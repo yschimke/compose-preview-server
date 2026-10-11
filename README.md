@@ -171,11 +171,22 @@ module's `build/compose-previews/` copy unless `guidelines` names a file or URL)
 - **`preview_guidelines_prompt`** needs no key. It returns the batched request — the rules, each
   preview's source and accessibility nodes, and the renders as image blocks — so an agent can judge
   it with its own model.
-- **`check_preview_guidelines`** asks OpenRouter, with the key from `COMPOSE_PREVIEW_OPENROUTER_KEY`
-  (environment only; without it the tool says how to set it). `model` defaults to
+- **`check_preview_guidelines`** asks OpenRouter, with the key from `COMPOSE_PREVIEW_OPENROUTER_KEY`,
+  else the one `compose-preview guidelines key set` stored in the user's credentials file
+  (`~/.config/compose-preview/credentials.json`). A stored key is used only for a workspace whose
+  Gradle root the user trusted with `compose-preview guidelines key trust <dir>`; the tool cannot
+  grant that itself, and refuses before rendering, naming the command. Never a tool argument;
+  without a key the tool says how to set one. `model` defaults to
   `deepseek/deepseek-v4.1-flash` and `max_cost` (US dollars, default 0.10) caps the call. It returns
   each preview's verdicts with the node ids and picture regions they point at, the model that
   answered and the cost.
+
+  With `base_url` (and `model`, the endpoint's own name) it asks an OpenAI-compatible endpoint
+  instead, like `compose-preview guidelines --backend openai`: a loopback server needs no key, and
+  any other only gets previews when the user stored a key for that origin with
+  `compose-preview guidelines key set --for <base_url>` and trusted the project. The server reads no
+  key from `COMPOSE_PREVIEW_MODEL_KEY` here, because the caller picks the endpoint. Endpoints report
+  no cost, so `max_cost` does not apply.
 
 ### `.uid` designs: `design_open`
 
