@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.agentgrants.AgentGrantScope
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.daemon.protocol.StreamCodec
 import ee.schimke.composeai.daemon.protocol.StreamFrameParams
@@ -12,8 +13,13 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 
 /**
  * The Android players of a baked-only catalog preview (a bundle with `.rc` documents and baked
@@ -119,6 +125,9 @@ class ServeDonorRcPlayerLaneTest {
       it.register("examples", host = bakedOnlyCatalog, pinned = true)
     }
 
+  private val grants =
+    ServeAgentGrantStore(maxScope = AgentGrantScope.PLAYGROUND, maxGrantTtlSeconds = 3600)
+
   private val server: ServeHttpServer by lazy {
     ServeHttpServer(
         host = "127.0.0.1",
@@ -127,6 +136,9 @@ class ServeDonorRcPlayerLaneTest {
         sessions = registry,
         defaultSessionId = "examples",
         isPublic = false,
+        agentGrants = grants,
+        machineAuthorization =
+          ServeMachineAuthorization(TOKEN, githubAuth = null, agentGrants = grants),
       )
       .also { it.start() }
   }
@@ -143,6 +155,50 @@ class ServeDonorRcPlayerLaneTest {
     "http://127.0.0.1:${server.port}$path${if ('?' in path) "&" else "?"}token=$TOKEN"
 
   private fun get(path: String) = client.newCall(Request.Builder().url(url(path)).build()).execute()
+
+  private fun getAs(bearer: String, path: String): Int =
+    client
+      .newCall(
+        Request.Builder()
+          .url("http://127.0.0.1:${server.port}$path")
+          .header(ServeHttpServer.TOKEN_HEADER, bearer)
+          .build()
+      )
+      .execute()
+      .use { it.code }
+
+  private fun post(path: String, body: String, contentType: String = "application/json"): String =
+    client
+      .newCall(
+        Request.Builder()
+          .url("http://127.0.0.1:${server.port}$path")
+          .post(body.toRequestBody(contentType.toMediaType()))
+          .build()
+      )
+      .execute()
+      .use { it.body.string() }
+
+  private fun str(text: String, key: String) =
+    Json.parseToJsonElement(text).jsonObject[key]!!.jsonPrimitive.content
+
+  /** An agent grant of [scope], asked for and approved by the operator as in the real flow. */
+  private fun grantedToken(scope: String): String {
+    val opened = post("/agent-access/request", """{"scope":"$scope","label":"donor lane"}""")
+    val requestId = str(opened, "requestId")
+    val page = get("/agent-access/$requestId").use { it.body.string() }
+    val csrf = Regex("name=\"csrf\" value=\"([^\"]*)\"").find(page)!!.groupValues[1]
+    post(
+      "/agent-access/$requestId?token=$TOKEN",
+      "action=approve&csrf=$csrf&scope=$scope&ttl=1800",
+      contentType = "application/x-www-form-urlencoded",
+    )
+    val polled =
+      post(
+        "/agent-access/poll",
+        """{"requestId":"$requestId","deviceSecret":"${str(opened, "deviceSecret")}"}""",
+      )
+    return str(polled, "token")
+  }
 
   @Test
   fun `a baked-only preview's android player replays its document on a resident daemon`() {
@@ -207,6 +263,33 @@ class ServeDonorRcPlayerLaneTest {
       }
     }
     assertTrue(donorRenders.isEmpty() && ownRenders.isEmpty())
+  }
+
+  @Test
+  fun `a preview grant cannot borrow a daemon through a bare player selection`() {
+    // The baked snapshot exists, so the null-`cached` scope check never fires; the donor lane must
+    // refuse on its own, since a borrowed render is commissioned work.
+    val preview = grantedToken("preview")
+    assertEquals(
+      403,
+      getAs(preview, "/examples/render/$EXAMPLE_ID.png?rcPlayer=androidx-embedded"),
+    )
+    assertTrue(donorRenders.isEmpty(), "a preview grant commissioned nothing")
+
+    val live = grantedToken("live")
+    assertEquals(200, getAs(live, "/examples/render/$EXAMPLE_ID.png?rcPlayer=androidx-embedded"))
+    assertEquals(1, donorRenders.size)
+  }
+
+  @Test
+  fun `a string seed the replay cannot apply never reaches the donor`() {
+    get("/examples/render/$EXAMPLE_ID.png?rcPlayer=androidx-view&rc.label=HELLO").use { response ->
+      assertNotEquals(
+        RenderOutcome.Generation.DAEMON.wire,
+        response.header(ServeHttpServer.GENERATION_HEADER),
+      )
+    }
+    assertTrue(donorRenders.isEmpty(), "a seed the replay would drop was not answered as drawn")
   }
 
   private companion object {

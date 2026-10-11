@@ -11395,9 +11395,24 @@ class ServeHttpServer(
                   (cached == null ||
                     droppedOverridesFor(renderHost, cached.generation, previewId, overrides)
                       .isNotEmpty()) &&
+                  // A replay can't apply string `rc.<name>=` seeds; leave those to the existing
+                  // lane's refusal rather than answering 200 with unchanged pixels.
+                  CatalogLiveRouting.irReplayDroppedOverrideNames(
+                      previewId,
+                      overrides,
+                      renderHost.bakedTheme(previewId),
+                      renderHost.bakedRcPlayer(previewId),
+                    )
+                    .isEmpty() &&
                   it in donorBackedRcPlayers(renderHost, previewId)
               }
           if (donorPlayer != null) {
+            // A borrowed daemon render is commissioned work, whether or not a baked snapshot
+            // exists, so a bare player selection below `live` is refused here too.
+            bareRcPlayerBelowLive?.let {
+              respondBelowScope(it, AgentGrantScope.LIVE, api = true)
+              return@withLeasedSession
+            }
             val docOutcome = remoteComposeDocOutcome(renderHost, previewId)
             if (docOutcome.isTransient) {
               respondDocumentUnavailable(docOutcome)
