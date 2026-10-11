@@ -658,4 +658,59 @@ class ServeAgentGrantRequestPersistenceTest {
     // And a later process does not bring it back.
     assertNotPollable(store().poll(request.id, request.deviceSecret))
   }
+
+  @Test
+  fun `a grant collected on another process counts against the box cap here`() {
+    val a = store(maxActiveGrants = 1)
+    val b = store(maxActiveGrants = 1)
+    val first = a.ask()
+    a.approveOk(first.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "github:yuri")
+    assertIs<ServeAgentGrantStore.Poll.Approved>(b.poll(first.id, first.deviceSecret))
+    assertTrue(a.activeGrants().isEmpty(), "the grant lives only in B")
+
+    assertEquals(ServeAgentGrantStore.Capacity.BOX_FULL, a.capacityFor("@ana", "github:ana"))
+    val second = a.ask()
+    assertIs<ServeAgentGrantStore.Decision.NoCapacity>(
+      a.decide(second.id, "@ana", AgentGrantScope.LIVE, 600, emptySet(), "github:ana")
+    )
+    // Counted once in B, which holds it.
+    assertEquals(ServeAgentGrantStore.Capacity.BOX_FULL, b.capacityFor("@ana", "github:ana"))
+
+    // Revoked, it holds no place anywhere.
+    assertTrue(a.revoke(b.activeGrants().single().id, "@yuri"))
+    assertEquals(ServeAgentGrantStore.Capacity.OK, a.capacityFor("@ana", "github:ana"))
+  }
+
+  @Test
+  fun `a grant collected on another process counts against its approver's cap here`() {
+    val a = store(maxActiveGrantsPerApprover = 1)
+    val b = store(maxActiveGrantsPerApprover = 1)
+    val first = a.ask()
+    a.approveOk(first.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "github:yuri")
+    assertIs<ServeAgentGrantStore.Poll.Approved>(b.poll(first.id, first.deviceSecret))
+
+    assertEquals(ServeAgentGrantStore.Capacity.APPROVER_FULL, a.capacityFor("@yuri", "github:yuri"))
+    assertEquals(ServeAgentGrantStore.Capacity.OK, a.capacityFor("@ana", "github:ana"))
+    val second = a.ask()
+    assertIs<ServeAgentGrantStore.Decision.NoCapacity>(
+      a.decide(second.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "github:yuri")
+    )
+  }
+
+  @Test
+  fun `collecting counts grants collected on another process`() {
+    // Two approvals under a cap of two; B collects one, then the cap is one on A's side.
+    val a = store(maxActiveGrants = 2)
+    val b = store(maxActiveGrants = 2)
+    val first = a.ask()
+    val second = a.ask()
+    a.approveOk(first.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "y")
+    a.approveOk(second.id, "@ana", AgentGrantScope.LIVE, 600, emptySet(), "a")
+    assertIs<ServeAgentGrantStore.Poll.Approved>(b.poll(first.id, first.deviceSecret))
+
+    val lowered = store(maxActiveGrants = 1)
+    val refused =
+      assertIs<ServeAgentGrantStore.Poll.Denied>(lowered.poll(second.id, second.deviceSecret))
+    assertNotNull(refused.reason)
+  }
 }

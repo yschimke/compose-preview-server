@@ -878,10 +878,12 @@ class ServeAgentGrantStore(
     }
 
   /**
-   * Live grants plus *reservations* — approvals in the shared file, from any process, not yet
-   * collected and whose grant would still be live under today's ceiling — so the caps hold across a
-   * restart and an overlapping deploy. [excludingRequestId] is the request being collected, which
-   * must not count against itself. Without a file every approval mints at once: no reservations.
+   * Live grants held here, plus grants another process collected (`collected` rows in the shared
+   * file whose grant is not in this process's map), plus *reservations* — approvals in the file not
+   * yet collected — each counted once while its grant would still be live under today's ceiling, so
+   * the caps hold across a restart and an overlapping deploy. [excludingRequestId] is the request
+   * being collected, which must not count against itself. Without a file every approval mints at
+   * once: no reservations.
    */
   private fun capacityLocked(
     approvedBy: String,
@@ -890,24 +892,34 @@ class ServeAgentGrantStore(
     excludingRequestId: String?,
   ): Capacity {
     val now = clock()
+    val rows = disk?.all()?.values.orEmpty()
+    fun ServeAgentGrantRequestFile.Approval.live() =
+      effectiveExpiry(approvedAtMillis, expiresAtMillis) > now
+    // Approvals nobody has collected yet, in any process.
     val reserved =
-      disk
-        ?.all()
-        ?.values
-        ?.filter { it.state == ServeAgentGrantRequestFile.APPROVED && it.id != excludingRequestId }
-        ?.mapNotNull { row ->
-          row.approval?.takeIf { effectiveExpiry(it.approvedAtMillis, it.expiresAtMillis) > now }
+      rows
+        .filter { it.state == ServeAgentGrantRequestFile.APPROVED && it.id != excludingRequestId }
+        .mapNotNull { row -> row.approval?.takeIf { it.live() } }
+    // Grants another process collected: in the file as `collected`, absent from this process's
+    // map. A grant held here is counted once, from [grants]; a revoked row is no longer
+    // `collected`.
+    val elsewhere =
+      rows
+        .filter {
+          it.state == ServeAgentGrantRequestFile.COLLECTED &&
+            it.grantId != null &&
+            !grants.containsKey(it.grantId)
         }
-        .orEmpty()
+        .mapNotNull { row -> row.approval?.takeIf { it.live() } }
     val byApprover =
       grants.values.count { it.isApprovedBy(approvedBy, approvedByActorId) } +
-        reserved.count {
+        (reserved + elsewhere).count {
           if (it.approvedByActorId.isNotBlank()) it.approvedByActorId == approvedByActorId
           else it.approvedBy == approvedBy
         }
     return when {
       enforceApproverCap && byApprover >= maxActiveGrantsPerApprover -> Capacity.APPROVER_FULL
-      grants.size + reserved.size >= maxActiveGrants -> Capacity.BOX_FULL
+      grants.size + reserved.size + elsewhere.size >= maxActiveGrants -> Capacity.BOX_FULL
       else -> Capacity.OK
     }
   }

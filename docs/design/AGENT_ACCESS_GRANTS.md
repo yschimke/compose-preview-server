@@ -287,7 +287,9 @@ internet mint itself credentials.
   never a bearer. A corrupt file is reported and treated as unreadable, not as empty.
 - **A collected approval meets today's limits, not yesterday's.** An approval not yet collected, by
   any process, holds its grant's place: it counts towards `--agent-grant-max-active` and its
-  approver's cap as if it were live. Collecting re-applies the server's *current* ceilings: the scope
+  approver's cap as if it were live, and so does a grant another process collected (its `collected`
+  row, attributed to its approver), so the caps count every live grant once whichever process holds
+  it. Collecting re-applies the server's *current* ceilings: the scope
   is clamped to the current maximum, the capabilities are intersected with the ones still allowed,
   and the lifetime with the current maximum, still counted from the approval. That clamped lifetime
   is also how long it reserves a place: one already past it holds none and is marked `expired` when
