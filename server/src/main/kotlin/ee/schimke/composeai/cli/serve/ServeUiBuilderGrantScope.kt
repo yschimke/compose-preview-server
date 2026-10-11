@@ -256,6 +256,7 @@ internal object ServeUiBuilderGrantScope {
       is UiBuilderServiceRequest.ExportDesign -> designId
       is UiBuilderServiceRequest.RenameDesign -> designId
       is UiBuilderServiceRequest.DeleteDesign -> designId
+      is UiBuilderServiceRequest.RestoreDesign -> designId
       is UiBuilderServiceRequest.ListRevisions -> designId
       is UiBuilderServiceRequest.RestoreRevision -> designId
       is UiBuilderServiceRequest.MoveDesignHome -> designId
@@ -264,6 +265,7 @@ internal object ServeUiBuilderGrantScope {
       is UiBuilderServiceRequest.CreateDesign,
       is UiBuilderServiceRequest.ExportDocument,
       is UiBuilderServiceRequest.ListDesigns,
+      UiBuilderServiceRequest.ListTrash,
       UiBuilderServiceRequest.ListCatalogs -> null
     }
 }

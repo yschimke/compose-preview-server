@@ -3296,6 +3296,25 @@ public class ServeRunner(
         )
     }
     uiBuilderLaneOpen = uiBuilderLane != null
+    // Deleted designs wait a day in the trash; this empties it, sidecars included, on the way up
+    // and
+    // hourly after. Every host with a builder runs it: the trash is not an admin feature.
+    uiBuilderLane?.let { lane ->
+      ServeUiBuilderTrashPurger(
+          service = lane.service,
+          sidecars =
+            ServeUiBuilderSidecars(
+              references = lane.references,
+              comments = lane.comments,
+              links = lane.links,
+              reviews = lane.reviews,
+              thumbnails = lane.thumbnails,
+              guidelineRecords = lane.guidelineRecords,
+              folders = lane.folders,
+            ),
+        )
+        .start()
+    }
     uiBuilderPublishedRefresh = uiBuilderLane?.refreshPublished
     // Logged at startup because a capability cap otherwise surfaces three steps downstream, as a
     // refused tool call.

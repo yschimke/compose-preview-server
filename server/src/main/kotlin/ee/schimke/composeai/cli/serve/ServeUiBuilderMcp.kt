@@ -65,6 +65,7 @@ import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceUpdate
 import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionRejectedException
+import ee.schimke.composeai.uibuilder.service.UiBuilderTrashedDesign
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -116,7 +117,7 @@ class ServeUiBuilderMcp(
    * lets an agent wait for replies instead of polling.
    */
   private val comments: ServeUiBuilderCommentStore? = null,
-  /** Reference overlays; held only so [DELETE_DESIGN] sweeps them as the admin delete does. */
+  /** Reference overlays, for [SET_REFERENCE] and [COMPARE_REFERENCE]. */
   private val references: ServeUiBuilderReferenceStore? = null,
   /**
    * What each design is for (issue, frame, implementing PR), or null without durable state (tools
@@ -267,8 +268,11 @@ class ServeUiBuilderMcp(
       // Sharing writes to the design's access control, and the service admits only its owner.
       SHARE_DESIGN,
       // Gated at the door as a write; the service then admits only the design's owner. There is
-      // no `delete` capability to hand out on purpose — see [DELETE_DESIGN].
-      DELETE_DESIGN -> UiBuilderRouteCapability.WRITE
+      // no `delete` capability to hand out on purpose — see [DELETE_DESIGN]. Restoring is the same
+      // door the other way, and the trash listing names only what the caller could restore.
+      DELETE_DESIGN,
+      RESTORE_DESIGN -> UiBuilderRouteCapability.WRITE
+      LIST_TRASH -> UiBuilderRouteCapability.READ
       EXPORT -> UiBuilderRouteCapability.EXPORT
       EXPORT_DOCUMENT ->
         if (RemoteDocumentExportSupport.formats.isEmpty()) null else UiBuilderRouteCapability.EXPORT
@@ -415,7 +419,9 @@ class ServeUiBuilderMcp(
         REPLACE_DESIGN_DOCUMENT ->
           return authoritativeDocumentMutation(tool, args, actor, callId, clientInteraction)
         RENAME_DESIGN,
-        DELETE_DESIGN -> return manageDesign(tool, args, actor, callId)
+        DELETE_DESIGN,
+        RESTORE_DESIGN,
+        LIST_TRASH -> return manageDesign(tool, args, actor, callId)
         DESIGN_ACCESS -> GetDesignAccessRequestV1(designId = args.requiredText("designId"))
         SHARE_DESIGN -> {
           args.text("visibility")?.let { value ->
@@ -655,11 +661,16 @@ class ServeUiBuilderMcp(
     actor: AuthenticatedUiBuilderActor,
     callId: String,
   ): String {
-    val designId = args.requiredText("designId")
     val request =
       when (tool) {
-        RENAME_DESIGN -> UiBuilderServiceRequest.RenameDesign(designId, args.requiredText("title"))
-        else -> UiBuilderServiceRequest.DeleteDesign(designId)
+        LIST_TRASH -> UiBuilderServiceRequest.ListTrash
+        RENAME_DESIGN ->
+          UiBuilderServiceRequest.RenameDesign(
+            args.requiredText("designId"),
+            args.requiredText("title"),
+          )
+        RESTORE_DESIGN -> UiBuilderServiceRequest.RestoreDesign(args.requiredText("designId"))
+        else -> UiBuilderServiceRequest.DeleteDesign(args.requiredText("designId"))
       }
     val response =
       try {
@@ -682,36 +693,27 @@ class ServeUiBuilderMcp(
           DesignRenamedV1.serializer(),
           DesignRenamedV1(callId = callId, design = response.design),
         )
-      is UiBuilderServiceResponse.DesignDeleted -> {
-        runCatching { references?.delete(designId) }
-          .onFailure { onLog("serve: reference overlay for $designId not removed (${it.message})") }
-        runCatching { comments?.delete(designId) }
-          .onFailure { onLog("serve: comment board for $designId not removed (${it.message})") }
-        runCatching {
-          // The store returns an enum rather than throwing; check it, or a leftover record would be
-          // inherited by the next design with this id.
-          if (links?.delete(designId) == LinksDeleteResult.FAILED) {
-            onLog("serve: links record for $designId not removed")
-          }
-        }
-          .onFailure { onLog("serve: links record for $designId not removed (${it.message})") }
-        runCatching {
-          if (reviews?.delete(designId) == false) {
-            onLog("serve: review record for $designId not removed")
-          }
-        }
-          .onFailure { onLog("serve: review record for $designId not removed (${it.message})") }
-        runCatching {
-          if (guidelineRecords?.delete(designId) == false) {
-            onLog("serve: guidelines record for $designId not removed")
-          }
-        }
-          .onFailure { onLog("serve: guidelines record for $designId not removed (${it.message})") }
+      // The design is in the trash, so its overlay, discussion and links stay with it until the
+      // purge ([ServeUiBuilderTrashPurger]) sweeps them; a restore brings them all back.
+      is UiBuilderServiceResponse.DesignDeleted ->
         UI_BUILDER_JSON.encodeToString(
           DesignDeletedV1.serializer(),
-          DesignDeletedV1(callId = callId, designId = designId),
+          DesignDeletedV1(
+            callId = callId,
+            designId = response.designId,
+            restorableUntilEpochMillis = response.restorableUntilEpochMillis,
+          ),
         )
-      }
+      is UiBuilderServiceResponse.DesignRestored ->
+        UI_BUILDER_JSON.encodeToString(
+          DesignRestoredV1.serializer(),
+          DesignRestoredV1(callId = callId, design = response.design),
+        )
+      is UiBuilderServiceResponse.Trash ->
+        UI_BUILDER_JSON.encodeToString(
+          TrashV1.serializer(),
+          TrashV1(callId = callId, designs = response.designs.map(TrashedDesignV1::of)),
+        )
       else -> envelope(callId, response)
     }
   }
@@ -3793,6 +3795,8 @@ class ServeUiBuilderMcp(
     const val SHARE_DESIGN = "ui_builder_share_design"
     const val RENAME_DESIGN = "ui_builder_rename_design"
     const val DELETE_DESIGN = "ui_builder_delete_design"
+    const val RESTORE_DESIGN = "ui_builder_restore_design"
+    const val LIST_TRASH = "ui_builder_list_trash"
     const val VALIDATE = "ui_builder_validate"
 
     const val CHECK_DESIGN = "ui_builder_check_design"
@@ -3960,6 +3964,8 @@ class ServeUiBuilderMcp(
         SHARE_DESIGN,
         RENAME_DESIGN,
         DELETE_DESIGN,
+        LIST_TRASH,
+        RESTORE_DESIGN,
       ) + ServeUiBuilderHistoryTools.TOOL_NAMES
 
     /** Kept separate for callers that group native-render capabilities. */
@@ -4413,12 +4419,37 @@ class ServeUiBuilderMcp(
         ),
         tool(
           DELETE_DESIGN,
-          "Delete a design you own, with its history, access list, overlay and discussion. Only " +
-            "the owner may — not an editor, not a viewer, and not anybody merely holding a write " +
-            "grant on this server — so a session can clean up the designs it made and cannot " +
-            "reach anybody else's; an agent acting under an approved grant owns what it created " +
-            "as the person who approved it. There is no undo. Not the released envelope: the " +
-            "contract has no delete, so the reply names the design that is gone.",
+          "Delete a design: it moves to the trash with its history, access list, overlay and " +
+            "discussion, and is gone from every listing and tool until $RESTORE_DESIGN brings " +
+            "it back, which works until `restorableUntilEpochMillis` in the reply (a day). After " +
+            "that it is purged for good. Only the owner may delete, or an agent deleting a " +
+            "design it created itself under its current grant — not an editor, not a viewer, " +
+            "and not anybody merely holding a write grant — so a session can clean up the " +
+            "designs it made and cannot reach anybody else's. A trashed id cannot be reused " +
+            "until it is restored or purged. Not the released envelope: the contract has no " +
+            "delete, so the reply names the design and its restore deadline.",
+          """
+          {"type":"object","properties":{
+            "designId":{"type":"string"}
+          },"required":["designId"],"additionalProperties":false}
+          """,
+        ),
+        tool(
+          LIST_TRASH,
+          "The designs in the trash that you could restore — ones you deleted, or ones you " +
+            "own — most recently deleted first, each with who deleted it and its " +
+            "`restorableUntilEpochMillis`. Use it to undo a $DELETE_DESIGN you regret, or to " +
+            "check what a cleanup removed. Takes no arguments.",
+          """
+          {"type":"object","properties":{},"additionalProperties":false}
+          """,
+        ),
+        tool(
+          RESTORE_DESIGN,
+          "Bring a deleted design back out of the trash exactly as it was: the same revision, " +
+            "history, access list, overlay and discussion. Allowed to whoever could have " +
+            "deleted it, until its `restorableUntilEpochMillis`; after that it is not found. The " +
+            "reply is the design's listing entry.",
           """
           {"type":"object","properties":{
             "designId":{"type":"string"}
@@ -4878,14 +4909,57 @@ internal data class DesignRenamedV1(
   val design: DesignListItemV1,
 )
 
-/** A design, gone: its id and nothing else, because there is nothing else left to say about it. */
+/**
+ * A design, deleted: its id, and until when [ServeUiBuilderMcp.RESTORE_DESIGN] can bring it back
+ * (null when it went past the trash, as an unreadable design does).
+ */
 @kotlinx.serialization.Serializable
 internal data class DesignDeletedV1(
   val schema: String = "compose-preview/ui-builder-design-deleted/v1",
   val callId: String,
   val designId: String,
   val deleted: Boolean = true,
+  val restorableUntilEpochMillis: Long? = null,
 )
+
+/** A design back out of the trash, as the caller now sees it in a listing. */
+@kotlinx.serialization.Serializable
+internal data class DesignRestoredV1(
+  val schema: String = "compose-preview/ui-builder-design-restored/v1",
+  val callId: String,
+  val design: DesignListItemV1,
+)
+
+/** [ServeUiBuilderMcp.LIST_TRASH]'s reply. */
+@kotlinx.serialization.Serializable
+internal data class TrashV1(
+  val schema: String = "compose-preview/ui-builder-trash/v1",
+  val callId: String,
+  val designs: List<TrashedDesignV1>,
+)
+
+/** One trashed design on the wire. */
+@kotlinx.serialization.Serializable
+internal data class TrashedDesignV1(
+  val designId: String,
+  val title: String,
+  val ownerActorId: String,
+  val trashedAtEpochMillis: Long,
+  val trashedByActorId: String,
+  val restorableUntilEpochMillis: Long,
+) {
+  companion object {
+    fun of(design: UiBuilderTrashedDesign): TrashedDesignV1 =
+      TrashedDesignV1(
+        designId = design.designId,
+        title = design.title,
+        ownerActorId = design.ownerActorId,
+        trashedAtEpochMillis = design.trashedAtEpochMillis,
+        trashedByActorId = design.trashedByActorId,
+        restorableUntilEpochMillis = design.restorableUntilEpochMillis,
+      )
+  }
+}
 
 /**
  * What authoring needs to know about this host's catalogs, the default

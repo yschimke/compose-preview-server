@@ -6381,8 +6381,11 @@ ${captureControlsHtml().prependIndent("          ")}
      * this box has no such route.
      */
     requestAccessHref: String = "",
+    /** Designs in the trash this viewer may restore; the section is omitted when empty. */
+    trash: List<UiBuilderTrashRow> = emptyList(),
   ): String {
     val esc = WebEscaping::htmlEscape
+    val trashHtml = uiBuilderTrashSection(trash)
     val requestAccess =
       if (createAction.isNotBlank() || requestAccessHref.isBlank()) ""
       else
@@ -6454,9 +6457,10 @@ ${captureControlsHtml().prependIndent("          ")}
             <details class="cp-design-more cp-design-danger">
               <summary>Delete</summary>
               <form class="cp-design-form" method="post" action="${esc(row.deleteAction)}">
-                <p class="cp-grant-fineprint">This removes <code>${esc(row.designId)}</code>, its history,
-                its comments and its access list. It cannot be undone.</p>
-                <button class="cp-grant-deny" type="submit" name="confirm" value="delete">Delete permanently</button>
+                <p class="cp-grant-fineprint">This moves <code>${esc(row.designId)}</code> to the trash with
+                its history, comments and access list. You can restore it from the trash below for a
+                day; after that it is gone for good.</p>
+                <button class="cp-grant-deny" type="submit" name="confirm" value="delete">Move to trash</button>
               </form>
             </details>
             """
@@ -6873,6 +6877,7 @@ ${captureControlsHtml().prependIndent("          ")}
         $recent
         $filter
         $grid
+        $trashHtml
         $create
         <a class="cp-back" href="/ui-builder/$navSuffix">← UI builder</a>
         """
@@ -6882,6 +6887,51 @@ ${captureControlsHtml().prependIndent("          ")}
 
   /** How many recently changed designs the designs page shows as pictures above the list. */
   private const val RECENT_DESIGNS = 4
+
+  /** One trashed design on the designs page, with the form that restores it. */
+  data class UiBuilderTrashRow(
+    val designId: String,
+    val title: String,
+    val trashedByActorId: String,
+    val restorableUntilEpochMillis: Long,
+    /** `POST /ui-builder/{designId}/restore`, with the page's token query. */
+    val restoreAction: String,
+  )
+
+  /**
+   * The designs page's trash: closed by default, one line per design with who deleted it, until
+   * when it can come back, and a Restore button. Empty when there is nothing to restore.
+   */
+  internal fun uiBuilderTrashSection(trash: List<UiBuilderTrashRow>): String {
+    if (trash.isEmpty()) return ""
+    val esc = WebEscaping::htmlEscape
+    val until =
+      java.time.format.DateTimeFormatter.ofPattern("d MMM HH:mm 'UTC'", java.util.Locale.ENGLISH)
+        .withZone(java.time.ZoneOffset.UTC)
+    val items =
+      trash.joinToString("") { row ->
+        val title = if (row.title.isBlank()) row.designId else row.title
+        """
+        <li class="cp-trash-item">
+          <form class="cp-design-form" method="post" action="${esc(row.restoreAction)}">
+            <span><strong>${esc(title)}</strong> <code>${esc(row.designId)}</code>
+            — deleted by <code>${esc(row.trashedByActorId)}</code>, restorable until
+            ${esc(until.format(java.time.Instant.ofEpochMilli(row.restorableUntilEpochMillis)))}</span>
+            <button class="cp-action-chip" type="submit" name="confirm" value="restore">Restore</button>
+          </form>
+        </li>
+        """
+      }
+    return """
+      <details class="cp-designs-trash">
+        <summary>Trash (${trash.size})</summary>
+        <p class="cp-grant-fineprint">Deleted designs wait here for a day with their history,
+        comments and sharing, then are removed for good.</p>
+        <ul class="cp-trash-list">$items</ul>
+      </details>
+      """
+      .trimIndent()
+  }
 
   /** One row of [uiBuilderAccessPage]'s table, already flattened for display. */
   data class UiBuilderAccessRow(

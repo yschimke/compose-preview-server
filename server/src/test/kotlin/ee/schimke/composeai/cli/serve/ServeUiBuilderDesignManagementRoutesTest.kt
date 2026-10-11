@@ -25,6 +25,7 @@ import ee.schimke.composeai.uibuilder.service.UiBuilderServiceRequest
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceUpdate
 import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionCall
+import ee.schimke.composeai.uibuilder.service.UiBuilderTrashedDesign
 import java.io.Closeable
 import java.io.File
 import java.nio.file.Files
@@ -53,6 +54,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 class ServeUiBuilderDesignManagementRoutesTest {
   private val documents = ConcurrentHashMap<String, DesignDocumentV1>()
   private val deleted = CopyOnWriteArrayList<String>()
+  private val trashed = java.util.concurrent.ConcurrentHashMap<String, DesignDocumentV1>()
 
   private fun document(id: String, title: String) =
     DesignDocumentV1(
@@ -104,26 +106,23 @@ class ServeUiBuilderDesignManagementRoutesTest {
           }
           is UiBuilderServiceRequest.ListDesigns ->
             UiBuilderServiceResponse.Designs(
-              documents.values.map {
-                DesignListItemV1(
-                  designId = it.id,
-                  title = it.title,
-                  revision = it.revision,
-                  accessRevision = 1,
-                  catalogPin = it.catalogPin,
-                  createdAtEpochMillis = it.createdAtEpochMillis,
-                  updatedAtEpochMillis = it.updatedAtEpochMillis,
-                  ownerActorId = OWNER,
-                  requesterAccess =
-                    DesignActorAccessV1(
-                      actorId = OWNER,
-                      role = DesignAccessRoleV1.OWNER,
-                      allowedActions = DesignAccessActionV1.entries.toList(),
-                    ),
-                )
-              },
+              documents.values.map(::listItem),
               null,
             )
+          is UiBuilderServiceRequest.ListTrash ->
+            UiBuilderServiceResponse.Trash(
+              trashed.values.map {
+                UiBuilderTrashedDesign(it.id, it.title, OWNER, 1_000, OWNER, 86_401_000)
+              }
+            )
+          is UiBuilderServiceRequest.RestoreDesign ->
+            trashed.remove(request.designId)?.let {
+              documents[it.id] = it
+              UiBuilderServiceResponse.DesignRestored(listItem(it))
+            }
+              ?: UiBuilderServiceResponse.Error(
+                UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "no design ${request.designId}")
+              )
           is UiBuilderServiceRequest.GetDesignAccess ->
             UiBuilderServiceResponse.DesignAccess(request.designId, access(request.designId))
           is UiBuilderServiceRequest.ListCatalogs ->
@@ -133,13 +132,14 @@ class ServeUiBuilderDesignManagementRoutesTest {
             UiBuilderServiceResponse.Catalogs(emptyList())
           }
           is UiBuilderServiceRequest.DeleteDesign ->
-            if (documents.remove(request.designId) == null)
+            if (documents[request.designId]?.also { trashed[it.id] = it } == null)
               UiBuilderServiceResponse.Error(
                 UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "no design ${request.designId}")
               )
             else {
+              documents.remove(request.designId)
               deleted += request.designId
-              UiBuilderServiceResponse.DesignDeleted(request.designId)
+              UiBuilderServiceResponse.DesignDeleted(request.designId, 86_401_000)
             }
           else -> UiBuilderServiceResponse.Catalogs(emptyList())
         }
@@ -321,6 +321,29 @@ class ServeUiBuilderDesignManagementRoutesTest {
   }
 
   @Test
+  fun `a deleted design waits in the page's trash and its restore brings it back`() {
+    val confirmed = FormBody.Builder().add("confirm", "delete").build()
+    assertEquals(303, post("/ui-builder/morning-player/delete", confirmed).first)
+    var page = designsPage()
+    assertTrue(page.contains("Trash (1)"), page)
+    assertTrue(page.contains("/ui-builder/morning-player/restore"), page)
+
+    val restore = FormBody.Builder().add("confirm", "restore").build()
+    assertEquals(400, post("/ui-builder/morning-player/restore", FormBody.Builder().build()).first)
+    assertEquals(
+      403,
+      post("/ui-builder/morning-player/restore", restore, origin = "https://evil.example").first,
+    )
+    val (code, location) = post("/ui-builder/morning-player/restore", restore)
+    assertEquals(303, code)
+    assertTrue(location.orEmpty().contains("morning-player"), location)
+    page = designsPage()
+    assertFalse(page.contains("Trash ("), "an empty trash is not shown")
+    // Restoring twice is the service's own "not found".
+    assertEquals(404, post("/ui-builder/morning-player/restore", restore).first)
+  }
+
+  @Test
   fun `a folder move from the home API is visible in the designs page and survives a form move`() {
     val moved =
       Request.Builder()
@@ -374,6 +397,24 @@ class ServeUiBuilderDesignManagementRoutesTest {
     assertEquals("/ui-builder/from-one", location)
     assertTrue(documents.containsKey("from-one"))
   }
+
+  private fun listItem(document: DesignDocumentV1): DesignListItemV1 =
+    DesignListItemV1(
+      designId = document.id,
+      title = document.title,
+      revision = document.revision,
+      accessRevision = 1,
+      catalogPin = document.catalogPin,
+      createdAtEpochMillis = document.createdAtEpochMillis,
+      updatedAtEpochMillis = document.updatedAtEpochMillis,
+      ownerActorId = OWNER,
+      requesterAccess =
+        DesignActorAccessV1(
+          actorId = OWNER,
+          role = DesignAccessRoleV1.OWNER,
+          allowedActions = DesignAccessActionV1.entries.toList(),
+        ),
+    )
 
   private companion object {
     const val OWNER = "operator"

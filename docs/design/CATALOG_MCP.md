@@ -199,7 +199,8 @@ that protocol/SDK migration is deliberately not bundled into the compatibility t
 | `ui_builder_record_decision`, `ui_builder_await_decision` | `ui-builder-write`, `ui-builder-read` | Record an agent's `approve`/`reject` of one revision, and **wait** for a person's; present only where the host keeps reviews (#1255) |
 | `ui_builder_set_implementation`, `ui_builder_implementation_status` | `ui-builder-write`, `ui-builder-read` + `ui-builder-export` | Record the pull request implementing a design (status, revision, whether its previews match), and read everything the code side needs in one call (#1255) |
 | `ui_builder_find_design_for_pr` | `ui-builder-read` | From a pull request back to the design(s) it implements |
-| `ui_builder_rename_design`, `ui_builder_delete_design` | `ui-builder-write` | Retitle a design you may write; delete one you **own**. Neither has a request type in the contract, so both answer outside the released envelope |
+| `ui_builder_rename_design`, `ui_builder_delete_design` | `ui-builder-write` | Retitle a design you may write; delete one you **own** (or created under this grant) into the trash. Neither has a request type in the contract, so both answer outside the released envelope |
+| `ui_builder_list_trash`, `ui_builder_restore_design` | `ui-builder-read`, `ui-builder-write` | What you deleted, or what of yours was deleted, in the last day; bring one back whole |
 | `ui_builder_await_design` | `ui-builder-read` | **Wait** for somebody else to change a design, and return what they changed |
 | `ui_builder_list_revisions`, `ui_builder_diff_designs` | `ui-builder-read` | A design's retained revisions (actor, time, operation, document digest, and the retention floor); a node-level diff of any two retained revisions of any two designs (below) |
 | `ui_builder_restore_revision` | `ui-builder-write` | Restore a retained revision **forward**, as a new revision; `dryRun: true` returns the diff it would apply. Needs the design's own write action |
@@ -272,10 +273,12 @@ the reply is the released `McpResponseEnvelopeV1` and the request shapes are the
    it was cut from — the `baseRevision` to quote when going back to edit the original.
 7. `ui_builder_rename_design` when the design has become something else, and
    `ui_builder_delete_design` when it was a probe. Rename is open to anybody who may write the
-   design and moves no revision. Delete is **owner only** — an agent under a grant owns what it
-   created as the person who approved the grant — so a session can clear its own litter and cannot
-   reach anybody else's; a design whose owner no longer exists is still the operator's to remove
-   through `/admin/ui-builder`.
+   design and moves no revision. Delete is **owner only**, plus one exception: an agent may delete
+   a design it created under its current grant. So a session can clear its own litter and cannot
+   reach anybody else's. A delete moves the design to the **trash** for a day, with its history,
+   comments, overlay and links: `ui_builder_list_trash` shows it and `ui_builder_restore_design`
+   brings it back. The server purges the trash hourly. A design whose owner no longer exists is
+   still the operator's to remove through `/admin/ui-builder`, which deletes permanently.
 
 ### Home decisions: a form when the client can answer one
 
