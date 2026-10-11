@@ -21,6 +21,11 @@ import { CONTINUOUS_EDIT_DEBOUNCE_MS, debounced } from "./viewer/debounce.js";
 import { viewParam } from "./spec/views.js";
 import { rcWasmFailureMessage } from "./viewer/rcWasmFailure.js";
 import {
+    RC_SNAPSHOT_WAIT_MS,
+    rcCanvasSize,
+    whenImageSized,
+} from "./viewer/rcCanvasSize.js";
+import {
     KIT_SOURCE,
     activeSource,
     changesSource,
@@ -3063,19 +3068,26 @@ function openRc() {
                 if (!r.ok) throw new Error("doc " + r.status);
                 return r.arrayBuffer();
             }),
+            // On a `?mode=rc` deep link the snapshot is often still in flight here, so wait for it
+            // to decode rather than read a `naturalWidth` of 0.
+            whenImageSized(img, RC_SNAPSHOT_WAIT_MS),
         ])
             .then(function (settled) {
                 var buf = settled[1];
                 if (!rcActive()) return null;
                 // Size the canvas to the preview's real pixel dimensions before loading: the player
                 // derives the document viewport from the canvas size at load time. The baked
-                // snapshot carries those dimensions.
-                var w = img.naturalWidth || 0,
-                    h = img.naturalHeight || 0;
-                if (w > 0 && h > 0) {
-                    rcCanvasEl!.width = w;
-                    rcCanvasEl!.height = h;
-                }
+                // snapshot carries those dimensions; without one, the stage box at the render
+                // density stands in, so the canvas is never left at the 300×150 default (which
+                // paints black).
+                var sr = stage.getBoundingClientRect();
+                var size = rcCanvasSize(
+                    settled[2],
+                    { width: sr.width, height: sr.height },
+                    renderDensity,
+                );
+                rcCanvasEl!.width = size.width;
+                rcCanvasEl!.height = size.height;
                 if (!rcPlayer) rcPlayer = new window.RC!.RcdPlayer(rcCanvasEl!);
                 return rcPlayer.loadFromArrayBuffer(buf);
             })
