@@ -590,6 +590,33 @@ class ServeBundleHostTest {
   }
 
   @Test
+  fun `a throttled published document is transient, then staged once it arrives`() {
+    // A declared document the delivery branch refuses right now must not read as unpublished (the
+    // route turns that into a 404), and the retry must actually ask again.
+    val id = "com.example.Card"
+    val answers =
+      ArrayDeque(listOf<BranchFetch>(BranchFetch.Throttled(1), BranchFetch.Ok(byteArrayOf(9))))
+    var calls = 0
+    val host =
+      ServeBundleHost(
+        bundle(id to byteArrayOf(1)),
+        label = "examples",
+        declaredRcDocs = listOf(id),
+        fetchRcDoc = {
+          calls++
+          answers.removeFirstOrNull() ?: BranchFetch.NotFound
+        },
+      )
+
+    assertTrue(host.hasRemoteComposeDoc(id))
+    assertTrue(host.remoteComposeDocRead(id).isTransient)
+    assertEquals(listOf<Byte>(9), host.remoteComposeDoc(id)?.toList())
+    // Staged: a third read is served from disk without another fetch.
+    assertEquals(listOf<Byte>(9), host.remoteComposeDoc(id)?.toList())
+    assertEquals(2, calls)
+  }
+
+  @Test
   fun `a throttled pinned read is not remembered as a missing file`() {
     // `pinnedMisses` is permanent only for real 404s (`(commit, path)` is immutable); a throttle
     // says nothing about the revision and must not be memoised.

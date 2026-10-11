@@ -909,8 +909,8 @@ class ServeCatalogStore(
           declaredRcDocs = replayableRcDocs.keys.toList(),
           fetchRcDoc = { id ->
             replayableRcDocs[id]?.let { path ->
-              fetchCatalogAsset(base + path)?.takeIf { it.size <= MAX_PUBLISHED_RC_DOC_BYTES }
-            }
+              cachedBranchRead(base + path, MAX_PUBLISHED_RC_DOC_BYTES)
+            } ?: BranchFetch.NotFound
           },
           // Motion ids and their lazy fetch; captures are never staged (see [motionPathById]).
           declaredMotion = motionPathById.keys.toList(),
@@ -3371,7 +3371,7 @@ class ServeCatalogStore(
     const val MAX_DESIGN_PAGES = 40
     private const val MAX_FETCH_BYTES = 25L * 1024 * 1024 // 25 MB per catalog asset
     private const val MAX_RUNTIME_ARCHIVE_FETCH_BYTES = 64L * 1024 * 1024
-    private const val MAX_PUBLISHED_RC_DOC_BYTES = 8 * 1024 * 1024
+    private const val MAX_PUBLISHED_RC_DOC_BYTES = 8L * 1024 * 1024
 
     /**
      * Live dirs are `<root>/<system>/g<generation>`, staged in `<root>/<system>/.staging`. Nested
