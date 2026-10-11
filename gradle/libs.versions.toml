@@ -430,6 +430,15 @@ composeai-ui-builder = "3.106.0"
 # vendored variable fonts, draw-list sounds and per-frame redraw of clock-driven canvases, then
 # 2.4.0's StateLayout enter/exit and shared elements matched by their AnimationSpec id.
 rc-players = "2.4.0"
+# The Android Remote Compose players the server's own player-only Android daemon replays documents
+# with, staged as `lib-rc-players-android/` (`stageRcPlayersAndroidLibs`). The Android daemon
+# sidecar deliberately ships none of this family (a consumer brings it, compose-preview-daemon's
+# `isConsumerSuppliedRemoteCompose`), so a daemon with no catalog behind it has to be handed one.
+# `rc-players-android` is the rc-players release (its BOM) the daemon's connector is built against,
+# and `compose-remote` is the AndroidX line that release's embedded player depends on; move them
+# together.
+rc-players-android = "2.5.0"
+compose-remote = "1.0.0-alpha19"
 # The TypeScript player's browser bundle (`remote-compose-player-js-dist`, a zip with the `dist`
 # classifier). Its own ref because rc-players publishes only the modules a release changed: the
 # bundle last changed in 2.1.2, and 2.1.3–2.4.0 never published this coordinate.
@@ -494,6 +503,7 @@ composeai-build-host-protocol = { module = "ee.schimke.composeai:build-host-prot
 # The UI-builder entry is opt-in the other way round -- `-PcomposeUiBuilderDir` is the only way
 # a checkout is consulted, and the default build proves the published set resolves.
 composeai-tools-bom = { module = "ee.schimke.composeai:compose-ai-tools-bom", version.ref = "composeai-tools" }
+rc-players-bom = { module = "ee.schimke.composeai:rc-players-bom", version.ref = "rc-players-android" }
 composeai-contracts-bom = { module = "ee.schimke.composeai:compose-preview-contracts-bom", version.ref = "composeai-contracts" }
 composeai-daemon-bom = { module = "ee.schimke.composeai:compose-preview-daemon-bom", version.ref = "composeai-preview-daemon" }
 composeai-ui-builder-bom = { module = "ee.schimke.composeai:compose-preview-ui-builder-bom", version.ref = "composeai-ui-builder" }
@@ -542,6 +552,17 @@ composeai-ui-builder-render-bundle = { module = "ee.schimke.composeai:compose-pr
 rc-player-wasm-dist = { module = "ee.schimke.composeai:rc-player-wasm-dist", version.ref = "rc-players" }
 remote-compose-player-js-dist = { module = "ee.schimke.composeai:remote-compose-player-js-dist", version.ref = "remote-compose-player-js" }
 
+# Artifact-only at the use site and non-transitive: `lib-rc-players-android/` is exactly the family the
+# Android sidecar leaves out, and everything else those players link comes from the sidecar.
+compose-remote-core = { module = "androidx.compose.remote:remote-core", version.ref = "compose-remote" }
+compose-remote-creation = { module = "androidx.compose.remote:remote-creation", version.ref = "compose-remote" }
+compose-remote-creation-core = { module = "androidx.compose.remote:remote-creation-core", version.ref = "compose-remote" }
+compose-remote-creation-compose = { module = "androidx.compose.remote:remote-creation-compose", version.ref = "compose-remote" }
+compose-remote-player-core = { module = "androidx.compose.remote:remote-player-core", version.ref = "compose-remote" }
+compose-remote-player-view = { module = "androidx.compose.remote:remote-player-view", version.ref = "compose-remote" }
+compose-remote-player-compose = { module = "androidx.compose.remote:remote-player-compose", version.ref = "compose-remote" }
+# Versionless, through the rc-players BOM: rc-players publishes only the modules a release changed.
+rcplayer-embedded-android = { module = "ee.schimke.composeai:third-party-rc-embedded-player" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }

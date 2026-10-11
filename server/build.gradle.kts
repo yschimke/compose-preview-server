@@ -271,6 +271,95 @@ val stageRcPlayerWasm =
     outputDirectory.set(layout.buildDirectory.dir("rc-player-wasm"))
   }
 
+// The Android Remote Compose players, shipped as `<APP_HOME>/lib-rc-players-android/` for the
+// server's own player-only Android daemon (`ServeRcPlayerDaemon`), which replays a document with no
+// catalog behind it. Exactly the family the Android daemon sidecar leaves for a consumer to bring
+// (androidx.compose.remote plus the rc-players embedded player); everything else those players link
+// already sits in `lib-daemon-android/`. Never on a server classpath. The CMP player
+// (`cmp-android`) is not staged: its rc-player-compose tail (Coil, Ktor, kotlinx-datetime) is no
+// part of the sidecar, so that player stays off unless an operator's directory supplies it.
+val rcPlayersAndroid =
+  configurations.create("rcPlayersAndroid") {
+    description = "The Android Remote Compose players the player-only daemon replays with."
+    isCanBeConsumed = false
+    isCanBeResolved = true
+    attributes {
+      attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage.JAVA_RUNTIME))
+      attribute(Category.CATEGORY_ATTRIBUTE, objects.named(Category.LIBRARY))
+      attribute(
+        TargetJvmEnvironment.TARGET_JVM_ENVIRONMENT_ATTRIBUTE,
+        objects.named(TargetJvmEnvironment.ANDROID),
+      )
+      attribute(
+        org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType.attribute,
+        org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType.androidJvm,
+      )
+      attribute(
+        Attribute.of("com.android.build.api.attributes.BuildTypeAttr", String::class.java),
+        "release",
+      )
+    }
+  }
+
+dependencies {
+  rcPlayersAndroid(platform(libs.rc.players.bom))
+  listOf<Provider<MinimalExternalModuleDependency>>(
+      libs.compose.remote.core,
+      libs.compose.remote.creation.asProvider(),
+      libs.compose.remote.creation.core,
+      libs.compose.remote.creation.compose,
+      libs.compose.remote.player.core,
+      libs.compose.remote.player.view,
+      libs.compose.remote.player.compose,
+      libs.rcplayer.embedded.android,
+    )
+    .forEach { rcPlayersAndroid(it) { isTransitive = false } }
+}
+
+/** Copy jars as they are and each AAR's `classes.jar` (plus its `libs/`) as `<aar>.jar`. */
+abstract class StageAndroidLibraryJars : DefaultTask() {
+  @get:InputFiles
+  @get:PathSensitive(PathSensitivity.NAME_ONLY)
+  abstract val artifacts: ConfigurableFileCollection
+
+  @get:OutputDirectory abstract val destinationDir: DirectoryProperty
+
+  @TaskAction
+  fun stage() {
+    val dest = destinationDir.get().asFile
+    dest.deleteRecursively()
+    dest.mkdirs()
+    for (artifact in artifacts.files) {
+      if (artifact.extension != "aar") {
+        artifact.copyTo(File(dest, artifact.name))
+        continue
+      }
+      ZipFile(artifact).use { aar ->
+        aar
+          .entries()
+          .asSequence()
+          .filter { it.name == "classes.jar" || it.name.matches(Regex("libs/[^/]+\\.jar")) }
+          .forEach { entry ->
+            val name =
+              if (entry.name == "classes.jar") "${artifact.nameWithoutExtension}.jar"
+              else "${artifact.nameWithoutExtension}-${entry.name.substringAfter('/')}"
+            aar.getInputStream(entry).use { input ->
+              File(dest, name).outputStream().use { input.copyTo(it) }
+            }
+          }
+      }
+    }
+  }
+}
+
+val stageRcPlayersAndroidLibs =
+  tasks.register<StageAndroidLibraryJars>("stageRcPlayersAndroidLibs") {
+    description = "Stage the Android Remote Compose players into lib-rc-players-android."
+    group = "distribution"
+    artifacts.from(rcPlayersAndroid)
+    destinationDir.set(layout.buildDirectory.dir("staged-rc-players-android-libs"))
+  }
+
 // The TypeScript Remote Compose player behind `/rc-player/bundle.js` (the camaelon-js lane and
 // shared `/d/<id>` pages), resolved from Central (`remote-compose-player-js-dist`). Used as
 // published, with `src/rc-player/inert-custom-host.js` appended: the player wires a live
@@ -320,6 +409,7 @@ distributions {
     contents {
       into("lib-renderer") { from(stageRendererLibs) }
       into("lib-daemon-desktop") { from(stageDaemonDesktopLibs) }
+      into("lib-rc-players-android") { from(stageRcPlayersAndroidLibs) }
     }
     // The CMP/Wasm Remote Compose player — see `stageRcPlayerWasm`. Its `fonts/` is also the
     // cmp-jvm render worker's typefaces.

@@ -596,6 +596,13 @@ class ServeHttpServer(
    */
   private val playgroundHealth: (() -> PlaygroundHealth)? = null,
   /**
+   * The server's own Android player daemon ([ServeRcPlayerDaemon]): draws a carried Remote Compose
+   * document with an Android player whether or not a catalog daemon is resident. Null when this
+   * host has no Android runtime for it or server-side rendering is off; a resident catalog daemon
+   * is then the only lender ([docRcDonor]).
+   */
+  private val rcPlayerDaemon: ServeRcPlayerDaemon? = null,
+  /**
    * Delivery-branch read counters for `/status.json`, from the catalog store. A provider since the
    * numbers move; null without a catalog store.
    */
@@ -8487,6 +8494,7 @@ class ServeHttpServer(
                   coldLaunches = it.coldLaunches,
                 )
               },
+            rcPlayerDaemon = if (onlySystem == null) rcPlayerDaemon?.snapshot() else null,
           ),
         config =
           ConfigDto(
@@ -10631,8 +10639,9 @@ class ServeHttpServer(
           add(ServeRcPlayerIds.CMP_WASM)
         }
       }
-      // …plus the Android players another catalog's resident daemon draws this preview's document
-      // with, while one is resident ([donorBackedRcPlayers]).
+      // …plus the Android players a daemon replaying this preview's document draws it with: the
+      // server's own player daemon, or another catalog's while one is resident
+      // ([donorBackedRcPlayers]).
       val donorRcPlayers =
         donorBackedRcPlayers(renderHost, preview.id).map(ServeRcPlayerIds::of).filterNot {
           it in ownRcPlayers
@@ -11380,8 +11389,8 @@ class ServeHttpServer(
               return@withLeasedSession
             }
           }
-          // An Android player this host can't draw (a baked-only catalog) but another catalog's
-          // resident daemon can, by replaying this preview's document ([donorBackedRcPlayers]).
+          // An Android player this host can't draw (a baked-only catalog) but a daemon replaying
+          // this preview's document can ([donorBackedRcPlayers]).
           // Only when the published chain can't answer the player truthfully, and only for what a
           // replay applies (the player, `uiMode`, `rc.<name>=`); anything else, or no donor, keeps
           // the existing lane.
@@ -11974,8 +11983,8 @@ class ServeHttpServer(
 
   /**
    * The server-side players a `/d/<id>` page may offer: the embedded desktop player (cmp-jvm) when
-   * installed, and each Android player ([DOC_DAEMON_PLAYERS]) a resident catalog daemon can draw
-   * with ([docRcDonor]). Behind the same gate as [handleDocRender].
+   * installed, and each Android player ([DOC_DAEMON_PLAYERS]) this server can draw a carried
+   * document with ([canDrawCarriedRc]). Behind the same gate as [handleDocRender].
    */
   private fun RoutingContext.docServerPlayers(
     doc: ServeDocStore.Doc
@@ -11988,10 +11997,19 @@ class ServeHttpServer(
         listOf(ServeWeb.DocServerPlayer(ServeRcPlayerIds.CMP_JVM, "CMP (JVM)", renderPath))
       else emptyList()
     val android =
-      DOC_DAEMON_PLAYERS.filter { docRcDonor(it) != null }
-        .map { ServeWeb.DocServerPlayer(ServeRcPlayerIds.of(it), it.label, renderPath) }
+      DOC_DAEMON_PLAYERS.filter(::canDrawCarriedRc).map {
+        ServeWeb.DocServerPlayer(ServeRcPlayerIds.of(it), it.label, renderPath)
+      }
     return jvm + android
   }
+
+  /**
+   * Whether a carried Remote Compose document can be drawn with [backend]: by the server's own
+   * player daemon, which counts while it could start rather than only while it runs (the viewer
+   * would otherwise never offer what starts it), else by a resident catalog daemon ([docRcDonor]).
+   */
+  private fun canDrawCarriedRc(backend: RcPlayerBackend): Boolean =
+    rcPlayerDaemon?.offers(backend) == true || docRcDonor(backend) != null
 
   /** A catalog preview whose live daemon replays a carried Remote Compose document. */
   private data class DocRcDonor(val sessionId: String, val previewId: String)
@@ -12110,9 +12128,9 @@ class ServeHttpServer(
   }
 
   /**
-   * The Android half of [handleDocRender]: [doc] drawn by [player] on a resident catalog's daemon
-   * ([docRcDonor]) via `overrides.remoteCompose.documentBase64`. Only a fresh render answers; baked
-   * or published images are the donor's pixels, so they are refused.
+   * The Android half of [handleDocRender]: [doc] drawn by [player] on a daemon that replays it
+   * ([respondDonorRcRender]) via `overrides.remoteCompose.documentBase64`. Only a fresh render
+   * answers; baked or published images are the donor's pixels, so they are refused.
    */
   private suspend fun RoutingContext.respondDocDaemonRender(
     doc: ServeDocStore.Doc,
@@ -12146,25 +12164,26 @@ class ServeHttpServer(
   }
 
   /**
-   * The Android players ([DOC_DAEMON_PLAYERS]) [previewId] is drawn with only by lending its
-   * captured document to another catalog's resident daemon ([docRcDonor]), as a `/d/<id>` document
-   * is: its own host renders no overrides for it (a baked-only bundle) but carries the document and
-   * its render spec. Empty whenever the host draws the preview itself. The one answer to both "may
-   * the viewer offer it" and "does `/render` route it to a donor".
+   * The Android players ([DOC_DAEMON_PLAYERS]) [previewId] is drawn with only by handing its
+   * captured document to a daemon that replays it ([canDrawCarriedRc]), as a `/d/<id>` document is:
+   * its own host renders no overrides for it (a baked-only bundle) but carries the document and its
+   * render spec. Empty whenever the host draws the preview itself. The one answer to both "may the
+   * viewer offer it" and "does `/render` route it to a donor".
    */
   private fun donorBackedRcPlayers(host: ServeHost, previewId: String): List<RcPlayerBackend> {
     if (host.canRenderOverridesFor(previewId)) return emptyList()
     if (!host.hasRemoteComposeDoc(previewId)) return emptyList()
     if (host.remoteComposeRenderSpec(previewId) == null) return emptyList()
-    return DOC_DAEMON_PLAYERS.filter { docRcDonor(it) != null }
+    return DOC_DAEMON_PLAYERS.filter(::canDrawCarriedRc)
   }
 
   /**
-   * [document] drawn by [player] on a resident catalog's daemon ([docRcDonor]) via
-   * `overrides.remoteCompose.documentBase64` — the shared tail of shared documents
-   * ([respondDocDaemonRender]) and donor-backed catalog previews ([donorBackedRcPlayers]). Only a
-   * fresh render answers; baked or published images are the donor's pixels, so they are refused.
-   * [generation] and [cacheControl] mark the response once a donor is found.
+   * [document] drawn by [player] via `overrides.remoteCompose.documentBase64` — the shared tail of
+   * shared documents ([respondDocDaemonRender]) and donor-backed catalog previews
+   * ([donorBackedRcPlayers]). The server's own player daemon draws it whenever it offers [player]
+   * ([ServeRcPlayerDaemon], started on demand); otherwise a resident catalog's daemon lends itself
+   * ([docRcDonor]). Only a fresh render answers; baked or published images are the donor's pixels,
+   * so they are refused. [generation] and [cacheControl] mark the response once a daemon is found.
    */
   private suspend fun RoutingContext.respondDonorRcRender(
     player: RcPlayerBackend,
@@ -12180,15 +12199,6 @@ class ServeHttpServer(
     /** The `?bg=` stage for the drawn PNG; identity by default. */
     stage: suspend (ByteArray) -> ByteArray = { it },
   ) {
-    val donor = docRcDonor(player)
-    if (donor == null) {
-      call.response.headers.append(HttpHeaders.RetryAfter, "30")
-      call.respondText(
-        "no running catalog here can draw ${ServeRcPlayerIds.of(player)}",
-        status = HttpStatusCode.ServiceUnavailable,
-      )
-      return
-    }
     val overrides =
       PreviewOverrides(
         widthPx = widthPx.coerceIn(1, DOC_RENDER_MAX_PX),
@@ -12206,6 +12216,48 @@ class ServeHttpServer(
             }
             .build(),
       )
+    // Preferred over borrowing even while a catalog daemon is resident: its players are the ones
+    // this server pins, and a stranger's document never runs inside a catalog's daemon.
+    val playerDaemon = rcPlayerDaemon?.takeIf { it.offers(player) }
+    if (playerDaemon != null) {
+      markGeneration(generation, cacheControl)
+      val outcome =
+        withContext(Dispatchers.IO) {
+          if (!renderSemaphore.tryAcquire(RENDER_QUEUE_WAIT_SECONDS, TimeUnit.SECONDS)) null
+          else
+            try {
+              playerDaemon.render(overrides)
+            } finally {
+              renderSemaphore.release()
+            }
+        }
+      when (outcome) {
+        is ServeRcPlayerDaemon.Outcome.Rendered ->
+          respondCarriedRcOutcome(outcome.outcome, player, stage)
+        ServeRcPlayerDaemon.Outcome.Warming -> {
+          call.response.headers.append(HttpHeaders.RetryAfter, "5")
+          call.respondText(
+            "the ${ServeRcPlayerIds.of(player)} daemon is starting; retry shortly",
+            status = HttpStatusCode.ServiceUnavailable,
+          )
+        }
+        is ServeRcPlayerDaemon.Outcome.Unavailable -> {
+          call.response.headers.append(HttpHeaders.RetryAfter, "30")
+          call.respondText(outcome.reason, status = HttpStatusCode.ServiceUnavailable)
+        }
+        null -> respondCarriedRcOutcome(null, player, stage)
+      }
+      return
+    }
+    val donor = docRcDonor(player)
+    if (donor == null) {
+      call.response.headers.append(HttpHeaders.RetryAfter, "30")
+      call.respondText(
+        "no running catalog here can draw ${ServeRcPlayerIds.of(player)}",
+        status = HttpStatusCode.ServiceUnavailable,
+      )
+      return
+    }
     markGeneration(generation, cacheControl)
     withLeasedSession(donor.sessionId) { host ->
       // The lease resumes a session suspended since [docRcDonor] peeked at it, and a resumed host
@@ -12228,35 +12280,44 @@ class ServeHttpServer(
               renderSemaphore.release()
             }
         }
-      when (outcome) {
-        null,
-        RenderOutcome.Busy -> {
+      respondCarriedRcOutcome(outcome, player, stage)
+    }
+  }
+
+  /**
+   * A carried-document render's answer, from either daemon [respondDonorRcRender] uses; null is a
+   * render queue that never admitted it.
+   */
+  private suspend fun RoutingContext.respondCarriedRcOutcome(
+    outcome: RenderOutcome?,
+    player: RcPlayerBackend,
+    stage: suspend (ByteArray) -> ByteArray,
+  ) {
+    when (outcome) {
+      null,
+      RenderOutcome.Busy -> {
+        call.response.headers.append(HttpHeaders.RetryAfter, "2")
+        call.respondText("render busy; retry shortly", status = HttpStatusCode.ServiceUnavailable)
+      }
+      is RenderOutcome.Ok ->
+        if (
+          outcome.generation == RenderOutcome.Generation.BAKED ||
+            outcome.generation == RenderOutcome.Generation.RC_PUBLISHED
+        ) {
           call.response.headers.append(HttpHeaders.RetryAfter, "2")
           call.respondText(
-            "render busy; retry shortly",
+            "the ${ServeRcPlayerIds.of(player)} daemon is not warm yet; retry shortly",
             status = HttpStatusCode.ServiceUnavailable,
           )
+        } else {
+          call.respondBytes(stage(outcome.png), ContentType.Image.PNG)
         }
-        is RenderOutcome.Ok ->
-          if (
-            outcome.generation == RenderOutcome.Generation.BAKED ||
-              outcome.generation == RenderOutcome.Generation.RC_PUBLISHED
-          ) {
-            call.response.headers.append(HttpHeaders.RetryAfter, "2")
-            call.respondText(
-              "the ${ServeRcPlayerIds.of(player)} daemon is not warm yet; retry shortly",
-              status = HttpStatusCode.ServiceUnavailable,
-            )
-          } else {
-            call.respondBytes(stage(outcome.png), ContentType.Image.PNG)
-          }
-        is RenderOutcome.Failed ->
-          call.respondText(outcome.reason, status = HttpStatusCode.InternalServerError)
-        RenderOutcome.NotFound ->
-          call.respondText("the donor preview is gone", status = HttpStatusCode.ServiceUnavailable)
-        else ->
-          call.respondText("unexpected render outcome", status = HttpStatusCode.InternalServerError)
-      }
+      is RenderOutcome.Failed ->
+        call.respondText(outcome.reason, status = HttpStatusCode.InternalServerError)
+      RenderOutcome.NotFound ->
+        call.respondText("the donor preview is gone", status = HttpStatusCode.ServiceUnavailable)
+      else ->
+        call.respondText("unexpected render outcome", status = HttpStatusCode.InternalServerError)
     }
   }
 
@@ -16669,7 +16730,7 @@ class ServeHttpServer(
 
     /**
      * The Android players a shared `/d/<id>` document, or a baked-only catalog preview
-     * ([donorBackedRcPlayers]), can be drawn with on a resident catalog's daemon ([docRcDonor]),
+     * ([donorBackedRcPlayers]), can be drawn with by a daemon replaying it ([canDrawCarriedRc]),
      * default first, in viewer order.
      */
     private val DOC_DAEMON_PLAYERS: List<RcPlayerBackend> =
@@ -17283,6 +17344,11 @@ private data class DaemonSummaryDto(
   val busyLeasedSessions: List<String> = emptyList(),
   /** Null when the server keeps no spare sandbox workers (`--spare-sandboxes 0`). */
   val spareSandboxes: SpareSandboxesDto? = null,
+  /**
+   * The server's own Android player daemon ([ServeRcPlayerDaemon]), or null when it isn't wired.
+   * Box-wide, so omitted for a site. Not in [running]: it is no session.
+   */
+  val rcPlayerDaemon: ServeRcPlayerDaemon.Snapshot? = null,
 )
 
 /**

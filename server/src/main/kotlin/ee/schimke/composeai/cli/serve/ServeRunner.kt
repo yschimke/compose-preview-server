@@ -2126,6 +2126,27 @@ public class ServeRunner(
     )
   }
 
+  /**
+   * The Android players' own daemon ([ServeRcPlayerDaemon]), built but not started. Behind
+   * `--allow-render-trusted`, the switch every daemon-backed render lane already needs, and only
+   * where this host has the Android runtime and the staged players; otherwise null (logged), and
+   * the Android players are drawn only while a catalog daemon is resident to lend itself.
+   */
+  private fun buildRcPlayerDaemon(): ServeRcPlayerDaemon? {
+    if (!allowRenderTrusted) return null
+    val workRoot =
+      java.nio.file.Files.createTempDirectory("serve-rc-player").toFile().also { it.deleteOnExit() }
+    return ServeRcPlayerDaemon.subprocess(workRoot, liveSeatLimiter) {
+        System.err.println("serve: Android Remote Compose player daemon: $it")
+      }
+      ?.also {
+        System.err.println(
+          "serve: Android Remote Compose players on demand — " +
+            it.players.joinToString(" ") { player -> "${ServeRcPlayerIds.of(player)}✓" }
+        )
+      }
+  }
+
   /** Build the `--accept-bundles` upload store (temp-dir backed), wired to [registry]. */
   private fun openUploadStore(registry: ServeSessionRegistry): ServeBundleStore {
     val uploads =
@@ -3403,6 +3424,7 @@ public class ServeRunner(
             startedServer?.port ?: requestedPort,
           )
       }
+    val rcPlayerDaemon = buildRcPlayerDaemon()
     val server =
       ServeHttpServer(
         host = host,
@@ -3487,6 +3509,7 @@ public class ServeRunner(
         externalPlaygroundLinks =
           playgroundLane?.compile?.takeIf { playgroundExternal && !publicPlayground },
         playgroundHealth = playgroundLane?.health,
+        rcPlayerDaemon = rcPlayerDaemon,
         branchFetchStats = catalogStore?.let { store -> { store.branchFetchStats.snapshot() } },
         themeOptimizerStats = { backgroundWork.optimizerAdmissionSnapshot() },
         themeCacheStats = { themeCacheStore?.snapshot() },
@@ -3721,6 +3744,7 @@ public class ServeRunner(
           runCatching { catalogFeed?.close() }
           runCatching { catalogRegistrySync?.close() }
           runCatching { registry.close() }
+          runCatching { rcPlayerDaemon?.close() }
           runCatching { commentWebhook?.second?.close() }
           runCatching { commentWebhook?.first?.close() }
           runCatching { push?.close() }
