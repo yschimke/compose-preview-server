@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import {
     RC_FALLBACK_DP,
     rcCanvasSize,
+    rcDocumentSize,
     whenImageSized,
 } from "../src/viewer/rcCanvasSize.js";
 
@@ -87,5 +88,82 @@ describe("whenImageSized", () => {
 
     it("resolves null when the snapshot never decodes", async () => {
         assert.equal(await whenImageSized(fakeImage(0, 0), 10), null);
+    });
+});
+
+function header(parts: Array<[number, number]>): ArrayBuffer {
+    // parts: [byteLength (1|2|4), value]
+    const size = parts.reduce((n, [len]) => n + len, 0);
+    const v = new DataView(new ArrayBuffer(size));
+    let o = 0;
+    for (const [len, value] of parts) {
+        if (len === 1) v.setUint8(o, value);
+        else if (len === 2) v.setUint16(o, value);
+        else v.setInt32(o, value);
+        o += len;
+    }
+    return v.buffer;
+}
+
+describe("rcDocumentSize", () => {
+    it("reads the tagged header's width and height", () => {
+        const buf = header([
+            [1, 0],
+            [4, (0x048c << 16) | 1],
+            [4, 1],
+            [4, 0],
+            [4, 3],
+            [2, (1 << 10) | 7], // float density, skipped
+            [2, 4],
+            [4, 0x40000000],
+            [2, 5],
+            [2, 4],
+            [4, 454],
+            [2, 6],
+            [2, 4],
+            [4, 300],
+        ]);
+        assert.deepEqual(rcDocumentSize(buf), { width: 454, height: 300 });
+    });
+
+    it("reads the untagged header's width and height", () => {
+        const buf = header([
+            [1, 0],
+            [4, 1],
+            [4, 0],
+            [4, 0],
+            [4, 558],
+            [4, 280],
+        ]);
+        assert.deepEqual(rcDocumentSize(buf), { width: 558, height: 280 });
+    });
+
+    it("is null when the header declares no size, is truncated, or is not RC", () => {
+        assert.equal(
+            rcDocumentSize(
+                header([
+                    [1, 0],
+                    [4, (0x048c << 16) | 1],
+                    [4, 1],
+                    [4, 0],
+                    [4, 0],
+                ]),
+            ),
+            null,
+        );
+        assert.equal(
+            rcDocumentSize(
+                header([
+                    [1, 0],
+                    [4, (0x048c << 16) | 1],
+                    [4, 1],
+                    [4, 0],
+                    [4, 2],
+                    [2, 5],
+                ]),
+            ),
+            null,
+        );
+        assert.equal(rcDocumentSize(header([[4, 0x89504e47]])), null);
     });
 });

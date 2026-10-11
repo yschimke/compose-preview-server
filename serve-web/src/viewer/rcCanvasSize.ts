@@ -16,6 +16,9 @@ export const RC_FALLBACK_DP: PixelSize = { width: 360, height: 640 };
 /** How long the lane waits for the snapshot to decode before falling back. */
 export const RC_SNAPSHOT_WAIT_MS = 15000;
 
+/** How long a lane that fell back keeps listening for the snapshot so it can re-fit. */
+export const RC_SNAPSHOT_REFIT_MS = 120000;
+
 function positive(n: number): boolean {
     return typeof n === "number" && isFinite(n) && n > 0;
 }
@@ -82,4 +85,52 @@ export function whenImageSized(
             finish(decodedSize(img));
         }, timeoutMs);
     });
+}
+
+const RC_MAGIC = 0x048c;
+const DOC_WIDTH = 5;
+const DOC_HEIGHT = 6;
+const MAX_HEADER_PROPERTIES = 1000;
+
+/**
+ * The pixel size a Remote Compose document declares in its `Header` operation, in either the
+ * untagged (version, width, height) or the tagged property-table form, or null when it declares
+ * none or is not a Remote Compose document. Mirrors the server's `ServeDocFormats` reader; it is
+ * the size the document was captured at, so the baked snapshot shares it.
+ */
+export function rcDocumentSize(buf: ArrayBuffer): PixelSize | null {
+    const v = new DataView(buf);
+    try {
+        if (v.byteLength < 13 || v.getUint8(0) !== 0) return null;
+        const major = v.getInt32(1);
+        let o = 13;
+        if (major >>> 16 === RC_MAGIC) {
+            let width = 0,
+                height = 0;
+            const count = Math.min(
+                Math.max(v.getInt32(o), 0),
+                MAX_HEADER_PROPERTIES,
+            );
+            o += 4;
+            for (let i = 0; i < count; i++) {
+                const tag = v.getUint16(o);
+                const length = v.getUint16(o + 2);
+                o += 4;
+                const dataType = tag >> 10,
+                    key = tag & 0x3f;
+                if (dataType === 0 && length === 4) {
+                    if (key === DOC_WIDTH) width = v.getInt32(o);
+                    if (key === DOC_HEIGHT) height = v.getInt32(o);
+                }
+                o += length;
+            }
+            return width > 0 && height > 0 ? { width, height } : null;
+        }
+        if (major >>> 16 !== 0 || major < 1) return null;
+        const width = v.getInt32(o),
+            height = v.getInt32(o + 4);
+        return width > 0 && height > 0 ? { width, height } : null;
+    } catch (e) {
+        return null; // truncated header
+    }
 }
