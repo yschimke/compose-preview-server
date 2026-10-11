@@ -249,6 +249,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
  *
  * - `Cache storage is disabled` — the renderer runs in a sandboxed frame with no Cache API, and
  *   the code already falls back. Filtered in `ui-builder-renderer.spec.mjs` before this existed.
+ *   It can arrive as an uncaught `pageerror` as well as a console error, and that spec filters
+ *   both.
  * - `Accessing \`memory\` via \`wasmExports\`` — a Kotlin 2.4.20 deprecation notice about a
  *   dependency reaching `wasmExports.memory`, emitted at `console.error` severity:
  *   https://kotl.in/vr3szr. Nothing here references `wasmExports`.
