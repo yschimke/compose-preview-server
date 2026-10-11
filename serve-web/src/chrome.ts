@@ -19,6 +19,7 @@ import {
     installBugReportLink,
 } from "./chrome/bugReport.js";
 import { installReportLauncher } from "./chrome/reportLauncher.js";
+import { installRecent } from "./chrome/recent.js";
 import "./components/ReportClassification.js";
 import "./components/ReportScope.js";
 
@@ -34,3 +35,7 @@ installBugReportBody();
 // every-page footing as the two above and wired from the same place. It only opens a `<details>`
 // and points at the two destinations; the capture bundle it can reach is fetched on first use.
 installReportLauncher();
+// Recently viewed rides the shell because the viewer records into it and the front door (plus a
+// catalog landing) shows it, and the shell is the only bundle the front door loads. Any other page
+// returns before touching storage or the DOM.
+installRecent();
