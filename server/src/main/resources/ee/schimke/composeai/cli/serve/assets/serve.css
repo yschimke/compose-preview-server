@@ -2099,6 +2099,34 @@ cp-parity-scores { display: contents; }
 @media (hover: none) { .cp-card > .cp-star { opacity: 1; } }
 .cp-star--head { vertical-align: middle; align-self: center; }
 .cp-starred { margin: 0 0 28px; }
+/* The Starred row's Share action: the same quiet text button as Recent's "Clear", beside the
+   heading. On a landing the heading is a small caps label in its own row, so the pair gets one. */
+.cp-starred-head { display: flex; align-items: baseline; gap: 8px; margin: 0 0 12px; }
+.cp-starred-head .cp-group-head { margin: 0; }
+.cp-starred-share { padding: 2px 8px; border: 0; border-radius: var(--md-sys-shape-corner-full);
+  background: transparent; color: var(--md-sys-color-on-surface-variant); font: inherit;
+  font-size: var(--md-sys-typescale-label-medium-size); white-space: nowrap; cursor: pointer; }
+.cp-starred-share:hover { color: var(--md-sys-color-primary);
+  background: color-mix(in srgb, var(--md-sys-color-primary) 8%, transparent); }
+.cp-starred-share:focus-visible { outline: 3px solid var(--md-sys-color-secondary); outline-offset: 1px; }
+/* Opening a Share link: an M3 snackbar asking before anything is added. Bottom-centre, clear of the
+   report launcher in the corner, and lifted above the keyboard hint rail when that is on. */
+.cp-stars-offer { position: fixed; left: 50%; bottom: 24px; z-index: 45; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 4px; width: max-content;
+  max-width: min(560px, calc(100vw - 32px)); padding: 6px 8px 6px 16px;
+  border-radius: var(--md-sys-shape-corner-extra-small);
+  background: var(--md-sys-color-inverse-surface); color: var(--md-sys-color-inverse-on-surface);
+  box-shadow: var(--md-sys-elevation-level3); }
+body:has(.cp-keyboard-hints) .cp-stars-offer { bottom: 72px; }
+.cp-stars-offer-text { margin: 0 8px 0 0; flex: 1 1 auto;
+  font-size: var(--md-sys-typescale-body-medium-size); }
+.cp-stars-offer button { flex: none; padding: 8px 12px; border: 0;
+  border-radius: var(--md-sys-shape-corner-full); background: transparent; font: inherit;
+  font-weight: 500; color: var(--md-sys-color-inverse-primary); cursor: pointer; }
+.cp-stars-offer .cp-stars-offer-dismiss { color: var(--md-sys-color-inverse-on-surface); }
+.cp-stars-offer button:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
+.cp-stars-offer button:focus-visible { outline: 3px solid var(--md-sys-color-inverse-primary);
+  outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) { .cp-star { transition: none; } .cp-star:active { transform: none; } }
 .cp-image-error { position: absolute; z-index: 2; inset: 12px; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 8px; padding: 12px; text-align: center;

@@ -8,6 +8,8 @@
 //
 // Per-visitor taste, not shared state, so it lives in `localStorage` (the `cp-grp.` drawer memory
 // is the same call) and never in the URL: a link someone shares must not carry their shortlist.
+// The one exception is asked for by name — the Starred row's Share action (`starsLink.ts`) copies a
+// link whose fragment carries the row, and opening one offers to ADD those stars, never to replace.
 // One host serves many catalogs from one origin, so previews are keyed by the catalog they belong
 // to — the path segment the server mounts it under, which is the same on the landing and the
 // viewer.
@@ -16,6 +18,16 @@
 // storage blocked, sees exactly the page the server rendered; a write that fails leaves the star
 // toggled for this page view and nothing worse. The Starred row holds COPIES of the cards, so the
 // grids below — their sections, counts, anchors and filters — are untouched by it.
+
+import { copyText } from "../viewer/copyId.js";
+import {
+    type SharedStars,
+    clearSharedStarsFragment,
+    decodeSharedStars,
+    sharedStarsUrl,
+    sharedStarsValue,
+    showSharedStarsOffer,
+} from "./starsLink.js";
 
 export const STARS_KEY = "cp-stars.v1";
 
@@ -98,6 +110,26 @@ export function setPreviewStarred(
     if (list.length) stars.previews[system] = list;
     else delete stars.previews[system];
     writeStars(stars);
+}
+
+/**
+ * Add [shared] to the visitor's stars: catalogs globally, previews under [system]. Merge, never
+ * replace — what the visitor had stays, in their order, and only ids they did not already have are
+ * added, newest-first like any other star (in the link's own order). Returns how many were new.
+ */
+export function mergeStars(system: string, shared: SharedStars): number {
+    const stars = readStars();
+    const newCatalogs = shared.catalogs.filter(
+        (id) => !stars.catalogs.includes(id),
+    );
+    const had = stars.previews[system] ?? [];
+    const newPreviews = shared.previews.filter((id) => !had.includes(id));
+    const added = newCatalogs.length + newPreviews.length;
+    if (!added) return 0;
+    stars.catalogs = [...newCatalogs, ...stars.catalogs];
+    if (newPreviews.length) stars.previews[system] = [...newPreviews, ...had];
+    writeStars(stars);
+    return added;
 }
 
 /**
@@ -226,6 +258,45 @@ function copyOf(card: Element): Element {
     return copy;
 }
 
+const COPIED_MS = 1400;
+
+/**
+ * The Starred row's Share action: copies a link to this page carrying [shared]'s stars in its
+ * fragment. Confirms the way the viewer's id chip does — the label reads "Link copied ✓" for a
+ * moment, and a polite live region says so for a screen reader.
+ */
+function shareButton(what: string, shared: () => SharedStars): HTMLElement {
+    const wrap = document.createElement("span");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "cp-starred-share";
+    button.textContent = "Share";
+    button.setAttribute("aria-label", `Copy a link to these starred ${what}`);
+    button.title = `Copy a link that offers these starred ${what} to whoever opens it`;
+    const live = document.createElement("span");
+    live.className = "cp-visually-hidden";
+    live.setAttribute("role", "status");
+    live.setAttribute("aria-live", "polite");
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    button.addEventListener("click", () => {
+        void copyText(sharedStarsUrl(shared())).then((ok) => {
+            // Pin the width so the shorter/longer confirmation does not shove the heading about.
+            if (!timer) button.style.minWidth = `${button.offsetWidth}px`;
+            button.textContent = ok ? "Link copied ✓" : "Copy failed";
+            live.textContent = ok ? "Link copied" : "Copy failed";
+            clearTimeout(timer);
+            timer = setTimeout(() => {
+                button.textContent = "Share";
+                button.style.minWidth = "";
+                live.textContent = "";
+                timer = undefined;
+            }, COPIED_MS);
+        });
+    });
+    wrap.append(button, live);
+    return wrap;
+}
+
 // ---------------------------------------------------------------- front door
 
 function homeCards(): HTMLElement[] {
@@ -271,7 +342,15 @@ function renderHomeStarred(): void {
     const head = document.createElement("h2");
     head.className = "cp-head";
     head.textContent = "Starred";
-    title.append(head);
+    // Shares the catalogs the row shows, in its order — not stale ids for catalogs this host no
+    // longer serves, which the row already leaves out.
+    title.append(
+        head,
+        shareButton("catalogs", () => ({
+            catalogs: cards.map((c) => c.getAttribute("data-cp-system")!),
+            previews: [],
+        })),
+    );
     const grid = document.createElement("div");
     grid.className = "cp-grid cp-syslist";
     for (const card of cards) {
@@ -335,9 +414,20 @@ function renderLandingStarred(system: string): void {
     section.className = "cp-starred cp-subgroup";
     section.setAttribute("aria-label", "Starred previews");
     section.style.setProperty("--cp-n", String(picked.length));
+    const headRow = document.createElement("div");
+    headRow.className = "cp-starred-head";
     const head = document.createElement("h2");
     head.className = "cp-group-head";
     head.textContent = "Starred";
+    headRow.append(
+        head,
+        shareButton("previews", () => ({
+            catalogs: [],
+            previews: starred.filter((id) =>
+                picked.some((card) => cardPreviewIds(card).includes(id)),
+            ),
+        })),
+    );
     const row = document.createElement("div");
     row.className = "cp-cards";
     const pairs: Array<[HTMLElement, HTMLElement]> = [];
@@ -347,7 +437,7 @@ function renderLandingStarred(system: string): void {
         row.append(copy);
         pairs.push([card, copy]);
     }
-    section.append(head, row);
+    section.append(headRow, row);
     anchor.parentNode.insertBefore(section, anchor);
     followFilter(section, pairs);
 }
@@ -449,10 +539,54 @@ function install(): void {
     } else return;
 
     refresh();
+    offerSharedStars();
     // A star added in another tab shows up here too.
     window.addEventListener("storage", (event) => {
         if (event.key !== STARS_KEY) return;
         unsaved = null;
+        refresh();
+    });
+}
+
+/**
+ * When this page was opened from a Share link, offer its stars. Only what this page can show is
+ * offered — catalogs on the front door, this catalog's previews on its landing — and only what the
+ * visitor does not already have, so the count in the prompt is what Add will visibly put in the
+ * row. A link with nothing left to offer, or one that does not parse, just has its fragment cleared.
+ */
+function offerSharedStars(): void {
+    const value = sharedStarsValue(location.hash);
+    if (value === null) return;
+    const shared = decodeSharedStars(value);
+    const stars = readStars();
+    const offer: SharedStars = { catalogs: [], previews: [] };
+    let system = "";
+    if (shared && page?.kind === "home") {
+        const present = new Set(
+            Array.from(
+                document.querySelectorAll(".cp-sys[data-cp-system]"),
+                (c) => c.getAttribute("data-cp-system"),
+            ),
+        );
+        offer.catalogs = shared.catalogs.filter(
+            (id) => present.has(id) && !stars.catalogs.includes(id),
+        );
+    } else if (shared && page?.kind === "landing") {
+        system = page.system;
+        const had = stars.previews[system] ?? [];
+        const cards = landingCards();
+        offer.previews = shared.previews.filter(
+            (id) =>
+                !had.includes(id) &&
+                cards.some((c) => cardPreviewIds(c).includes(id)),
+        );
+    }
+    if (!offer.catalogs.length && !offer.previews.length) {
+        clearSharedStarsFragment();
+        return;
+    }
+    showSharedStarsOffer(offer, () => {
+        mergeStars(system, offer);
         refresh();
     });
 }
@@ -468,6 +602,7 @@ export function installStars(): void {
 export function resetStarsForTest(): void {
     page = null;
     unsaved = null;
+    document.getElementById("cp-stars-offer")?.remove();
     filterObserver?.disconnect();
     filterObserver = null;
 }

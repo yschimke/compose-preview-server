@@ -5,10 +5,18 @@ import {
     STARS_KEY,
     cardPreviewIds,
     installStars,
+    mergeStars,
     readStars,
     resetStarsForTest,
     systemFromPath,
 } from "../src/chrome/stars.js";
+import {
+    MAX_SHARED_IDS,
+    decodeSharedStars,
+    encodeSharedStars,
+    sharedStarsUrl,
+    sharedStarsValue,
+} from "../src/chrome/starsLink.js";
 
 function at(path: string): void {
     history.replaceState(null, "", path);
@@ -264,5 +272,182 @@ describe("stars", () => {
         document.body.innerHTML = "<main><p>Status</p></main>";
         installStars();
         assert.equal(document.querySelector(".cp-star"), null);
+    });
+});
+
+describe("shared stars", () => {
+    const clipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    beforeEach(() => {
+        stubStorage();
+        resetStarsForTest();
+    });
+    afterEach(() => {
+        resetDom();
+        if (clipboard) Object.defineProperty(navigator, "clipboard", clipboard);
+        else delete (navigator as { clipboard?: unknown }).clipboard;
+    });
+
+    const flush = () => new Promise((r) => setTimeout(r, 0));
+
+    it("round-trips a shortlist through the fragment, ids with separators included", () => {
+        const stars = {
+            catalogs: ["compose-m3", "team/apps"],
+            previews: ["chip__light", "odd,id:with;bits", "ünï"],
+        };
+        const value = encodeSharedStars(stars);
+        assert.equal(
+            value.startsWith("c:compose-m3,team%2Fapps;p:chip__light,"),
+            true,
+        );
+        assert.deepEqual(decodeSharedStars(value), stars);
+        assert.equal(encodeSharedStars({ catalogs: [], previews: [] }), "");
+    });
+
+    it("builds a link to this page that keeps its query and replaces its fragment", () => {
+        at("/compose-m3/?tab=all#c-chip");
+        const url = sharedStarsUrl({ catalogs: [], previews: ["chip"] });
+        assert.equal(
+            url,
+            `${location.origin}/compose-m3/?tab=all#stars=p:chip`,
+        );
+        assert.equal(sharedStarsValue(new URL(url).hash), "p:chip");
+        assert.equal(sharedStarsValue("#c-chip"), null);
+        // The visitor's own browse token never rides a link made to hand on.
+        at("/?token=secret&session=wear-m3");
+        assert.equal(
+            sharedStarsUrl({ catalogs: ["a"], previews: [] }),
+            `${location.origin}/?session=wear-m3#stars=c:a`,
+        );
+    });
+
+    it("ignores malformed input and caps what a link can carry", () => {
+        for (const bad of [
+            "",
+            "garbage",
+            ":x",
+            "c:",
+            "c:a,,b",
+            "c:%E0%A4%A",
+            "c:" + "a".repeat(9000),
+        ])
+            assert.equal(decodeSharedStars(bad), null, bad);
+        // A control character or an over-long id is dropped, not the whole link.
+        assert.deepEqual(decodeSharedStars("c:ok,%00bad," + "x".repeat(201)), {
+            catalogs: ["ok"],
+            previews: [],
+        });
+        // A group a later format might add is skipped; duplicates collapse.
+        assert.deepEqual(decodeSharedStars("z:whatever;p:a,a,b"), {
+            catalogs: [],
+            previews: ["a", "b"],
+        });
+        const many = Array.from({ length: 80 }, (_, i) => `id${i}`);
+        assert.equal(
+            decodeSharedStars(`p:${many.join(",")}`)!.previews.length,
+            MAX_SHARED_IDS,
+        );
+    });
+
+    it("merges into the visitor's stars instead of replacing them", () => {
+        localStorage.setItem(
+            STARS_KEY,
+            JSON.stringify({
+                catalogs: ["wear-m3"],
+                previews: { "compose-m3": ["button"] },
+            }),
+        );
+        assert.equal(
+            mergeStars("compose-m3", {
+                catalogs: ["jetcaster", "wear-m3"],
+                previews: ["chip__light", "button"],
+            }),
+            2,
+        );
+        assert.deepEqual(readStars(), {
+            catalogs: ["jetcaster", "wear-m3"],
+            previews: { "compose-m3": ["chip__light", "button"] },
+        });
+    });
+
+    it("copies a link carrying the Starred row from its Share action", async () => {
+        const copied: string[] = [];
+        Object.defineProperty(navigator, "clipboard", {
+            configurable: true,
+            value: {
+                writeText: (text: string) => {
+                    copied.push(text);
+                    return Promise.resolve();
+                },
+            },
+        });
+        at("/");
+        document.body.innerHTML = HOME;
+        installStars();
+        star('#cp-grid [data-cp-system="wear-m3"] > .cp-star').click();
+        star('#cp-grid-1 [data-cp-system="jetcaster"] > .cp-star').click();
+        const share = document.querySelector<HTMLButtonElement>(
+            "#cp-starred .cp-section-title .cp-starred-share",
+        )!;
+        assert.ok(share, "the Starred heading carries a Share action");
+        share.click();
+        await flush();
+        assert.deepEqual(copied, [
+            `${location.origin}/#stars=c:jetcaster,wear-m3`,
+        ]);
+        assert.equal(share.textContent, "Link copied ✓");
+    });
+
+    it("offers a link's previews on the landing, and Add merges then clears the fragment", () => {
+        localStorage.setItem(
+            STARS_KEY,
+            JSON.stringify({
+                catalogs: [],
+                previews: { "compose-m3": ["button"] },
+            }),
+        );
+        // `button` is already starred and `gone` is not on this page: only the chip is offered.
+        at("/compose-m3/?tab=all#stars=p:chip__dark,button,gone");
+        document.body.innerHTML = LANDING;
+        installStars();
+        const offer = document.getElementById("cp-stars-offer")!;
+        assert.ok(offer, "the link raises an offer");
+        assert.equal(
+            offer.querySelector(".cp-stars-offer-text")!.textContent,
+            "Add 1 starred preview from this link?",
+        );
+        // Nothing is added until the visitor says so.
+        assert.deepEqual(readStars().previews, { "compose-m3": ["button"] });
+
+        offer.querySelector<HTMLButtonElement>(".cp-stars-offer-add")!.click();
+        assert.deepEqual(readStars().previews, {
+            "compose-m3": ["chip__dark", "button"],
+        });
+        assert.equal(document.getElementById("cp-stars-offer"), null);
+        assert.equal(location.hash, "");
+        assert.equal(location.search, "?tab=all");
+        assert.equal(
+            document.querySelectorAll("#cp-starred .cp-card").length,
+            2,
+        );
+    });
+
+    it("dismisses without adding, and clears a link with nothing to offer", () => {
+        at("/#stars=c:jetcaster");
+        document.body.innerHTML = HOME;
+        installStars();
+        document
+            .querySelector<HTMLButtonElement>(".cp-stars-offer-dismiss")!
+            .click();
+        assert.deepEqual(readStars().catalogs, []);
+        assert.equal(document.getElementById("cp-stars-offer"), null);
+        assert.equal(location.hash, "");
+
+        resetDom();
+        resetStarsForTest();
+        at("/#stars=c:%E0%A4%A");
+        document.body.innerHTML = HOME;
+        installStars();
+        assert.equal(document.getElementById("cp-stars-offer"), null);
+        assert.equal(location.hash, "");
     });
 });
