@@ -38,6 +38,10 @@ import { withStage } from "./annotate/report.js";
 import { isTransparent } from "./backgroundChoice.js";
 import { installWebShare } from "./viewer/webShare.js";
 import { installPresent } from "./viewer/present.js";
+import {
+    densityFromDeviceLabel,
+    installGridOverlay,
+} from "./viewer/gridOverlay.js";
 import { wireCopyId } from "./viewer/copyId.js";
 import { pageWakeHold } from "./viewer/wakeLock.js";
 import { writeThemeMemory } from "./chrome/themeMemory.js";
@@ -1252,6 +1256,37 @@ installWebShare(function () {
 });
 // The stage alone, full screen: a corner button on it, and F with keyboard navigation on.
 installPresent(stage);
+// An 8dp grid over the render: a corner toggle beside Present, and G with keyboard navigation on.
+// It lies over the live canvas once a stream frame is on it (Device/Orientation then change over
+// the socket, never reloading the <img>), else the snapshot. The page's density is right for the
+// preview as authored; a picked Device renders at that device's density instead, which its
+// option's dp size and the render's px size give exactly — by the width alone under "Full page
+// (scroll)", whose PNG is as tall as the content.
+var gridDevice = may<HTMLSelectElement>("cp-device");
+var gridOrientation = may<HTMLSelectElement>("cp-orientation");
+var refreshGrid = installGridOverlay(
+    stage,
+    img,
+    function () {
+        return live.checked && !canvas.hidden && liveW > 0
+            ? { el: canvas, width: liveW, height: liveH, live: true }
+            : { el: img, width: img.naturalWidth, height: img.naturalHeight };
+    },
+    function (s) {
+        return (
+            densityFromDeviceLabel(
+                gridDevice && gridDevice.selectedOptions[0],
+                s.width,
+                s.height,
+                !s.live && scrollLong && scrollLong.checked
+                    ? gridOrientation
+                        ? gridOrientation.value
+                        : ""
+                    : null,
+            ) || renderDensity
+        );
+    },
+);
 // Live frame painting. Frames land on `frameQueue` and drain one per animation frame. Two
 // watermarks keep the stage moving forward: the queue drops frames at or below the last released,
 // and `paintedSeq` drops decodes that resolve out of order. See `live/framePainter.ts`.
@@ -1592,6 +1627,8 @@ function closeStream() {
     liveH = 0;
     img.style.removeProperty("visibility");
     img.hidden = false;
+    // Back on the snapshot: the grid returns to the <img>.
+    if (refreshGrid) refreshGrid();
 }
 // Wasm tier: the in-browser CMP app in a sandboxed iframe, wired only when data-wasm-src is
 // present. Theme / font scale / locale re-point the iframe's query; device and orientation are
@@ -1758,6 +1795,8 @@ function fitLiveCanvas() {
     canvas.style.top = boxTop + (boxH - h) / 2 + "px";
     canvas.style.width = w + "px";
     canvas.style.height = h + "px";
+    // A new frame (or a frame of a new size) moves the grid with it; see `refreshGrid`.
+    if (refreshGrid) refreshGrid();
 }
 // Swap the stage from the snapshot to the already-painted Wasm frame. The snapshot keeps its layout
 // slot (visibility, not display) so geometry never shifts.
