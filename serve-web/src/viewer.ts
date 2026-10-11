@@ -44,6 +44,7 @@ import { reportBody } from "./report/body.js";
 import { withStage } from "./annotate/report.js";
 import { isTransparent } from "./backgroundChoice.js";
 import { installWebShare } from "./viewer/webShare.js";
+import { wireCopyId } from "./viewer/copyId.js";
 import { pageWakeHold } from "./viewer/wakeLock.js";
 import { writeThemeMemory } from "./chrome/themeMemory.js";
 import { fitInk, imageInk, type InkBounds } from "./design/ink.js";
@@ -1358,6 +1359,10 @@ document.querySelectorAll<HTMLElement>(".cp-copyurl").forEach(function (btn) {
         }
     });
 });
+// The preview id under the title copies itself on click (viewer/copyId.ts says why).
+document
+    .querySelectorAll<HTMLElement>(".cp-preview-id")
+    .forEach((el) => wireCopyId(el));
 // "Copy PNG" / "Copy SVG": fetch the current /render artefact and put it on the clipboard —
 // PNG as real image/png bytes (falling back to a base64 data: URI), SVG as markup verbatim — so
 // it can be pasted straight into an issue, editor, or prompt without downloading a file. Uses
