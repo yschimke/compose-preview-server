@@ -1032,6 +1032,68 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `component search ignores case and separators and puts the named component first`() {
+    val server = start()
+
+    fun search(arguments: String): List<String> =
+      Json.parseToJsonElement(envelope(server, ServeUiBuilderMcp.SEARCH_COMPONENTS, arguments))
+        .jsonObject
+        .getValue("catalogs")
+        .jsonArray
+        .flatMap { catalog ->
+          catalog.jsonObject.getValue("components").jsonArray.map {
+            it.jsonObject.getValue("id").jsonPrimitive.content
+          }
+        }
+
+    // How the eval asked for it; only `text-field` used to find anything.
+    for (query in listOf("text field", "textfield", "TextField", "text_field", "Text-Field")) {
+      val ids = search("""{"query":"$query"}""")
+      assertEquals("m3/text-field", ids.firstOrNull(), "$query: $ids")
+      assertTrue("layout/column" !in ids, "$query: $ids")
+    }
+  }
+
+  @Test
+  fun `component search takes catalogSystemId for catalog and refuses a catalog it does not have`() {
+    val server = start()
+
+    fun catalogs(arguments: String): List<String> =
+      Json.parseToJsonElement(envelope(server, ServeUiBuilderMcp.SEARCH_COMPONENTS, arguments))
+        .jsonObject
+        .getValue("catalogs")
+        .jsonArray
+        .map { it.jsonObject.getValue("systemId").jsonPrimitive.content }
+
+    assertEquals(
+      listOf(CATALOG_SYSTEM_ID),
+      catalogs("""{"query":"text","catalog":"$CATALOG_SYSTEM_ID"}"""),
+    )
+    assertEquals(
+      listOf(CATALOG_SYSTEM_ID),
+      catalogs("""{"query":"text","catalogSystemId":"$CATALOG_SYSTEM_ID"}"""),
+    )
+    // A misspelt or unknown catalog used to be ignored or to answer an empty list, which reads
+    // as "no such component" rather than "no such catalog".
+    val unknown =
+      call(
+        server,
+        ServeUiBuilderMcp.SEARCH_COMPONENTS,
+        """{"query":"text","catalog":"m4-catalog"}""",
+      )
+    assertEquals("true", unknown["isError"]?.jsonPrimitive?.content, unknown.toString())
+    val text = unknown["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
+    assertTrue(text.contains(CATALOG_SYSTEM_ID), text)
+    val conflicting =
+      call(
+        server,
+        ServeUiBuilderMcp.SEARCH_COMPONENTS,
+        """{"query":"text","catalog":"$CATALOG_SYSTEM_ID","catalogSystemId":"other"}""",
+      )
+    assertEquals("true", conflicting["isError"]?.jsonPrimitive?.content, conflicting.toString())
+  }
+
+  @Test
   fun `an optional property can be unset with null, and a required one cannot`() {
     val server = start()
     envelope(

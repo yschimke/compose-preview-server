@@ -571,8 +571,9 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * Components whose id, role or traits contain `query` (case-insensitive), in [listCatalogs]'
-   * summary shape.
+   * Components [UiBuilderComponentSearch] matches `query` against — id, display name, Compose
+   * symbol, role and traits, ignoring case and separators — best first, in [listCatalogs]' summary
+   * shape. Catalogs are ordered by their best match.
    */
   private suspend fun searchComponents(
     args: JsonObject,
@@ -582,12 +583,19 @@ class ServeUiBuilderMcp(
     val query =
       args[QUERY_ARGUMENT]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
         ?: throw McpRequestException("`$QUERY_ARGUMENT` is required")
-    val catalogFilter = args[CATALOG_ARGUMENT]?.jsonPrimitive?.contentOrNull
+    val catalogFilter = args.catalogFilter()
     val listed =
       when (val response = execute(ListCatalogsRequestV1, actor)) {
         is UiBuilderServiceResponse.Catalogs -> response
         else -> return envelope(callId, response)
       }
+    val systemIds = listed.catalogs.map { it.benchmark.catalogSystemId }
+    if (catalogFilter != null && catalogFilter !in systemIds) {
+      throw McpRequestException(
+        "no catalog `$catalogFilter` on this server; it serves " +
+          systemIds.sorted().joinToString(", ") { "`$it`" }
+      )
+    }
     return SUMMARY_JSON.encodeToString(
       CatalogSummaryReplyV1.serializer(),
       CatalogSummaryReplyV1(
@@ -597,24 +605,52 @@ class ServeUiBuilderMcp(
             .filter { catalogFilter == null || it.benchmark.catalogSystemId == catalogFilter }
             .mapNotNull { catalog ->
               val systemId = catalog.benchmark.catalogSystemId
-              val matches =
-                catalog.components.filter { component ->
-                  component.componentId.contains(query, ignoreCase = true) ||
-                    component.role.contains(query, ignoreCase = true) ||
-                    component.traits.any { it.contains(query, ignoreCase = true) }
+              val ranked =
+                catalog.components.mapNotNull { component ->
+                  UiBuilderComponentSearch.rank(query, component.searchCandidate())?.let {
+                    it to component
+                  }
                 }
-              if (matches.isEmpty()) null
+              if (ranked.isEmpty()) null
               else
-                CatalogSummaryV1(
-                  systemId = systemId,
-                  platform = catalog.statusSemantics[PLATFORM_KEY]?.jsonPrimitive?.contentOrNull,
-                  catalogPin = listed.pins[systemId],
-                  components = matches.map(::summarize),
-                )
-            },
+                ranked.minOf { it.first } to
+                  CatalogSummaryV1(
+                    systemId = systemId,
+                    platform = catalog.statusSemantics[PLATFORM_KEY]?.jsonPrimitive?.contentOrNull,
+                    catalogPin = listed.pins[systemId],
+                    components = ranked.sortedBy { it.first }.map { summarize(it.second) },
+                  )
+            }
+            .sortedBy { it.first }
+            .map { it.second },
       ),
     )
   }
+
+  /**
+   * The catalog [SEARCH_COMPONENTS] is narrowed to. `catalog` is the documented name;
+   * `catalogSystemId`, what the catalog itself calls the id, is taken as the same thing rather than
+   * ignored, which silently searched every catalog. Naming two different catalogs is refused.
+   */
+  private fun JsonObject.catalogFilter(): String? {
+    val documented = text(CATALOG_ARGUMENT)
+    val alias = text(CATALOG_SYSTEM_ID_ARGUMENT)
+    if (documented != null && alias != null && documented != alias) {
+      throw McpRequestException(
+        "`$CATALOG_ARGUMENT` and `$CATALOG_SYSTEM_ID_ARGUMENT` name different catalogs; pass one"
+      )
+    }
+    return documented ?: alias
+  }
+
+  private fun ComponentCapabilityV1.searchCandidate(): UiBuilderComponentSearch.Candidate =
+    UiBuilderComponentSearch.Candidate(
+      id = componentId,
+      displayName = displayName,
+      symbol = code?.symbol,
+      role = role,
+      traits = traits,
+    )
 
   /** One component as a few short strings, which keeps the whole summary at about 12 KB. */
   private fun summarize(component: ComponentCapabilityV1): ComponentSummaryV1 =
@@ -3966,6 +4002,8 @@ class ServeUiBuilderMcp(
     private const val FULL_ARGUMENT = "full"
     private const val QUERY_ARGUMENT = "query"
     private const val CATALOG_ARGUMENT = "catalog"
+    /** Accepted for [CATALOG_ARGUMENT] by [SEARCH_COMPONENTS]; see `catalogFilter`. */
+    private const val CATALOG_SYSTEM_ID_ARGUMENT = "catalogSystemId"
     private const val COMPONENT_IDS_ARGUMENT = "componentIds"
     private const val INCLUDE_ARGUMENT = "include"
     private const val SELECTION_ARGUMENT = "selection"
@@ -4151,14 +4189,18 @@ class ServeUiBuilderMcp(
         ),
         tool(
           SEARCH_COMPONENTS,
-          "Find catalog components by name, role or trait (case-insensitive substring), e.g. " +
-            "`TextField`, `Button`, `Card`. Returns the same summary as $LIST_CATALOGS " +
+          "Find catalog components by id, display name, Compose symbol, role or trait, e.g. " +
+            "`TextField`, `text field`, `OutlinedTextField`, `Button`, `Card`. Case, spaces, " +
+            "hyphens, underscores, slashes and camelCase are ignored, and the components the " +
+            "query names come first: an exact name, then a prefix, then a name containing it, " +
+            "then role and traits. Returns the same summary as $LIST_CATALOGS " +
             "(id, role, traits, slots, properties, and the catalog pin) for only the matches, " +
             "so you don't pay for the whole catalog.",
           """
           {"type":"object","properties":{
-            "$QUERY_ARGUMENT":{"type":"string","description":"Text to look for in a component's id, role or traits."},
-            "$CATALOG_ARGUMENT":{"type":"string","description":"Only this catalog system id. Omit to search every catalog."}
+            "$QUERY_ARGUMENT":{"type":"string","description":"Text to look for in a component's id, display name, Compose symbol, role or traits."},
+            "$CATALOG_ARGUMENT":{"type":"string","description":"Only this catalog system id, e.g. m3-catalog. Omit to search every catalog; an id this server does not serve is an error."},
+            "$CATALOG_SYSTEM_ID_ARGUMENT":{"type":"string","description":"The same as `$CATALOG_ARGUMENT`."}
           },"required":["$QUERY_ARGUMENT"],"additionalProperties":false}
           """,
         ),
