@@ -597,6 +597,78 @@ class ServeCatalogStoreTest {
     )
   }
 
+  /** Loads [catalog] beside a published `rc-compare-summary.json` and returns the staged view. */
+  private fun stagedRcCompare(
+    catalog: String,
+    summary: String,
+    requested: MutableList<String> = CopyOnWriteArrayList(),
+  ): ServeBundleHost {
+    val fetch: (String) -> ByteArray? = { url ->
+      requested += url
+      when {
+        url.endsWith("/catalog.json") -> catalog.toByteArray()
+        url.endsWith("/${ServeRcCompare.SUMMARY_FILE}") -> summary.toByteArray()
+        url.endsWith(".png") -> png()
+        else -> null
+      }
+    }
+    assertTrue(
+      store(TrustStore.EMPTY, fetch = fetch).load("compose-m3") is ServeCatalogStore.Result.Ok
+    )
+    return registered.getValue("compose-m3")
+  }
+
+  @Test
+  fun `a catalog of pure RC documents stages its comparison by served id`() {
+    // No `previewId`, so no daemon alias: the producer keys its summary by the served id instead.
+    val requested = CopyOnWriteArrayList<String>()
+    val host =
+      stagedRcCompare(
+        """{"schema":"design-parity-catalog/v1","system":"compose-m3",
+          "renderer":"Remote Compose web player 1:cb84224aae12e593","components":[
+          {"componentId":"advanced-samples/2-vtext","rcDocument":"documents/advanced-samples/2-vtext.rc",
+           "images":[{"path":"images/advanced-samples/2-vtext.png"}]},
+          {"componentId":"Plain","images":[{"path":"images/plain.png"}]}]}""",
+        """{"rows":[{"id":"advanced-samples__2-vtext","width":600,"height":600,
+          "rendered":true,"mismatchPct":1.5},{"id":"plain","rendered":true}]}""",
+        requested,
+      )
+    assertFalse(host.rcComparePending())
+    val manifest = assertNotNull(host.rcCompare())
+    // Only RC-backed ids are bridged; a baked-only image the summary also names stays out.
+    assertEquals(listOf("advanced-samples__2-vtext"), manifest.rows.map { it.previewId })
+    assertEquals(1.5, manifest.rows.single().lanes.getValue("js").mismatchPct)
+    // Named for the catalog's declared player, not the AndroidX one the dependency assumes.
+    assertEquals(
+      "Remote Compose web player 1:cb84224aae12e593",
+      manifest.lanes.single { it.id == "baked" }.label,
+    )
+    assertTrue(requested.any { it.endsWith("/rc-baked/advanced-samples__2-vtext.png") })
+    assertTrue(requested.any { it.endsWith("/rc/advanced-samples__2-vtext.png") })
+    // The fallback feeds only this lane: no player is claimed for the untrusted documents.
+    assertTrue(host.previews.all { host.enabledRcPlayersFor(it.id).isEmpty() })
+  }
+
+  @Test
+  fun `a catalog with daemon preview ids keeps re-keying its comparison through them`() {
+    val host =
+      stagedRcCompare(
+        """{"schema":"design-parity-catalog/v1","system":"compose-m3",
+          "renderer":"compose-preview 2.46.0","components":[
+          {"componentId":"Card","rcDocument":"documents/card.rc",
+           "images":[{"path":"images/card/ideal.png","previewId":"ee.x.CardsKt.CardRemote"}]}]}""",
+        """{"rows":[{"id":"ee.x.CardsKt.CardRemote","rendered":true},
+          {"id":"card__ideal","rendered":true,"mismatchPct":99.0}]}""",
+      )
+    val manifest = assertNotNull(host.rcCompare())
+    assertEquals(listOf("card__ideal"), manifest.rows.map { it.previewId })
+    assertNull(manifest.rows.single().lanes.getValue("js").mismatchPct)
+    assertEquals(
+      ServeRcCompare.LANES.first().label,
+      manifest.lanes.single { it.id == "baked" }.label,
+    )
+  }
+
   @Test
   fun `published RC paths cannot escape the documents directory`() {
     val catalog =
