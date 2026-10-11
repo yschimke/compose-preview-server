@@ -125,6 +125,35 @@ describe("grid density", () => {
         }
     });
 
+    it("builds the toggle row where the server would, when the server emitted none", () => {
+        // A component-browser landing with no themes and no actions: the identity row, no toggles.
+        document.body.innerHTML = `
+          <div class="cp-catalog-head-row"><div class="cp-catalog-title"><h1>Kit</h1></div></div>
+          <div class="cp-catalog-body"><div class="cp-sections" id="cp-grid"></div></div>`;
+        const group = installGridDensity();
+        assert.ok(group);
+        const row = group.parentElement!;
+        assert.ok(row.classList.contains("cp-head-toggles"));
+        assert.equal(
+            document.querySelector(".cp-catalog-head-row")!.lastElementChild,
+            row,
+        );
+        assert.equal(installGridDensity(), group);
+        assert.equal(document.querySelectorAll(".cp-head-toggles").length, 1);
+    });
+
+    it("builds it in the filter's toolbar when there is one", () => {
+        document.body.innerHTML = `
+          <div class="cp-catalog-head-row"><h1>Kit</h1></div>
+          <div class="cp-catalog-tools"><div class="cp-searchbar"></div></div>
+          <div class="cp-grid" id="cp-grid"></div>`;
+        const group = installGridDensity();
+        assert.equal(
+            group?.parentElement?.parentElement,
+            document.querySelector(".cp-catalog-tools"),
+        );
+    });
+
     it("is idempotent", () => {
         document.body.innerHTML = LANDING;
         const first = installGridDensity();
@@ -133,7 +162,7 @@ describe("grid density", () => {
     });
 
     it("stays off pages without a catalog preview grid", () => {
-        document.body.innerHTML = `<div class="cp-head-toggles"></div>`;
+        document.body.innerHTML = `<div class="cp-catalog-head-row"><div class="cp-head-toggles"></div></div>`;
         assert.equal(installGridDensity(), null);
         // The front door's catalog list is a `.cp-grid` too, but not one of previews.
         document.body.innerHTML = `<div class="cp-head-toggles"></div><div id="cp-grid" class="cp-grid cp-syslist"></div>`;

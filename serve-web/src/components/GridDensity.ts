@@ -87,10 +87,11 @@ export function applyDensity(density: Density): void {
  * Mount the control on a catalog landing, and apply the remembered size.
  *
  * Only where there is a preview grid (`#cp-grid` holding catalog cards, not the front door's
- * catalog list) and the row of toggles the server already puts beside the heading or the filter —
- * the control joins the Theme pill and `⋯` menu at the head of that row. (`serve.css` hides it on a
- * phone, whose toolbar row is already full and whose grid is its own size.) Idempotent: a second
- * call finds its own group and only re-applies.
+ * catalog list). The control goes at the head of the row of toggles the server puts beside the
+ * heading or the filter, ahead of the Theme pill and `⋯` menu — building that row when the server
+ * had nothing to put in it (see `togglesRow`). `serve.css` hides it on a phone, whose toolbar row
+ * is already full and whose grid is its own size. Idempotent: a second call finds its own group
+ * and only re-applies.
  *
  * Native radios, so the group gets the platform's keyboard model for free — Tab enters on the
  * checked option, arrows move and select — and a screen reader announces "Small, radio button,
@@ -99,8 +100,9 @@ export function applyDensity(density: Density): void {
  */
 export function installGridDensity(): HTMLElement | null {
     const grid = document.getElementById("cp-grid");
-    const toggles = document.querySelector(".cp-head-toggles");
-    if (!grid || !toggles || grid.classList.contains("cp-syslist")) return null;
+    if (!grid || grid.classList.contains("cp-syslist")) return null;
+    const toggles = togglesRow();
+    if (!toggles) return null;
     const density = readDensity();
     applyDensity(density);
     const existing = toggles.querySelector<HTMLElement>(".cp-density");
@@ -135,6 +137,27 @@ export function installGridDensity(): HTMLElement | null {
     });
     toggles.prepend(group);
     return group;
+}
+
+/**
+ * The row the control joins: the server's `.cp-head-toggles`, or one built where the server would
+ * have put it. The server omits the row when it has nothing for it — a component-browser landing
+ * whose previews carry no light/dark pair or declared themes has neither a Theme pill nor actions —
+ * and the control is no less useful there. `ServeWeb.landingPage` puts the row in the toolbar
+ * (`.cp-catalog-tools`) when the filter lives there, and otherwise at the end of the identity row
+ * (`.cp-catalog-head-row`), whose stylesheet already pushes it to the trailing edge.
+ */
+function togglesRow(): Element | null {
+    const served = document.querySelector(".cp-head-toggles");
+    if (served) return served;
+    const home =
+        document.querySelector(".cp-catalog-tools") ??
+        document.querySelector(".cp-catalog-head-row");
+    if (!home) return null;
+    const row = document.createElement("div");
+    row.className = "cp-head-toggles";
+    home.append(row);
+    return row;
 }
 
 /** Test seam: forget a pick held for this page view. */
