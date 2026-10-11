@@ -1861,6 +1861,18 @@
     renderFallback(result, reason || 'A render resource is available:', resource);
   }
 
+  function resourceRefreshUnavailable(result, resource, reason) {
+    // The tool result is already drawable; optional resources/read must not erase it.
+    if (baseImageData && canvas.querySelector('.preview-stage > img')) {
+      meta.textContent = 'Showing rendered preview; resource refresh unavailable.';
+      scheduleFit();
+      return true;
+    }
+    renderResourceFallback(result, resource, reason);
+    meta.textContent = 'Resource reads are unavailable; use the text fallback.';
+    return false;
+  }
+
   // A result that arrived but has nothing to draw. The header says so plainly instead of staying
   // on "Waiting…", which reads as still pending; the complete text stays one click away.
   function renderNotice(result, { error, heading, summary }) {
@@ -2213,8 +2225,7 @@
       resourcePollUnchanged = image && image.blob === baseImageData ? resourcePollUnchanged + 1 : 0;
       if (!image) {
         if (overlayCall) return;
-        renderResourceFallback(toolResult, resource, 'The host returned no PNG for resource:');
-        meta.textContent = 'Resource has no PNG; use the text fallback.';
+        resourceRefreshUnavailable(toolResult, resource, 'The host returned no PNG for resource:');
         return;
       }
       if (
@@ -2238,10 +2249,9 @@
         return;
       }
       // Resource reads are optional in MCP Apps hosts. Keep the durable URI and text result useful.
-      renderResourceFallback(toolResult, resource, 'Unable to read preview resource:');
-      meta.textContent = 'Resource reads are unavailable; use the text fallback.';
+      const retained = resourceRefreshUnavailable(toolResult, resource, 'Unable to read preview resource:');
       console.warn('Failed to read Compose Preview resource:', error);
-      if (liveTarget && splitPreviewUri(resource.uri).uri === liveTarget.uri) requestImageFor(liveTarget);
+      if (!retained && liveTarget && splitPreviewUri(resource.uri).uri === liveTarget.uri) requestImageFor(liveTarget);
     } finally {
       if (generation === resourceReadGeneration && resourceResult?.resource?.uri === resource.uri) {
         resourceReadUri = undefined;

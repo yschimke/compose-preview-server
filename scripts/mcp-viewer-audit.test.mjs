@@ -4,23 +4,27 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 const { chromium } = createRequire(import.meta.url)('playwright');
-const html = fs.readFileSync(new URL('../mcp-app/compose-preview-viewer.html', import.meta.url), 'utf8');
+const html = fs.readFileSync(process.env.MCP_RESOURCE_VIEWER_HTML || new URL('../mcp-app/compose-preview-viewer.html', import.meta.url), 'utf8');
 const png = fs.readFileSync(new URL('../docs/evidence/preview-library-recovery/compose-starter.png', import.meta.url)).toString('base64');
 const uri = 'compose-preview://starter/_app/ListScreenPreview';
 
 async function setup(browser, options = {}, source = html) {
   const page = await browser.newPage({ viewport: { width: 1000, height: 1100 } });
-  await page.setContent('<iframe id="app" style="width:100%;height:1060px;border:0"></iframe>');
+  await page.setContent(`<iframe id="app" style="width:100%;height:${options.frameHeight || 1060}px;border:0"></iframe>`);
   await page.evaluate(({ source, png, uri, options }) => {
     const frame = document.getElementById('app');
     window.messages = [];
     window.calls = [];
     const send = m => frame.contentWindow.postMessage({ jsonrpc: '2.0', ...m }, '*');
     const rendered = (value = {}) => ({ structuredContent: { uri, previewId: 'ListScreenPreview', ...value },
-      content: [{ type: 'image', mimeType: 'image/png', data: png }] });
+      content: [{ type: 'image', mimeType: 'image/png', data: png }, ...(options.resourceRead ? [{ type: 'resource_link', uri, mimeType: 'image/png', name: 'Preview' }] : [])] });
     window.nextResult = value => send({ method: 'ui/notifications/tool-result', params: rendered(value) });
     window.addEventListener('message', e => {
-      if (e.source !== frame.contentWindow || !e.data.method || e.data.id === undefined) return;
+      if (e.source !== frame.contentWindow || !e.data.method) return;
+      if (e.data.method === 'ui/notifications/size-changed' && options.resize) {
+        frame.style.height = `${e.data.params.height}px`;
+      }
+      if (e.data.id === undefined) return;
       const { id, method, params } = e.data;
       const reply = result => send({ id, result });
       if (method === 'ui/initialize') {
@@ -28,6 +32,11 @@ async function setup(browser, options = {}, source = html) {
         send({ method: 'ui/notifications/tool-input', params: { arguments: { uri, overrides: { localeTag: 'de-DE' }, token: 'transport-secret' } } });
         window.nextResult(options.subject || {});
       } else if (method === 'tools/list') reply({ tools: options.saved ? [{ name: 'catalog__ui_builder_get_guidelines' }] : [] });
+      else if (method === 'resources/read' && options.resourceRead) {
+        window.calls.push({ method, params });
+        if (options.resourceRead === 'denied') send({ id, error: { code: -32601, message: 'Resource reads unavailable' } });
+        else reply({ contents: [{ uri, mimeType: 'text/plain', text: 'No PNG' }] });
+      }
       else if (method === 'ui/message') {
         window.messages.push(params);
         if (options.reject === 'rpc') send({ id, error: { code: -32601, message: 'Messages unavailable' } });
@@ -163,3 +172,40 @@ for (const state of ['fresh', 'stale', 'empty', 'denied']) {
     } finally { await browser.close(); }
   });
 }
+
+for (const resourceRead of ['denied', 'no-png']) {
+  test(`resource refresh ${resourceRead} preserves the rendered image`, async () => {
+    const browser = await launch();
+    try {
+      const page = await setup(browser, { resourceRead });
+      const frame = page.frameLocator('#app');
+      const original = await frame.locator('#canvas img').getAttribute('src');
+      const evidence = process.env.MCP_RESOURCE_EVIDENCE;
+      await frame.locator('#refresh').click();
+      await page.waitForFunction(() => document.querySelector('#app').contentDocument.querySelector('#meta').textContent !== 'Reading preview resource…');
+      if (evidence) await page.screenshot({ path: `${evidence}/${resourceRead}.png` });
+      assert.equal(await frame.locator('#meta').textContent(), 'Showing rendered preview; resource refresh unavailable.');
+      assert.equal(await frame.locator('#canvas img').getAttribute('src'), original);
+      assert.equal(await frame.locator('#canvas .fallback').count(), 0);
+      assert.equal(await page.evaluate(() => window.calls.filter(c => c.method === 'resources/read').length), 1);
+      // A new subject without pixels must not reuse the previous subject's render.
+      await page.evaluate(() => document.querySelector('#app').contentWindow.postMessage({
+        jsonrpc: '2.0', method: 'ui/notifications/tool-result', params: {
+          content: [{ type: 'resource_link', uri: 'compose-preview://starter/_app/OtherPreview', mimeType: 'image/png', name: 'Other' }],
+        },
+      }, '*'));
+      await frame.locator('#canvas .fallback').waitFor();
+      assert.equal(await frame.locator('#canvas img').count(), 0);
+    } finally { await browser.close(); }
+  });
+}
+
+test('a host that honours sizing enlarges a short initial preview frame', async () => {
+  const browser = await launch();
+  try {
+    const page = await setup(browser, { frameHeight: 160, resize: true });
+    await page.waitForFunction(() => document.querySelector('#app').getBoundingClientRect().height > 200);
+    const image = await page.frameLocator('#app').locator('#canvas img').boundingBox();
+    assert.ok(image.height > 120, 'render grows beyond the initial tiny frame');
+  } finally { await browser.close(); }
+});
