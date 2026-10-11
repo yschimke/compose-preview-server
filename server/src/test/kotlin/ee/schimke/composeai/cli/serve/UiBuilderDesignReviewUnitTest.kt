@@ -2,15 +2,21 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
 import ee.schimke.composeai.uibuilder.protocol.BackgroundModifierV1
+import ee.schimke.composeai.uibuilder.protocol.BooleanValueV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
+import ee.schimke.composeai.uibuilder.protocol.CodeCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.ColorTokenValueV1
 import ee.schimke.composeai.uibuilder.protocol.ColorValueV1
+import ee.schimke.composeai.uibuilder.protocol.ComponentCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignEnvironmentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
 import ee.schimke.composeai.uibuilder.protocol.LayoutDirectionV1
+import ee.schimke.composeai.uibuilder.protocol.PropertyCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
+import ee.schimke.composeai.uibuilder.protocol.WasmAdapterStatusV1
+import ee.schimke.composeai.uibuilder.protocol.WasmCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
 import java.nio.file.Path
 import kotlin.test.Test
@@ -20,6 +26,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonPrimitive
 import org.junit.jupiter.api.io.TempDir
 
 /** The pure halves of compose-preview-server#1255: the contrast arithmetic and the review store. */
@@ -135,6 +142,94 @@ class UiBuilderDesignReviewUnitTest {
     assertTrue(UiBuilderAccessibilityCheck.check(document, emptyMap()).isEmpty())
     val dark = document.copy(environment = document.environment.copy(theme = ThemeV1.DARK))
     assertTrue(UiBuilderAccessibilityCheck.check(dark, emptyMap()).isEmpty())
+  }
+
+  @Test
+  fun `an export refusal is placed on the node and property it names`() {
+    val field =
+      ComponentCapabilityV1.Builder(
+          "m3/outlined-text-field",
+          "Outlined text field",
+          "Leaf",
+          WasmCapabilityV1.Builder(JsonPrimitive(false), WasmAdapterStatusV1.UNSUPPORTED).build(),
+        )
+        .also {
+          it.properties =
+            listOf(
+              PropertyCapabilityV1.Builder("value", JsonPrimitive("string")).build(),
+              PropertyCapabilityV1.Builder("singleLine", JsonPrimitive("boolean")).build(),
+            )
+          it.code = CodeCapabilityV1.Builder("androidx.compose.material3.OutlinedTextField").build()
+        }
+        .build()
+    val document =
+      document(
+        "column" to
+          DesignNodeV1(
+            id = "column",
+            componentId = "layout/column",
+            slots = mapOf("children" to listOf("email", "name")),
+          ),
+        "email" to
+          DesignNodeV1(
+            id = "email",
+            componentId = "m3/outlined-text-field",
+            properties = mapOf("value" to StringValueV1(""), "singleLine" to BooleanValueV1(true)),
+          ),
+        "name" to
+          DesignNodeV1(
+            id = "name",
+            componentId = "m3/outlined-text-field",
+            properties = mapOf("value" to StringValueV1("")),
+          ),
+      )
+
+    // The projection's wording names the node and the property.
+    val projected =
+      UiBuilderExportDiagnosticLocation.locate(
+          "node `email`.singleLine: expected kotlin.Boolean",
+          null,
+          document,
+          listOf(field),
+        )
+        .single()
+    assertEquals("email", projected.nodeId)
+    assertEquals("singleLine", projected.field)
+    // The catalog offers `singleLine` and the gate refuses it: the message says they disagree.
+    assertTrue(projected.message.contains("catalog disagree"), projected.message)
+    assertTrue(projected.message.startsWith("node `email`.singleLine"), projected.message)
+
+    // The generator's wording names the callable and the parameter; the place is the node of a
+    // component calling it that sets the property, not every text field.
+    val generated =
+      UiBuilderExportDiagnosticLocation.locate(
+          "`OutlinedTextField` has no parameter `singleLine`",
+          null,
+          document,
+          listOf(field),
+        )
+        .single()
+    assertEquals("email", generated.nodeId)
+    assertEquals("singleLine", generated.field)
+
+    // A node the diagnostic already names is kept, and a sentence about nothing in particular is
+    // passed through as it was.
+    assertEquals(
+      "name",
+      UiBuilderExportDiagnosticLocation.locate("refused", "name", document, listOf(field))
+        .single()
+        .nodeId,
+    )
+    val loose =
+      UiBuilderExportDiagnosticLocation.locate(
+          "the screen has no root",
+          null,
+          document,
+          listOf(field),
+        )
+        .single()
+    assertNull(loose.nodeId)
+    assertEquals("the screen has no root", loose.message)
   }
 
   @Test
