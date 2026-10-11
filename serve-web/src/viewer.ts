@@ -2991,12 +2991,19 @@ function applyRcOverrides() {
 function openRc() {
     if (!rcAvailable()) return;
     root.setAttribute("data-mode", "rc");
+    // The snapshot stays on stage until the first frame, so the badge says so rather than naming
+    // a player that is not painting yet.
+    setPending("loading Camaelon JS…");
     canvas.hidden = true;
     rcReady = false;
     status.textContent = "loading RC player…";
     ensureRcScript(function (ok: boolean) {
         if (!ok || !window.RC) {
-            showModeError("The Remote Compose player failed to load.");
+            rcLaneFailed(
+                "The Remote Compose player failed to load.",
+                "rc",
+                rcReady,
+            );
             return;
         }
         if (!rcActive()) return; // toggled away while the script loaded
@@ -3038,7 +3045,11 @@ function openRc() {
                 revealRc();
             })
             .catch(function () {
-                showModeError("Rendering the Remote Compose document failed.");
+                rcLaneFailed(
+                    "Rendering the Remote Compose document failed.",
+                    "rc",
+                    rcReady,
+                );
             });
     });
 }
@@ -3048,12 +3059,25 @@ function revealRc() {
     if (!rcActive() || rcReady) return;
     rcReady = true;
     clearModeError();
+    setPending(null);
     rcCanvasEl!.hidden = false;
     img.style.display = "none";
     status.textContent = "";
 }
+// An RC player that never painted leaves the snapshot on stage, so the lane hands provenance back to
+// it: the badge (and every other `data-mode` reader) then describes the frame actually shown. Only
+// while that lane still owns the stage and has not painted: a late failure after the visitor moved
+// on, or a re-render error over a frame already showing, leaves the mode alone.
+function rcLaneFailed(msg: string, mode: "rc" | "rc-wasm", painted: boolean) {
+    showModeError(msg);
+    if (!painted && root.getAttribute("data-mode") === mode)
+        root.setAttribute("data-mode", "snapshot");
+}
 function closeRc() {
     if (!rcCanvasEl) return;
+    // Left before the first frame: drop its "loading" claim. `enterMode` closes every other lane
+    // before it opens the next, so this never clears that lane's own pending label.
+    setPending(null);
     root.setAttribute("data-mode", "snapshot");
     rcReady = false;
     rcCanvasEl.hidden = true;
@@ -3102,6 +3126,7 @@ function revealRcWasm() {
         rcWasmBootTimer = null;
     }
     clearModeError();
+    setPending(null);
     positionRcWasmFrame();
     rcWasmFrame!.classList.add("cp-wasm-live");
     img.style.visibility = "hidden";
@@ -3110,6 +3135,7 @@ function revealRcWasm() {
 function openRcWasm() {
     if (!rcWasmFrame) return;
     root.setAttribute("data-mode", "rc-wasm");
+    setPending("loading CMP Wasm…");
     canvas.hidden = true;
     positionRcWasmFrame();
     rcWasmFrame.hidden = false;
@@ -3119,11 +3145,16 @@ function openRcWasm() {
     if (rcWasmBootTimer) clearTimeout(rcWasmBootTimer);
     rcWasmBootTimer = setTimeout(function () {
         if (!rcWasmReady && rcWasmActive())
-            showModeError("CMP Wasm RC player didn't start.");
+            rcLaneFailed(
+                "CMP Wasm RC player didn't start.",
+                "rc-wasm",
+                rcWasmReady,
+            );
     }, 20000);
 }
 function closeRcWasm() {
     if (!rcWasmFrame) return;
+    setPending(null);
     rcWasmReady = false;
     if (rcWasmBootTimer) {
         clearTimeout(rcWasmBootTimer);
@@ -3146,8 +3177,10 @@ if (rcWasmFrame) {
             typeof e.data === "string" &&
             e.data.indexOf("cp-rc-wasm-error:") === 0
         ) {
-            showModeError(
+            rcLaneFailed(
                 "Rendering the Remote Compose document failed in CMP Wasm.",
+                "rc-wasm",
+                rcWasmReady,
             );
         } else if (
             e.data &&
