@@ -29,6 +29,9 @@ const pages = {
         "known-differences.js",
     ],
     viewer: [runtime, "viewer-components.js", "format-compare.js", "viewer.js"],
+    // Not a page: what the viewer's "On phone" popover fetches on first open (`viewer/phoneQr.ts`).
+    // Lazy so the viewer above does not carry it; pinned so the encoder stays the small one it is.
+    "phone QR (lazy)": ["qr-code.js"],
     // Three.js is intentionally isolated: only a preview carrying a scene pays this additional
     // WebGL/WebXR runtime, while every ordinary viewer remains under the existing budget.
     "spatial viewer": [runtime, "viewer-components.js", "spatial-view.js"],
@@ -83,6 +86,7 @@ const limits = {
     // springs, in a page whose own bundle nobody touched. Raised by the usual 2 kB step so the
     // ceiling goes on meaning what it says.
     "spatial viewer": 188_000,
+    "phone QR (lazy)": 4_000,
 };
 
 const gzipBytes = new Map();
