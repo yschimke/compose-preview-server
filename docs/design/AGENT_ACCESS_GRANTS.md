@@ -262,11 +262,23 @@ internet mint itself credentials.
   is what a poll is compared against. An approval is written as the **decision** (approver, granted
   scope, capabilities and designs, approval time and the grant's expiry), never as a token: after a
   restart the grant is minted when its requester's first poll collects it, and its lifetime is still
-  counted from the approval, so a restart never extends it. A collected or revoked approval is
-  deleted from the file (a person's own request, carried by their session and never polled, counts
-  as collected the moment it is approved), so a later restart cannot mint it again; everything else is dropped when it
-  expires (a pending or denied request at its deadline, an approval when its grant would). Without
-  a writable catalogs directory — tests, a local server — nothing is written.
+  counted from the approval, so a restart never extends it. A collected or revoked approval is not
+  deleted but marked — a `collected` or `revoked` tombstone kept until its grant would have expired —
+  and a restored approval is minted only after re-reading the file under its lock and finding it
+  still `approved`. The old and new processes overlap during a deploy, and without the marker a
+  revocation or collection on one could be undone by a stale copy on the other. (A person's own
+  request, carried by their session and never polled, is marked collected the moment it is
+  approved.) Everything else is dropped when it expires: a pending or denied request at its
+  deadline, an approval when its grant would. Without a writable catalogs directory — tests, a local
+  server — nothing is written.
+- **A restored approval meets today's limits, not yesterday's.** An approval waiting to be minted
+  holds its grant's place: it counts towards `--agent-grant-max-active` and its approver's cap as if
+  it were live, so a restart cannot admit more approvals than the box allows. Minting it re-applies
+  the server's *current* ceilings: the scope is clamped to the current maximum, the capabilities are
+  intersected with the ones still allowed, and the lifetime with the current maximum, still counted
+  from the approval. If the approval carried capabilities and none survive, or the caps are full
+  (overlapping processes can each have approved up to their own limit), the request is refused
+  instead: the poll answers `denied` with a `message` saying why, and the agent asks again.
 - **Never printed.** The token appears exactly once, in the poll response. `/status`, the server log,
   and every error message carry only a fingerprint (`sha256` prefix). The audit line names the
   approver, the label, the scopes, the expiry, and that fingerprint.

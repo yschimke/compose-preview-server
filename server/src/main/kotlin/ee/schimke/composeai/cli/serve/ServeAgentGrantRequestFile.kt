@@ -48,11 +48,16 @@ internal class ServeAgentGrantRequestFile(file: Path, private val clock: () -> L
     val designIds: List<String> = emptyList(),
     val createdAtMillis: Long,
     val expiresAtMillis: Long,
-    /** `pending`, `approved` or `denied`. */
+    /**
+     * `pending`, `approved` or `denied`; or the tombstones `collected` and `revoked`, which are
+     * never restored and are kept only so a process holding an older copy cannot mint from it.
+     */
     val state: String,
     val resolvedBy: String? = null,
-    /** Set exactly when [state] is `approved`. */
+    /** Set when [state] is `approved`, and kept on a tombstone so it lives as long. */
     val approval: Approval? = null,
+    /** Why the server refused a restored approval, for a `denied` row it refused. */
+    val refusal: String? = null,
   ) {
     /** Past which nobody is owed anything: the request's deadline, or an approval's grant's. */
     val keepUntilMillis: Long
@@ -70,6 +75,7 @@ internal class ServeAgentGrantRequestFile(file: Path, private val clock: () -> L
     val approvedAtMillis: Long,
     /** The grant's expiry, counted from [approvedAtMillis], so collecting late buys no time. */
     val expiresAtMillis: Long,
+    val enforceApproverCap: Boolean = true,
   )
 
   private var cachedStamp: Pair<Instant, Long>? = null
@@ -87,11 +93,17 @@ internal class ServeAgentGrantRequestFile(file: Path, private val clock: () -> L
     return cached.filterValues { it.keepUntilMillis > now }
   }
 
-  fun upsert(record: Record) = change { it[record.id] = record }
+  /** [id]'s row read now under the file lock, past the cache: for a decision that must not race. */
+  @Synchronized
+  fun fresh(id: String): Record? =
+    try {
+      locked { read() }[id]?.takeIf { it.keepUntilMillis > clock() }
+    } catch (e: IOException) {
+      System.err.println("serve: agent-grant: could not read access requests from $file: $e")
+      null
+    }
 
-  fun delete(ids: Collection<String>) {
-    if (ids.isNotEmpty()) change { rows -> ids.forEach { rows.remove(it) } }
-  }
+  fun upsert(record: Record) = change { it[record.id] = record }
 
   @Synchronized
   private fun change(action: (MutableMap<String, Record>) -> Unit) {
