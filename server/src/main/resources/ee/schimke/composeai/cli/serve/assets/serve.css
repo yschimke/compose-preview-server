@@ -2045,6 +2045,30 @@ cp-parity-scores { display: contents; }
   background-size: 220% 100%; animation: cp-image-loading 1.2s ease-in-out infinite; }
 @keyframes cp-image-loading { to { background-position-x: -220%; } }
 .cp-imgwrap[data-image-state="loading"] img, .cp-stage[data-image-state="loading"] > img { visibility: hidden; }
+/* Stars (`chrome/stars.ts`): a visitor's shortlist, repeated in a "Starred" row at the top of the
+   page that lists it. Quiet by design — on a card the outline star shows only while the card is
+   hovered or focused, so a grid of forty cards is not a grid of forty stars; a starred card keeps
+   its filled star, which is the one thing worth seeing at a glance. Above the card's stretched
+   link overlay and its state layer, like the Retry button. */
+.cp-star { display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0;
+  border: 0; border-radius: 50%; background: transparent; color: var(--cp-fg-muted);
+  font: inherit; font-size: 1.15rem; line-height: 1; cursor: pointer;
+  transition: color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+    opacity var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+    transform var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-emphasized); }
+.cp-star:hover { color: var(--md-sys-color-primary);
+  background: color-mix(in srgb, var(--md-sys-color-primary) 8%, transparent); }
+.cp-star:focus-visible { outline: 3px solid var(--md-sys-color-secondary); outline-offset: 1px; }
+.cp-star[aria-pressed="true"] { color: var(--md-sys-color-primary); }
+.cp-star:active { transform: scale(0.88); }
+.cp-card > .cp-star { position: absolute; z-index: 4; top: 8px; right: 8px; opacity: 0;
+  background: color-mix(in srgb, var(--md-sys-color-surface-container-low) 82%, transparent); }
+.cp-card:hover > .cp-star, .cp-card:focus-within > .cp-star, .cp-card > .cp-star:focus-visible,
+.cp-card > .cp-star[aria-pressed="true"] { opacity: 1; }
+@media (hover: none) { .cp-card > .cp-star { opacity: 1; } }
+.cp-star--head { vertical-align: middle; align-self: center; }
+.cp-starred { margin: 0 0 28px; }
+@media (prefers-reduced-motion: reduce) { .cp-star { transition: none; } .cp-star:active { transform: none; } }
 .cp-image-error { position: absolute; z-index: 2; inset: 12px; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 8px; padding: 12px; text-align: center;
   color: var(--md-sys-color-on-error-container); background: var(--md-sys-color-error-container);

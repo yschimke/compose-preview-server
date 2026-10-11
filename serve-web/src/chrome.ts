@@ -19,6 +19,7 @@ import {
     installBugReportLink,
 } from "./chrome/bugReport.js";
 import { installReportLauncher } from "./chrome/reportLauncher.js";
+import { installStars } from "./chrome/stars.js";
 import "./components/ReportClassification.js";
 import "./components/ReportScope.js";
 
@@ -34,3 +35,7 @@ installBugReportBody();
 // every-page footing as the two above and wired from the same place. It only opens a `<details>`
 // and points at the two destinations; the capture bundle it can reach is fetched on first use.
 installReportLauncher();
+// Stars ride the shell because the front door is one of the pages that carries them and the shell is
+// the only bundle the front door loads. A page with nothing to star — no catalog cards, no catalog
+// heading, no viewer — returns before touching the DOM.
+installStars();
