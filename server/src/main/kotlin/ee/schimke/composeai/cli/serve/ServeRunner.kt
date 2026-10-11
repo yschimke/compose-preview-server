@@ -2714,6 +2714,7 @@ public class ServeRunner(
             system = sourceSystem,
             sourceRepo = config?.repo,
             sourceBranchPrefix = config?.branch?.removeSuffix(sourceSystem),
+            atCommit = published.deliveryCommit,
           )
           ?.let { startupRecords[systemId] = it }
       }

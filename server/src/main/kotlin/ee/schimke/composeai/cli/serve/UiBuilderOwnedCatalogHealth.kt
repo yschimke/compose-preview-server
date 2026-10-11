@@ -49,9 +49,12 @@ class UiBuilderOwnedCatalogHealth(
     }
   }
 
-  /** [systemId] composed with readable templates (or needs none): clear whatever was recorded. */
+  /**
+   * [systemId]'s published definition composed again: lift the withhold. Whether its templates read
+   * is a separate fact, recorded by [degrade] or cleared by [templatesRead] in the same refresh, so
+   * a degradation recorded just before this call survives it.
+   */
   fun healthy(systemId: String) {
-    degraded.remove(systemId)
     if (withheld.remove(systemId) != null) {
       log("serve: UI-builder catalog $systemId is available again")
     }
