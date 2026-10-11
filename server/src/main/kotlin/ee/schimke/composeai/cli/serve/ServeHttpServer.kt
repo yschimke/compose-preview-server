@@ -7062,6 +7062,12 @@ class ServeHttpServer(
     // the operator's `/admin/ui-builder`: it has no delete or document-replacement path, and a
     // design that was never shared with the caller never reaches the page.
     get("${base}/designs") { handleUiBuilderDesigns() }
+    if (uiBuilderProjectStore != null && designService != null && uiBuilderAuthorization != null) {
+      get("${base}/projects") {
+        call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+        call.respondText(uiBuilderProjectsPage(), ContentType.Text.Html)
+      }
+    }
     // Creating a design is a POST, and its answer is a redirect to the design's permalink.
     // The form the New design dialog submits is an ordinary HTML form, so the browser follows
     // the `303` itself and lands on a URL that is safe to reload, bookmark and share — which
