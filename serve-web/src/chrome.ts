@@ -21,6 +21,7 @@ import {
 import { installReportLauncher } from "./chrome/reportLauncher.js";
 import { installSlashSearch } from "./chrome/slashSearch.js";
 import { installStars } from "./chrome/stars.js";
+import { installRecent } from "./chrome/recent.js";
 import "./components/ReportClassification.js";
 import "./components/ReportScope.js";
 
@@ -43,3 +44,7 @@ installSlashSearch();
 // the only bundle the front door loads. A page with nothing to star — no catalog cards, no catalog
 // heading, no viewer — returns before touching the DOM.
 installStars();
+// Recently viewed rides the shell because the viewer records into it and the front door (plus a
+// catalog landing) shows it, and the shell is the only bundle the front door loads. Any other page
+// returns before touching storage or the DOM.
+installRecent();
