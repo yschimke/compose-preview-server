@@ -14,31 +14,22 @@ data class ServeDocFact(val key: String, val value: String)
 data class ServeDocSize(val width: Int, val height: Int)
 
 /**
- * A **known document format** the serve host can ingest ([ServeDocStore]) and hand back as an
- * expiring permalink. Each format is data-only — a document is a *description* of what to draw, not
- * code — so the server never executes it: it stores the bytes, sniffs which format they are, and
- * the browser plays them back with the format's vendored player.
+ * A known document format the serve host can ingest ([ServeDocStore]) and hand back as an expiring
+ * permalink. Formats are data-only: the server stores and sniffs the bytes, and the browser plays
+ * them with the format's vendored player. Adding a format is one entry plus its player bundle.
  *
- * Everything per-format lives here, in the registry, rather than as branches in the store or the
- * HTTP routes: adding a format is one [ServeDocFormat] entry plus its player bundle. The route
- * layer only ever looks a format up by [id] and reads these fields.
- *
- * @param id stable wire id (`remotecompose`, `lottie`) — appears in the upload response and in the
- *   player route `/doc-player/<id>/bundle.js`.
+ * @param id stable wire id (`remotecompose`, `lottie`), used in the upload response and
+ * `/doc-player/<id>/bundle.js`.
  * @param label human name for the document page.
- * @param extension canonical file extension, used for the raw download's filename.
+ * @param extension canonical file extension for the raw download's filename.
  * @param contentType what `GET /d/<id>/raw` responds with.
- * @param playerResource classpath path of the vendored browser player bundle served at
- *   `/doc-player/<id>/bundle.js`.
- * @param detect content sniff — true when [ByteArray] really is this format. Runs before anything
- *   else touches the upload, so a mislabelled or hostile file is rejected on shape, not on its
- *   name.
- * @param describe the facts shown on the document page (dimensions, duration, version …).
- *   Best-effort: a document that parses far enough to store but not to summarise yields fewer rows.
- * @param size the document's declared drawing size, when it announces one — the page sizes the
- *   player's stage with it before load (a canvas player derives its viewport from the element's
- *   size at load time, so a later resize can't recover it). Null when the format/document doesn't
- *   say.
+ * @param playerResource classpath path of the vendored player bundle served at
+ * `/doc-player/<id>/bundle.js`.
+ * @param detect content sniff, run before anything else touches the upload so a mislabelled or
+ * hostile file is rejected on shape, not name.
+ * @param describe best-effort facts for the document page (dimensions, duration, version …).
+ * @param size the declared drawing size, if any; the page sizes the player's stage with it before
+ * load, since a canvas player can't recover from a later resize.
  */
 data class ServeDocFormat(
   val id: String,
@@ -50,8 +41,8 @@ data class ServeDocFormat(
   val describe: (ByteArray) -> List<ServeDocFact>,
   val size: (ByteArray) -> ServeDocSize?,
   /**
-   * Why an otherwise-recognised document can't be played here, or null when it can. Checked at
-   * upload, so the uploader gets a clear refusal rather than a permalink that plays wrong.
+   * Why an otherwise-recognised document can't be played here, or null. Checked at upload so the
+   * uploader gets a refusal rather than a permalink that plays wrong.
    */
   val unsupported: (ByteArray) -> String? = { null },
 ) {
@@ -61,28 +52,21 @@ data class ServeDocFormat(
 }
 
 /**
- * The known document formats, and the sniffing that maps uploaded bytes onto one.
- *
- * Both current entries are *data-only* tiers in the serve host's trust × format model (see
- * `docs/public-preview-server.md`): rendering them runs a player in the **viewer's** browser, never
- * Kotlin on the server, so an anonymous upload can be played back safely.
+ * The known document formats and the sniffing that maps uploaded bytes onto one. Both are data-only
+ * tiers (see `docs/public-preview-server.md`): playback runs in the viewer's browser, never on the
+ * server, so anonymous uploads are safe.
  */
 object ServeDocFormats {
 
   /**
-   * Remote Compose document (`.rc`) — the `RemoteDocument` byte stream the Compose connector
-   * captures, played back by the same vendored `RC.RcdPlayer` the preview viewer's canvas lane
-   * uses.
+   * Remote Compose document (`.rc`), played by the vendored `RC.RcdPlayer`.
    *
-   * The stream opens with the `Header` operation: opcode `0x00`, then a big-endian `major` int. The
-   * header comes in the two forms the players' reader (`RcDocumentCodec`'s `HeaderCodec`) accepts,
-   * told apart by that int's high 16 bits:
-   * - **tagged** — the high 16 bits are the format magic (`0x048C`) and the low 16 the major
-   *   version, followed by minor, patch and a property table carrying the declared size;
-   * - **untagged** — the high 16 bits are zero, as the AndroidX writer emits: major, minor, patch,
-   *   then a fixed width, height and capabilities long.
-   *
-   * That is the sniff; [describeRemoteCompose] reads the version and declared size from either.
+   * Sniffed on the `Header` operation (opcode `0x00`, then a big-endian `major` int) in the two
+   * forms `RcDocumentCodec`'s `HeaderCodec` accepts:
+   * - **tagged**: high 16 bits are the magic (`0x048C`), low 16 the major version, then minor,
+   *   patch and a property table carrying the declared size;
+   * - **untagged** (AndroidX writer): high 16 bits zero; major, minor, patch, then fixed width,
+   *   height and capabilities.
    */
   val REMOTE_COMPOSE =
     ServeDocFormat(
@@ -97,9 +81,8 @@ object ServeDocFormats {
     )
 
   /**
-   * Lottie animation (Bodymovin JSON) — played back by the vendored `lottie-web` player. Sniffed on
-   * shape rather than extension: a JSON object carrying a `layers` array plus the frame-rate /
-   * in-point / out-point trio every Bodymovin export writes.
+   * Lottie animation (Bodymovin JSON), played by the vendored `lottie-web`. Sniffed on shape: an
+   * object with a `layers` array plus `fr`/`ip`/`op`.
    */
   val LOTTIE =
     ServeDocFormat(
@@ -119,11 +102,7 @@ object ServeDocFormats {
 
   fun byId(id: String): ServeDocFormat? = ALL.firstOrNull { it.id == id }
 
-  /**
-   * The format [bytes] are, or null when they're not a known document. Content-sniffed — the
-   * uploaded filename is never trusted to decide the format, only (via [ALL]'s order) to break a
-   * tie that can't happen today.
-   */
+  /** The format [bytes] are, or null. Content-sniffed; the filename never decides the format. */
   fun detect(bytes: ByteArray): ServeDocFormat? = ALL.firstOrNull { it.detect(bytes) }
 
   /** Human list of what an upload may be, for the error a rejected upload gets back. */
@@ -147,12 +126,9 @@ object ServeDocFormats {
   /**
    * Which header form [bytes] open with, or null when they are not a Remote Compose document.
    *
-   * Mirrors rc-players' `HeaderCodec.decode` (`rc-player/protocol/.../RcDocumentCodec.kt`): a
-   * `major` word below `0x10000` is the untagged (legacy) layout, otherwise its high 16 bits must
-   * be [RC_MAGIC]. The untagged form has no magic to sniff on, so it is held to what a real writer
-   * emits rather than everything the codec tolerates: a major version of at least 1 with a zero
-   * high half (the codec's signed comparison would also take a negative word), and a positive
-   * declared width and height. That keeps a zero-filled or otherwise arbitrary buffer refused.
+   * Mirrors rc-players' `HeaderCodec.decode`: a `major` word below `0x10000` is untagged, otherwise
+   * its high 16 bits must be [RC_MAGIC]. Having no magic, the untagged form is held to what a real
+   * writer emits (major ≥ 1, positive width and height) so arbitrary buffers are refused.
    */
   private fun remoteComposeHeaderForm(bytes: ByteArray): HeaderForm? {
     if (bytes.size < TAGGED_HEADER_MIN_BYTES) return null
@@ -194,9 +170,8 @@ object ServeDocFormats {
   private class RemoteComposeHeader(val version: String, val size: ServeDocSize?)
 
   /**
-   * Read the document's `Header` operation for its version + declared size, in either form.
-   * Deliberately total: any malformed / truncated table stops the walk and yields what was read so
-   * far, since this only feeds a display panel and the stage's initial dimensions.
+   * Read the `Header` operation's version and declared size, in either form. Total: a malformed
+   * table stops the walk and yields what was read, since this only feeds display.
    */
   private fun readRemoteComposeHeader(bytes: ByteArray): RemoteComposeHeader? {
     val form = remoteComposeHeaderForm(bytes) ?: return null
@@ -217,10 +192,9 @@ object ServeDocFormats {
         }
         HeaderForm.TAGGED -> {
           val propertyCount = reader.int()
-          // The header's property table: a short tag (dataType = tag shr 10, key = tag and 0x3F,
-          // as AndroidX `Header.readMap` and the players mask it), a short byte length, then the
-          // value. Unknown types are skipped by their declared length, so an added property key
-          // can't derail the walk.
+          // Property table: a short tag (dataType = tag shr 10, key = tag and 0x3F, as AndroidX
+          // `Header.readMap` masks it), a short byte length, then the value. Unknown types are
+          // skipped by length.
           repeat(propertyCount.coerceIn(0, MAX_HEADER_PROPERTIES)) {
             val tag = reader.short()
             val dataType = tag shr 10
@@ -276,9 +250,9 @@ object ServeDocFormats {
 
   /** The parsed animation object when [bytes] are a Bodymovin/Lottie document; null otherwise. */
   /**
-   * The vendored player is lottie-web's light build, which has no expression engine: a document
-   * that animates through expressions would play with their static fallbacks instead. Expressions
-   * are the string `x` on an animatable property (numeric `x` values are easing handles).
+   * The vendored lottie-web light build has no expression engine, so expression-driven documents
+   * would play their static fallbacks. Expressions are a string `x` on an animatable property
+   * (numeric `x` values are easing handles).
    */
   private fun lottieUnsupported(bytes: ByteArray): String? {
     val root = parseLottie(bytes) ?: return null
@@ -309,9 +283,8 @@ object ServeDocFormats {
         null
       } ?: return null
     if (root["layers"] !is JsonArray) return null
-    // `fr` (frame rate) plus the in/out point pair are written by every Bodymovin export and are
-    // what the player needs to run a timeline — so requiring them keeps some other `layers`-shaped
-    // JSON from being mistaken for an animation.
+    // Every Bodymovin export writes `fr`, `ip` and `op`; requiring them keeps other `layers`-shaped
+    // JSON out.
     val required = listOf("fr", "ip", "op").mapNotNull { root.number(it) }
     if (required.size != 3) return null
     return root

@@ -1,26 +1,20 @@
 package ee.schimke.composeai.cli.serve
 
 /**
- * A component's links to the SAME component as another catalog publishes it.
+ * A component's links to the same component as another catalog publishes it. Unlike
+ * [ServeParallelPairing]'s single symmetric parity sibling, `related` is any number of directed
+ * siblings about the component (samples, a tile rendition, a motion study), produced upstream by
+ * `@CatalogComponent(related = …)` into `components[].related`.
  *
- * Not `compareWith` + `parallel`: that pairing ([ServeParallelPairing]) is one symmetric sibling
- * for a parity comparison, while `related` is any number of directed siblings that are *about* the
- * component (call-site samples, a tile rendition, a motion study). Produced upstream by
- * `@CatalogComponent(related = …)` into `components[].related`; this is the reading half.
- *
- * The model and policy only — pure, with the lookup left to the server — and not a surface. No
- * catalog is named here (`.github/scripts/ui-builder-catalog-literals.sh` enforces it). Public only
- * because [Declared] appears in [ServeBundleHost.relatedByComponentId].
+ * Pure model and policy; no catalog is named here (`.github/scripts/ui-builder-catalog-literals.sh`
+ * enforces it). Public only because [Declared] appears in [ServeBundleHost.relatedByComponentId].
  */
 object ServeRelatedCatalogs {
 
   /**
-   * One declared link, as `catalog.json` carries it.
-   *
-   * [componentId] is null when the other catalog spells the component the same way — the common
-   * case, and the reason the producer allows the short `"<system>"` form. [label] is null when the
-   * catalog authored no wording and the reader should be shown the system's own title instead,
-   * which only the serve layer knows.
+   * One declared link, as `catalog.json` carries it. [componentId] is null when the other catalog
+   * spells the component the same way (the short `"<system>"` form); [label] is null when the
+   * reader should see the system's own title instead.
    */
   data class Declared(
     val system: String,
@@ -29,12 +23,9 @@ object ServeRelatedCatalogs {
   )
 
   /**
-   * A link that names a system this box actually serves, with the component id to open there.
-   *
-   * [live] is whether that catalog had a host when this was resolved. It is carried rather than
-   * filtered on, because the two cases want different treatment and only a surface can choose: a
-   * system that is registered but still loading is worth a disabled affordance, while one that is
-   * not registered at all is worth nothing at all and is dropped by [resolve] before this point.
+   * A link to a system this box serves, with the component id to open there. [live] is carried
+   * rather than filtered on: a registered but loading system is worth a disabled affordance
+   * (unregistered ones are dropped by [resolve]).
    */
   data class Link(
     val system: String,
@@ -44,27 +35,13 @@ object ServeRelatedCatalogs {
   )
 
   /**
-   * The declared links for one component, in declaration order, with the obviously-unusable
-   * dropped.
+   * The declared links for one component, in order, minus blank systems and links back to
+   * [selfSystem]. The self-link check is exact, since catalog ids are case-sensitive everywhere; a
+   * miscased self-link is dropped by [resolve] anyway.
    *
-   * Dropped: a blank system (a producer slip, and there is nothing to point at), and a link back to
-   * [selfSystem] (a catalog is not related to itself; the export cannot always tell, because a spec
-   * is written against a system name rather than the catalog it will be published as). The
-   * self-link comparison is EXACT, not case-insensitive: a catalog id is a case-sensitive map key
-   * everywhere else it is used — the registry's session map, `catalogs.json`'s duplicate check, the
-   * URL path segment — so `Kit` and `kit` are two catalogs here too, and folding them would drop a
-   * real link between them. A merely miscased self-link costs nothing: it is not registered under
-   * that spelling, so [resolve] drops it anyway.
-   *
-   * Deduplicated on system + component, first declaration winning, so a component that inherits a
-   * link from a `@CatalogGroup` and restates it does not show it twice. Only the pair as DECLARED
-   * can be deduplicated here, because the short `"<system>"` form does not name its component until
-   * [resolve] fills one in — a mixed `("samples")` + `("samples", "Button")` pair is collapsed
-   * there instead.
-   *
-   * NOT dropped: a link to a system this box does not serve. That is [resolve]'s call, because it
-   * depends on what is registered right now and this function has to be stable across a catalog
-   * reload.
+   * Deduplicated on the declared system + component, first wins (the short form is collapsed later,
+   * in [resolve]). Links to unserved systems are kept: that depends on what is registered now, and
+   * this must be stable across reloads.
    */
   fun declaredFor(entries: List<Declared>, selfSystem: String?): List<Declared> {
     val seen = mutableSetOf<Pair<String, String?>>()
@@ -82,36 +59,21 @@ object ServeRelatedCatalogs {
   }
 
   /**
-   * The INVERSE of one catalog's declared links: which of its components point at each component of
-   * [targetSystem].
+   * The inverse of one catalog's declared links: which of its components point at each component of
+   * [targetSystem]. `related` is declared by the kit (which knows its call sites), so a samples
+   * catalog's back-links are derived by asking every other served catalog rather than stamped in at
+   * import; served alone, it correctly has none.
    *
-   * `related` is directed — a kit catalog declares which samples explain its components, and the
-   * samples catalog declares nothing. That is the right way round for the producer: the kit knows
-   * its own call sites, and a samples catalog imported from upstream cannot be made to know what it
-   * is a sample OF without maintaining the same mapping twice, in a file that is regenerated on
-   * every import.
-   *
-   * So the back-link is derived rather than declared. A samples page asks this of every OTHER
-   * catalog the box serves: "does anything in you point at me?" — and the answer is the component
-   * to link back to.
-   *
-   * A samples catalog served ALONE therefore has no back-links, which is correct rather than a gap:
-   * there is no kit catalog on that box to link back to. This is the whole reason the inverse is
-   * computed here instead of being stamped into the samples catalog at import time.
-   *
-   * [entries] is the source catalog's [ServeBundleHost.relatedByComponentId] — already normalised
-   * by [declaredFor], so nothing here re-checks blanks or self-links. Keys of the result are
-   * [targetSystem]'s component ids; values are the source catalog's, in the order they were
-   * declared, deduplicated.
+   * [entries] is the source's [ServeBundleHost.relatedByComponentId], already normalised by
+   * [declaredFor]. Result keys are [targetSystem]'s component ids; values are the source's, in
+   * declaration order, deduplicated.
    */
   fun inverse(
     entries: Map<String, List<Declared>>,
     targetSystem: String,
     /**
-     * This component id when a link names none — the short `"<system>"` form means "the same
-     * component, over there", so the inverse of `Button → samples` is `samples/Button → Button`.
-     * Passed as a function rather than resolved by the caller because only the entries that
-     * actually name [targetSystem] need it.
+     * The component id when a link names none (the short form means "the same component, over
+     * there"). A function because only entries naming [targetSystem] need it.
      */
     fallbackComponentId: (String) -> String = { it },
   ): Map<String, List<String>> {
@@ -128,26 +90,13 @@ object ServeRelatedCatalogs {
   }
 
   /**
-   * Resolve declared links against the catalogs this box serves.
+   * Resolve declared links against the catalogs this box serves. [componentId] fills in the short
+   * `"<system>"` form. [registered] includes unlisted systems, since samples catalogs are
+   * deliberately unlisted. [isLive] is asked only for registered systems.
    *
-   * [componentId] is this component's own id, used when a link names no counterpart — the short
-   * `"<system>"` form means "the same component, over there". [registered] is every system the box
-   * knows, listed or not; a samples catalog is deliberately unlisted, so filtering on the
-   * front-page set would drop exactly the links this exists for. [isLive] says which of those
-   * currently has a host, and is asked only for systems that survived the registration check, so a
-   * resolve never costs a lookup per declared link on a box serving none of them.
-   *
-   * A link to an unregistered system is DROPPED rather than rendered dead. The alternative was
-   * considered and rejected: a catalog declares `related` from its own source tree, so it can name
-   * a system this particular box has never heard of — a fork serving one catalog would otherwise
-   * show a column of links to nothing, and be right to think the server was broken.
-   *
-   * Deduplicated again, on the RESOLVED pair. [declaredFor] can only see what was declared, and the
-   * short `"<system>"` form does not name a component until the fallback above fills one in — so a
-   * component that inherits `("samples")` from its `@CatalogGroup` and restates it as `("samples",
-   * "Button")` arrives here as two entries naming one destination. First wins, as it does there,
-   * which keeps the inherited link's position and the restated one's label out of a tie-break
-   * nobody would be able to predict.
+   * Links to unregistered systems are dropped rather than rendered dead: a catalog may name systems
+   * a given box never serves. Deduplicated again on the resolved pair (the short and explicit forms
+   * can name one destination), first wins.
    */
   fun resolve(
     entries: List<Declared>,

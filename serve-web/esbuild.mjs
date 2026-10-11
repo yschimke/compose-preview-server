@@ -1,20 +1,10 @@
-// Bundles the serve web assets to IIFEs committed under the CLI's
-// resources, where `ServeWebAssets` picks it up like any other static asset.
+// Bundles the serve web assets to IIFEs committed under the server's resources, where
+// `ServeWebAssets` serves them. Committed so the Gradle release chain needs no Node; `npm run
+// verify` (in CI) fails if the bundles drift from source.
 //
-// Committed output, not a Gradle-driven build. `:cli` is a plain Kotlin/JVM
-// module and the whole release chain (`installDist`, `distTar`, the GHCR image)
-// runs without node; putting an npm build on that critical path would mean every
-// CLI build, every release, and every sandbox needs a node toolchain to produce a
-// tarball whose Kotlin didn't change. The vendored `codemirror.js` beside it is
-// committed for the same reason. `npm run verify` (wired into CI) rebuilds and
-// fails if the committed bundle has drifted from source, so "committed" can't
-// quietly become "stale".
-//
-// Vue itself is one cacheable runtime and the controls are split by server surface. All entries
-// stay classic scripts: Kotlin pages intentionally interleave synchronous inline bootstraps with
-// generated assets, and converting only some of that chain to deferred modules would change when
-// custom elements upgrade. `vue-runtime.js` therefore publishes the tiny `window.cpVue` façade
-// synchronously; each surface bundle consumes it without bundling a second renderer.
+// All entries stay classic scripts because Kotlin pages interleave synchronous inline bootstraps
+// with them. `vue-runtime.js` publishes the `window.cpVue` façade synchronously so surface bundles
+// don't each carry Vue.
 
 import { build, context } from "esbuild";
 import { fileURLToPath } from "node:url";
@@ -27,8 +17,7 @@ const assets = (name) =>
     resolve(
         root,
         "..",
-        // The server is its own Gradle module (#3824 item 7); its resources moved with it, so
-        // the bundles are committed into the server module so Gradle remains Node-free.
+        // Committed into the server module so Gradle remains Node-free.
         "server",
         "src",
         "main",
@@ -42,57 +31,19 @@ const assets = (name) =>
         name,
     );
 
-// These bundles are loaded from different places and cost different amounts.
-//
-// `vue-runtime.js` is emitted immediately before exactly one surface component bundle. The
-// catalog, compare, design, parity and viewer entries carry only the elements that can occur on
-// that surface. This keeps Vue cacheable across navigations and removes both sources of waste from
-// the old all-components bundle: unrelated controls and a second Vue copy in known differences.
-//
-// `serve-chrome.js` carries what EVERY page needs — the URL-state global and the
-// Page theme setting — so the page shell emits it unconditionally, on the front
-// door and `/status` too. Folding those into the component bundle would put
-// Vue on a front door whose imagery is prebaked precisely so a visit
-// costs the HTML and nothing else. Neither chrome module is a custom element, so
-// this bundle carries no Vue at all and lands around 3 kB.
-//
-// The split also fixes an ordering problem a single bundle could not: chrome has
-// to be evaluated BEFORE the components bundle and before the legacy scripts,
-// because they read `window.cpUrlState` — while the components bundle stays
-// where each surface already puts it.
-//
-// `keyboard-navigation.js` is also emitted by every page, but stays separate so
-// its opt-in power-user UI can initialize after the complete page DOM exists.
-//
-// `report-capture.js` is the screen-capture tool behind the report launcher, and
-// it is separate for the opposite reason to the shell: it is on NO page until
-// somebody opens the launcher panel or lands on `/report-bug`, at which point
-// `chrome/reportLauncher.ts` injects the tag. Folding it into the shell would put
-// a selection overlay, a canvas cropper and the clipboard path on every front-door
-// visit, none of which will ever run there.
-//
-// `format-compare.js` keeps its own name and tag because two consumers OUTSIDE the
-// browser load that exact path — the publish-time reference-score driver and the
-// compare audit — and because only the comparison surfaces need its several
-// hundred lines. It is a generated file now rather than a hand-written one; the
-// four external consumers are unaffected, since what they depend on is the path
-// and the `window.ComposePreviewCompare` shape, both unchanged.
-//
-// `known-differences.js` is the acceptance band and the engine behind it, emitted only by the
-// focused comparison. It is the heaviest bundle here after `viewer.js` because it carries the
-// contract's whole reference implementation — the document ladder, five gates, a dependency-free
-// PNG reader and the separated-plane scorer, shared verbatim with `scripts/design-artifacts/` so the
-// browser and the offline driver cannot disagree about what an acceptance means. Folding it into
-// a surface component bundle would put all of that on the catalog grid and design pages; folding it
-// into `format-compare.js` would charge that file's four external consumers for a surface none of
-// them uses.
-//
-// `viewer.js` is generated for the same reason and on the same terms: same path,
-// same script tag, same position after `viewer-components.js` and
-// `format-compare.js`. It stays its own bundle because only the viewer page
-// carries it and it is by far the largest of these — folding 3,000 lines of lane
-// machinery into a component bundle would put it on the catalog grid, the
-// compare wall and the design pages, none of which have a stage to drive.
+// Bundles are split by where they load and what they cost:
+// - `vue-runtime.js` precedes exactly one surface bundle, each carrying only that surface's
+//   elements.
+// - `serve-chrome.js` (URL state + Page theme) is on every page, Vue-free (~3 kB), and must run
+//   before the component bundle and legacy scripts, which read `window.cpUrlState`.
+// - `keyboard-navigation.js` is on every page but initializes after the full DOM exists.
+// - `report-capture.js` is injected only when the report launcher opens or on `/report-bug`.
+// - `format-compare.js` keeps its path and `window.ComposePreviewCompare` shape for its external
+//   consumers (reference-score driver, compare audit).
+// - `known-differences.js` is the acceptance engine (shared verbatim with
+//   `scripts/design-artifacts/`), emitted only by the focused comparison.
+// - `viewer.js` is viewer-only and the largest; it loads after `viewer-components.js` and
+//   `format-compare.js`.
 const BUNDLES = [
     { entry: "src/analytics.ts", out: "analytics.js" },
     { entry: "src/vueRuntime.ts", out: "vue-runtime.js" },
@@ -113,9 +64,7 @@ const BUNDLES = [
     // is bounded by its path), not under `/assets/serve/`. Push and notificationclick only.
     { entry: "src/pushWorker.ts", out: "push-sw.js" },
     { entry: "src/formatCompare.ts", out: "format-compare.js" },
-    // The comparison metric, for a worker thread. Its own entry because that is what a worker is:
-    // a second script, loaded by URL, with no DOM and none of the API surface beside it. Tiny —
-    // `scorePlanes` plus the tuning constants — and fetched only by a page that names it.
+    // The comparison metric for a worker thread: a separate script loaded by URL, with no DOM.
     { entry: "src/scorer/scorerWorker.ts", out: "compare-scorer.js" },
     { entry: "src/knownDifferences.ts", out: "known-differences.js" },
     { entry: "src/viewer.ts", out: "viewer.js" },
@@ -129,17 +78,13 @@ const optionsFor = ({ entry, out }) => ({
     format: "iife",
     platform: "browser",
     target: ["es2022"],
-    // No sourcemap: the output is a committed artifact served from a public
-    // host, and a `.map` beside it would be a second committed blob to keep in
-    // sync for no reviewer benefit.
+    // No sourcemap: it would be a second committed blob to keep in sync.
     sourcemap: false,
     logLevel: "info",
     legalComments: "none",
     minify: !watch,
-    // Vue ships these as compile-time feature flags. Set them explicitly so esbuild can discard
-    // the Options API, production devtools hooks and verbose hydration diagnostics that this
-    // custom-element-only application never calls. Without the definitions Vue retains the
-    // compatibility branches and emits a runtime warning as well as several avoidable kilobytes.
+    // Vue's compile-time feature flags, set so esbuild drops the Options API, prod devtools hooks
+    // and hydration diagnostics this custom-element app never uses (and Vue's runtime warning).
     define: {
         __VUE_OPTIONS_API__: "false",
         __VUE_PROD_DEVTOOLS__: "false",

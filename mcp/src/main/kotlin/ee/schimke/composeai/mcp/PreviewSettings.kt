@@ -16,18 +16,12 @@ import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.put
 
 /**
- * The compose-preview defaults a person sets once rather than per call (issue #1242): the ones that
- * used to be flags and environment variables. ChatGPT / Codex render them as native controls on the
- * plugin page (`openai/settings`); every other host can call `settings_read` / `settings_update`
- * like any tool, and the CLI reads the same file ([PreviewSettingsStore]).
- *
- * Every field has a value — the spec requires one for every schema property — so "not set" is a
- * sentinel that means "leave it to the preview / the client": [PREVIEW_DEVICE], `fontScale = 0`,
- * `locale = ""`, `renderResult = "auto"`, `replicasPerDaemon = -1`.
- *
- * Precedence for `render_preview`: an explicit tool argument beats a setting, which beats the
- * per-client default (the file result for agent harnesses, `observe=png` for MCP Apps hosts), which
- * beats the built-in default. See [applyToRenderPreview].
+ * Compose-preview defaults set once rather than per call. ChatGPT/Codex render them as native
+ * controls (`openai/settings`); other hosts use `settings_read`/`settings_update`, and the CLI
+ * reads the same file ([PreviewSettingsStore]). Every field needs a value, so "not set" is a
+ * sentinel: [PREVIEW_DEVICE], `fontScale = 0`, `locale = ""`, `renderResult = "auto"`,
+ * `replicasPerDaemon = -1`. For `render_preview`, an explicit argument beats a setting, which beats
+ * the per-client default, then the built-in default (see [applyToRenderPreview]).
  */
 data class PreviewSettings(
   /** `@Preview(device=…)` id applied as `overrides.device`, or [PREVIEW_DEVICE] for none. */
@@ -47,16 +41,14 @@ data class PreviewSettings(
   val renderResult: String = RESULT_AUTO,
   /**
    * Whether an inline `render_preview` hands the model the image. Off defaults `observe` to
-   * `semantics`: the model reads the semantics tree and hashes, and the pixels stay in the preview
-   * resource (and the MCP Apps viewer).
+   * `semantics`; the pixels stay in the preview resource.
    */
   val imageToModel: Boolean = true,
   /** Sandbox replicas per daemon; `-1` picks from the machine's cores. Read at server start. */
   val replicasPerDaemon: Int = -1,
   /**
-   * How the `.uid` editor (`design_open`) opens: [LAYOUT_FOCUSED], just the canvas and a slim file
-   * bar, or [LAYOUT_FULL], the whole desktop editor (compose-ui-builder#378). Read each time the
-   * editor resource is read, so a change applies to the next design opened.
+   * How `design_open` opens the `.uid` editor: [LAYOUT_FOCUSED] (canvas and file bar) or
+   * [LAYOUT_FULL]. Read per editor resource read, so changes apply to the next design opened.
    */
   val uiBuilderMcpAppLayout: String = LAYOUT_FOCUSED,
 ) {
@@ -73,12 +65,9 @@ data class PreviewSettings(
   }
 
   /**
-   * [args] for `render_preview` with these settings filled in where the call is silent. Keys the
-   * call passes are never touched, and a setting at its "not set" sentinel adds nothing, so the
-   * per-client and built-in defaults in `DaemonMcpServer` still apply after this.
-   *
-   * [clientDefaultsToFile] is whether this client gets the file result by default (a known agent
-   * harness); it decides whether the call ends up inline, which is when [imageToModel] matters.
+   * [args] with these settings filled in where the call is silent; passed keys and sentinel
+   * settings add nothing, so `DaemonMcpServer`'s defaults still apply. [clientDefaultsToFile]
+   * decides whether the call ends up inline, which is when [imageToModel] matters.
    */
   fun applyToRenderPreview(args: JsonObject, clientDefaultsToFile: Boolean): JsonObject {
     val out = args.toMutableMap()
@@ -229,21 +218,16 @@ data class PreviewSettings(
 }
 
 /**
- * The one settings file shared by the MCP server and the `compose-preview` CLI:
- * `~/.compose-preview/settings.json`, or [FILE_ENV] when set.
- *
+ * The settings file shared by the MCP server and the CLI: `~/.compose-preview/settings.json`, or
+ * [FILE_ENV] when set.
  * ```json
  * {
  *   "schema": "compose-preview-settings/v1",
  *   "values": { "darkTheme": true, "renderResult": "file" }
  * }
  * ```
- *
- * `values` holds only the keys somebody set; a reader fills the rest from [PreviewSettings]'
- * defaults, so a default can change without rewriting anyone's file, and unknown keys (a newer
- * writer) are kept on save. Writes go to a sibling temp file and are moved into place, so a reader
- * never sees half a file. Reads are cached by modification time, so a change the CLI writes shows
- * up on the next call.
+ * `values` holds only keys someone set (defaults fill the rest); unknown keys are kept on save.
+ * Writes are atomic via a temp file; reads are cached by modification time.
  */
 class PreviewSettingsStore(
   val file: File,

@@ -36,19 +36,10 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.encodeToJsonElement
 
 /**
- * The export action for the designs that have no component record and never will.
- *
- * `remote-m3` and `wear-m3` are not catalogs someone forgot to run discovery against: a Wear widget
- * ships as Remote Compose inside a `WearWidgetDocument` and a Wear screen's `ScreenScaffold` takes
- * a scroll state no recovered signature describes, so both are written by their own emitters. Until
- * this, only the editor's Code pane called them — the server's export reported `remote-m3` as
- * non-exportable, and the one artifact a designer could not get out of the builder was the one it
- * had just generated for them on screen.
- *
- * Asserted through the executor with a **deliberately unconfigured** record source, because that is
- * the deployment: preview.coo.ee runs `--ui-builder-catalogs m3-catalog,remote-m3,wear-m3` and
- * passes a record for `m3-catalog` only. An export that needed one here would be an export nobody
- * receives.
+ * Export for designs with no component record: `remote-m3` and `wear-m3` have their own emitters
+ * (Remote Compose widgets in a `WearWidgetDocument`; `ScreenScaffold`'s scroll state matches no
+ * recovered signature). Asserted with a deliberately unconfigured record source, matching
+ * deployments that pass a record for `m3-catalog` only.
  */
 class RecordFreeComposeExportTest {
 
@@ -79,10 +70,8 @@ class RecordFreeComposeExportTest {
     // It is the widget's own source, not a Material 3 screen's.
     assertTrue("class HelloWidget : GlanceWearWidget()" in artifact.content, artifact.content)
     assertTrue("@RemoteComposable" in artifact.content, artifact.content)
-    // The scaffold is erased, exactly as the Code pane erases it. `remote-m3/widget-container-*` is
-    // this builder's stand-in for `WearWidgetContainer`, and on-device that frame belongs to the
-    // launcher: it draws it around content from `WearWidgetParams`. An export that named it would
-    // hand somebody a file drawing a second frame inside the host's.
+    // The scaffold is erased as the Code pane does: on-device the launcher draws the widget
+    // container, so naming it would draw a second frame.
     assertFalse("widget-container" in artifact.content, artifact.content)
     assertFalse("WearWidgetContainer" in artifact.content, artifact.content)
     // What the container's background becomes instead: the widget's own brush, which is what the
@@ -92,10 +81,8 @@ class RecordFreeComposeExportTest {
         artifact.content,
       artifact.content,
     )
-    // And its size picks the preview params providers rather than being emitted as a dimension —
-    // one footprint from each rather than a preview unrolled per value. Two shapes, because the
-    // rectangular render is the one recommended as the widget picker editor's image and a designer
-    // should not have to hand-write a `@Preview` to see it.
+    // Its size selects the preview params providers (one footprint each) rather than a dimension;
+    // the rectangular render is the one recommended for the widget picker.
     assertTrue(
       "SquircleSmallWidgetPreviewParams().values.maxBy { it.widthDp }" in artifact.content,
       artifact.content,
@@ -104,9 +91,7 @@ class RecordFreeComposeExportTest {
       "RectangularSmallWidgetPreviewParams().values.maxBy { it.widthDp }" in artifact.content,
       artifact.content,
     )
-    // The provenance names the revision and catalog the artifact was pinned to, as the
-    // record-driven
-    // export does; a file on somebody's disk is traceable either way.
+    // Provenance names the pinned revision and catalog, as the record-driven export does.
     assertTrue("Design widget-1 revision 0" in artifact.content, artifact.content)
     assertTrue("Catalog remote-m3@candidate" in artifact.content, artifact.content)
   }
@@ -122,10 +107,8 @@ class RecordFreeComposeExportTest {
 
   @Test
   fun `the same design generates different source for the native preview lane`() {
-    // Two files for two readers, from one design. The export above is what a designer pastes into
-    // their own module — a widget class, a provider-driven preview — and this is what the host
-    // compiles to draw the thing: the body, the brush and the container spec, with no
-    // `GlanceWearWidget` in it for anything to construct.
+    // Two files from one design: the export above is what a designer pastes; this is what the host
+    // compiles to draw it (body, brush, container spec, no `GlanceWearWidget`).
     val generated =
       executor.generate(widget()) as ScreenGeneratorComposeExportExecutor.Generated.Emitted
 
@@ -209,12 +192,9 @@ class RecordFreeComposeExportTest {
   }
 
   /**
-   * `remote-m3/remote-text` names the fixed Remote Material 3 API, not a discovered pack call.
-   *
-   * Catalog validation decides whether a design may contain it. Once accepted, both export lanes
-   * must emit `RemoteText` even when this executor has no component record; requiring one made a
-   * saved catalog design refuse in the Code pane despite the catalog having offered the component.
-   * The published half remains here to prove adding a record does not change that fixed-API path.
+   * `remote-m3/remote-text` names the fixed Remote Material 3 API, not a discovered pack call; once
+   * catalog validation accepts it, both export lanes emit `RemoteText` without a component record.
+   * The published half proves adding a record doesn't change that.
    */
   @Test
   fun `remote text exports as a fixed API with or without a published component record`() {
@@ -241,9 +221,8 @@ class RecordFreeComposeExportTest {
     assertTrue("RemoteText(" in artifact.content, artifact.content)
     assertTrue("text = \"Hello\".rs" in artifact.content, artifact.content)
 
-    // And the picture, which is a third lane rather than the same one: the native preview
-    // exporter builds its own emitter. A design whose file writes a component and whose render
-    // refuses it is a hole in the canvas nobody can explain from the artifact.
+    // The native preview exporter is a third lane with its own emitter; it must agree with the file
+    // export.
     val preview =
       publishedExecutor.generate(design) as ScreenGeneratorComposeExportExecutor.Generated.Emitted
     assertTrue("RemoteText(" in preview.source, preview.source)
@@ -253,15 +232,9 @@ class RecordFreeComposeExportTest {
   }
 
   /**
-   * A published catalog's components are version-checked, like every other record this executor
-   * reads.
-   *
-   * `ComponentRecordSource` deserialises a newer schema with unknown fields ignored — deliberately,
-   * so a host serving a catalog built by a newer plugin still shows a shelf. Generating from one is
-   * a different question, and the record-driven lane and the pack lane both refuse it by version.
-   * The published half went straight to the emitter, which would write Kotlin from a shape nobody
-   * promised where the other two say which version they read and what to re-run. Raised in review
-   * on #691.
+   * Published catalog components are version-checked like every other record:
+   * `ComponentRecordSource` tolerates newer schemas for the shelf, but generating from one must
+   * refuse by version.
    */
   @Test
   fun `a published catalog on a schema this build will not generate from refuses by version`() {
@@ -303,8 +276,8 @@ class RecordFreeComposeExportTest {
   }
 
   /**
-   * What `remote-m3` composes to on a host that reads its published file — the map `ServeRunner`
-   * hands the executor, built here by the same call it makes.
+   * What `remote-m3` composes to on a host that reads its published file, built by the same call
+   * `ServeRunner` makes.
    */
   private val remoteM3Record: ComponentRecordFile by lazy {
     json.decodeFromString(

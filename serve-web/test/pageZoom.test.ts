@@ -1,13 +1,7 @@
-// Behavioural contract for `<cp-page-zoom>`, driven against a fake layout.
-//
-// happy-dom has no layout, so every rect here comes from a tiny model: each
-// `[data-node-id]` declares its box in the export's user units, and the helper
-// maps it through whatever transform the element has written on the canvas —
-// exactly what a browser does. That is what makes a NESTED drill testable without
-// one: the second double-click has to see the boxes as they are after the first.
-//
-// The real browser still gets the last word: `pages-snapshot.spec.mjs` drives the
-// same gestures with a real pointer and screenshots the result.
+// Behavioural contract for `<cp-page-zoom>` against a fake layout: each `[data-node-id]` declares
+// its box in user units and the helper maps it through the canvas transform, as a browser would,
+// which makes nested drills testable. `pages-snapshot.spec.mjs` drives the same gestures in a real
+// browser.
 
 import "./setup.js";
 import assert from "node:assert/strict";
@@ -32,14 +26,9 @@ const SHEET_MARKUP = `
     </div>`;
 
 /**
- * A design page: two portrait cards, each holding slots, each slot a component —
- * the shape a real Figma export has, and the committed page fixture with it.
- *
- * The bar sits in the sticky control row above the stage, which is where the
- * server writes it: the stage is as tall as the sheet's aspect makes it, so a
- * control in its bottom corner is off screen for most of the reading (#4996).
- * It therefore drives a stage it is NOT inside — the arrangement every test
- * below runs against.
+ * A design page: two cards holding slots holding components, like a real Figma export. The bar sits
+ * in the sticky control row above the stage (where the server writes it), so it drives a stage it
+ * is not inside.
  */
 const PAGE = `
   <div id="cp-design-page">
@@ -50,7 +39,7 @@ const PAGE = `
   </div>
   </div>`;
 
-/** The arrangement the bar used to ship in: nested inside the stage it drives. */
+/** The older arrangement: the bar nested inside the stage it drives. */
 const NESTED_PAGE = `
   <div id="cp-design-page">
   <div class="cp-page-stage">${SHEET_MARKUP}
@@ -67,18 +56,13 @@ function view(): { scale: number; x: number; y: number } {
     // An EMPTY transform is the identity — that is how the element expresses 1:1, by clearing the
     // property rather than writing `translate(0px, 0px) scale(1)`.
     if (!transform || transform === "none") return { scale: 1, x: 0, y: 0 };
-    // ANCHORED. Unanchored, `translate(...) scale(...) rotate(180deg)` still matches its familiar
-    // substring, so the guard below would accept it and this fake layout would silently ignore an
-    // operation the browser is really applying — the zoom tests passing over a visibly different
-    // view.
+    // Anchored, so extra operations (e.g. `rotate`) fail the match instead of being silently
+    // ignored.
     const match =
         /^translate\((-?[\d.]+)px, (-?[\d.]+)px\) scale\(([\d.]+)\)$/.exec(
             transform.trim(),
         );
-    // Anything else present but unreadable is a FAILURE, not an identity. Returning the identity
-    // here — which this used to do — makes every assertion in this file fail open: a reset that
-    // emitted `translateX(...)`, or a scale that came out `NaN`, would satisfy
-    // `deepEqual(view(), { scale: 1, x: 0, y: 0 })` on a canvas that is nowhere near 1:1.
+    // Unreadable transforms are failures, not identity, or every assertion here would fail open.
     if (!match) throw new Error(`unreadable transform: ${transform}`);
     const parsed = { x: +match[1], y: +match[2], scale: +match[3] };
     if (!Object.values(parsed).every(Number.isFinite))
@@ -96,15 +80,13 @@ function at(ux: number, uy: number): { x: number; y: number } {
 }
 
 /**
- * Install the fake layout: the stage is fixed, and everything inside the canvas is
- * its declared user box mapped through the current transform.
+ * The fake layout: the stage is fixed, and canvas contents are their user boxes mapped through the
+ * current transform.
  */
 function stubLayout(): void {
     const stage = el<HTMLElement>(".cp-page-stage");
-    // Read through to STAGE on every call, so a test can narrow the stage mid-run the
-    // way an opening side panel does.
-    // A 1 px border, like the real stage's: the canvas is `inset: 0`, so it fills the
-    // INNER box and the clamp has to be built from that, not from the border box.
+    // Read through on every call so a test can narrow the stage mid-run. A 1 px border like the
+    // real stage, since the clamp is built from the inner box.
     Object.defineProperty(stage, "clientWidth", {
         configurable: true,
         get: () => STAGE.width,
@@ -160,11 +142,7 @@ function stubLayout(): void {
             .sort(topmostFirst)) as typeof document.elementsFromPoint;
 }
 
-/**
- * Document order, REVERSED — which is paint order for an SVG, and therefore the order a
- * real `elementsFromPoint` answers in. It gets both cases the drill cares about right: a
- * child paints over its parent, and a later sibling paints over an earlier one.
- */
+/** Reversed document order, which is SVG paint order and what `elementsFromPoint` returns. */
 function topmostFirst(a: Element, b: Element): number {
     return a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING
         ? 1
@@ -192,10 +170,8 @@ function dblclick(
 }
 
 /**
- * happy-dom's `WheelEvent` drops `ctrlKey` from its init, so the modifier — the
- * whole contract of this gesture — has to be defined onto the event. Nothing
- * production-side depends on the workaround, and the real browser path is covered
- * by the harness's `zoom-wheel` state.
+ * happy-dom's `WheelEvent` drops `ctrlKey` from its init, so define it on the event (the browser
+ * path is covered by the harness's `zoom-wheel` state).
  */
 function wheel(
     point: { x: number; y: number },
@@ -211,10 +187,8 @@ function wheel(
         deltaY,
         deltaMode,
     });
-    // happy-dom's `WheelEvent` drops every MouseEvent field its init carries — the
-    // modifier AND the coordinates — so they have to be defined onto the event. Without
-    // the coordinates the zoom still scales but anchors on `NaN`, which is exactly the
-    // half of this gesture a scale-only assertion cannot see.
+    // happy-dom drops every MouseEvent field from the init, including coordinates, which would
+    // anchor the zoom on `NaN`.
     Object.defineProperty(event, "ctrlKey", { value: ctrl });
     Object.defineProperty(event, "clientX", { value: point.x });
     Object.defineProperty(event, "clientY", { value: point.y });
@@ -379,19 +353,14 @@ describe("<cp-page-zoom>", () => {
         assert.equal(el<HTMLElement>("cp-page-zoom").hidden, true);
         const stage = el<HTMLElement>(".cp-page-stage");
         assert.equal(stage.classList.contains("cp-page-zoomed"), false);
-        // The published scale goes back to 1 as well. The stylesheet counter-scales every node's
-        // mark by it, so a reset that restored the view and left the variable behind would draw
-        // hairlines at the old zoom over a sheet at 1:1 — a residue no view assertion can see.
-        // Compared as the published STRING, with no `|| 1` fallback: a reset that published `0`,
-        // an empty value or `NaN` would parse-or-default its way past a numeric check while the
-        // counter-scaling stayed broken.
+        // The published scale resets to "1" too (the stylesheet counter-scales by it), compared as
+        // a string so `0`, empty or `NaN` fail.
         assert.equal(stage.style.getPropertyValue("--cp-page-zoom"), "1");
     });
 
     it("resets from a WHEEL zoom too, not only from a framed section", async () => {
-        // The capture that used to assert this could only afford one route in. Reset is reachable
-        // from a continuous wheel zoom as well as a discrete double-click frame, and the two arrive
-        // at the view through different code — `zoomAbout` versus `frameRect`.
+        // Reset from a continuous wheel zoom as well as a double-click frame (`zoomAbout` vs
+        // `frameRect`).
         await mount();
         wheel(at(320, 215), -120, true);
         wheel(at(320, 215), -120, true);
@@ -468,11 +437,8 @@ describe("<cp-page-zoom>", () => {
 
     it("keeps the zoom when Escape is the press that clears a selection", async () => {
         await mount();
-        // `design-page.js` listens on `#cp-design-page` and clears its selection there.
-        // Reproduced exactly, because the ORDER is the whole point: a bubbling document
-        // listener runs after this one, sees the mark already gone, and throws away a
-        // reading position three double-clicks deep in answer to a press meant for a
-        // tooltip.
+        // Reproduce `design-page.js`'s listener on `#cp-design-page`: order matters, since a
+        // bubbling document listener would see the selection already cleared.
         const spot = el(".cp-page-node");
         el("#cp-design-page").addEventListener("keydown", (event) => {
             if ((event as KeyboardEvent).key === "Escape") {
@@ -546,9 +512,8 @@ describe("<cp-page-zoom>", () => {
         await mount();
         dblclick(at(65, 430));
         await flush();
-        // The overlay's node sits below the framed view; `design-page.js` parks its
-        // tooltip from the box this reveal leaves behind, so an eased pan would put the
-        // two in different places.
+        // `design-page.js` parks its tooltip from the box this reveal leaves, so the pan must not
+        // be eased.
         const spot = el<HTMLElement>(".cp-page-node");
         spot.getBoundingClientRect = () =>
             ({
@@ -575,10 +540,8 @@ describe("<cp-page-zoom>", () => {
     });
 
     it("drills the tree, not whatever else is painted under the pointer", async () => {
-        // Two OVERLAPPING SIBLINGS: a badge drawn over the left card, big enough to be
-        // drillable. Ordering every hit by area would make the card look like the badge's
-        // parent and let a second double-click "descend" from one into the other, which is
-        // a relationship the export does not have.
+        // Overlapping siblings: a drillable badge over the left card must not be treated as the
+        // card's child.
         await mount(`
           <div id="cp-design-page">
           <div class="cp-page-stage">
@@ -593,9 +556,7 @@ describe("<cp-page-zoom>", () => {
             <cp-page-zoom hidden></cp-page-zoom>
           </div>
           </div>`);
-        // A point inside the badge, the card and the slot at once. The badge is the
-        // topmost thing painted there, so the drill takes the badge's own lineage — and
-        // the badge has no addressable parent, so that is where it stops.
+        // The badge is topmost here and has no addressable parent, so the drill stops there.
         dblclick(at(200, 200));
         await flush();
         const framed = percent();
@@ -673,9 +634,7 @@ describe("<cp-page-zoom>", () => {
         await flush();
         const twice = percent();
         assert.ok(twice > once, "two presses of + are two steps in");
-        // …and the `dblclick` those two presses also produce must not be read as a
-        // gesture on the sheet: drilling from the button's coordinates would either
-        // frame whatever is painted under the bar or spend a step zooming back out.
+        // The `dblclick` produced by two button presses must not drill the sheet.
         into.dispatchEvent(
             new MouseEvent("dblclick", {
                 bubbles: true,
@@ -696,9 +655,8 @@ describe("<cp-page-zoom>", () => {
 
     it("re-describes the focused node after a keyboard zoom", async () => {
         await mount();
-        // `design-page.js` parks its tooltip when focus lands on an overlay, and a
-        // keyboard zoom moves that overlay without producing a new focus event — so
-        // without a nudge the tip is left stranded where the node used to be.
+        // A keyboard zoom moves the focused overlay without a new focus event, so the tooltip must
+        // be nudged.
         const spot = el<HTMLElement>(".cp-page-node");
         let described = 0;
         spot.addEventListener("focus", () => described++);
@@ -720,9 +678,8 @@ describe("<cp-page-zoom>", () => {
         dblclick(at(65, 430));
         await flush();
         const framed = view();
-        // What a mid-flight second drill would otherwise read: the canvas still
-        // carrying an interpolated transform while `this.view` holds the destination.
-        // `settle()` has to put the destination back before anything is measured.
+        // A mid-flight drill would read an interpolated transform; `settle()` restores the
+        // destination first.
         el<HTMLElement>(".cp-page-canvas").style.transform =
             "translate(0px, 0px) scale(1.4)";
         dblclick(at(110, 200));
@@ -787,9 +744,7 @@ describe("<cp-page-zoom>", () => {
         pointer("pointermove", -4000, 400);
         pointer("pointerup", -4000, 400);
         await flush();
-        // The sheet's right edge lands ON the stage's inner edge. Clamping against the
-        // border box instead would allow 2 x (scale - 1) more travel — a blank strip
-        // where the drawing should be, tens of pixels wide at high zoom.
+        // The sheet's right edge lands on the stage's inner edge, not the border box.
         assert.ok(
             Math.abs(view().x - (STAGE.width - STAGE.width * scale)) < 0.5,
             `expected the pan to stop at the inner edge, got x=${view().x}`,

@@ -9,55 +9,42 @@ import java.io.InputStream
 import java.util.zip.ZipInputStream
 
 /**
- * Runtime ingestion of **client-provided** portable bundles for the shared/public mode: a client
- * uploads a bundle zip (or points at a URL of one — a CI "build results" artifact), and the store
- * unpacks it and registers a read-only [ServeBundleHost] session via [register]. This is what makes
- * a deployed public server useful without it building anything: clients contribute pre-rendered
- * results and get a shareable `?session=<name>` link back.
+ * Runtime ingestion of client-provided portable bundles for shared/public mode: a client uploads a
+ * zip (or names a URL, e.g. a CI artifact) and the store unpacks it and registers a read-only
+ * [ServeBundleHost] session via [register], returning a shareable `?session=<name>` link.
  *
- * Safety: only the servable `previews/` entries are extracted — the baked `<id>.png` images, the
- * per-preview knob sidecars (`<id>.overrides.json` / `<id>.remotecompose.json`), and the root
- * `previews.json` manifest; everything else in the zip is ignored — each written under a per-bundle
- * directory with a zip-slip containment check, and the total extracted size is capped. The URL case
- * ([addFromUrl]) is an **SSRF** surface — a public server fetching arbitrary URLs could be steered
- * at internal metadata/services — so it is gated by [allowedHosts]: only a URL whose host is on
- * that operator-supplied allowlist is fetched, and an empty allowlist refuses every URL (fail
- * closed). [fetch] is injected so it can be stubbed in tests; the host gate runs in [addFromUrl]
- * regardless of which fetcher is wired.
+ * Only servable `previews/` entries are extracted (baked PNGs, knob sidecars, root
+ * `previews.json`), under a per-bundle directory with zip-slip containment and a total size cap.
+ * [addFromUrl] is an SSRF surface, gated by the operator's [allowedHosts] (empty refuses every URL)
+ * regardless of the injected [fetch].
  */
 class ServeBundleStore(
   private val root: File,
   private val register: (name: String, host: ServeBundleHost) -> Unit,
   /**
-   * Transport override for tests. Null ⇒ the real one-request-at-a-time HTTP transport, driven by
-   * [ServeUrlFetch.followingRedirects] so every redirect hop is allowlist-checked too.
+   * Transport override for tests. Null uses the real transport via
+   * [ServeUrlFetch.followingRedirects], which allowlist-checks every redirect hop.
    */
   private val fetch: ((String) -> ByteArray?)? = null,
   private val maxBytes: Long = DEFAULT_MAX_BYTES,
   /**
-   * SSRF allowlist for [addFromUrl]: hostnames (case-insensitive, exact match) a `?url=` fetch is
-   * permitted to reach. Empty = no URL fetch is allowed (fail closed), so enabling
-   * `--accept-bundles` alone never lets a client make the server fetch an arbitrary address.
+   * SSRF allowlist for [addFromUrl]: exact, case-insensitive hostnames. Empty refuses every URL
+   * (fail closed).
    */
   private val allowedHosts: List<String> = emptyList(),
   /**
-   * Producer-trust store. An uploaded bundle is verified against it ([BundleVerifier]) and the
-   * resulting verdict is attached to the registered [ServeBundleHost] + returned in [Result.Ok].
-   * Data tiers (the extracted `previews/<id>.png`) are served regardless — the verdict gates only
-   * whether the operator would later re-render the bundle's executable Compose. Defaults to the
-   * empty (fail-closed) store, so without `--trust-store` every upload is `unverified`.
-   *
-   * Read per upload rather than captured, so an admin-added producer applies to the next upload
-   * without a restart.
+   * Producer-trust store an upload is verified against ([BundleVerifier]); the verdict is attached
+   * to the host and returned in [Result.Ok]. Data tiers are served regardless; the verdict only
+   * gates later re-rendering. Defaults to the empty fail-closed store. Read per upload so admin
+   * changes apply immediately.
    */
   private val trust: () -> TrustStore = { TrustStore.EMPTY },
 ) {
 
   sealed interface Result {
     /**
-     * [trust] is the [BundleVerifier.summary] of the verdict, e.g. `signature:ci` or `unverified`.
-     * Defaults to `unverified` — the value for an upload checked against the empty store (no
-     * `--trust-store`) — so a caller that doesn't care about trust can ignore it.
+     * [trust] is the verdict's [BundleVerifier.summary] (e.g. `signature:ci`); defaults to
+     * `unverified`.
      */
     data class Ok(val name: String, val previewCount: Int, val trust: String = "unverified") :
       Result
@@ -68,15 +55,11 @@ class ServeBundleStore(
   /**
    * Unpack [zipBytes] under [name] and register it as a bundle session.
    *
-   * [isSecurityChecked] is a required, greppable audit marker (no runtime enforcement): the caller
-   * passes `true` only once the request has cleared policy (here: token-gated `POST /bundles`). The
-   * unpack itself is defended in depth — name sanitisation, zip-slip containment, size cap — but
-   * the marker records that the *entry point* was authorised before risky bytes were processed.
-   *
-   * [origin] is non-null only when the *server itself* fetched the bundle from a known branch (the
-   * operator-supplied `--bundle <raw.githubusercontent…>` startup path), so a branch it trusts
-   * badges `Trusted(Branch)` even for an unsigned bundle. Client uploads pass `null` (origin trust
-   * is for server-fetched bundles, not arbitrary uploads).
+   * [isSecurityChecked] is a greppable audit marker (not enforced): the caller passes `true` only
+   * after policy (token-gated `POST /bundles`). The unpack is defended in depth (name sanitisation,
+   * zip-slip, size cap). [origin] is set only when the server itself fetched the bundle from a
+   * known branch (`--bundle <raw URL>` at startup), so a trusted branch badges `Trusted(Branch)`;
+   * client uploads pass null.
    */
   fun add(
     name: String,
@@ -101,9 +84,8 @@ class ServeBundleStore(
       dir.deleteRecursively()
       return Result.Failed("bundle had no previews/*.png or previews/*.error.json entries")
     }
-    // Attribute the upload to a trusted producer if it carries a verifiable signature (origin trust
-    // is for server-fetched catalogs, not client uploads, so no Origin here). The verdict travels
-    // with the host for display; it never blocks serving the already-extracted data tiers.
+    // Uploads are attributed only by verifiable signature (no origin trust for client uploads). The
+    // verdict travels with the host for display and never blocks serving extracted data.
     val verdict = BundleVerifier.verify(zip, trust(), origin)
     val host = ServeBundleHost(dir, safe, verdict)
     register(safe, host)
@@ -111,14 +93,10 @@ class ServeBundleStore(
   }
 
   /**
-   * Fetch a bundle zip from [url] (the "link to build results" case), then [add] it.
-   *
-   * SSRF gate: the URL must be http/https and its host must be on [allowedHosts] (empty = refuse
-   * everything), checked here before anything is sent — and re-checked before **every redirect
-   * hop** ([ServeUrlFetch.followingRedirects]), so an allowlisted host answering `302
-   * http://169.254.169.254/…` can't walk the server onto an internal address either.
-   * [isSecurityChecked] is the same documented audit marker as [add] — the caller asserts the entry
-   * point was authorised (token-gated). The host allowlist is the actual SSRF enforcement.
+   * Fetch a bundle zip from [url], then [add] it. SSRF gate: http/https with a host on
+   * [allowedHosts] (empty refuses all), re-checked on every redirect hop
+   * ([ServeUrlFetch.followingRedirects]) so a `302` to an internal address is refused.
+   * [isSecurityChecked] is the same audit marker as [add].
    */
   fun addFromUrl(name: String, url: String, isSecurityChecked: Boolean): Result {
     if (!isAllowedUrl(url)) {
@@ -139,13 +117,11 @@ class ServeBundleStore(
   private fun isAllowedUrl(url: String): Boolean = ServeUrlFetch.isAllowedUrl(url, allowedHosts)
 
   /**
-   * The injected [fetch] when a caller supplied one (tests), else the real transport — which never
-   * follows a redirect on its own; [ServeUrlFetch.followingRedirects] does that, re-checking the
-   * allowlist per hop.
+   * The injected [fetch] if supplied, else the real transport, which never follows redirects
+   * itself.
    */
   private fun fetchBundle(url: String): ByteArray? {
-    // An injected fetcher OWNS the result, including a null one — `?:` here would treat "the
-    // override reported a failure" as "there is no override" and quietly fall through to the real
+    // An injected fetcher owns the result, null included; it must never fall through to the real
     // network.
     val override = fetch
     if (override != null) return override(url)
@@ -155,10 +131,9 @@ class ServeBundleStore(
   }
 
   /**
-   * Extract the servable `previews/` entries (baked `<id>.png`, the `<id>.overrides.json` /
-   * `<id>.remotecompose.json` knob sidecars), the sibling `ir/<id>.rc` Remote Compose documents,
-   * plus renderer `<id>.error.json` sidecars and the root `previews.json` into [dir] (zip-slip
-   * safe, size-capped). Returns the number of servable preview records (PNG or render failure).
+   * Extract the servable `previews/` entries (PNGs, knob sidecars), `ir/<id>.rc` documents,
+   * `<id>.error.json` sidecars and the root `previews.json` into [dir], zip-slip safe and
+   * size-capped. Returns the number of servable preview records.
    */
   private fun extractPreviews(zipBytes: ByteArray, dir: File): Int {
     val rootPath = dir.canonicalFile.toPath()
@@ -169,20 +144,16 @@ class ServeBundleStore(
       while (entry != null) {
         val name = entry.name.replace('\\', '/')
         val segments = name.split("/")
-        // Keep the baked PNGs (the servable images) and the per-preview knob sidecars — both the
-        // plain-Compose `previews/<id>.overrides.json` and the Remote Compose
-        // `previews/<id>.remotecompose.json` — so a served upload can present its declared editable
-        // knobs. Dropping the RC sidecar here would silently strip `remoteComposeKnobs` from the
-        // upload path (POST / URL) while the live-bundle / directory paths kept them.
+        // Keep both knob sidecars (`.overrides.json` and `.remotecompose.json`) so uploads present
+        // the same knobs as the directory path.
         val underPreviews = name.startsWith("$PREVIEWS_SUBDIR/") && ".." !in segments
         val insideSpatial = segments.dropLast(1).any { it.endsWith(SPATIAL_SUFFIX) }
         val isPng = underPreviews && !insideSpatial && name.endsWith(PNG_SUFFIX)
         val isRenderError = underPreviews && name.endsWith(RENDER_ERROR_SUFFIX)
         val isOverrides = underPreviews && name.endsWith(OVERRIDES_SUFFIX)
         val isRemoteCompose = underPreviews && name.endsWith(REMOTECOMPOSE_SUFFIX)
-        // A spatial preview is a scene document plus sibling image textures under
-        // `previews/<id>.spatial/`. Keep the allowlist deliberately closed: the browser never
-        // needs executable content from an uploaded bundle.
+        // Spatial previews: a scene document plus image textures under `previews/<id>.spatial/`.
+        // The allowlist stays closed; nothing executable is needed.
         val spatialLeaf = segments.lastOrNull().orEmpty()
         val isSpatial =
           underPreviews &&
@@ -190,17 +161,12 @@ class ServeBundleStore(
             segments[segments.lastIndex - 1].endsWith(SPATIAL_SUFFIX) &&
             (spatialLeaf == SPATIAL_SCENE_FILE ||
               SPATIAL_IMAGE_SUFFIXES.any { spatialLeaf.lowercase().endsWith(it) })
-        // Also keep the captured Remote Compose documents from the sibling `ir/<id>.rc` tree —
-        // the browser player's replayable input, served over `GET /render/<id>.rc`. Dropping
-        // these here would strip the client-side render lane from the upload path (POST / URL)
-        // while
-        // the directory path (which reads the bundle dir straight from disk) kept them.
+        // Keep `ir/<id>.rc` documents for the browser player (`GET /render/<id>.rc`), matching the
+        // directory path.
         val underIr = name.startsWith("$IR_SUBDIR/") && ".." !in segments
         val isRc = underIr && name.endsWith(RC_SUFFIX)
-        // Also keep the root `previews.json` manifest so a served bundle can surface the app's
-        // declared @ThemeCatalog themes (the synthetic THEME_CATALOG entries live only here, not in
-        // the per-preview sidecars). A top-level file (no path segments), so it's exempt from the
-        // `previews/` prefix check but still zip-slip guarded below.
+        // Keep the root `previews.json` for `@ThemeCatalog` themes, which live only there;
+        // top-level, so exempt from the `previews/` prefix but still zip-slip guarded.
         val isPreviewsJson = name == PREVIEWS_JSON
         // Provider-neutral references are inert input for the existing comparison lane. UID
         // snapshots are separately size/digest checked when opened; never extract active HTML.
@@ -279,18 +245,12 @@ class ServeBundleStore(
     /** A session name safe to use as a path segment + URL value; null if it can't be made safe. */
     fun sanitizeName(name: String): String? {
       val trimmed = name.trim()
-      // Reject empty and dot-only names ('.', '..', '...') even though they match the char class:
-      // File(root, ".")/File(root, "..") resolve to the upload root or its parent, and add() calls
-      // deleteRecursively() on that path before unpacking — which would wipe the wrong directory.
+      // Reject empty and dot-only names: `.`/`..` resolve to the upload root or its parent, which
+      // [add] would `deleteRecursively()`.
       if (trimmed.isEmpty() || trimmed.all { it == '.' }) return null
-      // …and reject a name that collides with one of the server's own top-level routes. Such a
-      // session is ambiguous everywhere — Ktor scores the constant segment above `/{system}`, so
-      // `/api/` could never reach a bundle called `api` at its own landing anyway — and on a
-      // top-level site it is worse than ambiguous: the site interceptor lets a reserved first
-      // segment through as "that's a route, not a session", and a path the routes don't actually
-      // match (`/api/`) then falls to `/{system}/` and serves the foreign bundle. Refusing the
-      // NAME is what makes "a reserved segment is never a session" true, which is the invariant
-      // the interceptor rests on.
+      // Reject reserved top-level route names: such a session is unreachable anyway, and on a
+      // top-level site the interceptor would let `/api/` fall through to `/{system}/` and serve the
+      // bundle. Refusing the name upholds "a reserved segment is never a session".
       if (trimmed in ServeSites.RESERVED_SYSTEMS) return null
       return trimmed.takeIf { it.matches(Regex("[A-Za-z0-9._@-]{1,128}")) }
     }

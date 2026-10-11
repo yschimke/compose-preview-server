@@ -51,16 +51,15 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
 /**
- * End-to-end test of the MCP server: drives an [McpSession] via in-memory pipes with a synthetic
- * MCP client and a [FakeDaemon]. Asserts the load-bearing behaviors:
- *
- * 1. `initialize` succeeds and `tools/list` returns the expected tool surface.
+ * End-to-end test of the MCP server: drives an [McpSession] over in-memory pipes with a synthetic
+ * MCP client and a [FakeDaemon]. Covers:
+ * 1. `initialize` and the `tools/list` surface.
  * 2. `register_project` returns a workspace id.
- * 3. `discoveryUpdated` from a fake daemon → `notifications/resources/list_changed` to the client.
+ * 3. Daemon `discoveryUpdated` → `notifications/resources/list_changed`.
  * 4. `resources/list` returns the catalog.
- * 5. `resources/subscribe` + fake daemon `renderFinished` → `notifications/resources/updated`.
- * 6. The `watch` tool propagates `setVisible`/`setFocus` to the matched fake daemon.
- * 7. `resources/read` round-trips through `renderNow` → `renderFinished` and returns base64 PNG.
+ * 5. `resources/subscribe` + `renderFinished` → `notifications/resources/updated`.
+ * 6. `watch` propagates `setVisible`/`setFocus` to the matching daemon.
+ * 7. `resources/read` round-trips `renderNow` → `renderFinished` and returns a base64 PNG.
  */
 class DaemonMcpServerTest {
 
@@ -161,8 +160,7 @@ class DaemonMcpServerTest {
     assertThat(caps?.get("resources")?.jsonObject?.get("subscribe")?.jsonPrimitive?.contentOrNull)
       .isEqualTo("true")
 
-    // serverInfo.version must be the build's actual version (McpVersion.kt / MCP_VERSION), not the
-    // "v0" literal it used to carry regardless of which release was running.
+    // serverInfo.version must be the build's real version (McpVersion.kt / MCP_VERSION).
     val serverInfo = initResult["serverInfo"]?.jsonObject
     assertThat(serverInfo?.get("name")?.jsonPrimitive?.contentOrNull)
       .isEqualTo("compose-preview-mcp")
@@ -203,7 +201,7 @@ class DaemonMcpServerTest {
         "record_preview",
         "previews_tray",
         "preview_mentions",
-        // OpenAI MCP Extensions: the sidebar library (#1241) and structured settings (#1242).
+        // OpenAI MCP Extensions: the sidebar library and structured settings.
         PreviewLibrary.TOOL,
         PreviewSettingsMcp.READ_TOOL,
         PreviewSettingsMcp.UPDATE_TOOL,
@@ -225,7 +223,7 @@ class DaemonMcpServerTest {
       .isEqualTo(DaemonMcpServer.MCP_APP_VIEWER_URI)
     assertThat(tools.tools.single { it.name == "render_matrix" }.meta).isNotNull()
     assertThat(tools.tools.single { it.name == "diff_semantics" }.meta).isNotNull()
-    // #1114: both render tools declare the object their structuredContent is.
+    // Both render tools declare the object their structuredContent is.
     for (name in listOf("render_preview", "render_matrix")) {
       com.google.common.truth.Truth.assertWithMessage(name)
         .that(tools.tools.single { it.name == name }.outputSchema?.type)
@@ -501,10 +499,9 @@ class DaemonMcpServerTest {
 
   @Test
   fun `bootstrap tools list_changed fires when full catalog completes inside grace period`() {
-    // Race covered by issue #670: a client receives bootstrapToolDefs from tools/list, the full
-    // catalog finishes loading well under TOOL_CATALOG_NOTIFY_DELAY_MS, and without this fix no
-    // notifications/tools/list_changed is sent — so listChanged-only clients permanently miss
-    // tools like `record_preview`.
+    // A client served bootstrapToolDefs must still get notifications/tools/list_changed even if the
+    // full catalog loads well under TOOL_CATALOG_NOTIFY_DELAY_MS, or listChanged-only clients never
+    // see tools like `record_preview`.
     runCatching { client.close() }
     runCatching { session.close() }
     runCatching { supervisor.shutdown() }
@@ -585,10 +582,8 @@ class DaemonMcpServerTest {
     val payload = json.parseToJsonElement(result.firstTextContent()).jsonObject
     val devices =
       payload["devices"]?.jsonArray ?: error("list_devices payload must include 'devices' array")
-    // Spot-check a few well-known catalog entries — full enumeration would couple this test to
-    // the catalog membership, which is exactly the kind of hardcoded duplication the wire
-    // surface aims to remove. Pick one phone, one Wear, one TV; verify shape + a couple of
-    // dimensions to prove the mapping reaches the JSON.
+    // Spot-check a phone, a Wear and a TV entry (shape plus a few dimensions) rather than
+    // enumerating, which would couple this test to catalog membership.
     val byId = devices.associateBy { it.jsonObject["id"]?.jsonPrimitive?.contentOrNull }
     val pixel5 =
       byId["id:pixel_5"]?.jsonObject ?: error("expected id:pixel_5 in list_devices output")
@@ -822,14 +817,12 @@ class DaemonMcpServerTest {
     assertThat(factory.spawnHistory.size).isAtLeast(2)
     val secondDaemon = factory.spawnHistory[1]
 
-    // Replacement daemon emits its (newly-rebuilt) discovery — supervisor's
-    // `synthesiseInitialDiscovery` would normally do this from the manifest path, but the
-    // FakeDescriptorProvider's blank manifestPath skips that, so we drive it manually.
+    // The replacement daemon emits its discovery; the fake descriptor's blank manifestPath skips
+    // `synthesiseInitialDiscovery`, so drive it manually.
     secondDaemon.emitDiscovery("com.example.Red")
 
-    // Existing watch should re-fire setVisible on the replacement daemon (the propagator's
-    // memo for this DaemonKey was forgotten by `onClasspathDirty`, so the same watched set
-    // counts as a delta against `previous=null` and is re-sent).
+    // The existing watch re-fires setVisible on the replacement: `onClasspathDirty` forgot the
+    // propagator's memo, so the same set counts as new.
     val secondVisible = secondDaemon.visibleSets.poll(2_000, TimeUnit.MILLISECONDS)
     val secondFocus = secondDaemon.focusSets.poll(2_000, TimeUnit.MILLISECONDS)
     assertThat(secondVisible).isEqualTo(listOf("com.example.Red"))
@@ -1095,10 +1088,7 @@ class DaemonMcpServerTest {
     Files.write(pngFile.toPath(), pngBytes)
     daemon.autoRenderPngPath = { id -> if (id == previewId) pngFile.absolutePath else null }
 
-    // Two concurrent reads of the same URI. Pre-dedup-fix this would race on a single queue
-    // slot: one waiter would get the bytes, the other would time out. With per-call futures,
-    // both complete on the same `renderFinished` (the daemon may emit one or two events
-    // depending on internal dedup; either way both waiters wake).
+    // Two concurrent reads of the same URI must both complete on the same `renderFinished`.
     val uri = PreviewUri(workspaceId, ":module", previewId).toUri()
     val pool = java.util.concurrent.Executors.newFixedThreadPool(2)
     val futA =
@@ -1161,17 +1151,8 @@ class DaemonMcpServerTest {
 
   @Test
   fun `render_preview with overrides forwards them to the daemon's renderNow`() {
-    // Regression for the broken main / mismatched-bytes pair:
-    //   1. PR #413 split renderAndReadBytes into renderAndReadBytes + awaitNextRender, but
-    //      didn't thread the new `overrides` parameter through — the latter just reused a
-    //      symbol-not-in-scope `overrides` reference, leaving main with an unresolved-reference
-    //      error and the MCP tool's overrides silently dropped on every call. This test asserts
-    //      the daemon actually sees them.
-    //   2. Two concurrent render_preview calls for the same URI but different overrides used to
-    //      share a single CompletableFuture in pendingRenders, returning whichever rendered
-    //      first's bytes to BOTH callers. RenderKey now includes overrides so that fanout splits
-    //      cleanly. The serial-call assertion below is the minimum — the dedup fix is documented
-    //      via the kdoc on awaitNextRender.
+    // Overrides must reach the daemon on `render_preview`, and concurrent calls with different
+    // overrides must not share one future (each caller gets its own bytes).
     client.initialize()
     val projectDir = tmp.newFolder("workspace")
     tmp.newFolder("workspace", "module")
@@ -1222,9 +1203,7 @@ class DaemonMcpServerTest {
         timeoutMs = 10_000,
       )
 
-    // The daemon recorded one renderNow whose overrides match what we sent. Without the
-    // compile fix, `renderOverrides[0]` would be `null` because the param was dropped on the
-    // floor on its way through awaitNextRender.
+    // The daemon recorded one renderNow carrying the sent overrides.
     assertThat(daemon.renderOverrides).hasSize(1)
     val firstOverrides = daemon.renderOverrides[0]
     assertThat(firstOverrides).isNotNull()
@@ -1259,9 +1238,8 @@ class DaemonMcpServerTest {
     assertThat(resourceOverrides.uiMode).isEqualTo(ee.schimke.composeai.daemon.protocol.UiMode.DARK)
     assertThat(resourceOverrides.material3Theme!!.colorScheme["primary"]).isEqualTo("#FF336699")
 
-    // A second render_preview call WITHOUT overrides now uses a different RenderKey and triggers
-    // a fresh renderNow rather than dedup'ing onto the first. Pre-fix, the now-stale shared key
-    // path would have skipped the renderNow and the request would have hung.
+    // A second call without overrides triggers a fresh renderNow rather than deduping onto the
+    // first.
     client.callTool("render_preview", buildJsonObject { put("uri", uri) }, timeoutMs = 10_000)
     assertThat(daemon.renderOverrides).hasSize(3)
     assertThat(daemon.renderOverrides[2]).isNull()
@@ -1598,7 +1576,7 @@ class DaemonMcpServerTest {
     restartSession(server, requestHandlers = rootsHandler(projectDir))
     client.initialize(capabilities = buildJsonObject { putJsonObject("roots") {} })
 
-    // #1198: render_matrix preview= registered nothing on first use.
+    // render_matrix preview= must register the project on first use.
     val result = client.callTool("render_matrix", buildJsonObject { put("preview", "Missing") })
     assertThat(result.isError()).isTrue()
     assertThat(supervisor.listProjects().map { it.path.canonicalPath })
@@ -1855,7 +1833,7 @@ class DaemonMcpServerTest {
   @Test
   fun `a sibling of a restored build is still discovered on a preview lookup`() {
     val repo = samplesRepo()
-    // Only ComposeStarter was saved before the restart (#1188).
+    // Only ComposeStarter was saved before the restart.
     supervisor.workspaceStore.remember(
       "ComposeStarter-0",
       File(repo, "ComposeStarter"),
@@ -2143,7 +2121,7 @@ class DaemonMcpServerTest {
         },
       )
 
-    // #1210: the pending call finishes, but its retry never comes.
+    // The pending call finishes but its retry never comes.
     assertThat(render("Abandoned").firstTextContent()).contains("\"pending\":true")
     assertThat(budgetServer.inFlightCallCount()).isEqualTo(1)
     release.countDown()
@@ -2556,8 +2534,8 @@ class DaemonMcpServerTest {
 
   /**
    * Serves `a11y/atf`, `a11y/overlay` (from [overlay]) and `layout/inspector` for every preview.
-   * With [inactive] the daemon advertises none of them until `extensions/enable` turns on `a11y`
-   * and `layout/inspector`, as a real daemon does (PROTOCOL.md § 3a).
+   * With [inactive] none is advertised until `extensions/enable` turns on `a11y` and
+   * `layout/inspector` (PROTOCOL.md § 3a).
    */
   private fun serveDetails(overlay: File, inactive: Boolean = false) {
     factory.daemonConfigurer = { d ->
@@ -3289,8 +3267,8 @@ class DaemonMcpServerTest {
 
   @Test
   fun `render_preview enables compose semantics when the daemon has not activated it`() {
-    // #1166: a daemon that starts with compose/semantics inactive answers data/fetch with
-    // DataProductUnknown; the default observation opts it in rather than falling back to pixels.
+    // A daemon starting with compose/semantics inactive answers DataProductUnknown; the default
+    // observation opts it in rather than falling back to pixels.
     val semanticsCapability =
       ee.schimke.composeai.daemon.protocol.DataProductCapability(
         kind = "compose/semantics",
@@ -3331,9 +3309,8 @@ class DaemonMcpServerTest {
 
   @Test
   fun `render_preview defaults to the semantics observation with no base64 image`() {
-    // Issue #1787 acceptance criterion: a bare render_preview (no `observe`) returns the
-    // structured semantics snapshot + sha + dimensions, NOT a base64 PNG — the token-frugal
-    // snapshot-default for an agent loop. Pixels are opt-in via observe="png".
+    // A bare render_preview returns the structured semantics snapshot + sha + dimensions, not a
+    // base64 PNG; pixels are opt-in via observe="png".
     client.initialize()
     val projectDir = tmp.newFolder("workspace")
     tmp.newFolder("workspace", "module")
@@ -3748,9 +3725,8 @@ class DaemonMcpServerTest {
 
   @Test
   fun `render_matrix retries a coalesced renderNow rejection instead of timing out`() {
-    // yschimke/compose-ag-plugin#64: the daemon rejects an override render while it still records
-    // the previous one ("coalesced: …") and never sends renderFinished for it. The MCP server
-    // ignored the rejection, so every fontScale matrix waited 60 s and the queue stayed blocked.
+    // The daemon rejects an override render while still recording the previous one ("coalesced: …")
+    // and never sends renderFinished; ignoring the rejection blocked the queue for 60 s per render.
     val png = tmp.newFile("coalesced.png").also { writeSolidPng(it, 0xffff0000.toInt()) }
     val (daemon, uri) = redPreviewDaemon(png)
     val rejected = java.util.concurrent.atomic.AtomicInteger()
@@ -3891,10 +3867,9 @@ class DaemonMcpServerTest {
 
   @Test
   fun `previews the daemon dropped come back from an unchanged manifest on a lookup by name`() {
-    // yschimke/compose-ag-plugin#64 and #76: after a failed compile the daemon's discovery dropped
-    // every preview in the file; the fixed file's recompile never re-added them, and previews.json,
-    // which still listed them, was unchanged, so the manifest reload skipped it. The catalog stayed
-    // at one entry for the rest of the session.
+    // After a failed compile the daemon's discovery dropped every preview in the file, the fixed
+    // recompile didn't re-add them, and the unchanged previews.json was skipped by the manifest
+    // reload.
     val projectDir = tmp.newFolder("dropped")
     File(projectDir, "module/src/main/kotlin").mkdirs()
     File(projectDir, "gradlew").writeText("#!/bin/sh\n")
@@ -4345,7 +4320,7 @@ class DaemonMcpServerTest {
         timeoutMs = 10_000,
       )
     assertThat(resp.isError()).isFalse()
-    // #1199: the grid rendered each variant without the overrides; one match renders with them.
+    // The grid renders variants without overrides; a single match renders with them.
     val texts = resp.textContents().map { json.parseToJsonElement(it).jsonObject }
     assertThat(texts.none { it["cells"] != null }).isTrue()
     assertThat(
@@ -4407,8 +4382,7 @@ class DaemonMcpServerTest {
 
   @Test
   fun `render_matrix resolves a multipreview function's bare id and applies axes to one variant`() {
-    // Regression: the bare function id reached the daemon and surfaced
-    // "PreviewManifestRouter: no manifest entry for previewId".
+    // The bare function id must not reach the daemon ("PreviewManifestRouter: no manifest entry").
     client.initialize()
     val (workspaceId, ids) = multipreviewModule("Devices - Large Round", "Fonts - Small")
     val bare = PreviewUri(workspaceId, ":app", "com.example.MainActivityKt.ListScreenPreview")
@@ -4504,9 +4478,8 @@ class DaemonMcpServerTest {
 
   @Test
   fun `render_preview rejects overrides the daemon does not support`() {
-    // Daemon advertises supportedOverrides = ["widthPx", "uiMode"]; an agent passes localeTag
-    // (which the backend would silently ignore today). MCP rejects with a diagnostic instead
-    // of letting the wire round-trip succeed and the locale silently drop.
+    // The daemon advertises supportedOverrides = ["widthPx", "uiMode"]; a localeTag override is
+    // rejected with a diagnostic rather than silently dropped.
     factory.daemonConfigurer = { d -> d.advertisedSupportedOverrides = listOf("widthPx", "uiMode") }
     client.initialize()
     val projectDir = tmp.newFolder("workspace")
@@ -4532,16 +4505,14 @@ class DaemonMcpServerTest {
     assertThat(resp.isError()).isTrue()
     val msg = resp.firstTextContent()
     assertThat(msg).contains("does not apply 'localeTag'")
-    // No renderNow should have been issued — validation runs before the daemon dispatch.
+    // Validation runs before dispatch: no renderNow.
     assertThat(daemon.renderRequests).isEmpty()
   }
 
   @Test
   fun `render_preview rejects an override-extension field the daemon does not support`() {
-    // #1606: the override-extension fields (permissions / focus / keyboard / …) are validated
-    // against supportedOverrides too, not just the primitive overrides. A desktop-shaped daemon
-    // that advertises only the primitives must reject a `permissions` override rather than letting
-    // it round-trip and silently drop.
+    // Override-extension fields (permissions / focus / keyboard / …) are validated too: a
+    // desktop-shaped daemon advertising only primitives must reject `permissions`.
     factory.daemonConfigurer = { d -> d.advertisedSupportedOverrides = listOf("widthPx", "uiMode") }
     client.initialize()
     val projectDir = tmp.newFolder("workspace")
@@ -4572,9 +4543,8 @@ class DaemonMcpServerTest {
 
   @Test
   fun `render_preview decodes and forwards override-extension fields to the daemon`() {
-    // #1606: render_preview now accepts the connector-driven extension overrides and forwards them
-    // through renderNow.overrides. A backend that advertises them (Android-shaped) accepts the
-    // call and the daemon observes the typed fields.
+    // A backend advertising the extension overrides accepts them and the daemon receives the typed
+    // fields.
     factory.daemonConfigurer = { d ->
       d.advertisedSupportedOverrides =
         listOf("focus", "keyboard", "permissions", "touchOverlay", "talkBack")
@@ -4628,9 +4598,8 @@ class DaemonMcpServerTest {
 
   @Test
   fun `render_preview falls open when daemon advertises empty supportedOverrides`() {
-    // Pre-feature daemon: empty supportedOverrides means we can't tell which fields work.
-    // Validation must fall open — same behaviour as before #441 landed. The renderNow goes
-    // through unchanged.
+    // An older daemon with empty supportedOverrides: validation falls open and renderNow goes
+    // through.
     factory.daemonConfigurer = { d ->
       d.advertisedSupportedOverrides = emptyList()
       d.autoRenderPngPath = { _ ->
@@ -4662,9 +4631,8 @@ class DaemonMcpServerTest {
 
   @Test
   fun `render_preview rejects unknown device id and accepts spec grammar`() {
-    // Daemon advertises a small known-devices catalog. Agent passes id:typo_phone — rejected.
-    // Then the same agent passes a spec: grammar — accepted (spec: is not enumerable, so
-    // validation passes through and the daemon parses it at resolve-time).
+    // A known-devices catalog: `id:typo_phone` is rejected, while `spec:` geometry passes through
+    // (not enumerable; parsed by the daemon).
     factory.daemonConfigurer = { d ->
       d.advertisedSupportedOverrides = listOf("device", "widthPx", "heightPx", "density")
       d.advertisedKnownDevices =
@@ -4721,21 +4689,12 @@ class DaemonMcpServerTest {
 
   @Test
   fun `record_preview drives start-script-stop-encode and returns base64 APNG inline`() {
-    // P2: end-to-end MCP exercise of the recording surface. The MCP `record_preview` tool drives
-    // the four daemon RPCs in sequence and packages the encoded bytes into an image content
-    // block. Asserts:
-    //   1. Each of the four daemon-side handlers observed exactly one call with the expected
-    //      arguments — `recording/start` with previewId/fps/scale, `recording/script` with the
-    //      script timeline, `recording/stop` with the recordingId, `recording/encode` with format.
-    //   2. The tool result carries an image content block (mimeType = image/apng) whose data
-    //      decodes to the canned APNG bytes the fake daemon wrote.
-    //   3. A sibling text block carries the metadata (recordingId, frameCount, durationMs,
-    //      framesDir, sizeBytes) so an agent that prefers the path / metrics doesn't need to
-    //      base64-decode the bytes to find them.
-    //
-    // The fake daemon doesn't actually render anything — its `recording/encode` handler writes
-    // the pre-loaded bytes to a temp file and the MCP server reads them back. That's enough to
-    // verify the wire flow without standing up a real Compose backend.
+    // End-to-end `record_preview`: drives the four daemon RPCs and asserts
+    // 1. each handler saw exactly one call with the expected arguments (start, script, stop,
+    //    encode);
+    // 2. the result has an `image/apng` block decoding to the canned bytes;
+    // 3. a sibling text block carries recordingId, frameCount, durationMs, framesDir and sizeBytes.
+    //    The fake writes pre-loaded bytes on encode, which is enough to verify the wire flow.
     val recordingsDir = tmp.newFolder("recordings-out")
     val framesDir = tmp.newFolder("recording-frames")
     writeSolidPng(framesDir.resolve("frame-00000.png"), 0xFF000000.toInt())
@@ -4925,9 +4884,8 @@ class DaemonMcpServerTest {
 
   @Test
   fun `record_preview defaults to the frames observation with no inline media`() {
-    // Issue #1860 acceptance criterion: a bare record_preview (no `observe`) returns the structured
-    // per-frame observation — frames[] + changedFrameCount + on-disk paths — and NO inline media
-    // block. Bytes are opt-in via observe="media"; the encoded artifact stays on disk at videoPath.
+    // A bare record_preview returns the per-frame observation (frames[], changedFrameCount, on-disk
+    // paths) and no inline media; bytes are opt-in via observe="media".
     val framesDir = tmp.newFolder("frames-default")
     writeSolidPng(framesDir.resolve("frame-00000.png"), 0xFF000000.toInt())
     writeSolidPng(framesDir.resolve("frame-00001.png"), 0xFFFFFFFF.toInt())
@@ -4999,11 +4957,9 @@ class DaemonMcpServerTest {
 
   @Test
   fun `record_preview emitTest uses the preview's real composable name for a variant preview`() {
-    // Issue #1807: a named/variant `@Preview(name = "Light")` on `fun Forecast()` is catalogued
-    // under a synthetic id whose last segment is `Forecast_Light`, but the only callable that
-    // actually exists is the base `Forecast()`. The generated `setContent { … }` must call the real
-    // function (resolved from the catalog's `functionName`), not the id's last segment, or the test
-    // doesn't compile. Drive `record_preview` with `emitTest=true` and assert the emitted source.
+    // A variant `@Preview(name = "Light")` on `fun Forecast()` is catalogued as `…Forecast_Light`,
+    // but only `Forecast()` exists; the generated `setContent { … }` must call it (via the
+    // catalog's `functionName`).
     val framesDir = tmp.newFolder("variant-frames")
     writeSolidPng(framesDir.resolve("frame-00000.png"), 0xFF000000.toInt())
     writeSolidPng(framesDir.resolve("frame-00001.png"), 0xFFFFFFFF.toInt())
@@ -5059,16 +5015,14 @@ class DaemonMcpServerTest {
     assertThat(resp.isError()).isFalse()
     val generated = resp.textContents().last()
     assertThat(generated).contains("composeTestRule.setContent { Forecast() }")
-    // The id's last segment must NOT leak into the generated call — that's the #1807 bug.
+    // The id's last segment must not leak into the generated call.
     assertThat(generated).doesNotContain("Forecast_Light()")
   }
 
   @Test
   fun `record_preview emitTest turns probe semantics into inferred assertions`() {
-    // Issue #1786: a recording.probe carries a host-captured semantics snapshot in its script
-    // evidence. The MCP server threads that into RecordingTestGenerator, which turns the probe into
-    // an `onNodeWith…().assertExists()` assertion instead of a TODO stub. Drive `record_preview`
-    // with a click + probe whose evidence carries a test-tagged node and assert the emitted source.
+    // A recording.probe's host-captured semantics snapshot becomes an
+    // `onNodeWith…().assertExists()` assertion rather than a TODO stub.
     val framesDir = tmp.newFolder("probe-frames")
     writeSolidPng(framesDir.resolve("frame-00000.png"), 0xFF000000.toInt())
     writeSolidPng(framesDir.resolve("frame-00001.png"), 0xFFFFFFFF.toInt())
@@ -5155,31 +5109,19 @@ class DaemonMcpServerTest {
 
   @Test
   fun `MCP exposes data slash navigation snapshot and dispatches navigation deepLink + back`() {
-    // End-to-end exercise of the navigation surface from an MCP-tool perspective:
-    //
-    // 1. The MCP `get_preview_data` tool surfaces the daemon's `data/navigation` data product —
-    //    an agent can read the held activity's launch Intent (action / data URI / simple-typed
-    //    extras) and the registered `OnBackPressedCallback` state for the rendered preview.
-    // 2. The MCP `record_preview` tool forwards `navigation.deepLink` (with a `deepLinkUri`
-    //    payload) and `navigation.back` script events to the daemon's `recording/script` channel,
-    //    proving the wire shape carries the new fields end-to-end (including the
-    //    `decodeRecordingEvents` extension we added in `DaemonMcpServer.kt`).
-    //
-    // The fake daemon advertises the navigation descriptor + a `data/navigation` capability so
-    // the MCP-side validators (script-kind allow-list in `validateRecordingScriptKinds`,
-    // `data/fetch` advertised-kind check) accept the request. We don't render anything — the
-    // test verifies that the MCP server forwards the agent's intent verbatim, not that the
-    // daemon dispatches it. The dispatch end is pinned by `AndroidRecordingSessionTest`.
+    // The navigation surface end to end: `get_preview_data` exposes `data/navigation` (launch
+    // Intent, `OnBackPressedCallback` state), and `record_preview` forwards `navigation.deepLink`
+    // (with `deepLinkUri`) and `navigation.back` to `recording/script`. The fake advertises the
+    // descriptor and capability so MCP-side validation accepts them; daemon dispatch is pinned by
+    // `AndroidRecordingSessionTest`.
     val recordingsDir = tmp.newFolder("nav-recordings-out")
     val framesDir = tmp.newFolder("nav-recording-frames")
     writeSolidPng(framesDir.resolve("frame-00000.png"), 0xFF000000.toInt())
     val cannedApngBytes =
       byteArrayOf(-119, 80, 78, 71, 13, 10, 26, 10, 0x01, 0x02, 0x03, 0x04, 0x05)
 
-    // Reconstruct the navigation descriptor inline rather than depending on
-    // `:daemon:android` from `:mcp` — `NavigationRecordingScriptEvents` lives there because the
-    // dispatch arms are Android-only, but the descriptor is plain metadata so we can construct
-    // the equivalent advertisement with `:data-render-core` types alone.
+    // Built inline rather than depending on `:daemon:android`: the descriptor is plain metadata
+    // constructible from `:data-render-core` types.
     val navDescriptor =
       ee.schimke.composeai.daemon.protocol.DataExtensionDescriptor(
         id = ee.schimke.composeai.daemon.protocol.DataExtensionId("navigation"),
@@ -5220,10 +5162,8 @@ class DaemonMcpServerTest {
           ee.schimke.composeai.daemon.InputTouchRecordingScriptEvents.descriptor +
           navDescriptor
       d.dataFetchHandler = { _, kind, _, _ ->
-        // Mirror the wire shape that `NavigationDataProducer` writes on a real Android render —
-        // a deep-link Intent (post `navigation.deepLink` dispatch) with `hasEnabledCallbacks=true`
-        // because the held screen registered a `BackHandler` (matches the NavHostHomePreview
-        // sample's profile destination).
+        // Mirrors what `NavigationDataProducer` writes after a deep-link dispatch, with
+        // `hasEnabledCallbacks=true` for a screen registering a `BackHandler`.
         if (kind != "data/navigation") FakeDaemon.DataFetchOutcome.Unknown
         else
           FakeDaemon.DataFetchOutcome.Ok(
@@ -5444,10 +5384,7 @@ class DaemonMcpServerTest {
 
   @Test
   fun `record_preview rejection hints at the namespaced id when the unprefixed name was sent`() {
-    // Issue #1550 — older docs (and the InteractiveInputKind enum) list bare names like `click`,
-    // `pointerDown`. The record_preview event ids are namespaced: `input.click`, etc. When an
-    // agent sends the unprefixed form, point them at the namespaced id so they don't have to
-    // round-trip through `list_data_products`.
+    // Bare names like `click` get a hint to the namespaced id (`input.click`).
     factory.daemonConfigurer = { d ->
       d.advertisedDataExtensions =
         listOf(ee.schimke.composeai.daemon.InputTouchRecordingScriptEvents.descriptor)
@@ -5489,17 +5426,9 @@ class DaemonMcpServerTest {
 
   @Test
   fun `record_preview rejects extension events advertised but not yet implemented`() {
-    // The daemon advertises a script event in `dataExtensions[].recordingScriptEvents` with
-    // `supported = false` to signal a planned-but-unwired roadmap item. MCP rejects up front so the
-    // agent doesn't watch a quiet `unsupported` evidence trail come back from a recording that
-    // otherwise looks healthy. The daemon-side fallback (returning `unsupported` evidence) stays as
-    // defense-in-depth for direct daemon clients.
-    //
-    // Constructed inline rather than read from `RecordingScriptDataExtensions.roadmapDescriptors`
-    // because that list went empty once `state.{save,restore}` shipped real handlers (#749). The
-    // rejection branch in `DaemonMcpServer.validateRecordingEvents` still needs coverage —
-    // synthesise a descriptor with `supported = false` to exercise it independent of which
-    // wire-name happens to be the current roadmap pick.
+    // An event advertised with `supported = false` (a roadmap item) is rejected up front. Built
+    // inline because `RecordingScriptDataExtensions.roadmapDescriptors` is currently empty, but the
+    // rejection branch still needs coverage.
     factory.daemonConfigurer = { d ->
       d.advertisedDataExtensions =
         listOf(
@@ -5555,9 +5484,8 @@ class DaemonMcpServerTest {
 
   @Test
   fun `record_preview rejects format the daemon does not advertise`() {
-    // Daemon advertises only APNG (no ffmpeg on its PATH); agent asks for mp4. MCP rejects up
-    // front with a clean diagnostic naming the supported formats — no `recording/start` round-
-    // trip, no time wasted spinning up a session that would only fail at encode time.
+    // A daemon advertising only APNG: an mp4 request is rejected up front, naming the supported
+    // formats.
     factory.daemonConfigurer = { d -> d.advertisedRecordingFormats = listOf("apng") }
     client.initialize()
     val projectDir = tmp.newFolder("workspace")
@@ -5589,10 +5517,7 @@ class DaemonMcpServerTest {
 
   @Test
   fun `record_preview accepts mp4 when the daemon advertises it`() {
-    // Capability advertises mp4 (i.e. the daemon's host detected ffmpeg at startup). MCP validates
-    // and forwards the request; the fake daemon's `recording/encode` handler echoes the format
-    // back. Asserts the format reaches the daemon as `RecordingFormat.MP4` (not silently coerced
-    // to APNG).
+    // A daemon advertising mp4: the format reaches it as `RecordingFormat.MP4`.
     val recordingsDir = tmp.newFolder("mp4-recordings-out")
     factory.daemonConfigurer = { d ->
       d.advertisedRecordingFormats = listOf("apng", "mp4", "webm")
@@ -5648,9 +5573,8 @@ class DaemonMcpServerTest {
     assertThat(encodeCall!!.format)
       .isEqualTo(ee.schimke.composeai.daemon.protocol.RecordingFormat.MP4)
 
-    // Per the MCP 2025-06-18 spec, `video/mp4` belongs in an `EmbeddedResource` content block,
-    // not a `ContentBlock.Image` (strict clients reject mismatched mimeTypes on `image`). The
-    // sibling Text block still carries the metadata for callers that prefer the path.
+    // Per MCP 2025-06-18, `video/mp4` goes in an `EmbeddedResource` block, not
+    // `ContentBlock.Image`.
     val (blob, mime, blobUri) = resp.firstEmbeddedResourceBlob()
     assertThat(mime).isEqualTo("video/mp4")
     assertThat(blobUri).startsWith("compose-preview-recording://")
@@ -5660,9 +5584,7 @@ class DaemonMcpServerTest {
 
   @Test
   fun `record_preview rejects malformed fps without spawning a session`() {
-    // Regression for Codex P2 — `args["fps"]?.toIntOrNull()` silently dropped typo'd values like
-    // "fast" into null and the daemon defaulted to 30 fps. We now distinguish absent (use default)
-    // from present-but-unparseable (error). Same shape for `scale`.
+    // A typo'd `fps` ("fast") is an error, not silently defaulted; same for `scale`.
     client.initialize()
     val projectDir = tmp.newFolder("workspace")
     tmp.newFolder("workspace", "module")
@@ -5718,15 +5640,9 @@ class DaemonMcpServerTest {
 
   @Test
   fun `concurrent different-overrides render_preview calls are serialized per previewId`() {
-    // Regression for the wrong-bytes hazard PR #432's "known limitation" note documented (and
-    // mis-described as a hang). Pre-fix: two concurrent override-bearing render_preview calls
-    // for the same URI would each fire a renderNow; the daemon coalesced the second; the MCP's
-    // by-previewId fanout woke BOTH waiters with the FIRST render's bytes. Caller B (with O2)
-    // silently received caller A's O1 bytes.
-    //
-    // Post-fix: previewQueues serializes per-previewId — caller B's renderNow doesn't fire
-    // until caller A's renderFinished arrives. Each caller observes a renderNow with their
-    // own overrides on the daemon, in the order they arrived.
+    // Two concurrent override-bearing render_preview calls for one URI are serialized per preview:
+    // B's renderNow waits for A's renderFinished, so each caller gets its own overrides' bytes
+    // (previously B could receive A's).
     client.initialize()
     val projectDir = tmp.newFolder("workspace")
     tmp.newFolder("workspace", "module")
@@ -5803,10 +5719,7 @@ class DaemonMcpServerTest {
       Files.write(sharedPng.toPath(), pngBytesB)
       daemon.emitRenderFinished(previewId, sharedPng.absolutePath)
 
-      // Both calls returned successfully — pre-fix B would have completed early with A's bytes
-      // (wrong-bytes); post-fix B blocks until its own renderFinished and gets B's bytes. The
-      // load-bearing wire-side assertion is the order and count of renderNows the daemon
-      // observed above; we just confirm both callers unblocked here.
+      // Both callers unblock; the load-bearing assertion is the renderNow order and count above.
       val resultA =
         json.parseToJsonElement(callA.get(5, TimeUnit.SECONDS).firstTextContent()).jsonObject
       val resultB =
@@ -5836,9 +5749,7 @@ class DaemonMcpServerTest {
     val pngFile = tmp.newFile("fake-render.png")
     Files.write(pngFile.toPath(), pngBytes)
 
-    // Configure the fake to auto-emit renderFinished whenever it processes a renderNow for this
-    // preview id, pointing at the staged PNG. Avoids the spawn-a-thread-and-poll race the earlier
-    // test had.
+    // Auto-emit renderFinished for this preview, pointing at the staged PNG.
     daemon.autoRenderPngPath = { id -> if (id == previewId) pngFile.absolutePath else null }
 
     val uri = PreviewUri(workspaceId, ":module", previewId).toUri()
@@ -5887,14 +5798,8 @@ class DaemonMcpServerTest {
       .isEqualTo(listOf(previewId))
   }
 
-  // -------------------------------------------------------------------------
-  // Edit-loop staleness regression — agents that edit a preview source repeatedly
-  // and request a render after each edit observe stale renders when
-  // ensureSourceFreshBeforeRender (DaemonMcpServer.kt:438) doesn't forward a
-  // fileChanged. The daemon's UserClassLoaderHolder.swap fires only on
-  // fileChanged({kind: "source"}), so without it the next render binds against
-  // the previous bytecode.
-  // -------------------------------------------------------------------------
+  // Edit-loop staleness: the daemon's UserClassLoaderHolder.swap only fires on fileChanged({kind:
+  // "source"}), so ensureSourceFreshBeforeRender must forward one after each edit.
 
   @Test
   fun `resources read forwards fileChanged on every iteration of an edit render loop`() {
@@ -5945,11 +5850,8 @@ class DaemonMcpServerTest {
 
   @Test
   fun `resources read forwards fileChanged when content changes but mtime is preserved`() {
-    // Tight edit loop where the source's mtime stays pinned across every iteration —
-    // simulates same-millisecond writes on fast SSDs / tmpfs, mtime-preserving editors, and
-    // agent harnesses that touch files programmatically without bumping mtime.
-    // ensureSourceFreshBeforeRender's slow path hashes the file when mtime didn't move, so
-    // content-only edits still fire `fileChanged` and the daemon's classloader rotates.
+    // A tight edit loop with mtime pinned: the slow path's content hash must still fire
+    // `fileChanged`.
     client.initialize()
     val projectDir = tmp.newFolder("workspace")
     val moduleDir = tmp.newFolder("workspace", "module")
@@ -5998,10 +5900,7 @@ class DaemonMcpServerTest {
 
   @Test
   fun `notify_file_changed forwards fileChanged regardless of mtime so agents can bypass staleness`() {
-    // The documented workaround for the mtime-based staleness gap above: agents call
-    // the explicit `notify_file_changed` MCP tool after every edit. This test pins the
-    // workaround so a regression in the tool's forwarding path (DaemonMcpServer.kt:2766)
-    // is caught early.
+    // The explicit `notify_file_changed` workaround must keep forwarding.
     client.initialize()
     val projectDir = tmp.newFolder("workspace")
     val moduleDir = tmp.newFolder("workspace", "module")
@@ -6042,11 +5941,8 @@ class DaemonMcpServerTest {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // Freshness metrics, polling, and random-sampling determinism probe.
-  // Background workers run on a scheduled executor in production; tests use `= 0` cadence to
-  // disable scheduling and trigger the workers directly so timing isn't load-bearing.
-  // -------------------------------------------------------------------------
+  // Freshness metrics, polling, and the sampling probe. Tests use `= 0` cadence and trigger workers
+  // directly.
 
   @Test
   fun `freshness metrics buckets every probe outcome and surfaces them via status`() {
@@ -6322,10 +6218,8 @@ class DaemonMcpServerTest {
 
   @Test
   fun `manifest poller imports new previews when composePreviewDiscover rewrites previews-json`() {
-    // Reproduces issue #834: a Gradle `composePreviewDiscover` re-run between renders rewrites the
-    // module's `previews.json` to include new `@Preview` ids. The MCP server must pick that up
-    // without a daemon restart so `render_preview` for the new id no longer fails with
-    // `PreviewManifestRouter: no manifest entry`.
+    // A `composePreviewDiscover` re-run rewrites `previews.json` with new ids; the server must pick
+    // them up without a daemon restart.
     val freshFactory = FakeDaemonClientFactory()
     val freshSupervisor =
       DaemonSupervisor(descriptorProvider = FakeDescriptorProvider(), clientFactory = freshFactory)
@@ -6447,9 +6341,7 @@ class DaemonMcpServerTest {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // D1 — data product tools
-  // -------------------------------------------------------------------------
+  // Data product tools.
 
   @Test
   fun `list_data_products surfaces kinds advertised by each daemon's initialize`() {
@@ -6804,9 +6696,8 @@ class DaemonMcpServerTest {
             requiresRerender = false,
           )
         )
-      // First call → NotAvailable (preview hasn't rendered). Second call → Ok. The MCP server's
-      // auto-render path between the two issues a renderNow whose renderFinished completes
-      // `awaitNextRender`, after which the retry hits the Ok branch.
+      // First fetch is NotAvailable, then Ok; the auto-render in between completes
+      // `awaitNextRender`.
       daemon.dataFetchHandler = { _, kind, _, _ ->
         if (fetchAttempts.incrementAndGet() == 1) FakeDaemon.DataFetchOutcome.NotAvailable
         else
@@ -6837,7 +6728,7 @@ class DaemonMcpServerTest {
     assertThat(payload["payload"]?.jsonObject?.get("nodes")?.jsonPrimitive?.contentOrNull)
       .isEqualTo("auto-rendered")
     assertThat(fetchAttempts.get()).isEqualTo(2)
-    // The auto-render path issued exactly one renderNow.
+    // Exactly one auto-render renderNow.
     val renderRequest = daemon.renderRequests.poll(2_000, TimeUnit.MILLISECONDS)
     assertThat(renderRequest).isEqualTo(listOf(previewId))
   }
@@ -6973,10 +6864,8 @@ class DaemonMcpServerTest {
     val sub = daemon.dataSubscribes.poll(2_000, TimeUnit.MILLISECONDS)
     assertThat(sub).isEqualTo("com.example.Red" to "a11y/hierarchy")
 
-    // Hard close on the client side simulates the agent process going away. The McpSession's
-    // reader hits EOF, fires onClose, and the supervisor's hook calls forgetDataSubscriptions
-    // which forwards data/unsubscribe to the daemon. The poll-with-timeout below is what we use
-    // to wait for that asynchronous chain to complete.
+    // Closing the client simulates the agent going away: EOF fires onClose, which forwards
+    // data/unsubscribe asynchronously; poll for it.
     client2.close()
 
     val unsub = daemon.dataUnsubscribes.poll(2_000, TimeUnit.MILLISECONDS)
@@ -7003,9 +6892,7 @@ class DaemonMcpServerTest {
             requiresRerender = false,
           )
         )
-      // Configure dataFetch to fail loudly — the cache hit MUST serve without ever touching the
-      // wire. If our cache short-circuit is broken, the test will fall through to this branch
-      // and the assertion on payload contents will fail.
+      // dataFetch fails loudly, so a broken cache short-circuit fails the payload assertion.
       daemon.dataFetchHandler = { _, _, _, _ ->
         FakeDaemon.DataFetchOutcome.FetchFailed("cache-miss-must-not-happen")
       }
@@ -7087,9 +6974,8 @@ class DaemonMcpServerTest {
     daemon.emitDiscovery(previewId)
     client.expectNotification("notifications/resources/list_changed", 2_000)
 
-    // Subscribe to the URI so we get a `resources/updated` notification per renderFinished —
-    // those notifications act as our synchronization point that the supervisor finished processing
-    // each render (and updating the cache) before we move on.
+    // Subscribe so each renderFinished produces `resources/updated`, our sync point that the cache
+    // was updated.
     val uri = PreviewUri(workspaceId, ":module", previewId).toUri()
     client.request("resources/subscribe", buildJsonObject { put("uri", uri) })
 
@@ -7247,9 +7133,7 @@ class DaemonMcpServerTest {
       DaemonSupervisor(
         descriptorProvider = FakeDescriptorProvider(),
         clientFactory = factoryLocal,
-        // Empty list (the default) — supervisor must NOT send an options object with an empty
-        // attachDataProducts array (encodeDefaults = false on the wire keeps the field absent;
-        // an explicit empty array would be an unnecessary protocol diff).
+        // Empty by default: no options object with an empty attachDataProducts array is sent.
       )
     try {
       val projectDir = tmp.newFolder("workspace-no-attach")
@@ -7264,11 +7148,7 @@ class DaemonMcpServerTest {
     }
   }
 
-  // -------------------------------------------------------------------------
-  // `render_preview.force` — sanctioned escape hatch for stale renders.
-  // Issue #924 tracks reports; the field exists to take `rm -rf build/classes/`
-  // off the table for agents who'd otherwise reach for it.
-  // -------------------------------------------------------------------------
+  // `render_preview.force`: the sanctioned escape hatch for stale renders (see #924).
 
   @Test
   fun `render_preview with force forwards fileChanged classpath before renderNow`() {
@@ -7381,9 +7261,7 @@ class DaemonMcpServerTest {
       .isEqualTo("agent reached for rm -rf — caught by linter")
   }
 
-  // -------------------------------------------------------------------------
-  // Helpers
-  // -------------------------------------------------------------------------
+  // Helpers.
 
   private fun restartSession(
     target: DaemonMcpServer,
@@ -7557,8 +7435,8 @@ class DaemonMcpServerTest {
 }
 
 /**
- * Minimal MCP client used by [DaemonMcpServerTest]. Speaks Content-Length-framed JSON-RPC over the
- * pipes the McpSession exposes.
+ * Minimal MCP client for [DaemonMcpServerTest], speaking Content-Length-framed JSON-RPC over the
+ * session's pipes.
  */
 class McpTestClient(
   private val input: InputStream,
@@ -7790,11 +7668,7 @@ class McpToolResult(val raw: JsonObject) {
     return content.mapNotNull { it.jsonObject["text"]?.jsonPrimitive?.contentOrNull }
   }
 
-  /**
-   * First `EmbeddedResource` content block (MCP `type: "resource"`); returns `(blobBase64,
-   * mimeType, uri)`. Used for non-image binary payloads (mp4 / webm) where `ContentBlock.Image`
-   * would be the wrong shape.
-   */
+  /** First `EmbeddedResource` block as `(blobBase64, mimeType, uri)`, for non-image binaries. */
   fun firstEmbeddedResourceBlob(): Triple<String, String, String> {
     val content = raw["content"]?.jsonArray ?: error("tool result has no content array")
     val block =

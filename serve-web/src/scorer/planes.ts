@@ -1,26 +1,10 @@
-// The comparison metric itself, as arithmetic over luminance planes.
-//
-// Not SSIM and not a pixel diff. Both are wrong for this question: a design reference and a Compose
-// render are drawn by two different rasterisers, so every vector edge lands on different sub-pixels
-// and a per-pixel comparison reports a mismatch on a pair that is visually identical. What this does
-// instead is let an EDGE pixel look for its partner within a small neighbourhood, charging a
-// positional cost for how far it had to go — so a one-pixel raster shift is nearly free while a mark
-// that is genuinely absent stays expensive.
-//
-// The search runs in BOTH directions. One way round, an extra mark in the candidate can hide beside
-// a matching one in the reference and cost nothing at all.
-//
-// What the answer is a fraction OF is the other half of the metric, and getting it wrong is what
-// issue #4290 reported: the cost used to be averaged over every pixel of the canvas, so a pair of
-// watch screens that agreed on nothing but their black background still scored 93%. Empty backdrop
-// is not evidence of agreement — two frames that share it share nothing anybody drew. So the
-// average is taken over the pixels that carry CONTENT: where either frame has detail, plus wherever
-// the two actually disagree. A component that lost half its marks now reads as having lost half its
-// marks, whatever the size of the canvas it was rendered onto.
-//
-// No DOM here. Everything below is Float32Array in, number out, which is why it can be tested
-// exhaustively without a browser — the canvas plumbing that produces the planes lives in
-// `frames.ts`.
+// The comparison metric as arithmetic over luminance planes. Not SSIM or a pixel diff: two
+// rasterisers put every vector edge on different sub-pixels, so each edge pixel looks for its
+// partner nearby, paying a positional cost — a one-pixel shift is nearly free, a missing mark
+// expensive. The search runs both ways so an extra mark cannot hide beside a matching one. The
+// average is taken over content (pixels either frame drew on, plus disagreements), not the whole
+// canvas, so shared empty backdrop is not counted as agreement (#4290). No DOM; the planes come
+// from `frames.ts`.
 
 import {
     CONTENT_DILATION,
@@ -101,12 +85,8 @@ export function contentMask(
 }
 
 /**
- * What one pixel's luminance gap costs, 0–1.
- *
- * Free within {@link LUMA_TOLERANCE} — the two rasterisers disagree slightly about every shared
- * edge, and accumulating that would turn "these match" into a percentage that drifts with image
- * size. Full price from {@link FULL_DIFFERENCE_DELTA} up, so a mark that is simply not there costs
- * a whole pixel rather than the fraction of 255 its own tone happens to occupy.
+ * One pixel's luminance-gap cost, 0–1: free within {@link LUMA_TOLERANCE} (rasteriser noise), full
+ * price from {@link FULL_DIFFERENCE_DELTA} so a missing mark costs a whole pixel.
  */
 export function pixelCost(delta: number): number {
     const span = FULL_DIFFERENCE_DELTA - LUMA_TOLERANCE;
@@ -114,11 +94,8 @@ export function pixelCost(delta: number): number {
 }
 
 /**
- * One direction of the search: what each pixel of `source` costs against `target`, 0–1 per pixel.
- *
- * `yieldTo` is awaited every eighth row. A full catalog performs dozens of comparisons and a dense
- * edge mask is a real amount of work; without the yield the page stops painting and stops accepting
- * input for the duration.
+ * One direction of the search: each `source` pixel's cost against `target`, 0–1. `yieldTo` is
+ * awaited every eighth row so a catalog's worth of comparisons doesn't freeze the page.
  */
 export async function directedCosts(
     source: Plane,
@@ -179,11 +156,8 @@ export function yieldScorer(): Promise<void> {
 }
 
 /**
- * The structural match of two luminance planes, 0–100.
- *
- * The share of the two frames' CONTENT that agrees: their cost, summed both ways round, over the
- * pixels either frame drew on or disagrees about. Two blank planes have no content and no
- * disagreement, so they are a match by definition rather than a division by zero.
+ * The structural match of two planes, 0–100: content agreement, with costs summed both ways over
+ * the pixels either frame drew on or disagrees about. Two blank planes are a match by definition.
  */
 export async function scorePlanes(
     reference: Plane,

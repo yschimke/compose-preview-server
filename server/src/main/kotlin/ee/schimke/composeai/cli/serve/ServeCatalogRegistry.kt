@@ -22,26 +22,10 @@ object ServeCatalogRegistry {
   const val FILE_PATH: String = ".compose-preview/catalogs.json"
 
   /**
-   * Refs tried, in order, for a nomination that names none: the project's default branch first,
-   * then the two names it is almost always called.
-   *
-   * `raw.githubusercontent.com` exposes a `HEAD` alias for a repository's default branch, which is
-   * exactly the question being asked — "whatever that project calls its default branch" — so it
-   * goes first and answers in one request.
-   *
-   * The fallbacks exist for the case that actually bit: `yschimke/compose-preview-imports` had its
-   * default branch pointing at something other than `main`, so `HEAD` faithfully served a tree that
-   * did not contain the freshly-merged document, and the first box to boot against it would have
-   * reported a live registry as absent. (That looked like a stale CDN and was described as one when
-   * these candidates were introduced — it was not. `HEAD` was correct about a repository that was
-   * misconfigured, and reading `…/HEAD/README.md` returned 200 only because that path exists on the
-   * other branch too.)
-   *
-   * Trying `main` and `master` after it recovers that specific misconfiguration without ever
-   * overriding a correctly-set default branch — `HEAD` having answered, the fallbacks are not
-   * reached — which is why the order is this way round and not the other. A project whose default
-   * branch is genuinely neither, and which needs a ref pinned anyway (a tag, a release branch), can
-   * say so: `<owner>/<repo>@<ref>`.
+   * Refs tried, in order, for a nomination naming none. `HEAD` (raw.githubusercontent.com's
+   * default-branch alias) goes first; `main` and `master` recover a project whose default branch is
+   * misconfigured, without ever overriding a correct one. Pin anything else with
+   * `<owner>/<repo>@<ref>`.
    */
   val DEFAULT_REF_CANDIDATES: List<String> = listOf("HEAD", "main", "master")
 
@@ -49,9 +33,8 @@ object ServeCatalogRegistry {
   const val MAX_BYTES: Long = 256L * 1024
 
   /**
-   * Most entries one registry may contribute. A bound rather than a limit anyone should meet: the
-   * startup loader fetches every catalog sequentially, so a registry that grew a thousand entries —
-   * by accident or otherwise — would be a box that never finishes booting.
+   * Most entries one registry may contribute. A runaway bound: startup fetches catalogs
+   * sequentially, so thousands of entries would never finish booting.
    */
   const val MAX_ENTRIES: Int = 200
 
@@ -119,14 +102,9 @@ object ServeCatalogRegistry {
     "https://raw.githubusercontent.com/$repo/$ref/$FILE_PATH"
 
   /**
-   * Fetch and normalise one registry project's document, or null when it has none / it could not be
-   * read or parsed.
-   *
-   * Best-effort by construction: a registry that is unreachable, absent or malformed leaves the box
-   * serving exactly what it already serves. That is the same failure posture the rest of the
-   * catalog machinery has — a branch that can't be fetched is skipped, not fatal — and it matters
-   * more here, because the document is fetched again on a timer: a transient failure that took
-   * catalogs away would take them away every time GitHub hiccuped.
+   * Fetch and normalise one registry's document, or null when absent, unreadable or unparseable.
+   * Best-effort: this runs on a timer, so a transient failure must leave the box serving what it
+   * already serves.
    */
   fun fetch(
     nomination: Nomination,
@@ -151,12 +129,8 @@ object ServeCatalogRegistry {
     val body =
       bytes
         ?: run {
-          // **Say so.** This return used to be silent, on the reasoning that a best-effort read
-          // leaves the box serving what it already serves. That is the right BEHAVIOUR and was the
-          // wrong SILENCE: on preview.coo.ee the boot read of a live, reachable registry returned
-          // nothing, and because it said nothing the logs held no trace of a registry at all —
-          // indistinguishable from the flag never arriving, which is where the debugging went.
-          // A best-effort read still owes an operator the reason it gave up.
+          // Best-effort still owes the operator a reason, or a missing registry is
+          // indistinguishable from the flag never arriving.
           onProblem(
             "catalog registry $repo: no $FILE_PATH at ${tried.joinToString("/")} — " +
               "contributing no catalogs this pass"
@@ -207,9 +181,8 @@ object ServeCatalogRegistry {
           onProblem("catalog registry $repo: duplicate entry '${pinned.system}' — ignored")
           continue
         }
-        // A claim on a group this document doesn't declare falls back to the owner heading, the
-        // same way an unattributed catalog does. Dropping the catalog over its placement would
-        // trade a misfiled card for a missing one.
+        // A claim on an undeclared group falls back to the owner heading, as for an unattributed
+        // catalog, rather than dropping the catalog.
         val group = pinned.group?.takeIf { id -> groups.any { it.id == id } }
         add(pinned.copy(group = group))
       }

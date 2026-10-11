@@ -1,29 +1,17 @@
 package ee.schimke.composeai.cli.serve
 
 /**
- * What a motion capture is called in the picker, and what it says once picked.
- *
- * ### Why this exists
- *
- * The picker used to print the annotation's whole caption on a button. That is fine for "Tap the
- * avatar" and ruinous for the captions real catalogs write, which are a sentence of instruction
- * followed by a paragraph of what to watch for:
+ * What a motion capture is called in the picker, and what it says once picked. Real catalog
+ * captions are an instruction plus a paragraph of what to watch for:
  *
  * > Toggle repeatedly. The container morphs between its unchecked and checked shapes through the
  * > theme's spatial animation — Baseline swaps the shape, Expressive travels between them.
  *
- * Two of those side by side in a segmented group is a wall of prose above the stage, wider than the
- * render it is introducing, and the reader still has to compare two near-identical blocks word by
- * word to tell which button is which. The words themselves are worth keeping — they name the
- * property the recording exists to show — so this splits them rather than truncating them away:
+ * Printing that on a button is a wall of prose, so the caption is split rather than truncated:
+ * - [title] is the caption's first clause (ellipsized if long), shown in the closed menu.
+ * - [detail] is the full caption, shown beside the frames once a capture is on stage.
  *
- * - [title] is what the closed menu shows and what distinguishes one capture from its neighbours —
- *   the caption's first clause, ellipsized if even that runs long.
- * - [detail] is the caption in full, printed beside the frames once a capture is on the stage,
- *   where there is a whole row to spend on it and only ONE of them is on screen at a time.
- *
- * Deliberately free of HTML and of [ServeWeb] so the rule that decides where a caption is cut is
- * unit-testable on its own.
+ * Free of HTML and [ServeWeb] so the cut rule is unit-testable.
  */
 internal data class MotionCaptureLabel(
   /** The brief name: what the menu shows, always non-blank. */
@@ -34,32 +22,20 @@ internal data class MotionCaptureLabel(
 
 internal object MotionCaptureLabels {
   /**
-   * Past this the closed menu starts setting the width of the control row, which is the problem
-   * this whole split exists to solve. Long enough for the instruction clauses catalogs actually
-   * write ("Toggle repeatedly", "Press and hold the card") to survive uncut.
+   * Past this the closed menu sets the control row's width. Long enough for typical instruction
+   * clauses ("Press and hold the card") to survive uncut.
    */
   private const val TITLE_MAX = 42
 
   /**
-   * Label every capture of one preview, numbering only where a title would otherwise repeat.
-   *
-   * Numbering is a property of the SET, not of a capture, which is why this takes the list: two
-   * caption-less interaction captures are permitted by the manifest and are what the annotation
-   * defaults produce, and they used to give the picker two entries both reading "Interaction" — no
-   * way, by eye or by screen reader, to tell which recording either one selects. Numbering
-   * unconditionally would instead put a "1" on every single-capture preview, which is a count
-   * nobody asked for.
-   *
-   * Cutting captions to a first clause makes a collision *more* likely rather than less — two
-   * recordings of one component very often open with the same instruction and differ only in the
-   * detail — so the number distinguishes them in the menu and the detail line says what actually
+   * Label every capture of one preview, disambiguating only where titles would repeat (e.g. two
+   * caption-less captures both reading "Interaction"); numbering every capture would add a "1" to
+   * single-capture previews. First-clause titles collide often, so the detail line says what
    * differs.
    *
-   * A number is the fallback, not the first answer: where a colliding set is a component's light
-   * and dark recordings — which is what a catalog that records each gesture once per theme
-   * publishes, and what the whole `compose-m3` catalog publishes — the capture ids already say
-   * which is which, and "(Light)" / "(Dark)" is a label a reader can act on where "1" / "2" is not.
-   * See [themeSuffixes] for when that applies.
+   * Where a colliding set is one component's light and dark recordings (the common case), the ids
+   * already say which is which, so "(Light)"/"(Dark)" is used instead of numbers; see
+   * [themeSuffixes].
    */
   fun of(captures: List<ServeMotion>): List<MotionCaptureLabel> {
     val base = captures.map { capture ->
@@ -69,10 +45,8 @@ internal object MotionCaptureLabels {
       )
     }
     val totals = base.groupingBy { it.title }.eachCount()
-    // A colliding group whose captures are one component's light and dark recordings is the common
-    // case by a distance — a catalog records a gesture once per theme and writes the caption once —
-    // and there "1" and "2" name nothing a reader can act on. The ids do say which is which, so
-    // they get to.
+    // Light/dark recordings of one gesture are the common collision; use the ids' theme rather than
+    // numbers.
     val themed = themeSuffixes(captures, base, totals)
     val seen = mutableMapOf<String, Int>()
     return base.mapIndexed { i, label ->
@@ -89,12 +63,8 @@ internal object MotionCaptureLabels {
   }
 
   /**
-   * A theme word per capture, or null when the ids cannot name the whole set apart.
-   *
-   * All or nothing on purpose: labelling half a colliding group by theme and numbering the rest
-   * would produce "Press and hold (Light)" beside "Press and hold 2", which is worse than either
-   * scheme on its own. So a group qualifies only when every one of its captures carries a theme
-   * token and no two of them carry the same one — anything else falls back to numbering.
+   * A theme word per capture, or null when the ids can't tell the whole set apart. All or nothing,
+   * so "(Light)" never sits beside "2": every capture needs a distinct theme token, else numbering.
    */
   private fun themeSuffixes(
     captures: List<ServeMotion>,
@@ -111,10 +81,8 @@ internal object MotionCaptureLabels {
   }
 
   /**
-   * The theme a capture id names, if it names one: the *last* standalone `light` / `dark` segment
-   * after the id's head. Same rule (and same reason) as the grid's theme pairing — a capture id is
-   * a flattened preview id, so it can carry a `light`/`dark` **state** segment earlier that is not
-   * the theme, and the head itself (`theme-meshcore-light`) is one segment and never a token.
+   * The theme a capture id names: the last standalone `light`/`dark` segment after the head, as in
+   * the grid's theme pairing (earlier segments may be state, and the head is never a token).
    */
   private fun themeToken(id: String): String? {
     val parts = id.split("__")
@@ -122,10 +90,7 @@ internal object MotionCaptureLabels {
     return idx?.let { parts[it] }
   }
 
-  /**
-   * The caption's opening clause — or the capture's kind when it declared no caption. A weak label
-   * is honest; it appears only when the annotation said nothing to be honest about.
-   */
+  /** The caption's opening clause, or the capture's kind when there is no caption. */
   private fun briefTitle(caption: String?, kind: String?): String {
     val text = normalise(caption)
     if (text.isEmpty())
@@ -138,14 +103,10 @@ internal object MotionCaptureLabels {
   }
 
   /**
-   * Where the caption stops being a name and starts being an explanation: the end of its first
-   * sentence, or the first dash / colon / semicolon that introduces one, whichever comes first.
-   *
-   * Every separator has to be FOLLOWED by a space (or end the caption) — otherwise "1.5dp", "e.g."
-   * and "Crop to 1:1" would each cut the title to nothing — and the dashes need a space in front of
-   * them too, so hyphenated words ("press-and-hold") stay whole. A terminator that ends the whole
-   * caption is dropped rather than cut at: a menu entry reading "Tap the avatar." is a sentence
-   * pretending to be a label.
+   * Where the caption stops being a name: the end of its first sentence, or the first
+   * dash/colon/semicolon, whichever comes first. Separators must be followed by a space (so
+   * "1.5dp", "e.g.", "1:1" survive) and dashes preceded by one (so "press-and-hold" survives). A
+   * terminator ending the whole caption is dropped.
    */
   private fun firstClause(text: String): String {
     var cut = text.length
@@ -187,9 +148,8 @@ internal object MotionCaptureLabels {
   }
 
   /**
-   * One line, single-spaced. A caption is authored in Kotlin source and reaches here with whatever
-   * wrapping the author's formatter left in it; both the menu and the readout are one-line
-   * controls, so a newline in the middle of one is markup noise rather than meaning.
+   * One line, single-spaced: captions arrive with source-formatter wrapping, and both controls are
+   * one-line.
    */
   private fun normalise(text: String?): String = text?.replace(Regex("\\s+"), " ")?.trim().orEmpty()
 

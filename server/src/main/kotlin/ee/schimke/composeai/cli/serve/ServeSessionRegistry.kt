@@ -9,28 +9,24 @@ import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
 /**
- * Builds (forks) a tenant's *session state* on demand — the expensive discover/build step. The fork
- * happens behind this seam, so the registry and HTTP layer stay transport- and policy-agnostic and
- * tests can inject a fake. Returns `null` when no such session can be created.
+ * Builds (forks) a tenant's session state on demand, the expensive discover/build step, behind a
+ * seam tests can fake. Returns `null` when no such session can be created.
  */
 fun interface ServeSessionFactory {
   fun create(sessionId: String): ServeSessionState?
 }
 
 /**
- * Multi-tenant registry of serve sessions behind **one** HTTP server, so a shared server fronts
- * many sessions instead of spawning a server per module.
+ * Multi-tenant registry of serve sessions behind one HTTP server.
  *
- * Sessions follow an **Activity-style lifecycle** so daemons don't run forever:
- * - **created** lazily via [factory] (the expensive build) on first use, keyed by id;
- * - **opened** into a live daemon-backed [ServeRenderHost] via [open] (cheap — relaunches from the
- *   built descriptor);
- * - **suspended** when idle ([suspendIdle]): the daemon subprocess is closed but the cheap
- *   [ServeSessionState] is kept, so the session can be **resumed** on the next request by
- *   re-[open]ing from that state — no rebuild.
+ * Sessions follow an Activity-style lifecycle so daemons don't run forever:
+ * - created lazily via [factory] (the expensive build) on first use;
+ * - opened into a daemon-backed host via [open] (cheap, from the built descriptor);
+ * - suspended when idle ([suspendIdle]): the daemon closes but the [ServeSessionState] is kept, so
+ *   the next request resumes without a rebuild.
  *
- * A session is never suspended while it has an open [lease] (e.g. a live WebSocket) or active
- * streams. Concurrency-safe: at most one build per id under racing callers.
+ * Never suspended while it has an open [lease] or active streams. At most one build per id under
+ * racing callers.
  */
 class ServeSessionRegistry(
   private val open: (ServeSessionState) -> ServeHost?,
@@ -38,41 +34,25 @@ class ServeSessionRegistry(
   private val idleTimeoutMillis: Long = DEFAULT_IDLE_TIMEOUT_MILLIS,
   reaperIntervalMillis: Long = idleTimeoutMillis,
   /**
-   * Second-level idle window (issue #2022): a *forked* session that has stayed suspended this long
-   * is removed entirely and its git worktree pruned (via [ServeSessionState.reclaim]), so a
-   * long-lived project-mode server doesn't accumulate suspended-session state + worktrees for every
-   * revision it has ever served. Must exceed [idleTimeoutMillis] (a session suspends first, then
-   * GCs). Non-positive disables the GC (tests drive [reclaimIdleForked] directly with a fake
-   * clock).
+   * Second-level idle window: a forked session suspended this long is removed and its worktree
+   * pruned ([ServeSessionState.reclaim]), so a project-mode server doesn't accumulate worktrees
+   * (see #2022). Must exceed [idleTimeoutMillis]; non-positive disables it.
    */
   private val suspendedGcTimeoutMillis: Long = DEFAULT_SUSPENDED_GC_TIMEOUT_MILLIS,
   /**
-   * Idle window for shedding **pooled daemons** ([releaseIdleDaemons]), separate from
-   * [idleTimeoutMillis], which suspends whole sessions.
-   *
-   * They are different questions. Suspending a session throws away a catalog's warm state and the
-   * visitor pays to rebuild it, so ten minutes is a reasonable price of admission. A pool replica
-   * is reopened from the same launch descriptor whenever the next burst needs it, and while it sits
-   * there it holds a live seat weighted 2 — so on an eight-seat box a handful of forgotten replicas
-   * is the whole budget. Reusing the session window meant a replica could hold its seat for the ten
-   * minutes it takes to qualify plus up to another sweep interval before anything looked.
-   *
-   * Non-positive falls back to [idleTimeoutMillis], preserving the old behaviour.
+   * Idle window for shedding pooled daemons ([releaseIdleDaemons]), separate from session
+   * suspension: a replica reopens cheaply but holds a weighted live seat while idle, so it gets a
+   * shorter window. Non-positive falls back to [idleTimeoutMillis].
    */
   private val daemonIdleMillis: Long = DEFAULT_DAEMON_IDLE_MILLIS,
   /**
-   * How recently a leaseholder must have shown activity for its lease to keep answering *busy* on
-   * the whole-server idle clock ([idleMillis]). See [DEFAULT_LEASE_BUSY_MILLIS] for why residency
-   * and busyness are asked as two questions rather than one.
+   * How recently a leaseholder must have been active for its lease to count as busy on
+   * [idleMillis]. See [DEFAULT_LEASE_BUSY_MILLIS].
    */
   private val leaseBusyMillis: Long = DEFAULT_LEASE_BUSY_MILLIS,
   /**
-   * Whether the box is out of memory right now, consulted on every reaper sweep.
-   *
-   * Wired to the same `OptimizerPressureGate` reading `/status.json` publishes, so the threshold a
-   * deployment already tuned governs shedding too rather than a second one drifting beside it. The
-   * default says "never under pressure", which is the old behaviour and what every test that does
-   * not care about memory gets.
+   * Whether the box is under memory pressure, checked every reaper sweep; wired to the same gate
+   * `/status.json` publishes. Defaults to never.
    */
   private val underMemoryPressure: () -> Boolean = { false },
   private val clock: () -> Long = System::currentTimeMillis,
@@ -86,66 +66,46 @@ class ServeSessionRegistry(
     /** Pinned sessions (e.g. static bundle hosts — no daemon to reclaim) are never suspended. */
     val pinned: Boolean,
     /**
-     * True only for sessions built on demand by [factory] (project mode `?session=<rev>`), each
-     * with a git worktree on disk. These are the only entries the second-level GC
-     * ([reclaimIdleForked]) *removes* — [register]ed sessions (the pinned checkout, bundle/catalog
-     * hosts) are kept permanently resumable, matching the register-vs-fork distinction in the issue
-     * (#2022).
+     * True only for sessions built on demand by [factory] (project mode `?session=<rev>`, each with
+     * a worktree); only these are removed by [reclaimIdleForked]. Registered sessions stay
+     * resumable.
      */
     val forked: Boolean,
     @Volatile var lastAccess: Long,
     /**
-     * Open **request-scoped** holders: a lease taken for the duration of one HTTP request
-     * (`withLeasedSession`). These count as busy for their whole life, however long that is — a
-     * cold `/render` or a `/bundle.zip` legitimately runs for minutes, and the quiet gate exists to
-     * keep background work off exactly that.
+     * Open request-scoped holders (`withLeasedSession`). Busy for their whole life, since a cold
+     * `/render` or `/bundle.zip` can legitimately take minutes.
      */
     @Volatile var requestLeases: Int = 0,
     /**
-     * Open **connection** holders: a viewer WebSocket, held for the socket's whole life. These keep
-     * the session resident unconditionally but only count as busy while [lastLeaseActivity] is
-     * recent — see [idleMillis] and issue #4312.
+     * Open connection holders (viewer WebSockets): keep the session resident, but count as busy
+     * only while [lastLeaseActivity] is recent (see [idleMillis]).
      */
     @Volatile var connectionLeases: Int = 0,
     /**
-     * Wall-clock of the last thing a *leaseholder* actually did — a lease being taken, a client
-     * message arriving on its socket ([Lease.touch]), or any acquire of this session.
-     *
-     * Separate from [lastAccess], which answers "may this session's daemon be suspended?" and is
-     * deliberately generous. This one answers "is someone being served right now?" against the much
-     * shorter [leaseBusyMillis], and only [idleMillis] reads it.
+     * Last time a leaseholder did something (lease taken, socket message via [Lease.touch],
+     * acquire). Unlike the generous [lastAccess] (suspension), this answers "is someone being
+     * served now?" against [leaseBusyMillis]; read only by [idleMillis].
      */
     @Volatile var lastLeaseActivity: Long = lastAccess,
     /**
-     * Wall-clock when [host] last transitioned suspended→resident (null while suspended). The basis
-     * for the "up for" figure the `/status` page shows per running daemon; reset each time the
-     * daemon is re-opened so it reflects the *current* run, not the session's first-ever open.
+     * When [host] last became resident (null while suspended); basis for `/status`'s per-daemon
+     * uptime.
      */
     @Volatile var startedAt: Long? = null,
     /**
-     * A suspension detached this entry's host and is closing it **right now** (outside the lock, so
-     * a blocking daemon shutdown doesn't stall every other session). [liveHost] waits this out
-     * before reopening: without it, a request arriving inside that window sees `host == null` and
-     * launches a replacement daemon while the previous one is still shutting down, so a single
-     * session momentarily runs two daemon subprocesses and overshoots the live-seat/memory budget.
-     * Closing under the lock used to serialise this implicitly.
+     * Set while a suspension closes this entry's detached host outside the lock. [liveHost] waits
+     * it out so a resume never runs two daemons for one session.
      */
     /**
-     * When [suspendIdle] released this session's host, or null while it is resident.
-     *
-     * The rotation key for [resumeIdleOptimizers], and deliberately not [lastAccess]: a catalog
-     * suspended in the very sweep that then resumes is the one with the OLDEST `lastAccess`, so
-     * ordering on that resurrected whatever had just been parked and left the genuinely long-parked
-     * catalogs exactly where they were. Suspension order is least-recently-parked-first, which is
-     * the round-robin the fair admission rule already assumes.
+     * When [suspendIdle] released this host, or null while resident. The rotation key for
+     * [resumeIdleOptimizers]; not [lastAccess], which would favour whatever was just parked.
      */
     @Volatile var suspendedAt: Long? = null,
     @Volatile var closing: Boolean = false,
     /**
-     * True while [liveHost] is re-opening this session's host with the registry lock RELEASED.
-     *
-     * The mirror of [closing]: a second caller for the same session waits on [closeFinished] rather
-     * than opening a duplicate host, while callers for every other session go straight through.
+     * True while [liveHost] reopens this host with the registry lock released; a second caller
+     * waits on [closeFinished] instead of opening a duplicate.
      */
     @Volatile var opening: Boolean = false,
   ) {
@@ -155,9 +115,8 @@ class ServeSessionRegistry(
   }
 
   /**
-   * A read-only snapshot of one **currently-resident** session (its host is live right now), for
-   * the `/status` page's "running servers" view. [hasLiveStream] distinguishes a live daemon-backed
-   * host (a render daemon is up) from a pinned static bundle host that merely replays baked PNGs.
+   * Snapshot of one resident session for `/status`'s running-servers view. [hasLiveStream]
+   * distinguishes a live daemon from a static bundle host.
    */
   data class RunningDaemon(
     val id: String,
@@ -183,33 +142,17 @@ class ServeSessionRegistry(
     private val released = AtomicBoolean(false)
 
     /**
-     * Serialises [touch] against [close], so "a no-op once released" is a guarantee rather than a
-     * likelihood.
-     *
-     * An `AtomicBoolean` read alone makes [touch] a check-then-act: it can see the lease open, be
-     * overtaken by a `close()` that releases the hold, and only then write its timestamps — marking
-     * a session busy on behalf of a holder that has already left, and (with a second connection
-     * lease on the same session) restarting that one's quiet window from a stale instant.
-     *
-     * A private monitor rather than the registry's own lock: [touch] is on the socket's per-message
-     * path, and the registry lock is held across a session *build* in `entryFor`, so borrowing it
-     * here would park a message loop behind an unrelated tenant's Gradle work. Lock ordering is
-     * one-way — this monitor is taken before the registry lock (via `onRelease`) and never the
-     * other way round — so the pair cannot deadlock.
+     * Serialises [touch] against [close], so a touch after release is truly a no-op rather than
+     * marking a departed holder busy. A private monitor, not the registry lock (held across session
+     * builds), so the socket message path never waits on another tenant's Gradle work. Always taken
+     * before the registry lock, never after, so no deadlock.
      */
     private val gate = Any()
 
     /**
-     * Report that the holder is *doing* something — a client message on its socket, say — as
-     * opposed to merely still being connected.
-     *
-     * Holding a lease is what keeps the session resident; calling this is what keeps a **connection
-     * lease** counting as busy on the whole-server idle clock (see [idleMillis]). A long-lived
-     * connection that never touches goes quiet on that clock while staying resident, which is the
-     * point: an open browser tab nobody is looking at should not stand the theme optimizer down for
-     * hours. Request-scoped leases count as busy regardless and need not call this.
-     *
-     * A no-op once the lease is [close]d.
+     * Report that the holder is doing something (e.g. a socket message). This keeps a connection
+     * lease counting as busy on [idleMillis]; an untouched connection goes quiet while staying
+     * resident, so an unattended tab doesn't hold off the optimizer. No-op once [close]d.
      */
     fun touch() {
       synchronized(gate) { if (!released.get()) onTouch() }
@@ -228,12 +171,9 @@ class ServeSessionRegistry(
   private val closeFinished = lock.newCondition()
 
   /**
-   * Observers notified as a session transitions resident→suspended, with the host that's about to
-   * be closed. The seam exists so a caller can snapshot facts that are only readable off a *live*
-   * host (a catalog's trust verdict, provenance and preview count) before suspension makes them
-   * unobservable — [peekHost] deliberately never resumes, so without this the `/status` page can't
-   * tell "suspended, trusted" from "untrusted". Invoked **outside** the registry lock, so a
-   * listener may call back in; failures are swallowed (an observer must never block suspension).
+   * Observers notified as a session goes resident→suspended, with the host about to close, so
+   * callers can snapshot facts only readable off a live host ([peekHost] never resumes). Invoked
+   * outside the lock; failures are swallowed.
    */
   private val suspendListeners = CopyOnWriteArrayList<(String, ServeHost) -> Unit>()
 
@@ -243,13 +183,8 @@ class ServeSessionRegistry(
   }
 
   /**
-   * Observers notified when a session is **retired** ([unregister]), so a caller holding a
-   * last-known snapshot of it (see [peekHost]) can drop it.
-   *
-   * The snapshot advice in [peekHost] has no counterpart without this: a holder is told to keep
-   * facts across suspension, and then has no way to learn that the session it kept them for is
-   * gone. On a host with catalog churn — publish, serve, retire, repeat through the admin API —
-   * every retired catalog's snapshot is retained for the life of the process.
+   * Observers notified when a session is retired ([unregister]), so holders of a [peekHost]
+   * snapshot can drop it instead of retaining it forever.
    */
   private val unregisterListeners = CopyOnWriteArrayList<(String) -> Unit>()
 
@@ -259,22 +194,12 @@ class ServeSessionRegistry(
   }
 
   /**
-   * A projection of a session's host that has to outlive its residency, captured and discarded as
-   * part of the registry's **own** transitions rather than alongside them.
+   * A projection of a session's host that must outlive residency, captured and discarded as part of
+   * the registry's own transitions. Unlike [addSuspendListener] (outside the lock), [capture] runs
+   * under the lock just before detach and [discard] under the same lock as removal, so readers
+   * never see a gap and slow writers can't resurrect retired entries.
    *
-   * [addSuspendListener] cannot provide this, and the difference is the whole point. A suspend
-   * listener runs *after* the lock is released, so a reader can observe the moment in between:
-   * `peekHost` already null, [isKnownSession] still true, and no snapshot yet. And because a
-   * listener writes to storage the registry does not own, a retirement can be overtaken by a slower
-   * writer still holding the removed host, which resurrects the entry it just evicted.
-   *
-   * Both disappear when the capture and the transition are the same act. [capture] runs under the
-   * lock immediately before the host is detached, so "resident" and "snapshotted" are the only two
-   * states a reader can see; [discard] runs under the same lock as the removal, so nothing can be
-   * written back afterwards.
-   *
-   * The cost of that guarantee is the contract: both run **with the registry lock held**, so an
-   * implementation must do no I/O, must not block, and must never re-enter the registry.
+   * Both run with the registry lock held: no I/O, no blocking, no re-entry.
    */
   interface SessionSnapshots {
     /** Under the lock, immediately before [host] is detached from [sessionId]. */
@@ -291,14 +216,11 @@ class ServeSessionRegistry(
     this.snapshots = snapshots
   }
 
-  // Wall-clock of the most recent acquire/lease/touch/release across all sessions — the basis for
-  // the server-level idle checks ([idleMillis], [connectionIdleMillis]) that the theme optimizer's
-  // quiet gate and the ephemeral exit-when-idle watchdog read.
+  // Last acquire/lease/touch/release across all sessions; the basis for [idleMillis] and
+  // [connectionIdleMillis].
   @Volatile private var lastActivity: Long = clock()
 
-  // A daemon reaper suspends idle sessions. Disabled (null) when either knob is non-positive —
-  // tests
-  // drive suspension directly with a fake clock instead.
+  // Disabled when either knob is non-positive; tests drive suspension directly.
   private val reaper: ScheduledExecutorService? =
     if (idleTimeoutMillis > 0 && reaperIntervalMillis > 0) {
       Executors.newSingleThreadScheduledExecutor { r ->
@@ -307,11 +229,8 @@ class ServeSessionRegistry(
         .also {
           it.scheduleWithFixedDelay(
             {
-              // Pressure first, because the clock-driven passes below cannot help a box that is
-              // already out of memory: `suspendIdle` needs a session to have been untouched for
-              // ten minutes, and a box filling in five does not have ten. This is the path between
-              // "fine" and "the kernel picked a victim" -- shed a little service, stay up, and let
-              // the ordinary passes reclaim the rest on their own schedule.
+              // Pressure first: `suspendIdle` needs ten untouched minutes, which a box filling in
+              // five doesn't have.
               runCatching { if (underMemoryPressure()) shedUnderPressure() }
               // Suspend first, then GC: a session must be suspended (host released) before it's
               // eligible for the longer-window forked-session reclaim below.
@@ -326,15 +245,9 @@ class ServeSessionRegistry(
             reaperIntervalMillis,
             TimeUnit.MILLISECONDS,
           )
-          // Pooled daemons are swept on their OWN cadence when it is shorter. A replica holds a
-          // live seat weighted 2 and is cheap to reopen, so waiting a session-suspension interval
-          // to look at it means a handful of forgotten replicas can hold an eight-seat box's whole
-          // budget. Same single thread, so the two sweeps never overlap.
-          //
-          // The pressure shed rides this faster cadence rather than the session one, and that is
-          // the whole point of putting it here: `reaperIntervalMillis` defaults to the ten-minute
-          // idle window, and a box that fills in five minutes is dead long before a ten-minute
-          // sweep looks at it. Shedding has to run on the order of the fall, not the idle policy.
+          // Pooled daemons are swept on their own shorter cadence (replicas hold weighted seats and
+          // reopen cheaply). The pressure shed rides this faster cadence too, since a ten-minute
+          // sweep is too slow for a box filling in five. Same thread, so sweeps never overlap.
           if (daemonIdleMillis > 0 && daemonIdleMillis < reaperIntervalMillis) {
             it.scheduleWithFixedDelay(
               {
@@ -352,16 +265,11 @@ class ServeSessionRegistry(
     }
 
   /**
-   * Seed a session from already-known [state] (e.g. the CLI's current checkout), optionally with an
-   * already-open [host]. Replaces any prior entry. The session participates in suspend/resume like
-   * a forked one — its daemon is released when idle and reopened from [state] on demand.
+   * Seed a session from known [state], optionally with an open [host], replacing any prior entry.
+   * Participates in suspend/resume like a forked one.
    *
-   * **Re-registration closes the replaced host.** A catalog refresh ([ServeCatalogRefresher])
-   * re-runs the catalog load and re-registers the same pinned id with a fresh host; the prior
-   * entry's host (and its live daemon subprocess) is dropped from [sessions] and would otherwise
-   * never be closed (`close()` only walks the live map), leaking the daemon. So close it here —
-   * outside the lock, since a host `close()` can block on daemon shutdown. A no-op on first
-   * registration (no prior entry) and when the same host instance is re-registered.
+   * Re-registration closes the replaced host (outside the lock), since a catalog refresh
+   * re-registers the same id and the old daemon would otherwise leak.
    */
   fun register(
     sessionId: String,
@@ -369,17 +277,9 @@ class ServeSessionRegistry(
     host: ServeHost? = null,
     pinned: Boolean = false,
   ) {
-    // A session may never take one of the server's own top-level route names. Such a session is
-    // unreachable at its own landing anyway — Ktor scores a constant segment above `/{system}` —
-    // and it breaks the [ServeSites] interceptor's invariant that a reserved first segment is
-    // always a route: `/api/` matches no constant route, so it would fall to `/{system}/` and
-    // serve that session through a hostname published as one catalog.
-    //
-    // Enforced HERE rather than at each ingestion point because there are five of those (an
-    // upload, a `--bundles` directory, a `--bundle` argument, a catalog id, a revision ref) and
-    // fixing them one at a time is how the last two review rounds went. This is one of the two
-    // places a session id is ever bound to an entry — [entryFor] is the other (a ref forked on
-    // demand by [factory], which never passes through here), and it carries the same guard.
+    // A session may never take a top-level route name ([ServeSites.RESERVED_SYSTEMS]): it would be
+    // unreachable, and `/api/` would fall through to `/{system}/` on a site host. Enforced here and
+    // in [entryFor], the only two places a session id is bound.
     if (sessionId in ServeSites.RESERVED_SYSTEMS) {
       System.err.println(
         "serve: refusing session '$sessionId' — that name is one of the server's own routes"
@@ -401,18 +301,14 @@ class ServeSessionRegistry(
   }
 
   /**
-   * Drop [sessionId] entirely — the counterpart of [register], for a catalog **retired** at runtime
-   * ([ServeCatalogAdmin]). The removed entry's host (and its daemon subprocess) is closed outside
-   * the lock, like the replacement path in [register]. Returns false when nothing was registered
-   * under that id.
+   * Drop [sessionId] entirely (a catalog retired at runtime, [ServeCatalogAdmin]), closing its host
+   * outside the lock. False when nothing was registered.
    */
   fun unregister(sessionId: String): Boolean {
     val removed = lock.withLock {
       val removed = sessions.remove(sessionId)
-      // Discarded under the SAME lock as the removal, so a concurrent detach either captured
-      // before this and is discarded here, or finds no entry to capture from at all. Outside the
-      // lock the two can interleave, and the slower writer resurrects what the retirement just
-      // evicted.
+      // Discarded under the same lock as the removal, so a concurrent detach can't resurrect the
+      // snapshot.
       if (removed != null) snapshots?.let { runCatching { it.discard(sessionId) } }
       removed
     }
@@ -426,8 +322,7 @@ class ServeSessionRegistry(
   }
 
   /**
-   * The live host for [sessionId] — resuming a suspended session or forking a new one via
-   * [factory]. Returns `null` when the session can't be created/opened, so the caller can 404.
+   * The live host for [sessionId], resuming or forking via [factory]; null if it can't be created.
    * Touches the idle clock.
    */
   fun acquire(sessionId: String): ServeHost? = lock.withLock {
@@ -440,19 +335,12 @@ class ServeSessionRegistry(
   }
 
   /**
-   * Acquire [sessionId] and hold it resident for the returned [Lease]'s lifetime, so a long-lived
-   * connection — including a WebSocket on the snapshot fallback lane that opens no stream — isn't
-   * suspended mid-connection. Returns `null` when the session can't be created/opened.
+   * Acquire [sessionId] and keep it resident for the [Lease]'s lifetime, or null.
    *
-   * [connection] picks which of the two questions this hold answers on the idle clock, and the
-   * default is the conservative one:
-   * - **false (default), a request-scoped hold.** `withLeasedSession` wraps ordinary HTTP work in
-   *   one of these, and that work is not always short — a cold `/render` is 30-70s and a
-   *   `/bundle.zip` longer still. It counts as busy for its whole life, because keeping background
-   *   work off a foreground render is precisely what the quiet gate is for.
-   * - **true, a connection hold.** A viewer WebSocket, which lives as long as the tab does. It
-   *   keeps the session resident unconditionally, but counts as busy only while its holder is
-   *   actually doing something ([Lease.touch]) — see [idleMillis] and issue #4312.
+   * [connection] chooses how the hold counts on the idle clock:
+   * - false (default): request-scoped, busy for its whole life (a cold `/render` can run 30-70s);
+   * - true: a viewer WebSocket, resident unconditionally but busy only while active
+   *   ([Lease.touch]); see [idleMillis].
    */
   fun lease(sessionId: String, connection: Boolean = false): Lease? = lock.withLock {
     check(!closed) { "ServeSessionRegistry is closed" }
@@ -483,164 +371,92 @@ class ServeSessionRegistry(
   }
 
   /**
-   * True when [sessionId] is an already-registered **static** (pinned) session — a bundle/catalog
-   * host that replays baked PNGs and holds no daemon, so leasing it spawns nothing. Unknown or
-   * daemon-backed (non-pinned, incl. a lazily-forked one) sessions return false, so the live-seat
-   * gate reserves a seat for anything whose open could cost a render daemon. Never opens/forks a
-   * host.
+   * True when [sessionId] is a registered static (pinned) session that holds no daemon, so leasing
+   * it spawns nothing. Unknown and daemon-backed sessions return false so the seat gate reserves a
+   * seat. Never opens a host.
    */
   fun isKnownStatic(sessionId: String): Boolean = lock.withLock {
     sessions[sessionId]?.pinned == true
   }
 
   /**
-   * Whether [sessionId] names a session this registry actually has. Cheap and non-opening — it does
-   * not lease, resume, or spawn anything.
-   *
-   * Exists so the live-seat budget can tell a real admission attempt from a request for something
-   * that was never here. The seat is reserved *before* the session is leased (leasing resumes the
-   * host and spawns its daemon, so a later check would be too late to bound anything), which means
-   * a request for a nonexistent session reaches the budget too — harmless for admission, but it
-   * would let anyone inflate the refusal counter that budget decisions are supposed to rest on.
+   * Whether [sessionId] exists, without opening anything. Lets the live-seat budget (checked before
+   * leasing) ignore requests for nonexistent sessions so its refusal counter isn't inflatable.
    */
   fun isKnownSession(sessionId: String): Boolean = lock.withLock { sessions.containsKey(sessionId) }
 
   /**
-   * Live-seat cost of [sessionId]'s daemon in [LiveSeatLimiter] permits — its session state's
-   * [ServeSessionState.liveSeatWeight], or `1` for an unknown / lazily-forked session (whose
-   * on-demand build hasn't run yet, so it's treated as a default desktop-weight daemon). Read
-   * before leasing so the seat gate can charge a heavy Android catalog more than a cheap desktop
-   * one without opening the daemon.
+   * Live-seat cost of [sessionId]'s daemon ([ServeSessionState.liveSeatWeight]), or 1 for an
+   * unknown or not-yet-built session. Read before leasing.
    */
   fun liveSeatWeight(sessionId: String): Int = lock.withLock {
     sessions[sessionId]?.state?.liveSeatWeight ?: 1
   }
 
   /**
-   * Milliseconds the *whole server* has been idle, or `null` when someone is actually being served.
-   * Idle counts from the last acquire/lease/release/[Lease.touch]; with nothing happening it grows
-   * unbounded. Drives the theme optimizer's quiet gate.
+   * Milliseconds the whole server has been idle, or null while someone is being served. Drives the
+   * theme optimizer's quiet gate.
    *
-   * **A connection lease answers busy only while its holder is still doing something**
-   * (issue #4312). This used to be `any { leases > 0 }`, and a viewer WebSocket holds a lease for
-   * the socket's whole life — so one browser tab left open on a catalog pinned the clock at *busy*
-   * indefinitely, whether or not anyone was looking at it. Everything gated on the clock then
-   * stopped: measured on the public box, a single idle tab held the optimizer's gate shut for eight
-   * consecutive minutes with zero renders, after which only the ceiling (#4288) let work through,
-   * at a trickle.
-   *
-   * Residency and busyness are two questions, and `leases > 0` answered both with one number. A
-   * lease still keeps its session resident unconditionally — the reaper must never close a live
-   * socket's host mid-connection — but a **connection** lease stops *suppressing this clock* once
-   * its holder has been quiet for [leaseBusyMillis]. Interrupting an optimizer pass costs a
-   * returning visitor at most one render (`OPTIMIZER_YIELD_MILLIS`), so the trade is one-sided.
-   *
-   * A **request-scoped** lease is never aged out, however long it runs. `withLeasedSession` wraps
-   * ordinary HTTP work in one, and that work is not always quick — a cold `/render` is 30-70s, a
-   * `/bundle.zip` longer — so ageing those out would let background work start against exactly the
-   * foreground render this gate exists to protect. See [lease].
-   *
-   * Use [connectionIdleMillis] where a live connection must count regardless of activity.
+   * A connection lease answers busy only while its holder is active (within [leaseBusyMillis]);
+   * otherwise one forgotten tab held the gate shut indefinitely (see #4312). It still keeps its
+   * session resident. Request-scoped leases never age out, since that work may be a long foreground
+   * render. Use [connectionIdleMillis] where any open connection must count.
    */
   fun idleMillis(now: Long = clock()): Long? = lock.withLock {
     if (sessions.values.any { it.isBusy(now) }) null else now - lastActivity
   }
 
   /**
-   * [idleMillis] under the strict rule: **any** open lease answers busy, however quiet its holder.
-   *
-   * The `--exit-when-idle` watchdog reads this one rather than the relaxed clock. Standing an
-   * optimizer pass down under an idle tab costs that tab one render when it comes back; tearing the
-   * process down under it drops a live socket, so the two want different definitions of busy even
-   * though both are asking "is anyone here?".
+   * [idleMillis] under the strict rule: any open lease is busy. Used by `--exit-when-idle`, since
+   * exiting would drop a live socket.
    */
   fun connectionIdleMillis(now: Long = clock()): Long? = lock.withLock {
     if (sessions.values.any { it.leases > 0 }) null else now - lastActivity
   }
 
   /**
-   * Whether this entry has a holder that answers *busy*: any request-scoped lease, or a connection
-   * lease whose holder has been active recently enough. See [idleMillis].
+   * Whether this entry has a busy holder: any request lease, or a recently active connection lease.
    */
   private fun Entry.isBusy(now: Long): Boolean =
     requestLeases > 0 || (connectionLeases > 0 && now - lastLeaseActivity < leaseBusyMillis)
 
   /**
-   * Session ids holding at least one open lease, sorted — i.e. exactly the set keeping a session
-   * resident, and exactly the set that makes [connectionIdleMillis] answer `null`.
-   *
-   * Published on `/status.json` because a busy answer with nothing to attribute it to is not
-   * diagnosable from outside the process, and everything downstream of the idle clock (the theme
-   * optimizer's quiet gate, the `--exit-when-idle` watchdog) then looks broken for no visible
-   * reason. A lease is released in a `finally`, but a request cancelled mid-flight can still leak
-   * one — see `withLeasedSessionOrNull` — and a leaked lease keeps a session resident for the life
-   * of the process. This names the holder so that failure is a one-line read rather than an
-   * inference.
-   *
-   * Since #4312 this is a *superset* of what shuts the optimizer's gate: see [busyLeasedSessions]
-   * for the holders that are also currently counting as busy.
+   * Sessions holding at least one open lease, sorted: exactly what keeps sessions resident and
+   * makes [connectionIdleMillis] null. Published on `/status.json` so a leaked lease (e.g. from a
+   * cancelled request) is attributable. A superset of [busyLeasedSessions].
    */
   fun leasedSessions(): List<String> = lock.withLock {
     sessions.entries.filter { it.value.leases > 0 }.map { it.key }.sorted()
   }
 
   /**
-   * The subset of [leasedSessions] whose holder has been active within [leaseBusyMillis] — i.e.
-   * exactly the set that makes [idleMillis] answer `null`.
-   *
-   * The two lists are published side by side so the interesting state is readable rather than
-   * inferred: `leasedSessions` non-empty with this one empty is the idle-tab case, a session held
-   * resident for a connection nobody is using.
+   * The subset of [leasedSessions] whose holder is currently busy (what makes [idleMillis] null).
+   * Leased-but-not-busy is the idle-tab case.
    */
   fun busyLeasedSessions(now: Long = clock()): List<String> = lock.withLock {
     sessions.entries.filter { it.value.isBusy(now) }.map { it.key }.sorted()
   }
 
   /**
-   * Suspend (close the daemon of, keep the state of) resident sessions idle past the timeout.
-   *
-   * The [suspendListeners] notification and the host `close()` both run **after** the lock is
-   * released — a `close()` can block on daemon shutdown, and a listener may re-enter the registry —
-   * so the only work under the lock is detaching each host from its entry. Listeners see the host
-   * before it's closed, so a snapshot they take reads live state.
-   *
-   * Each detached entry is marked [Entry.closing] for that window so a concurrent resume waits for
-   * the old daemon to die rather than starting a second one alongside it (see [liveHost]) — the
-   * serialisation that closing-under-the-lock used to provide, without the stall.
+   * Suspend resident sessions idle past the timeout. Only detaching happens under the lock;
+   * listener notification and host `close()` run after, with each entry marked [Entry.closing] so a
+   * concurrent resume waits for the old daemon (see [liveHost]).
    */
   fun suspendIdle(): Int = suspendResident(idleTimeoutMillis, limit = Int.MAX_VALUE)
 
   /**
-   * Suspend resident sessions **now** because the box is out of memory, least-recently-touched
-   * first, without waiting out [idleTimeoutMillis].
-   *
-   * The registry could previously only refuse new work and reap on a clock. Nothing shed what was
-   * already resident, so a box that filled faster than the idle window could drain it had no path
-   * between "fine" and "the kernel picked a victim": on preview.coo.ee, twenty-odd daemons, the
-   * container at 0% available while the host still had 70% free, and a restart every twenty
-   * minutes. The pressure gate that detects the condition already exists and already fires -- it
-   * just had nothing to call.
-   *
-   * Sheds one session per sweep by default. Suspending is not free (a visitor pays a rebuild, and
-   * an unfinished optimizer pass is parked), so this trades a slice of service for staying up, and
-   * takes the smallest slice that still moves. [limit] raises that for a box falling faster than
-   * one host per sweep frees.
-   *
-   * Every guard [suspendIdle] applies still applies: a pinned session, an open lease, a live stream
-   * or active background work is never shed. Under pressure the LRU order matters where it did not
-   * before -- an idle sweep takes everything eligible, this takes the one least likely to be
-   * missed.
+   * Suspend resident sessions now because the box is out of memory, least-recently-touched first,
+   * without waiting out [idleTimeoutMillis]. Sheds one per sweep by default (suspending costs a
+   * visitor a rebuild); [limit] raises it. Every [suspendIdle] guard still applies: pinned, leased,
+   * streaming or background-active sessions are never shed.
    */
   fun shedUnderPressure(limit: Int = 1): Int =
     suspendResident(idleMillis = 0, limit = limit, leastRecentlyUsedFirst = true)
 
   /**
-   * The shared sweep behind [suspendIdle] and [shedUnderPressure].
-   *
-   * One body rather than two, because the delicate part is not the selection -- it is the detach:
-   * the snapshot captured under the lock in the same transition as `host = null`, the `closing`
-   * gate a concurrent resume waits on, and the listener/close pass that must run outside the lock
-   * and must clear that gate even when a listener throws. A second copy of that would drift.
+   * Shared sweep behind [suspendIdle] and [shedUnderPressure], kept as one body because the detach
+   * (snapshot under the lock, the `closing` gate, and the outside-lock close that must always clear
+   * it) is the delicate part.
    */
   private fun suspendResident(
     idleMillis: Long,
@@ -697,15 +513,9 @@ class ServeSessionRegistry(
   }
 
   /**
-   * Ask every resident host to close the daemon subprocesses it has held idle past
-   * [idleTimeoutMillis], returning the total closed. Complements [suspendIdle] rather than
-   * duplicating it: that one releases a whole host and skips **pinned** sessions, which is exactly
-   * the set (registered bundle/catalog hosts) whose pooled daemons were accumulating unbounded —
-   * one catalog on the public box held ten resident daemon processes with no streams and no
-   * traffic. A pinned host stays listed and instantly resumable; only its idle pool shrinks.
-   *
-   * Runs outside the lock: closing a subprocess can block, and a host doing so must not stall an
-   * unrelated session's acquire. A host closed concurrently by [suspendIdle] just reports zero.
+   * Ask every resident host to close daemons idle past the window, returning the count. Complements
+   * [suspendIdle], which skips pinned sessions: their pooled daemons otherwise accumulate. Runs
+   * outside the lock since closing can block.
    */
   fun releaseIdleDaemons(): Int {
     val window = if (daemonIdleMillis > 0) daemonIdleMillis else idleTimeoutMillis
@@ -717,28 +527,13 @@ class ServeSessionRegistry(
   }
 
   /**
-   * Bring back the parked catalog that has waited longest, while a lane is free to give it.
+   * Bring back the longest-parked catalog with unfinished optimization while a lane is free.
+   * Progress survives in [ServeSessionState.catalogThemeCache], but restarting the pass relies on
+   * visitor heartbeats ([ServeHost.keepLiveWarm]); this is the heartbeat for an unbrowsed box.
    *
-   * The counterpart to letting an unfinished optimizer be suspended at all. Its progress survives —
-   * a catalog's rendered PNGs live in [ServeSessionState.catalogThemeCache], which outlives the
-   * host — but nothing would *restart* the pass: re-entry rides on [ServeHost.keepLiveWarm], which
-   * a visitor's presence heartbeat drives, so on a box nobody is browsing the parked catalogs would
-   * simply stop. This is the heartbeat they would otherwise never get.
-   *
-   * Bounded by [ServeBackgroundWork.optimizerResumeSlots] because resuming is not free: it costs a
-   * cold Android daemon (34-68s) and holds roughly a gigabyte for as long as the host stays up.
-   * That budget is the free lanes **plus one challenger**: bounding it at the free lanes alone
-   * starves every catalog that is not already resident, because a pass re-queues the instant its
-   * slice ends, so every later sweep reads zero and the parked ones wait for an incumbent to
-   * *finish* — hours, for a 10,440-target catalog. The extra slot puts the longest-parked catalog
-   * at the door, where admission's own fairness hands it the next lane ahead of the incumbent that
-   * just ran, and the displaced incumbent is suspended in its turn.
-   *
-   * Longest-parked first by [Entry.suspendedAt] — not by `lastAccess`, which would resurrect
-   * whatever the same sweep had just suspended.
-   *
-   * **Only on a quiet server.** A resume is background work like the renders it leads to, and a
-   * cold start landing while someone is browsing competes with them for the seat budget.
+   * Bounded by [ServeBackgroundWork.optimizerResumeSlots] (free lanes plus one challenger, so
+   * parked catalogs reach the door instead of waiting for incumbents to finish), since a resume
+   * costs a cold daemon and ~1 GB. Ordered by [Entry.suspendedAt]. Only on a quiet server.
    */
   fun resumeIdleOptimizers(): Int {
     val toWarm = lock.withLock {
@@ -750,18 +545,14 @@ class ServeSessionRegistry(
           // Longest-parked first — see [Entry.suspendedAt] for why this is not `lastAccess`.
           .sortedBy { it.suspendedAt ?: Long.MIN_VALUE }
       val resumed = mutableListOf<ServeHost>()
-      // Read once, from any candidate: every catalog on a server shares the one process-wide
-      // [ServeBackgroundWork], and re-reading it per entry would let a resume this loop just made
+      // Read once: all catalogs share one [ServeBackgroundWork], and re-reading would let this loop
       // widen its own budget.
       var slots = candidates.firstOrNull()?.state?.backgroundWork?.optimizerResumeSlots() ?: 0
       for (entry in candidates) {
         if (slots <= 0) break
         val host = liveHost(entry) ?: continue
-        // The session's own idle clock, NOT `lastActivity`: that one is the whole-server quiet
-        // gate the optimizer reads, and stamping it here would have the resume report the server
-        // as busy and refuse the very turn it was resumed to take. This one only buys the host
-        // `idleTimeoutMillis` before [suspendIdle] looks at it again, which is the slice it needs
-        // to win a lane and render.
+        // The session's own idle clock, not the server-wide `lastActivity` (which would make the
+        // optimizer see the server as busy); buys the host one suspension window to win a lane.
         entry.lastAccess = clock()
         entry.suspendedAt = null
         runCatching { entry.state?.backgroundWork?.recordOptimizerHostResumed() }
@@ -777,17 +568,9 @@ class ServeSessionRegistry(
   }
 
   /**
-   * Put one named catalog's optimizer back to work, reviving its host if it has been suspended.
-   *
-   * The explicit counterpart to [resumeIdleOptimizers]. Marking a catalog's renders dirty changes
-   * what there is to do but wakes nobody: a converged catalog's pass has already exited, and for
-   * most catalogs most of the time the host is suspended as well. Left to the background rotation
-   * the mark would sit until the reaper next ran and a lane happened to be free, so the action that
-   * reports a queue would be telling the truth about the queue and not about anyone working it.
-   *
-   * Deliberately NOT bounded by [ServeBackgroundWork.optimizerResumeSlots]: that budget paces a
-   * rotation nobody asked for, and this is a request. Admission still applies once the pass runs —
-   * waking a host is not the same as granting it a lane.
+   * Put one named catalog's optimizer back to work, reviving its host if suspended. The explicit
+   * counterpart to [resumeIdleOptimizers]: marking renders dirty wakes nobody by itself. Not
+   * bounded by resume slots (this is a request), but admission still applies once the pass runs.
    */
   fun wakeOptimizer(sessionId: String): Boolean {
     val host =
@@ -795,9 +578,7 @@ class ServeSessionRegistry(
         if (closed) return false
         val entry = sessions[sessionId] ?: return false
         if (entry.closing) return false
-        // Buys the host `idleTimeoutMillis` before [suspendIdle] looks at it again — the slice it
-        // needs to win a lane. See [resumeIdleOptimizers] for why this is `lastAccess` and not the
-        // server-wide quiet clock the optimizer's own gate reads.
+        // Buys the host one suspension window; see [resumeIdleOptimizers] for why `lastAccess`.
         entry.lastAccess = clock()
         if (entry.suspendedAt != null) {
           entry.suspendedAt = null
@@ -812,33 +593,21 @@ class ServeSessionRegistry(
   }
 
   /**
-   * Whether this session is a catalog with theme-optimization targets left to fill.
-   *
-   * Read from [ServeSessionState] rather than from a host, because the whole point is to ask it of
-   * a session whose host is gone. A session with no cache, or one whose optimizer is switched off
-   * (no targets are ever configured, so `total` stays 0), is not a candidate.
+   * Whether this session is a catalog with optimization targets left, read from [ServeSessionState]
+   * since the host may be gone. No cache or optimizer off (`total` 0) ⇒ not a candidate.
    */
   private fun optimizerUnfinished(state: ServeSessionState?): Boolean {
     val snapshot = state?.catalogThemeCache?.snapshot() ?: return false
-    // `converged`, NOT `fullyOptimized`. A catalog whose every target is warm but whose renders
-    // came from another build still has work — and it is the case an operator's "regenerate this
-    // catalog" creates deliberately. Asking the narrower question here left the newly marked
-    // catalog excluded from every resume, so the action reported a queue that nothing would ever
-    // come and work.
+    // `converged`, not `fullyOptimized`: warm entries from another build (or a requested
+    // regenerate) still need work.
     return snapshot.total > 0 && !snapshot.converged
   }
 
   /**
-   * Second-level reclaim (issue #2022): fully **remove** *forked* sessions — ones built on demand
-   * by [factory] (project mode `?session=<rev>`), each with a git worktree on disk — that have
-   * stayed suspended (no live host, no lease) past [suspendedGcTimeoutMillis], running each one's
-   * [ServeSessionState.reclaim] to prune its worktree. Pinned/registered sessions are never
-   * removed, so the current checkout and bundle/catalog hosts stay permanently resumable. A later
-   * `?session=<rev>` for a reclaimed revision simply rebuilds it. Returns the number reclaimed.
-   *
-   * Idle is measured from [Entry.lastAccess] (the last acquire/lease), the same basis as
-   * [suspendIdle], so the window means "untouched for this long" — which is what a long-lived
-   * project server wants: a revision nobody has opened in the GC window is gone, worktree and all.
+   * Second-level reclaim: remove forked sessions (project-mode revisions with worktrees) suspended
+   * past [suspendedGcTimeoutMillis], running [ServeSessionState.reclaim] to prune worktrees (see
+   * #2022). Registered sessions are never removed; a reclaimed revision just rebuilds. Idle is
+   * measured from [Entry.lastAccess]. Returns the count.
    */
   fun reclaimIdleForked(): Int = lock.withLock {
     if (closed || suspendedGcTimeoutMillis <= 0) return 0
@@ -851,11 +620,8 @@ class ServeSessionRegistry(
     }
     for ((id, entry) in stale) {
       sessions.remove(id)
-      // The second removal path, and it has to discard too. Every suspended session is captured —
-      // a forked revision host included, which contributes an empty map since it is no catalog —
-      // so a GC that removed the entry without the snapshot would leak one per reclaimed revision
-      // and defeat exactly the bound this function exists to enforce. Under the same lock as the
-      // removal, like [unregister].
+      // Discard the snapshot too (under the same lock, like [unregister]), or one would leak per
+      // reclaimed revision.
       snapshots?.let { runCatching { it.discard(id) } }
       runCatching { entry.state?.reclaim?.invoke() }
     }
@@ -863,26 +629,16 @@ class ServeSessionRegistry(
   }
 
   /**
-   * The resident host for [sessionId] **without** resuming a suspended one — for read-only status
-   * introspection (`/status`) that must not wake an idle daemon (a monitor/Home Assistant poll
-   * shouldn't keep every live catalog's daemon alive). Null when unknown or currently suspended.
-   *
-   * A null here means "not resident", **not** "no such metadata": a caller that needs a suspended
-   * session's facts should keep its own last-known snapshot via [addSuspendListener] rather than
-   * reading absence as a verdict.
+   * The resident host for [sessionId] without resuming, for read-only introspection that mustn't
+   * wake daemons. Null means not resident, not "no metadata"; keep a snapshot via
+   * [addSuspendListener] for suspended sessions.
    */
   fun peekHost(sessionId: String): ServeHost? = lock.withLock { sessions[sessionId]?.host }
 
   /**
-   * The retained state for [sessionId] without resuming it — null when nothing is registered under
-   * that id.
-   *
-   * [peekHost] answers null for a session the idle reaper has suspended, which since the optimizer
-   * residency work is *most catalogs most of the time*: a caller that only peeks at hosts therefore
-   * cannot tell "no such catalog" from "that catalog is idle", and would refuse work on the ones it
-   * exists to serve. The state outlives the host by design, and the durable things hang off it —
-   * `catalogThemeCache` among them — so an operation that touches those should reach them here and
-   * leave the daemon asleep.
+   * The retained state for [sessionId] without resuming; null when unregistered. Unlike [peekHost],
+   * distinguishes "no such catalog" from "idle", and reaches durable state like `catalogThemeCache`
+   * while the daemon sleeps.
    */
   fun peekState(sessionId: String): ServeSessionState? = lock.withLock {
     sessions[sessionId]?.state
@@ -895,9 +651,8 @@ class ServeSessionRegistry(
   fun knownSessionIds(): List<String> = lock.withLock { sessions.keys.sorted() }
 
   /**
-   * Any registered session id, or null when none are — used by the module-less server to pick a
-   * landing session so `/` resolves to something. Insertion order isn't guaranteed (HashMap), so
-   * the caller prefers a specific id (a catalog / the first bundle) and only falls back to this.
+   * Any registered session id, or null; the module-less server's last-resort landing session (order
+   * isn't guaranteed).
    */
   fun anySessionId(): String? = lock.withLock { sessions.keys.firstOrNull() }
 
@@ -917,22 +672,16 @@ class ServeSessionRegistry(
   }
 
   /**
-   * Existing entry, or one forked via [factory]. Caller holds [lock].
-   *
-   * The reserved-name guard from [register] applies here too: a `--revisions` ref named after one
-   * of the server's own routes (`api`, `status`, …) would otherwise be forked on first request,
-   * never having passed through [register], and would then be served by `/{system}/` on a top-level
-   * site host — the exact leak the guard exists to prevent. Refusing the fork keeps the invariant
-   * "no session is ever named after a rooted route" true for every entry in [sessions].
+   * Existing entry, or one forked via [factory]; caller holds [lock]. Applies [register]'s
+   * reserved-name guard, since forked refs never pass through [register].
    */
   private fun entryFor(sessionId: String): Entry? {
     sessions[sessionId]?.let {
       return it
     }
     if (sessionId in ServeSites.RESERVED_SYSTEMS) return null
-    // Hold the lock across the build so racing first-callers for one id can't build twice. A build
-    // is
-    // slow, but a shared dev/CI server has few tenants and correctness beats build concurrency.
+    // The lock is held across the build so racing first-callers can't build twice; correctness
+    // beats build concurrency for few tenants.
     val state = factory.create(sessionId) ?: return null
     // forked = true: built on demand (a git worktree on disk), so it's GC-eligible once long idle.
     return Entry(state, host = null, pinned = false, forked = true, lastAccess = clock()).also {
@@ -941,26 +690,13 @@ class ServeSessionRegistry(
   }
 
   /**
-   * The entry's live host, resuming (re-opening) from its state if it was suspended. Caller holds
-   * [lock].
+   * The entry's live host, resuming from its state if suspended; caller holds [lock].
    *
-   * A resume that lands mid-suspension first waits for the outgoing daemon to finish closing
-   * ([Entry.closing]) — otherwise this would open its replacement alongside a daemon that is still
-   * shutting down, briefly doubling that session's memory and live-seat cost. `await` releases the
-   * lock while parked, so the closer (which re-takes it only to clear the flag) still makes
-   * progress, and other sessions are unaffected.
-   *
-   * **[open] runs with the lock released.** Re-opening a catalog host resolves its bundle classpath
-   * and launches (and prewarms) an Android daemon — seconds at best, a minute on a loaded box. Held
-   * under the one registry lock, that stalled every request to every *other* session for the whole
-   * open: on preview.coo.ee a warm catalog's landing page went from 0.4 s to 25 s while one
-   * suspended catalog resumed, and the shedder suspends one per sweep under memory pressure, so
-   * this was the steady state rather than an edge. [Entry.opening] keeps the per-session guarantee
-   * the lock used to give for free — one opener per session, a second caller waits for its host —
-   * without serialising unrelated sessions behind it.
-   *
-   * If the entry was retired or replaced, or the registry closed, while the lock was released, the
-   * host just opened belongs to nobody: it is closed (outside the lock again) and null returned.
+   * Waits out an in-progress close ([Entry.closing]) so two daemons never coexist for one session
+   * (`await` releases the lock). [open] itself runs with the lock released, because reopening can
+   * take seconds to a minute and would stall every other session; [Entry.opening] keeps one opener
+   * per session. If the entry was retired, replaced or the registry closed meanwhile, the new host
+   * is closed and null returned.
    */
   private fun liveHost(entry: Entry): ServeHost? {
     // `!closed` first: [close] signals on its way out, and a waiter that re-parked because an
@@ -1007,20 +743,14 @@ class ServeSessionRegistry(
   }
 
   /**
-   * A snapshot of every **currently-resident** session (host live right now) for the `/status`
-   * page's "running servers" view — id-sorted for stable output. Reads each host's cheap
-   * [ServeHost.activeStreamCount]/[ServeHost.hasLiveStream] getters under the lock (neither
-   * re-enters the registry). Suspended sessions are omitted; a caller wanting only live *daemons*
-   * filters on [RunningDaemon.hasLiveStream] (a pinned static bundle host is resident but runs no
-   * daemon).
+   * Every resident session for `/status`, id-sorted. Reads cheap host getters under the lock.
+   * Filter on [RunningDaemon.hasLiveStream] for live daemons only.
    */
   fun runningDaemons(): List<RunningDaemon> = lock.withLock {
     sessions
       .mapNotNull { (id, entry) ->
         val host = entry.host ?: return@mapNotNull null
-        // A registered-but-never-woken catalog carries a host object and no subprocess. Reporting
-        // it here would keep the running count (and its `startedAt` uptime) tied to registration,
-        // which is precisely what the lazy open exists to decouple.
+        // A registered-but-never-woken catalog has a host but no subprocess, so it isn't reported.
         if (!host.daemonStarted) return@mapNotNull null
         RunningDaemon(
           id = id,
@@ -1040,44 +770,29 @@ class ServeSessionRegistry(
 
   internal companion object {
     /**
-     * Default idle window before a resident session's daemon is suspended.
-     *
-     * Visible beyond this class because the page-side presence heartbeat
-     * ([ServeWeb.PRESENCE_INTERVAL_SECONDS]) has to fit inside it with room for a dropped ping — a
-     * relationship worth asserting rather than restating.
+     * Default idle window before a resident session's daemon is suspended. Public because the
+     * page's presence heartbeat ([ServeWeb.PRESENCE_INTERVAL_SECONDS]) must fit inside it with room
+     * for a dropped ping.
      */
     const val DEFAULT_IDLE_TIMEOUT_MILLIS = 10 * 60 * 1000L
 
     /**
-     * Default second-level window before a *forked* suspended session is removed and its worktree
-     * pruned (issue #2022) — an hour, comfortably past the 10-minute suspend window so a session
-     * always suspends first. Pinned/registered sessions are exempt regardless.
+     * Default window before a forked suspended session is removed (an hour), well past the suspend
+     * window.
      */
     const val DEFAULT_SUSPENDED_GC_TIMEOUT_MILLIS = 60 * 60 * 1000L
 
     /**
-     * Default idle window before a pooled daemon is closed and its live seat returned — a minute,
-     * against the ten a whole session gets. A replica reopens from its launch descriptor whenever
-     * the next burst needs it; a suspended session costs a visitor a rebuild. Different prices, so
-     * different windows.
+     * Default idle window before a pooled daemon closes (a minute): replicas reopen cheaply, while
+     * suspended sessions cost a rebuild.
      */
     const val DEFAULT_DAEMON_IDLE_MILLIS = 60 * 1000L
 
     /**
-     * Default quiet window before an open lease stops answering *busy* on [idleMillis] — thirty
-     * seconds, against the ten minutes a whole session gets before suspension.
-     *
-     * The two windows price different mistakes. Suspending a session under a visitor costs them a
-     * daemon rebuild, so that one is generous. Letting a background pass start under a visitor
-     * costs them one render — the optimizer yields as soon as a request lands
-     * (`OPTIMIZER_YIELD_MILLIS`) — so this one can afford to be short, and has to be: it must sit
-     * **below** the optimizer's 60s cold-entry window (`themeOptimizationIdleMillis`), or a lease
-     * that only stops counting as busy after the gate's own window would still be the binding
-     * constraint and the gate would never open under a held lease.
-     *
-     * It also sits well below the page's presence heartbeat ([ServeWeb.PRESENCE_INTERVAL_SECONDS],
-     * 240s), so an open tab's own keepalive can't keep the lease permanently "active" — the
-     * heartbeat re-arms the clock every four minutes and it runs freely in between.
+     * Default quiet window before an open lease stops counting as busy on [idleMillis]. Short
+     * because a background pass under a visitor costs only one render, and it must be below the
+     * optimizer's 60s entry window or a held lease would keep the gate shut. Also well below the
+     * 240s presence heartbeat, so a tab's keepalive can't keep it permanently active.
      */
     const val DEFAULT_LEASE_BUSY_MILLIS = 30 * 1000L
   }

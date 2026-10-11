@@ -83,10 +83,9 @@ export class ElementSelection extends ControllerElement {
         // A reflow moves the frame under an already-drawn marquee, so the box has to be re-placed
         // rather than left where the pointer put it.
         this.on(window, "resize", () => this.placeMarquee());
-        // Clicking an annotated element — the brief's first of two ways to choose, alongside the
-        // drag. `<cp-inspect-layers>` raises this from a box on the Actual panel when its host is
-        // selectable; the boxes are its to own, so it announces the pick rather than this component
-        // reaching into another element's DOM.
+        // Clicking an annotated element, the second way to choose besides dragging:
+        // `<cp-inspect-layers>` raises this from a box on the Actual panel when its host is
+        // selectable.
         this.on(window, "cp-element-pick", ((event: CustomEvent) =>
             this.pickAnnotation(event.detail?.bounds)) as EventListener);
 
@@ -97,12 +96,10 @@ export class ElementSelection extends ControllerElement {
     // ---- tags ----------------------------------------------------------------
 
     /**
-     * Fetch the published index and fill the picker.
-     *
-     * The absence of `data-cp-tags` is the server saying a tag selection would not describe this
-     * frame — an override or a pin has re-rendered it, or the catalog publishes no index — so the
-     * picker stays hidden and the drag stays available. That is deliberately not the same as "no
-     * tags": see `ServeWeb.referenceComparisonPage`'s `tagIndexUrl`.
+     * Fetch the published tag index and fill the picker. Without `data-cp-tags` the server is
+     * saying a tag selection wouldn't describe this frame (overridden, pinned, or no index), so the
+     * picker stays hidden; not the same as "no tags" (see `ServeWeb.referenceComparisonPage`'s
+     * `tagIndexUrl`).
      */
     private async loadTags(): Promise<void> {
         const url = this.root?.getAttribute("data-cp-tags");
@@ -114,9 +111,8 @@ export class ElementSelection extends ControllerElement {
             if (!response.ok) return;
             payload = await response.json();
         } catch {
-            // A host that cannot answer leaves the page exactly as it was: the drag is still there,
-            // and a picker that appeared empty would read as "this render has no tagged elements",
-            // which is a different and false claim.
+            // A host that can't answer leaves the page as is; an empty picker would falsely claim
+            // no tagged elements.
             return;
         }
         this.targets = tagTargets(payload);
@@ -171,9 +167,8 @@ export class ElementSelection extends ControllerElement {
         const tag = this.picker?.value ?? "";
         const target = this.targets.find((entry) => entry.tag === tag);
         if (!tag || !target) return this.clear();
-        // Belt and braces with the disabled option above: an ambiguous tag reaching here (a
-        // keyboard path, a page script, a browser that ignores `disabled`) must not become an
-        // element selector.
+        // An ambiguous tag reaching here (keyboard, script, ignored `disabled`) must not become a
+        // selector.
         if (target.ambiguous) return this.clear();
         // `bounds` may be absent — a tag whose every carrying node had a zero-area box still counts
         // — and an element with no region is a perfectly good record. It is `count` that makes a
@@ -222,18 +217,14 @@ export class ElementSelection extends ControllerElement {
         // selected. The render plane is a property of the render, so a point converted early stays
         // valid however the display subsequently resizes.
         let startRender: { x: number; y: number } | null = null;
-        // The gesture belongs to ONE pointer. `touch-action: none` means the browser no longer
-        // steals a touch drag for scrolling, so a second finger landing on the overlay is now
-        // reachable — and without this it would reset the origin and let either contact finish the
-        // gesture, recording a rectangle spanning two fingers that nobody drew.
+        // The gesture belongs to one pointer: with `touch-action: none` a second finger is
+        // reachable and would otherwise reset the origin.
         let owner: number | null = null;
         const mine = (event: PointerEvent) =>
             owner === null || event.pointerId === owner;
         const offs: Array<() => void> = [];
-        // The frame may still be decoding when the drag is armed. Both of these keep the overlay
-        // matched to it: `load` for the first geometry it ever has, and the observer for every
-        // reflow after. Without them, arming a drag on an undecoded frame gives a 0x0 surface that
-        // cannot be dragged on at all.
+        // The frame may still be decoding; `load` and the observer keep the overlay matched, or the
+        // surface is 0x0.
         const resizes =
             typeof ResizeObserver === "function"
                 ? new ResizeObserver(() => this.sizeLayer())
@@ -282,9 +273,7 @@ export class ElementSelection extends ControllerElement {
             owner = event.pointerId;
             start = local(event);
             startRender = toRenderPoint(start, frame);
-            // Capture, so `pointermove`/`pointerup` keep arriving here once the pointer leaves the
-            // frame. Guarded: happy-dom and older engines have no such method, and a drag that
-            // stays inside the frame works without it.
+            // Capture so moves keep arriving outside the frame; guarded for engines without it.
             layer.setPointerCapture?.(event.pointerId);
             draw(start, start);
         }) as EventListener);
@@ -303,14 +292,9 @@ export class ElementSelection extends ControllerElement {
             // A click with no drag is a cancel, not an error — that is what a stray click on a
             // full-frame overlay IS.
             if (!bounds) return this.describe();
-            // A drag REPLACES the selection, tag included. It is tempting to keep a chosen tag so
-            // "this tag, in this corner" is expressible, and that reading is wrong for this field:
-            // `bounds` is the selected element's *authoring-time baseline*, the thing a later
-            // movement gate measures from. Pairing a tag with a rectangle that is not that
-            // element's box records a baseline the element never had, so an unchanged element
-            // later reports as moved — the exact failure the plane rules elsewhere in this batch
-            // exist to prevent, arriving through the selector instead of through a coordinate
-            // space. A reporter who wants the tag back picks it again, and the picker says so.
+            // A drag replaces the selection, tag included: `bounds` is the element's authoring-time
+            // baseline, and pairing a tag with a rectangle that isn't its box would later report
+            // the element as moved.
             if (this.picker) this.picker.value = "";
             this.apply({ bounds });
         }) as EventListener);
@@ -330,13 +314,8 @@ export class ElementSelection extends ControllerElement {
     }
 
     /**
-     * Match the overlay to the frame's CURRENT box.
-     *
-     * Re-run rather than done once, because the frame may not have decoded when the drag is armed:
-     * the Actual panel's image sizes itself, so before it loads its client box is zero and the
-     * overlay would be a 0×0 surface nothing can be dragged on — an armed gesture that silently
-     * cannot start, recoverable only by cancelling and trying again. `startDrag` keeps this in step
-     * with the image's own geometry for as long as the gesture is live.
+     * Match the overlay to the frame's current box; re-run because the image may not have decoded
+     * when the drag is armed (zero box). `startDrag` keeps it in step.
      */
     private sizeLayer(): void {
         const layer = this.layer;

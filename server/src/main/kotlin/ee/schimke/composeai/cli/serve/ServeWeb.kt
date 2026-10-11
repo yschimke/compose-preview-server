@@ -33,16 +33,9 @@ object ServeWeb {
   /**
    * Sign-in affordance for a GitHub-protected live stream lane.
    *
-   * Deliberately carries no repository: the live stream gates on *being signed in*, nothing more
-   * ([ServeHttpServer.rejectMissingGithubRepoAccess] is the playground's gate, not this one). The
-   * chip used to name `--github-auth-repo` in its tooltip, which read as "you need access to that
-   * repo for Live" — the opposite of the rule, and enough to make an outside contributor give up
-   * before clicking (wear-m3-catalog#68).
-   *
-   * [restrictedToAllowedUsers] is the one thing that can narrow it: with `--github-auth-users` set,
-   * [GitHubOAuthVerifier] refuses every login outside the list, so "any GitHub account works" would
-   * walk those visitors through OAuth to a 403. Same distinction the front door's control already
-   * draws — the allowlist restricts *sign-in itself*, which the repo check never did.
+   * Deliberately names no repository: live streams gate only on being signed in.
+   * [restrictedToAllowedUsers] reflects `--github-auth-users`, which restricts sign-in itself, so
+   * the prompt must not promise that any GitHub account works.
    */
   data class LiveAuthPrompt(
     val loginHref: String,
@@ -53,39 +46,28 @@ object ServeWeb {
   data class GitHubAuthStatus(
     val loginHref: String,
     /**
-     * `POST` target of the "Sign out" control shown beside a signed-in login
-     * ([ServeGithubAuth.logoutPath]), carrying the current page as its `return`.
-     *
-     * Null means no sign-out is offered — the state a page built before this existed, and a
-     * signed-out visitor, are both served correctly by that. A `POST` rather than a link because a
-     * sign-out a prefetcher can fire by looking at a URL is not one; the control is therefore a
-     * one-button form rather than an anchor.
+     * `POST` target of the "Sign out" control ([ServeGithubAuth.logoutPath]), carrying the current
+     * page as its `return`. Null offers no sign-out. A one-button form rather than a link, so a
+     * prefetcher cannot sign the visitor out.
      */
     val logoutHref: String? = null,
     val login: String? = null,
     val restrictedToAllowedUsers: Boolean = false,
     /**
-     * What the sign-in unlocks on the page carrying this control, which is what its tooltip has to
-     * describe. The two lanes have genuinely different gates — live streams open to any signed-in
-     * visitor, the playground additionally wants access to [accessRepository] — so a control shown
-     * on a catalog whose *only* gated lane is the playground must not promise Live.
-     *
-     * [LIVE] is the default because it is what the front door and `/status` carry: those pages
-     * stand above any one catalog, so they describe the capability the sign-in most broadly unlocks
-     * rather than answering for a particular catalog's lanes.
+     * What the sign-in unlocks on this page, which the tooltip describes. Live streams open to any
+     * signed-in visitor; the playground also needs [accessRepository], so a catalog whose only
+     * gated lane is the playground must not promise Live. [LIVE] is the default for
+     * catalog-independent pages (front door, `/status`).
      */
     val lane: GatedLane = GatedLane.LIVE,
     /**
-     * `--github-auth-repo`, named only when [lane] is [GatedLane.PLAYGROUND] — the one case where
-     * repository access is genuinely part of what the visitor needs. Deliberately absent from the
-     * Live wording: naming it there is the confusion this whole change exists to remove
-     * (wear-m3-catalog#68).
+     * `--github-auth-repo`, named only when [lane] is [GatedLane.PLAYGROUND]; deliberately absent
+     * from the Live wording.
      */
     val accessRepository: String? = null,
     /**
-     * Whether this host sends Web Push notifications ([ServePushNotifier]), and so whether the
-     * Settings menu offers a signed-in visitor the **Notifications** group
-     * ([pushNotificationSettings]). False on a host without a UI builder to notify about.
+     * Whether this host sends Web Push ([ServePushNotifier]), and so whether Settings offers the
+     * **Notifications** group ([pushNotificationSettings]).
      */
     val notifications: Boolean = false,
   )
@@ -97,30 +79,20 @@ object ServeWeb {
   }
 
   /**
-   * What the front door may say about the **UI builder**, and — when the visitor may not use it —
-   * why not.
+   * What the front door may say about the **UI builder**, and why not when the visitor may not use
+   * it.
    *
-   * The builder is where a design system stops being a gallery and starts being a tool: a signed-in
-   * visitor can start a document from any catalog the builder runs for. Advertised nowhere, the
-   * whole surface is reachable only by knowing the URL.
-   *
-   * The invite carries the **decision**, not the credential. The front-door handler asks the same
-   * [ServeUiBuilderAuthorization] the create route will ask ([UiBuilderRouteCapability.WRITE]), so
-   * the card offers exactly what a click would be allowed to do — the page never advertises an
-   * action the POST behind it refuses, and never hides one it would have allowed.
-   *
-   * [deniedReason] is the other half of that, and the reason this is a data class rather than a
-   * boolean. Refusing in silence is the failure mode: a signed-in visitor whose account lacks the
-   * repository access the write capability gates on would otherwise get no chip, no explanation,
-   * and no way to find out that the builder exists or what would let them in.
+   * Carries the decision, not the credential: the handler asks the same
+   * [ServeUiBuilderAuthorization] the create route asks ([UiBuilderRouteCapability.WRITE]), so the
+   * card never offers an action the POST refuses. [deniedReason] exists so a signed-in visitor
+   * without access is told why instead of seeing nothing.
    */
   data class UiBuilderInvite(
     /** The catalogs this host actually runs the builder for; every other card offers nothing. */
     val systems: Set<String>,
     /**
-     * Whether anybody is signed in. The action is offered to signed-in visitors only — creating a
-     * document is a write, and an anonymous visitor's only honest next step is the sign-in control
-     * the header already carries.
+     * Whether anybody is signed in. Creating a document is a write, so the action is offered to
+     * signed-in visitors only.
      */
     val signedIn: Boolean,
     /** Whether this visitor's credential actually carries the builder's write capability. */
@@ -132,18 +104,12 @@ object ServeWeb {
   )
 
   /**
-   * Absolute URLs advertised to link unfurlers for a browser-facing page. [imageUrl] is the thing
-   * that page represents (a featured catalog hero, catalog component, or exact viewer render);
-   * utility/error pages leave it null and get an honest text-only card. Kept explicit rather than
-   * derived here because only the HTTP layer knows the externally visible scheme/host (notably when
-   * Caddy terminates TLS).
+   * Absolute URLs advertised to link unfurlers for a browser-facing page. [imageUrl] is what the
+   * page represents; utility/error pages leave it null for a text-only card. Supplied by the HTTP
+   * layer, which alone knows the external scheme/host (e.g. behind Caddy TLS).
    *
-   * [imageWidth]/[imageHeight] are the image's real pixel dimensions, read from the PNG's IHDR by
-   * the caller. Advertising them is not decoration: without them an unfurler has to download the
-   * image and measure it before it can lay out a card, and both Slack and Google drop the image
-   * rather than block on that when the fetch is slow or the measure fails. They also decide which
-   * card the page gets — see [twitterCard], which stops claiming a large-image card for a thumbnail
-   * that cannot fill one.
+   * [imageWidth]/[imageHeight] are the real PNG dimensions. Without them Slack and Google may drop
+   * the image rather than measure it; they also pick the card type ([twitterCard]).
    */
   data class UnfurlMetadata(
     val pageUrl: String,
@@ -153,52 +119,29 @@ object ServeWeb {
   )
 
   /**
-   * The narrower edge a `summary_large_image` card needs before it is worth asking for.
-   *
-   * Slack and Twitter/X both fall back to the small card for an image below roughly this size, and
-   * Google recommends 512² as the floor for a preview image — so a page that asks for the large
-   * card with a 300×210 component render gets the small one anyway, having first told the fetcher
-   * something untrue. A single component preview genuinely is a thumbnail; asking for `summary` and
-   * getting a clean square beats asking for a banner and getting a broken one.
+   * Minimum edge for a `summary_large_image` card. Slack and Twitter/X fall back to the small card
+   * below roughly this size, and Google recommends 512² as a floor.
    */
   private const val LARGE_CARD_MIN_EDGE = 320
 
   /**
-   * The narrowest and widest **aspect** (width ÷ height) worth claiming a `summary_large_image`
-   * for.
+   * Aspect (width ÷ height) band worth claiming a `summary_large_image` for.
    *
-   * Size was never the whole story. Every consumer lays the large card out in a slot of roughly
-   * 1.91:1 and fits the image to it by cropping, so what the card actually shows is a 1.91:1 window
-   * onto the picture — and the further the picture's own aspect is from that, the less of it
-   * survives. A catalog hero is the worst case in this codebase and it is not a near miss:
-   * `compose-m3`'s is 1078×2399, an aspect of **0.45**, so the window keeps a horizontal band
-   * through the middle of a phone screenshot and throws away 78% of the image. On that particular
-   * render the surviving band was the empty half of an app scaffold — the front door unfurled as a
-   * strip of blank dark pixels, at full card size, having passed the min-edge test comfortably.
-   *
-   * The band is the set of shapes whose crop still leaves roughly two thirds of the picture.
-   * Cropping an image of aspect `a` into a 1.91 slot keeps `a / 1.91` of its height when it is
-   * taller than the slot, and `1.91 / a` of its width when it is wider — so 1.25 and 2.4 are the
-   * points either side where a third of the image starts to disappear. A 4:3 screenshot (1.33)
-   * survives that comfortably; a square watch face (1.0, barely half kept) and a portrait phone
-   * screenshot (0.45, a quarter kept) do not, and both are genuinely better served by `summary`,
-   * which shows the whole image beside the text instead of a slice of it.
-   *
-   * This is a floor for *raw artwork*. The pages that matter most — the front door and each catalog
-   * landing — don't rely on it, because they advertise a drawn [ServeSocialCard] at exactly
-   * 1200×630 (1.90) rather than a render, and so are inside the band by construction.
+   * Consumers crop the large card to roughly 1.91:1, so a picture far from that shape loses most of
+   * itself (a 0.45 portrait phone hero keeps a blank horizontal strip). 1.25..2.4 is where about a
+   * third of the image starts to disappear; outside it `summary` shows the whole image. The front
+   * door and catalog landings use a 1200×630 [ServeSocialCard] and sit inside the band by
+   * construction.
    */
   private const val LARGE_CARD_MIN_ASPECT = 1.25
 
   private const val LARGE_CARD_MAX_ASPECT = 2.4
 
   /**
-   * `twitter:card` for an unfurl — the large-image card only when there is an image *and* we know
-   * it can fill one: big enough on both edges ([LARGE_CARD_MIN_EDGE]) and close enough in shape to
-   * the slot it will be cropped into ([LARGE_CARD_MIN_ASPECT]..[LARGE_CARD_MAX_ASPECT]).
-   *
-   * An image whose dimensions we couldn't read keeps the large card: unknown size is not evidence
-   * of a small or badly-shaped image, and the fetcher measures it itself in that case.
+   * `twitter:card` for an unfurl: the large-image card only when the image is big enough
+   * ([LARGE_CARD_MIN_EDGE]) and close enough to the crop shape
+   * ([LARGE_CARD_MIN_ASPECT]..[LARGE_CARD_MAX_ASPECT]). Unknown dimensions keep the large card; the
+   * fetcher measures it itself.
    */
   private fun twitterCard(unfurl: UnfurlMetadata): String {
     if (unfurl.imageUrl == null) return "summary"
@@ -220,30 +163,15 @@ object ServeWeb {
    * The verdict band a published match percentage falls in — the chip's colour, and nothing else.
    *
    * Restates `matchBand` in `compose-ai-tools/scripts/design-artifacts/design-reference-score.mjs`,
-   * where the number is minted. The thresholds come from the distribution a real catalog produces
-   * rather than from round numbers (issue #4290): the score is measured over the pixels the two
-   * frames actually drew on rather than over the whole canvas, and across wear-m3-catalog's 186
-   * published pairs that runs 4%..100% with a median of 91. 63 sit at or above 95, and the 59 below
-   * 85 are the genuine divergences — a 4% scroll indicator, a 52% picker, a 70% stepper that lost
-   * its button fills.
-   *
-   * A band never decides whether the number is SHOWN, only how it is coloured, so a drift between
-   * the two copies costs a hue and can never hide a finding.
+   * where the number is minted; thresholds come from real catalog distributions. A band never
+   * decides whether the number is shown, so drift between the copies only costs a hue.
    */
   /**
    * One variant of the component a viewer page is showing, for the **compare strip** under its
    * render ([comparisonStripHtml]).
    *
-   * The stage itself can put ONE baseline behind ONE variant. Seeing the same component's other
-   * variants compared otherwise means leaving for the wall, which opens on the whole catalog and
-   * has to be filtered by hand — from a page that already knew which component you were looking at
-   * (`docs/design/COMPARE_NAVIGATION.md`, F4). The strip is that filter, applied without anyone
-   * typing it.
-   *
-   * **Identity only.** Every URL on the strip is built by [comparisonStripHtml] out of `basePath`,
-   * the link query and the asset generation, exactly as the rest of the viewer's links are — the
-   * same split the parity page's locator draws, and the reason a hand-rolled query here could never
-   * lose its token or its `?at=` pin.
+   * Identity only: every URL on the strip is built by [comparisonStripHtml] from `basePath`, the
+   * link query and the asset generation, so it never loses the token or `?at=` pin.
    */
   data class ComponentVariant(
     val previewId: String,
@@ -252,23 +180,15 @@ object ServeWeb {
     /** This variant's imported design reference, when it publishes one. */
     val referenceId: String? = null,
     /**
-     * The match the DELIVERY BRANCH published for this pair, when it has one.
-     *
-     * The strip shows published numbers and scores nothing itself, which is a deliberate limitation
-     * rather than an omission. The viewer bundle is within two kilobytes of its budget
-     * (`serve-web/scripts/check-bundle-budgets.mjs`), so a per-row scorer here would cost every
-     * viewer page the wall's machinery to answer a question the delivery branch has already
-     * answered for these exact pixels. A row with no published number says so and links to the
-     * focused comparison, which scores live.
+     * The match the delivery branch published for this pair, when it has one. The strip scores
+     * nothing itself: the viewer bundle is near its size budget, and the focused comparison scores
+     * live.
      */
     val matchPercent: Double? = null,
     /**
-     * The paired catalog's render of this variant, when the `compareWith` + `parallel` pairing
-     * resolves for it — the same same-origin URL the lane's `parallel` source puts on the stage
-     * ([SpecSource.rasterUrl]), so the strip and the stage can never show two different pictures
-     * under one name. Null for a variant the sibling does not draw, which the strip shows as an
-     * empty frame rather than as the component's default (`ServeParallelPairing`'s reason: a
-     * missing cell is a finding, not an inconvenience).
+     * The paired catalog's render of this variant when the `compareWith` + `parallel` pairing
+     * resolves — the same URL the stage uses ([SpecSource.rasterUrl]). Null when the sibling does
+     * not draw it; shown as an empty frame, since a missing cell is a finding.
      */
     val parallelRenderUrl: String? = null,
   )
@@ -281,30 +201,16 @@ object ServeWeb {
     }
 
   /**
-   * The **compare strip** under a viewer's render: every variant of the component on the stage,
-   * measured against the same baseline, without anyone typing a filter.
+   * The **compare strip** under a viewer's render: every variant of the component on stage,
+   * measured against the same baseline.
    *
-   * It is here rather than a link to the wall because the reader's question is almost never about
-   * the one variant — it is "is this component wrong, or is this *state* of it wrong?". The strip
-   * is that narrowing applied on arrival; `?component=` on the wall is the same scope with the full
-   * instruments. It costs one server-rendered `<img>` per cell and one attribute write of
-   * JavaScript, which is what lets it appear on every viewer page.
+   * It does not score: numbers are the ones the delivery branch published, and a variant with none
+   * links to the focused comparison. It does not pick its own baseline: each row carries both the
+   * design reference and the paired render, tagged `data-cp-strip-source`; `serve.css` hides the
+   * one not on show and `viewer.ts` (`syncSpecStrip`) switches it. The published match is bound to
+   * the design reference, so it shows `not scored` opposite anything else.
    *
-   * **It does not score.** Numbers are the ones the delivery branch published for these exact
-   * pixels; a variant with none says `not scored` and links to the focused comparison, which
-   * measures live. A per-row scorer would charge every viewer page the wall's machinery for an
-   * already-published answer, and the viewer bundle is within two kilobytes of budget.
-   *
-   * **It does not pick its own baseline.** Every row is rendered with BOTH — the design reference
-   * and, where the pairing resolves, the paired catalog's render — each cell tagged
-   * `data-cp-strip-source`, with the section's own attribute naming the one on show. `serve.css`
-   * hides the other; `viewer.ts` moves the attribute when the lane's source picker is pressed
-   * (`syncSpecStrip`) and `?specSource=` restores it. Only the published match is baseline-bound:
-   * measured against the design reference, it says `not scored` opposite anything else rather than
-   * lending a design number to a comparison nobody measured.
-   *
-   * Returns empty for a component with a single variant and no reference — an empty panel under
-   * every one-off preview is worse than no panel.
+   * Returns empty for a single-variant component with no reference.
    */
   private fun comparisonStripHtml(
     variants: List<ComponentVariant>,
@@ -329,11 +235,9 @@ object ServeWeb {
     // One variant and nothing to compare it against is not a strip, it is a heading over a single
     // row that restates the picture directly above it.
     if (variants.size < 2 && scored.isEmpty() && !hasParallel) return ""
-    // No variant has a design reference and there is no paired catalog: there is no baseline at
-    // all, only the variants themselves. A column of empty reference frames and a column of
-    // `not scored` under every row then says nothing but "this catalog has no design file", once
-    // per variant, and the link to the reference wall opens on rows it cannot draw. The strip
-    // stays — it is still the way between this component's variants — without the baseline half.
+    // No design reference and no paired catalog: no baseline at all, so drop the baseline half
+    // rather than repeat empty frames and `not scored` per variant. The strip stays as navigation
+    // between variants.
     val hasBaseline = scored.isNotEmpty() || hasParallel
     fun seg(value: String) = WebEscaping.urlEncodeSegment(value)
     // `data-cp-strip-source` on a cell says which baseline it belongs to. Absent when there is
@@ -352,9 +256,8 @@ object ServeWeb {
               "<span class=\"cp-strip-shot\"${sourced("kit")}><img loading=\"lazy\" alt=\"\" " +
                 "src=\"$basePath/reference/${seg(it)}.png$assetQ\"></span>"
             }
-              // A cell rather than nothing, so the columns line up down the strip: a row that jumps
-              // left because this variant is unmapped reads as a layout fault, where an empty frame
-              // reads as the missing mapping it is.
+              // An empty frame rather than nothing, so the columns line up and the gap reads as a
+              // missing mapping.
               ?: "<span class=\"cp-strip-shot cp-strip-shot--empty\"${sourced("kit")} aria-label=\"No design reference\"></span>"
         // The paired catalog's render of the same variant, on the same terms: an empty frame where
         // the sibling draws no such cell, because the pairing refuses to substitute its default.
@@ -387,9 +290,7 @@ object ServeWeb {
             val detailHref =
               "$basePath/compare/${seg(variant.previewId)}?reference=${seg(it)}" +
                 (if (q.isEmpty()) "" else "&" + q.removePrefix("?"))
-            // Escaped like every other URL this page writes: an `&` between query parameters is a
-            // character reference start in HTML, and a raw one is only tolerated by the parser's
-            // error recovery. `&component=` is one `;` away from being read as an entity.
+            // Escaped like every other URL: a raw `&` in an attribute starts a character reference.
             "<a class=\"cp-strip-detail\"${sourced("kit")} href=\"${WebEscaping.htmlEscape(detailHref)}\" " +
               "title=\"Reference, diff and render for this variant\">diff &rarr;</a>"
           } ?: ""
@@ -427,9 +328,9 @@ object ServeWeb {
     val counted =
       "${variants.size} ${if (variants.size == 1) "variant" else "variants"} of " +
         WebEscaping.htmlEscape(componentName)
-    // What the rows stand opposite, once per baseline, in the sub-heading and over the column.
-    // The section's attribute is what `serve.css` reads to show one of them; the lane's default
-    // source is the one it opens on, so the strip and the stage agree before any script runs.
+    // What the rows stand opposite, once per baseline. `serve.css` shows one by the section's
+    // attribute; it opens on the lane's default source so the strip and stage agree before any
+    // script runs.
     fun baselineName(id: String, name: String) =
       "<span${sourced(id)}>${WebEscaping.htmlEscape(name)}</span>"
     val against =
@@ -461,18 +362,12 @@ object ServeWeb {
   private fun scriptTag(name: String): String = "<script src=\"${assetHref(name)}\"></script>"
 
   /**
-   * The scorer, and where its worker half lives.
+   * The scorer script tag, carrying the URL of its worker half.
    *
-   * `format-compare.js` is the comparison API; `compare-scorer.js` is the metric inside it, built
-   * for a worker thread. The URL rides on the script tag rather than in a tag of its own because
-   * that is the one place it is certainly correct: `scorer/offload.ts` reads it off the DOM, both
-   * halves are versioned by content, and a page that emits the API without the worker would be
-   * naming an asset it does not carry.
-   *
-   * Every page that scores something calls this instead of `scriptTag("format-compare.js")`, so the
-   * two cannot drift apart. A consumer that loads the asset WITHOUT this tag — the publish-time
-   * score driver and the compare audit, which inject the file into a bare page — finds no attribute
-   * and scores on its own thread, which is what those two need and what they already did.
+   * `format-compare.js` is the comparison API; `compare-scorer.js` is the metric, built for a
+   * worker that `scorer/offload.ts` finds via this tag's attribute. Every scoring page uses this
+   * instead of `scriptTag("format-compare.js")` so the two cannot drift; consumers that inject the
+   * file bare score on the main thread.
    */
   private fun compareScorerTag(): String =
     "<script src=\"${assetHref("format-compare.js")}\" " +
@@ -485,23 +380,16 @@ object ServeWeb {
   private fun viewCountHtml(views: Long): String =
     if (views <= 0) "" else "<div class=\"cp-engage\">${formatViews(views)}</div>"
 
-  /**
-   * The viewer's view tally. A `<span>`, not a block: it sits on the title row beside the id, where
-   * it reads as one more fact about this preview rather than a paragraph of its own.
-   */
+  /** The viewer's view tally, inline on the title row. */
   private fun viewerViewCountHtml(views: Long): String =
     if (views <= 0) "" else "<span class=\"cp-viewer-engage\">${formatViews(views)}</span>"
 
   /**
    * The visit tally, wrapped in the marker that keeps it out of a page's `ETag`.
    *
-   * This is the one run of markup on an assembled page that changes on essentially every request —
-   * the request that revalidates a page *is* the visit that bumps the number — so hashing it would
-   * mean no repeat navigation ever revalidates to a `304` (#217). Measured on the deployed
-   * `/m3-catalog/`, two consecutive responses differ in this text and in nothing else, out of 369
-   * KB. [ServeHttpServer] elides exactly this element when it hashes a page, so a cached page can
-   * show a count up to its own `max-age` old — the staleness `s-maxage=300` already accepts at the
-   * CDN for every anonymous visitor.
+   * It changes on essentially every request, so hashing it would stop any repeat navigation
+   * revalidating to a `304`. [ServeHttpServer] elides this element when hashing, so a cached page
+   * can show a count up to its `max-age` old.
    */
   private fun formatViews(views: Long): String =
     "<span $VOLATILE_ATTR>${formatCount(views)} ${if (views == 1L) "view" else "views"}</span>"
@@ -531,14 +419,9 @@ object ServeWeb {
       .trimIndent()
 
   /**
-   * Query string carrying the token and — only for a non-default tenant ([sessionId] non-null) —
-   * the `session` id, so generated links stay on the same tenant. A null [sessionId] (the default
-   * session) keeps URLs token-only.
-   *
-   * In [isPublic] mode every route is open (the token gates nothing), so the `token=` param is
-   * **omitted** — a public link like `preview.coo.ee/compose-m3/` shouldn't drag a useless token
-   * around. Non-public keeps the token as the only gate. May return an empty string (public + the
-   * default session), so callers wrap it with [querySuffix] to avoid a dangling `?`.
+   * Query string carrying the token and, only for a non-default tenant ([sessionId] non-null), the
+   * `session` id. In [isPublic] mode every route is open, so the token is omitted. May return
+   * empty; wrap with [querySuffix].
    */
   private fun queryString(token: String, sessionId: String?, isPublic: Boolean): String {
     val parts = buildList {
@@ -549,16 +432,12 @@ object ServeWeb {
   }
 
   /**
-   * The query string for a same-session link, given the page's [basePath]. When the page is served
-   * under a `/<system>` path ([basePath] non-empty) the session is carried by the path, so links
-   * are **token-only** — no `&session=`. When it's the root-mounted default/legacy `?session=` form
-   * ([basePath] empty) it falls back to [queryString]. In [isPublic] mode the token is dropped
-   * either way (may return empty — wrap with [querySuffix]).
+   * The query string for a same-session link given the page's [basePath]. Under a `/<system>` path
+   * the session is in the path, so links are token-only; root-mounted pages fall back to
+   * [queryString]. [isPublic] drops the token (may return empty — wrap with [querySuffix]).
    *
-   * A **top-level site** ([ServeSites]) is the third case and needs no code here: it is rooted like
-   * the legacy form but carries its session in the ORIGIN, so its pages pass a null session id to
-   * this function (see each page's `linkSessionId`) while keeping the real one for the per-catalog
-   * storage keys and the dark-first lookup.
+   * A top-level site ([ServeSites]) carries its session in the origin, so its pages pass a null
+   * session id here.
    */
   private fun linkQuery(
     token: String,
@@ -569,10 +448,7 @@ object ServeWeb {
     if (basePath.isEmpty()) queryString(token, sessionId, isPublic)
     else if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
 
-  /**
-   * Prefix a query with `?` when non-empty, else the empty string (no dangling `?` on token-free
-   * public links).
-   */
+  /** `?` + [query] when non-empty, else empty. */
   private fun querySuffix(query: String): String = if (query.isEmpty()) "" else "?$query"
 
   /**
@@ -586,9 +462,8 @@ object ServeWeb {
   }
 
   /**
-   * The public front door only calls out a negative producer verdict: unverified catalogs are
-   * orange and labelled `untrusted`, while trusted catalogs carry no badge. The full verdict and
-   * its basis remain available on `/status` and on the catalog's own pages.
+   * The front door only flags a negative producer verdict (`untrusted`, orange); trusted catalogs
+   * carry no badge. The full verdict is on `/status` and the catalog's pages.
    */
   private fun homeTrustBadge(trust: String?): String {
     if (trust != "unverified") return ""
@@ -597,11 +472,8 @@ object ServeWeb {
   }
 
   /**
-   * The session-level **"why snapshot-only" banner** — one amber `<section>` under the header
-   * listing each [ServeDegradation]'s human [detail][ServeDegradation.detail] (e.g. "this catalog
-   * publishes no live bundle"). Empty string when [degradations] is empty (a fully-live session or
-   * a plain module), so no banner renders. This explains the *session-level* reason a live lane is
-   * absent; the viewer's per-control `cp-note` still explains what each individual override needs.
+   * The session-level **"why snapshot-only" banner** listing each [ServeDegradation.detail]. Empty
+   * when [degradations] is empty. Per-control reasons stay in the viewer's `cp-note`.
    */
   private fun degradeBanner(degradations: List<ServeDegradation>): String {
     if (degradations.isEmpty()) return ""
@@ -619,27 +491,19 @@ object ServeWeb {
   }
 
   /**
-   * What a page knows about the **published revisions** of the catalog it is showing: which one it
-   * is pinned to (null ⇒ the current one), the branch's recent history, and the repo those commits
-   * live in.
-   *
-   * Carried as data rather than as prebuilt HTML because each page addresses itself differently — a
-   * viewer link is `/p/<id>`, a comparison's is `/compare/<id>?reference=…` — so the page that owns
-   * the URL shape is the one that must build the destinations. See [revisionsHtml].
+   * What a page knows about the **published revisions** of its catalog: the pin (null ⇒ current),
+   * recent history, and the repo the commits live in. Data rather than HTML because each page
+   * builds its own destination URLs ([revisionsHtml]).
    */
   data class CatalogRevisions(
     val pinned: String? = null,
     val revisions: List<ServeCatalogRevision.Revision> = emptyList(),
     val repo: String? = null,
     /**
-     * The delivery-branch commit the page is being assembled **from** — the generation every frame
-     * URL on it is scoped to ([ServeCacheGeneration]). Null for a session with no delivery branch,
-     * which is the same set that gets no revision surface at all.
-     *
-     * It rides here rather than as a parameter of its own because a page's pin and its generation
-     * are one question — *which publish is this page about* — and every page that draws a frame
-     * already has to answer it. Keeping them apart is how a page would end up writing a pin on the
-     * `<img>` and a generation on the `data-` twin beside it.
+     * The delivery-branch commit this page is assembled from — the generation every frame URL is
+     * scoped to ([ServeCacheGeneration]). Null without a delivery branch. Kept beside the pin
+     * because both answer "which publish is this page about", and apart they could disagree on one
+     * `<img>`.
      */
     val generation: String? = null,
   ) {
@@ -653,19 +517,12 @@ object ServeWeb {
   }
 
   /**
-   * The revision control: the pin banner (when the page is showing an older publish) above the list
-   * of publishes it can move between.
+   * The revision control: the pin banner (when showing an older publish) above the list of
+   * publishes it can move between. [hrefFor] builds this page at a given pin (null ⇒ live).
    *
-   * This is the whole answer to "a published URL keeps changing under me" (issue #3723). The
-   * delivery branch carries one commit per publish, so the versions already exist — what was
-   * missing was a way to *name* one from the page and a way to *reach* the others. [hrefFor] builds
-   * this same page at a given pin (null ⇒ the live one), which is what makes both halves one
-   * control rather than a banner and an unrelated menu.
-   *
-   * A revision is shown by its publish date and the **source** commit it was rendered from where
-   * the subject recorded one, falling back to the delivery sha. That ordering is deliberate: the
-   * delivery sha is a publish marker, while the source sha is the change someone is actually
-   * looking for when they go back a version.
+   * A revision is labelled by publish date and the source commit it was rendered from when
+   * recorded, falling back to the delivery sha — the source sha is what someone going back a
+   * version is looking for.
    */
   private fun revisionBannerHtml(
     revisions: CatalogRevisions,
@@ -698,18 +555,13 @@ object ServeWeb {
     revisions: CatalogRevisions,
     includeBanner: Boolean = true,
     /**
-     * Attributes for `<cp-revision-runs>`, or blank to leave the menu undecorated.
-     *
-     * Passed in rather than assembled here because the two URLs it carries — the runs lane and the
-     * preview's render — belong to a *preview*, and this function draws the catalog-wide control on
-     * pages that have no single preview behind them (a design reference, an unavailable-revision
-     * page). Blank on those is the correct answer, not a missing feature.
+     * Attributes for `<cp-revision-runs>`, or blank. Passed in because they belong to a preview,
+     * and this control also draws on pages with no single preview.
      */
     runsAttrs: String = "",
     /**
-     * A `/api/render-runs` payload inlined into the page, so the preview-harness captures the
-     * markers offline. Blank on every served page — the element fetches there — and non-blank only
-     * in the fixture, which is the only reason this parameter exists.
+     * A `/api/render-runs` payload inlined for the preview-harness fixture. Blank on every served
+     * page; the element fetches there.
      */
     runsInlineJson: String = "",
     hrefFor: (String?) -> String,
@@ -731,32 +583,19 @@ object ServeWeb {
         val label = revision.sourceSha ?: revision.short
         val mark = if (selected) " aria-current=\"true\"" else ""
         val currentTag = if (isCurrent) "<span class=\"cp-revision-tag\">current</span>" else ""
-        // `nofollow` because these are the same page over and over: a crawler that walked them
-        // would index a dozen near-duplicates of every preview, and the version worth indexing is
-        // the live one. The pages stay perfectly shareable — a link someone pastes is followed by
-        // a person and unfurled by a fetcher, neither of which is a crawl.
-        // The delivery sha on the row itself, which is the only thing that identifies it to
-        // `<cp-revision-runs>`. Not derivable from the href: the current row deliberately carries
-        // no `?at=` pin, so a client parsing hrefs would fail to mark the one row that is always a
-        // run head.
+        // `nofollow`: these are near-duplicates of each preview; only the live one is worth
+        // indexing.
+        // The delivery sha identifies the row to `<cp-revision-runs>`; it is not derivable from the
+        // href because the current row carries no `?at=`.
         val stamp = " data-revision=\"${WebEscaping.htmlEscape(revision.commit)}\""
         "<a class=\"cp-revision\" rel=\"nofollow\" href=\"${WebEscaping.htmlEscape(href)}\"$mark" +
           "$stamp>" +
           "<span class=\"cp-revision-date\">${WebEscaping.htmlEscape(date)}</span>" +
           "<code class=\"cp-revision-sha\">${WebEscaping.htmlEscape(label)}</code>$currentTag</a>"
       }
-    // The trigger names the revision the page is *on* — the pin when there is one, the tip
-    // otherwise — so the closed menu already answers "which version am I looking at?", which was
-    // the question the flat wall of chips answered only by making the reader hunt for the
-    // highlighted one. Its accessible name is that visible text, deliberately: an `aria-label` here
-    // would override the date, sha and current/pinned state and announce the control as bare
-    // "Revision".
-    //
-    // It looks like a menu button and is a plain disclosure, which is what the ARIA says too. No
-    // `role="menu"`/`menuitem`: those promise the menu keyboard model — arrow-key navigation, Esc
-    // to dismiss, managed focus — and nothing here implements it, so the roles would describe
-    // behaviour a keyboard user does not get. `<details>` + a list of links gives real disclosure
-    // and ordinary Tab order for free; the `<nav>` is what names the list for a screen reader.
+    // The trigger names the revision the page is on (pin or tip). No `aria-label`: it would
+    // override the visible date/sha/state. A plain `<details>` disclosure without `role="menu"`,
+    // since nothing implements the menu keyboard model.
     val shown = revisions.revisions.firstOrNull { it.commit == (pinned ?: current) }
     val shownDate =
       shown?.date?.takeIf { it.isNotBlank() }?.let { prettyDate(it) }
@@ -808,15 +647,12 @@ object ServeWeb {
   }
 
   /**
-   * Add `at=<sha>` to a link, or return it unchanged when the page carries no pin. One helper
-   * because a pinned page has to pin *everything* it links — the render, the reference, its sibling
-   * variants — and a single missed suffix is a panel quietly showing the present next to the past.
+   * Add `at=<sha>` to a link, or return it unchanged when the page carries no pin. A pinned page
+   * must pin every link it emits.
    *
-   * Callers pass either a bare query suffix (empty, or already `?…`) or a whole URL that may or may
-   * not carry a query, so the separator is chosen from what the string actually contains rather
-   * than from whether it is empty. Getting that wrong is not a cosmetic slip: a public server
-   * builds token-free links, so `/<system>/p/<id>` has no `?` at all, and appending `&at=<sha>`
-   * folds the pin into the *path* — the URL 404s and every revision in the menu is a dead link.
+   * Callers pass a bare query suffix or a whole URL, so the separator is chosen from whether the
+   * string already has a `?`: token-free public links have none, and `&at=` there would land in the
+   * path and 404.
    */
   private fun withPin(link: String, pinned: String?): String {
     val pin = pinned?.takeIf { it.isNotBlank() } ?: return link
@@ -829,16 +665,10 @@ object ServeWeb {
   }
 
   /**
-   * The query every **published frame URL** on a page carries: the page's own query, plus the
-   * publish that page is about.
-   *
-   * One helper rather than a `withPin` here and a `scope` there, because the two are alternatives
-   * and choosing wrongly is silent. A pinned page's frames take the pin: the reader asked for that
-   * publish, and [ServeCacheGeneration] would only restate what `at=` already fixes — with a second
-   * sha to disagree with the first. An unpinned page's frames take its generation, which is what
-   * stops a browser pairing this page's verdict with the next publish's pixels (issue #4695).
-   *
-   * Never applied to a *page* link. See [ServeCacheGeneration.scope].
+   * The query every **published frame URL** on a page carries: the page's query plus the publish it
+   * is about. A pinned page's frames take the pin; an unpinned page's take its generation, so a
+   * browser cannot pair this page's verdict with the next publish's pixels. Never applied to a page
+   * link; see [ServeCacheGeneration.scope].
    */
   private fun assetQuery(query: String, revisions: CatalogRevisions): String =
     if (revisions.pinned != null) withPin(query, revisions.pinned)
@@ -848,34 +678,22 @@ object ServeWeb {
   private const val SOURCE_REPO = "yschimke/compose-ai-tools"
 
   /**
-   * How often an open catalog page tells the server a visitor is still there ([presenceScript]).
-   *
-   * Comfortably under the session reaper's ten-minute idle window, and by enough that a single
-   * dropped ping — a sleeping laptop, a flaky connection, a tab briefly backgrounded — doesn't let
-   * the session lapse. Cheap at this rate: one empty POST per open tab per four minutes.
+   * Presence ping interval for an open catalog page ([presenceScript]). Well under the session
+   * reaper's ten-minute idle window, so one dropped ping doesn't let the session lapse.
    */
   internal const val PRESENCE_INTERVAL_SECONDS = 240
 
   /**
-   * Marks an element whose text changes on essentially every request, so it must not decide whether
-   * a page revalidates. `ServeHttpServer.pageEntityTag` elides these elements before it hashes an
-   * assembled page; nothing else reads the attribute, and no stylesheet keys off it.
-   *
-   * Only [formatViews] carries it today. Anything added here is content a repeat visitor may see up
-   * to one `max-age` stale, so it belongs on a tally or a relative time, never on a fact the page
-   * would be wrong without.
+   * Marks an element whose text changes on essentially every request, so it must not decide
+   * revalidation. `ServeHttpServer.pageEntityTag` elides these before hashing. Content marked with
+   * it may be up to one `max-age` stale, so use it only for tallies or relative times.
    */
   internal const val VOLATILE_ATTR = "data-cp-volatile"
 
   /**
-   * Where the Catalog / Dev switch remembers the visitor's choice: a host-wide cookie, read by the
-   * server on every request (`ServeHttpServer.componentBrowserMode`).
-   *
-   * A cookie rather than `localStorage` because the choice decides what the *server* renders. Kept
-   * on the client, the only way to act on it was to put it in the URL — so every page rewrote every
-   * same-origin link to carry `?chrome=`, and a bare URL had to be bounced through a
-   * `location.replace` before it could paint. This is one header the browser already sends, and the
-   * URLs go back to being about the thing they address.
+   * Cookie holding the Catalog / Dev switch choice, read by the server on every request
+   * (`ServeHttpServer.componentBrowserMode`). A cookie rather than `localStorage` because the
+   * choice decides what the server renders, and keeps it out of URLs.
    */
   internal const val INTERFACE_MODE_COOKIE = "cp_chrome"
 
@@ -883,33 +701,22 @@ object ServeWeb {
   private const val INTERFACE_MODE_COOKIE_MAX_AGE = 31536000
 
   /**
-   * Attributes the switch writes [INTERFACE_MODE_COOKIE] with: host-wide (the mode is the whole
-   * site's, not one path's) and `SameSite=Lax`, which is all a presentation preference needs — it
-   * carries no identity and gates nothing. `Secure` is appended by the script when the page is
-   * itself https, so the same markup works on a `http://127.0.0.1` dev server, where a `Secure`
-   * cookie would simply be dropped. Deliberately readable by script: the switch is client-side.
+   * Attributes for [INTERFACE_MODE_COOKIE]: host-wide and `SameSite=Lax`. The script appends
+   * `Secure` on https so the markup also works on an http dev server. Deliberately script-readable.
    */
   private const val INTERFACE_MODE_COOKIE_ATTRS =
     "; path=/; max-age=$INTERFACE_MODE_COOKIE_MAX_AGE; samesite=lax"
 
   /**
-   * How many theme chips the viewer bar shows inline before folding. Lower than [AXIS_CHIPS_INLINE]
-   * because the bar is capped at a single non-wrapping row: past a handful the chips ellipsise into
-   * stubs and the group scrolls within itself, which is worse than a toggle that spells the current
-   * theme out in full.
+   * Theme chips shown inline in the viewer bar before folding. Lower than [AXIS_CHIPS_INLINE]
+   * because the bar is a single non-wrapping row.
    */
   private const val THEME_CHIPS_INLINE = 4
 
   /**
-   * Which of the design-spec lane's four views the page is served pressed, and therefore the one
-   * `?specView=` leaves unsaid.
-   *
-   * Triptych since #4376 — the lane is entered to ask how the render and the imported reference
-   * compare, and spec / diff / render side by side answers that on arrival where the plain
-   * reference (the lane's original view, still one click away) only asked the eye to hold one frame
-   * while looking at the other. The browser side keeps the same constant in
-   * `serve-web/src/spec/views.ts`; they are the same decision rendered twice, so move both together
-   * or the served page opens pressing a button the script immediately unpresses.
+   * The design-spec lane view the page is served with pressed, and so the one `?specView=` omits.
+   * Must match `serve-web/src/spec/views.ts`, or the page opens pressing a button the script
+   * immediately unpresses.
    */
   internal const val SPEC_DEFAULT_VIEW = "triptych"
 
@@ -937,9 +744,8 @@ object ServeWeb {
       "8.01 0 0016 8c0-4.42-3.58-8-8-8z\"/></svg>"
 
   /**
-   * Inline Figma mark, monochrome in `currentColor` so it sits in the same muted link row as
-   * [GITHUB_ICON]. Its own class carries the 2:3 aspect (`.cp-gh` alone would squash the tall
-   * viewBox into a square).
+   * Inline Figma mark in `currentColor`, matching [GITHUB_ICON]. Its own class keeps the 2:3
+   * aspect.
    */
   private const val FIGMA_ICON =
     "<svg class=\"cp-gh cp-figma-mark\" viewBox=\"0 0 38 57\" aria-hidden=\"true\" " +
@@ -951,12 +757,8 @@ object ServeWeb {
       "<path d=\"M0 28.5A9.5 9.5 0 0 0 9.5 38H19V19H9.5A9.5 9.5 0 0 0 0 28.5z\"/></svg>"
 
   /**
-   * The launcher's mark: a speech bubble with an exclamation in it — "say something is wrong".
-   *
-   * Deliberately not the GitHub mark the two reports otherwise wear. Those marks say *where a
-   * report lands*, which is the right label on a control that files one; this button files nothing,
-   * it opens the choice between two destinations, and stamping one of their logos on it would
-   * pre-announce an answer the panel exists to ask.
+   * The report launcher's mark: a speech bubble with an exclamation. Not the GitHub mark, because
+   * this button chooses between two destinations rather than filing to one.
    */
   private const val REPORT_ICON =
     "<svg class=\"cp-fab-mark\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" fill=\"none\" " +
@@ -969,9 +771,8 @@ object ServeWeb {
   /** GitHub session action shown in the home-page header when OAuth is configured. */
   private fun githubAuthControl(status: GitHubAuthStatus?): String {
     status ?: return ""
-    // What this sign-in buys, in the visitor's terms. The allowlist narrows *who may sign in at
-    // all*, so it reshapes either sentence; the repo is named only on the playground, whose gate
-    // it actually is.
+    // What this sign-in buys. The allowlist narrows who may sign in at all; the repo is named only
+    // on the playground, whose gate it is.
     val repo =
       status.accessRepository?.let { " with access to ${WebEscaping.htmlEscape(it)}" } ?: ""
     val tooltip =
@@ -989,10 +790,8 @@ object ServeWeb {
       "<a class=\"cp-gh-auth\" href=\"${WebEscaping.htmlEscape(status.loginHref)}\"" +
         "$tooltipAttr>$GITHUB_ICON Sign in with GitHub</a>"
     } else {
-      // Identity only. What to *do* about it — end the session, or re-run the round trip as
-      // somebody else — lives in the Settings menu ([githubSessionSettings]), beside the page's
-      // other standing per-visitor choices, rather than as two more chips in a bar that already
-      // carries five.
+      // Identity only; sign-out and switch-account live in the Settings menu
+      // ([githubSessionSettings]).
       "<span class=\"cp-gh-auth cp-gh-auth--signed\"$tooltipAttr>$GITHUB_ICON " +
         "Signed in as ${WebEscaping.htmlEscape(login)}</span>"
     }
@@ -1001,18 +800,9 @@ object ServeWeb {
   /**
    * The **Session** group in the Settings menu: who is signed in, and the two ways out.
    *
-   * Both exits are here rather than in the header bar because they are standing per-visitor state,
-   * which is what that menu is for, and because a bar that already carries a mode switch, Status,
-   * an identity and Settings does not need two more chips to say what a visitor does roughly once.
-   *
-   * They fix different things, which is why there are two. **Sign out** ends the session — the
-   * affordance that was missing entirely, leaving DevTools as the only way off a shared machine.
-   * **Switch account** re-runs the OAuth round trip, which is the only thing that recomputes the
-   * access bits the cookie cached at sign-in; a sign-out reaches the same place, but through an
-   * anonymous page and a second sign-in.
-   *
-   * Empty for a signed-out visitor (the header's sign-in link is the whole affordance there) and
-   * for a page whose status carries no [GitHubAuthStatus.logoutHref].
+   * **Sign out** ends the session. **Switch account** re-runs OAuth, the only thing that recomputes
+   * the access bits cached at sign-in. Empty for a signed-out visitor or when
+   * [GitHubAuthStatus.logoutHref] is absent.
    */
   private fun githubSessionSettings(status: GitHubAuthStatus?): String {
     val login = status?.login?.takeIf { it.isNotBlank() } ?: return ""
@@ -1038,15 +828,12 @@ object ServeWeb {
   }
 
   /**
-   * The **Notifications** group: Web Push for the signed-in visitor, one toggle per kind
-   * ([PushKind]) and one button that asks the browser.
+   * The **Notifications** group: one Web Push toggle per [PushKind] plus a button that asks the
+   * browser.
    *
-   * Server-rendered like every other settings group, and inert without `push-settings.js`, which is
-   * emitted right here so only a signed-in visit on a host with push pays for it. The script — not
-   * this markup — decides what the button may offer, because only the browser knows: whether it has
-   * a `PushManager` at all, whether this is an iPhone that must be added to the Home Screen first,
-   * whether the page is on HTTPS, and whether permission was already given or refused. The browser
-   * is asked for permission from that button's click and from nowhere else.
+   * Inert without `push-settings.js`, emitted here so only signed-in visits on push hosts load it.
+   * The script decides what the button offers (PushManager support, iOS Home Screen, HTTPS, prior
+   * permission); permission is requested only from that button's click.
    */
   internal fun pushNotificationSettings(): String {
     val kinds =
@@ -1077,27 +864,13 @@ ${kinds.prependIndent("        ")}
   }
 
   /**
-   * The minimal site footer — GitHub, `/version`, "report a bug", and the running build — rendered
-   * by [document] at the bottom of **every** browser-facing page, below the body. [version]
-   * null/blank just drops the build span; the other entries stay, so the footer is never empty.
+   * The minimal site footer rendered by [document] on every browser-facing page: GitHub,
+   * `/version`, "report a bug", and the build. A null/blank [version] drops only the build span.
    *
-   * The **GitHub** entry — the repo that ships this server — is the site's only link to it. It
-   * reads "GitHub" rather than "source", because it opens the repo's front page and "source" is
-   * spoken for by [sourceLinkHtml], the per-preview link that opens the *file* a preview is
-   * declared in. Two links a click apart both saying "source" go to different kinds of place.
-   *
-   * [note] is the page's own footer block, rendered *above* the links row: on a catalog landing
-   * that's the provenance disclosure ([provenanceSection]), which belongs with the build/source
-   * metadata rather than in the middle of the catalog's content. Empty on every other page.
-   *
-   * [bugReport] false drops the "report a bug" entry — passed by the report page itself, which is
-   * where that entry leads.
-   *
-   * [changelogHref] adds the **Changelog** entry: the catalog's own `/feed.xml`, the published
-   * history of what changed in the design system this page belongs to. It leads the row because it
-   * is the only entry about the *content* — the rest are about the server. Empty wherever no such
-   * history exists (the front door, `/status`, a plain module, a server started with the feed lane
-   * off), so the link is never offered where it would 404.
+   * "GitHub" rather than "source", since [sourceLinkHtml] is the per-preview source link. [note] is
+   * the page's own footer block, rendered above the links (e.g. the landing's [provenanceSection]).
+   * [bugReport] false drops "report a bug" (on the report page itself). [changelogHref] adds a
+   * leading **Changelog** link to the catalog's `/feed.xml`; empty where no feed exists.
    */
   private fun siteFooter(
     version: String?,
@@ -1135,26 +908,13 @@ $noteBlock        <div class="cp-site-footer-links">
   }
 
   /**
-   * The footer's "report a bug" affordance: the entry point to [ServeBugReport.PATH], the page that
-   * collects this server's diagnostics and hands the visitor a prefilled issue on the repo that
-   * ships the server.
+   * The footer's "report a bug" entry point to [ServeBugReport.PATH], which collects server
+   * diagnostics and prefills an issue on the server's repo. Lives in the footer because every page
+   * has one, unlike [previewLinksHtml]'s per-preview report.
    *
-   * It sits in the footer, on every page, **beside the build number** — a bug in the server is a
-   * bug in that build, and the footer is the one piece of chrome every surface has, including the
-   * ones with no preview to hang a report off (the front door, `/status`, a 404, a catalog that
-   * failed to load). That is the whole difference from the per-preview affordance in
-   * [previewLinksHtml], which reports a *preview* to the repo that declares it.
-   *
-   * A **GET form** rather than a link, for the reason written up on [ServeIssueReport.action]: the
-   * two facts the report needs from the browser — which page the visitor is on, and the session
-   * token that page carries — are page-derived strings, and writing those into an `href` is a
-   * navigation sink. Here the action is a server-rendered literal, the script only ever fills input
-   * *values*, and the browser does the encoding on submit.
-   *
-   * Both inputs start empty and are filled by `serve-chrome.js`. With JS off the form still submits
-   * — on a public server that yields a report with no page section (the server's own diagnostics
-   * are all still there), and on a token-gated one the report page 404s like every other gated
-   * route reached without a token.
+   * A GET form rather than a link (see [ServeIssueReport.action]): the page URL and token are
+   * page-derived, so the script only fills input values instead of writing an `href`. Inputs are
+   * filled by `serve-chrome.js`; with JS off it still submits without a page section.
    */
   private fun reportBugFormHtml(): String =
     reportBugForm(
@@ -1164,55 +924,30 @@ $noteBlock        <div class="cp-site-footer-links">
     )
 
   /**
-   * The `GET /report-bug` form, wrapped around whichever [submit] control the caller wants — the
-   * footer's link-shaped one, or the launcher's two-line choice.
-   *
-   * Emitted **twice** on an ordinary page, once per entry point, and that is deliberate rather than
-   * a duplication to factor out: they are two different affordances (a link in the document flow,
-   * and a fixed launcher) that happen to need the same three page-derived values.
-   * `fillBugReportLink` fills every copy on the page — it walks `querySelectorAll`, not
-   * `querySelector` — precisely so a second entry point costs nothing to add.
+   * The `GET /report-bug` form wrapped around the caller's [submit] control. Emitted once per entry
+   * point (footer link and launcher); `fillBugReportLink` fills every copy via `querySelectorAll`.
    */
   private fun reportBugForm(submit: String): String =
     "<form class=\"cp-report-bug\" method=\"get\" action=\"${ServeBugReport.PATH}\">" +
       "<input type=\"hidden\" name=\"${ServeBugReport.FROM_PARAM}\" value=\"\">" +
       "<input type=\"hidden\" name=\"token\" value=\"\">" +
-      // The scheme THIS page is painted in. Captured here because it cannot be recovered on the
-      // report page: a catalog that pinned dark chrome and an OS set to light disagree, and the
-      // report page has its own answer to that question rather than this page's.
+      // The scheme this page is painted in; the report page cannot recover it, since a catalog may
+      // pin dark chrome against a light OS.
       "<input type=\"hidden\" name=\"scheme\" value=\"\">" +
       submit +
       "</form>"
 
   /**
-   * The **floating report launcher**: a small fixed button, bottom-right of every browser-facing
-   * page, opening a panel that names both trackers and offers the screen capture.
+   * The **floating report launcher**: a fixed bottom-right button opening a panel that names both
+   * trackers and offers screen capture.
    *
-   * **Why it floats.** The footer entry is at the bottom of the document, and on the surfaces where
-   * something most often looks wrong — a viewer with a tall stage, a catalog grid of two hundred
-   * cards, a design page — that is several screens away from the thing being complained about. A
-   * fixed launcher makes "something here is broken" a one-click gesture from wherever the visitor
-   * noticed it, which is the only moment they still have the page in the state that produced the
-   * bug. The footer entry stays: it is in the document flow, it prints, and it is what a page with
-   * no JavaScript and no fixed positioning still has.
+   * It floats so reporting is one click from where the problem was noticed; the footer entry stays
+   * for no-JS pages. It offers two destinations because server bugs and preview bugs go to
+   * different repos, and the panel names each.
    *
-   * **Why it offers two destinations rather than one.** This server has always had two reports and
-   * they go to different repositories — a bug in the *server* to the repo that ships it, a bug in a
-   * *preview* to the repo whose Kotlin declares it — but the only place that distinction was
-   * written down was a sentence on the report page, which is after the choice has been made. A
-   * report filed in the wrong tracker reaches people who cannot act on it, so the panel states the
-   * split at the moment of choosing, and names the repo each half files against.
-   *
-   * The catalog half is server-rendered `hidden` and unhidden by `reportLauncher.ts` on pages that
-   * actually carry the per-preview affordance (`#cp-report`), whose form already knows the derived
-   * repo — see [reportIssueHtml]. Deriving it here instead would mean plumbing the catalog's repo
-   * through every `document` caller for a link that is a scroll-and-focus into markup already on
-   * the page.
-   *
-   * [captureSrc] is the hashed URL of `report-capture.js`, carried as an attribute rather than a
-   * `<script>` tag: the capture machinery is several kilobytes that only matter once someone has
-   * decided to file something, so it is fetched when the panel first opens and never on a page
-   * whose visitor never reports anything.
+   * The catalog half is server-rendered `hidden` and unhidden by `reportLauncher.ts` on pages
+   * carrying `#cp-report` ([reportIssueHtml]). [captureSrc] is the hashed `report-capture.js` URL,
+   * fetched only when the panel first opens.
    */
   private fun reportLauncherHtml(captureSrc: String): String =
     """
@@ -1246,18 +981,9 @@ ${captureControlsHtml().prependIndent("          ")}
   /**
    * The capture controls, shared by the launcher panel and [bugReportPage].
    *
-   * Server-rendered and `hidden`, unhidden by `report-capture.js` once it has established that this
-   * browser can actually grab a frame. That order matters: a control that offers a screenshot and
-   * then reports "your browser cannot" is worse than no control, and the capability
-   * (`getDisplayMedia`, `ClipboardItem`) is not knowable server-side.
-   *
-   * Three modes rather than one, because the three things a reporter wants to attach have nothing
-   * in common. *Whole view* is the honest default for "the page is wrong". *Region* is for a corner
-   * of a wide comparison, where a full-viewport shot buries the defect in a screenful of things
-   * that are fine. *Element* is the one that needed a picker: on these pages the interesting thing
-   * is very often a single node with an exact boundary — a render, a spec panel, a diagnostics
-   * table, one cell of one — and asking someone to drag a box precisely around a table cell is a
-   * worse tool than letting them point at it.
+   * Server-rendered `hidden` and unhidden by `report-capture.js` only once it knows the browser can
+   * grab a frame (`getDisplayMedia`, `ClipboardItem`). Modes: *whole view*, *region* (a drag box),
+   * and *element* (pick a single node).
    */
   private fun captureControlsHtml(): String =
     """
@@ -1281,48 +1007,24 @@ ${captureControlsHtml().prependIndent("          ")}
       .trimIndent()
 
   /**
-   * Shared, intentionally compact navigation for every browser-facing page.
+   * Shared, compact navigation for every browser-facing page.
    *
-   * The bar is a **fixed three-slot layout** — brand, live status, navigation — and every page
-   * emits all three slots whether or not they have content, so nothing shifts position from one
-   * page to the next. That matters because two of the slots are conditional: the render-server
-   * badge only appears on pages that poll a daemon (and only once the first poll answers), and the
-   * GitHub session control only on pages served with OAuth configured. In a plain flex row those
-   * absences drag the nav around — centred on a catalog page, hard right on the home page. Here the
-   * brand is pinned left, the status badge centred, and the nav (including [action], the GitHub
-   * session control) pinned right.
+   * A fixed three-slot layout — brand left, live status centred, nav right — with all slots always
+   * emitted so nothing shifts when the conditional ones (daemon badge, GitHub session) are absent.
+   * The status slot starts empty and `hidden`; `presenceScript` fills it when the daemon poll
+   * answers.
    *
-   * The status slot is server-rendered but starts empty and `hidden`; `presenceScript` fills and
-   * unhides it when the daemon poll answers, so a page that never polls simply shows nothing there
-   * rather than reserving a visible gap.
-   *
-   * [breadcrumb] rides in the brand slot, immediately after the mark: a page's "where am I / how do
-   * I get back" (a [crumbHtml] trail, or a catalog landing's [backButton]) is *navigation*, and the
-   * bar is where a visitor already looks for navigation. In the page BODY it would spend a whole
-   * row — plus its margin — restating the header's own job, pushing the render further below the
-   * fold on every viewer.
-   *
-   * The nav panel carries only what is *about this server's pages*: **Status**, the GitHub session
-   * control ([action]), and **Settings**. Deliberately not here: a "Catalogs" link, which would go
-   * to `/` — exactly where the brand beside it already goes — and a "GitHub" link to the repo that
-   * ships the server, which is a fact *about the software* and belongs in [siteFooter] with the
-   * build number and the bug report.
+   * [breadcrumb] rides in the brand slot so navigation doesn't cost a body row. The nav carries
+   * only Status, the GitHub session control ([action]) and Settings; the repo link belongs in
+   * [siteFooter].
    */
   private fun siteHeader(
     navSuffix: String,
     action: String = "",
     breadcrumb: String = "",
     /**
-     * The catalog this page belongs to, named in the bar itself.
-     *
-     * The header used to say only "compose-preview" on every page of every system, so the one fact
-     * a visitor most needs — *which design system am I looking at* — lived solely in the page's own
-     * `<h1>` and scrolled away with it. The bar is pinned, so the name belongs here: it stays
-     * legible while you are deep in a grid or a viewer, and it distinguishes two tabs open on two
-     * catalogs, which the mark alone never could.
-     *
-     * Empty on the pages that belong to no catalog (the front door, `/status`, a shared document),
-     * which keep the bare brand.
+     * The catalog this page belongs to, named in the pinned bar so it stays visible while scrolling
+     * and tells tabs apart. Empty on pages that belong to no catalog.
      */
     siteName: String = "",
     componentBrowser: Boolean = false,
@@ -1332,18 +1034,12 @@ ${captureControlsHtml().prependIndent("          ")}
     sessionSettings: String = "",
     /**
      * A collapsed search control for the bar ([headerSearchControl]). Empty on every page but the
-     * front door, whose grid it filters — the bar is where a visitor looks for a site's search, and
-     * collapsed to an icon it costs the layout nothing on the pages that do have one.
+     * front door, whose grid it filters.
      */
     search: String = "",
     /**
-     * The UI builder's own **Designs** index, linked from the nav panel on every page that belongs
-     * to the builder.
-     *
-     * Empty everywhere else, and that is the point: `/ui-builder/designs` 404s on a host that
-     * serves no builder, and a catalog viewer has no business carrying a link to one. A builder
-     * page, on the other hand, is exactly where somebody asks *where is the thing I was working on*
-     * — and until this link existed the answer was a URL you had to already know.
+     * Link to the UI builder's **Designs** index, emitted only on builder pages;
+     * `/ui-builder/designs` 404s on hosts without a builder.
      */
     designsHref: String = "",
   ): String {
@@ -1411,21 +1107,14 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The header's **Settings** menu: standing per-visitor preferences, as opposed to the controls
-   * that describe what is on screen (the Theme chips, Transparent, the override drawers). Two
-   * settings live here: **Page theme**, whether the chrome follows the selected preview theme or
-   * the visitor's operating system (see `cli/serve-web/src/chrome/pageTheme.ts`), and opt-in
-   * **Power-user navigation** (see `keyboard-navigation.js`). They are settings rather than toolbar
-   * controls because each is answered once and then applies to every catalog and page.
-   *
-   * A plain `<details>`, so it opens and the radios record a choice with **no JavaScript at all**;
-   * the scripts only reflect stored values and enhance the menu. It sits in the nav so it is in the
-   * same place on every page, and last so it never displaces the links.
+   * The header's **Settings** menu: standing per-visitor preferences — **Page theme**
+   * (`cli/serve-web/src/chrome/pageTheme.ts`) and opt-in **Power-user navigation**
+   * (`keyboard-navigation.js`). A plain `<details>` so it works with no JavaScript; scripts only
+   * reflect stored values. Last in the nav so it never displaces links.
    */
   /**
-   * [session] is [githubSessionSettings]' output — empty on a page with no GitHub session to act
-   * on. It sorts **last**, after the display and keyboard preferences: it is the only group whose
-   * controls leave the page, and the destructive one of the two does so irreversibly.
+   * [session] is [githubSessionSettings]' output, empty when there is no GitHub session. Sorted
+   * last because it is the only group whose controls leave the page.
    */
   private fun settingsMenuHtml(showPreviewThemeSetting: Boolean, session: String = ""): String =
     """
@@ -1464,12 +1153,8 @@ ${captureControlsHtml().prependIndent("          ")}
       .trimIndent()
 
   /**
-   * A breadcrumb trail for the site header's brand slot: the [parent] page as a link, then — when
-   * the page is a leaf rather than a plain "up one level" — the [current] page's name as inert
-   * text.
-   *
-   * Emitted into [siteHeader]'s `breadcrumb` slot rather than as the body's first paragraph. Both
-   * [parent] and [current] are escaped here, so callers pass raw text.
+   * A breadcrumb trail for [siteHeader]'s brand slot: [parent] as a link, then [current] as inert
+   * text when the page is a leaf. Both are escaped here, so callers pass raw text.
    */
   private fun crumbHtml(href: String, parent: String, current: String? = null): String {
     val tail =
@@ -1484,11 +1169,9 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The per-preview "source" link shown under the viewer's title — an anchor to this preview's
-   * source file on GitHub. [href] is the resolved blob URL (from [ServeUrls.githubBlobUrl]);
-   * null/blank ⇒ nothing is rendered (a local session with no delivery provenance, or a preview
-   * whose manifest recorded no source path). [path] is the module-relative source path, surfaced as
-   * the link's tooltip so hovering names the file. Both the URL and the path are attribute-escaped.
+   * The per-preview "source" link to this preview's file on GitHub. [href] is the blob URL
+   * ([ServeUrls.githubBlobUrl]); null/blank renders nothing. [path] is the tooltip. Both are
+   * attribute-escaped.
    */
   private fun sourceLinkHtml(href: String?, path: String?): String {
     val url = href?.takeIf { it.isNotBlank() } ?: return ""
@@ -1500,20 +1183,14 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The viewer's "report an issue" affordance: a prefilled GitHub new-issue **form** for the
-   * preview on screen, assembled by [ServeIssueReport] (see [ServeIssueReport.action] for why a
-   * form rather than a link). [action] is the issue form's URL and [body] is its hidden input —
-   * filled for the settings the page was served at, so it works with JS off — while [bodyTemplate]
-   * is the same body with the render link left as [ServeIssueReport.RENDER_PLACEHOLDER], which the
-   * viewer JS re-substitutes as the overrides change. There is deliberately **no** title: the
-   * reporter types it (see [reportIssueHtml]). [repo] names the target so nobody files against a
-   * repo they didn't mean to, and [login] — present only when the visitor has a GitHub session on
-   * this server — says whose account will author it.
+   * The viewer's "report an issue" affordance: a prefilled GitHub new-issue form assembled by
+   * [ServeIssueReport] (see [ServeIssueReport.action] for why a form).
    *
-   * [subject] names what the report is *about*, in the affordance's own prose. The default suits
-   * the per-preview case this started as; the comparison wall — which shows every component and
-   * singles out none — files a page-scoped report and says so instead of claiming a preview the
-   * visitor never picked.
+   * [body] is the hidden input filled for the served settings so it works with JS off;
+   * [bodyTemplate] holds [ServeIssueReport.RENDER_PLACEHOLDER], which the viewer JS re-substitutes
+   * as overrides change. No title: the reporter types it. [repo] names the target and [login] the
+   * authoring account, if signed in. [subject] names what the report is about (e.g. page-scoped on
+   * the comparison wall).
    */
   data class ReportIssue(
     val action: String,
@@ -1523,12 +1200,9 @@ ${captureControlsHtml().prependIndent("          ")}
     val login: String? = null,
     val subject: String = "this preview",
     /**
-     * The design system id a browser-written locator has to name, when this page can write one.
-     *
-     * Non-null is what turns the comparison wall's row pickers on: it says the template carries
-     * [ServeIssueReport.LOCATORS_PLACEHOLDER] and that the two page-level facts a locator needs
-     * beyond the row itself — this and [locatorRevision] — are on the page for the script to read.
-     * Null everywhere else, and the pickers stay hidden there.
+     * The design system id a browser-written locator must name. Non-null enables the comparison
+     * wall's row pickers: it means the template carries [ServeIssueReport.LOCATORS_PLACEHOLDER] and
+     * the page exposes this and [locatorRevision]. Null elsewhere.
      */
     val locatorSystem: String? = null,
     /** Delivery provenance as `owner/repo@branch`, the locator's `revision:` line. */
@@ -1536,17 +1210,15 @@ ${captureControlsHtml().prependIndent("          ")}
   )
 
   /**
-   * The Figma node a preview is specified by, as the viewer offers it: a ready-to-open deep [url]
-   * (assembled by [ServeFigmaSpec] from a literal origin plus a validated file key and node id, so
-   * a hostile catalog cannot put an arbitrary href on the page) and the reference's [label], which
-   * names *which* spec the link opens when a producer publishes several.
+   * The Figma node a preview is specified by: a deep [url] built by [ServeFigmaSpec] from a literal
+   * origin plus validated ids (so a hostile catalog cannot inject an href), and a [label] naming
+   * which spec it is.
    */
   data class FigmaSpec(val url: String, val label: String? = null, val provider: String = "Figma")
 
   /**
-   * A published design page as the catalog's **navigation** needs it: what to call it, and the id
-   * its URL carries. Deliberately not the whole [DesignPage] — the landing lists these, it does not
-   * draw them, and a page's node list is megabytes of manifest the tree has no use for.
+   * A published design page as navigation needs it: its name and URL id. Not the whole
+   * [DesignPage], whose node list can be megabytes.
    */
   data class PageLink(
     val id: String,
@@ -1556,25 +1228,16 @@ ${captureControlsHtml().prependIndent("          ")}
   )
 
   /**
-   * One **major section** of a design page — a Figma `COMPONENT_SET`, which on a specimen sheet is
-   * what a reader means by a heading: the `Shape` page's grid of shapes, the `Buttons` page's row
-   * of button families.
-   *
-   * Grouping nodes only, not every component. A definition sheet carries hundreds of nodes and
-   * listing them in a sidebar would rebuild the wall of rows this navigation exists to avoid; the
-   * sets are the handful of things the page is actually divided into.
+   * One **major section** of a design page — a Figma `COMPONENT_SET`. Grouping nodes only; listing
+   * every component would rebuild the wall of rows this navigation avoids.
    */
   data class PageSection(val nodeId: String, val name: String)
 
   /**
-   * The `id` a page's node hotspot carries, so a link can land on it.
-   *
-   * A design-tool node id (`1:23`) is legal in an HTML `id` but not in a CSS selector or a URL
-   * fragment without escaping, and it is free text from a third-party manifest either way — so the
-   * anchor is *built* from the id rather than being it. Every character outside the safe set
-   * becomes `-`, which can collide in principle; the collision is harmless here, because the worst
-   * case is a fragment landing on the sibling above the one you asked for, and the alternative
-   * (percent-encoding into a fragment) is unreadable in a URL a reader is meant to share.
+   * The HTML `id` a page's node hotspot carries. Design-tool ids (`1:23`) are untrusted and not
+   * selector/fragment-safe, so every character outside the safe set becomes `-`. Collisions are
+   * possible but harmless (worst case lands on a sibling), and readable fragments beat
+   * percent-encoding.
    */
   fun nodeAnchorId(nodeId: String): String =
     "cp-node-" +
@@ -1583,11 +1246,8 @@ ${captureControlsHtml().prependIndent("          ")}
         .joinToString("")
 
   /**
-   * The row under the viewer's title holding the per-preview provenance links: "source" (where the
-   * preview is declared), "report an issue" (a prefilled bug against the repo that owns it), and
-   * "figma spec" (the node this preview is specified by, when the catalog names one). They share
-   * one flex row so they read as one line of provenance actions; any can be absent, and when all
-   * are the row itself is omitted rather than left as empty vertical space.
+   * The row under the viewer's title holding the per-preview provenance links: "source", "report an
+   * issue", and "figma spec". Any may be absent; when all are, the row is omitted.
    */
   private fun previewLinksHtml(
     sourceHref: String?,
@@ -1612,9 +1272,8 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * "A2UI playground" — for a preview declaring the A2UI `document` knob, the playground page
-   * opened on it: its document (the knob's default, e.g. a sample's payload) in an editor,
-   * re-rendered through this preview as it changes.
+   * "A2UI playground": for a preview declaring the A2UI `document` knob, the playground opened on
+   * its document and re-rendered through this preview.
    */
   private fun a2uiPlaygroundLinkHtml(href: String?): String {
     val url = href?.takeIf { it.isNotBlank() } ?: return ""
@@ -1629,14 +1288,8 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * "open in playground" — the same provenance row's action twin: where `source` sends you to read
-   * this preview's Kotlin on GitHub, this opens it *in the editor* against the catalog it came
-   * from, ready to press Run on.
-   *
-   * Deliberately sits in the provenance row rather than beside the render: it is a developer
-   * affordance about where this preview comes from, not a control over what is on screen. Null —
-   * the common case on a host with no playground lane, or a preview whose source path was never
-   * recorded — renders nothing at all rather than a dead entry.
+   * "open in playground": opens this preview's source in the editor against its catalog. In the
+   * provenance row because it is a developer affordance. Null renders nothing.
    */
   private fun playgroundLinkHtml(href: String?): String {
     val url = href?.takeIf { it.isNotBlank() } ?: return ""
@@ -1646,14 +1299,9 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * "cross-catalog layers" — the derived-layer diff against the counterpart render in the
-   * `compareWith` sibling (issue #4838).
-   *
-   * In the provenance row rather than in the spec lane, and that is not cosmetic: the lane exists
-   * only for a catalog that publishes design references, while this pairing needs none. Hanging the
-   * link there would have hidden it from exactly the catalogs that have a sibling and no kit import
-   * — and the row is where a per-preview "where does this come from, and what else is it" link
-   * belongs anyway. Empty (no sibling, or a pinned page) renders nothing.
+   * "cross-catalog layers": the derived-layer diff against the `compareWith` sibling's render. In
+   * the provenance row rather than the spec lane, which only exists for catalogs with design
+   * references. Empty (no sibling, or a pinned page) renders nothing.
    */
   private fun parallelLayersLinkHtml(href: String): String {
     val url = href.takeIf { it.isNotBlank() } ?: return ""
@@ -1664,9 +1312,7 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * Renders [spec] as a link opening the Figma node this preview is specified by. Null — the common
-   * case, since only a catalog that publishes Figma-backed design references names one — renders
-   * nothing at all rather than a dead or guessed link.
+   * Renders [spec] as a link to the Figma node this preview is specified by; null renders nothing.
    */
   private fun figmaSpecHtml(spec: FigmaSpec?): String {
     val s = spec ?: return ""
@@ -1682,23 +1328,12 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * Renders [report] as the per-preview "report an issue" affordance beside the "source" link: a
-   * disclosure styled as a link, opening a small panel whose one visible control is a **required**
-   * Summary the reporter writes themselves.
+   * Renders [report] as the per-preview "report an issue" affordance: a link-styled disclosure
+   * whose panel has one visible control, a **required** Summary.
    *
-   * **Why the reporter types the title.** A server-written title (`Preview issue: <preview>
-   * (<system>)`) names the preview and says nothing about what is wrong, so a repo collects a queue
-   * of issues distinguishable only by opening them. The preview's identity is not lost by asking:
-   * it is the `| Preview |` row of the body's "Which preview" table, which every report carries.
-   * Same trade `/report-bug` makes — see [bugReportPage]'s Summary input.
-   *
-   * **Why a script-free `<details>`.** The form has to keep working with JS off, which is also what
-   * enforces the title: `required` is the browser's own check, so a reporter cannot submit an
-   * untitled report whether or not the page's script ran. Nothing here is scripted — the disclosure
-   * is the element's own behaviour, the `action` stays a server-rendered literal, and the only
-   * thing the viewer JS touches is the hidden `body` input it already refreshed.
-   *
-   * Null (a surface with no repo to file against) renders nothing.
+   * The reporter writes the title because a generated one says nothing about what is wrong; the
+   * preview identity is in the body. A script-free `<details>` so it works with JS off, and
+   * `required` enforces the title either way. Null renders nothing.
    */
   private fun reportIssueHtml(report: ReportIssue?): String {
     val r = report ?: return ""
@@ -1707,16 +1342,10 @@ ${captureControlsHtml().prependIndent("          ")}
     val repo = WebEscaping.htmlEscape(r.repo)
     val subject = WebEscaping.htmlEscape(r.subject)
     val tip = "Something wrong with $subject — files against $repo$who"
-    // `data-cp-repo` is read by the floating launcher, which offers this affordance as its catalog
-    // half and has to name the repo in the offer. Taken from an attribute rather than scraped out
-    // of the note's prose below, so rewording the note cannot silently change where the launcher
-    // says a report goes. `data-cp-subject` is there for the same reason and answers the other half
-    // of the offer — what the report is about — so the wall's launcher says "these comparisons"
-    // rather than claiming a preview on a page that shows every one of them.
-    // The two page-level halves of a locator the picker writes per row. Emitted only where the
-    // template has a `{{locators}}` line to fill (see [ReportIssue.locatorSystem]), so their
-    // presence is also the signal that turns the wall's row pickers on — one attribute the script
-    // reads rather than a second flag that could disagree with the template.
+    // `data-cp-repo` and `data-cp-subject` are read by the floating launcher to name the repo and
+    // subject of its catalog half, so rewording the prose cannot change them.
+    // The locator facts are emitted only where the template has a `{{locators}}` line
+    // ([ReportIssue.locatorSystem]); their presence is what enables the wall's row pickers.
     val locatorFacts =
       (r.locatorSystem
         ?.takeIf { it.isNotBlank() }
@@ -1748,29 +1377,13 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * One `parity:` label the reporter picks for themselves: is this **upstream**, is it **this
-   * catalog**, or does somebody still have to work that out?
+   * One `parity:` label the reporter picks: **upstream**, **this catalog**, or not yet known (the
+   * default, so an unconsidered report stays unclassified rather than wrongly labelled).
    *
-   * It is the first question asked of every difference on a parity wall and the one the reporter is
-   * best placed to answer — they are looking at the two pictures. Asked here, it arrives with the
-   * issue; asked later, it is a triager reconstructing a comparison from a screenshot. The three
-   * answers are deliberately the whole vocabulary: "upstream" and "this catalog" are the two places
-   * a fix can live, and the third exists so that *not knowing* is a first-class answer rather than
-   * a reason to guess. It is the default, because a report filed without a thought about this is an
-   * unclassified one, and saying so is more useful than a confident wrong label.
-   *
-   * **Why a `<select name="labels">` rather than something the page assembles.** GitHub's new-issue
-   * form reads `labels` straight from the query, so the browser's own control is the whole
-   * transport: no script, no hidden field to keep in step, and a reporter with JavaScript off files
-   * exactly the same labelled issue as everybody else. The values extend the `parity:` vocabulary
-   * the catalog's issue index already speaks (`parity-issues.mjs`, [ServeParityIssuesStore]), so a
-   * classification made here comes back on `parity/issues.json` rather than dying in the label
-   * list.
-   *
-   * The body says it too. The server writes the line pointing at the label
-   * ([ServeIssueReport.CLASSIFICATION_PREFIX]) and `<cp-report-classification>` rewrites it with
-   * the chosen answer in prose, so a triager reading the issue does not have to look at the label
-   * list — and a repository that has no such label to apply still gets the answer.
+   * A plain `<select name="labels">` because GitHub's new-issue form reads `labels` from the query:
+   * no script, works with JS off. Values extend the `parity:` vocabulary read back by
+   * [ServeParityIssuesStore]. `<cp-report-classification>` also writes the answer into the body
+   * line ([ServeIssueReport.CLASSIFICATION_PREFIX]) for repos without the label.
    */
   private fun reportClassificationHtml(): String =
     "<cp-report-classification class=\"cp-report-class\">" +
@@ -1809,14 +1422,10 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The three answers, as `label value` → visible text → the sentence the issue body states.
-   *
-   * `verification-needed` is the existing `parity:` value for "somebody has to look at this", so
-   * the third answer reuses it rather than minting a synonym beside it. The other two are new and
-   * are added to the vocabulary at both ends of the round trip — the producer
-   * (`compose-ai-tools/scripts/design-artifacts/parity-issues.mjs`) and the reader
-   * ([ServeParityIssuesStore]) — since a value only one end knows is a label the index silently
-   * drops.
+   * The three answers as label value → visible text → body sentence. `verification-needed` is the
+   * existing `parity:` value; the other two must be known to both
+   * `compose-ai-tools/scripts/design-artifacts/parity-issues.mjs` and [ServeParityIssuesStore], or
+   * the index drops them.
    */
   private val REPORT_CLASSIFICATIONS =
     listOf(
@@ -1840,22 +1449,12 @@ ${captureControlsHtml().prependIndent("          ")}
   private const val REPORT_CLASSIFICATION_DEFAULT = "parity:verification-needed"
 
   /**
-   * The same affordance as a **row of its own**, for a page-scoped report on a surface that carries
-   * no per-preview provenance line to hang it off.
+   * The report affordance as a row of its own, for page-scoped reports on catalog surfaces without
+   * a per-preview provenance line (landing grid, design page, pages index, motion browser). Without
+   * a `#cp-report` the launcher's catalog half stays hidden.
    *
-   * A catalog page that shows no single preview — the landing grid, a design page, the pages index,
-   * the motion browser — still belongs to a catalog, and something on it can still be wrong in that
-   * catalog's own repository. Without a `#cp-report` anywhere in the markup the floating launcher
-   * has nothing to point at, so its catalog half stays hidden and the server tracker is the only
-   * route out of the page (issue #4704). The report those surfaces file is the page-scoped one the
-   * comparison wall introduced: it names the page rather than inventing a preview the visitor never
-   * picked.
-   *
-   * Reuses `.cp-preview-links` wholesale, and not only for the styling: `.cp-report`'s panel is
-   * anchored to that row rather than to its own toggle, which is what keeps it on screen at every
-   * width (see the comment block in `serve.css`). [extraClass] is the surface's own spacing hook.
-   *
-   * Null — a surface with nothing sensible to file against — renders nothing at all.
+   * Reuses `.cp-preview-links` because `.cp-report`'s panel is anchored to that row (see
+   * `serve.css`). [extraClass] is a spacing hook. Null renders nothing.
    */
   private fun pageReportRowHtml(report: ReportIssue?, extraClass: String = ""): String {
     val html = reportIssueHtml(report).takeIf { it.isNotBlank() } ?: return ""
@@ -1865,29 +1464,12 @@ ${captureControlsHtml().prependIndent("          ")}
 
   /** Render catalog-published GitHub issues. Every href has already been rebuilt by the store. */
   /**
-   * The filed-issue list, as a **disclosure**: one line of the open numbers, and the issues
-   * themselves behind it.
+   * The filed-issue list as a **disclosure**: one line of open numbers, the issues behind it — the
+   * same trade as [compareBugsCellHtml], so the list never pushes the render below the fold.
    *
-   * The same trade the wall's Bugs column makes ([compareBugsCellHtml]), for the same reason and on
-   * the three pages that carry this list. On the viewer it was the worst of the three: a full-width
-   * panel between the preview's title and the preview, four issues tall, so a catalog with a few
-   * reports against a component pushed the picture the page exists for below the fold. On the
-   * parity dashboard the same block repeats per component, which is the page's whole body.
-   *
-   * [label] is what the summary reads before the numbers — "Issues" on the viewer and the focused
-   * comparison, the component's name on the dashboard, where the heading and the list were two
-   * elements saying one thing. Blank drops it, for a band whose own `<h2>` already says what these
-   * are. [openByDefault] is for the one list whose page is *about* it and whose reader arrived to
-   * read it, rather than to look at a picture with it beside them.
-   *
-   * The panel closes with the index's [generatedAt] wherever the caller can supply one, for the
-   * reason [compareBugsCellHtml] gives: these rows are a snapshot taken when the page was rendered,
-   * nothing re-checks GitHub, and a `closed` with no date invites more trust than that can carry.
-   *
-   * No counts, again: the summary lists the open numbers and marks the closed ones without saying
-   * how many. Unlike the wall there is no theme swap to invalidate a count here — but two spellings
-   * of one rule is how the two drift, and "closed" is not less informative than "1 closed" when the
-   * numbers themselves are one click away.
+   * [label] precedes the numbers (blank drops it). [openByDefault] is for a page that is about the
+   * list. The panel ends with the index's [generatedAt] where available, since the rows are a
+   * snapshot. No counts, matching the wall.
    */
   private fun parityIssueRowsHtml(
     issues: List<ParityIssue>,
@@ -1910,10 +1492,7 @@ ${captureControlsHtml().prependIndent("          ")}
     val open = issues.filter { it.state == "open" }
     val numbers =
       open.joinToString("") { "<span class=\"cp-parity-issue-chip\">#${it.number}</span>" }
-    // With nothing open, the numbers ARE the closed ones — dimmed, and in place of the marker. The
-    // marker's whole job is "there is more behind this line"; on a list with nothing else to show
-    // it would be the line, and `closed` alone says less than `#41` does for the same width. The
-    // dashboard's closed band is exactly this case, and so is a wall row whose reports all landed.
+    // With nothing open, the closed numbers are shown dimmed in place of the marker.
     val closedMark =
       when {
         issues.none { it.state == "closed" } -> ""
@@ -1956,30 +1535,18 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The parity **verdict** panel: what a parity run concluded about this comparison, grouped the
-   * way the run itself reports — accessibility and i18n first, then tokens, then layout, then the
-   * pixels (docs/PRINCIPLES.md's order in `yschimke/design-parity`, and the order a reader can act
-   * on).
+   * The parity **verdict** panel, grouped as the run reports: accessibility and i18n, tokens,
+   * layout, then pixels.
    *
-   * Server-rendered, deliberately. Everything else this page draws over its panels is built in the
-   * browser from a payload, because it is geometry and geometry is useless without script. A
-   * finding is a SENTENCE — "this label truncates in German", "padding is 24 where the spec says
-   * 12" — and a sentence that appears only after a bundle has downloaded and upgraded cannot be
-   * quoted into a bug, found with the browser's own search, or read at all by anything that does
-   * not run script. So the prose is HTML and only the anchors travel as data.
-   *
-   * The anchor payload rides INSIDE the section, immediately after the rows it keys. Two reasons,
-   * and the second is load-bearing: the ids are minted here and the payload is keyed by them, so
-   * keeping them adjacent is the only arrangement in which they cannot be built out of step — and
-   * `<cp-reference-compare>` installs the moment the parser reaches ITS tag, which is further down
-   * the page. A payload emitted after that tag, as the acceptance context is, does not exist yet
-   * when the element looks for it, and the highlights silently never wire up.
+   * Server-rendered so findings are quotable, searchable and readable without script; only anchors
+   * travel as data. The anchor payload sits inside the section right after the rows it keys: the
+   * ids are minted together, and `<cp-reference-compare>` installs when the parser reaches its tag
+   * further down, so a later payload would not exist yet.
    */
   private fun parityVerdictHtml(sets: List<ParityFindingSet>): String {
     val findings = sets.flatMap { it.findings }
-    // A run that looked and found nothing still has something to say, and it is not the same fact
-    // as a catalog nobody ran: only the first can print "Pass". So a set survives on its declared
-    // status alone, and renders as the head with no groups under it.
+    // A run that found nothing still prints "Pass", unlike a catalog nobody ran, so a set survives
+    // on its declared status alone.
     if (findings.isEmpty() && sets.none { it.status != null }) return ""
     // Worst declared status wins. A run that declared none at all is read off its own findings,
     // which is the same rule the producing engine applies and keeps a hand-written manifest honest.
@@ -2023,9 +1590,7 @@ ${captureControlsHtml().prependIndent("          ")}
           items.joinToString("\n        ") +
           "\n      </ul>\n    </section>"
       }
-    // Only claimed when something on the page can actually respond to a pointer. A catalog whose
-    // producer publishes findings with no geometry gets the same panel without the instruction to
-    // hover, rather than an invitation that does nothing.
+    // Only invite hovering when some finding has geometry to respond.
     val hint =
       if (anchors.isEmpty()) ""
       else
@@ -2039,10 +1604,8 @@ ${captureControlsHtml().prependIndent("          ")}
             "rel=\"noopener\">Full parity report</a>"
         }
         .orEmpty()
-    // Carries its own leading newline and is written without `trimIndent()`, like every other
-    // interpolated block on this page: trimming runs AFTER interpolation, so a nested block's own
-    // indentation would drag the page's with it, and an empty one on its own template line would
-    // leave a blank line on every catalog that publishes no verdict.
+    // Carries its own leading newline and skips `trimIndent()`: trimming runs after interpolation,
+    // so nested indentation would leak and an empty block would leave a blank line.
     val section =
       "\n<section class=\"cp-parity-verdict\" id=\"cp-parity-verdict\"" +
         " aria-labelledby=\"cp-parity-verdict-title\">\n" +
@@ -2067,29 +1630,16 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * One finding row.
-   *
-   * A row carries its anchor id when it HAS somewhere to point, and nothing else — no `tabindex`,
-   * no `role`, no `aria-pressed`. Those are added by `<cp-reference-compare>` once it has parsed
-   * the payload and actually built the boxes, because only then is the row a control.
-   *
-   * The server cannot know that. Script may be disabled, blocked by a policy, or simply fail to
-   * load, and on any of those the page still renders — that is the point of putting the prose in
-   * the document. Announcing every anchored row as a pressed-state button up front would hand a
-   * screen-reader or keyboard user a tab stop that does nothing when they reach it, on the one page
-   * whose no-script behaviour was the reason to render it server-side at all. The same is true of a
-   * payload keyed to a row the panels cannot place: the client drops the id, and a row that never
-   * became a control never looked like one.
+   * One finding row, carrying its anchor id only when it has somewhere to point.
+   * `tabindex`/`role`/`aria-pressed` are added by `<cp-reference-compare>` once it has built the
+   * boxes, so with no script no row pretends to be a control.
    */
   private fun parityFindingRowHtml(id: String, finding: ParityFinding): String {
     val expected = finding.detail["expected"]
     val actual = finding.detail["actual"]
     val token = finding.detail["token"] ?: finding.detail["property"]
-    // The token is printed whenever the finding names one — a spec token IS the finding's subject,
-    // and a check reporting "radius: candidate resolved none" carries the identity with no numeric
-    // delta. Gating the row on expected/actual dropped that identity from the page while the
-    // sanitizer had faithfully kept it, and the `rest` filter below excludes the key too, so it
-    // reached nowhere at all.
+    // The token is printed whenever the finding names one: a spec token is the finding's subject
+    // even with no numeric delta, and `rest` below excludes the key.
     val delta =
       if (expected == null && actual == null && token == null) ""
       else
@@ -2102,9 +1652,7 @@ ${captureControlsHtml().prependIndent("          ")}
             "<span class=\"cp-parity-actual\">actual ${WebEscaping.htmlEscape(it)}</span>"
           } ?: "") +
           "</span>"
-    // Every remaining key, as the row's title. A producer's structured payload is transported in
-    // full rather than narrowed to the two keys this page formats, so a check that reports a
-    // contrast ratio or a measured touch target is still readable here.
+    // Every remaining key, as the row's title, so producer-specific measurements stay readable.
     val rest =
       finding.detail
         .filterKeys { it != "expected" && it != "actual" && it != "token" && it != "property" }
@@ -2129,30 +1677,14 @@ ${captureControlsHtml().prependIndent("          ")}
   /**
    * The rows of a published index that belong to the catalog serving [system].
    *
-   * One repository may declare **several** design systems — `yschimke/wear-m3-catalog` publishes
-   * `:catalog` as `wear-m3-catalog` and `:remote-catalog` as `remote-m3` — and the index producer
-   * reads that repository's issues once and publishes the identical file onto *both* delivery
-   * branches (`parity-issues.yml`, whose two jobs differ only in `system`). That is deliberate: a
-   * locator names the system it was filed against, so one issue set can feed both indexes.
+   * One repository may declare several design systems and publish the same index onto each delivery
+   * branch; component and preview ids collide across them, so scope the index before matching. A
+   * row with no system is kept (the field is optional); only a row naming a different system is
+   * dropped.
    *
-   * Nothing downstream honoured it. [issuesForPreview] and [issuesForRow] match on component id and
-   * preview id, and two catalogs built from one repository share both vocabularies — every
-   * `Button/Filled` report filed against `remote-m3` therefore landed on the `wear-m3-catalog` row
-   * of the same name, and four preview ids (`pageindicator-horizontal__ideal__default__192dp` and
-   * its siblings) collide outright. On the wear catalog's own comparison wall that came to 527 of
-   * 690 pills, headed by an issue whose title says it is fixed on the very catalog it was being
-   * shown on. The component-id match is what makes an umbrella report reach every component it
-   * names, so the fix is not to narrow it but to scope the index first.
-   *
-   * A row with **no** system is kept: the field is optional on the wire, and an index published
-   * before the producer emitted one carries badges that are still this catalog's best guess. Only a
-   * row that positively names a *different* system is dropped, which is the same "positive evidence
-   * only, never inference from absence" rule the acceptance lifecycle join is built on.
-   *
-   * **Display only.** The acceptance lifecycle join resolves an issue by URL, and an acceptance may
-   * legitimately cite an issue filed against a sibling system; scoping that would turn a `closed`
-   * lifecycle into `unknown` and lose a stale finding. Handlers therefore pass the whole index as
-   * `acceptanceIssues` and the scoped list as `parityIssues`.
+   * Display only: the acceptance lifecycle join resolves issues by URL and may cite a sibling
+   * system's issue, so handlers pass the whole index as `acceptanceIssues` and the scoped list as
+   * `parityIssues`.
    */
   fun issuesForSystem(issues: List<ParityIssue>, system: String?): List<ParityIssue> {
     if (system.isNullOrBlank()) return issues
@@ -2168,16 +1700,10 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The issues one **comparison row** carries — component-scoped issues naming any of its preview
-   * [ids] or its component, plus variant-scoped issues naming one of [variantIds] exactly.
-   *
-   * Component-wide reports match the row's whole id set because a row IS the variants. Exact
-   * reports are serialized for every real theme variant so the browser can swap the visible pill
-   * with the pictures. Folded-out siblings remain filtering aliases only and cannot contribute an
-   * exact issue.
-   *
-   * Open before closed, then newest first: the column is read for "does someone already know?", and
-   * a closed report answers that more weakly than an open one.
+   * The issues one **comparison row** carries: component-scoped issues naming any of its preview
+   * [ids] or its component, plus variant-scoped issues naming one of [variantIds] exactly. Exact
+   * reports are emitted for every theme variant so the browser can swap pills with the pictures;
+   * folded-out siblings only alias. Open before closed, then newest first.
    */
   private fun issuesForRow(
     issues: List<ParityIssue>,
@@ -2199,43 +1725,18 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The wall's **Bugs** cell: one line saying what is already filed against this row, a disclosure
-   * carrying the detail, and one link to file more.
+   * The wall's **Bugs** cell: one line of what is already filed against this row, a disclosure with
+   * the detail, and a link to file more.
    *
-   * Collapsed, the cell is ONE line: the OPEN issue numbers, the closed marker, and "+ file". That
-   * is a width decision as much as a height one, and this column was spending both — every issue
-   * was a full-width pill on its own line carrying its title, so a row with four reports stood four
-   * lines tall and 350px wide on a wall whose other three columns are pictures, and the wear
-   * catalog's wall carries 690 pills over 620 rows. Bare numbers cost 5 characters each and the
-   * whole line now measures ~130px.
+   * Collapsed it is one line — open issue numbers, the closed marker, and "+ file" — to keep the
+   * column narrow; titles, closed issues and classification sit behind the disclosure. The panel
+   * ends with the index's `generatedAt` because the state is a snapshot; nothing re-checks GitHub
+   * on the render path.
    *
-   * What the pill's title was there for is not lost, it moves behind the disclosure: the open
-   * issues with their titles, the CLOSED ones — which are worth having and worth not spending a
-   * line each on, since "someone already looked at this and closed it" is a weaker answer than an
-   * open report — and the classification the index carries. A reader scanning for "does anyone know
-   * about this?" is answered by the collapsed line; a reader who wants to know *what* they know
-   * opens one row.
-   *
-   * **A snapshot, and it says so.** The panel closes with the index's own `generatedAt`, because
-   * the state on screen is whatever `parity/issues.json` said when this page was rendered. The
-   * index is regenerated on every issue event, so it is rarely more than a tick behind — but
-   * "rarely" is not "never", and a row that says `closed` without saying *as of when* invites the
-   * reader to trust it further than it can carry. Nothing here re-checks GitHub: that would put an
-   * outbound call on a public server's render path for a fact this column does not need to be live
-   * about.
-   *
-   * No counts anywhere, deliberately. Variant-scoped rows are hidden and shown by `CompareWall` as
-   * the theme swaps ([scopeAttrs] rides on both the collapsed number and its panel entry), so any
-   * number the server printed would be a number the browser could invalidate. The closed marker
-   * therefore says `closed` and not `2 closed`, and each panel entry carries its own state word.
-   *
-   * "+ file" is always offered, including on a row with nothing filed, because that row is the
-   * point: a bad score with no issue against it is the one a reader is scanning for. It stays
-   * OUTSIDE the disclosure for the same reason — a row with nothing filed has no disclosure at all
-   * — and beside the numbers rather than under them, so that row costs one line and not two.
-   * [detailHref] is the focused comparison for the served pair — the report that names the exact
-   * preview AND reference — and [fallbackHref] the viewer's own report, for a row with no reference
-   * to focus.
+   * No counts: `CompareWall` hides variant-scoped rows as the theme swaps ([scopeAttrs]), so a
+   * server-printed count could be wrong. "+ file" is always offered, outside the disclosure.
+   * [detailHref] is the focused comparison for the served pair; [fallbackHref] the viewer's own
+   * report for a row with no reference.
    */
   private fun compareBugsCellHtml(
     issues: List<ParityIssue>,
@@ -2251,9 +1752,8 @@ ${captureControlsHtml().prependIndent("          ")}
         "title=\"Report what is wrong with this comparison\">+&#8202;file</a>"
     if (issues.isEmpty()) return "\n            <td class=\"cp-compare-bugs\">$file</td>"
 
-    // The contract `CompareWall` toggles on, unchanged and now carried TWICE per issue — on the
-    // collapsed number and on its panel entry — because both are the same claim about the same
-    // preview and the browser hides them together.
+    // The contract `CompareWall` toggles on, carried on both the collapsed number and its panel
+    // entry so the browser hides them together.
     fun scopeAttrs(issue: ParityIssue): String =
       if (issue.scope != "variant") " data-bug-scope=\"component\""
       else {
@@ -2267,11 +1767,8 @@ ${captureControlsHtml().prependIndent("          ")}
       open.joinToString("") { issue ->
         "<span class=\"cp-compare-bug-chip\"${scopeAttrs(issue)}>#${issue.number}</span>"
       }
-    // A row whose every report is closed still says so on the collapsed line — otherwise the only
-    // thing distinguishing it from a row nobody has ever looked at is a disclosure marker. And with
-    // nothing open, the numbers ARE the closed ones: the marker's job is "there is more behind this
-    // line", so on a line with nothing else it would BE the line, and `closed` says less than `#41`
-    // for the same width. Same rule as [parityIssueRowsHtml], spelled the same way.
+    // A row whose reports are all closed still says so; with nothing open, the closed numbers
+    // replace the marker (same rule as [parityIssueRowsHtml]).
     val closedMark =
       when {
         issues.none { it.state == "closed" } -> ""
@@ -2286,17 +1783,14 @@ ${captureControlsHtml().prependIndent("          ")}
       issues.joinToString("") { issue ->
         val closed = issue.state == "closed"
         val title = issue.title.trim()
-        // An untitled issue cannot happen through the index — `parity-issues.mjs` refuses one — but
-        // the entry is rendered from catalog-published data, so the empty case renders the number
-        // alone rather than a stray empty line.
+        // `parity-issues.mjs` refuses untitled issues, but this is catalog data, so render the
+        // number alone if one appears.
         val titleHtml =
           if (title.isEmpty()) ""
           else
             "<span class=\"cp-compare-bug-title\" title=\"${WebEscaping.htmlEscape(title)}\">" +
               "${WebEscaping.htmlEscape(title)}</span>"
-        // The classification the reporter chose, when the issue carries one. It is the difference
-        // between "we know and we disagree with the kit" and "nobody has verified this yet", which
-        // is most of what a reader opening this panel is trying to learn.
+        // The reporter's classification, when the issue carries one.
         val tag =
           issue.parity
             ?.takeIf { it.isNotBlank() }
@@ -2328,20 +1822,17 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * Provenance of a served design-system catalog: the trusted GitHub [repo]/[branch] it was fetched
-   * from, when it was [generatedAt] (ISO-8601), and the [toolVersion]
-   * (compose-ai-tools) + [designParityVersion] that produced it. Threaded from [ServeCatalogStore]
-   * (which knows the repo/branch) + the catalog's own `catalog.json` metadata. Null fields are
-   * simply omitted.
+   * Provenance of a served design-system catalog: the trusted GitHub [repo]/[branch], [generatedAt]
+   * (ISO-8601), and the [toolVersion] + [designParityVersion] that produced it. Built from
+   * [ServeCatalogStore] plus `catalog.json`; null fields are omitted.
    */
   data class CatalogProvenance(
     val repo: String,
     val branch: String,
     /**
-     * The delivery-branch commit this catalog was fetched at, when the store could resolve it — the
-     * revision every permalink on this catalog's pages pins to ([ServeCatalogRevision]). Null for
-     * an uploaded bundle, and for a catalog whose branch advertisement couldn't be read; the pages
-     * then simply offer no permalink.
+     * The delivery-branch commit this catalog was fetched at — the revision permalinks pin to
+     * ([ServeCatalogRevision]). Null for an uploaded bundle or an unreadable branch; no permalink
+     * is offered then.
      */
     val commit: String? = null,
     val generatedAt: String? = null,
@@ -2350,42 +1841,29 @@ ${captureControlsHtml().prependIndent("          ")}
   )
 
   /**
-   * The **source** a catalog was built from — `catalog.json`'s `source = {repo, ref, module}` — as
-   * opposed to the delivery [CatalogProvenance] (the `design-artifacts/<system>` branch that
-   * carries the generated assets). This is the repo/ref/module of the actual Kotlin, so it's what a
-   * per-preview "source" link must point at: `blob/<ref>/<module>/<sourceFile>`. Null for a plain
-   * uploaded bundle or a catalog that declared no source.
+   * The **source** a catalog was built from (`catalog.json`'s `source = {repo, ref, module}`), as
+   * opposed to the delivery [CatalogProvenance]. Per-preview "source" links point at
+   * `blob/<ref>/<module>/<sourceFile>`. Null for a plain bundle or undeclared source.
    */
   data class CatalogSource(val repo: String, val ref: String, val module: String)
 
   /**
-   * One thing the spec lane can put on the stage beside the render.
+   * One thing the spec lane can put on the stage beside the render. The lane's views work over any
+   * image pair, so a second comparison is a second source rather than a new mode.
    *
-   * The lane's four views — Spec, Diff, Triptych, Slider — are instruments over *a pair of images*,
-   * and they do not care where the second image came from. So a second comparison is a second
-   * SOURCE for the existing lane rather than a mode of its own: the views, the single normalisation
-   * pass that keeps them in one pixel space, and the URL state all carry over untouched
-   * (issue #4621).
+   * * `kit` — the imported design reference: a specification fixed at publish time.
+   * * `parallel` — the counterpart component in the `compareWith` sibling: another implementation's
+   * render, not a spec.
    *
-   * Two kinds exist today and they answer different questions, which is why the lane names the one
-   * it is showing rather than implying they are interchangeable:
+   * [provenance] states that the sibling's render used its own theme, knobs and overrides, so the
+   * comparison is not implied to be symmetric.
    *
-   * * `kit` — the imported design reference. A SPECIFICATION: a static import, fixed at publish
-   *   time. "Does this match what the design says?"
-   * * `parallel` — the counterpart component in the `compareWith` sibling, served from this same
-   *   origin. ANOTHER IMPLEMENTATION'S RENDER, not a spec. "Do our two renditions agree?"
-   *
-   * [provenance] is the whole reason the second kind is safe to offer. The sibling's render was
-   * produced under its own theme, knobs and overrides — not the ones that produced the render it is
-   * being compared against — so the lane says so. An implied symmetry here is the detail most
-   * likely to make the feature quietly misleading.
-   *
-   * @property id the value the picker carries (`kit` / `parallel`); also the URL state's own token.
+   * @property id the value the picker carries (`kit` / `parallel`); also the URL state's token.
    * @property label what the picker button reads, e.g. `Figma` or `wear-m3-catalog`.
    * @property rasterUrl same-origin URL of the image to compare against; the viewer refuses any
-   *   other origin ([specRasterSrc]).
-   * @property provenance one line naming where this image came from, shown when the source is
-   *   selected. Empty for a source that needs no caveat.
+   * other origin ([specRasterSrc]).
+   * @property provenance one line naming where this image came from; empty when no caveat is
+   * needed.
    */
   data class SpecSource(
     val id: String,
@@ -2403,10 +1881,9 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The catalog-provenance strip shown on a catalog landing: a link to the trusted delivery
-   * [branch][CatalogProvenance.branch] on GitHub, the generation date, the compose-ai-tools +
-   * design-parity versions it was rendered with, and a link to re-run the `design-artifacts`
-   * workflow that regenerates it. Empty [prov] fields drop their item.
+   * The catalog-provenance strip on a catalog landing: delivery [branch][CatalogProvenance.branch]
+   * link, generation date, tool versions, and a link to re-run the `design-artifacts` workflow.
+   * Empty [prov] fields drop their item.
    */
   private fun provenanceSection(prov: CatalogProvenance, refreshUrl: String?): String {
     val repo = WebEscaping.htmlEscape(prov.repo)
@@ -2419,9 +1896,7 @@ ${captureControlsHtml().prependIndent("          ")}
         "<span class=\"cp-prov-item\"><span class=\"cp-prov-key\">catalog</span> " +
           "<a href=\"$branchUrl\">$GITHUB_ICON $repo@$branch</a></span>"
       )
-      // Which publish is on screen. The branch link above names a moving target by construction, so
-      // without this the strip could say where a catalog came from but not *when* — and a visitor
-      // reading a rendering they want to cite had nothing to cite it by.
+      // Which publish is on screen; the branch link alone names a moving target.
       ServeCatalogRevision.treeUrl(prov.repo, prov.commit)?.let { url ->
         add(
           "<span class=\"cp-prov-item\"><span class=\"cp-prov-key\">revision</span> " +
@@ -2510,12 +1985,9 @@ ${captureControlsHtml().prependIndent("          ")}
     id.split("__").drop(1).lastOrNull { it == "light" || it == "dark" }
 
   /**
-   * A dark-first design system draws its components for a dark surface (Wear OS is
-   * black-watch-face-first), so a preview with no explicit light/dark token should sit on the DARK
-   * stage — otherwise a light-on-transparent Wear render lands on the default white stage and its
-   * light text is unreadable. Keyed off the served system name — the `/<system>` path mount
-   * ([basePath]) or, for the legacy `?session=` form, the session id — and resolved through the
-   * single per-system policy in [SystemDisplay] rather than an inline name check here.
+   * Whether the served system is dark-first (e.g. Wear OS), so a preview with no explicit
+   * light/dark token sits on the dark stage. Keyed off the system name from [basePath] or, for the
+   * legacy `?session=` form, the session id, via [SystemDisplay].
    */
   private fun isDarkFirstSystem(
     basePath: String,
@@ -2527,22 +1999,17 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The stage / thumbnail **background** theme for a preview: its explicit `__light` / `__dark`
-   * variant token when it has one, else the DARK default for a dark-first system
-   * ([isDarkFirstSystem]), else none (the default light stage). Distinct from [cardTheme] — which
-   * drives the light/dark *filter axis* and must stay explicit-only, so a dark-first catalog with
-   * no light variants doesn't sprout a dead Light/Dark toggle.
+   * The stage / thumbnail **background** theme: the explicit `__light` / `__dark` token, else dark
+   * for a dark-first system ([isDarkFirstSystem]), else none. Distinct from [cardTheme], which
+   * drives the filter axis and must stay explicit-only so a dark-first catalog doesn't get a dead
+   * Light/Dark toggle.
    */
   private fun bgTheme(id: String, darkFirst: Boolean): String? =
     cardTheme(id) ?: if (darkFirst) "dark" else null
 
   /**
-   * An `#AARRGGBB` data-product colour as a CSS one.
-   *
-   * CSS's 8-digit hex puts alpha **last** (`#RRGGBBAA`), so emitting the wire form unchanged would
-   * read `#FF1C1B1F` as opaque-ish `#FF1C1B` — a red stage instead of a near-black one, which is
-   * the kind of wrong that looks deliberate. An opaque colour drops the alpha entirely so the
-   * common case stays the familiar six digits.
+   * An `#AARRGGBB` data-product colour as CSS. CSS 8-digit hex puts alpha last (`#RRGGBBAA`), so
+   * the wire form must be reordered; opaque colours drop alpha.
    */
   private fun String.asCssColor(): String {
     val hex = removePrefix("#")
@@ -2553,30 +2020,19 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The ground this preview should be shown on, resolved through the shared [PreviewBackdrop]
-   * chain: what the preview states about itself first, the catalog's declared stage after.
+   * The ground this preview should be shown on, resolved through [PreviewBackdrop]: what the
+   * preview states about itself first, the catalog's stage after.
    *
-   * This is the serve host's end of the "per-preview with catalog defaults" contract. The two
-   * halves are genuinely different claims and must not be collapsed: a `showBackground = false`
-   * sticker says nothing about its ground on purpose (so it drops onto any Figma canvas) and
-   * *wants* the catalog stage, while an explicit `@Preview(backgroundColor = 0xFFFFFFFF)` specimen
-   * in the same dark-first catalog is stating a white ground and must keep it. Deriving both from
-   * the catalog alone, which is what every compare surface used to do, gets the second one wrong.
-   *
-   * The [Backdrop][PreviewBackdrop.Backdrop] carries its own `source`, so a page can show *why* it
-   * chose a stage instead of leaving a reader to guess — see the reference-compare page, which
-   * names it in the panel's title text.
+   * A `showBackground = false` sticker wants the catalog stage, while an explicit `backgroundColor`
+   * must keep its colour even in a dark-first catalog. The [Backdrop][PreviewBackdrop.Backdrop]
+   * carries its `source` so pages can show why a stage was chosen.
    */
   internal fun backdropFor(
     preview: ServePreview,
     darkFirst: Boolean,
     /**
-     * The render lane's `uiMode` override (`"light"`/`"dark"`), when this page is showing one.
-     *
-     * An override is the *effective* render state, so it outranks the preview's discovery-time
-     * `uiMode` for both rungs that read the night axis. Without it a `?uiMode=dark` comparison put
-     * the overridden — genuinely dark — Actual panel on the preview's original light stage, and for
-     * a `showBackground = true` preview it named white while the renderer painted the dark sheet.
+     * The render lane's `uiMode` override (`"light"`/`"dark"`), when this page shows one. It is the
+     * effective render state, so it outranks the preview's discovery-time `uiMode`.
      */
     uiModeOverride: String? = null,
   ): PreviewBackdrop.Backdrop {
@@ -2588,10 +2044,7 @@ ${captureControlsHtml().prependIndent("          ")}
         night =
           overriddenSurface?.let { it == PreviewBackdrop.CatalogSurface.DARK }
             ?: PreviewBackground.isNight(preview.uiMode),
-        // The variant this render IS, which the catalog's stage cannot speak for: a *dark* variant
-        // inside a light-first catalog needs a dark ground exactly as much as a dark-first
-        // catalog's does. Omitting it opened a dark row's focused comparison on a light stage while
-        // the wall and the viewer both showed it dark.
+        // The variant's own theme: a dark variant in a light-first catalog needs a dark ground too.
         variantSurface = overriddenSurface ?: variantSurfaceOf(preview),
       ),
       if (darkFirst) PreviewBackdrop.CatalogSurface.DARK else PreviewBackdrop.CatalogSurface.LIGHT,
@@ -2599,30 +2052,19 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The device-frame clip for a preview, as a CSS `clip-path`, or null when the whole capture is
+   * The device-frame clip for a preview as a CSS `clip-path`, or null when the whole capture is
    * screen.
    *
-   * This is the shape half of the same "what is behind this preview?" question [backdropFor]
-   * answers with a colour, and the two are only correct together. A round Wear capture is a circle
-   * in a square PNG; painting its backdrop across the whole square draws the watch as a rectangle,
-   * and because a Wear catalog declares black backgrounds against black screens, the device edge
-   * did not merely look wrong — on this repo's own `PageIndicatorScaffoldTemplate` renders the
-   * stage was pixel-identical to the screen and the boundary was invisible.
-   *
-   * Sized to the DEVICE box rather than to the panel: the compare panels size their `<img>` with
-   * `width: auto; height: auto`, so the image element's box carries the render's own aspect and a
-   * circle stated against the device is exactly the circle in the pixels. Clipping the panel
-   * instead would clip the panel's rectangle, which is a different shape in a different place.
+   * The shape half of [backdropFor]: a round Wear capture is a circle in a square PNG, and with
+   * black-on-black backdrops the device edge disappears unless clipped. Sized to the device box,
+   * which matches the `<img>` box since panels size it `auto`.
    */
   internal fun stageClipFor(
     preview: ServePreview,
     /**
-     * The render lane's overrides, when this page is showing one. The clip has to describe the
-     * frame that was actually RENDERED, not the one the preview was discovered with — the Actual
-     * panel takes these through `assetQuery`, so a comparison opened at `?device=id:wearos_square`
-     * shows a square render and a circle stated from the annotation would crop live screen off it.
-     * The inverse is just as wrong: overriding a phone preview onto a watch leaves a round render
-     * on a square stage. Same reason [backdropFor] takes `uiModeOverride`.
+     * The render lane's overrides, when present. The clip must describe the frame actually rendered
+     * (e.g. `?device=id:wearos_square`), not the discovered one. Same reason [backdropFor] takes
+     * `uiModeOverride`.
      */
     overrides: Map<String, String> = emptyMap(),
   ): String? {
@@ -2638,20 +2080,10 @@ ${captureControlsHtml().prependIndent("          ")}
   /**
    * The device frame this comparison actually rendered at, or null when it cannot be stated.
    *
-   * An explicit `device=` override replaces the frame outright and is resolved from the device
-   * catalog exactly as discovery would have — including its shape, so switching a round preview to
-   * one of the Wear picker's square choices drops the clip rather than keeping a stale circle.
-   *
-   * A SIZE override suppresses the clip instead of adjusting it. `widthPx`/`heightPx` are pixels
-   * against a density this page does not carry, and `orientation` re-derives the frame through
-   * rules that live in the resolver; a clip guessed from any of them would be a circle in the wrong
-   * place, which is worse than the square stage this feature replaced — that at least never hid
-   * real pixels. Answering null puts such a render back on the un-clipped stage, honestly.
-   *
-   * Internal rather than private because [ServeRenderMatte] needs the same frame for the same
-   * reason [stageClipFor] does — it draws the clip into the bytes instead of into CSS — and two
-   * copies of "which frame did this actually render at" is exactly how the stage and the clip would
-   * come to disagree about one render.
+   * An explicit `device=` override is resolved from the device catalog, shape included. A size
+   * override suppresses the clip: pixels without density and orientation rules can't be re-derived
+   * here, and a wrong clip hides real pixels. Internal because [ServeRenderMatte] needs the same
+   * frame, and one copy keeps stage and clip consistent.
    */
   internal fun effectiveDeviceFrame(
     preview: ServePreview,
@@ -2663,9 +2095,8 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * Render overrides that change the frame's SHAPE by a route this page cannot re-derive. Kept as a
-   * list rather than folded into the check above so a new sizing knob in
-   * [ServeOverrides.SUPPORTED_KEYS] is one line to account for here.
+   * Render overrides that change the frame's shape in a way this page cannot re-derive. A list so a
+   * new sizing knob in [ServeOverrides.SUPPORTED_KEYS] is one line here.
    */
   private val SIZE_OVERRIDE_KEYS =
     listOf(
@@ -2679,11 +2110,8 @@ ${captureControlsHtml().prependIndent("          ")}
     )
 
   /**
-   * The light/dark variant a preview **is**, from the catalog's baked `theme` token, else its night
-   * `uiMode`. Null when the render is unthemed and says nothing — the catalog's stage answers then.
-   *
-   * Same two signals, in the same order, that [previewTheme] reads; they are kept in step
-   * deliberately so the stage a comparison uses and the theme the viewer reports cannot diverge.
+   * The light/dark variant a preview **is**: the catalog's baked `theme`, else its night `uiMode`;
+   * null when unthemed. Same signals and order as [previewTheme], kept in step deliberately.
    */
   private fun variantSurfaceOf(preview: ServePreview): PreviewBackdrop.CatalogSurface? =
     PreviewBackdrop.CatalogSurface.parse(preview.theme)
@@ -2694,31 +2122,24 @@ ${captureControlsHtml().prependIndent("          ")}
       }
 
   /**
-   * The preview's baked theme, preferring explicit catalog metadata, then its discovery-time
-   * uiMode, over id heuristics.
-   *
-   * Falls through to [backdropFor] rather than to the catalog stage directly, so a preview that
-   * declares its own ground (`showBackground` / `backgroundColor`) is placed on *that* rather than
-   * on whichever stage its system happens to prefer.
+   * The preview's baked theme, preferring explicit catalog metadata, then discovery-time uiMode,
+   * over id heuristics. Falls through to [backdropFor] so a preview declaring its own ground uses
+   * it.
    */
   private fun previewTheme(preview: ServePreview, darkFirst: Boolean): String? =
     preview.theme
       ?: when (preview.uiMode and UI_MODE_NIGHT_MASK) {
         UI_MODE_NIGHT_YES -> "dark"
         UI_MODE_NIGHT_NO -> "light"
-        // A preview that states its own ground overrides the catalog stage; everything else keeps
-        // [bgTheme]'s existing answer verbatim — including its `null` for a light-first catalog,
-        // which means "emit no tag, take the page's default stage" rather than "light".
+        // A preview that states its own ground overrides the catalog stage; otherwise keep
+        // [bgTheme]'s answer, whose `null` means "emit no tag", not "light".
         else -> declaredBackdropTheme(preview) ?: bgTheme(preview.id, darkFirst)
       }
 
   /**
-   * `"light"`/`"dark"` when the preview's own `@Preview` params name a ground, else null.
-   *
-   * Deliberately narrower than [backdropFor]: this is only the rungs where the preview speaks for
-   * itself, because the catalog-default rung is [bgTheme]'s job and answering it here too would
-   * turn its null — the signal that no tag should be emitted at all — into a `light` tag on every
-   * preview in every light-first catalog.
+   * `"light"`/`"dark"` when the preview's own `@Preview` params name a ground, else null. Narrower
+   * than [backdropFor]: the catalog-default rung is [bgTheme]'s, and answering it here would turn
+   * its null into a `light` tag everywhere.
    */
   private fun declaredBackdropTheme(preview: ServePreview): String? =
     PreviewBackdrop.resolve(
@@ -2730,10 +2151,8 @@ ${captureControlsHtml().prependIndent("          ")}
       ?.let { if (it.isDark) "dark" else "light" }
 
   /**
-   * Stable, catalog-specific persistence key shared by that catalog's landing and viewer pages.
-   *
-   * Read and written in `sessionStorage`, so the theme choice it names belongs to ONE TAB: it
-   * follows every navigation within that tab and reaches no other. See [viewerThemeStickyScript].
+   * Catalog-specific `sessionStorage` key shared by a catalog's landing and viewer pages, so the
+   * theme choice is per-tab. See [viewerThemeStickyScript].
    */
   private fun themeStorageKey(sessionId: String?, basePath: String): String {
     val catalog = basePath.trim('/').ifBlank { sessionId ?: "default" }
@@ -2747,27 +2166,19 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * Stable, catalog-specific prefix for the viewer's remembered disclosures (see
-   * `viewer-drawers.js`). `localStorage` is per-ORIGIN, and one host serves many catalogs under
-   * different base paths — so an unscoped key would let "I folded this catalog's thirty-state axis"
-   * also fold a normally-inline axis on every unrelated catalog beside it. Same scoping the theme
-   * and section keys already carry, for the same reason.
+   * Catalog-specific prefix for the viewer's remembered disclosures (`viewer-drawers.js`).
+   * `localStorage` is per-origin and one host serves many catalogs, so keys must be scoped.
    */
   private fun foldStorageScope(sessionId: String?, basePath: String): String =
     WebEscaping.urlEncodeSegment(basePath.trim('/').ifBlank { sessionId ?: "default" })
 
   /**
    * The flattened id with its theme token stripped — the key that pairs a component's light and
-   * dark variants into ONE grid card. `button-filled__ideal__default__light` and `…__dark` both key
-   * to `button-filled__ideal__default`, so the Light/Dark control can swap the card between the two
-   * baked renders in place.
+   * dark variants into one grid card (`…__default__light` / `…__dark` → `…__default`).
    *
-   * Strips ONLY the segment [cardTheme] treats as the theme — the *last* standalone `light`/`dark`
-   * segment after the component-id head — never every one. A flattened id can carry a non-theme
-   * `light`/`dark` *state* segment earlier (e.g. `toggle__dark__default__light` is the dark-state
-   * toggle rendered in the light theme); stripping all of them would collapse `toggle__dark__…` and
-   * `toggle__light__…` onto one key and drop a state. A component slug like `theme-meshcore-light`
-   * is a single segment and is never a theme token.
+   * Strips only the segment [cardTheme] treats as the theme (the last standalone `light`/`dark`
+   * after the head): an earlier `light`/`dark` may be a state (`toggle__dark__default__light`), and
+   * a slug like `theme-meshcore-light` is one segment.
    */
   private fun baseKey(id: String): String {
     val parts = id.split("__")
@@ -2778,14 +2189,9 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The component's **identity across every render axis** — its slug head, with the state / theme /
-   * props / size axes all dropped. `button-filled__ideal__pressed__dark`,
-   * `button-filled__ideal__default__light`, and `…__light__content-icon-label` all key to
-   * `button-filled`. It's the part before the `__ideal` quality marker
-   * ([ServeCatalogStore.previewIdFor] emits `<slug>__ideal__…`); a preview with no `__ideal` marker
-   * (a plain uploaded bundle screen) falls back to its theme-stripped [baseKey], so such previews
-   * still key apart from one another. Used to collapse the viewer's component nav to ONE entry per
-   * component (mirroring the grid), independent of which variant is being viewed.
+   * The component's identity across every render axis: the slug before the `__ideal` marker
+   * ([ServeCatalogStore.previewIdFor]), e.g. `button-filled`. Ids without `__ideal` fall back to
+   * [baseKey]. Collapses the viewer's component nav to one entry per component.
    */
   private fun componentKey(p: ServePreview): String {
     val idx = p.id.indexOf("__ideal")
@@ -2793,41 +2199,27 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * Whether [p] is a **non-default** component state render (`unchecked`, `pressed`, `disabled`,
-   * `unselected`, …) — a render the grid folds out so each component shows a single (default) card,
-   * with its other states reachable via the viewer's [component subtree][componentSubtreeHtml].
-   * Keyed off the catalog's `state` metadata (from `variants.json`), not the id: a stateless
-   * preview / plain bundle screen has `state == null` and is treated as default (always shown).
+   * Whether [p] is a non-default component state (`pressed`, `disabled`, …) that the grid folds
+   * out, reachable via the viewer's [component subtree][componentSubtreeHtml]. Keyed off the
+   * catalog's `state` metadata, not the id; `null` counts as default.
    */
   private fun isNonDefaultState(p: ServePreview): Boolean = p.state != null && p.state != "default"
 
   /**
-   * Whether [p] is a **non-default props variant** — an i18n / content / a11y axis render
-   * (`{"locale":"ar-XB"}`, `{"direction":"rtl"}`, `{"fontScale":"2.0"}`,
-   * `{"content":"icon+label"}`, …) the grid folds out so a component shows ONE card (its default
-   * render) instead of a card per variant, with the folded variants reachable via the viewer's
-   * [component subtree][componentSubtreeHtml]. Keyed off the catalog's `props` metadata (from
-   * `variants.json`), not the id: a propless preview (a plain bundle screen, or a design-system
-   * default) has empty props and is treated as default (always shown).
+   * Whether [p] is a non-default props variant (locale, direction, fontScale, content, …) that the
+   * grid folds out, reachable via the viewer's [component subtree][componentSubtreeHtml]. Keyed off
+   * the catalog's `props` metadata; empty props count as default.
    */
   private fun hasNonDefaultProps(p: ServePreview): Boolean = !p.props.isNullOrEmpty()
 
   /**
-   * Whether [p] is a render at a **non-primary breakpoint** — one of the component's other declared
-   * sizes, which the grid folds onto its single card exactly as it folds a non-default
-   * [state][isNonDefaultState] or [props variant][hasNonDefaultProps].
+   * Whether [p] is a render at a non-primary breakpoint, folded onto the component's card like a
+   * non-default [state][isNonDefaultState] or [props variant][hasNonDefaultProps]; otherwise each
+   * size would be its own card.
    *
-   * A size is a different *rendering* of one component, not a different component: `AlertDialog` at
-   * 204dp is the same dialog the 192dp card shows, drawn on a wider watch. Left unfolded, a catalog
-   * that documents five breakpoints publishes five cards under one name — 14 components became 70
-   * rows in wear-m3-catalog, all of them called things like "Alert Dialog"
-   * ([wear-m3-catalog#41](https://github.com/yschimke/wear-m3-catalog/issues/41)).
-   *
-   * [primary] is the component's primary size from [primarySizeByComponent], looked up in [p]'s own
-   * theme lane. A preview with no declared size, or whose component resolved none *in that lane*,
-   * is never folded — an older catalog (or a plain bundle) whose size lives only in the id keeps a
-   * card per size, because there is no metadata to build a switcher from and folding would make
-   * those renders unreachable.
+   * [primary] comes from [primarySizeByComponent] for [p]'s theme lane. Previews with no declared
+   * size, or whose component has no primary in that lane, are never folded, since there would be no
+   * switcher to reach them.
    */
   private fun isNonPrimarySize(
     p: ServePreview,
@@ -2840,49 +2232,27 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * A component's identity *within one theme lane* — the key the size fold is resolved against.
+   * A component's identity within one theme lane, for resolving the size fold.
    *
-   * The lane comes from [ServePreview.theme] alone, NOT from [themeLane]: that one falls back to
-   * scanning the flattened id for a `light`/`dark` segment, and `breakpoints[].size` is an
-   * arbitrary catalog-chosen string, so a catalog that names a breakpoint `light` would have its
-   * *size* token read as a baked theme. Two sizes would then resolve as two lanes, both survive the
-   * fold, and [groupPreviews] would pair them as a light/dark swap — a Theme control that silently
-   * changes device size. A catalog that bakes its themes into ids without declaring the metadata
-   * simply resolves one lane here and folds as it did before the lane split, which is the safe
-   * direction: this key only ever decides how much to KEEP.
+   * Uses [ServePreview.theme] only, not [themeLane]: breakpoint names are arbitrary, and a size
+   * named `light` would otherwise be read as a theme and turn the Theme control into a size switch.
+   * Unthemed catalogs resolve one lane, which only errs towards keeping more.
    */
   private fun sizeFoldKey(p: ServePreview, darkFirst: Boolean): Pair<String, String> =
     componentKey(p) to (p.theme?.takeIf { it.isNotBlank() } ?: if (darkFirst) "dark" else "light")
 
   /**
-   * Each component's **primary** breakpoint — the size its one card is drawn at — keyed by
-   * [componentKey] **and theme lane**.
+   * Each component's **primary** breakpoint (the size its card is drawn at), keyed by
+   * [componentKey] and theme lane.
    *
-   * The catalog's own order decides it: the first size a component publishes, read in authored
-   * order ([ServePreview.catalogOrder], falling back to list order for a catalog that records
-   * none). The export writes a component's images in the order the spec's `breakpoints` table
-   * declares them, so this is the first *declared* breakpoint — the one a catalog leads with, and
-   * for a design catalog the one its design references are mapped against.
+   * The first size in authored order ([ServePreview.catalogOrder], else list order) — the first
+   * declared breakpoint. Per lane because the size switcher is lane-scoped ([componentRenderRows]);
+   * a sparse theme × size product would otherwise fold a lane's only render away. The
+   * component-wide primary wins in every lane that has it, so lanes enumerating sizes differently
+   * still pair into one card; a lane falls back to its own first size only when it lacks that one.
    *
-   * Per **lane**, because the size switcher a folded render is reached from is itself lane-scoped
-   * ([componentRenderRows] holds `themeLane` fixed, so a light page never offers a dark size). A
-   * catalog whose theme × size product is sparse — the primary size drawn only light while some
-   * other breakpoint carries the component's only dark render — would otherwise have that dark
-   * render folded away with nothing left to reach it from. Keying per lane keeps one representative
-   * in each lane that has renders at all.
-   *
-   * The component-wide primary is resolved FIRST and wins in every lane that has it; a lane falls
-   * back to its own first-declared size only when it genuinely lacks that size. Resolving each lane
-   * independently would let two lanes pick different primaries whenever they enumerate their
-   * breakpoints in a different order — light leading with `192dp` while dark leads with `240dp`,
-   * which separate per-theme preview functions can easily produce. The two survivors then carry
-   * different size tokens, so [baseKey] cannot pair them, and a FULL product would publish two
-   * cards where the whole point is one. Lane-local primaries are the exception for sparse lanes,
-   * not the rule.
-   *
-   * Only the component's DEFAULT renders are consulted: a component may publish a state or props
-   * variant at some sizes and not others, and letting those vote could pick a primary that the
-   * default render never rendered at, folding the whole component's card out of the grid.
+   * Only default renders vote, so a state or props variant cannot pick a primary the default never
+   * rendered at.
    */
   private fun primarySizeByComponent(
     previews: List<ServePreview>,
@@ -2913,22 +2283,12 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * A preview id with only its **size** segment removed — the key that groups renders differing
-   * *only* in breakpoint while holding every other axis fixed, so the viewer's size switcher offers
-   * `AlertDialog` at 204dp from its 192dp render without dragging the reader off the state or props
-   * variant they are looking at.
+   * A preview id with only its **size** segment removed, grouping renders that differ only in
+   * breakpoint for the viewer's size switcher.
    *
-   * The exporter names a sticker `<slug>__<variant>__<state>[__theme][__size][__props…]`
-   * (`catalog-image-path.mjs`), so the size sits after the theme and before the props segments —
-   * hence [propsCount] trailing segments are held out of the search rather than the token simply
-   * being matched from the end, which a props value spelling the same word would otherwise win. The
-   * token is the slug of the render's own declared [ServePreview.size] rather than anything from a
-   * fixed vocabulary: a catalog is free to name its breakpoints `192dp`, `smallRound` or `wide`,
-   * and only the catalog knows which.
-   *
-   * Returns [id] unchanged when the render declares no size or the token isn't in it — the props
-   * axis it may already have been folded on is preserved either way, so a caller can compose the
-   * two without a size-less preview quietly losing the other fold.
+   * Ids are `<slug>__<variant>__<state>[__theme][__size][__props…]` (`catalog-image-path.mjs`), so
+   * [propsCount] trailing segments are skipped before matching the slug of [ServePreview.size].
+   * Returns [id] unchanged when no size is declared or found.
    */
   private fun sizeInvariantKey(id: String, size: String?, propsCount: Int): String {
     val token = size?.takeIf { it.isNotBlank() }?.let(::catalogSlug) ?: return id
@@ -2943,52 +2303,40 @@ ${captureControlsHtml().prependIndent("          ")}
     sizeInvariantKey(p.id, p.size, p.props?.size ?: 0)
 
   /**
-   * The size-switcher grouping key: [sizeInvariantKey] with the theme dropped too, for the same
-   * reason [switcherStateKey] drops it — an untagged render has to group with its themed siblings,
-   * and [themeLane] is what keeps the lanes apart.
+   * The size-switcher grouping key: [sizeInvariantKey] with the theme dropped too, as in
+   * [switcherStateKey]; [themeLane] keeps lanes apart.
    */
   private fun switcherSizeKey(p: ServePreview): String =
     themeStrippedKey(sizeInvariantKey(p), p.theme)
 
   /**
    * The exporter's slug for one id segment: non-`[a-zA-Z0-9._-]` runs collapse to `-`, trimmed and
-   * lowercased. The Kotlin twin of `catalogSlug` in `catalog-image-path.mjs` (and of
-   * [ServeBundleHost.heroSlug]) — a declared size of `Small Round` is `smallround` in the id it
-   * named, so matching one against the other has to go through the same rule.
+   * lowercased. Kotlin twin of `catalogSlug` in `catalog-image-path.mjs` (and
+   * [ServeBundleHost.heroSlug]).
    */
   private fun catalogSlug(value: String): String =
     value.replace(Regex("[^a-zA-Z0-9._-]+"), "-").trim('-').lowercase()
 
   /**
-   * Human label for a declared breakpoint: the catalog's own name for it ([ServePreview.size]),
-   * else the token vocabulary [previewSizeVariantLabel] can recognise in the id. The catalog's name
-   * leads because it is the one the spec's `breakpoints` table authored and the one the reader sees
-   * everywhere else the axis is named.
+   * Human label for a declared breakpoint: the catalog's own name ([ServePreview.size]), else what
+   * [previewSizeVariantLabel] recognises in the id.
    */
   private fun sizeLabel(p: ServePreview): String? =
     p.size?.takeIf { it.isNotBlank() } ?: previewSizeVariantLabel(p.id)
 
   /**
-   * Human label for a component [state] token: the default render reads "Default"; a hyphenated
-   * token like `keyboard-focus` becomes "Keyboard focus" (dashes → spaces, first letter
-   * capitalised). Used for the viewer's state-switcher buttons.
+   * Human label for a component [state] token for the state-switcher: "Default", or
+   * `keyboard-focus` → "Keyboard focus".
    */
   private fun stateLabel(state: String?): String =
     if (state == null || state == "default") "Default"
     else state.replace('-', ' ').replaceFirstChar { it.uppercaseChar() }
 
   /**
-   * A preview id with only its **state** segment removed — the key that groups renders differing
-   * *only* in state (the state axis) while holding every other axis fixed (theme, and any `content`
-   * / `size` / `k=v` props axes a component also varies on). The state segment is the one right
-   * after the `ideal` marker in the flattened id (`<slug>__ideal__<state>[__theme][__props…]`, from
-   * [ServeCatalogStore.previewIdFor]); it equals the preview's [ServePreview.state]. So
-   * `button-filled__ideal__default__light` and `…__pressed__light` share the key
-   * `button-filled__ideal__light`, but the `content=icon+label` render
-   * `button-filled__ideal__default__light__content-icon-label` keeps its props segment and keys
-   * apart — its state switcher won't drag the visitor back to the label-only button. Falls back to
-   * the whole id when there's no state (a plain preview) or the state token isn't found, so such a
-   * preview only ever groups with itself.
+   * A preview id with only its **state** segment (the one after `ideal`, see
+   * [ServeCatalogStore.previewIdFor]) removed, grouping renders that differ only in state while
+   * every other axis stays fixed. Props segments are kept, so a `content=icon+label` render keys
+   * apart. Falls back to the whole id when there is no state.
    */
   private fun stateInvariantKey(id: String, state: String?): String {
     state ?: return id
@@ -3003,69 +2351,43 @@ ${captureControlsHtml().prependIndent("          ")}
   private fun stateInvariantKey(p: ServePreview): String = stateInvariantKey(p.id, p.state)
 
   /**
-   * The switcher's grouping key: [stateInvariantKey] with the theme segment dropped too
-   * ([baseKey]), so a component's renders group by *what they are* and the theme is left to
-   * [themeLane] alone.
+   * The switcher's grouping key: [stateInvariantKey] with the theme dropped too ([baseKey]),
+   * leaving the theme to [themeLane].
    *
-   * Dropping the theme from the key rather than relying on it is what makes an **untagged** render
-   * group with its themed siblings. A catalog does not necessarily tag both modes: a component
-   * whose non-default states come from `@OverrideVariant` publishes its dark cells as `…__xs__dark`
-   * (the `uiMode` is a `@Preview` param the synthetic capture inherits) but its light cells as a
-   * bare `…__xs`, while the default render still carries the full `…__default__light`. Keyed on the
-   * id including the theme, those two never met: the light default keyed
-   * `button-filled__ideal__light` and the light `xs` cell keyed `button-filled__ideal`, so the
-   * viewer offered no state switcher at all on the light lane — the lane the grid links to — and
-   * the whole size/shape matrix was reachable only by hand-typing an id. Both now key
-   * `button-filled__ideal` and [themeLane] keeps light and dark apart.
+   * Catalogs don't always tag both modes (e.g. `@OverrideVariant` cells are `…__xs__dark` but bare
+   * `…__xs` in light), so keying on the theme would split light renders from their default and hide
+   * the state switcher.
    */
   private fun switcherStateKey(p: ServePreview): String =
     themeStrippedKey(stateInvariantKey(p), p.theme)
 
   /**
-   * The props-family counterpart of [switcherStateKey], normalised the same way and for the same
-   * reason: a themed default (`button__ideal__default__light`) and an untagged props sibling
-   * (`button__ideal__default__content-icon-label`) resolve to one lane but would otherwise key
-   * apart, and the family check runs first — so the lane agreeing would never get to matter and the
-   * folded variant would stay unreachable.
+   * The props-family counterpart of [switcherStateKey], normalised the same way so an untagged
+   * props sibling groups with a themed default.
    */
   private fun switcherPropsKey(p: ServePreview): String =
     themeStrippedKey(propsFamilyKey(p), p.theme)
 
   /**
-   * [id] with its theme segment dropped ([baseKey]) — but **only when the render declares a
-   * theme**.
-   *
-   * The guard is what keeps a state from being read as a theme. `baseKey` finds the last
-   * `light`/`dark` token positionally, and a component may legitimately name a *state* `dark`
-   * (`toggle__ideal__dark` with `state = "dark"`, no theme at all). Stripping that would key the
-   * state apart from its own siblings; asking only renders that actually carry a theme to give it
-   * up cannot.
+   * [id] with its theme segment dropped ([baseKey]), but only when the render declares a theme —
+   * otherwise a state named `dark` would be stripped as if it were a theme.
    */
   private fun themeStrippedKey(id: String, theme: String?): String =
     if (theme == null) id else baseKey(id)
 
   /**
-   * The light/dark **lane** a render belongs to for switcher grouping — its declared
-   * [ServePreview.theme], else the `__light`/`__dark` token in its id ([cardTheme]), else the
-   * system's primary lane (dark for a dark-first system, light otherwise).
+   * The light/dark **lane** a render belongs to for switcher grouping: [ServePreview.theme], else
+   * the id token ([cardTheme]), else the system's primary lane.
    *
-   * The fallback is the point: an untagged render is not theme-*less* in any way a visitor
-   * experiences, it is simply the mode the catalog draws by default, and the switcher has to put it
-   * in that lane or it strands there alone. Compared as a resolved string rather than a nullable so
-   * the relation is symmetric — an untagged sibling reaches the primary-lane default and the
-   * primary-lane default reaches it back.
-   *
-   * The id is read **state-stripped**, so the token scan cannot pick up a state named `light` or
-   * `dark` and lane an unthemed render away from its own siblings.
+   * An untagged render belongs in the catalog's default lane; a resolved string keeps the relation
+   * symmetric. The id is read state-stripped so a state named `light`/`dark` can't pick the lane.
    */
   private fun themeLane(p: ServePreview, darkFirst: Boolean): String =
     p.theme ?: cardTheme(stateInvariantKey(p)) ?: if (darkFirst) "dark" else "light"
 
   /**
-   * Canonical JSON for a props value. Objects sort their keys recursively, while arrays preserve
-   * their authored order. This keeps the variant identity stable even when two producers emit an
-   * equivalent object with a different property order, and it keeps JSON types distinct (`true` is
-   * not the same variant as `"true"`).
+   * Canonical JSON for a props value: object keys sorted recursively, array order preserved, JSON
+   * types kept distinct (`true` ≠ `"true"`).
    */
   private fun canonicalPropsJson(value: JsonElement): String =
     when (value) {
@@ -3092,9 +2414,8 @@ ${captureControlsHtml().prependIndent("          ")}
       ?.joinToString(",") { "${it.key}=${canonicalPropsJson(it.value)}" } ?: ""
 
   /**
-   * Human label for a props-variant axis: "Default" for none, else a compact per-axis phrasing
-   * ("RTL", "Locale ar-XB", "Font 2.0×", "Icon+label"), falling back to `key value` for an unknown
-   * axis. Multiple axes join with " · ". Used for the viewer's variant-switcher buttons.
+   * Human label for a props-variant axis for the variant-switcher: "Default", or per-axis phrasing
+   * ("RTL", "Locale ar-XB", "Font 2.0×", "Icon+label"), else `key value`; axes join with " · ".
    */
   private fun propsLabel(props: JsonObject?): String {
     if (props.isNullOrEmpty()) return "Default"
@@ -3113,13 +2434,9 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The preview id with its trailing **props** segments removed — the key that groups a component's
-   * default render with its props-axis variants (content / locale / direction / fontScale), holding
-   * every other axis (slug, state, theme, size) fixed. The exporter appends one flattened segment
-   * per props entry to the id (`…__light__content-icon-label`, `…__compact__locale-de`), so
-   * dropping [ServePreview.props]`.size` trailing segments recovers the default render's id. The
-   * default (no props) keys to its own full id, so a propless component only ever groups with
-   * itself.
+   * The preview id with its trailing **props** segments removed, grouping a default render with its
+   * props-axis variants. The exporter appends one segment per props entry, so dropping
+   * [ServePreview.props]`.size` segments recovers the default's id.
    */
   private fun propsFamilyKey(p: ServePreview): String {
     val n = p.props?.size ?: 0
@@ -3129,35 +2446,26 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The comparison-table card family for [p]: fold state, props, size and the baked light/dark
-   * pair. This mirrors the default-card grouping used by [groupPreviews] without broadening aliases
-   * to every render of the same [componentKey].
-   *
-   * The size is folded here so a viewer deep-link naming a breakpoint the gallery left out still
-   * selects that component's row rather than landing on an empty comparison — the same job the key
-   * already does for a folded-out state. A component whose second size DOES carry a reference keeps
-   * its own row (rows are keyed by [baseKey], not by this); the two rows then share one alias set,
-   * exactly as two reference-bearing states of one component already do.
+   * The comparison-table card family for [p]: fold state, props, size and the light/dark pair,
+   * mirroring [groupPreviews] without aliasing every render of the [componentKey]. Folding size
+   * lets a deep link to an omitted breakpoint still select its row; a size with its own reference
+   * keeps its own row (rows are keyed by [baseKey]).
    */
   private fun comparisonCardKey(p: ServePreview): String =
     baseKey(stateInvariantKey(sizeInvariantKey(propsFamilyKey(p), p.size, propsCount = 0), p.state))
 
   /**
-   * How a comparison row names the variant it shows — `Hovered`, `Xl square`, `RTL · Font 2.0×` —
-   * or empty for the component's plain default render.
-   *
-   * The comparison page keeps every reference-bearing variant as a row of its own, so a component
-   * with a reference per state contributes a dozen rows. [componentKey] alone cannot tell them
-   * apart, which is what makes an otherwise correct page look mis-paired. Empty for the default so
-   * the overwhelmingly common one-row-per-component case still reads as just the component name.
+   * How a comparison row names its variant (`Hovered`, `Xl square`, `RTL · Font 2.0×`), or empty
+   * for the plain default. Needed because a component with a reference per state contributes
+   * several rows.
    */
   private fun compareVariantLabel(p: ServePreview): String =
     listOf(stateLabel(p.state), propsLabel(p.props)).filter { it != "Default" }.joinToString(" · ")
 
   /**
-   * One grid card: a component that may carry a baked `light` and/or `dark` variant (a pair the
-   * Light/Dark control [swaps][GridCard.swappable] in place) and/or a theme-neutral render. [order]
-   * preserves first-seen position so the grid keeps catalog order.
+   * One grid card: a component with baked `light` and/or `dark` variants the Light/Dark control
+   * [swaps][GridCard.swappable] in place, and/or a theme-neutral render. [order] keeps catalog
+   * order.
    */
   private class GridCard(val order: Int) {
     var light: ServePreview? = null
@@ -3173,22 +2481,17 @@ ${captureControlsHtml().prependIndent("          ")}
       get() = light ?: dark ?: neutral!!
 
     /**
-     * The render the grid actually paints, which on a **dark-first** system is the dark one —
-     * [default] prefers light regardless, and `swapCard` has always opened on the system's own
-     * lane. Anything describing the card to a visitor has to agree with the pixels beside it: a
-     * tree built from [default] would label a dark-first catalog's cards from their light twins and
-     * send every variant link into the light lane while the card next to it is showing dark.
+     * The render the grid actually paints: the dark one on a dark-first system ([default] prefers
+     * light). Anything describing the card must use this to agree with the pixels.
      */
     fun rendered(darkFirst: Boolean): ServePreview =
       if (darkFirst) (dark ?: light ?: neutral!!) else default
   }
 
   /**
-   * Collapse a catalog's per-theme previews into grid cards keyed by [baseKey], so a component's
-   * `__light`/`__dark` variants become a SINGLE card the Light/Dark control swaps between — instead
-   * of two separate cards a filter hides between. A component captured in only one theme (or a
-   * theme-neutral app screen) stays a lone card the toggle leaves untouched. Order follows first
-   * appearance.
+   * Collapse per-theme previews into grid cards keyed by [baseKey], so `__light`/`__dark` variants
+   * become one card the Light/Dark control swaps. Single-theme and theme-neutral renders stay lone
+   * cards. Order follows first appearance.
    */
   private fun groupPreviews(previews: List<ServePreview>): List<GridCard> {
     val byKey = LinkedHashMap<String, GridCard>()
@@ -3207,61 +2510,37 @@ ${captureControlsHtml().prependIndent("          ")}
   private const val OTHER_SECTION = "Other"
 
   /**
-   * The **All** row's `data-tab`: the whole catalog, every section's panel showing at once, and
-   * what a sectioned catalog lands on.
-   *
-   * A reserved slug rather than a section's own, so [buildSections] hands a catalog that really
-   * does name a section "All" the slug `all-2` and the two never collide over `#cp-tab-all` /
-   * `?tab=all`.
+   * The **All** row's `data-tab`: every section's panel at once, and what a sectioned catalog lands
+   * on. Reserved, so [buildSections] gives a section named "All" the slug `all-2`.
    */
   private const val ALL_TAB = "all"
 
-  /**
-   * The catalog section whose cards ARE theme specimens — a colour-role/type sheet that exists to
-   * show one specific theme.
-   */
+  /** The catalog section whose cards are theme specimens. */
   private const val THEMES_SECTION = "Themes"
 
   /**
-   * Whether [p] is a theme **specimen**: a card that renders a named theme as its subject, so
-   * re-rendering it under a `themeProvider` override destroys the very thing it documents.
+   * Whether [p] is a theme **specimen** — a card rendering a named theme as its subject — so a
+   * `themeProvider` override would destroy what it documents.
    *
-   * meshcore-mobile's `Theme/MeshCore-Light` is the case that surfaced this. Its caption reads
-   * "MeshCore · Light · Orbitron / Space Grotesk / JetBrains Mono", and under a Dynamic Dark
-   * override the card drew dark, in the default sans — pixels contradicting their own label. Every
-   * card in a Themes tab has that property by construction.
-   *
-   * Two signals, either of which is enough:
-   * * the catalog **section** — deliberately keyed on that rather than the id, because `theme-…` id
-   *   prefixes are an authoring convention while `section` is the authored statement of what the
-   *   tab IS (`catalog.spec.json`'s `section: "Themes"`). It speaks for a whole tab at once.
-   * * the per-preview [ServePreview.fixedTheme] flag, from `@FixedTheme` on the function (or a
-   *   `@ThemeCatalog`-synthesised sheet). This is what a specimen living OUTSIDE a Themes tab says
-   *   for itself — an ungrouped bundle, a `Foundation` section that mixes swatches with components,
-   *   a plain `compose-preview serve` of one module, none of which have a section to speak for
-   *   them.
-   *
-   * This does NOT remove the theme chips: the rest of the catalog still re-renders, and a specimen
-   * simply keeps its baked pixels — the same treatment a card with no daemon twin already gets.
+   * Either signal suffices: the catalog section ([THEMES_SECTION], the authored statement of what
+   * the tab is), or [ServePreview.fixedTheme] from `@FixedTheme` / a `@ThemeCatalog` sheet for
+   * specimens outside a Themes tab. Theme chips stay; the specimen keeps its baked pixels.
    */
   private fun isThemeSpecimen(p: ServePreview): Boolean =
     p.fixedTheme || p.section?.equals(THEMES_SECTION, ignoreCase = true) == true
 
   /**
-   * One sub-heading group inside a section tab: its [name] (null ⇒ ungrouped) and its cards.
-   *
-   * [slug] is the group's half of the `cp-group-<section>-<group>` anchor the navigation tree jumps
-   * to, assigned by [buildSections] and unique within its section. Empty for a synthesized flat
-   * group ([synthesizeGroups]), which has no tree above it to be jumped to from.
+   * One sub-heading group inside a section tab: [name] (null ⇒ ungrouped) and its cards. [slug] is
+   * the group half of the `cp-group-<section>-<group>` anchor, unique within its section; empty for
+   * a synthesized flat group ([synthesizeGroups]).
    */
   private class LandingGroup(val name: String?, var slug: String = "") {
     val cards = mutableListOf<GridCard>()
   }
 
   /**
-   * One section (tab) of a tabbed landing: its display [name], a route-safe [slug] (the tab's
-   * `#cp-panel-<slug>` anchor / id), and its ordered sub-[groups]. [count] totals its cards for the
-   * tab's badge.
+   * One section (tab) of a tabbed landing: display [name], route-safe [slug] (`#cp-panel-<slug>`),
+   * and ordered [groups]. [count] totals its cards for the badge.
    */
   private class LandingSection(val name: String, var slug: String) {
     val groups = mutableListOf<LandingGroup>()
@@ -3283,17 +2562,12 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * Bucket [cards] into ordered [LandingSection] tabs (keyed by each card's [ServePreview.section])
-   * with ordered sub-[LandingGroup]s (keyed by [ServePreview.group]) inside — the tabbed-catalog
-   * structure the landing renders as a tab bar over per-section panels.
+   * Bucket [cards] into ordered [LandingSection] tabs (by [ServePreview.section]) with ordered
+   * [LandingGroup]s (by [ServePreview.group]).
    *
-   * Sections, groups, and cards are all ordered by their authored [ServePreview.catalogOrder] (min
-   * order for a section/group), because [ServeBundleHost] lists previews sorted by id — so without
-   * this the tabs would read alphabetically rather than Themes → Components → Screens → … as
-   * authored. A card missing a section falls into a trailing **"Other"** tab so nothing is dropped.
-   * Slugs are de-duplicated so two same-slug section names still get distinct tab anchors. Returns
-   * an empty list when NO card carries a section (a flat, untabbed catalog — the caller keeps the
-   * plain grid).
+   * Everything is ordered by authored [ServePreview.catalogOrder] (min per section/group), since
+   * [ServeBundleHost] sorts previews by id. Cards without a section go to a trailing **"Other"**
+   * tab. Slugs are de-duplicated. Returns empty when no card has a section (flat grid).
    */
   private fun buildSections(cards: List<GridCard>): List<LandingSection> {
     if (cards.none { it.default.section != null }) return emptyList()
@@ -3323,9 +2597,8 @@ ${captureControlsHtml().prependIndent("          ")}
           n++
         }
         val section = LandingSection(name, slug)
-        // Group slugs are scoped to their section, so the same group name reused across two
-        // sections (meshcore-mobile's "Device" appears under both Components and Screens) still
-        // yields two distinct anchors rather than one that swallows both.
+        // Group slugs are scoped to their section, so a group name reused across sections gets
+        // distinct anchors.
         val usedGroupSlugs = HashSet<String>()
         acc.groups.values
           .sortedBy { g -> g.cards.minOf { ord(it) } }
@@ -3346,37 +2619,17 @@ ${captureControlsHtml().prependIndent("          ")}
 
   /**
    * The catalog's **navigation tree**: one row per section, each expanding to its named sub-groups,
-   * standing beside the grid rather than above it.
+   * beside the grid.
    *
-   * This replaces the row of section tabs. The tabs showed only the top level of a structure that
-   * is two deep — a tab bar leaves a catalog's groups (Foundation, Contacts, Scanner, …) as
-   * headings you have to scroll a panel to find, so the only way to learn what a section *contains*
-   * is to open it and read. The tree publishes both levels at once: every group in the selected
-   * section is a destination you can see and click, and the selected one is marked as you scroll.
+   * Section rows keep the tab-bar DOM contract (`.cp-tab[data-tab]`, `#cp-tab-<slug>`,
+   * `aria-controls`, `aria-selected`, `href="#cp-panel-<slug>"`) that [catalogFilterScript], the
+   * remembered tab and `?tab=` key off. Groups are a `role="group"` list of `.cp-tree-group` links
+   * to `#cp-group-<section>-<group>`.
    *
-   * The DOM contract the section rows carry is deliberately the tab bar's — `.cp-tab[data-tab]`,
-   * `#cp-tab-<slug>`, `aria-controls`, `aria-selected`, and the `href="#cp-panel-<slug>"` fallback
-   * — because that is what [catalogFilterScript]'s section switching, the remembered-tab key, and
-   * the `?tab=` URL param all key off. What is new is the nesting: a `role="group"` list of
-   * `.cp-tree-group` links, each pointing at its `#cp-group-<section>-<group>` anchor on the
-   * sub-group divider the grid already emits.
-   *
-   * A section is **expanded exactly when it is selected**, which is the same statement its panel
-   * makes — one section's contents at a time, rather than a second piece of state that can disagree
-   * with which panel is showing. While a search is active the script spans every section (that is
-   * the existing tab behaviour), so the tree expands every section that still holds a match. With
-   * no JS nothing collapses at all: `html.cp-js` gates the collapse, so a no-JS client sees the
-   * full outline over the full stack of panels, and every row is a working in-page anchor.
-   *
-   * Sections whose groups are all unnamed render as leaves — there is nothing to list under them.
-   *
-   * The tree leads with an **All** row ([ALL_TAB]) whenever there is more than one section, and it
-   * is what the page lands on. Opening on the first section instead would make the default view of
-   * a catalog a fraction of it. All is the browsing state a front door should have: every panel
-   * showing, one scroll through the lot, and a filter that spans the catalog because nothing is
-   * narrowing it. Picking a section still narrows to it; All is a row you can come back to. Under
-   * All every section is expanded, since the tree beside a grid showing everything is the outline
-   * of everything.
+   * A section is expanded exactly when selected; during a search every section with a match
+   * expands. `html.cp-js` gates collapsing, so no-JS clients see the full outline. Sections with
+   * only unnamed groups are leaves. With more than one section the tree leads with an **All** row
+   * ([ALL_TAB]), the landing default, under which every section is expanded.
    */
   private fun catalogTreeHtml(
     sections: List<LandingSection>,
@@ -3390,9 +2643,8 @@ ${captureControlsHtml().prependIndent("          ")}
     append("<nav class=\"cp-tree\" id=\"cp-tabs\" aria-label=\"Catalog sections\">\n")
     append("<ul class=\"cp-tree-list\" role=\"tree\" aria-label=\"Catalog sections\">\n")
     if (hasAll) {
-      // The whole grid, not a panel: `#cp-grid` is what the All row controls and what its no-JS
-      // href jumps to — every section's panel is inside it, and it is the one id that is still
-      // there when the sections themselves are collapsed away by a filter.
+      // `#cp-grid` contains every section panel and survives a filter collapsing them, so the All
+      // row targets it.
       append("<li class=\"cp-tree-node\" role=\"none\">\n")
       append("  <a class=\"cp-tab\" role=\"treeitem\" id=\"cp-tab-$ALL_TAB\"")
       append(" href=\"#cp-grid\" data-tab=\"$ALL_TAB\"")
@@ -3401,9 +2653,7 @@ ${captureControlsHtml().prependIndent("          ")}
       append("</li>\n")
     }
     sections.forEachIndexed { i, sec ->
-      // Nothing is selected under All — it is the row above that is. A section is still EXPANDED,
-      // because All shows every panel at once and the tree standing beside that has to be the
-      // outline of what is actually on screen.
+      // Nothing is selected under All, but each section is expanded to outline what is on screen.
       val selected = if (!hasAll && i == 0) "true" else "false"
       val expanded = if (hasAll) "true" else selected
       val named = sec.groups.filter { it.name != null }
@@ -3412,26 +2662,18 @@ ${captureControlsHtml().prependIndent("          ")}
       append("  <a class=\"cp-tab\" role=\"treeitem\" id=\"cp-tab-${sec.slug}\"")
       append(" href=\"#cp-panel-${sec.slug}\" data-tab=\"${sec.slug}\"")
       append(" aria-controls=\"cp-panel-${sec.slug}\" aria-selected=\"$selected\"")
-      // `aria-owns` because the markup cannot nest the group inside the treeitem: the row has to
-      // be an <a> to stay a real link (the no-JS path), and the <li> that does contain both is
-      // `role="none"`. Without this the `role="group"` would hang off the tree rather than off the
-      // section whose `aria-expanded` governs it, so a screen reader could not report the group
-      // rows as that section's children.
+      // `aria-owns` because the group can't nest inside the treeitem: the row must be an `<a>` for
+      // no-JS, and the containing `<li>` is `role="none"`.
       if (named.isNotEmpty()) append(" aria-expanded=\"$expanded\" aria-owns=\"$childrenId\"")
-      // No `tabindex` in the served markup, deliberately. The roving tab stop is a tree-widget
-      // behaviour and the tree is only a widget once its script runs — baking `-1` into every row
-      // but the first would leave a no-JS client (where the arrow keys never bind) unable to reach
-      // any section past the first by keyboard, in the very mode where the rows are its only
-      // navigation. `reflectTabs()` applies the indices on init instead.
+      // No `tabindex` in served markup: the roving tab stop only makes sense once the script runs,
+      // and baked `-1`s would strand no-JS keyboard users. `reflectTabs()` applies them on init.
       append(">")
       append(WebEscaping.htmlEscape(sec.name))
       append("<span class=\"cp-tab-count\">${sec.count}</span></a>\n")
       if (named.isNotEmpty()) {
         append("  <ul class=\"cp-tree-children\" id=\"$childrenId\" role=\"group\">\n")
         named.forEachIndexed { gi, g ->
-          // The first group of the first section opens with the page, so a visitor lands on a tree
-          // that is already showing components rather than one that has to be prised open before
-          // it says anything a tab bar didn't.
+          // The first group of the first section opens with the page.
           appendGroupRow(
             g,
             sec.slug,
@@ -3449,15 +2691,9 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The **outline** tree, for a catalog whose previews declare no `section` — the shape most
-   * published design systems are in, m3-catalog included, where the inventory comes from
-   * `@CatalogComponent(group = …)` and nothing ever names a section.
-   *
-   * Until now those catalogs got no tree at all: [buildSections] returned empty, the landing fell
-   * back to a flat grid, and the two levels of structure the catalog *did* have (family group, then
-   * component) stayed invisible. Here the groups ARE the top level. There are no panels to switch —
-   * the flat grid shows everything at once — so every row is purely a jump, which is also why these
-   * rows carry no `data-tab`.
+   * The **outline** tree, for a catalog whose previews declare no `section` (most design systems,
+   * grouped only via `@CatalogComponent(group = …)`). The groups are the top level, and rows are
+   * pure jumps over the flat grid, so they carry no `data-tab`.
    */
   private fun catalogOutlineTreeHtml(
     groups: List<LandingGroup>,
@@ -3468,9 +2704,8 @@ ${captureControlsHtml().prependIndent("          ")}
     append("<nav class=\"cp-tree\" id=\"cp-tabs\" aria-label=\"Catalog contents\">\n")
     append("<ul class=\"cp-tree-list\" role=\"tree\" aria-label=\"Catalog contents\">\n")
     groups.forEachIndexed { i, g ->
-      // The group row IS the top-level node here, so it carries `cp-tree-node` itself rather than
-      // being wrapped in one — the wrapper is what the filter hides, and a second <li> around an
-      // <li> is not a list.
+      // The group row is the top-level node, so it carries `cp-tree-node` itself (the wrapper is
+      // what the filter hides).
       appendGroupRow(g, null, flatGroupAnchorId(g.slug), i == 0, components, "cp-tree-node")
     }
     append(pagesBranch)
@@ -3478,24 +2713,12 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The tree's **Pages** branch: the design file's own pages, listed by name under one row that
-   * leads to the index.
+   * The tree's **Pages** branch: the design file's own pages, listed under one row leading to the
+   * index.
    *
-   * This used to be an action chip in the header row, beside "compare SVG" and "download all". A
-   * chip can only say *how many* pages there are — the names, which are the thing you actually
-   * choose between, are a page away — and it sits in a row of one-off actions while being the one
-   * entry there that is a place. The tree is where this catalog's places already live, so the
-   * branch goes in the tree, at the foot: a page is a view of the *design file*, not part of the
-   * catalog's own inventory, and it should not push that inventory down the column.
-   *
-   * Two things make it unlike every other branch, and both are deliberate:
-   * - **It carries no `data-group`.** Every other row names an id on this page and is intercepted
-   *   into a scroll; these rows are real navigations, so the click handler's `if (!id) return`
-   *   leaves them to the browser. It is the same treatment a variant row already gets.
-   * - **It is always open.** `aria-expanded="true"` is written once and never reflected — with a
-   *   handful of pages there is nothing to gain by hiding their names behind a twisty, and the open
-   *   state is what makes the branch worth having over the chip it replaces. [catalogTreeScript]
-   *   skips reflecting a row that names no target, which is what keeps it open.
+   * Unlike other branches: it carries no `data-group` (rows are real navigations, so the click
+   * handler leaves them alone), and it is always open — `aria-expanded="true"` is never reflected,
+   * since [catalogTreeScript] skips rows naming no target.
    */
   private fun pagesBranchHtml(pages: List<PageLink>, basePath: String, q: String): String {
     if (pages.isEmpty()) return ""
@@ -3520,22 +2743,11 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The sidebar's two panes — **Components** and **Pages** — and the strip that switches them.
+   * The sidebar's two panes — **Components** and **Pages** — and the strip that switches them, so
+   * design pages don't sit below the whole inventory.
    *
-   * The design file's pages used to be a branch at the FOOT of the component tree: below every
-   * family, every component and every variant the catalog has. On m3-catalog that is past ~120
-   * rows, so the pages were reachable only by scrolling the inventory you were not looking for, and
-   * the two lists competed for the same column while answering different questions — *which
-   * component* versus *which page of the design file*. They are peers, so they get peer treatment:
-   * one strip at the top says which of the two the column is showing.
-   *
-   * **Only when there is something to switch between.** A catalog with no design pages keeps the
-   * bare tree it has always had — a tab strip with one tab is a control that cannot be used, and
-   * emitting one would move every committed golden for no reader benefit.
-   *
-   * Both panes are filtered by the one search box below the strip (see [catalogFilterScript]),
-   * which is the other half of what makes them peers: the pages list was previously the only thing
-   * in this column the filter could not reach.
+   * Emitted only when the catalog has design pages; otherwise the bare tree. Both panes share the
+   * search box below the strip ([catalogFilterScript]).
    */
   private fun paneTabsHtml(componentCount: Int, pageCount: Int): String =
     """
@@ -3553,12 +2765,8 @@ ${captureControlsHtml().prependIndent("          ")}
       .trimIndent()
 
   /**
-   * The **Pages** pane: the design file's own pages, as a flat list.
-   *
-   * Flat rather than a tree, because it is one: a page has no children, and the branch shape it
-   * used to wear implied a hierarchy that never existed. Each row carries `data-search` so the
-   * shared filter can match it the way it matches a component row — the attribute rather than the
-   * text, so what is matched is decided here and not by whatever the row happens to render.
+   * The **Pages** pane: a flat list of the design file's pages. Each row carries `data-search` so
+   * the shared filter matches what is decided here, not the rendered text.
    */
   private fun pagesPaneHtml(pages: List<PageLink>, basePath: String, q: String): String =
     buildString {
@@ -3575,10 +2783,8 @@ ${captureControlsHtml().prependIndent("          ")}
           append("  <li><a class=\"cp-tree-page cp-tree-link\" href=\"$href\"")
           append(" data-search=\"$name\">$name</a></li>\n")
         } else {
-          // A page WITH sections is a branch: the row still leads to the whole sheet, and the
-          // twisty beside it opens the sections that sheet is divided into. Only the first opens,
-          // for the same reason the component tree opens one family — a column that opens
-          // everything is the wall of rows this navigation exists to replace.
+          // A page with sections is a branch: the row opens the sheet, the twisty its sections.
+          // Only the first opens.
           val listId = "cp-page-sections-${WebEscaping.htmlEscape(page.id)}"
           val open = i == 0
           append("  <li class=\"cp-page-branch\">\n")
@@ -3589,21 +2795,10 @@ ${captureControlsHtml().prependIndent("          ")}
           append("    <ul class=\"cp-tree-children cp-page-sections\" id=\"$listId\">\n")
           page.sections.forEach { section ->
             val sectionName = WebEscaping.htmlEscape(section.name)
-            // The row opens the SHEET, with no fragment — for now.
-            //
-            // A section is a COMPONENT_SET, and the page view draws nothing for one: it anchors
-            // components, and `isComponent` excludes containers because nothing implements a set.
-            // An earlier revision inferred a target by taking the first deeper node after the set,
-            // which is precisely the inference `PageNode.container`'s own contract forbids — "a
-            // manifest lists components and nothing else, so an unlisted frame between two of them
-            // lets a shallower node be followed by a deeper one that is NOT inside it". On an empty
-            // set that silently linked to an unrelated component, which is worse than not linking:
-            // a wrong destination is indistinguishable from a right one until you read the sheet.
-            //
-            // Landing on the section itself needs the page to emit an anchor for the container,
-            // which is the deep-link work this is a step toward. Until then the honest link is the
-            // sheet, and the section names still do the job they were added for — making a page
-            // findable by what is on it.
+            // The row opens the sheet with no fragment, for now. A section is a COMPONENT_SET,
+            // which the page view does not anchor, and inferring the next deeper node as a target
+            // is wrong (see `PageNode.container`). Linking to the section needs a container anchor
+            // first.
             val sectionHref = pageUrl
             append("      <li><a class=\"cp-tree-variant cp-tree-link\"")
             append(" href=\"${WebEscaping.htmlEscape(sectionHref)}\"")
@@ -3619,23 +2814,13 @@ ${captureControlsHtml().prependIndent("          ")}
       append("</div>\n")
     }
 
-  /**
-   * The anchor on a synthesized flat sub-group divider — no section owns it, so it stands alone.
-   */
+  /** The anchor on a synthesized flat sub-group divider; no section owns it. */
   private fun flatGroupAnchorId(groupSlug: String) = "cp-group-$groupSlug"
 
   /**
-   * A card's id line, split so it elides from the MIDDLE rather than the end.
-   *
-   * At a catalog column's width almost every id is clipped, and clipped at the END it conveys
-   * nothing the label above it hasn't already said — `iconbutton-standard__ide…`. What
-   * distinguishes one render from its siblings is the SUFFIX (the mode and the scheme), so the id
-   * is cut at its last `__` and only the head half is allowed to shrink:
-   * `iconbutton-standard__…__light`. CSS has no middle ellipsis, hence the two spans.
-   *
-   * Both spans are always emitted, even for an id with no `__` (empty tail): the grid's light/dark
-   * swap re-fills them in place, and a card that arrived without a tail span would have nowhere to
-   * put its variant's suffix.
+   * A card's id line, split so it elides from the middle: the distinguishing part is the suffix
+   * after the last `__`, so only the head shrinks. CSS has no middle ellipsis, hence two spans.
+   * Both are always emitted because the light/dark swap refills them in place.
    */
   private fun cardIdHtml(id: String): String {
     val cut = id.lastIndexOf("__")
@@ -3653,24 +2838,15 @@ ${captureControlsHtml().prependIndent("          ")}
     val variants: List<TreeVariant>,
     val href: String,
     /**
-     * The row's prebaked thumbnail ([navThumbSrc]), or null for a tree that lists renders rather
-     * than components (the viewer's axes subtree) and for a catalog whose pixels are not baked
-     * locally yet.
-     *
-     * The catalog menu used to be a tree of NAMES beside a grid of pictures, while the viewer's
-     * component drawer — the same list, on the other page — showed a thumbnail per row. One of the
-     * two was right, and it was not the one on the page that has the pixels (#252).
+     * The row's prebaked thumbnail ([navThumbSrc]), or null for a tree listing renders (the
+     * viewer's axes subtree) or a catalog without locally baked pixels.
      */
     val thumbSrc: String? = null,
   )
 
   /**
-   * One group row plus its component rows (and each component's variants).
-   *
-   * Expansion follows the same discipline as a section: **a group is open exactly when it is the
-   * current one**, and a component likewise. That is what keeps the tree a navigation aid rather
-   * than a wall — compose-m3's 84 components across twenty families would otherwise all be rows at
-   * once — and it matches what the grid beside it is doing, which shows one section at a time.
+   * One group row plus its component rows (and their variants). A group, like a component, is open
+   * exactly when it is the current one, keeping the tree from becoming a wall of rows.
    */
   private fun StringBuilder.appendGroupRow(
     group: LandingGroup,
@@ -3720,15 +2896,9 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * One component row plus its variant children — the tree's leaf shape, shared by the landing's
-   * whole-catalog tree and the viewer's single-component subtree so the two cannot drift into
-   * looking like different things.
-   *
-   * What differs between the two callers is only where the rows *point* and whether they start
-   * open. On the landing they are in-page jumps to a card in the grid beside them, and a component
-   * ships collapsed because eighty-four of them are on screen at once. In the viewer each row is a
-   * real navigation to that render's own page, the list is open (there is exactly one component),
-   * and [currentHref] marks the render being viewed.
+   * One component row plus its variant children, shared by the landing's tree and the viewer's
+   * subtree so they cannot drift. On the landing rows are in-page jumps and start collapsed; in the
+   * viewer they navigate, the list is open, and [currentHref] marks the current render.
    */
   private fun StringBuilder.appendComponentRow(
     label: String,
@@ -3741,40 +2911,29 @@ ${captureControlsHtml().prependIndent("          ")}
     /** Collapsed by default; the viewer's subtree opens, having only one component to show. */
     collapsed: Boolean = true,
     /**
-     * Whether to lead the children with a synthetic **Default** row pointing at [defaultHref].
-     *
-     * The landing needs it: there the component row is an in-page jump to a card, not a render, so
-     * without this row the default has no entry of its own. The viewer does not, because there the
-     * component row IS the default render — a `Default` child beneath it would be a second row with
-     * the same href and the same destination, which is the duplication this flag exists to avoid.
+     * Whether to lead the children with a synthetic **Default** row pointing at [defaultHref]. The
+     * landing needs it; in the viewer the component row is already the default render.
      */
     syntheticDefaultRow: Boolean = true,
     /** The row whose href matches is `aria-current="page"` — the render on screen. */
     currentHref: String? = null,
     /**
-     * A small prebaked thumbnail drawn to the left of [label], on the same `?thumb=<hash>` lane the
-     * grid's cards and the viewer's component drawer use. Null leaves the row text-only — which is
-     * what the viewer's axes subtree wants, since its rows are renders of ONE component and
-     * forty-by-forty pixels cannot tell `Pressed` from `Disabled`.
+     * A small prebaked thumbnail (the `?thumb=<hash>` lane) left of [label]. Null keeps the row
+     * text-only, as the viewer's axes subtree wants.
      */
     thumbSrc: String? = null,
     /**
-     * Named groups of destinations, appended after the variant rows and inside the same child list:
-     * this component's recorded interactions, the samples that call it. Each is its own disclosure,
-     * so the variant rows stay the plain list they have always been.
-     *
-     * They are NOT counted into the component row's tally, which answers "how many renders of this
-     * component are there" — a recording is not a render of it, and folding the two would make the
-     * count mean nothing in particular. Each directory carries its own.
+     * Named groups of destinations (recorded interactions, samples that call it) appended after the
+     * variant rows, each its own disclosure. Not counted in the component's render tally; each
+     * directory carries its own.
      */
     directories: List<ComponentDirectory> = emptyList(),
     indent: String = "        ",
   ) {
     fun current(target: String) = if (target == currentHref) " aria-current=\"page\"" else ""
-    // The component row can itself be current — in the viewer it IS the default render, the rows
-    // under it being the other ones. Nothing double-marks, because a caller that folds the default
-    // into this row also drops it from [variants]; a caller that keeps a synthetic Default row
-    // (the landing) passes no [currentHref] at all.
+    // The component row can itself be current (in the viewer it is the default render). Nothing
+    // double-marks: callers folding the default in drop it from [variants], and the landing passes
+    // no [currentHref].
     append("$indent<li role=\"none\"><a class=\"cp-tree-component cp-tree-link\"")
     append(" role=\"treeitem\" href=\"${WebEscaping.htmlEscape(href)}\"$rowAttrs")
     val hasChildren = variants.isNotEmpty() || directories.isNotEmpty()
@@ -3814,9 +2973,7 @@ ${captureControlsHtml().prependIndent("          ")}
         append("</a></li>\n")
       }
       directories.forEachIndexed { index, dir ->
-        // Open, like the subtree around it. A closed disclosure inside an open one hides the rows
-        // behind two clicks, and the whole point of moving these into the drawer was that a reader
-        // should not have to already know they exist.
+        // Open, like the subtree around it, so the rows aren't hidden behind two clicks.
         val groupId = "$variantsId-${dir.kind}-$index"
         append("$indent    <li role=\"none\" class=\"cp-tree-dir cp-tree-dir--${dir.kind}\">\n")
         append("$indent      <span class=\"cp-tree-dir-head\" role=\"treeitem\"")
@@ -3855,9 +3012,8 @@ ${captureControlsHtml().prependIndent("          ")}
     "cp-group-$sectionSlug-$groupSlug"
 
   /**
-   * The id of the grid card a component row jumps to. Preview ids are already slug-shaped
-   * (`button-filled__ideal__default__light`), but they are catalog data rather than something this
-   * page mints, so anything outside the HTML-id alphabet is folded to `-`.
+   * The id of the grid card a component row jumps to. Preview ids are catalog data, so characters
+   * outside the HTML-id alphabet fold to `-`.
    */
   private fun cardAnchorId(previewId: String) =
     "cp-card-" +
@@ -3866,14 +3022,9 @@ ${captureControlsHtml().prependIndent("          ")}
         .joinToString("")
 
   /**
-   * One anchor per card, minted once for the whole page.
-   *
-   * Two things depend on this happening in a single place. The grid and the tree must not compute
-   * the anchor differently — they name the same element. And the anchors have to be **injective**:
-   * [cardAnchorId] folds everything outside the HTML-id alphabet to `-`, and a preview id may
-   * legitimately contain `/`, `?`, `#` or a space, so `Foo/Bar` and `Foo?Bar` would otherwise mint
-   * one id for two cards and `getElementById` would send both rows — and both fragment URLs — to
-   * whichever card came first. A collision takes a numeric suffix, exactly as the group slugs do.
+   * One anchor per card, minted once for the whole page so grid and tree agree. Anchors must be
+   * injective: [cardAnchorId] folds `/`, `?`, `#`, spaces etc. to `-`, so collisions take a numeric
+   * suffix like group slugs do.
    */
   private fun mintCardAnchors(cards: List<GridCard>): Map<String, String> {
     val used = HashSet<String>()
@@ -3896,15 +3047,9 @@ ${captureControlsHtml().prependIndent("          ")}
   private class TreeVariant(val label: String, val href: String, val axis: String = "state")
 
   /**
-   * One destination inside a [ComponentDirectory] — a label and where it goes.
-   *
-   * [live] is false for a destination that is registered but has no host yet, which happens on a
-   * cold box and while a catalog reloads. Such a row is drawn disabled rather than dropped: the
-   * reader is told the thing exists and is not ready, which is the truth, where a missing row would
-   * say the component has no samples at all.
-   *
-   * [title] is the row's tooltip — the caption a catalog authored, where it wrote one. The label
-   * has to stay short enough for a drawer column; the sentence goes here.
+   * One destination inside a [ComponentDirectory]: a label and where it goes. [live] false means
+   * registered but not yet hosted (cold box, reload); drawn disabled rather than dropped. [title]
+   * is the tooltip (the catalog's caption).
    */
   data class ComponentDirectoryRow(
     val label: String,
@@ -3914,20 +3059,9 @@ ${captureControlsHtml().prependIndent("          ")}
   )
 
   /**
-   * A named group of destinations under a component: its recorded interactions, the samples that
-   * call it, whatever a later lane adds.
-   *
-   * ## Why this is not more variant rows
-   *
-   * A variant is the SAME render with one axis moved — `Pressed` is the component, pressed. A
-   * directory holds a different KIND of artifact that happens to be about the same component: a
-   * recording, a call site in another catalog. Listed flat among the variants they read as the same
-   * thing, and a reader scanning for "the other states" has to step over them. A named node says
-   * what the group is, costs one line closed, and gives the next lane somewhere to go without
-   * inventing a third shape.
-   *
-   * [kind] is a slug for the CSS hook and nothing else — no behaviour keys off it, so a new
-   * directory is a producer and a stylesheet rule rather than a branch in here.
+   * A named group of destinations under a component: recorded interactions, samples that call it,
+   * and later lanes. Not variant rows, because these are different kinds of artifact about the
+   * component. [kind] is only a CSS hook.
    */
   data class ComponentDirectory(
     val kind: String,
@@ -3936,40 +3070,26 @@ ${captureControlsHtml().prependIndent("          ")}
   )
 
   /**
-   * What KIND of catalog a page belongs to, and through that what shape the page takes.
-   *
-   * Declared by the catalog (`catalog.json`'s `display.role`, carried on
-   * [ServeBundleHost.catalogRole]) and never inferred from its name — which catalogs exist is the
-   * deployment's business, not this module's.
-   *
-   * Distinct from Catalog mode ([viewerPage]'s `componentBrowser`), which is the READER's choice of
-   * how much chrome to be shown and applies to every catalog alike. A role is a property of the
-   * thing being shown: the same reader, on a samples page, is looking at something a design
-   * comparison is not a question about.
+   * What kind of catalog a page belongs to, and so what shape the page takes. Declared by the
+   * catalog (`display.role`, via [ServeBundleHost.catalogRole]), never inferred from its name.
+   * Distinct from Catalog mode ([viewerPage]'s `componentBrowser`), which is the reader's choice.
    */
   enum class PageRole {
     /** A design system's own catalog: the page as it has always been. */
     CATALOG,
     /**
-     * A catalog of CALL SITES — the samples that use a design system, published beside it.
-     *
-     * Two differences, both following from the same fact: a sample is not a rendition of a
-     * reference, it is code someone would copy.
-     * 1. Every comparison lane goes. A design reference, the paired catalog's render, the layer
-     *    diff, the parity issues, the compare strip: each asks "does this match the reference", and
-     *    there is no reference this is meant to match. Offering the lanes anyway would invite a
-     *    reader to read a difference as a defect.
-     * 2. The source stands BESIDE the render rather than behind a chip that swaps it out. On an
-     *    ordinary component page the code is one of several things a reader might want; here it is
-     *    the thing the page is for, and the render is what it produces.
+     * A catalog of call sites — samples that use a design system. A sample is code to copy, not a
+     * rendition of a reference, so:
+     * 1. Every comparison lane is dropped (reference, paired render, layer diff, parity issues,
+     *    compare strip).
+     * 2. The source stands beside the render rather than behind a chip.
      */
     SAMPLES;
 
     companion object {
       /**
-       * The role a catalog declared, or [CATALOG] for one that declared none — and for one that
-       * declared a role this server does not know, which is a catalog published by a newer producer
-       * and must degrade to the ordinary page rather than to an error.
+       * The declared role, or [CATALOG] when none or unknown (a newer producer must degrade to the
+       * ordinary page).
        */
       fun of(declared: String?): PageRole =
         when (declared?.trim()?.lowercase()) {
@@ -3980,11 +3100,8 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The viewer, opened on one recording — the same `?mode=motion&motion=<id>` shape the Motion
-   * index's own cards link with, so the two surfaces cannot drift into two spellings of one link.
-   *
-   * [q] already carries its leading `?` when it carries anything, which is why the separator is
-   * chosen rather than written.
+   * The viewer opened on one recording, with the same `?mode=motion&motion=<id>` shape the Motion
+   * index uses. [q] already carries its leading `?` when non-empty.
    */
   private fun motionHref(
     basePath: String,
@@ -3998,18 +3115,9 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The viewer's **component subtree**: the same tree the catalog navigates by, filtered to the one
-   * component on screen.
-   *
-   * This replaced two rows of chips — a `State` row and a `Variant` row — that were the viewer's
-   * own second opinion about the component's axes. They keyed identically to [primaryVariants], so
-   * they always listed the same renders the tree does; they simply said it in a different shape, in
-   * a different place, with the two axes torn apart into rows that never named their relationship.
-   * A subtree says it once, in the shape the reader already learned on the landing page: the
-   * component, then every render under it, the current one marked.
-   *
-   * Returns "" when the component has no second render — the same silence the chip rows kept, so a
-   * single-state component grows no navigation it cannot use.
+   * The viewer's **component subtree**: the catalog's navigation tree filtered to the component on
+   * screen — the component, every render under it, the current one marked. Returns "" when the
+   * component has no second render.
    */
   /** The component's default render in [current]'s theme lane, or [current] when it has none. */
   private fun componentDefault(
@@ -4026,26 +3134,18 @@ ${captureControlsHtml().prependIndent("          ")}
           !isNonDefaultState(it) &&
           !hasNonDefaultProps(it)
       }
-      // Authored order decides, not list order: the host lists previews sorted by id, so a
-      // component documented at several breakpoints would otherwise root its subtree at whichever
-      // size sorts first (`204dp` before `92dp`) rather than at the size its card is drawn at.
+      // Authored order, not list order: the host sorts by id, so `204dp` would otherwise root the
+      // subtree before `92dp`.
       .minByOrNull { it.catalogOrder ?: Int.MAX_VALUE } ?: current
   }
 
   /**
-   * Every render of [current]'s component reachable in ONE hop from where the reader is standing.
+   * Every render of [current]'s component reachable in one hop.
    *
-   * Two sets, unioned. [primaryVariants] from the component's default is the canonical set the
-   * landing tree draws — one axis at a time, which is what keeps that tree navigable across a whole
-   * catalog. But a component may bake state × props as a CROSS-PRODUCT, and that set holds one axis
-   * at its default while walking the other: from `RTL` it offers no `pressed + RTL`, and since the
-   * grid folds both axes out, the combination would be reachable from nowhere at all. So the rows
-   * relative to [current] — its states holding its props fixed, its props holding its state fixed,
-   * exactly how the chip switchers this replaced were keyed — are unioned in, and lead, because
-   * they are the moves from *here*.
-   *
-   * Deduped by href, so a component with only one axis (nearly all of them) gets exactly the
-   * canonical list and nothing doubles up.
+   * The union of [primaryVariants] from the default (one axis at a time) and the rows relative to
+   * [current] (its states with its props fixed, and vice versa), which lead. The second set is
+   * needed when state × props is baked as a cross-product, or combinations like `pressed + RTL`
+   * would be unreachable. Deduped by href.
    */
   private fun componentRenderRows(
     current: ServePreview,
@@ -4054,15 +3154,12 @@ ${captureControlsHtml().prependIndent("          ")}
     href: (ServePreview) -> String,
   ): List<TreeVariant> {
     val lane = themeLane(current, darkFirst)
-    // Collected as previews, not as finished rows: whether a row can be labelled by ONE axis is a
-    // property of the whole set (see [variantLabel]), so nothing can be named until both passes
-    // have run.
+    // Collected as previews, not rows: whether a row can be labelled by one axis depends on the
+    // whole set ([variantLabel]).
     val rows = LinkedHashMap<String, Pair<ServePreview, String>>()
-    // A second-tier cell is never a ROW here — that is what the tier means — but the render on
-    // screen is always its own subtree's subject, so it is exempt from its own filter. Arriving on
-    // one by its link (from a kit page, say) must show a page that says where it is, not a tree of
-    // everything except it. `componentSubtreeHtml` re-adds it if these passes do not, so this only
-    // decides whether it is labelled by its axis or by its name.
+    // A second-tier cell is never a row, but the render on screen is exempt so arriving on one
+    // still shows where it is. `componentSubtreeHtml` re-adds it anyway; this only decides how it
+    // is labelled.
     fun listed(p: ServePreview) = !p.secondary || p.id == current.id
     // This render's own state axis, holding its props fixed.
     val stateKey = switcherStateKey(current)
@@ -4087,9 +3184,8 @@ ${captureControlsHtml().prependIndent("          ")}
     val sizeKey = switcherSizeKey(current)
     val bySize = LinkedHashMap<String, ServePreview>()
     for (p in all) {
-      // Bound to a local rather than smart-cast through `p.size`: `ServePreview` is in
-      // `:render-host` now, and Kotlin will not smart-cast a public property declared in another
-      // module (it cannot see that nothing reassigns it).
+      // Bound to a local: `ServePreview` lives in `:render-host`, and Kotlin won't smart-cast
+      // another module's public property.
       val size = p.size ?: continue
       if (!listed(p)) continue
       if (switcherSizeKey(p) != sizeKey || themeLane(p, darkFirst) != lane) continue
@@ -4105,9 +3201,7 @@ ${captureControlsHtml().prependIndent("          ")}
         .sortedBy { if (it.key == "") 0 else 1 }
         .forEach { (_, p) -> rows.putIfAbsent(href(p), p to "props") }
     }
-    // Sizes last, and in the catalog's declared order rather than sorted: the export writes a
-    // component's images in `breakpoints` order, so first-seen IS smallest-to-largest as the
-    // catalog declares it, and re-sorting here would invent an ordering the spec did not ask for.
+    // Sizes last, in the catalog's declared `breakpoints` order (first-seen), not re-sorted.
     if (bySize.size > 1) {
       bySize.forEach { (_, p) -> rows.putIfAbsent(href(p), p to "size") }
     }
@@ -4116,9 +3210,8 @@ ${captureControlsHtml().prependIndent("          ")}
       (p, axis) ->
       rows.putIfAbsent(href(p), p to axis)
     }
-    // Both axes in play ⇒ every row names both coordinates. Otherwise a row that resets the state
-    // and a row that resets the props are both "Default", and the render on screen is labelled by
-    // whichever pass reached it first — `Pressed` for something that is Pressed AND RTL.
+    // With both axes in play every row names both coordinates; otherwise two different rows would
+    // both read "Default".
     val crossProduct = byState.size > 1 && byProps.size > 1
     return rows.values.map { (p, axis) ->
       TreeVariant(variantLabel(p, axis, crossProduct), href(p), axis)
@@ -4126,32 +3219,13 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The component's recordings, as a directory over the renders the TREE lists — not over every
-   * render the catalog publishes.
+   * The component's recordings, as a directory over the renders the tree lists — [default] plus
+   * [variants], including the render on screen — not over every render the catalog publishes (which
+   * can be a 64-row matrix).
    *
-   * That distinction is the whole of this function. A first cut unioned the captures of every
-   * sibling sharing the component key, and on a component like `EdgeButton` that is 64 renders —
-   * every breakpoint times every state — so the drawer grew a 64-row matrix under a variant list
-   * that deliberately holds 10. [primaryVariants] already decided which renders are worth
-   * navigating to and why (theme, breakpoint, fontScale and locale are a different rendering of the
-   * same thing, not a different thing to look at); a directory that ignored that decision was
-   * answering a question the tree had already answered better.
-   *
-   * So the render set is exactly [default] plus [variants] — the rows drawn above it, including the
-   * render on screen even when no axis would have listed it, which is how a capture that lives only
-   * on a secondary render is still reachable from the page showing it.
-   *
-   * ## Naming
-   *
-   * A capture's own title identifies it only within ONE render's set: [MotionCaptureLabels] numbers
-   * a repeat inside that set, and a caption-less capture is "Animation" in every set there is. Over
-   * a union across renders that produced 64 rows all reading `Animation`, distinguished by nothing.
-   *
-   * So the label says whichever of the two actually varies. Captures from a single render are named
-   * by their own titles, which is the fixture case and reads best ("Tap the avatar", "Header
-   * collapse"). Captures spread across renders are named by the RENDER — the same words the variant
-   * row above uses — with the capture's title appended only for a render contributing more than
-   * one, because there the render alone is ambiguous again.
+   * Naming: a capture title is only unique within one render's set ([MotionCaptureLabels]).
+   * Captures from a single render use their own titles; captures across renders are named by the
+   * render, with the title appended where a render contributes more than one.
    */
   private fun motionDirectory(
     preview: ServePreview,
@@ -4163,12 +3237,8 @@ ${captureControlsHtml().prependIndent("          ")}
     q: String,
   ): ComponentDirectory? {
     class Take(val renderLabel: String, val render: ServePreview, val capture: ServeMotion)
-    // Every render resolved through [byHref], the DEFAULT included. A caller may hand this page a
-    // record enriched past the sibling list it also passes — the handler reads a pinned revision's
-    // own record, the fixtures build one with `copy()` — and that enriched record is the one
-    // holding
-    // the captures. Taking `default` as it came out of the sibling list read a preview with none,
-    // which silently emptied the directory on exactly the page whose stage was playing them.
+    // Resolve every render through [byHref], the default included: a caller may pass an enriched
+    // record (pinned revision, fixture `copy()`) that holds the captures the sibling list lacks.
     val takes =
       (listOf(previewDisplayName(default) to (byHref[href(default)] ?: default)) +
           variants.mapNotNull { row -> byHref[row.href]?.let { row.label to it } })
@@ -4208,48 +3278,36 @@ ${captureControlsHtml().prependIndent("          ")}
     q: String,
     darkFirst: Boolean,
     /**
-     * The component's named groups — the catalogs that are about it — resolved by the handler,
-     * which is the half of this that needs the session registry and another catalog's previews. The
-     * recordings directory is built here instead, because it is drawn over the same render rows
-     * this function already computes ([motionDirectory] says why that matters).
+     * The component's named groups (catalogs about it), resolved by the handler since they need the
+     * session registry. The recordings directory is built here over the same render rows
+     * ([motionDirectory]).
      */
     directories: List<ComponentDirectory> = emptyList(),
     /** Whether to draw the recordings directory at all — false under a pin and in Catalog mode. */
     includeMotion: Boolean = true,
   ): String {
     fun href(p: ServePreview) = "$basePath/p/${WebEscaping.urlEncodeSegment(p.id)}$q"
-    // The subtree hangs off the component's DEFAULT render, whichever of its renders is on screen:
-    // arriving on `disabled` must not re-root the tree at `disabled` and hide the rest. Held to the
-    // current theme lane so navigating within a dark catalog stays dark, exactly as the chip rows
-    // and the component nav already do.
+    // The subtree hangs off the component's default render whichever render is on screen, held to
+    // the current theme lane.
     val default = componentDefault(preview, siblings, darkFirst)
     val rows = componentRenderRows(preview, siblings, darkFirst, ::href)
-    // The render ON SCREEN is always a row, even when neither axis set would have listed it. A
-    // catalog can carry a variant whose axis lives only in its id — `…__default__light__
-    // content-icon-label` with no `props` metadata — and such a render belongs to no axis, so a
-    // subtree built from the axes alone would show the reader every render of this component
-    // except the one they are looking at, with nothing marked current. A tree that says "this
-    // component's renders" has to contain the page it is drawn on.
+    // The render on screen is always a row, even when its axis lives only in its id (no `props`
+    // metadata), so the tree always contains the page it is drawn on.
     val withCurrent =
       if (rows.any { it.href == href(preview) } || preview.id == default.id) rows
       else rows + TreeVariant(previewDisplayName(preview), href(preview), "props")
-    // The DEFAULT render is the component row, not a child of it. Both pointed at the same href —
-    // the same page, reached two ways, one line apart — and the child said "Default" directly under
-    // a row already naming that render. Folding it up leaves the tree saying each render once: the
-    // component, then the ways it differs.
+    // The default render is the component row itself, not a duplicate "Default" child.
     val variants = withCurrent.filterNot { it.href == href(default) }
-    // The preview ON SCREEN leads, so a caller handing this page a record enriched past the list it
-    // also passes — the handler's pinned revision, the fixtures' `copy()` — has its own captures
-    // read rather than the list's.
+    // The preview on screen leads, so an enriched record (pinned revision, fixture `copy()`) has
+    // its own captures read.
     val byHref = (listOf(preview) + siblings).distinctBy { it.id }.associateBy { href(it) }
     val allDirectories =
       listOfNotNull(
         if (!includeMotion) null
         else motionDirectory(preview, default, variants, byHref, ::href, basePath, q)
       ) + directories
-    // A component with one render and no directories has nothing to show — the tree would be its
-    // own title. With a directory it has plenty, so the subtree is worth drawing for a component
-    // that never varies but is called by five samples.
+    // One render and no directories: nothing to show. With a directory the subtree is worth drawing
+    // even for a single render.
     if (variants.isEmpty() && allDirectories.isEmpty()) return ""
     return buildString {
       append("<nav class=\"cp-tree cp-axes-tree\" aria-label=\"Component renders\">\n")
@@ -4274,25 +3332,13 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * A component's primary-axis variants — the renders the grid folds out so a component shows one
-   * card, listed here so the tree can offer them without a visit to the viewer to discover they
-   * exist.
+   * A component's primary-axis variants — the renders the grid folds out, listed so the tree can
+   * offer them.
    *
-   * **Primary** is `state` (disabled, pressed, checked) and `props` (with icon, RTL, large font):
-   * axes where the variant is a different *thing to look at*. Theme, breakpoint, fontScale and
-   * locale are **secondary** — a different rendering of the same thing — and stay out of the tree,
-   * theme because the card already swaps it in place, the rest because they multiply every row by a
-   * matrix nobody navigates by.
-   *
-   * A state cell can now declare itself secondary too ([ServePreview.secondary], from
-   * `@OverrideVariant(secondary = true)`), and it is dropped here on the same ground: an
-   * exhaustively drawn kit set is a matrix nobody navigates by either. Only the LISTING changes —
-   * such a render is still served, still addressed by its own URL, and still paired with its kit
-   * node — so a link from a kit page or a design-map pairing lands on it, and its own subtree still
-   * offers the primary rows to get back by.
-   *
-   * The viewer's own subtree ([componentSubtreeHtml]) is built from this same function, so the two
-   * cannot offer different sets: one definition of what a component's renders are, drawn twice.
+   * Primary axes are `state` and `props` (a different thing to look at). Theme, breakpoint,
+   * fontScale and locale are secondary (a different rendering) and stay out. A state cell marked
+   * [ServePreview.secondary] (`@OverrideVariant(secondary = true)`) is dropped too; it is still
+   * served and addressable. The viewer's subtree ([componentSubtreeHtml]) uses this same function.
    */
   private fun primaryVariants(
     default: ServePreview,
@@ -4339,18 +3385,12 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * A row's label. Normally it names only the axis the row moves along — a component varies on one
-   * axis and repeating the other's default on every row would be noise. But when BOTH axes are in
-   * play the single label is ambiguous rather than terse: from `pressed + RTL`, the row resetting
-   * the state (`default + RTL`) and the row resetting the props (`pressed + default`) are both
-   * "Default", two different renders wearing one name. Naming both coordinates is what tells them
-   * apart, and it also stops a cross-product row being labelled by whichever axis pass happened to
-   * reach it first.
+   * A row's label: normally just the axis the row moves along. When both axes are in play, name
+   * both coordinates, or `default + RTL` and `pressed + default` would both read "Default".
    */
   private fun variantLabel(p: ServePreview, axis: String, crossProduct: Boolean): String =
-    // A size row names its breakpoint whatever else is in play: it moves along neither of the two
-    // axes [crossProduct] disambiguates, and the size is the only thing that tells it from the row
-    // the reader is standing on.
+    // A size row always names its breakpoint; it moves along neither axis [crossProduct]
+    // disambiguates.
     if (axis == "size") sizeLabel(p) ?: stateLabel(p.state)
     else if (!crossProduct) if (axis == "state") stateLabel(p.state) else propsLabel(p.props)
     else "${stateLabel(p.state)} · ${propsLabel(p.props)}"
@@ -4372,9 +3412,8 @@ ${captureControlsHtml().prependIndent("          ")}
     )
 
   /**
-   * The component **family** a card belongs to — the first token of its [componentKey] slug head
-   * (`button-filled` → `button`, `textfield-outlined` → `textfield`, `badge` → `badge`). Used only
-   * as a *fallback* grouping for a catalog that authored no [sections][ServePreview.section].
+   * The component **family** of a card: the first token of its [componentKey] (`button-filled` →
+   * `button`). Only a fallback grouping for catalogs with no [sections][ServePreview.section].
    */
   private fun cardFamily(card: GridCard): String =
     componentKey(card.default).substringBefore("__").substringBefore('-').ifBlank {
@@ -4386,12 +3425,8 @@ ${captureControlsHtml().prependIndent("          ")}
     FAMILY_DISPLAY_NAMES[family] ?: family.replace('-', ' ').replaceFirstChar { it.uppercaseChar() }
 
   /**
-   * The name the drawer's tree gives a preview, for a row some other layer builds.
-   *
-   * Exported so a handler-built directory row reads like the variant rows beside it. Without it the
-   * related rows carried `ServePreview.label`, which for a generated catalog IS the route id — a
-   * kit row read `alertdialog__ideal__default__192dp` where the variant row one line above read
-   * `Disabled`. Two naming rules on one list is the defect; this is the one rule.
+   * The name the drawer's tree gives a preview, exported so handler-built directory rows match the
+   * variant rows (`ServePreview.label` is the route id for generated catalogs).
    */
   fun rowDisplayName(preview: ServePreview): String = previewDisplayName(preview)
 
@@ -4433,16 +3468,11 @@ ${captureControlsHtml().prependIndent("          ")}
     }
 
   /**
-   * A **synthesized** sub-grouping for a section-less catalog: bucket [cards] by [cardFamily] so
-   * the flat grid gains labelled dividers (Buttons, Cards, Text fields, …) like an authored catalog
-   * — the fix for a large first-party catalog (compose-m3's 84 tiles) rendering as one undivided
-   * wall. Purely a fallback: a catalog that authored its own sections goes through [buildSections]
-   * and never reaches here.
+   * A synthesized sub-grouping for a section-less catalog: bucket [cards] by [cardFamily] so the
+   * flat grid gains labelled dividers. Catalogs with sections use [buildSections] instead.
    *
-   * Returns null (⇒ keep the plain flat grid) unless the grouping is actually *useful*: it needs at
-   * least two families AND at least one family with more than one card — otherwise every card would
-   * get its own lone header, which is noisier than no grouping at all. Families keep first-seen
-   * (catalog) order; cards keep their order within a family.
+   * Returns null (plain flat grid) unless there are at least two families and one has more than one
+   * card. Families keep first-seen order; cards keep their order.
    */
   private fun synthesizeGroups(cards: List<GridCard>): List<LandingGroup>? {
     if (cards.size < 2) return null
@@ -4458,44 +3488,26 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The sticky **Theme** control for the catalog header — every theme the catalog configures, not
-   * just the built-in light/dark axis (issue #2881).
+   * The sticky **Theme** control for the catalog header: every theme the catalog configures, not
+   * just light/dark.
    *
-   * Two kinds of chip sit on the same axis, so a visitor picks *a theme* rather than juggling two
-   * controls:
-   * - the **baked** light/dark pair ([hasBaked]) — an instant, client-side swap between the two
-   *   renders the catalog already published (`data-theme-choice="light"` / `"dark"`);
-   * - each app-**declared** `@ThemeCatalog` / `@WearThemeCatalog` theme ([declared]) —
-   *   `data-theme-choice="theme:<providerFqn>"`, which re-points every daemon-twinned card's
-   *   thumbnail at `/render/<id>.png?themeProvider=<fqn>` so the grid redraws under that theme.
+   * - the **baked** light/dark pair ([hasBaked]): an instant client-side swap
+   *   (`data-theme-choice="light"` / `"dark"`);
+   * - each **declared** `@ThemeCatalog` / `@WearThemeCatalog` theme ([declared]):
+   *   `data-theme-choice="theme:<providerFqn>"`, re-pointing daemon-twinned thumbnails at
+   *   `/render/<id>.png?themeProvider=<fqn>`.
    *
-   * A catalog with no baked pair still gets a leading `default` chip so the declared themes have
-   * something to return to. Persists to the catalog-scoped per-tab key (shared with that catalog's
-   * viewer Theme select, which ignores the `theme:` values it doesn't understand). Progressive
-   * enhancement throughout — a no-JS client sees the full grid on its baked renders.
+   * Without a baked pair a leading `default` chip is added. Persists to the catalog-scoped per-tab
+   * key shared with the viewer. No-JS clients see the baked renders.
    */
   private fun themePickerHtml(hasBaked: Boolean, declared: List<ServeTheme>): String {
     val builtIns =
       if (hasBaked) listOf("light" to "Light", "dark" to "Dark") else listOf("default" to "Default")
     val chips = themeChipsHtml(builtIns, declared, indent = "            ")
-    // THE VIEWER'S Theme control, not a second one that looks like it. The landing used to lay its
-    // chips out as a wrapping row above 640px and fold them behind a pill only on a phone, so the
-    // same catalog's two pages offered the same choice through two different affordances: a row of
-    // a dozen chips here, one labelled dropdown on the component page. Below the fold that was also
-    // the landing's tallest piece of chrome — a design system declaring a dozen themes spent three
-    // or four rows of the toolbar naming them, on every viewport, whether or not anyone was
-    // switching.
-    //
-    // So this is `.cp-theme-menu` + `.cp-theme-menu-panel`, the same two classes `viewerPage`
-    // emits, with the same chips from [themeChipsHtml] inside: one pill that names the theme in
-    // force, opening onto a column of full-width rows. All of the panel's styling is already in the
-    // sheet for the viewer, and `<cp-catalog-toolbar>` closes it on a pick exactly as
-    // `<cp-viewer-drawers>` does.
-    //
-    // The pill's value is seeded with the leading built-in and then mirrored from whichever chip
-    // is pressed (`<cp-catalog-toolbar>`), because the choice in force is remembered for the tab
-    // and changes without a page load — a server-rendered label alone would be wrong on arrival for
-    // anyone who has picked a theme in this tab before.
+    // The same `.cp-theme-menu` + `.cp-theme-menu-panel` control `viewerPage` emits, with chips
+    // from [themeChipsHtml], so both pages offer one affordance; `<cp-catalog-toolbar>` closes it
+    // on a pick. The pill's label is seeded with the leading built-in and then mirrored from the
+    // pressed chip, since the remembered choice changes without a page load.
     val seed = builtIns.first().second
     return """
     <div class="cp-toolbar">
@@ -4517,14 +3529,12 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The theme chips themselves, shared by the landing picker ([themePickerHtml]) and the viewer bar
-   * ([viewerThemePickerHtml]) so one control appears on both pages instead of two that drift.
+   * The theme chips shared by the landing picker ([themePickerHtml]) and the viewer bar
+   * ([viewerThemePickerHtml]).
    *
-   * [builtIns] are the `(choice value, label)` pairs the page offers before any app-declared theme
-   * — the landing's baked `light`/`dark` swap (or its lone `default`), the viewer's Light/Dark
-   * uiMode pair (or Dark alone on a dark-first system). [declared] follows as one
-   * `theme:<providerFqn>` chip each, qualified with its group when its bare name would collide with
-   * a built-in label or with another declared theme.
+   * [builtIns] are `(choice value, label)` pairs offered first (the landing's baked pair or
+   * `default`; the viewer's Light/Dark or Dark alone on a dark-first system). [declared] follows as
+   * one `theme:<providerFqn>` chip each, qualified with its group when the bare name would collide.
    */
   private fun themeChipsHtml(
     builtIns: List<Pair<String, String>>,
@@ -4532,12 +3542,9 @@ ${captureControlsHtml().prependIndent("          ")}
     /** Indentation for every chip after the first, so the emitted block reads as written HTML. */
     indent: String = "        ",
     /**
-     * Built-in choice value → the viewer page of the sticker this catalog publishes in that mode,
-     * for the built-ins that have one. A chip carrying [twinHrefs] is **navigation**: the pixels it
-     * wants are already baked under their own id, so `viewer.ts` follows the link instead of asking
-     * the daemon to redraw this id under a `uiMode` override (compose-ai-tools#4997). Empty for the
-     * landing grid, which switches theme by filtering cards it has already loaded, and for a page
-     * with no published twin — those chips keep the override.
+     * Built-in choice value → the viewer page of the sticker published in that mode. Such a chip is
+     * navigation: `viewer.ts` follows the link instead of asking the daemon for a `uiMode`
+     * override. Empty on the landing and for pages with no published twin.
      */
     twinHrefs: Map<String, String> = emptyMap(),
   ): String {
@@ -4573,43 +3580,24 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The **Transparent** toggle: flips the page between the solid stage the previews are normally
-   * read on and the transparent checkerboard that shows a sticker's real alpha.
+   * The **Transparent** toggle between the solid stage and a checkerboard showing a sticker's real
+   * alpha: one `aria-pressed` button, identical on landing and viewer.
    *
-   * One button rather than a Background / Transparent pair — a two-state axis with a default is
-   * what `aria-pressed` on a single toggle says, and the pair spent twice the toolbar width to say
-   * it while always showing one segment that did nothing when clicked.
-   *
-   * Emitted identically on the landing grid and on the single-preview viewer — the `<html>` class
-   * it drives (`cp-bg-transparent`) already backs both `.cp-imgwrap` and `.cp-stage`, and the
-   * pre-paint script in [document] already restores the choice on every page, so the viewer was
-   * simply missing the control rather than the behaviour.
-   *
-   * The button itself is rendered by the `<cp-bg-toggle>` Vue element in the surface bundle
-   * (source: `cli/serve-web/src/components/BgToggle.ts`), not here — one source of truth for markup
-   * a JS-only control owns. `serve.css` gives the element `display: contents`, so the button stays
-   * the toolbar's own flex item and lays out exactly as the bare button did.
+   * It drives the `cp-bg-transparent` `<html>` class, restored pre-paint by [document]. The button
+   * is rendered by the `<cp-bg-toggle>` element (`cli/serve-web/src/components/BgToggle.ts`);
+   * `serve.css` gives it `display: contents` so the button is the toolbar's flex item.
    */
   private fun bgPickerHtml(title: String): String =
     "<cp-bg-toggle label=\"${WebEscaping.htmlEscape(title)}\"></cp-bg-toggle>"
 
   /**
-   * The search box for the landing grid: a text input that filters cards to those whose label or id
-   * contains the typed text. Progressive enhancement — the server emits every card and
-   * [catalogFilterScript] does the hiding, so a no-JS client still sees the full grid. Shown
-   * whenever the module has previews (independent of the theme toggle, which only appears for
-   * per-theme catalogs).
+   * The landing grid's search box, filtering cards by label or id. [catalogFilterScript] does the
+   * hiding, so no-JS clients see the full grid.
    */
   private fun searchBoxHtml(usesFilter: Boolean = false): String {
-    // The `uses:` operator's readout, and the only furniture it adds to the page. Empty and hidden
-    // until the operator is typed, so a Dev-mode visitor who never uses it sees the same search bar
-    // as before; `role="status"` because what it reports arrives asynchronously, after a keystroke
-    // the reader has already finished making.
-    //
-    // It exists because the landing grid has no count line to borrow — `#cp-count` is emitted by
-    // the comparison pages, not this one — and without a readout the operator would narrow the grid
-    // with nothing on the page saying why, and an unindexable catalog would look exactly like a
-    // catalog where nothing matched.
+    // Readout for the `uses:` operator, hidden until the operator is typed. `role="status"` because
+    // results arrive asynchronously. Needed because the landing has no count line, and an
+    // unindexable catalog must not look like zero matches.
     val status =
       if (!usesFilter) ""
       else "\n      <p id=\"cp-uses-status\" class=\"cp-uses-status\" role=\"status\" hidden></p>"
@@ -4623,20 +3611,14 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * Landing-grid controls: the search box (matches a card's label + id, case-insensitive) and, when
-   * the catalog carries light/dark pairs, the sticky Light/Dark **toggle** — which *swaps* each
-   * swappable card between its baked light and dark render in place (image, viewer link, id, label,
-   * and stage backing), rather than hiding cards. Single-theme / theme-neutral cards carry no swap
-   * data and are left untouched. Theme state persists to a catalog-scoped `sessionStorage` key
-   * (round-tripped with that catalog's viewer Theme select); the search text is ephemeral. Fully
-   * client-side progressive enhancement — a no-JS client sees the full grid on its baked (default)
-   * renders.
+   * Landing-grid controls: the search box (label + id, case-insensitive) and, for catalogs with
+   * light/dark pairs, the sticky Light/Dark toggle, which swaps each swappable card's render, link,
+   * id, label and stage in place. Theme state persists to a catalog-scoped `sessionStorage` key
+   * shared with the viewer; search text is ephemeral. No-JS clients see the baked renders.
    *
-   * When [hasTabs] (a sectioned catalog), the same script also drives the section **tabs**:
-   * clicking a tab shows only that section's panel (others' cards hidden) while a search spans
-   * every tab (tab selection ignored until the query clears), and empty sub-groups / sections
-   * collapse. All tab handling is emitted as inline additions that are empty for a flat catalog, so
-   * a section-less catalog's script is byte-for-byte unchanged.
+   * With [hasTabs] the script also drives section tabs: a tab shows only its panel, a search spans
+   * every tab, and emptied groups/sections collapse. Tab code is spliced in inline and empty for a
+   * flat catalog.
    */
   private fun catalogFilterScript(
     hasThemes: Boolean,
@@ -4647,37 +3629,20 @@ ${captureControlsHtml().prependIndent("          ")}
     themeStorageKey: String,
     tabStorageKey: String,
     /**
-     * Per-card render URL to re-request under a declared theme, in the grid's document order — a
-     * **server-emitted** JS array literal (`["/render/a.png?…", "", …]`, `""` for a card the
-     * session can't re-render). Emitted rather than read back off the card so no URL the browser
-     * assigns to an `<img src>` ever originates as DOM text (CodeQL `js/xss-through-dom`). Empty
-     * string ⇒ the catalog offers no declared themes and none of the theme-render machinery is
-     * emitted at all.
+     * Per-card render URLs to re-request under a declared theme, in grid order, as a server-emitted
+     * JS array literal (`""` for cards the session can't re-render). Emitted rather than read from
+     * the DOM so no `<img src>` originates as DOM text (CodeQL `js/xss-through-dom`). Empty ⇒ no
+     * declared themes and none of that machinery.
      */
     themeBaseJs: String = "",
     themeLeaseUrl: String = "",
-    /**
-     * `POST` URL that tells the server a visitor is still on this page ([presenceScript]). Empty
-     * omits the heartbeat entirely — the default, so a fixture golden or a plain-module landing
-     * emits exactly the script it always did.
-     */
+    /** Presence `POST` URL ([presenceScript]). Empty omits the heartbeat. */
     presenceUrl: String = "",
-    /**
-     * Whether the sidebar carries the Components/Pages pane strip ([paneTabsHtml]). False for every
-     * catalog without design pages, which then emits this script byte-for-byte as before.
-     */
+    /** Whether the sidebar carries the Components/Pages strip ([paneTabsHtml]). */
     hasPanes: Boolean = false,
-    /**
-     * Whether the tree leads with the **All** row ([ALL_TAB]) — every sectioned catalog with more
-     * than one section. False leaves out every mention of `all`, so a single-section catalog emits
-     * the script it always did.
-     */
+    /** Whether the tree leads with the **All** row ([ALL_TAB]); false omits every mention of it. */
     hasAllTab: Boolean = false,
-    /**
-     * Endpoint for the Dev-mode `uses:` operator ([usesFilterScript]). Empty — the default, and
-     * every Catalog-mode render — leaves out every mention of it, so that presentation emits the
-     * script byte-for-byte as before.
-     */
+    /** Endpoint for the Dev-mode `uses:` operator ([usesFilterScript]). Empty omits it entirely. */
     usesUrl: String = "",
   ): String {
     // Declared before anything that branches on it — the tab predicate and the pane split below
@@ -4692,9 +3657,8 @@ ${captureControlsHtml().prependIndent("          ")}
         if (script.isEmpty()) ""
         else script.lines().joinToString("") { if (it.isEmpty()) "\n" else "\n      $it" }
       }
-    // The stored choice is one of `light` / `dark` (a baked swap), `default` (the catalog's own
-    // renders), or `theme:<providerFqn>` (an app-declared @ThemeCatalog theme, applied by
-    // re-pointing each daemon-twinned card's thumbnail at a `?themeProvider=` render).
+    // The stored choice: `light` / `dark` (baked swap), `default`, or `theme:<providerFqn>`
+    // (re-points daemon-twinned thumbnails at a `?themeProvider=` render).
     val themeInit =
       if (hasThemes)
         """
@@ -4738,12 +3702,11 @@ ${captureControlsHtml().prependIndent("          ")}
         """
           .trimIndent()
       else ""
-    // The declared-theme lane is serial unless the server grants this page a short-lived claim on
-    // its catalog's burst allocation. All users and tabs for that catalog share the same width, so
-    // opening another page cannot multiply a five-worker burst into a JVM storm. Each worker
-    // advances only after its image settles; failures get bounded delayed retries with
-    // cache-busting URLs. Baked light/dark swaps never queue. themeGen abandons all workers the
-    // moment a new theme is chosen and releases that generation's lease.
+    // Declared-theme renders run serially unless the server grants a short-lived claim on the
+    // catalog's shared burst allocation, so many tabs cannot multiply the burst. Each worker
+    // advances when its image settles; failures get bounded delayed retries with cache-busting
+    // URLs. Baked swaps never queue. A new theme choice bumps themeGen, abandoning workers and
+    // releasing the lease.
     val themeRenderInit =
       if (hasDeclaredThemes)
         """
@@ -4965,22 +3928,12 @@ ${captureControlsHtml().prependIndent("          ")}
         """
           .trimIndent()
       else ""
-    // Swap every swappable card to the chosen theme's baked render (src / viewer href / id / label
-    // /
-    // stage backing), and light up the pressed button. A card missing the chosen theme is skipped.
-    // For a DECLARED theme the light/dark swap stays on the card's server-side default variant
-    // (`data-def`) and the render URL grows a `themeProvider` param — applied only to cards the
-    // session can actually re-render (`data-theme-live`), so an Android-only variant keeps its
-    // baked
-    // pixels rather than requesting a render that would ignore the theme.
-    // Under a DECLARED theme a swap card keeps its server-side default variant's metadata (label /
-    // id / viewer link / stage backing, from `data-def`) — only the pixels come from the themed
-    // render — so picking a theme never silently flips the light/dark axis too.
-    // On the **All** tab every section is on screen, so the card's own section is never the
-    // current tab and this test rejected the whole grid — the visible batch came out empty, the
-    // burst lease was released before a single render started, and every deferred card then
-    // carried a token the server no longer knew (issue: themed grid stuck on the old pixels).
-    // Geometry alone is the right answer there; the tab comparison is for the tabbed views.
+    // Swap every swappable card to the chosen theme's baked render and press its button; cards
+    // missing that theme are skipped. For a declared theme cards keep their default variant's
+    // metadata (`data-def`) and only the pixels change, via a `themeProvider` param on cards that
+    // can re-render (`data-theme-live`).
+    // On the All tab every section is on screen, so visibility is decided by geometry alone; the
+    // tab comparison is only for tabbed views.
     val themeSectionShowing =
       if (hasAllTab)
         "current === \"$ALL_TAB\" || themeSection.getAttribute(\"data-section\") === current"
@@ -5164,23 +4117,17 @@ ${captureControlsHtml().prependIndent("          ")}
         });
       });"""
       else ""
-    // Tab pieces — each empty for a flat (section-less) catalog and appended INLINE onto an
-    // existing
-    // line, so the emitted script for a plain catalog is byte-for-byte identical to the pre-tabs
-    // one.
-    // `cp-js` on <html> hides the redundant per-section <h2> (the tab bar labels the section).
-    // A `.cp-subgroup` divider is present for BOTH an authored tabbed catalog and a synthesized
-    // flat-grouped one, so its emptied-on-search collapse lives under [hasGroups], separate from
-    // the tab-only machinery below.
+    // Tab pieces, each empty for a section-less catalog and spliced inline so a plain catalog's
+    // script is unchanged.
+    // `cp-js` on `<html>` hides the redundant per-section `<h2>`.
+    // `.cp-subgroup` dividers exist for authored and synthesized groups alike, so their collapse
+    // lives under [hasGroups].
     val groupDecls =
       if (hasGroups) "\n      var navGroups = document.querySelectorAll(\".cp-subgroup\");" else ""
-    // Declared HERE rather than in the tree script, which is spliced in further down: `reflectTabs`
-    // runs the moment it is defined and touches `treeGroups`, and a `var` assigned later would only
-    // be hoisted, not set.
-    // The Components/Pages switch. Declared inside the filter IIFE, like the section tabs, so the
-    // pane in view and the query filtering it are one piece of state — a strip that lived in its
-    // own script would have to re-enter `apply()` from outside and could disagree with it about
-    // which list is on screen.
+    // Declared here, not in the later-spliced tree script: `reflectTabs` runs immediately and
+    // touches `treeGroups`.
+    // The Components/Pages switch lives inside the filter IIFE so the pane in view and the query
+    // are one piece of state.
     val paneDecls =
       if (!hasPanes) ""
       else
@@ -5189,9 +4136,7 @@ ${captureControlsHtml().prependIndent("          ")}
           "\n      var sectionRows = document.querySelectorAll(\"#cp-pane-pages .cp-tree-variant\");" +
           "\n      var pagesEmpty = document.getElementById(\"cp-pages-empty\");" +
           "\n      var pane = urlParam(\"pane\") === \"pages\" ? \"pages\" : \"components\";" +
-          // The filter serves whichever pane is showing, so it says which — the box is the same
-          // control either way and the placeholder is the only thing that can tell you what it is
-          // about to search.
+          // The placeholder says which pane the box will search.
           "\n      function reflectPanes() {" +
           "\n        paneTabs.forEach(function (t) {" +
           "\n          var on = t.getAttribute(\"data-pane\") === pane;" +
@@ -5215,11 +4160,8 @@ ${captureControlsHtml().prependIndent("          ")}
           // The tree's own roving-tab-stop pass, published so `apply()` can call it from outside
           // the tree script's closure once the filter has changed which rows are on screen.
           "\n      var cpTreeStops = null;"
-    // All shows every section's panel at once, and two things follow from that. The tree beside it
-    // opens every branch, because it is now the outline of the whole grid rather than of one
-    // panel. And the per-section <h2>s come back: `cp-js` hides them because the selected row
-    // names the one section on screen, which stops being true the moment several are — the same
-    // reason a live search, which also spans sections, brings them back.
+    // Under All the tree opens every branch and the per-section `<h2>`s come back, as during a
+    // search.
     val allTabState =
       if (!hasAllTab) ""
       else
@@ -5250,10 +4192,8 @@ ${captureControlsHtml().prependIndent("          ")}
           "\n        if (t.getAttribute(\"data-tab\") === urlTab) current = urlTab;" +
           "\n      });" +
           "\n      var initialTab = current;" +
-          // Selection, expansion and the tree's single tab stop are one statement: the selected
-          // section is the open one and the one Tab lands on. The exception is a live search, which
-          // spans every section — so every branch that still holds a match opens, because the rows
-          // the matches sit under must not be the rows you cannot see.
+          // The selected section is the open one and holds the tree's tab stop; during a search
+          // every branch with a match opens.
           "\n      function reflectTabs() {" +
           "\n        var searching = !!(input && input.value.trim());" +
           allTabState +
@@ -5276,23 +4216,15 @@ ${captureControlsHtml().prependIndent("          ")}
           "\n          if (on && shown) stop = t;" +
           "\n        });" +
           "\n        treeGroups.forEach(function (g) { g.tabIndex = -1; });" +
-          // A filter can hide the selected section outright — search for something only another
-          // section matches and `current` is off screen. Its row would still hold the tree's only
-          // tab stop, so Tab would skip the whole navigation. Hand the stop to the first branch
-          // still showing instead.
+          // If a filter hides the selected section, hand the tree's tab stop to the first visible
+          // branch.
           "\n        if (!stop && firstShown) firstShown.tabIndex = 0;" +
           "\n      }" +
           "\n      reflectTabs();" +
           "\n      document.documentElement.classList.add(\"cp-js\");"
       else ""
-    // A card is shown when it matches the search AND (while not searching) sits in the current tab.
-    // A filter spans every section; tab selection is ignored until it clears. `uses:` is a filter,
-    // so the same has to be true of it — and it is not enough to test `q`, because a query that is
-    // ONLY `uses:Foo` leaves `q` empty. Reading that as "not searching" kept every other section
-    // hidden, so matches outside the selected tab vanished and the readout counted only the cards
-    // in it. `reflectTabs`'s own `searching` was already right about this — it reads the raw input,
-    // where the operator is still present — which is why the branches opened while the cards under
-    // them stayed hidden; this line is the half that disagreed.
+    // A card is shown when it matches the search and, when not searching, sits in the current tab.
+    // `uses:` counts as searching even when `q` is empty after stripping the operator.
     val searchingExpr = if (usesFilter) "(q !== \"\" || usesActive())" else "q !== \"\""
     val tabOkLine =
       if (hasTabs)
@@ -5303,11 +4235,8 @@ ${captureControlsHtml().prependIndent("          ")}
       else ""
     val hiddenExpr = if (hasTabs) "!(searchOk && tabOk)" else "!searchOk"
     val shownCond = if (hasTabs) "searchOk && tabOk" else "searchOk"
-    // After the per-card pass, collapse any sub-group / section left with no visible card — and
-    // re-size the sub-groups that survived. A cluster's width is its card count (`--cp-n`, see
-    // `.cp-subgroup` in serve.css), and a filter changes that count: a family showing one of its
-    // four cards would otherwise go on reserving four columns and painting three of them blank,
-    // which is the whole thing this layout exists to stop happening.
+    // Collapse sub-groups/sections left with no visible card, and re-size survivors: a cluster's
+    // width is its visible card count (`--cp-n`, see `.cp-subgroup` in serve.css).
     val groupPost =
       if (hasGroups)
         "\n        navGroups.forEach(function (g) {" +
@@ -5320,17 +4249,12 @@ ${captureControlsHtml().prependIndent("          ")}
       if (hasTabs)
         "\n        tabSections.forEach(function (s) { s.hidden = !s.querySelector(\".cp-card:not([hidden])\"); });"
       else ""
-    // The tree tracks what the grid just did: a group row disappears with the sub-group it points
-    // at, so a filter never leaves a destination that scrolls to nothing. Section rows are hidden
-    // ONLY while searching — outside a search every section but the current one is empty by
-    // construction (its cards are filtered out by tab), and hiding those rows would delete the
-    // navigation instead of filtering it. Re-reflecting last picks up the expansion a search opens.
+    // Tree rows follow the grid: group rows hide with their sub-group. Section rows hide only while
+    // searching, since outside a search non-current sections are empty by construction.
     val treePost =
       if (!hasTree) ""
       else
-      // Component rows first: each follows the card it points at, so a search never leaves a row
-      // that scrolls to something hidden. Then the group rows follow their sub-group, which by
-      // now has collapsed if the filter emptied it.
+      // Component rows follow their cards, then group rows their sub-group.
       "\n        treeComponents.forEach(function (c) {" +
           "\n          var card = document.getElementById(c.getAttribute(\"data-group\"));" +
           "\n          if (c.parentElement) c.parentElement.hidden = !!(card && card.hidden);" +
@@ -5350,16 +4274,12 @@ ${captureControlsHtml().prependIndent("          ")}
           // Last word on the roving tab stop: the rows that just appeared or vanished change which
           // one should hold it, and `reflectTabs` only ever knew about sections and groups.
           "\n        if (cpTreeStops) cpTreeStops();"
-    // The pages list is filtered by the SAME query as the grid and the tree — one box, one meaning,
-    // whichever pane is showing. Matched against `data-search` rather than the row's text, so what
-    // counts as the page's name is decided by the server that wrote it.
+    // The pages list uses the same query, matched against `data-search` rather than row text.
     val panePost =
       if (!hasPanes) ""
       else
         "\n        var pagesShown = 0;" +
-          // Sections first, so a page row can ask whether any of its own survived. A page KEEPS on
-          // its own name or on a section's — searching "circle" must find the Shape page even
-          // though the word is not in its title, which is most of why the sections are here.
+          // Sections first, so a page is kept when its name or any of its sections matches.
           "\n        sectionRows.forEach(function (sec) {" +
           "\n          var hay = (sec.getAttribute(\"data-search\") || \"\").toLowerCase();" +
           "\n          var keep = paneQ === \"\" || hay.indexOf(paneQ) !== -1;" +
@@ -5373,9 +4293,8 @@ ${captureControlsHtml().prependIndent("          ")}
           "\n            ? Array.prototype.some.call(list.children, function (li) { return !li.hidden; })" +
           "\n            : false;" +
           "\n          var keep = own || kept;" +
-          // A page kept only because a section matched shows just those sections, and opens so they
-          // are on screen — a match you have to expand a twisty to see is a match the filter did
-          // not really surface. A page matching on its own name keeps its whole list.
+          // A page kept only by its sections shows just those and opens; one matching by name keeps
+          // its whole list.
           "\n          if (own && list) {" +
           "\n            Array.prototype.forEach.call(list.children, function (li) { li.hidden = false; });" +
           "\n          }" +
@@ -5385,17 +4304,9 @@ ${captureControlsHtml().prependIndent("          ")}
           "\n          if (keep) pagesShown++;" +
           "\n        });" +
           "\n        if (pagesEmpty) pagesEmpty.hidden = pagesShown !== 0;"
-    // ONE box, but it filters the list it is pointed at. On the Pages pane the query is a page
-    // query: applying it to the grid as well would answer "shape" with "No previews match your
-    // filter" under a sidebar that just found the Shape page, which is the box contradicting
-    // itself. The grid belongs to the Components pane, so it is filtered when that pane is the one
-    // showing and left whole otherwise.
-    // The Pages pane lists design sheets, which have no composables to call — so `uses:` is a
-    // question they cannot answer, and the pane filters on the RAW query rather than on the
-    // operator-stripped remainder. Without that, a query of only `uses:Foo` reached the pane as an
-    // empty string and showed every page while the readout above described the hidden component
-    // grid. Filtering on the raw text instead lands the pane on its own empty state, which is the
-    // truthful answer to "which of these sheets calls a Button".
+    // The query filters only the pane showing: on Pages the grid is left whole.
+    // The Pages pane filters on the raw query, since `uses:` cannot match a design sheet and should
+    // yield an empty state.
     val paneQExpr = if (usesFilter) "usesRawQuery" else "q"
     val paneSplit =
       if (!hasPanes) ""
@@ -5405,13 +4316,8 @@ ${captureControlsHtml().prependIndent("          ")}
     val paneWiring =
       if (!hasPanes) ""
       else
-      // The twisty on a page row, and the keys that do the same job.
-      //
-      // The row is a real LINK to the whole sheet as well as a fold, which is the whole difficulty:
-      // the pointer distinguishes the two by where it lands (the arrow, or the label), and the
-      // keyboard has no such position. So the two are split by input rather than shared: a pointer
-      // click inside the arrow's 14px folds, and Right/Left fold from the keyboard — the same two
-      // keys the component tree binds one pane over. Enter is left alone and follows the link.
+      // The page row twisty and its keys. The row is both a link and a fold: a pointer click inside
+      // the arrow's 14px folds, Right/Left fold from the keyboard, and Enter follows the link.
       "\n      pageRows.forEach(function (p) {" +
           "\n        if (!p.hasAttribute(\"aria-expanded\")) return;" +
           "\n        function fold(open) {" +
@@ -5425,9 +4331,8 @@ ${captureControlsHtml().prependIndent("          ")}
           "\n          fold(open);" +
           "\n        });" +
           "\n        p.addEventListener(\"click\", function (e) {" +
-          // A keyboard Enter synthesizes a click with `detail === 0` and no meaningful pointer
-          // position, so `offsetX` reads 0 — inside the arrow — and the row would fold instead of
-          // following its link. Hence pointer-only here, and the keydown above for the keyboard.
+          // Keyboard Enter synthesizes a click with `offsetX` 0 (inside the arrow), so this is
+          // pointer-only (`detail` > 0).
           "\n          if (!e.detail) return;" +
           "\n          if (e.offsetX > 14) return;" +
           "\n          e.preventDefault();" +
@@ -5441,9 +4346,7 @@ ${captureControlsHtml().prependIndent("          ")}
           // Replaces rather than pushes, for the same reason typing does: switching a sidebar pane
           // is not a place you expect Back to undo one step at a time.
           "\n          replaceUrl({ pane: pane === \"pages\" ? \"pages\" : \"\" });" +
-          // Re-filter: the query in the box now means something else. Switching to Pages with a
-          // live query has to release the grid it was filtering and narrow the pages instead, and
-          // switching back has to put both right again.
+          // Re-filter: switching panes changes what the query means.
           "\n          apply();" +
           "\n        });" +
           "\n      });" +
@@ -5461,22 +4364,18 @@ ${captureControlsHtml().prependIndent("          ")}
           "\n        });" +
           "\n      });"
       else ""
-    // The tree's own behaviour: its group rows, its keyboard, and the scroll-spy that keeps the
-    // row you are looking at marked. Spliced in at the same indent as the rest, and empty for a
-    // flat catalog — which has no tree. Emitted AFTER [popWiring] on purpose: `onPop` is a plain
-    // `popstate` listener, so the tree's fragment-precedence handler has to register second to get
-    // the last word over the shared `?tab=` restore.
+    // The tree's behaviour (group rows, keyboard, scroll-spy); empty for a flat catalog. Emitted
+    // after [popWiring] so its fragment-precedence `popstate` handler runs last over the shared
+    // `?tab=` restore.
     val treeWiring =
       if (!hasTree) ""
       else
         catalogTreeScript(tabStorageKey, hasTabs, hasAllTab).lines().joinToString("") {
           if (it.isEmpty()) "\n" else "\n      $it"
         }
-    // Back / Forward: re-read the whole selection off the URL and re-apply it in place — no
-    // reload, so nothing is re-fetched that the page already has. A history entry that carries no
-    // param for a control falls back to what THIS page load resolved to, never to the
-    // remembered value a later click wrote: otherwise Back out of a theme would land right back
-    // on the theme the visitor was leaving.
+    // Back / Forward: re-apply the selection from the URL in place. A missing param falls back to
+    // this page load's value, not the remembered one, or Back out of a theme would land on it
+    // again.
     val themePop =
       if (hasThemes)
         "\n          var poppedTheme = urlParam(\"theme\") || initialTheme;" +
@@ -5490,12 +4389,8 @@ ${captureControlsHtml().prependIndent("          ")}
           "\n          });" +
           "\n          reflectTabs();"
       else ""
-    // ---- The Dev-mode `uses:` operator
-    //
-    // Four small splices rather than a second script: the operator narrows the SAME card list the
-    // text filter narrows, so it has to share `apply()` and the state around it. A parallel script
-    // would need its own pass over the cards and could disagree with this one about which are
-    // showing — the exact failure the pane strip's comment above describes.
+    // The Dev-mode `uses:` operator, spliced in rather than a second script so it shares `apply()`
+    // and its state.
     val usesDecls = if (usesFilter) usesFilterScript(usesUrl) else ""
     val queryExpr =
       if (usesFilter) "var q = usesSplit(input ? input.value.trim() : \"\");"
@@ -5563,29 +4458,12 @@ ${captureControlsHtml().prependIndent("          ")}
   /**
    * The `uses:` operator's state and helpers, spliced into [catalogFilterScript]'s IIFE.
    *
-   * ### What it is
+   * `uses:Button` narrows the grid to previews whose declaration calls something matching `Button`,
+   * resolved server-side ([ServeHttpServer.handleUsesSearch]); it composes with the text filter. An
+   * operator rather than a control because it costs nothing until typed and rides `?q=`.
    *
-   * `uses:Button` in the landing filter box narrows the grid to previews whose declaration
-   * **calls** something matching `Button` — resolved by the server
-   * ([ServeHttpServer.handleUsesSearch]), which parses the catalog's own source. It composes with
-   * the ordinary text filter, which keeps its meaning: `uses:Button tonal` is "calls a Button, and
-   * is called something with `tonal` in it".
-   *
-   * ### Why an operator and not a control
-   *
-   * The alternative was a second input, or a chip beside the search box. Both would put a question
-   * about *this repository's source* into the furniture of a page whose other controls are about
-   * the design system — and it would sit there, empty, on every catalog and for every visitor. An
-   * operator costs nothing until it is typed, rides the existing `?q=` (so a `uses:` search is as
-   * bookmarkable and shareable as any other filter), and reads as what it is. It is not hidden: the
-   * count line names the filter back to you the moment it is active.
-   *
-   * ### Unresolved is not empty
-   *
-   * A token whose answer has not arrived yet shows no cards and says so ("looking for calls to …"),
-   * and a catalog that cannot be indexed at all says *that* ("call index unavailable") rather than
-   * reporting an honest-looking zero. The distinction is the whole reason the endpoint answers with
-   * an `available` flag instead of just a list.
+   * Unresolved is not empty: a pending token says "looking for calls to …" and an unindexable
+   * catalog says so, which is why the endpoint returns an `available` flag.
    */
   private fun usesFilterScript(usesUrl: String): String {
     val script =
@@ -5671,22 +4549,13 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The navigation tree's behaviour, spliced into [catalogFilterScript]'s IIFE so it closes over
-   * the selection it shares with the grid (`current`, `reflectTabs`, `apply`, `pushUrl`) instead of
-   * keeping a second copy that could disagree with which panel is showing.
-   *
-   * Three things the flat tab bar had no need of:
-   * * **group rows** — a jump within the catalog: select the section, then scroll its sub-group
-   *   divider into view. The bare `#cp-group-…` href stays as the no-JS fallback, because following
-   *   it with JS present would land on a divider inside a panel the section switching still has
-   *   hidden.
-   * * **keyboard** — the tree pattern's roving focus (Down/Up walk the *visible* rows, Right opens
-   *   a collapsed section, Left climbs from a group back to its section, Home/End jump the ends).
-   *   The tab bar never implemented its own pattern's arrow keys; a tree that publishes two levels
-   *   is where not having them starts to cost something.
-   * * **scroll-spy** — the row for the sub-group on screen is marked `aria-current`, so the tree
-   *   says where you *are* and not merely where you last clicked. Additive: with no
-   *   `IntersectionObserver` the marking simply follows clicks.
+   * The navigation tree's behaviour, spliced into [catalogFilterScript]'s IIFE to share `current`,
+   * `reflectTabs`, `apply` and `pushUrl`.
+   * * **group rows**: select the section, then scroll its divider into view; the bare `#cp-group-…`
+   * href is the no-JS fallback.
+   * * **keyboard**: roving focus (Down/Up visible rows, Right opens, Left climbs, Home/End).
+   * * **scroll-spy**: the row for the on-screen sub-group gets `aria-current`; without
+   * `IntersectionObserver` marking follows clicks.
    */
   private fun catalogTreeScript(
     tabStorageKey: String,
@@ -5694,21 +4563,13 @@ ${captureControlsHtml().prependIndent("          ")}
     /** Whether the tree leads with the **All** row ([ALL_TAB]) — see [catalogFilterScript]. */
     hasAllTab: Boolean = false,
   ): String {
-    // Section switching only exists for a catalog that HAS sections. An outline tree (a
-    // section-less catalog) hides nothing and remembers nothing — every row is purely a jump — so
-    // the pieces that talk to `current` / `selectTab` are spliced out rather than guarded at
-    // runtime, and its script never mentions a tab.
+    // An outline tree (no sections) has no section switching, so those pieces are spliced out
+    // rather than runtime-guarded.
     val selectOwningTab = if (hasTabs) "\n        selectOwningTab(row);" else ""
     val tabRows = if (hasTabs) ".cp-tab, " else ""
-    // The rows a `#cp-panel-<slug>` fragment could name, and the three operations that only mean
-    // something when sections exist. An outline tree gets inert stand-ins rather than `if
-    // (hasTabs)`
-    // scattered through the body.
-    // A `#cp-group-…` fragment scrolls; it does not decide which slice of the catalog you are
-    // looking at. Under All it would otherwise undo the very thing that made the link — the click
-    // that wrote the fragment deliberately stayed in All, and a reload of the URL it wrote has to
-    // land on the same page. Off All it still selects the fragment's own section, which is the only
-    // way its target is on screen at all.
+    // Fragment rows and section-only operations; an outline tree gets inert stand-ins.
+    // A `#cp-group-…` fragment scrolls but does not change the slice: under All it stays in All, so
+    // a reload lands on the same page; elsewhere it selects the fragment's section.
     val keepAll = if (hasAllTab) "\n          if (current === \"$ALL_TAB\") return;" else ""
     // Same rule on Back/Forward, but the marking still happens: the entry is a scroll position
     // within All, so the row it names is the one to mark.
@@ -6062,39 +4923,25 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * A heartbeat telling the server that a visitor is still on this catalog's pages.
+   * A heartbeat telling the server a visitor is still on this catalog's pages.
    *
-   * The server reaps an idle session — and the daemon behind it — after ten minutes, and measures
-   * idleness in *requests*. Someone reading one catalog page makes none: the grid's thumbnails and
-   * the front door's heroes are content-addressed and repaint from cache, which is the whole point
-   * of prebaking them. So a tab that has been open a quarter of an hour is indistinguishable from
-   * an abandoned one, and the visitor's next theme click pays a cold start. A ping every
-   * [PRESENCE_INTERVAL_SECONDS] says otherwise; see `handlePresence` for what the server does with
-   * it.
-   *
-   * Deliberately quiet about failure and about tabs nobody is looking at:
-   * - **Only while visible.** A backgrounded tab is not a visitor, and keeping a daemon resident
-   *   for one is exactly the waste the reaper exists to prevent. It resumes on `visibilitychange`,
-   *   and pings immediately on becoming visible so a tab returned to after an hour doesn't wait out
-   *   another interval before saying so.
-   * - **Fires on arrival.** The page load itself is a request, but a *baked* one — it warms no
-   *   daemon. Catalogs are not warmed at boot, so this first ping is what readies the one the
-   *   visitor actually opened.
-   * - **Errors ignored.** A heartbeat is not something a page can act on — offline, a catalog since
-   *   removed, a server restarted. The next one tries again.
+   * The server reaps idle sessions (and their daemon) after ten minutes measured in requests, but a
+   * reader of cached pages makes none. A ping every [PRESENCE_INTERVAL_SECONDS] keeps the session
+   * warm; see `handlePresence`.
+   * - **Only while visible**, pinging immediately on `visibilitychange` to visible.
+   * - **Fires on arrival**, since catalogs aren't warmed at boot.
+   * - **Errors ignored**; the next ping retries.
    */
   /**
-   * [presenceScript] as a standalone `<script>` tag, for a page that has no script of its own to
-   * splice it into (the viewer). Empty — not an empty tag — when there is no presence URL, so a
-   * page without the heartbeat is byte-for-byte what it always was.
+   * [presenceScript] as a standalone `<script>` tag for pages with no script to splice into (the
+   * viewer). Empty when there is no presence URL.
    */
   private fun presenceScriptTag(presenceUrl: String): String {
     val script = presenceScript(presenceUrl)
     if (script.isEmpty()) return ""
-    // Emitted with the surrounding body's own indentation, including the leading newline: the tag
-    // is interpolated *adjacent* to the previous one rather than on a line of its own, so the empty
-    // case leaves no stray blank line, and every injected line stays at or past the template's
-    // common indent (which `trimIndent` measures across the interpolated result, not the source).
+    // Emitted with the body's indentation and its own leading newline, interpolated adjacent to the
+    // previous tag, so the empty case leaves no blank line and `trimIndent` sees a consistent
+    // indent.
     val indented = script.lines().joinToString("") { if (it.isEmpty()) "\n" else "\n        $it" }
     return "\n      <script>(function () {$indented\n      })();</script>"
   }
@@ -6189,18 +5036,12 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * Viewer half of the catalog-scoped sticky Theme control. The landing page and viewer use the
-   * same values: `light`, `dark`, or `theme:<provider FQN>`.
+   * Viewer half of the catalog-scoped sticky Theme control; values match the landing (`light`,
+   * `dark`, `theme:<provider FQN>`).
    *
-   * The memory is `sessionStorage` (see `chrome/themeMemory.ts`), so it is the TAB's choice and
-   * nothing wider: it follows every navigation, reload and Back/Forward inside the tab that made
-   * the pick, and is gone when the tab closes. That is what lets a remembered choice apply
-   * UNIFORMLY, to a `…__s-square` preview and its `…__default__light` sibling alike. It could not
-   * before: a per-origin memory had to be suppressed on ids naming a baked theme, or a shared
-   * `__light` link would open in whatever theme the reader last picked days ago — and the
-   * suppression is exactly what made walking between two variants of one component change theme
-   * halfway. A tab that arrived by a pasted link or a bookmark remembers nothing, so a shared deep
-   * link is reproducible on its own terms rather than by a guard on the id.
+   * The memory is `sessionStorage` (`chrome/themeMemory.ts`), so it is per tab and applies
+   * uniformly to every variant; a tab opened from a shared link remembers nothing and so reproduces
+   * the link.
    */
   private fun viewerThemeStickyScript(themeStorageKey: String): String =
     """
@@ -6289,10 +5130,9 @@ ${captureControlsHtml().prependIndent("          ")}
       .trimIndent()
 
   /**
-   * One design system's summary on the public [homeIndexPage]: its [system] id, human [title], an
-   * optional one-line [subtitle] (the library coordinate), how many [previewCount] previews it
-   * carries, its producer-[trust] verdict, and a [heroPreviewId] to render as the card's meaningful
-   * preview (null ⇒ the system has no renderable preview, shown as a placeholder).
+   * One design system's summary on [homeIndexPage]: [system] id, [title], optional [subtitle]
+   * (library coordinate), [previewCount], [trust] verdict, and [heroPreviewId] for the card (null ⇒
+   * placeholder).
    */
   data class HomeSystem(
     val system: String,
@@ -6303,125 +5143,85 @@ ${captureControlsHtml().prependIndent("          ")}
     /** Repository that supplied this catalog; used for publisher attribution on the homepage. */
     val sourceRepo: String? = null,
     /**
-     * The upstream project this catalog's previews were rendered FROM, when the catalog is served
-     * from somewhere else — see [ServeCatalogsConfig.Entry.importedFrom]. Drives two things on the
-     * card: which owner's section it falls into (the upstream's, so an import sits beside that
-     * owner's other catalogs rather than under the staging repo's owner), and an "imported" badge
-     * naming the project, because a reader otherwise has no way to tell whose work they are looking
-     * at.
+     * The upstream project this catalog was rendered from when served elsewhere
+     * ([ServeCatalogsConfig.Entry.importedFrom]). Decides the owner section and the "imported"
+     * badge.
      */
     val importedFrom: String? = null,
     /**
-     * The upstream project the catalog's own `catalog.json` names as the source of its Kotlin
-     * ([ServeBundleHost.catalogSource]), which for an import is the project itself rather than the
-     * staging repository its delivery branch lives in.
+     * The upstream project named by the catalog's own `catalog.json`
+     * ([ServeBundleHost.catalogSource]); backs up [importedFrom] for the owner section when the
+     * configuration lacks it, since [sourceRepo] is only the delivery branch.
      *
-     * It backs [importedFrom] up for the owner section, and exists because the two facts have
-     * different failure modes: [importedFrom] is operator (or registry) configuration and is
-     * therefore *absent* whenever a registration path drops it — an admin publish that never
-     * carried the field, an entry written into `catalogs.json` before the field existed — while
-     * this travels inside the catalog. When the configuration went missing, three `joreilly`
-     * imports sat under `yschimke repositories` purely because [sourceRepo] records the delivery
-     * branch, which is a delivery detail (compose-ai-tools#5012).
-     *
-     * It never outranks [importedFrom]: the operator's statement about somebody else's catalog wins
-     * over that catalog's statement about itself. Both come from the same delivery repository's
-     * trust boundary — whoever may push the branch may write both this and the registry document —
-     * so preferring it to [sourceRepo] grants no attribution authority that wasn't already there.
+     * Never outranks [importedFrom]. Both come from the same delivery repository's trust boundary,
+     * so preferring it over [sourceRepo] grants no new attribution authority.
      */
     val catalogSourceRepo: String? = null,
     val heroPreviewId: String?,
     /** Content-crop for the hero thumbnail (frames a Wear sticker to its component); null ⇒ raw. */
     val heroCrop: ContentCrop? = null,
     /**
-     * The **prebaked** thumbnail for this card, when the server has one ([ServeHeroImages]). This
-     * is the fast path and the normal one: a small, already-cropped PNG on an immutable URL, so the
-     * front door's imagery costs the server nothing to serve and nothing at all on a repeat visit.
-     * Null falls back to [heroPreviewId] + [heroCrop] — the full-resolution `/render` lane with a
-     * CSS clip window — which is what a card gets when the render can't be decoded (and what the
-     * page-level unit tests exercise).
+     * The prebaked thumbnail for this card ([ServeHeroImages]): a small cropped PNG on an immutable
+     * URL — the normal path. Null falls back to [heroPreviewId] + [heroCrop] (the `/render` lane
+     * with a CSS clip window).
      */
     val heroImage: HeroImage? = null,
     /**
-     * Whether this system's hero sits on a **dark** stage — a dark-first (Wear) system, per
-     * [SystemDisplay.isDarkFirst]. The card carries `data-bg-theme="dark"` so its `.cp-imgwrap`
-     * backs the thumbnail on dark rather than the default white (a light-on-transparent Wear
-     * sticker on white reads wrong). Default false ⇒ the light stage, unchanged.
+     * Whether this system's hero sits on a dark stage ([SystemDisplay.isDarkFirst]); the card then
+     * carries `data-bg-theme="dark"`.
      */
     val darkStage: Boolean = false,
     /**
-     * The front-page section this catalog was **published under** by the operator's config
-     * ([ServeCatalogsConfig.Group]), or null when it declared none. A claim, not a fact: it only
-     * takes effect when [sourceRepo] is one of [HomeGroup.repos] — see [homeSections].
+     * The front-page section the operator's config publishes this catalog under
+     * ([ServeCatalogsConfig.Group]), or null. Only honoured when [sourceRepo] is one of
+     * [HomeGroup.repos] — see [homeSections].
      */
     val group: HomeGroup? = null,
     /** Aggregate visits to this catalog/app landing page. */
     val views: Long = 0,
     /**
-     * This catalog publishes design references, so its `compare?format=reference` route has
-     * something behind it and the card can offer the comparison. The **gate**, kept separate from
-     * the vendor label below for the same reason the catalog landing keeps them separate: a
-     * reference's `source.provider` may be `png`, `file`, `svg` or a token we do not map, which
-     * names no design tool but is still a perfectly good thing to compare against. Conflating the
-     * two dropped the action from every such catalog even though the route worked (#4349).
+     * Whether this catalog publishes design references, so the card can offer
+     * `compare?format=reference`. Kept separate from [designToolLabel]: a reference provider may
+     * name no design tool and still be comparable.
      *
-     * False — the default — renders no compare action, which is every catalog that publishes no
-     * design references, and every catalog on a server that has not had that catalog resident since
-     * it started (the front door reads a suspended catalog's snapshot rather than resuming it).
+     * False by default, including catalogs not resident since startup (the front door reads a
+     * suspended catalog's snapshot).
      */
     val hasReferenceComparison: Boolean = false,
     /**
-     * The design tool this catalog is specified by ("Figma", …), read off its references' provider
-     * exactly as the catalog landing reads it ([designToolLabel]). Purely the **label**: null keeps
-     * the neutral "compare to design references" wording rather than suppressing the action, and it
-     * is only ever consulted when [hasReferenceComparison] already said there is one.
+     * The design tool label ("Figma", …) from the references' provider ([designToolLabel]). Label
+     * only: null keeps the neutral wording. Consulted only when [hasReferenceComparison] is true.
      */
     val designToolLabel: String? = null,
     /**
      * The sibling catalog this one is a parallel rendition of, when the `compareWith` + `parallel`
-     * pairing resolves **and the sibling is resident with a counterpart to draw** — the same
-     * condition the compare wall builds its `format=parallel` rows from, so the card cannot
-     * deep-link a format that page would find empty.
-     *
-     * Both the switch and the name, unlike [designToolLabel]'s split from [hasReferenceComparison]:
-     * a pairing this server cannot resolve is not a pairing to keep an action for. Null — the
-     * default, and every catalog that declares no `compareWith` — renders no chip.
+     * pairing resolves and the sibling is resident with a counterpart — the same condition as the
+     * compare wall's `format=parallel` rows. Null renders no chip.
      */
     val parallelComparison: ParallelComparison? = null,
     /**
-     * Configured but not loaded yet: the first pass after a restart reads catalogs one at a time,
-     * and a box with dozens of them spends minutes there. The card holds the catalog's place on the
-     * front page instead of the catalog vanishing until its turn comes. It carries no link, because
-     * `/<system>/` does not exist until the load lands.
+     * Configured but not loaded yet (startup loads catalogs one at a time). The card holds the
+     * catalog's place without a link, since `/<system>/` does not exist yet.
      */
     val loading: Boolean = false,
   )
 
   /**
-   * The paired catalog a card can offer a comparison against, in both the lengths a card needs.
-   *
-   * Two fields because a catalog has two names and the card needs each in a different place: the
-   * SYSTEM id is short, bounded and already the handle a card prints under its own title, so it is
-   * what the chip reads; the TITLE is what a person calls it, so it is what the link is announced
-   * and tooltipped as. Carrying only one would mean either a chip four times the width of its
-   * neighbour or a link announced as a slug.
+   * The paired catalog a card can compare against: [system] is the short id the chip shows; [title]
+   * is the accessible name and tooltip.
    */
   data class ParallelComparison(val system: String, val title: String)
 
   /**
-   * One component offered by the home page's cross-catalog command palette. The server keeps this
-   * compact projection beside the other suspended-catalog metadata, so global discovery neither
-   * embeds every preview in the front door nor wakes an idle catalog daemon.
+   * One component offered by the home page's cross-catalog command palette. A compact projection
+   * kept with suspended-catalog metadata so discovery wakes no daemon.
    */
   data class ComponentSearchEntry(val previewId: String, val label: String, val keywords: String)
 
   /**
-   * Project a catalog's previews to the same component cards its landing page exposes. Theme,
-   * state, props AND breakpoint renders collapse to their component's default card, so the palette
-   * offers a component once rather than once per declared screen size — the same fold the grid and
-   * the viewer's component drawer apply (#4279). A render whose size the export never tagged can't
-   * be folded (there'd be no switcher to reach it from); those stay separate and keep the
-   * disambiguating size suffix below.
+   * Project a catalog's previews to its landing page's component cards. Theme, state, props and
+   * breakpoint renders collapse to the default card, as in the grid and drawer. Renders with an
+   * untagged size can't be folded and keep the size suffix below.
    */
   fun componentSearchEntries(
     previews: List<ServePreview>,
@@ -6446,13 +5246,8 @@ ${captureControlsHtml().prependIndent("          ")}
     return cards.map { card ->
       val preview = card.rendered(darkFirst)
       val baseLabel = previewDisplayName(preview)
-      // The catalog's OWN size name first (`192dp`, `smallRound`, `wide`), then the flattened-id
-      // token vocabulary. [previewSizeVariantLabel] only knows a fixed set of tokens, so a catalog
-      // naming its breakpoints anything else — which is every Wear catalog, whose sizes are `192dp`
-      // … `240dp` — hit the `?: baseLabel` fallback and published two palette rows spelled
-      // identically. The declared `size` is exactly what tells them apart, and it is the same
-      // string
-      // the grid's own size rows are labelled with.
+      // The catalog's own size name first (`192dp`, `smallRound`, `wide`), then the id token
+      // vocabulary, which knows only a fixed set and would otherwise label two rows identically.
       val label =
         if (baseLabel !in duplicateLabels) baseLabel
         else
@@ -6470,8 +5265,7 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * A front-page section a catalog may be published under: the [heading] shown, its count [noun],
-   * the [repos] whose bytes are allowed to appear under it, and its section-order [priority]
+   * A front-page section: [heading], count [noun], the [repos] allowed under it, and [priority]
    * ([ServeCatalogsConfig.Group.priority], highest first).
    */
   data class HomeGroup(
@@ -6482,19 +5276,15 @@ ${captureControlsHtml().prependIndent("          ")}
   )
 
   /**
-   * A prebaked hero thumbnail on the front door: its immutable `/hero/<system>/<hash>.png` [path]
-   * and the CSS-pixel size it lays out at. The crop is already in the pixels, so the card needs no
-   * clip window; [width]/[height] are published as `<img>` attributes so the grid reserves the
-   * right box before a single byte of image arrives (no reflow, no layout shift).
+   * A prebaked hero thumbnail: its immutable `/hero/<system>/<hash>.png` [path] and CSS-pixel size.
+   * The crop is in the pixels; [width]/[height] become `<img>` attributes to avoid layout shift.
    */
   data class HeroImage(val path: String, val width: Int, val height: Int)
 
   /**
-   * A thumbnail `<img>` for [src], optionally framed to its component content box ([crop]). With no
-   * crop it's the plain image the card CSS scales to fit; with a crop it's wrapped in a fixed-size
-   * `.cp-crop` clip window whose inline dimensions + negative offsets show only the component (a
-   * Wear sticker's watch canvas is clipped away). [extraImgAttrs] carries per-call `<img>`
-   * attributes (e.g. `loading="lazy"`). All numeric; [alt] is pre-escaped by the caller.
+   * A thumbnail `<img>` for [src], optionally framed to its content box ([crop]) in a `.cp-crop`
+   * clip window. [extraImgAttrs] carries extra `<img>` attributes (e.g. `loading="lazy"`). All
+   * numeric; [alt] is pre-escaped by the caller.
    */
   private fun thumbImg(
     src: String,
@@ -6504,13 +5294,9 @@ ${captureControlsHtml().prependIndent("          ")}
   ): String {
     val img = "<img$extraImgAttrs alt=\"$alt\" src=\"$src\">"
     if (crop == null) return img
-    // Geometry in PERCENTAGES of the box, not fixed px: the box sizes itself by aspect-ratio and
-    // may
-    // shrink under `max-width: 100%` on a narrow grid card, and the absolutely-positioned render
-    // scales with it (a fixed-px window overflowed the card and clipped wide components). `height`
-    // stays auto (the img keeps the render's aspect); `left` %s resolve against the box width,
-    // `top`
-    // against its aspect-ratio height.
+    // Geometry in percentages of the box, so the window scales when the aspect-ratio box shrinks on
+    // a narrow card. `height` stays auto; `left` resolves against box width, `top` against its
+    // height.
     val w = cropPct(crop.render.w, crop.window.w)
     val l = cropPct(crop.offset.left, crop.window.w)
     val t = cropPct(crop.offset.top, crop.window.h)
@@ -6519,25 +5305,14 @@ ${captureControlsHtml().prependIndent("          ")}
     // A gutter window does not hide its overflow: the pixels outside the box are the component's
     // own shadow, and the window exists to line the box up with its neighbours, not to crop it.
     val cls = if (crop.clip) "cp-crop" else "cp-crop cp-crop--bleed"
-    // The window's WIDTH is published as its relationship to the display cap, not as a frozen px
-    // count: `--cp-crop-w-per-cap` is the box width per 1px of cap and `--cp-crop-max-w` the 1x
-    // ceiling, so the stylesheet resolves `min(max-w, w-per-cap * --cp-thumb-cap)` and a narrow
-    // viewport can lower the cap exactly as it lowers a plain `<img>`'s `max-height` (#4544 — a
-    // cropped card drew 20% larger than its plain neighbour on a phone, because the 240px cap was
-    // baked in here). Only the width is set, so `aspect-ratio` still derives the height and the box
-    // scales rather than squashing. A hand-assembled crop carries no native size; it keeps the
-    // fixed-px window.
+    // The window width is published relative to the display cap (`--cp-crop-w-per-cap`, with
+    // `--cp-crop-max-w` as the 1x ceiling), so the stylesheet can resolve `min(max-w, w-per-cap *
+    // --cp-thumb-cap)` and a narrow viewport lowers it like a plain `<img>`'s `max-height`. Only
+    // width is set; `aspect-ratio` derives height. Hand-assembled crops keep a fixed-px window.
     //
-    // `--cp-crop-w-per-h` is the same relationship against the box's own HEIGHT, and it is a
-    // separate number because `natCapAxis` is not always the height: `computeGutterCrop` caps on
-    // height, `computeThumbCrop` on the largest edge. `clip` does not tell them apart either —
-    // `ServeBundleHost` clears it on a vector crop over a guttered render, so `--bleed` marks the
-    // overflow behaviour and says nothing about the axis. A well that is a fixed HEIGHT rather
-    // than a member of the grid — the front door's 220px hero row — has to size against the
-    // height whichever function drew the box, and this is what lets it.
-    //
-    // Derived rather than plumbed: the window's aspect ratio is `boxW/boxH` at every scale, so the
-    // native height is `natBoxW * boxH / boxW`. That keeps `ContentCrop`'s published shape alone.
+    // `--cp-crop-w-per-h` is the same against the box height, for fixed-height wells (the front
+    // door's hero row); it is separate because the capping axis differs between `computeGutterCrop`
+    // and `computeThumbCrop`. Derived as `natBoxW * boxH / boxW`, leaving `ContentCrop` unchanged.
     val natBoxH =
       if (crop.window.w > 0) (crop.nativeWindowW.toLong() * crop.window.h / crop.window.w).toInt()
       else 0
@@ -6554,10 +5329,8 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * A crop dimension as a percentage of its box axis (e.g. `imgW/boxW`), formatted for a CSS
-   * length: up to 4 decimals, locale-independent, trailing zeros trimmed (`0`, `119.5833`,
-   * `-422.9167`). Kept exact enough that the framed component lands on the same pixels the old
-   * fixed-px window did.
+   * A crop dimension as a percentage of its box axis for CSS: up to 4 decimals, locale-independent,
+   * trailing zeros trimmed.
    */
   private fun cropPct(numerator: Int, denominator: Int): String {
     val v = numerator * 100.0 / denominator
@@ -6566,8 +5339,7 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * A unitless CSS ratio (`numerator/denominator`), formatted like [cropPct] — up to 4 decimals,
-   * locale-independent, trailing zeros trimmed. Used for the crop window's width-per-cap-pixel.
+   * A unitless CSS ratio, formatted like [cropPct]; used for the crop window's width-per-cap-pixel.
    */
   private fun cropRatio(numerator: Int, denominator: Int): String {
     val v = numerator.toDouble() / denominator
@@ -6576,21 +5348,12 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The front door's **UI Builder** action, in the header bar rather than on every card.
+   * The front door's **UI Builder** action in the header bar, linking to the builder's New design
+   * chooser.
    *
-   * It used to be a chip on each catalog card the builder runs for, which repeated one destination
-   * down the grid: the link goes to `/ui-builder/`, the builder's **New design** chooser, where the
-   * catalog is picked anyway. One entry point in the bar says the same thing once and stays put
-   * while the grid scrolls.
-   *
-   * Offered only where the host runs the builder for at least one listed catalog and somebody is
-   * signed in — creating a design is a write, and an anonymous visitor's only honest next step is
-   * the sign-in control beside it. Component-browser mode never calls this.
-   *
-   * **A refusal is explained rather than hidden.** A visitor whose sign-in does not carry the
-   * builder's write capability gets the same label, visibly locked, as a `<details>` whose body
-   * names what is missing ([UiBuilderInvite.deniedReason]) — reachable without script and by
-   * keyboard. Showing nothing is indistinguishable from the builder not existing.
+   * Offered only when the builder runs for a listed catalog and somebody is signed in. A visitor
+   * lacking the write capability sees a locked `<details>` explaining why
+   * ([UiBuilderInvite.deniedReason]). Component-browser mode never calls this.
    */
   private fun builderHeaderAction(
     invite: UiBuilderInvite?,
@@ -6617,43 +5380,32 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The public preview server's **front door**: an index of the systems it publishes, each a card
-   * carrying a meaningful preview, the system's title + library, its trust badge, and a link to its
-   * `/<system>/` catalog. This replaces showing an arbitrary default module's previews at `/` (the
-   * point of `preview.coo.ee` is the catalogs, so the landing lists them rather than hiding them
-   * behind a nav pill). Non-catalog `serve` (no `--catalogs`) keeps the plain [landingPage].
+   * The public server's **front door**: an index of published systems, each card with a preview,
+   * title + library, trust badge and a link to `/<system>/`. Non-catalog `serve` keeps
+   * [landingPage].
    *
-   * Every card's imagery is **prebaked** ([HeroImage] / [ServeHeroImages]): a small,
-   * already-cropped PNG on an immutable, content-hashed URL, loaded eagerly. Rendering the front
-   * door therefore costs the server the HTML and nothing else — no render lane, no daemon, and on a
-   * repeat visit no image requests at all.
+   * Card imagery is prebaked ([HeroImage] / [ServeHeroImages]) on immutable URLs, so the page costs
+   * only its HTML.
    *
-   * [systems] are the published catalogs (the `--catalogs` set), grouped into the Compose design
-   * systems, Android's Compose samples, catalogs published by the `yschimke` GitHub organization,
-   * and a final "Other" section for every remaining publisher (for example, Confetti from
-   * `joreilly`). The sample catalogs are currently fetched from preview branches in the
-   * `yschimke/compose-samples` fork, but they represent `android/compose-samples`; grouping by the
-   * branch-trust origin would incorrectly present the fork as their publisher.
-   * `--catalogs-unlisted` app catalogs are deliberately NOT indexed here — they're served at
-   * `/<system>/` (shareable by direct link) but stay off the front door entirely, so an operator
-   * can publish an app catalog without advertising it on the public landing.
+   * [systems] are grouped into Compose design systems, Android's Compose samples (fetched from the
+   * `yschimke/compose-samples` fork but representing `android/compose-samples`), the `yschimke`
+   * organization, and "Other". `--catalogs-unlisted` catalogs are deliberately not indexed here.
    */
   fun homeIndexPage(
     systems: List<HomeSystem>,
     token: String,
     isPublic: Boolean = false,
     /**
-     * Running server version (the CLI's `SERVE_VERSION`), surfaced in the minimal footer beside the
-     * source/`/version` links so the live build is visible on the front door. Null omits it; the
-     * fixture golden passes a fixed string so a release never churns the committed HTML.
+     * Running server version (`SERVE_VERSION`) for the footer. Null omits it; the fixture golden
+     * passes a fixed string.
      */
     version: String? = null,
     /** Absolute page + representative hero URLs for Open Graph/Twitter link previews. */
     unfurl: UnfurlMetadata? = null,
     githubAuth: GitHubAuthStatus? = null,
     /**
-     * What this visitor may do with the UI builder — see [UiBuilderInvite]. Null on a host that
-     * does not run the builder at all, which renders no builder action anywhere on the page.
+     * What this visitor may do with the UI builder ([UiBuilderInvite]). Null when the host runs no
+     * builder.
      */
     uiBuilder: UiBuilderInvite? = null,
     componentBrowser: Boolean = false,
@@ -6670,24 +5422,16 @@ ${captureControlsHtml().prependIndent("          ")}
           .filter { it.isNotEmpty() }
           .joinToString("\n          ")
     /**
-     * The card's comparison destinations, shortest label that still identifies them.
-     *
-     * The design tool is already a short proper noun ("Figma"). The sibling is a whole catalog, and
-     * its TITLE is not: `M3 Wear OS Apps Design Kit` is four times the width of the chip beside it.
-     * So the sibling chip carries its SYSTEM ID — `wear-m3-catalog` — which is short, bounded, and
-     * the handle this very card already prints under its own title for the catalog it belongs to.
-     * The full title stays in the accessible name and the tooltip, where length costs nothing.
+     * The card's comparison destinations: the design tool's name, or the sibling's short system id
+     * (its title would be too wide). The full title stays in the accessible name and tooltip.
      */
     fun compareChips(s: HomeSystem, sysSeg: String): List<String> {
       fun chip(format: String, text: String, spoken: String): String {
         val query =
           listOf("format=$format", tokenParam).filter { it.isNotEmpty() }.joinToString("&")
         val href = WebEscaping.htmlEscape("/$sysSeg/compare?$query")
-        // The VISIBLE text, verbatim, inside the accessible name — WCAG 2.5.3 Label in Name. The
-        // sibling chip shows `wear-m3-catalog` and used to be announced only as "M3 Wear OS Apps
-        // Design Kit", so someone driving the page by voice could read the chip aloud and have
-        // nothing happen. Both, when they differ; the design-tool chip shows its own label and is
-        // left as one phrase rather than saying "Figma — Figma".
+        // The visible text appears verbatim in the accessible name (WCAG 2.5.3 Label in Name); both
+        // when they differ, one phrase when they don't.
         val named = if (text == spoken) spoken else "$text — $spoken"
         val described = WebEscaping.htmlEscape("${s.title}: compare to $named")
         return "<a class=\"cp-action-chip cp-action-chip--compact\" href=\"$href\" " +
@@ -6703,53 +5447,23 @@ ${captureControlsHtml().prependIndent("          ")}
     }
 
     /**
-     * The card's **compare to Figma** action: a chip in the card's own meta block, under the
-     * preview count, deep-linking that catalog's comparison page straight to its `reference`
-     * format.
+     * The card's **compare to Figma** action: a chip under the preview count deep-linking the
+     * catalog's comparison page in `reference` format.
      *
-     * It is on the front door because the comparison is a destination people arrive *for*;
-     * reachable only from a catalog's own landing chip row, it was invisible from `/`
-     * (compose-ai-tools#4324).
+     * The label names the design tool, falling back to "compare to design references"; whether the
+     * action exists is [HomeSystem.hasReferenceComparison], never the label. The accessible name
+     * adds the catalog title while keeping the visible text intact (WCAG 2.5.3).
      *
-     * The label names the design tool the catalog is actually specified by — "compare to Figma"
-     * says what you get where "compare reference" would name the format slug — falling back to the
-     * neutral "compare to design references" for a catalog whose references name no tool (a
-     * checked-in `png`, an `svg`, an unmapped provider). Whether there is an action at all is
-     * [HomeSystem.hasReferenceComparison], never the label: those are two questions, and answering
-     * the first with the second drops the action from every provider-neutral catalog (#4349).
-     *
-     * The accessible name carries the catalog's title ("Compose Material 3: compare to Figma")
-     * while the visible text stays short, so half a dozen cards naming the same tool do not all
-     * announce identically in a screen-reader link list. The visible string is kept intact inside
-     * it (WCAG 2.5.3 Label in Name), so "click compare to Figma" still matches.
-     *
-     * It lives INSIDE the card, which is why the card is a `<div>` whose title carries the
-     * `.cp-sys-open` link rather than being one big `<a>` — a link inside a link is not a thing
-     * HTML has. `.cp-sys-open` stretches an overlay across the tile so it is still one click
-     * target, and the chip sits above that overlay as the one region that goes somewhere else.
-     * Inside the card, the grid's own stretch keeps every card in a section the same height with no
-     * reserved row.
-     *
-     * Suppressed in the component-browser ("Catalog") interface mode, which hides the format
-     * comparisons on the catalog landing too — the mode is for browsing components, not auditing
-     * them against a design file.
+     * The card is a `<div>` whose `.cp-sys-open` link stretches over the tile, because links can't
+     * nest; the chip sits above that overlay. Suppressed in component-browser mode.
      */
     fun compareAction(s: HomeSystem, sysSeg: String): String {
       if (componentBrowser) return ""
       val chips = compareChips(s, sysSeg)
       if (chips.isEmpty()) return ""
-      // ONE "Compare to", then the destinations.
-      //
-      // Each chip used to carry the whole sentence, which read fine while there was only ever one
-      // of them and fell apart the moment a paired catalog added a second: two stacked chips both
-      // opening with "compare to", the second running to the width of a neighbour's title
-      // ("compare to M3 Wear OS Apps Design Kit") and wrapping to two lines inside a fixed grid
-      // track. The words the two share belong to the row, not to each button — so the row says the
-      // verb once and the chips say only where they go, which is what lets both sit on one line.
-      //
-      // A `<span>` label rather than a heading: it names a pair of links inside a card that already
-      // has a heading, and the accessible name of each link still carries the whole sentence
-      // (`<catalog>: compare to <destination>`) for a reader who meets it out of context.
+      // One "Compare to" label for the row, then chips naming only the destination, so two chips
+      // fit on one line. A `<span>` rather than a heading; each link's accessible name still
+      // carries the full sentence.
       return "<span class=\"cp-sys-compare\">" +
         "<span class=\"cp-sys-compare-label\" aria-hidden=\"true\">Compare to</span>" +
         chips.joinToString("") +
@@ -6757,9 +5471,8 @@ ${captureControlsHtml().prependIndent("          ")}
     }
 
     /**
-     * The card's action row, or nothing at all when this card has no actions. The UI Builder entry
-     * lives in the header bar ([builderHeaderAction]), not here. `.cp-sys-actions` passes pointer
-     * events through to the tile link underneath.
+     * The card's action row, or nothing when there are no actions. The UI Builder entry is in the
+     * header ([builderHeaderAction]). `.cp-sys-actions` passes pointer events to the tile link.
      */
     fun cardActions(s: HomeSystem, sysSeg: String): String {
       val compare = compareAction(s, sysSeg)
@@ -6797,10 +5510,8 @@ ${captureControlsHtml().prependIndent("          ")}
       val hero = s.heroImage
       val img =
         if (hero != null) {
-          // The fast path: a prebaked, already-cropped thumbnail on an immutable URL. `eager` (not
-          // `lazy`) because these ARE the page — a dozen small PNGs the browser should start the
-          // moment it sees them, rather than deferring past layout the way lazy-loading a
-          // full-resolution render used to. The width/height attributes reserve the box up front.
+          // Prebaked, cropped thumbnail on an immutable URL. `eager` because these images are the
+          // page; width/height reserve the box.
           "<img loading=\"eager\" decoding=\"async\" width=\"${hero.width}\" height=\"${hero.height}\"" +
             " alt=\"$title preview\" src=\"${WebEscaping.htmlEscape(hero.path)}$suffix\">"
         } else if (s.heroPreviewId != null) {
@@ -6829,9 +5540,8 @@ ${captureControlsHtml().prependIndent("          ")}
             ?.let {
               "\n            <div class=\"cp-browser-provenance\">${WebEscaping.htmlEscape(it)}</div>"
             } ?: ""
-      // Says whose work this is. An imported catalog is rendered from someone else's project and
-      // served from a staging repo, and nothing else on the card carries that: its id, title and
-      // provenance line all describe the catalog, not its origin.
+      // Says whose work this is: an imported catalog is someone else's project served from a
+      // staging repo.
       val importedBadge =
         s.importedFrom
           ?.takeIf { it.isNotBlank() }
@@ -6847,15 +5557,12 @@ ${captureControlsHtml().prependIndent("          ")}
           "\n            <div class=\"cp-sys-foot\">${counted(s.previewCount, "preview(s)")}" +
             (if (s.views > 0) " · ${formatViews(s.views)}" else "") +
             "</div>"
-      // A dark-first (Wear) system backs its hero on the dark stage — same `data-bg-theme` hook the
-      // catalog grid and viewer use — so a light-on-transparent Wear sticker isn't washed out on
-      // white.
+      // A dark-first system's hero uses the dark stage (same `data-bg-theme` hook as the grid and
+      // viewer).
       val bg = if (s.darkStage) " data-bg-theme=\"dark\"" else ""
       val searchAttr =
         " data-browser-search=\"${WebEscaping.htmlEscape("${s.title} ${s.system} ${s.subtitle.orEmpty()} ${s.sourceRepo.orEmpty()}").lowercase()}\""
-      // The catalog id as data, not as prose: the search matches a component to the card that
-      // publishes it, and `.cp-id` is absent in component-browser mode (and is display text either
-      // way).
+      // The catalog id as data for the search; `.cp-id` is absent in component-browser mode.
       val systemAttr = " data-cp-system=\"$sysId\""
       return """
       <div class="cp-card cp-sys"$bg$searchAttr$systemAttr>
@@ -6891,12 +5598,8 @@ ${captureControlsHtml().prependIndent("          ")}
           .trimIndent()
 
     /**
-     * A run of [COMPACT_SECTION_MAX]-or-smaller sections rendered side by side in one band.
-     *
-     * Each unit spans exactly as many of the band's columns as it has cards, and lays its own cards
-     * out on that same track, so a one-card section is one card wide and a two-card section two —
-     * the cards line up with the full-width sections above and below instead of each tiny section
-     * buying a whole row for one card and a lot of white space.
+     * A run of small ([COMPACT_SECTION_MAX] or fewer) sections side by side in one band. Each unit
+     * spans as many columns as it has cards, so cards align with the full-width sections around it.
      */
     fun band(row: List<Pair<HomeSection, String>>): String {
       val units =
@@ -6916,19 +5619,9 @@ ${captureControlsHtml().prependIndent("          ")}
     }
     val sections = homeSections(systems)
     /**
-     * The front door's search, in **two halves**: a `⌕` button in the header bar that expands a
-     * field, and the results the field drives down in the page.
-     *
-     * It used to be a full-width sticky bar pinned under the header, spending a band of every
-     * visitor's screen on a control most of them never touch — on the one page whose whole job is
-     * to show catalogs, the search sat between the reader and the first row of them. The bar is
-     * where a site's search lives; collapsed to its icon it costs the layout nothing, and one click
-     * (or the `/` the palette already binds) gets the field.
-     *
-     * The field is emitted by [siteHeader] via [headerSearchControl]. Everything below is what it
-     * drives: the empty-state line, the component results, and the script that ties the two
-     * together. They stay in the BODY because that is where the results belong — a header popover
-     * would have to re-implement the grid the page already has.
+     * The front door's search in two halves: a `⌕` button in the header that expands a field
+     * ([headerSearchControl] via [siteHeader]), and the results it drives in the body — the
+     * empty-state line, component results, and the script tying them together.
      */
     val catalogSearch =
       if (systems.isEmpty()) ""
@@ -6986,14 +5679,9 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The header bar's collapsed search: a `⌕` button, and the field it expands beside it.
-   *
-   * The field is rendered up front and `hidden` rather than created on click, so it exists for the
-   * script, for a `find in page`, and for a browser with JavaScript off — where the button does
-   * nothing and the field, being `hidden`, at least does not lie about being usable.
-   * `aria-expanded` on the button and `aria-controls` pointing at the field are what make the
-   * disclosure legible to a screen reader; the input keeps the id the page's script has always
-   * looked it up by.
+   * The header bar's collapsed search: a `⌕` button and the field it expands. The field is rendered
+   * up front and `hidden`, so it exists for the script and find-in-page. `aria-expanded` /
+   * `aria-controls` make the disclosure legible; the input keeps the id the script looks up.
    */
   private fun headerSearchControl(): String =
     """
@@ -7012,28 +5700,17 @@ ${captureControlsHtml().prependIndent("          ")}
       .trimIndent()
 
   /**
-   * The front door's filter, and the one piece of it that is not a filter at all.
+   * The front door's filter.
    *
-   * **Catalogs** are matched in the DOM, against the `data-browser-search` blob each card already
-   * carries — the cheap half, and the half that works before anything is fetched.
+   * **Catalogs** are matched in the DOM against each card's `data-browser-search` blob.
+   * **Components** are matched against `/api/components` (the command palette's index,
+   * `data-cp-global-components`), fetched once on the first keystroke; the element carrying that
+   * URL is emitted at the end of the body, so it is looked up at fetch time, not parse time.
+   * Matching components are listed as links, and a card stays visible when one of its components
+   * matched.
    *
-   * **Components** are matched against `/api/components`, the same cross-catalog index the command
-   * palette reads (`data-cp-global-components`), fetched once on the first keystroke and kept for
-   * the life of the page. The element carrying that URL is looked up *when the fetch is made*, not
-   * when the script runs: it is emitted at the very end of the body, so at parse time — this script
-   * is inside `<main>` — it does not exist yet, and a lookup taken then finds nothing for ever. It
-   * answers the question the old box could not: a visitor who wants a *Slider* does not know which
-   * of a dozen catalogs publishes one. The matching components are listed by name, each a link
-   * straight to its preview, and a card stays visible when one of ITS components matched even
-   * though nothing in its own title did — a visitor who wants a *Slider* does not know which of a
-   * dozen catalogs publishes one, and a catalog-only match empties the page for them.
-   *
-   * The list is built with `createElement`/`textContent`, never `innerHTML`: every field in that
-   * JSON — a component's label and keywords especially — comes from a catalog's own export, which
-   * is not this page's to trust with markup.
-   *
-   * A failed or missing fetch degrades to catalog-only matching rather than breaking the box; the
-   * index is set to an empty list so the request is not retried on every keystroke.
+   * The list is built with `createElement`/`textContent`, never `innerHTML`, because the JSON is
+   * catalog-supplied. A failed fetch degrades to catalog-only matching and is not retried.
    */
   private fun homeSearchScript(): String =
     "<script>" +
@@ -7115,14 +5792,9 @@ ${captureControlsHtml().prependIndent("          ")}
       "</script>"
 
   /**
-   * What the front door calls itself, in its `<title>`, its `og:title` and the headline of its
-   * unfurl card ([ServeSocialCard]).
-   *
-   * One constant because the three used to disagree: the tab said "Design systems" while the card
-   * said "Compose previews", so a link's name changed depending on which of the two an unfurler
-   * happened to prefer — and several fall back to `<title>` when they distrust the Open Graph
-   * block. The product name is not lost by naming the *page* here: it is in `og:site_name`, in the
-   * `<title>` suffix, and drawn on the card itself as the wordmark.
+   * What the front door calls itself in `<title>`, `og:title` and its unfurl card headline
+   * ([ServeSocialCard]). One constant so they agree; the product name stays in `og:site_name`, the
+   * `<title>` suffix and the card wordmark.
    */
   const val HOME_TITLE = "Design systems"
 
@@ -7131,15 +5803,9 @@ ${captureControlsHtml().prependIndent("          ")}
     "Browse $systemCount published Compose design system and app catalogs."
 
   /**
-   * The line under the headline on the front door's unfurl card.
-   *
-   * Deliberately *not* [homeUnfurlDescription]: every client that shows the card also shows the
-   * description beside it, so repeating the sentence in the picture wastes the only line the card
-   * has. A stat line is the thing a reader can't get from the text around it.
-   *
-   * Both counts change only when a catalog is published or republished, which is what
-   * [ServeSocialCard.Spec] requires of anything that reaches its cache key — a per-request value
-   * here (a view tally, a timestamp) would mint an uncacheable card on every visit.
+   * The line under the headline on the front door's unfurl card — a stat line rather than
+   * [homeUnfurlDescription], which clients already show beside the card. Both counts change only on
+   * publish, as [ServeSocialCard.Spec] requires of anything in its cache key.
    */
   fun homeCardSubtitle(systems: List<HomeSystem>): String {
     val previews = systems.sumOf { it.previewCount }
@@ -7154,9 +5820,8 @@ ${captureControlsHtml().prependIndent("          ")}
     "$previewCount Compose ${if (previewCount == 1) "preview" else "previews"}"
 
   /**
-   * A catalog's display name: what it calls itself, falling back to the module label. Shared by
-   * [landingPage] and by the caller that builds that page's unfurl card, so the headline drawn on
-   * the card cannot drift from the heading on the page it advertises.
+   * A catalog's display name, falling back to the module label. Shared by [landingPage] and its
+   * unfurl card so the two cannot drift.
    */
   fun catalogHeading(displayTitle: String?, moduleLabel: String): String =
     displayTitle?.takeIf { it.isNotBlank() } ?: moduleLabel
@@ -7178,41 +5843,20 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * Group the published catalogs by **publisher**, for the front-page sections.
+   * Group the published catalogs by **publisher** for the front-page sections.
    *
-   * The section a card lands in is **operator config, not code** ([ServeCatalogsConfig]): each
-   * catalog entry names the group it's published under, and this reduces those declarations to
-   * sections. Nothing here knows the id of any particular catalog — a server publishing catalogs
-   * this build has never heard of gets the same grouping the first-party ones do.
+   * The section comes from operator config ([ServeCatalogsConfig]), not code. A declared group is a
+   * claim checked against provenance: [HomeSystem.sourceRepo] must be one of [HomeGroup.repos]. The
+   * catalog id is claimable by anyone, and the trust verdict names the fetch branch (a delivery
+   * detail — see [ServeCatalogsConfig.Entry.attributionRepos]), so neither works alone.
    *
-   * A declared group is a **claim, checked against provenance**. [HomeSystem.sourceRepo] — the
-   * repository the catalog was generated from — must be one of the group's [HomeGroup.repos], which
-   * are exactly the repos the operator named for that entry. Neither of the alternatives works on
-   * its own:
-   * * The **catalog id** is claimed by whoever publishes it. A third-party catalog served as
-   *   `compose-m3` would otherwise be presented as an official design system purely for picking
-   *   that name.
-   * * The **trust verdict** names the branch the bytes were *fetched* from, which is a delivery
-   *   detail: Android's samples are currently fetched from preview branches in the
-   *   `yschimke/compose-samples` fork, and grouping on that would credit the fork owner for
-   *   Android's work — which is what [ServeCatalogsConfig.Entry.attributionRepos] exists to
-   *   express.
+   * A failed or missing claim falls back to an **owner** section, read from the first present of
+   * [HomeSystem.importedFrom], [HomeSystem.catalogSourceRepo] and [HomeSystem.sourceRepo]; no
+   * provenance at all goes to "Other" (never promoted).
    *
-   * A catalog whose claim doesn't hold — or that declares no group at all — falls back to an
-   * **owner** section, and one with no provenance at all to "Other": unattributed, never promoted.
-   * The owner is read from the first of [HomeSystem.importedFrom] (the operator's statement about
-   * where an import came from), [HomeSystem.catalogSourceRepo] (the catalog's own) and
-   * [HomeSystem.sourceRepo] (the delivery branch) that is present — so an import is filed beside
-   * the upstream project's other catalogs even when its registration carried no `importedFrom`,
-   * which is how three `joreilly` imports came to sit under `yschimke repositories`
-   * (compose-ai-tools#5012).
-   *
-   * Sections come out by their group's [HomeGroup.priority] (highest first), then in
-   * first-appearance (i.e. configured) order — so an operator orders the front page either by where
-   * the catalogs sit in the list or, when that isn't enough, by saying so on the group
-   * ([ServeCatalogsConfig.Group.priority]). A section whose group declares no priority, and one
-   * derived from a repo owner, sit at 0; where two claims share a heading the section takes the
-   * highest of them; "Other" is pinned last whatever it claims.
+   * Sections are ordered by [HomeGroup.priority] (highest first;
+   * [ServeCatalogsConfig.Group.priority]), then configured order. Unprioritised and owner sections
+   * sit at 0; sections sharing a heading take the highest priority; "Other" is always last.
    */
   internal fun homeSections(systems: List<HomeSystem>): List<HomeSection> {
     val grouped = LinkedHashMap<String, MutableList<HomeSystem>>()
@@ -7221,20 +5865,14 @@ ${captureControlsHtml().prependIndent("          ")}
     for (s in systems) {
       // The claim only holds when the bytes came from a repo the operator named for this entry.
       val claimed = s.group?.takeIf { g -> s.sourceRepo != null && s.sourceRepo in g.repos }
-      // An import is grouped by the project it came FROM, not the staging repo serving it —
-      // otherwise every import, whatever it wraps, piles into the staging repo owner's section.
-      // The catalog's own declared source stands in when the operator named no origin, so a
-      // registration that lost `importedFrom` still files the card under the upstream owner
-      // rather than under whoever hosts the delivery branch (#5012).
+      // An import is grouped by the project it came from, not the staging repo; the catalog's
+      // declared source stands in when `importedFrom` is missing.
       val heading =
         claimed?.heading ?: ownerHeading(s.importedFrom ?: s.catalogSourceRepo ?: s.sourceRepo)
       grouped.getOrPut(heading) { mutableListOf() } += s
       nouns.putIfAbsent(heading, claimed?.noun ?: ServeCatalogsConfig.DEFAULT_NOUN)
-      // Sections merge on the HEADING, which is operator text and neither unique nor validated as
-      // such: two declared groups (or a group and an owner fallback) can spell the same one. So the
-      // merged section takes the highest priority any of its claims declares — recording only the
-      // first would leave a `priority: 100` group unlifted purely because a heading-mate with no
-      // priority happened to register earlier.
+      // Sections merge on the heading (free operator text), so the merged section takes the highest
+      // priority any claim declares, regardless of registration order.
       priorities.merge(heading, claimed?.priority ?: 0, ::maxOf)
     }
     val sections = grouped.map { (heading, list) ->
@@ -7248,24 +5886,15 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The most catalogs a section can hold and still share a row with its neighbours.
-   *
-   * Two, because a section's cards keep the width they'd have on a row of their own: a unit is as
-   * many columns wide as it has cards, so at three the band is already a full row and there is
-   * nothing to share. Sections above this stay on their own row(s), which is what makes a large
-   * publisher read as a block rather than as one more entry in a shelf of small ones.
+   * The most catalogs a section can hold and still share a row: a unit is as many columns wide as
+   * it has cards, so at three the band is already full.
    */
   internal const val COMPACT_SECTION_MAX = 2
 
   /**
-   * Groups the front page's sections into rows: a run of small ([COMPACT_SECTION_MAX]-or-fewer
-   * catalogs) sections becomes one row they share, and everything else keeps a row of its own.
-   *
-   * The front page's order is meaningful ([homeSections] sorts by group priority, then by
-   * configured order), so a row is only ever built from sections that are **already adjacent** —
-   * banding never reaches past a big section to pull a small one forward. A run of exactly one
-   * small section is left as an ordinary section: there is no neighbour to share with, and wrapping
-   * it in a band would shrink its cards for nothing.
+   * Groups the front page's sections into rows: a run of small ([COMPACT_SECTION_MAX] or fewer)
+   * sections shares a row, everything else keeps its own. Only adjacent sections are banded,
+   * preserving [homeSections]' order; a run of one is left alone.
    */
   internal fun <T> homeRows(sections: List<T>, size: (T) -> Int): List<List<T>> {
     val rows = mutableListOf<List<T>>()
@@ -7300,29 +5929,20 @@ ${captureControlsHtml().prependIndent("          ")}
   private const val OTHER_HEADING = "Other"
 
   /**
-   * A styled **404** page for a browser that followed a dead link to a catalog or preview page
-   * (`/nope-catalog/`, `/<system>/p/does-not-exist`) — so a broken navigation lands on the site's
-   * own chrome with a way back home, rather than a bare `text/plain` "not found" dead-end. The
-   * render / API lanes keep their plain-text 404; this is only for the HTML page routes. The back
-   * link is built like [backButton] so it keeps the token on a gated ([isPublic] false) server.
+   * A styled **404** for a browser following a dead link to a catalog or preview page, with a way
+   * home. Render/API lanes keep their plain-text 404. The back link is built like [backButton] so
+   * it keeps the token on a gated ([isPublic] false) server.
    */
   fun notFoundPage(
     message: String,
     token: String,
     isPublic: Boolean,
     unfurl: UnfurlMetadata? = null,
-    /**
-     * Running server version (`SERVE_VERSION`), shown in the minimal footer. Null omits the build
-     * span.
-     */
+    /** Running server version (`SERVE_VERSION`) for the footer. Null omits the build span. */
     version: String? = null,
     /**
-     * The catalog whose colours and name this page wears, when it is served on a **top-level site**
-     * ([ServeSites]). A site hostname publishes one design system, so its `/status` and its 404 are
-     * that system's pages too — carrying the palette and the theme key here is what makes the
-     * *whole* hostname one skin rather than a themed catalog with unthemed chrome bolted beside it.
-     * Empty (the default) on the main host, where these pages belong to no catalog and keep the
-     * built-in chrome.
+     * The catalog whose colours and name this page wears on a **top-level site** ([ServeSites]), so
+     * `/status` and 404s match the rest of the hostname. Empty on the main host.
      */
     siteName: String = "",
     themeCss: String = "",
@@ -7361,18 +5981,12 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * A styled **explanation** for a browser that reached a surface its credential does not open —
-   * today, `POST /ui-builder/designs` refusing to create a design.
+   * A styled explanation for a browser that reached a surface its credential does not open (today,
+   * `POST /ui-builder/designs` refusing to create). Scripts get `text/plain`; a person following a
+   * form gets the same status with chrome, the reason, and what to do.
    *
-   * The route answers a script with `text/plain` and the right status, which is correct for a
-   * script and useless to a person: a form submission that lands on a bare "UI-builder write access
-   * required" is a dead end with no back link, no sign-in, and no statement of what access is
-   * actually missing. A person following a form gets this instead — the same status code, the
-   * site's own chrome, the reason in a sentence, and the two things they can do about it.
-   *
-   * [message] is the reason, already in the visitor's terms; [signInHref] adds the one action that
-   * can change the answer for a visitor who is not signed in, and is omitted when a sign-in would
-   * not help (they are signed in already, or this host cannot round-trip OAuth).
+   * [message] is the reason in the visitor's terms; [signInHref] is offered only when signing in
+   * could change the answer.
    */
   fun accessDeniedPage(
     message: String,
@@ -7414,20 +6028,12 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * `GET /ui-builder/{designId}/access` — who can open one design, and the form that changes it.
+   * `GET /ui-builder/{designId}/access`: who can open one design, and the form that changes it
+   * (`UpdateDesignAccessRequestV1`).
    *
-   * A design's access control has existed in the protocol since v1 and had, until this page, no
-   * user interface at all: a person could create a design and then had no way to let a colleague —
-   * or an agent working for someone else — open it, because the only door to
-   * `UpdateDesignAccessRequestV1` was a hand-written protocol POST. This is that door, drawn.
-   *
-   * Server-rendered rather than a panel inside the wasm editor for the same reason the create form
-   * is: it needs the server's own view of identity (who *you* are here is decided by the token, the
-   * GitHub session or a grant, none of which the editor can see), and a page a link can point at is
-   * something an owner can send to the person asking for access.
-   *
-   * Every actor id on this page came from a person typing it or from the design's stored access,
-   * and both are escaped without exception.
+   * Server-rendered rather than in the wasm editor because it needs the server's view of identity
+   * (token, GitHub session or grant), and a linkable page can be sent to whoever is asking for
+   * access. Every actor id is escaped.
    */
   fun uiBuilderAccessPage(
     designId: String,
@@ -7575,9 +6181,9 @@ ${captureControlsHtml().prependIndent("          ")}
   )
 
   /**
-   * `/ui-builder/{designId}/history`: the design as it was at each retained revision, newest first,
-   * with Open (the read-only pinned view), Restore and Fork. Restore and Fork are forms that POST
-   * and redirect back, so a refresh repeats neither.
+   * `/ui-builder/{designId}/history`: the design at each retained revision, newest first, with Open
+   * (read-only pinned view), Restore and Fork. Restore and Fork POST and redirect, so a refresh
+   * repeats neither.
    */
   fun uiBuilderHistoryPage(
     designId: String,
@@ -7674,11 +6280,9 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * One catalog the **New design** form can create into, with the starting points it offers.
-   *
-   * The labels are the server's, because only the server knows which catalogs it authors; the
-   * template ids come from `UiBuilderNewDesignSeed`, so this page can never offer a starting point
-   * the create route would refuse.
+   * One catalog the **New design** form can create into, with its starting points. Template ids
+   * come from `UiBuilderNewDesignSeed`, so the page cannot offer a template the create route would
+   * refuse.
    */
   data class UiBuilderNewDesignOption(
     val systemId: String,
@@ -7710,14 +6314,8 @@ ${captureControlsHtml().prependIndent("          ")}
     val unopenableReason: String?,
     val publicRead: Boolean? = null,
     /**
-     * The design's live SVG export, drawn as the card's thumbnail.
-     *
-     * A picture, because a list of ids is not a list a person recognises their own work in. It is
-     * the address `/api/ui-builder/v1/designs/{id}/export.svg` already serves — the same export,
-     * the same gate, the same actor — so the card costs no second renderer and no second capability
-     * check, and it follows the design because that URL renders the current revision. Empty (an
-     * export this viewer may not ask for, or a design that cannot be opened) draws the placeholder
-     * instead.
+     * The design's live SVG export (`/api/ui-builder/v1/designs/{id}/export.svg`), drawn as the
+     * card thumbnail under the same gate and actor. Empty draws the placeholder.
      */
     val previewHref: String = "",
     /** POST target that creates a copy of this design. Empty when the viewer may not create one. */
@@ -7731,8 +6329,8 @@ ${captureControlsHtml().prependIndent("          ")}
     /** POST target that changes [folder]. Empty when this viewer may not move the design. */
     val folderAction: String = "",
     /**
-     * `/ui-builder/request-access?design=…` for this design, offered where the page offers a way to
-     * ask for edit access at all. Empty otherwise.
+     * `/ui-builder/request-access?design=…` for this design where asking for edit access is
+     * offered; empty otherwise.
      */
     val requestAccessHref: String = "",
   )
@@ -7749,22 +6347,13 @@ ${captureControlsHtml().prependIndent("          ")}
       .trimIndent()
 
   /**
-   * `GET /ui-builder/designs` — the caller's own designs and the ones shared with them.
+   * `GET /ui-builder/designs`: the caller's own designs and the ones shared with them — the
+   * builder's file manager.
    *
-   * This is the builder's **file manager**, and it is built around the one question a person opens
-   * it with: *which of these is the thing I was working on?* An id, a revision and a timestamp do
-   * not answer that, so every card leads with the design's own rendering
-   * ([UiBuilderDesignRow.previewHref]) and the page is a grid of pictures rather than a list of
-   * rows. Everything a design can have done to it from outside the editor is on its card — open,
-   * duplicate, share, delete — because the alternative was an admin page with a token.
-   *
-   * Creating lives here too, in both of the forms it takes: a blank design from a template
-   * ([createAction]), and a copy of something that already exists ([copyAction]). The second is the
-   * one that was missing: starting from an example, rather than from nothing, is how most designs
-   * actually begin, and the only way to do it was to rebuild the design by hand.
-   *
-   * The filter box is the page's only script, and it only hides cards. With scripting off the box
-   * is still there and every design is still listed, which is the whole page working.
+   * Each card leads with the design's rendering ([UiBuilderDesignRow.previewHref]) and carries
+   * open, duplicate, share and delete. Creation lives here too: a blank design from a template
+   * ([createAction]) or a copy ([copyAction]). The filter box is the only script and only hides
+   * cards.
    */
   fun uiBuilderDesignsPage(
     rows: List<UiBuilderDesignRow>,
@@ -7779,8 +6368,8 @@ ${captureControlsHtml().prependIndent("          ")}
     /** What the last form submission did, shown once above the grid. */
     notice: String = "",
     /**
-     * Catalog-owned catalogs this box cannot serve fully, with why, so a designer who misses one in
-     * the New design list is told it is withheld rather than left to wonder where it went.
+     * Catalog-owned catalogs this box cannot serve fully, with why, so a missing New design entry
+     * is explained.
      */
     catalogProblems: Map<String, String> = emptyMap(),
     navSuffix: String = "",
@@ -7788,9 +6377,8 @@ ${captureControlsHtml().prependIndent("          ")}
     siteName: String = "",
     themeCss: String = "",
     /**
-     * `/ui-builder/request-access`, offered to a signed-in reader who may not create — the way from
-     * "I can look" to "I can edit" without an operator having to add them anywhere. Empty when
-     * there is no such way on this box.
+     * `/ui-builder/request-access`, offered to a signed-in reader who may not create. Empty when
+     * this box has no such route.
      */
     requestAccessHref: String = "",
   ): String {
@@ -7819,11 +6407,8 @@ ${captureControlsHtml().prependIndent("          ")}
             .withZone(java.time.ZoneOffset.UTC)
             .format(java.time.Instant.ofEpochMilli(it))
         } ?: "date unavailable"
-      // The thumbnail is `loading="lazy"` and `decoding="async"` on purpose: a page of twenty
-      // designs is twenty live exports, and none of them is worth blocking the list on. The
-      // `onerror` hides a picture that could not be produced rather than leaving a broken-image
-      // glyph where a design should be — an export can fail for reasons the list already
-      // explains in words underneath.
+      // Lazy and async: a page of designs is many live exports. `onerror` hides a failed export
+      // rather than showing a broken-image glyph.
       val thumbnail =
         if (row.previewHref.isBlank())
           """<span class="cp-design-thumb cp-design-thumb-empty" aria-hidden="true">◇</span>"""
@@ -7860,9 +6445,8 @@ ${captureControlsHtml().prependIndent("          ")}
       val share =
         if (row.grants == null) ""
         else """<a class="cp-action-chip" href="${esc(row.shareAction)}">Share</a>"""
-      // Two deliberate steps, and no `confirm()`: the summary opens a panel that says what is
-      // about to be lost, and the button inside it is the only thing that posts. A one-click
-      // Delete beside Open on a grid of thumbnails is a mis-click away from somebody's week.
+      // Two steps and no `confirm()`: the summary opens a panel saying what will be lost, and only
+      // its button posts.
       val delete =
         if (row.deleteAction.isBlank()) ""
         else
@@ -8003,10 +6587,8 @@ ${captureControlsHtml().prependIndent("          ")}
       </div>
       """
         .trimIndent()
-    // A folder is a section of its own, named, in name order, with the designs nobody has filed
-    // last: a person who files designs opens this page looking for a folder, and a folder that is
-    // only a line on each card makes them read every card to find it. Until anything is filed the
-    // page stays the one grid it always was — a "No folder" heading over everything says nothing.
+    // Once anything is filed, each folder is its own named section (in name order) with unfiled
+    // designs last; until then the page is one grid.
     val folderGroups =
       if (rows.none { it.folder != null }) emptyList()
       else
@@ -8043,13 +6625,9 @@ ${captureControlsHtml().prependIndent("          ")}
         <p class="cp-sub" id="cp-designs-none" hidden>No design here matches that.</p>
         """
           .trimIndent()
-    // The folders come first, as one row to pick from: a person who files designs opens this page
-    // looking for one, and picking it narrows everything below to that folder. There is no "All
-    // designs" pick — every folder is shown until one is pressed, and pressing it again lets go.
-    // The count is the bare number to keep the row short; the button's label still says "designs".
-    // Script-only, so it starts hidden; without script every folder is simply listed in full
-    // underneath. The choice rides in `?folder=` (empty for the unfiled designs) so a reload or a
-    // shared link keeps it.
+    // The folder picker row: pressing a folder narrows to it, pressing again lets go. Script-only,
+    // so it starts hidden. The choice rides in `?folder=` (empty for unfiled) so reloads and links
+    // keep it.
     val folderPicker =
       if (folderGroups.isEmpty()) ""
       else {
@@ -8084,10 +6662,7 @@ ${captureControlsHtml().prependIndent("          ")}
         """
           .trimIndent()
       }
-    // One control for "what am I making", not two. The catalog and the template are one choice from
-    // the reader's point of view — *a blank Wear screen*, *a Jetcaster page* — and splitting them
-    // across two selects made the second one's contents depend on the first, which is a thing a
-    // page without script cannot do.
+    // One control for catalog + template, since dependent selects need script.
     val newDesign =
       if (createAction.isBlank() || catalogs.isEmpty()) ""
       else
@@ -8323,19 +6898,13 @@ ${captureControlsHtml().prependIndent("          ")}
   const val DESIGN_SCOPE_ALL = "all"
 
   /**
-   * `GET /agent-access/{requestId}` — the page a human opens because an agent asked them to, and
-   * the only place a grant is ever created. See
+   * `GET /agent-access/{requestId}`: the page a human opens because an agent asked them to, and the
+   * only place a grant is created. See
    * [docs/design/AGENT_ACCESS_GRANTS.md](../../../../../../../../docs/design/AGENT_ACCESS_GRANTS.md).
    *
-   * The page has one job beyond collecting a click: **make the decision legible**. An operator
-   * arrives here from a link they were handed, and everything they need in order to be suspicious
-   * of it has to be on the screen — the verification code to compare against their terminal, the
-   * label the agent supplied, where the request came from, and, in plain language, what each scope
-   * lets the agent do to this machine.
-   *
-   * Everything the agent supplied ([label], [client]) is attacker-controlled text and is escaped
-   * here without exception. [selectableScopes] has already been narrowed to what this approver may
-   * actually give, so the form cannot offer a capability the POST would then refuse.
+   * It must make the decision legible: the verification code, the agent's label, where the request
+   * came from, and what each scope allows. [label] and [client] are attacker-controlled and always
+   * escaped. [selectableScopes] is already narrowed to what this approver may give.
    */
   fun agentGrantApprovalPage(
     requestId: String,
@@ -8349,47 +6918,41 @@ ${captureControlsHtml().prependIndent("          ")}
     selectableScopes: List<AgentGrantScope>,
     maxTtlSeconds: Long,
     /**
-     * Independent permissions this approver may tick, already narrowed like [selectableScopes].
-     * Empty on almost every box — the whole feature is opt-in twice over.
+     * Independent permissions this approver may tick, narrowed like [selectableScopes]. Usually
+     * empty; the feature is opt-in.
      */
     selectableCapabilities: List<AgentGrantCapability> = emptyList(),
     approveCsrf: String,
     denyCsrf: String,
-    /**
-     * Form target — carries the access token on a token-gated box, so the POST stays authorized.
-     */
+    /** Form target, carrying the access token on a token-gated box. */
     formAction: String,
     navSuffix: String = "",
     version: String? = null,
     siteName: String = "",
     themeCss: String = "",
     /**
-     * Named only when the approver's own rights are what capped [selectableScopes] — so the page
-     * says "you can't grant this" rather than silently omitting a row the agent asked for.
+     * Named only when the approver's own rights capped [selectableScopes], so the page says so
+     * instead of silently omitting a row.
      */
     withheldScopes: List<AgentGrantScope> = emptyList(),
     /** Capabilities the agent asked for that this approver may not pass on. Same treatment. */
     withheldCapabilities: List<AgentGrantCapability> = emptyList(),
     withheldReason: String = "",
     /**
-     * Capabilities the agent asked for that THIS BOX's ceiling excludes — a different cause from
-     * [withheldCapabilities] (the approver's own holdings) and a different remedy, so the page says
-     * both rather than folding them into one sentence that fits neither.
+     * Requested capabilities this box's ceiling excludes — a different cause and remedy from
+     * [withheldCapabilities], so both are stated.
      */
     storeNarrowedCapabilities: List<AgentGrantCapability> = emptyList(),
     storeNarrowedReason: String = "",
     /**
      * Set when the request came through the MCP OAuth façade: where approving sends the browser,
-     * and with it the code that redeems this grant. The page then leads with that host, and drops
-     * the "Asked from" line — for an OAuth request that address is the approver's own browser,
-     * which followed the client's link here, so it says nothing about who is asking. [label] is
-     * then the client's self-chosen name and is shown as such, below the host.
+     * with the redeeming code. The page leads with that host and drops "Asked from" (it would just
+     * be the approver's browser); [label] is shown as the client's self-chosen name.
      */
     oauthReturn: ServeMcpOAuth.RedirectTarget? = null,
     /**
-     * The designs the request names, when it was asked for from one. The page names each, and
-     * offers to limit the grant to them (the default) or to lend every design the approver can
-     * edit. Empty for a request that names none, which the page draws exactly as before.
+     * The designs the request names, if any. The page offers to limit the grant to them (default)
+     * or lend every design the approver can edit.
      */
     requestedDesigns: List<RequestedDesign> = emptyList(),
   ): String {
@@ -8402,9 +6965,8 @@ ${captureControlsHtml().prependIndent("          ")}
     val designFacts =
       if (requestedDesigns.isEmpty()) ""
       else "\n          <dt>Edit access to</dt><dd>$designNames</dd>"
-    // Two radios rather than a checkbox, for the reason the scopes are radios: the choice is one of
-    // two outcomes, and the page names both. The named designs are the default because they are
-    // what was asked for.
+    // Two radios naming both outcomes; the named designs are the default because they were asked
+    // for.
     val designFieldset =
       if (requestedDesigns.isEmpty()) ""
       else
@@ -8425,18 +6987,11 @@ ${captureControlsHtml().prependIndent("          ")}
         </fieldset>
         """
             .trimIndent()
-    // **Radios, not checkboxes**, because the scopes are cumulative and independent boxes lie about
-    // that. With `playground` offered, an approver could untick `live` while leaving `playground`
-    // ticked — the page then said live access was withheld, and the grant included it anyway,
-    // because `playground` implies `live` and the handler takes the highest ticked rung. On the one
-    // page in this server whose entire job is to state accurately what is being agreed to, a
-    // control that can misdescribe the outcome is the wrong control. One choice: the highest rung,
-    // with everything it carries spelled out beneath it.
-    // The **highest offered** rung is the default, not the requested one. Those differ exactly when
-    // the approver's own rights capped the request — and there `requestedScope` matches no radio at
-    // all, so the form opened with nothing selected and (being `required`) could not be submitted.
-    // Defaulting to the top of what this approver may actually give is also the right answer on the
-    // merits: it is the agent's ask, clamped to what the person in front of the page can grant.
+    // Radios, not checkboxes: scopes are cumulative (`playground` implies `live`), so independent
+    // boxes could misdescribe the grant. One choice — the rung — with what it carries spelled out.
+    // The default is the highest offered rung, not the requested one: when the approver's rights
+    // cap the request, `requestedScope` matches no radio and the `required` form could not be
+    // submitted.
     val defaultScope = selectableScopes.lastOrNull()
     val scopeRows =
       selectableScopes.joinToString("\n") { scope ->
@@ -8455,21 +7010,11 @@ ${captureControlsHtml().prependIndent("          ")}
         """
           .trimIndent()
       }
-    // **Checkboxes here, radios above**, and the difference is not cosmetic. The scopes are a
-    // ladder, so one control that picks a rung is the only honest way to draw them. A capability
-    // implies nothing and is implied by nothing, so it is its own yes/no — and unticking one says
-    // exactly what it looks like it says.
+    // Checkboxes here: capabilities are independent yes/no choices, unlike the scope ladder.
     //
-    // **Every box here starts ticked**, for the same reason the scope radio opens on the highest
-    // offered rung: [selectableCapabilities] has already been narrowed to what the agent asked for
-    // (`ServeAgentGrants.selectableCapabilities` intersects the request with the approver's and the
-    // box's ceilings), so a row on this page is by construction a request this approver may grant.
-    // The page's job is to make the ask legible, not to charge a click for agreeing with it — an
-    // approver who read the row and wants it anyway had to tick every one of them by hand, and a
-    // default that has to be re-entered every time is one people learn to click past rather than
-    // read. Consent is still an act: the form is not submitted until Approve is pressed, unticking
-    // a row is one click, and the POST honours exactly what comes back — an approval with a row
-    // unticked confers nothing, which is the property the page is really protecting.
+    // Every box starts ticked because [selectableCapabilities] is already the intersection of the
+    // request with the approver's and box's ceilings (`ServeAgentGrants.selectableCapabilities`).
+    // Consent is still the Approve press, and the POST honours exactly what is ticked.
     val capabilityRows =
       selectableCapabilities.joinToString("\n") { capability ->
         """
@@ -8625,9 +7170,8 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The short page an approve/deny/expire lands on. Deliberately terminal — there is no link back
-   * into the flow, because every path through it has already been decided and a "try again" button
-   * would only ever re-submit a request that no longer exists.
+   * The terminal page an approve/deny/expire lands on; no link back, since the request has been
+   * decided.
    */
   fun agentGrantNoticePage(
     heading: String,
@@ -8657,8 +7201,8 @@ ${captureControlsHtml().prependIndent("          ")}
     )
 
   /**
-   * A grant link opened in a browser that already acts as a different live grant. Nothing changes
-   * unless the person presses `Switch`, a same-origin POST; `Keep` goes to the same page unchanged.
+   * A grant link opened in a browser already acting as a different live grant. Nothing changes
+   * unless `Switch` (a same-origin POST) is pressed.
    */
   fun agentGrantSwitchPage(
     currentLabel: String,
@@ -8707,13 +7251,12 @@ ${captureControlsHtml().prependIndent("          ")}
   )
 
   /**
-   * `/ui-builder/request-access` — a signed-in reader asks for UI-builder edit access for
-   * **themselves**, and gets a link to send to someone who can approve it.
+   * `/ui-builder/request-access`: a signed-in reader asks for UI-builder edit access for themselves
+   * and gets a link to send to an approver.
    *
-   * Three states on one page: an access grant already carried (say until when), a request just
-   * opened (show the link, the code and what happens next), or neither (the form). The request is
-   * opened by this server from the reader's own session, so the approver sees a verified login
-   * rather than a name the asker typed.
+   * Three states: a grant already held (until when), a request just opened (link, code, next
+   * steps), or the form. The server opens the request from the reader's session, so the approver
+   * sees a verified login.
    */
   fun uiBuilderRequestAccessPage(
     login: String,
@@ -8724,8 +7267,8 @@ ${captureControlsHtml().prependIndent("          ")}
     activeUntil: String? = null,
     requested: RequestedAccess? = null,
     /**
-     * The design this page was opened from (`?design=`), when it was: the request it makes is for
-     * that design alone, and the page says so.
+     * The design this page was opened from (`?design=`), if any; the request is then for that
+     * design alone.
      */
     designId: String? = null,
     /** The designs the live grant in [activeUntil] names; empty when it names none. */
@@ -8814,10 +7357,8 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The durations the approval page offers: a short ladder, plus whatever was actually requested,
-   * clipped to the box's ceiling and de-duplicated. Ladder-only would drop the agent's own ask when
-   * it happens to fall between rungs; request-only would make "give it ten minutes instead" a thing
-   * you cannot do without the agent re-asking.
+   * Durations the approval page offers: a short ladder plus the requested value, clipped to the
+   * box's ceiling and de-duplicated.
    */
   internal fun ttlChoices(requestedSeconds: Long, maxSeconds: Long): List<Long> =
     (LADDER + requestedSeconds)
@@ -8829,15 +7370,10 @@ ${captureControlsHtml().prependIndent("          ")}
   private val LADDER = listOf(15 * 60L, 60 * 60L, 4 * 60 * 60L, 8 * 60 * 60L, 24 * 60 * 60L)
 
   /**
-   * The honest landing page for a preview URL pinned to a publish that did not contain that
-   * preview.
+   * The landing page for a preview URL pinned to a publish that did not contain that preview.
    *
-   * This remains a 404 — showing the current render under a historical URL would make the pin a lie
-   * — but unlike the generic [notFoundPage] it keeps the catalog's revision navigator. A preview
-   * can be added between publishes, so the catalog-wide revision menu can legitimately lead to a
-   * commit where its id is absent. Dropping the menu at that point strands the visitor on the first
-   * unavailable publish they try; keeping it lets them choose another historical publish or return
-   * to current without pretending this one had pixels it never published.
+   * Still a 404 (showing the current render would make the pin a lie), but unlike [notFoundPage] it
+   * keeps the revision navigator so the visitor can pick another publish or return to current.
    */
   fun unavailablePreviewRevisionPage(
     previewId: String,
@@ -8853,11 +7389,8 @@ ${captureControlsHtml().prependIndent("          ")}
     themeStorageKey: String = "",
     sessionInOrigin: Boolean = false,
     /**
-     * The catalog change feed the footer offers as **Changelog** and the head declares as this
-     * page's RSS alternate. Empty when the server runs with the feed lane off. See [siteFooter].
-     *
-     * Offered here like on any other catalog page: this one is reached by pinning a preview to a
-     * publication that predates it, which is exactly the moment a visitor wants the history.
+     * The catalog change feed offered as **Changelog** and declared as the page's RSS alternate.
+     * Empty when the feed lane is off. See [siteFooter].
      */
     changelogHref: String = "",
   ): String {
@@ -8896,67 +7429,50 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * `GET /playground` — the **Stage-1 editor** for the Kotlin playground
-   * (`docs/design/PLAYGROUND.md` §2). A code box + a mode selector + a Run button that POSTs to
-   * `/api/{v}/compiler/run` and shows the compiler diagnostics, the first-frame render, and the
-   * handoff link: **Open live preview →** (`/pg/<token>`, the CMP/Android live modes) or **Open
-   * document →** (`/d/<id>`, Remote Compose).
+   * `GET /playground`: the Stage-1 Kotlin playground editor (`docs/design/PLAYGROUND.md` §2). A
+   * code box, mode selector and Run button POSTing to `/api/{v}/compiler/run`, showing diagnostics,
+   * the first frame, and the handoff link (`/pg/<token>` live, or `/d/<id>` Remote Compose).
    *
-   * The lane compiles and runs user-supplied code on the server, so it is only ever mounted behind
-   * a token (refused under `--public`); the page therefore always carries a `?token=…` suffix on
-   * the links it builds. A plain `<textarea>` is the v1 editor — a stock `kotlin-playground` /
-   * bespoke CodeMirror surface is a deferred, non-blocking decision (design §7 item 5).
+   * The lane runs user code on the server, so it is only mounted behind a token (refused under
+   * `--public`) and links always carry `?token=…`. A plain `<textarea>` is the v1 editor (design §7
+   * item 5).
    */
   fun playgroundPage(
     token: String,
     isPublic: Boolean,
     /**
-     * What the catalog selector offers, first entry preselected: the host's pinned default (id
-     * `""`, present only when a `--playground-bundle` resolved) followed by every served catalog a
-     * snippet may be compiled against. Each entry carries its own mode list — a catalog's bundle
-     * backend decides its renderer — so the Mode control is repopulated from the selected entry
-     * rather than offering modes the host would then refuse.
+     * Catalog selector entries, first preselected: the host's pinned default (id `""`, only when
+     * `--playground-bundle` resolved) then every served catalog. Each entry carries its own mode
+     * list, so the Mode control follows the selection.
      *
-     * May be **empty** on a `--playground` host during startup: catalogs are fetched in the
-     * background after the server is up. The page says so and refreshes itself from
-     * `/api/1/compiler/catalogs` rather than making the visitor reload.
+     * May be empty during startup while catalogs load in the background; the page says so and
+     * refreshes from `/api/1/compiler/catalogs`.
      */
     catalogs: List<PlaygroundCatalogInfo>,
     /**
-     * True when `--playground` configured a runtime catalog selector on this host — independent of
-     * whether any catalog has loaded into it yet.
-     *
-     * Kept separate from `catalogs.size` on purpose. A host running `--playground` *plus* a pinned
-     * local bundle renders, during the startup window, a one-entry list holding only that pin — and
-     * deciding on the count alone would omit the control from that page, which the script can then
-     * never build, leaving the visitor pinned until they reload. What the control's presence tracks
-     * is the host's configuration, which does not change under it.
+     * True when `--playground` configured a runtime catalog selector, regardless of whether any
+     * catalog has loaded. Separate from `catalogs.size` because a pin-only list during startup
+     * would otherwise omit the control the script needs to fill in later.
      */
     catalogSelectorEnabled: Boolean = false,
     /**
-     * A served preview's source, opened in place of the starter sample with its catalog preselected
-     * — the `/playground?from=<system>/<previewId>` handoff from a viewer page. Null is the
-     * ordinary "opened the playground directly" case.
+     * A served preview's source to open with its catalog preselected
+     * (`/playground?from=<system>/<previewId>`). Null when opened directly.
      */
     seed: PlaygroundSeed? = null,
     /**
-     * Preselect this catalog without seeding any source — the "try this design system" handoff from
-     * a catalog landing page. Ignored when [seed] is present, which carries its own catalog.
+     * Preselect this catalog without seeding source (the catalog landing's handoff). Ignored when
+     * [seed] is present.
      */
     preselectCatalog: String? = null,
     /**
-     * The served-catalog system ids this host's **pinned** default compiles against
-     * ([PlaygroundCompileService.pinnedCatalogSystems]). The selector reports a pin under the
-     * anonymous id `""`, so without this a `?from=compose-m3/…` handoff on a host pinned to
-     * `compose-m3` would look unrecognised — the one case where the buffer *is* opening against its
-     * own catalog.
+     * The served-catalog ids this host's pinned default compiles against
+     * ([PlaygroundCompileService.pinnedCatalogSystems]), so a `?from=` handoff to the pinned
+     * catalog (reported as id `""`) is recognised.
      */
     pinnedCatalogSystems: Set<String> = emptySet(),
     unfurl: UnfurlMetadata? = null,
-    /**
-     * Running server version (`SERVE_VERSION`), shown in the minimal footer. Null omits the build
-     * span.
-     */
+    /** Running server version (`SERVE_VERSION`) for the footer. Null omits the build span. */
     version: String? = null,
     /** Show the authenticated, server-enabled single stateful editing lease control. */
     editingLeaseEnabled: Boolean = false,
@@ -8964,10 +7480,8 @@ ${captureControlsHtml().prependIndent("          ")}
     val suffix = querySuffix(queryString(token, sessionId = null, isPublic = isPublic))
     val sample = WebEscaping.htmlEscape(seed?.text ?: PLAYGROUND_SAMPLE)
     val fileName = seed?.fileName ?: "Snippet.kt"
-    // A seed names its own catalog; a catalog-page link names one without any source. Either way it
-    // only wins if this host actually offers it — a link built before a catalog loaded (or against
-    // one whose backend this host can't render) falls back to the first entry rather than
-    // preselecting something the Run button would refuse.
+    // A seed or catalog link only wins if this host offers that catalog; otherwise fall back to the
+    // first entry.
     val handoffCatalog = seed?.catalog ?: preselectCatalog
     // Two ways this host can offer the named catalog: as the selector's own entry for it, or as the
     // pinned default (which the selector reports under the anonymous id `""`).
@@ -8983,12 +7497,8 @@ ${captureControlsHtml().prependIndent("          ")}
           .takeIf { it >= 0 && system in pinnedCatalogSystems }
     }
     val selectedIndex = wantedIndex ?: 0
-    // A host that pins its bundles and offers no runtime choice renders exactly the bar it always
-    // did — one Mode select — rather than a one-entry "Catalog" control that decides nothing.
-    // Everything else gets the control, including the two states where the list is momentarily
-    // uninteresting: empty (nothing has loaded yet) and pin-only under [catalogSelectorEnabled].
-    // Both fill in from the script's refresh, and the script can only fill in a control that
-    // exists.
+    // A pinned host with no runtime choice keeps the single Mode select. Everything else gets the
+    // Catalog control, even when empty or pin-only, so the script's refresh has a control to fill.
     val showCatalogs =
       catalogSelectorEnabled ||
         catalogs.isEmpty() ||
@@ -9017,9 +7527,8 @@ ${captureControlsHtml().prependIndent("          ")}
           """<option value="$value"$selected>$label</option>"""
         }
         .joinToString("\n              ")
-    // Hand-indented to sit at the interpolation point's column (12) — a `trimIndent()`ed block
-    // would
-    // re-flush every line but the first back to column 0 in the emitted page.
+    // Hand-indented to the interpolation column (12); `trimIndent()` would flush later lines to
+    // column 0.
     val catalogRow =
       if (!showCatalogs) ""
       else
@@ -9031,10 +7540,8 @@ ${captureControlsHtml().prependIndent("          ")}
             "",
           )
           .joinToString("\n            ")
-    // "Nothing to compile against" has two causes that look identical from here — catalogs load in
-    // the background (transient, self-healing) and a catalog must verify as trusted *and* carry a
-    // liveBundle to back a compile (permanent, a config problem). Naming both beats leaving an
-    // operator staring at an empty selector wondering which one they have.
+    // An empty selector has two causes: catalogs still loading (transient) or none trusted with a
+    // liveBundle (configuration). Name both.
     val emptyNote =
       if (catalogs.isNotEmpty()) ""
       else
@@ -9044,16 +7551,10 @@ ${captureControlsHtml().prependIndent("          ")}
             fetched in the background after the server starts, so this usually clears on its own —
             but a catalog also has to verify as <strong>trusted</strong> and publish a live bundle
             before the playground will compile against it.</p>"""
-    // A handoff naming a catalog this host does not compile against. The link that built it is now
-    // withheld at the source ([ServeHttpServer.playgroundLinkFor]), so reaching this means a
-    // bookmark, a shared URL, or a hand-typed one — plus the genuinely transient case of a catalog
-    // that has not finished loading. Either way the previous behaviour was the worst of the three
-    // options: preselect the first entry, open the buffer, and let Run report a screen of
-    // unresolved references against a design system nobody chose. Say it before the visitor spends
-    // a compile finding out.
-    //
-    // Suppressed while the list is empty — [emptyNote] is already explaining that same state, and
-    // better ("this usually clears on its own").
+    // A handoff naming a catalog this host does not compile against (bookmark, shared or hand-typed
+    // URL, or one still loading; [ServeHttpServer.playgroundLinkFor] withholds such links). Say so
+    // before the visitor spends a compile. Suppressed while the list is empty, where [emptyNote]
+    // explains.
     val unavailableNote =
       if (handoffCatalog == null || wantedIndex != null || catalogs.isEmpty()) ""
       else {
@@ -9074,9 +7575,8 @@ ${captureControlsHtml().prependIndent("          ")}
             <code>${WebEscaping.htmlEscape(handoffCatalog)}</code>'s own types will not resolve.
             Pick another catalog above, or start from the sample.</p>"""
       }
-    // Says whose code is in the buffer, and is honest that it is a starting point: a preview file
-    // is ordinary module code and may reference siblings the catalog's bundle never exported, so
-    // "opened from" is the claim, not "this compiles".
+    // Says whose code is in the buffer, and only claims "opened from": a preview file may reference
+    // siblings the bundle never exported.
     val seedNote =
       if (seed == null) ""
       else {
@@ -9086,15 +7586,11 @@ ${captureControlsHtml().prependIndent("          ")}
                 WebEscaping.htmlEscape(seed.fileName)
               }</a>"""
           } ?: WebEscaping.htmlEscape(seed.fileName)
-        // Which of the three it is matters to a reader, and they promise different things. A
-        // cleaned seed is usage code — the catalog's annotations, sticker frame, click tally and
-        // knobs resolved away — so it may say "ready to Run"; the other two may not.
+        // The three seed kinds promise different things: only a cleaned seed (annotations, frame,
+        // tally and knobs resolved away) may say "ready to Run".
         if (seed.cleaned && !seed.scaffoldsDeclared) {
-          // Cleaned, but by the generic rules alone: this catalog has not said what its own helpers
-          // mean, so only the shared annotations came off and its `Sticker`/`counted`/knob calls
-          // are
-          // still in the buffer. Claiming "the sticker frame and knobs are gone, press Run" here
-          // would be describing a different seed than the one on screen.
+          // Cleaned by the generic rules only: this catalog's own helpers (`Sticker`, `counted`,
+          // knobs) are still in the buffer.
           """
 
           <p id="pg-seed" class="cp-sub">Opened from $where — <code>${
@@ -9208,9 +7704,8 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * Drives the playground editor: POST the snippet + mode, render the diagnostics/first-frame, and
-   * surface the `/pg/<token>` (live) or `/d/<id>` (Remote Compose) handoff link. Kept
-   * dependency-free (no bundle) so the page is one self-contained document.
+   * Drives the playground editor: POST snippet + mode, render diagnostics/first frame, and surface
+   * the `/pg/<token>` or `/d/<id>` handoff link. Dependency-free so the page is self-contained.
    */
   private fun playgroundScript(
     querySuffix: String,
@@ -9725,10 +8220,7 @@ ${captureControlsHtml().prependIndent("          ")}
     token: String,
     isPublic: Boolean,
     unfurl: UnfurlMetadata? = null,
-    /**
-     * Running server version (`SERVE_VERSION`), shown in the minimal footer. Null omits the build
-     * span.
-     */
+    /** Running server version (`SERVE_VERSION`) for the footer. Null omits the build span. */
     version: String? = null,
   ): String {
     val suffix =
@@ -9769,8 +8261,8 @@ ${captureControlsHtml().prependIndent("          ")}
     }
 
   /**
-   * One ingested document as the permalink page shows it — the display facts only, so this page
-   * never touches [ServeDocStore]'s bytes or clock (and the fixtures can build one by hand).
+   * One ingested document's display facts for the permalink page, so the page never touches
+   * [ServeDocStore]'s bytes or clock.
    */
   data class DocView(
     val id: String,
@@ -9795,13 +8287,11 @@ ${captureControlsHtml().prependIndent("          ")}
   )
 
   /**
-   * `GET /docs` — the **upload surface** for known document formats: drop a Remote Compose `.rc` or
-   * a Lottie JSON (or paste a link to one, when the host allows URL fetches) and get back an
-   * expiring permalink to hand to someone else.
+   * `GET /docs`: the upload surface for known formats — drop a Remote Compose `.rc` or a Lottie
+   * JSON (or paste a link, when URL fetches are allowed) and get an expiring permalink.
    *
-   * Progressive-ish: the drop zone is a real `<input type="file">` inside a `<form>`, and the
-   * script turns the submit into a `fetch` so the resulting link can be shown (and copied) in
-   * place. No upload happens without an explicit pick/drop.
+   * The drop zone is a real `<input type="file">` in a `<form>`; the script turns submit into a
+   * `fetch` to show the link in place. Nothing uploads without an explicit pick/drop.
    */
   fun docUploadPage(
     token: String,
@@ -9810,10 +8300,7 @@ ${captureControlsHtml().prependIndent("          ")}
     /** Whether `?url=` fetches are permitted here (the SSRF allowlist is non-empty). */
     urlUploadAllowed: Boolean,
     unfurl: UnfurlMetadata? = null,
-    /**
-     * Running server version (`SERVE_VERSION`), shown in the minimal footer. Null omits the build
-     * span.
-     */
+    /** Running server version (`SERVE_VERSION`) for the footer. Null omits the build span. */
     version: String? = null,
   ): String {
     val query = queryString(token, sessionId = null, isPublic = isPublic)
@@ -9866,10 +8353,9 @@ ${captureControlsHtml().prependIndent("          ")}
     default.contains('\n') || default.length > LONG_TEXT_KNOB_CHARS
 
   /**
-   * The preview the A2UI playground drives: the first one declaring a **string** knob named
-   * [A2UI_DOCUMENT_KNOB]. Null when the catalog has none, which is what makes `/{system}/a2ui` a
-   * 404 there. Keyed on the declaration rather than a preview id so a catalog can move or rename
-   * its playground preview without this server learning about it.
+   * The preview the A2UI playground drives: the first declaring a **string** knob named
+   * [A2UI_DOCUMENT_KNOB]. Null makes `/{system}/a2ui` a 404. Keyed on the declaration so catalogs
+   * can rename the preview freely.
    */
   fun a2uiDocumentPreview(previews: List<ServePreview>): ServePreview? =
     previews.firstOrNull { preview ->
@@ -9877,9 +8363,8 @@ ${captureControlsHtml().prependIndent("          ")}
     }
 
   /**
-   * [a2uiDocumentPreview], or the preview [requested] names when it declares the knob — how the
-   * playground opens on one sample's payload rather than the catalog's first document preview. A
-   * requested id that does not declare it is null, not a silent fallback to another preview.
+   * [a2uiDocumentPreview], or [requested] when it declares the knob. A requested id that doesn't is
+   * null, not a fallback.
    */
   fun a2uiDocumentPreview(previews: List<ServePreview>, requested: String?): ServePreview? =
     if (requested.isNullOrBlank()) a2uiDocumentPreview(previews)
@@ -9894,12 +8379,11 @@ ${captureControlsHtml().prependIndent("          ")}
     }
 
   /**
-   * `GET /{system}/a2ui`: edit an A2UI document and render it through the catalog's own renderer.
+   * `GET /{system}/a2ui`: edit an A2UI document and render it through the catalog's renderer.
    *
-   * A textarea prefilled with the preview's declared default, POSTed as `knob.document` to `POST
-   * <base>/render/<id>.png` — a document is kilobytes, which a GET query cannot carry. The PNG
-   * comes back as a blob URL; a refusal is shown in place with what to do about it. Ctrl/Cmd+Enter
-   * renders, and so does a pause in typing when auto-render is ticked.
+   * The textarea is prefilled with the declared default and POSTed as `knob.document` to
+   * `<base>/render/<id>.png` (too large for a GET). The PNG is shown via a blob URL; refusals are
+   * shown in place. Ctrl/Cmd+Enter renders, as does a typing pause with auto-render ticked.
    */
   fun a2uiPlaygroundPage(
     moduleLabel: String,
@@ -10032,19 +8516,13 @@ ${captureControlsHtml().prependIndent("          ")}
       .trimIndent()
 
   /**
-   * `GET /admin/ui-builder`: the operator's screen over every UI-builder design on the host.
+   * `GET /admin/ui-builder`: the operator's view over every UI-builder design on the host.
    *
-   * The list and the delete both go through the JSON routes under `/admin/ui-builder/designs`,
-   * carrying the admin token in the
-   * [ee.schimke.composeai.cli.serve.ServeHttpServer.ADMIN_TOKEN_HEADER] header — the page only ever
-   * sees the token a browser opened it with (`?token=`), and re-sends that. It is the one admin
-   * route that reads the query form, and only to open the page: the script removes `token` from the
-   * address bar on load, and the navigation links do not carry it, so the credential goes no
-   * further than the request that delivered it. No token in the URL means the page renders but
-   * every call answers 404, which the script says in place rather than showing an empty host.
-   *
-   * Delete is a confirm-then-DELETE: there is no soft delete and no undo on the service, so the
-   * prompt names the design and its owner before the request is made.
+   * List and delete go through the JSON routes under `/admin/ui-builder/designs` with the
+   * [ee.schimke.composeai.cli.serve.ServeHttpServer.ADMIN_TOKEN_HEADER] header, re-sending the
+   * `?token=` the page was opened with. The script strips `token` from the address bar on load and
+   * links don't carry it. Without a token every call 404s, which the page says. Delete is
+   * confirm-then-DELETE (no undo), naming the design and owner.
    */
   fun uiBuilderAdminPage(
     adminToken: String?,
@@ -10105,11 +8583,8 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * Drives the second table: the designs the configured projects are working on, and opening one.
-   *
-   * Its own function and its own `<script>` rather than a branch inside the first: the two tables
-   * fail independently — a project's unreachable branch must leave the host's own design list
-   * working — and keeping the state separate is what makes that true rather than merely intended.
+   * Drives the second table (the configured projects' designs). A separate `<script>` so the two
+   * tables fail independently.
    */
   private fun uiBuilderLibraryScript(adminToken: String?): String =
     """
@@ -10201,8 +8676,8 @@ ${captureControlsHtml().prependIndent("          ")}
       .trimIndent()
 
   /**
-   * Drives the admin page: fetch the design list, render rows, download one design's stored
-   * document, confirm-then-DELETE a design.
+   * Drives the admin page: fetch the design list, render rows, download a stored document,
+   * confirm-then-DELETE.
    */
   private fun uiBuilderAdminScript(adminToken: String?, readOnly: Boolean): String =
     """
@@ -10486,30 +8961,24 @@ ${captureControlsHtml().prependIndent("          ")}
       .trimIndent()
 
   /**
-   * `GET /d/<id>` — the **expiring permalink page** for one ingested document: the document itself,
-   * played back client-side by its format's vendored player, plus what the server could read out of
-   * it and how long the link has left.
+   * `GET /d/<id>`: the expiring permalink page for one ingested document — played client-side by
+   * its format's vendored player, with what the server read from it and how long the link has left.
    */
   fun docPage(
     doc: DocView,
     token: String,
     isPublic: Boolean,
     unfurl: UnfurlMetadata? = null,
-    /**
-     * Running server version (`SERVE_VERSION`), shown in the minimal footer. Null omits the build
-     * span.
-     */
+    /** Running server version (`SERVE_VERSION`) for the footer. Null omits the build span. */
     version: String? = null,
     /**
-     * The CMP Wasm player's page (`/rc-player-wasm/index.html`) when this host serves one
-     * (`--rc-player-wasm-dir`), else null. Non-null on an `.rc` permalink adds the player toggle:
-     * the same bytes, played by the vendored TypeScript player or by the Compose Multiplatform one.
+     * The CMP Wasm player page (`/rc-player-wasm/index.html`) when served (`--rc-player-wasm-dir`),
+     * else null. Non-null adds that player to the `.rc` toggle.
      */
     cmpWasmPlayerPath: String? = null,
     /**
-     * The server-side players this host can draw the document with, each answering at its own
-     * render path (`/d/<id>/render.png?rcPlayer=<id>`). Each adds a lane to the `.rc` permalink's
-     * toggle beside the browser players; empty leaves the toggle to those.
+     * Server-side players for this document, each at `/d/<id>/render.png?rcPlayer=<id>`; each adds
+     * a lane to the `.rc` toggle.
      */
     serverPlayers: List<DocServerPlayer> = emptyList(),
   ): String {
@@ -10526,14 +8995,11 @@ ${captureControlsHtml().prependIndent("          ")}
       }
     val rawUrl = doc.rawPath + suffix
     val isRemoteComposeDoc = doc.formatId == ServeDocFormats.REMOTE_COMPOSE.id
-    // Only the Remote Compose lane paints into a canvas the vendored faces matter for; the Lottie
-    // player draws SVG and its page is byte-identical to before.
-    // An `.rc` permalink loads only the font preloader. Emitted BEFORE the inline player script,
-    // which reads the global as it starts the lane; this page has no Vue controls.
+    // Only the Remote Compose canvas needs the vendored faces; the Lottie page is unchanged.
+    // The font preloader comes before the inline player script, which reads its global on start.
     val rcFontsScript =
       if (isRemoteComposeDoc) scriptTag("remote-compose.js") + "\n        " else ""
-    // Only a Remote Compose document has players to choose between, and only a host with a second
-    // one — the CMP Wasm player, or a server-side player — offers the choice. Same segmented shape
+    // The player choice appears only for `.rc` documents on a host with a second player. Same shape
     // and ids as the viewer's `rcPlayer=` lanes.
     val lanes =
       if (!isRemoteComposeDoc) emptyList()
@@ -10601,9 +9067,7 @@ ${captureControlsHtml().prependIndent("          ")}
     )
   }
 
-  /**
-   * The `rcPlayer=` ids the `.rc` permalink's toggle switches between, as the viewer names them.
-   */
+  /** The `rcPlayer=` ids the `.rc` toggle switches between, named as in the viewer. */
   private const val DOC_PLAYER_JS = "camaelon-js"
   private const val DOC_PLAYER_CMP_WASM = "cmp-wasm"
 
@@ -10628,9 +9092,8 @@ ${captureControlsHtml().prependIndent("          ")}
   )
 
   /**
-   * A lane's element beside the canvas, sized like it and loaded only when first chosen: the CMP
-   * Wasm bundle is tens of megabytes, and a server-side render costs a worker, neither of which a
-   * reader who never switches should pay for.
+   * A lane's element beside the canvas, loaded only when first chosen (the CMP Wasm bundle is tens
+   * of MB; a server render costs a worker).
    */
   private fun docLaneElement(doc: DocView, lane: DocLane): String {
     val size = "width=\"${doc.width ?: 512}\" height=\"${doc.height ?: 512}\""
@@ -10650,17 +9113,14 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The `.rc` permalink's player toggle. The TypeScript lane is the page as it always was; every
-   * other lane is an element beside its canvas, pointed at its source the first time it is chosen —
-   * the CMP Wasm player's page with `?src=` the same `/d/<id>/raw` bytes (told apart by its
-   * readiness messages, docs/design/RC_PLAYER_EMBED.md in rc-players), or a server-side player's
-   * `/d/<id>/render.png?rcPlayer=…`. The choice rides the URL as `rcPlayer=`, so a shared link
-   * opens on the player it was shared from.
+   * The `.rc` permalink's player toggle. The TypeScript lane is the default; other lanes are
+   * elements pointed at their source on first choice — the CMP Wasm page with `?src=` the
+   * `/d/<id>/raw` bytes (see docs/design/RC_PLAYER_EMBED.md in rc-players) or
+   * `/d/<id>/render.png?rcPlayer=…`. The choice rides the URL as `rcPlayer=`.
    *
-   * Each lane reports into its own status line, and only the selected one is shown: the TypeScript
-   * lane starts on load whatever is selected, and its `done()` / `fail()` would otherwise land on
-   * another lane's status — usually first, since its bundle is far smaller. A CMP frame that never
-   * reports (a missing or incompatible bundle) times out like the viewer's own cmp-wasm lane.
+   * Each lane has its own status line and only the selected one shows, since the TypeScript lane
+   * always starts on load. A CMP frame that never reports times out like the viewer's cmp-wasm
+   * lane.
    */
   private fun docPlayerToggleScript(rawUrl: String, querySuffix: String): String =
     """
@@ -10754,9 +9214,8 @@ ${captureControlsHtml().prependIndent("          ")}
     }
 
   /**
-   * Load the format's player bundle, fetch the document, and mount it. The per-format mount is the
-   * one place formats differ on this page; everything around it (load, error reporting, the stage)
-   * is shared, and the bundle URL comes from the registry rather than being written in here.
+   * Load the format's player bundle (URL from the registry), fetch the document and mount it; only
+   * the mount differs per format.
    */
   private fun docPlayerScript(doc: DocView, rawUrl: String): String {
     val mount =
@@ -10772,11 +9231,9 @@ ${captureControlsHtml().prependIndent("          ")}
           """
             .trimIndent()
         else ->
-          // The vendored generic-family faces must be *loaded*, not merely declared, before the
-          // player paints: canvas silently falls back for an unloaded face and never repaints
-          // (see `cli/serve-web/src/rcFonts.ts`). `cpRcFonts` is absent only if the component
-          // bundle failed to load, in which case the lane still renders — in the fallback face, as
-          // it did before.
+          // The vendored faces must be loaded before the player paints: canvas falls back for an
+          // unloaded face and never repaints (`cli/serve-web/src/rcFonts.ts`). `cpRcFonts` is
+          // absent only if the bundle failed, and then the fallback face is used.
           """
           var fonts = window.cpRcFonts ? window.cpRcFonts.ready() : Promise.resolve();
           Promise.all([fonts, fetch(raw).then(function (r) { return r.arrayBuffer(); })]).then(function (r) {
@@ -10834,18 +9291,14 @@ ${captureControlsHtml().prependIndent("          ")}
   private fun jsString(value: String): String =
     JsonPrimitive(value)
       .toString()
-      // JSON quoting is not enough inside an inline `<script>`: the HTML parser ends the element at
-      // the first literal `</script>` regardless of JS string context, so a value carrying one
-      // would
-      // close the script and let the rest render as markup. `<` is the same character to
-      // `JSON.parse` and to a JS string literal, and can never form a tag.
+      // JSON quoting is not enough in an inline `<script>`: the parser ends the element at any
+      // literal `</script>`. Escaping `<` is equivalent for `JSON.parse` and can never form a tag.
       .replace("<", "\\u003c")
       .replace(">", "\\u003e")
 
   /**
-   * Encoder for data baked into a page as a JS string literal (the playground's catalog list). Not
-   * the HTTP wire encoder — this one is only ever read back by [jsString] + `JSON.parse`, so it
-   * stays compact and omits defaults exactly like the API's.
+   * Encoder for data baked into a page as a JS string literal (read back via [jsString] +
+   * `JSON.parse`). Compact and omits defaults, like the API's.
    */
   private val JSON_COMPACT = Json { encodeDefaults = true }
 
@@ -10889,10 +9342,8 @@ ${captureControlsHtml().prependIndent("          ")}
     /** Bounded rendered-preview cache occupancy for this catalog generation. */
     val renderCache: CatalogRenderCacheSnapshot? = null,
     /**
-     * The row's facts are a last-known snapshot of a catalog whose daemon is idle, not a live read
-     * (`/status` never resumes one). Rendered as a "last known" qualifier next to the trust badge,
-     * so an idle trusted catalog reads as trusted-and-idle instead of as a blank, untrusted-looking
-     * row.
+     * The row's facts are a last-known snapshot of an idle catalog (`/status` never resumes one),
+     * shown as a "last known" qualifier by the trust badge.
      */
     val stale: Boolean = false,
   )
@@ -10909,20 +9360,17 @@ ${captureControlsHtml().prependIndent("          ")}
   )
 
   /**
-   * One live **agent access grant** on the [statusPage] — see
+   * One live **agent access grant** on the [statusPage]; see
    * [docs/design/AGENT_ACCESS_GRANTS.md](../../../../../../../../docs/design/AGENT_ACCESS_GRANTS.md).
-   *
-   * Carries a [fingerprint] and never a token. This table's whole reason to exist is that a human
-   * can see what they have let in and end it; showing the credential would make the page itself a
-   * place a credential leaks from.
+   * Carries a [fingerprint], never a token, so the page cannot leak credentials.
    */
   data class StatusAgentGrant(
     val id: String,
     val fingerprint: String,
     val scopes: String,
     /**
-     * Pre-formatted capability list, or empty. Its own column rather than appended to [scopes]: a
-     * capability is not a rung, and a cell reading `preview, live, images` would say it was.
+     * Pre-formatted capability list, or empty. A separate column because capabilities are not rungs
+     * of [scopes].
      */
     val capabilities: String = "",
     val label: String,
@@ -10954,10 +9402,9 @@ ${captureControlsHtml().prependIndent("          ")}
   )
 
   /**
-   * The rendered model for the [statusPage] — pre-formatted so the page is a pure projection (and
-   * the golden fixture is deterministic). [summary] are the headline stat tiles; [config] is the
-   * effective-configuration grid; the three lists are the catalog / running-daemon / recent-failure
-   * tables.
+   * The pre-formatted model for [statusPage], so the page is a pure projection and the fixture
+   * deterministic. [summary] are stat tiles; [config] the configuration grid; the lists are the
+   * catalog, daemon and recent-failure tables.
    */
   data class StatusView(
     val version: String,
@@ -10975,27 +9422,19 @@ ${captureControlsHtml().prependIndent("          ")}
     val servers: List<StatusServer>,
     val failures: List<StatusFailure>,
     val renderFailures: List<StatusRenderFailure> = emptyList(),
-    /**
-     * Live agent grants and the requests waiting on a human. Empty on a server with the lane off,
-     * and the section is then omitted entirely rather than rendered empty — a table of nothing is
-     * noise on a page an operator scans for trouble.
-     */
+    /** Live agent grants and pending requests. The section is omitted when empty. */
     val agentGrants: List<StatusAgentGrant> = emptyList(),
     val agentGrantRequests: List<StatusAgentRequest> = emptyList(),
     /**
-     * Live grants this reader is not shown a row for, because they did not approve them (or are not
-     * an approver at all). Rendered as a count only: a row names logins.
+     * Live grants hidden from this reader because they didn't approve them; shown as a count only,
+     * since rows name logins.
      */
     val hiddenAgentGrants: Int = 0,
   )
 
   /**
-   * The `/status` section for agent access grants: what is live, what is waiting, and a revoke
-   * button per row.
-   *
-   * Omitted entirely when the lane is off and nothing is live or pending — an operator scanning
-   * this page for trouble should not have to read two empty tables to learn that a feature they
-   * never enabled is still off.
+   * The `/status` agent access section: live grants, pending requests, and a revoke button per row.
+   * Omitted when the lane is off and nothing is live or pending.
    */
   private fun agentGrantSectionHtml(
     view: StatusView,
@@ -11075,16 +9514,13 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * A styled **server status** page (`GET /status`): what this `serve` host publishes and its trust
-   * / liveness, which render daemons are up right now, the effective configuration, and any recent
-   * daemon startup failures. The same snapshot is available as JSON at `/status.json` (or
-   * `/status?format=json`) for a monitor or a Home Assistant REST sensor — this is its human face.
+   * A styled **server status** page (`GET /status`): published catalogs with trust/liveness,
+   * running render daemons, effective configuration, and recent daemon startup failures. JSON at
+   * `/status.json` (or `/status?format=json`).
    *
-   * [token] threads through the generated links exactly as the landing/home renderers do: a
-   * token-gated server ([StatusView.public] false) keeps `?token=` on the gated links
-   * (`/status.json` and each catalog `/<system>/`) so clicking them doesn't hit the intentional
-   * 404; a `--public` server drops it (the routes need none). The always-ungated `/version` /
-   * `/healthz` links stay bare either way.
+   * [token] is threaded like the landing pages: a gated server ([StatusView.public] false) keeps
+   * `?token=` on gated links (`/status.json`, `/<system>/`); `--public` drops it. `/version` and
+   * `/healthz` are always bare.
    */
   fun statusPage(
     view: StatusView,
@@ -11093,12 +9529,8 @@ ${captureControlsHtml().prependIndent("          ")}
     /** Running server version (`SERVE_VERSION`), shown in the minimal footer. */
     version: String? = null,
     /**
-     * The catalog whose colours and name this page wears, when it is served on a **top-level site**
-     * ([ServeSites]). A site hostname publishes one design system, so its `/status` and its 404 are
-     * that system's pages too — carrying the palette and the theme key here is what makes the
-     * *whole* hostname one skin rather than a themed catalog with unthemed chrome bolted beside it.
-     * Empty (the default) on the main host, where these pages belong to no catalog and keep the
-     * built-in chrome.
+     * The catalog whose colours and name this page wears on a **top-level site** ([ServeSites]), so
+     * `/status` and 404s match the hostname. Empty on the main host.
      */
     siteName: String = "",
     themeCss: String = "",
@@ -11204,21 +9636,10 @@ ${captureControlsHtml().prependIndent("          ")}
           val loadError = c.loadError?.let { "<div class=\"cp-muted\">${esc(it)}</div>" } ?: ""
           val themeOptimization =
             c.themeOptimization?.let { optimization ->
-              // Dirty renders are the case this row used to report as finished. They are warm and
-              // served, so `cached` counts them and `fullyOptimized` is true — but they were
-              // written by a DIFFERENT build, and the pass is still working through re-rendering
-              // them. A catalog that has adopted its predecessor's whole cache would otherwise
-              // read "themes optimized 10440/10440" while every one of those pixels came from a
-              // renderer that is no longer running, which is precisely the thing an operator
-              // checking this page needs to be told.
-              //
-              // Worded for what the count means rather than for the case that motivated it. An
-              // operator calling `regenerate` marks THIS build's renders dirty too, so "inherited"
-              // would be a false claim about where those pixels came from, and "re-rendering"
-              // asserts activity the pass may not have — the queue can be paused, or waiting on
-              // admission. Saying only that they are queued is true of both, and telling them
-              // apart would need the store to carry provenance per entry, which the timestamp
-              // boundary deliberately does not.
+              // Dirty renders are cached and served (so `fullyOptimized` is true) but were written
+              // by a different build or marked by `regenerate`, and are still queued for
+              // re-rendering; report them. Worded as "queued" since the store doesn't track
+              // provenance and the queue may be paused.
               val queued =
                 if (optimization.dirty > 0) " · ${optimization.dirty} awaiting re-render" else ""
               val failed = if (optimization.failed > 0) " · ${optimization.failed} failed" else ""
@@ -11226,11 +9647,8 @@ ${captureControlsHtml().prependIndent("          ")}
                 if (optimization.converged) {
                   "themes optimized ${optimization.cached}/${optimization.total}"
                 } else if (optimization.fullyOptimized) {
-                  // `failed` belongs here too, and this is the branch that needs it most. A
-                  // fully-warm catalog whose dirty re-renders keep failing is exactly the state the
-                  // dirty failure count was added to make visible: every target is cached, so
-                  // nothing else on the row moves, and without this the only signal was the meter's
-                  // colour.
+                  // `failed` matters most here: a fully-warm catalog whose dirty re-renders keep
+                  // failing shows nothing else moving.
                   "themes optimized ${optimization.cached}/${optimization.total}$failed$queued"
                 } else {
                   "theme optimization ${optimization.state} · " +
@@ -11374,10 +9792,8 @@ ${captureControlsHtml().prependIndent("          ")}
       $renderFailureSection
       """
         .trimIndent() +
-        // Appended rather than interpolated into the template: a lane that is off must leave this
-        // page byte-for-byte what it was, and an empty interpolation inside the block still leaves
-        // its own line behind — which the committed HTML fixture would then report as a diff on
-        // every server that never enabled the feature.
+        // Appended rather than interpolated so a disabled lane leaves no blank line in the
+        // committed fixture.
         agentGrantSection
 
     return document(
@@ -11402,15 +9818,13 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * What [bugReportPage] draws: the assembled report, plus the pieces the page needs to show the
-   * reporter what they are about to file.
+   * What [bugReportPage] draws: the assembled report plus what the page shows the reporter before
+   * filing.
    *
-   * [body] is [ServeBugReport]'s output for the settings the page was served at, so the form works
-   * with JS off — the title is the reporter's own, typed into the page's Summary field.
-   * [bodyTemplate] is the same body with [ServeBugReport.CLIENT_PLACEHOLDER] where the browser
-   * block goes, which the page script fills from `navigator` / `window`. [renderUrl], when present,
-   * is the token-stripped `/render` PNG of whatever the reporter was looking at — shown on the page
-   * as a thumbnail so "this is what I saw" is literal rather than described.
+   * [body] is [ServeBugReport]'s output for the served settings (works with JS off; the title is
+   * typed by the reporter). [bodyTemplate] has [ServeBugReport.CLIENT_PLACEHOLDER] for the browser
+   * block, filled by the page script. [renderUrl] is the token-stripped `/render` PNG of what the
+   * reporter was viewing, shown as a thumbnail.
    */
   data class BugReport(
     val action: String,
@@ -11419,33 +9833,20 @@ ${captureControlsHtml().prependIndent("          ")}
     val repo: String,
     val renderUrl: String? = null,
     /**
-     * The design reference [renderUrl] was compared against, when the reported page had one on the
-     * stage beside it — see [ServeBugReport.Page.referenceUrl].
-     *
-     * The page shows what the body carries and nothing else, so this is here for the same reason it
-     * is there: a report from the focused comparison embeds both outer panels, and a preview that
-     * showed one of them would have the page under-state its own report (#4765).
+     * The design reference [renderUrl] was compared against, if any
+     * ([ServeBugReport.Page.referenceUrl]); shown because the body embeds it.
      */
     val referenceUrl: String? = null,
     /** Present only when the visitor has a GitHub session on this server. */
     val login: String? = null,
-    /**
-     * The catalog the reported page belonged to, when it belonged to one. See [BugReportCatalog].
-     */
+    /** The catalog the reported page belonged to, if any. See [BugReportCatalog]. */
     val catalog: BugReportCatalog? = null,
   )
 
   /**
-   * The catalog the reporter was looking at, so [bugReportPage] can send a *catalog* bug to the
-   * right tracker by name instead of telling the reporter to go and find the link themselves.
-   *
-   * The page's second paragraph has always said "wrong pixels are the catalog's bug, not this
-   * server's — go back to the preview and use its report link". That is good advice from the front
-   * door of a multi-catalog host, where the server genuinely cannot know which catalog is meant. It
-   * is poor advice on a **top-level site** ([ServeSites]), which publishes exactly one catalog and
-   * is the shape most visitors meet: `wear.preview.coo.ee` is the Wear catalog and nothing else,
-   * the page they came from may be a design page or an index with no preview to go back to, and the
-   * repository that owns the pixels is a lookup the server can do for them.
+   * The catalog the reporter was looking at, so [bugReportPage] can route a catalog bug to the
+   * right tracker by name. Essential on a **top-level site** ([ServeSites]), which serves one
+   * catalog and whose pages may have no preview to go back to.
    */
   data class BugReportCatalog(
     /** Served system id, e.g. `wear-m3`. */
@@ -11463,24 +9864,15 @@ ${captureControlsHtml().prependIndent("          ")}
   )
 
   /**
-   * `GET /report-bug` — the preview server's own bug-report page.
+   * `GET /report-bug`: the server's own bug-report page.
    *
-   * **Why a page rather than a footer link straight to GitHub.** The per-preview report can be one
-   * click, because its whole body is facts the visitor is already looking at: a preview id, the
-   * overrides in the URL bar, a render on screen. A server report is not — it carries the JVM the
-   * daemon runs on, which catalogs failed to load, and what the render lanes have been doing, none
-   * of which is on any page. Shipping that to GitHub from a footer button would post a body the
-   * reporter has never read, on a public tracker, in their name. So the page's main job is to
-   * **show the report before it is filed**: the same markdown, rendered as the sections it will
-   * become, with a plain-text copy underneath. Pressing the button then files exactly what is on
-   * screen.
+   * A page rather than a direct GitHub link because the report carries server state (JVM, failed
+   * catalogs, lane activity) the reporter hasn't seen; the page shows the report before it is
+   * filed, and the button files exactly what is on screen.
    *
-   * The screenshot is deliberately two-sided. When the reporter came from a viewer the page embeds
-   * that preview's `/render` PNG, and the body carries it too (embedded when this host is publicly
-   * reachable, linked otherwise — the reachability rules live in [ServeIssueReport.isEmbeddable]).
-   * That covers "the render is wrong". It does **not** cover "the page is wrong", which is most
-   * server bugs, so the page also asks for a pasted screenshot of the whole window — the one thing
-   * the server cannot produce for itself and the browser gives away for free.
+   * When the reporter came from a viewer, the page and body include that preview's `/render` PNG
+   * (embedded or linked per [ServeIssueReport.isEmbeddable]). Page-level bugs need a pasted
+   * whole-window screenshot, which the page asks for.
    */
   fun bugReportPage(
     report: BugReport,
@@ -11494,10 +9886,9 @@ ${captureControlsHtml().prependIndent("          ")}
     navSuffix: String = "",
     canUploadCaptures: Boolean = false,
     /**
-     * The reported page is one an anonymous visitor could not open — a UI-builder or admin page, or
-     * any page of a token-gated host. Its captures are then uploaded only after the reporter ticks
-     * the opt-in `report-capture.js` shows, since the image URL is anonymous-read and the issue
-     * that links it is public.
+     * The reported page is not anonymously viewable (UI-builder/admin pages, or any page on a
+     * token-gated host), so captures upload only after the reporter ticks the opt-in: the image URL
+     * is anonymous-read and the issue public.
      */
     privateCaptures: Boolean = false,
   ): String {
@@ -11511,10 +9902,8 @@ ${captureControlsHtml().prependIndent("          ")}
         .joinToString("\n") { section ->
           val rows =
             section.rows.joinToString("\n") { (key, value) ->
-              // A blank key marks a LIST row (a failed catalog, a failure line) rather than a
-              // key/value one. It spans both columns instead of drawing an empty header cell —
-              // which reserved the key column's width and its rule, so a section that is really a
-              // list read as a table whose left half had gone missing.
+              // A blank key marks a list row (spanning both columns), so a list section doesn't
+              // render with an empty key column.
               if (key.isBlank()) "<tr><td colspan=\"2\">${esc(value)}</td></tr>"
               else "<tr><th scope=\"row\">${esc(key)}</th><td>${esc(value)}</td></tr>"
             }
@@ -11522,10 +9911,9 @@ ${captureControlsHtml().prependIndent("          ")}
             "<div class=\"cp-status-scroll\"><table class=\"cp-table cp-report-facts\">" +
             "<tbody>\n$rows\n</tbody></table></div>"
         }
-    // Whatever the reporter captured on the page they came from, carried here in `sessionStorage`
-    // and rendered by `report-capture.js` — see [captureControlsHtml]. Server-rendered as an
-    // empty mount rather than left entirely to the script, so the section has a fixed place in the
-    // page and the "nothing came across" wording is written here with the rest of the page's prose.
+    // Captures from the previous page arrive via `sessionStorage` and are rendered by
+    // `report-capture.js` ([captureControlsHtml]). Server-rendered as an empty mount so the section
+    // and its "nothing came across" wording have a fixed place.
     val scopeAttr = if (privateCaptures) " data-cp-capture-scope=\"private\"" else ""
     val captures =
       """
@@ -11539,12 +9927,8 @@ ${captureControlsHtml().prependIndent("          ")}
       </div>
       """
         .trimIndent()
-    // What this host can actually do with a capture, said before the reporter takes one. The
-    // unconditional "…and embedded in the report automatically" was false on every host that does
-    // not admit the visitor to the image lane — which is every public one, since the lane gates on
-    // a signed-in login with access to the image repository. There the picture only ever reaches
-    // the issue by being pasted, and nothing on the page said so until the reporter had already
-    // opened a screenshot-less issue in another tab (#556).
+    // Says up front whether this host can embed a capture. Public hosts don't admit visitors to the
+    // image lane, so there the picture must be pasted into the issue.
     val screenshotProse =
       if (canUploadCaptures && privateCaptures)
         """
@@ -11580,10 +9964,8 @@ ${captureControlsHtml().prependIndent("          ")}
     val reference = report.referenceUrl?.takeIf { it.isNotBlank() }
     val shot =
       when {
-        // A comparison's two outer panels, in the order that page draws them. The prose changes
-        // with them: what is missing here is no longer "everything the browser composes" but one
-        // specific panel — the diff — and saying which is what tells the reporter whether a
-        // capture is still worth taking (#4765).
+        // A comparison's two outer panels, in page order; the prose then names the diff as the only
+        // missing panel.
         render != null && reference != null ->
           "\n      <p class=\"cp-status-sec\">The pair you were comparing</p>\n" +
             "      <p class=\"cp-sub\">Both are included in the report, live, so they follow the " +
@@ -11605,9 +9987,8 @@ ${captureControlsHtml().prependIndent("          ")}
             "report is about\" loading=\"lazy\">"
         else -> ""
       }
-    // Where a *catalog* bug belongs. Named and linked when the server knows the catalog — always,
-    // on a top-level site — and left as the generic "go back to the preview" advice when it does
-    // not. See [BugReportCatalog] for why the generic wording is wrong on a one-catalog hostname.
+    // Where a catalog bug belongs: named and linked when the catalog is known (always on a
+    // top-level site), else generic advice. See [BugReportCatalog].
     val catalog = report.catalog
     val elsewhere =
       (when {
@@ -11643,9 +10024,8 @@ ${captureControlsHtml().prependIndent("          ")}
             reaches people who cannot fix it.</p>
           """
         })
-        // Re-indented to the template's own level: the outer `trimIndent()` runs on the string
-        // AFTER substitution, so a block pasted in at column 0 would make the common indent 0 and
-        // leave every other line of the page's markup indented.
+        // Re-indented to the template's level: `trimIndent()` runs after substitution, so a
+        // column-0 block would zero the common indent.
         .trimIndent()
         .replace("\n", "\n      ")
     val body =
@@ -11743,21 +10123,12 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * Per-system **display policy** — the single source of truth for what background surface each
-   * published design system should use on the public server, so "does this system want a dark
-   * stage?" is answered in ONE place instead of an ad-hoc `startsWith("wear")` check scattered
-   * through the page renderers. Keyed by the served system id (the `/<system>` path mount, e.g.
-   * `wear-m3`, `confetti-wear`).
+   * Per-system **display policy**: the single answer to "does this system want a dark stage?",
+   * keyed by the served system id (e.g. `wear-m3`, `confetti-wear`).
    *
-   * A system is **dark-first** when it targets a dark-first platform — Wear OS is
-   * black-watch-face-first, so a light-on-transparent Wear sticker on the default white stage reads
-   * with unreadable content.
-   *
-   * The authoritative signal is what the **catalog itself declares** (`catalog.json`'s
-   * `display.surface`, from the spec) — pass it to [resolveDarkFirst]. Only when a catalog declares
-   * nothing does this fall back to [isDarkFirst], a generic Wear/watch id heuristic (token match,
-   * so `confetti-wear` hits as well as `wear-m3`) — a best-effort default, not a hardcoded per-app
-   * list.
+   * Dark-first systems target dark-first platforms like Wear OS. The catalog's declared
+   * `display.surface` is authoritative ([resolveDarkFirst]); only without one does [isDarkFirst]'s
+   * Wear/watch id heuristic apply.
    */
   object SystemDisplay {
     /**
@@ -11766,10 +10137,9 @@ ${captureControlsHtml().prependIndent("          ")}
     private val wearIdPattern = Regex("(^|[-_])(wear|watch)([-_]|$)")
 
     /**
-     * Whether [system] targets Wear OS, from the served id alone. Drives the platform-shaped bits
-     * of the viewer that are true of a watch regardless of surface colour — the watch device
-     * profiles in a screen's size picker, and the absence of an orientation control. Generic (any
-     * Wear/watch system), never per-app.
+     * Whether [system] targets Wear OS from its id alone. Drives watch-shaped viewer bits
+     * regardless of surface colour: watch device profiles in the size picker and no orientation
+     * control.
      */
     fun isWearOs(system: String): Boolean {
       val s = system.trim('/').lowercase()
@@ -11778,20 +10148,15 @@ ${captureControlsHtml().prependIndent("          ")}
     }
 
     /**
-     * Fallback dark-first guess from the system id alone, for a catalog that declares no
-     * `display.surface`: a Wear system is black-watch-face-first, so [isWearOs] *is* the guess.
-     * Kept as its own name because a future non-Wear dark-first platform belongs here, not in
-     * [isWearOs].
+     * Fallback dark-first guess from the id when no `display.surface` is declared. Separate from
+     * [isWearOs] so another dark-first platform could be added here.
      */
     fun isDarkFirst(system: String): Boolean = isWearOs(system)
 
     /**
      * Wear/watch renders have no day mode; discard a generic UI's accidental light override.
-     *
-     * Applied to the RAW parameter map — before [ServeOverrides.parse] — so every lane (render,
-     * storybook iframe, and both socket lanes) drops the override at one point, and a dropped
-     * `uiMode` never reaches the daemon as a distinct cache key. There is deliberately no
-     * post-parse twin of this: two normalizers at two layers is how one of them ends up dead.
+     * Applied to the raw parameter map before [ServeOverrides.parse], so every lane drops it at one
+     * point and it never becomes a distinct cache key.
      */
     fun normalizeOverrideParams(
       system: String,
@@ -11799,9 +10164,8 @@ ${captureControlsHtml().prependIndent("          ")}
     ): Map<String, String> = if (isDarkFirst(system)) overrides - "uiMode" else overrides
 
     /**
-     * Resolve whether [system] draws on a DARK stage, preferring the catalog's declared
-     * [surface][declaredSurface] (`"light"`/`"dark"`) and falling back to the [isDarkFirst] id
-     * heuristic only when the catalog declared nothing.
+     * Whether [system] draws on a dark stage: the catalog's declared [surface][declaredSurface]
+     * (`"light"`/`"dark"`), else the [isDarkFirst] heuristic.
      */
     fun resolveDarkFirst(system: String, declaredSurface: String?): Boolean =
       when (declaredSurface?.trim()?.lowercase()) {
@@ -11822,15 +10186,10 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * Pick a **meaningful** representative preview from a catalog's previews for the home index — the
-   * most recognisable, default-state render rather than an arbitrary (often alphabetically first)
-   * edge case. The primary rule is **prefer a real screen** (the most representative view of an
-   * *app*): when the catalog carries any `Screens`-section preview, a screen always wins over a
-   * single component — so an app like Confetti fronts a conference screen while a component library
-   * (compose-m3, no screens) falls straight through to its component hero. Within that, scores
-   * each: a non-default state (disabled/pressed/…) is pushed down; light beats dark; a canonical
-   * button/filled hero is preferred. Ties break on the id so the choice is deterministic (stable
-   * goldens). Null when there are no previews.
+   * Pick a representative preview from a catalog for the home index. A `Screens`-section preview
+   * always beats a component (apps front a screen; component libraries fall through). Then scoring:
+   * non-default states down, light over dark, a button/filled hero preferred. Ties break on id for
+   * stable goldens. Null when empty.
    */
   fun representativePreviewId(previews: List<ServePreview>): String? {
     val usable = previews.filter { it.renderFailure == null }
@@ -11851,9 +10210,8 @@ ${captureControlsHtml().prependIndent("          ")}
     // A preview is a "screen" when its catalog section says so (the reliable signal), else when its
     // id/label reads like one — so a screen wins the hero even before section metadata exists.
     val anyScreen = usable.any { isScreenPreview(it) }
-    // A screen id that reads like the app's primary/landing view (its conference/home/schedule/…),
-    // preferred among screens so an app fronts its main screen rather than an alphabetically-first
-    // secondary one (e.g. Confetti leads with the conference screen, not bookmarks).
+    // A screen id that reads like the app's primary view (conference/home/schedule/…), preferred
+    // among screens.
     val primaryScreen =
       listOf("conference", "home", "main", "schedule", "sessions", "overview", "start", "today")
     fun score(p: ServePreview): Int {
@@ -11876,32 +10234,22 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * How long a press has to be held on a catalog card before it means "start a live session here"
-   * rather than "open this preview". Long enough not to fire on a tap or the start of a scroll,
-   * short enough to feel like a press rather than a wait — the same ~half-second Android's own
-   * long-press uses.
+   * How long a catalog card must be held to start a live session instead of opening the preview —
+   * about Android's own long-press timeout.
    */
   const val LONG_PRESS_HOLD_MS: Int = 500
 
   /**
-   * The grid's **long-press live lane**: hold a card and its preview starts streaming from the
-   * session's render daemon in place, inside the card, instead of navigating to the viewer.
+   * The grid's **long-press live lane**: hold a card to stream its preview from the session's
+   * daemon in place.
    *
-   * This emits the browser side's configuration and the `<cp-catalog-live>` element that reads it.
-   * The per-card preview ids ride in a **server-emitted object literal**, in the grid's document
-   * order, rather than being read back off `data-` attributes — the same rule the themed-render
-   * URLs follow, so no id this page turns into a socket URL originates as DOM text. Each entry
-   * carries the card's light and dark ids (identical for a single-variant card, empty for one the
-   * session can't stream), so a card swapped to its dark render goes live on what is actually on
-   * screen.
+   * Emits the configuration and the `<cp-catalog-live>` element. Preview ids are a server-emitted
+   * object literal in grid order, not read from `data-` attributes, so no socket URL originates as
+   * DOM text. Each entry carries light and dark ids (identical for single-variant cards, empty when
+   * unstreamable), so a swapped card streams what's on screen.
    *
-   * The tag comes AFTER the config, so the element finds it the moment it upgrades; the components
-   * bundle is already loaded by then (it precedes the filter script above). The element defers to
-   * `DOMContentLoaded` if it upgrades early anyway, so the order is a nicety rather than a
-   * dependency.
-   *
-   * Empty — no config, no tag — when no card can stream, which is every static bundle and every
-   * baked-only catalog. Those pages are byte-for-byte what they always were.
+   * The tag follows the config (the element also defers to `DOMContentLoaded`). Empty when no card
+   * can stream.
    */
   private fun catalogLiveScript(
     basePath: String,
@@ -11931,195 +10279,149 @@ ${captureControlsHtml().prependIndent("          ")}
     trust: String? = null,
     isPublic: Boolean = false,
     /**
-     * Whether this server publishes a front-door home index (`/`) to link back to — true when it
-     * serves ANY catalog, listed (`--catalogs`) OR unlisted app (`--catalogs-unlisted`). Gates the
-     * "← All design systems" back button, so an app-only server's landings still link home. False
-     * (default) for a plain single-module `serve` with no index, which shows no back button.
+     * Whether this server has a front-door index (`/`) to link back to — true when it serves any
+     * listed or unlisted catalog. Gates the "← All design systems" button.
      */
     hasHomeIndex: Boolean = false,
     /**
-     * URL prefix for this session's own links (`/<system>` when served under a path, empty for the
-     * root-mounted default/legacy session). Card/render/zip links are prefixed with it and drop the
-     * `&session=` param (the path carries the session). Empty ⇒ links are exactly as before.
+     * URL prefix for this session's links (`/<system>`, or empty when root-mounted). Prefixed links
+     * drop `&session=`, since the path carries it.
      */
     basePath: String = "",
     /**
-     * Whether this session can compare a render against its SVG export — gates the "compare SVG"
-     * action, which deep-links the comparison page's `svg` format.
+     * Whether this session can compare against its SVG export (gates "compare SVG", `svg` format).
      */
     hasSvgComparison: Boolean = false,
     /**
-     * Whether this session can compare a render against Remote Compose output — gates the "compare
-     * RC players" action, which deep-links the comparison page's `rc` format.
+     * Whether this session can compare against Remote Compose output (gates "compare RC players",
+     * `rc` format).
      */
     hasRcComparison: Boolean = false,
     /**
-     * Whether this session can compare a render against its design references — gates the "compare
-     * to Figma" action, which deep-links the comparison page's `reference` format. Named after the
-     * design tool ([designToolLabel]) for the same reason the other two are named after their
-     * formats: the chip says what it puts side by side.
+     * Whether this session can compare against its design references (gates "compare to Figma",
+     * `reference` format), labelled via [designToolLabel].
      */
     hasReferenceComparison: Boolean = false,
     /**
-     * Whether this catalog has a parity index to link to — it maps at least one preview to a design
-     * reference, or it publishes a `parity/activity.json` feed. False (the default) omits the link
-     * entirely rather than offering a page of zeroes, so a plain module / an unmapped catalog's
-     * landing is unchanged.
+     * Whether this catalog has a parity index to link to: at least one preview mapped to a
+     * reference, or a `parity/activity.json` feed. False omits the link.
      */
     hasParityView: Boolean = false,
     /**
-     * What this catalog's PAIRED implementation is called ("M3 Wear OS Apps Design Kit"), when it
-     * declares one — the `parallel` baseline, and the comparison a Remote Compose catalog is most
-     * often opened for. Null or blank (the default) omits the chip, so a catalog that declares no
-     * `compareWith` pairing keeps exactly the actions it had.
-     *
-     * It had no chip at all until now: the landing offered `svg`, `rc` and `reference` and left the
-     * one comparison against a sibling catalog reachable only by switching format on the wall. See
+     * The paired implementation's name (e.g. "M3 Wear OS Apps Design Kit") when the catalog
+     * declares a `compareWith` pairing — the `parallel` baseline. Null or blank omits the chip. See
      * `docs/design/COMPARE_NAVIGATION.md`, §1.
      */
     parallelComparisonLabel: String? = null,
     /**
-     * How many motion captures this catalog publishes, across every preview — the count behind the
-     * "motion" action, and the gate on whether it appears at all. Zero (the default) omits it, so a
-     * catalog that records nothing is unchanged and no visitor is offered an empty page.
-     *
-     * A count rather than a boolean because one recording and thirty are different offers, the same
-     * reasoning the pages chip carries its count for.
+     * Motion captures this catalog publishes across all previews; zero omits the "motion" action. A
+     * count because one and thirty are different offers.
      */
     motionCaptureCount: Int = 0,
     /**
-     * The design pages this catalog publishes ([ServeDesignPages]), in publication order. Listed by
-     * name in the navigation tree ([pagesBranchHtml]); a catalog with no tree to put them in falls
-     * back to a header action chip. Empty (the default) offers neither, so a catalog that publishes
-     * no pages is unchanged.
+     * The design pages this catalog publishes ([ServeDesignPages]), in publication order, listed in
+     * the navigation tree ([pagesBranchHtml]) or, without a tree, as a header chip. Empty offers
+     * neither.
      */
     designPages: List<PageLink> = emptyList(),
     /**
      * The design tool this catalog is specified by ("Figma", …), from its references' provider or
-     * its parity feed — names the reference comparison after the thing it compares against
-     * ("compare to Figma") rather than after the internal format name. Null (no identifiable tool)
-     * keeps the neutral "compare to design references" label. See [designToolLabel].
+     * parity feed, so the action reads "compare to Figma". Null keeps the neutral label. See
+     * [designToolLabel].
      */
     designToolLabel: String? = null,
     /**
-     * Per-preview thumbnail content-crop lookup — frames a card's render to its component box (a
-     * Wear sticker on a 454² watch canvas shows just the component). Returns null for a card that
-     * should show the raw render (no figma-svg, or a render already tight to the component). The
-     * default `{ null }` keeps every card uncropped — used by the plain-module landing and by
-     * tests.
+     * Per-preview thumbnail content-crop lookup, framing a card's render to its component box. Null
+     * shows the raw render. The default `{ null }` keeps every card uncropped (plain-module
+     * landing, tests).
      */
     thumbCrop: (String) -> ContentCrop? = { null },
     /**
-     * Per-preview **prebaked thumbnail** lookup ([ServeHeroImages.gridThumbFor]), returning the
-     * baked bytes' content hash. When a card has one, every URL that points at that card's pixels
-     * carries `?thumb=<hash>` and the render lane answers it from memory with a downscaled image,
-     * instead of shipping the full-resolution render (a catalog page is ~2 MB of them). Returns
-     * null for a card whose pixels aren't baked locally yet — it keeps the plain render URL and
-     * picks a thumbnail up on a later page build.
+     * Per-preview prebaked thumbnail lookup ([ServeHeroImages.gridThumbFor]) returning the baked
+     * bytes' content hash. When present, every URL for that card's pixels carries `?thumb=<hash>`,
+     * which the render lane answers from memory with a downscaled image. Null keeps the plain
+     * render URL until a later page build.
      *
-     * The default `{ null }` leaves every card on the full render — used by the plain-module
-     * landing and by the fixture goldens, which must not churn with the bake.
+     * The default `{ null }` keeps full renders (plain-module landing, fixture goldens).
      */
     thumbHash: (String) -> String? = { null },
     /**
-     * `POST` URL that keeps this catalog's session (and its daemon) alive while a visitor has the
-     * page open — see [presenceScript]. Empty (the default) omits the heartbeat.
+     * Presence `POST` URL keeping this catalog's session and daemon alive ([presenceScript]). Empty
+     * omits the heartbeat.
      */
     presenceUrl: String = "",
     /**
-     * Running server version (the CLI's `SERVE_VERSION`), surfaced in the minimal footer beside the
-     * source/`/version` links. Null omits it; the fixture golden passes a fixed string so a release
-     * never churns the committed HTML.
+     * Running server version (`SERVE_VERSION`) for the footer. Null omits it; the fixture passes a
+     * fixed string.
      */
     version: String? = null,
     /**
-     * Provenance of a served design-system catalog (delivery branch, generation date, the
-     * compose-ai-tools + design-parity versions it was rendered with). When present it renders a
-     * provenance strip under the catalog header with a link to regenerate it. Null for a plain
-     * uploaded bundle / non-catalog module (no such metadata).
+     * Provenance of a served design-system catalog; renders a provenance strip with a regenerate
+     * link. Null for a plain bundle or non-catalog module.
      */
     provenance: CatalogProvenance? = null,
     /** POST URL that checks this catalog's delivery branch immediately. Null omits Refresh. */
     refreshUrl: String? = null,
     /**
-     * `/playground?catalog=<system>` — opens the playground with this design system preselected, so
-     * a snippet compiles against the catalog you were just browsing. Null on a host with no
-     * playground lane; the summary line then reads exactly as it always did.
+     * `/playground?catalog=<system>`, opening the playground with this design system preselected.
+     * Null when the host has no playground lane.
      */
     playgroundHref: String? = null,
     /**
-     * The catalog's declared stage surface (`catalog.json`'s `display.surface`: `"light"`/`"dark"`)
-     * — decides whether unthemed cards sit on the dark stage. Null ⇒ fall back to the system-name
-     * dark-first heuristic ([isDarkFirstSystem]). So a system declares its own surface rather than
-     * relying on its id.
+     * The catalog's declared stage surface (`display.surface`: `"light"`/`"dark"`), deciding
+     * whether unthemed cards sit on the dark stage. Null falls back to [isDarkFirstSystem].
      */
     declaredSurface: String? = null,
     /**
-     * The served catalog's own palette as an inline `:root` override for the chrome's custom
-     * properties, built by [ServeThemeCss] from the branch's `tokens.dtcg.json`. Empty ⇒ the page
-     * keeps the built-in chrome (a plain module, or a catalog that publishes no tokens).
+     * The catalog's palette as an inline `:root` override, built by [ServeThemeCss] from
+     * `tokens.dtcg.json`. Empty keeps the built-in chrome.
      */
     themeCss: String = "",
     /**
-     * Why this catalog is snapshot-only, when it is (no live bundle, unverified, …). When
-     * non-empty, a banner under the header explains it. Empty ⇒ no banner (a fully-live session, or
-     * a plain module). See [ServeDegradation] / [degradeBanner].
+     * Why this catalog is snapshot-only, if it is; non-empty shows a banner ([ServeDegradation] /
+     * [degradeBanner]).
      */
     degradations: List<ServeDegradation> = emptyList(),
     /**
-     * The app's declared `@ThemeCatalog` / `@WearThemeCatalog` themes ([ServeHost.declaredThemes]).
-     * They join the baked light/dark pair on the header's single Theme control (issue #2881), so
-     * the grid can be redrawn under any theme the catalog configures — not just Light/Dark. Offered
-     * only for cards the session can actually re-render ([canRenderThemeFor]) **by re-running their
-     * composable** ([irReplayFor]); empty (default) keeps the plain light/dark axis.
+     * The app's declared `@ThemeCatalog` / `@WearThemeCatalog` themes ([ServeHost.declaredThemes]),
+     * joining the baked light/dark pair on the Theme control. Offered only for cards that can
+     * re-render ([canRenderThemeFor]) by re-running their composable ([irReplayFor]).
      */
     declaredThemes: List<ServeTheme> = emptyList(),
     /**
-     * Whether a given preview can be re-rendered under a `themeProvider` override — i.e. it has a
-     * daemon twin ([ServeHost.canRenderOverridesFor]). A card that can't keeps its baked pixels
-     * (which would ignore the theme) and the declared-theme chips only appear when at least one
-     * card can. Defaults to `{ false }`: a plain static bundle offers baked light/dark only.
+     * Whether a preview can re-render under a `themeProvider` override, i.e. has a daemon twin
+     * ([ServeHost.canRenderOverridesFor]). Others keep baked pixels; declared-theme chips appear
+     * only if some card can. Defaults to `{ false }`.
      */
     canRenderThemeFor: (String) -> Boolean = { false },
     /**
-     * Whether a server render of a given preview **replays a captured document** rather than
-     * re-running the composable — the grid's counterpart of the viewer's `irReplay` flag, read from
-     * the same host question (`ServeHttpServer.isReplayedPreview`) that decides whether a
-     * `themeProvider` render is refused.
+     * Whether a server render of a preview replays a captured document rather than re-running the
+     * composable (the same question as `ServeHttpServer.isReplayedPreview`).
      *
-     * A declared theme installs a `PreviewWrapperProvider` **around a composition**, so a replayed
-     * preview can never honour one: the server answers its render with a terminal 409
-     * ([CatalogLiveRouting.irReplayDroppedOverrideNames]). Such a card is therefore not
-     * theme-overridable however live its daemon twin is — without this the grid offered chips that
-     * turned every card into "This preview can't render live" (a whole IR-backed catalog, e.g.
-     * `remote-m3`, failing at once). The viewer already greys the same choice; this is the landing
-     * page catching up. Defaults to `{ false }`: an ordinary class-backed session recomposes.
+     * A declared theme wraps a composition, so a replayed preview can never honour one and its
+     * render is refused 409 ([CatalogLiveRouting.irReplayDroppedOverrideNames]). Such cards are not
+     * theme-overridable. Defaults to `{ false }`.
      */
     irReplayFor: (String) -> Boolean = { false },
     /**
-     * Maximum themed-thumbnail burst supported by this host. Values above one enable the
-     * server-issued page lease endpoint; actual concurrency is granted dynamically and clamped by
-     * server render capacity. Monolithic daemons remain serial.
+     * Maximum themed-thumbnail burst for this host. Above one enables the server-issued page lease
+     * endpoint; actual concurrency is granted dynamically and clamped by render capacity.
+     * Monolithic daemons stay serial.
      */
     themeRenderBurstCapacity: Int = 1,
-    /**
-     * Per-preview engagement counts for this running server. The map is additive UI/API metadata:
-     * missing or zero entries render no badge.
-     */
+    /** Per-preview engagement counts; missing or zero entries render no badge. */
     engagement: Map<String, PreviewEngagement> = emptyMap(),
     /**
-     * Whether a given preview can be streamed live from the grid — the session offers the daemon
-     * stream ([ServeHost.hasLiveStream]) **and** this preview has a daemon twin behind it
-     * ([ServeHost.canRenderOverridesFor]). A card that passes gains the long-press live lane (see
-     * [catalogLiveScript]); one that doesn't stays an ordinary link, because its socket would only
-     * ever replay baked pixels. Defaults to `{ false }`: a static bundle offers no in-grid lane.
+     * Whether a preview can stream live from the grid: the session has a daemon stream
+     * ([ServeHost.hasLiveStream]) and the preview has a daemon twin
+     * ([ServeHost.canRenderOverridesFor]). Passing cards get the long-press lane
+     * ([catalogLiveScript]). Defaults to `{ false }`.
      */
     canStreamLiveFor: (String) -> Boolean = { false },
     /**
-     * GitHub sign-in URL when the box gates its live lanes behind auth and this visitor isn't
-     * signed in. Non-null keeps the long-press affordance (the lane exists, it just isn't theirs
-     * yet) and answers the press with the reason instead of opening a socket that would close
-     * 1008. Null (the default) ⇒ no auth in the way.
+     * GitHub sign-in URL when live lanes are auth-gated and this visitor isn't signed in. Non-null
+     * keeps the long-press affordance but answers it with the reason instead of a socket that would
+     * close 1008.
      */
     liveSignInHref: String? = null,
     /** Aggregate visits to this app/design-system landing page. */
@@ -12129,39 +10431,27 @@ ${captureControlsHtml().prependIndent("          ")}
     /** Human catalog title from catalog.json; [moduleLabel] remains the stable technical id. */
     displayTitle: String? = null,
     /**
-     * Whether this page is served as a **top-level site** ([ServeSites]) — its catalog rooted on a
-     * hostname of its own. The session is then implied by the ORIGIN, exactly as a `/<system>`
-     * mount implies it by the path, so same-session links must not repeat it as `?session=`. False
-     * (the default) leaves every existing caller's URLs byte-identical.
+     * Whether this page is served as a **top-level site** ([ServeSites]); the origin implies the
+     * session, so links must not repeat `?session=`.
      */
     sessionInOrigin: Boolean = false,
     /** Validated catalog-published issues, matched onto each component card. */
     parityIssues: List<ParityIssue> = emptyList(),
     componentBrowser: Boolean = false,
     /**
-     * GitHub session state, rendered as the header's sign-in control.
-     *
-     * A catalog landing is where a visitor arrives, and on a **top-level site** ([ServeSites]) it
-     * is the whole front door — there is no home index above it carrying the control, so before
-     * this the only sign-in affordance on a host like `wear.preview.coo.ee` was a press-and-hold on
-     * a card (which follows the login) or a chip on a preview page. Someone who wanted a live
-     * session had to be told to go and sign in on a *different hostname* first
-     * (wear-m3-catalog#68).
-     *
-     * Null, and in Catalog mode, renders nothing — same as every other page. Catalog mode drops the
-     * live lane entirely (hover-live included), so a sign-in offered there would unlock nothing.
+     * GitHub session state, rendered as the header's sign-in control. Needed on a top-level site
+     * ([ServeSites]), where the landing is the whole front door. Null, and Catalog mode (which
+     * drops the live lane), render nothing.
      */
     githubAuth: GitHubAuthStatus? = null,
     /**
-     * The catalog change feed the footer offers as **Changelog** and the head declares as this
-     * page's RSS alternate. Empty when the server runs with the feed lane off. See [siteFooter].
+     * The catalog change feed offered as **Changelog** and declared as the page's RSS alternate.
+     * Empty when the feed lane is off. See [siteFooter].
      */
     changelogHref: String = "",
     /**
-     * The page-scoped "report a catalog issue" for this surface, built by the caller from the
-     * session's catalog source/provenance via [ServeIssueReport]. It names the PAGE rather than a
-     * preview, because this one shows no single preview to name — see [pageReportRowHtml]. Null (a
-     * plain module, or any caller that has nothing to file against) omits it entirely.
+     * The page-scoped "report a catalog issue" for this surface, built via [ServeIssueReport];
+     * names the page rather than a preview ([pageReportRowHtml]). Null omits it.
      */
     reportIssue: ReportIssue? = null,
   ): String {
@@ -12174,28 +10464,20 @@ ${captureControlsHtml().prependIndent("          ")}
     val hasReferenceComparison = hasReferenceComparison && !componentBrowser
     val hasParallelComparison = !parallelComparisonLabel.isNullOrBlank() && !componentBrowser
     @Suppress("NAME_SHADOWING") val hasParityView = hasParityView && !componentBrowser
-    // Suppressed in Catalog mode with the other destinations, and it is a close call rather than
-    // an obvious one. The motion browser is browsing surface, not tooling — it is the collection
-    // view of a control Catalog mode deliberately KEEPS per component — so the case for showing it
-    // there is real. What settles it is the affordance: every other entry in the `⋯` menu is
-    // stripped in that mode, so keeping this one would give Catalog mode a menu that exists to
-    // hold a single item. Flip this line (and the checklist entry it is recorded under) if the
-    // collection view turns out to be what streamlined visitors come for.
+    // Suppressed in Catalog mode with the other destinations: every other `⋯` menu entry is
+    // stripped there, so keeping this one would leave a single-item menu. Revisit if the collection
+    // view proves wanted in that mode.
     @Suppress("NAME_SHADOWING")
     val motionCaptureCount = if (componentBrowser) 0 else motionCaptureCount
     @Suppress("NAME_SHADOWING") val playgroundHref = playgroundHref?.takeUnless { componentBrowser }
     @Suppress("NAME_SHADOWING")
     val degradations = if (componentBrowser) emptyList() else degradations
-    // The session id links may carry. Null on a rooted site (and for the default session): the
-    // URL already says which catalog this is. `sessionId` itself stays intact below — it keys the
-    // per-catalog localStorage entries and the dark-first lookup, which a site still needs.
+    // The session id links may carry: null on a rooted site and for the default session.
+    // `sessionId` still keys per-catalog storage and the dark-first lookup.
     val linkSessionId = if (sessionInOrigin) null else sessionId
     val q = querySuffix(linkQuery(token, linkSessionId, basePath, isPublic))
-    // The Dev-mode `uses:` operator's endpoint (`ServeHttpServer.handleUsesSearch`). Empty in
-    // Catalog mode, which is what keeps the operator out of that presentation entirely: no
-    // `data-uses-id` on a card, no branch of it in the filter script, and the same bytes on the
-    // wire a Catalog-mode visitor got before this existed. The route itself is gated the same way,
-    // so an empty string here is a matching front end to a 404 rather than the only lock.
+    // The Dev-mode `uses:` endpoint (`ServeHttpServer.handleUsesSearch`). Empty in Catalog mode,
+    // which removes the operator entirely; the route is gated the same way.
     val usesUrl = if (componentBrowser) "" else "$basePath/api/uses$q"
     val usesFilter = usesUrl.isNotEmpty()
     val themeLeaseUrl =
@@ -12208,19 +10490,13 @@ ${captureControlsHtml().prependIndent("          ")}
     val catalogId =
       if (componentBrowser || heading == moduleLabel) ""
       else "<p class=\"cp-catalog-id\">${WebEscaping.htmlEscape(moduleLabel)}</p>"
-    // A dark-first system (Wear) puts every unthemed card on the dark stage; explicit light/dark
-    // variants keep their own token. Only affects the background — the Light/Dark filter axis below
-    // still keys off the explicit-only [cardTheme].
+    // Dark-first systems put unthemed cards on the dark stage; explicit variants keep their token.
+    // Background only — the filter axis uses explicit-only [cardTheme].
     val darkFirst = isDarkFirstSystem(basePath, sessionId, declaredSurface)
-    // Collapse per-theme variants into one card each so the Light/Dark control swaps a card between
-    // its baked light/dark render *in place*, rather than filtering two cards. A single-theme /
-    // theme-neutral card carries no swap data and the toggle leaves it alone.
-    // Fold non-default component states (unchecked/pressed/disabled/…), props-axis variants
-    // (locale/direction-rtl/fontScale/content) AND non-primary breakpoints out of the grid first,
-    // so a component shows ONE card (its default render at its first declared size) instead of a
-    // card per state, per variant or per screen size; the folded renders stay reachable through the
-    // viewer's state + variant + size switchers. Plain bundle screens (no state, no props, no
-    // declared size) pass straight through.
+    // Collapse per-theme variants into one card each so the Light/Dark control swaps in place.
+    // Fold non-default states, props variants and non-primary breakpoints out first, so each
+    // component shows one card; the viewer's switchers reach the rest. Plain bundle screens pass
+    // through.
     val primarySizes = primarySizeByComponent(previews, darkFirst)
     val groups =
       groupPreviews(
@@ -12258,12 +10534,8 @@ ${captureControlsHtml().prependIndent("          ")}
               append("</ul></aside>\n")
             }
           } ?: ""
-    // A catalog whose breakpoints reach the server as metadata has just been folded to one card per
-    // component above, so its labels no longer collide on the size axis. This is the fallback for
-    // one whose sizes live only in the id — an older export, or a plain bundle's device fan-out —
-    // where each size is still a card of its own (for example three "Edgebutton" cards at
-    // Small/Large/XL Round). Add a qualifier only when the base label actually collides, keeping
-    // ordinary one-card labels terse.
+    // Fallback for catalogs whose sizes live only in the id (not folded above): qualify a label
+    // only when it actually collides.
     val duplicateGridLabels =
       groups.groupingBy { previewDisplayName(it.default) }.eachCount().filterValues { it > 1 }.keys
     fun gridDisplayName(preview: ServePreview): String {
@@ -12272,12 +10544,9 @@ ${captureControlsHtml().prependIndent("          ")}
       val size = sizeLabel(preview) ?: return label
       return "$label · $size"
     }
-    // A card's pixel URL. With a prebaked thumbnail it carries `?thumb=<hash>`, which the render
-    // lane answers from memory with the downscaled image; the id and every other param stay
-    // identical, so the SAME URL still serves a full render once anything is layered on it (a
-    // declared theme appends `themeProvider=`, and an override present means the thumbnail can't
-    // answer). That is what lets one helper feed the card's `src`, its light/dark swap targets and
-    // its themed-render base without any of them having to know which lane will answer.
+    // A card's pixel URL. With a prebaked thumbnail it carries `?thumb=<hash>`; the URL is
+    // otherwise identical, so anything layered on it (`themeProvider=`, overrides) still gets a
+    // full render. One helper feeds `src`, swap targets and the themed-render base.
     fun renderSrc(p: ServePreview): String {
       val base = "$basePath/render/${WebEscaping.urlEncodeSegment(p.id)}.png$q"
       val hash = thumbHash(p.id) ?: return base
@@ -12288,15 +10557,11 @@ ${captureControlsHtml().prependIndent("          ")}
     // The app-declared themes join the header's Theme control only when this session can actually
     // re-render a card under one — otherwise the chips would redraw nothing.
     fun themeRenderable(p: ServePreview) = canRenderThemeFor(p.id)
-    // Whether a declared theme actually redraws this preview: it needs a daemon twin, must not be a
-    // theme specimen (which has a twin but must keep its baked pixels — [isThemeSpecimen]), and
-    // must be re-rendered by RE-RUNNING its composable rather than by replaying a captured document
-    // ([irReplayFor]) — a theme provider wraps a composition, so a replay has nothing to wrap and
-    // the server refuses that render 409.
-    // ONE predicate feeding both the chip gate and the per-card URL, deliberately: gating the chips
-    // on mere renderability while the URLs also excluded specimens would offer the control on a
-    // catalog whose only twinned cards are specimens — every `themeBase` empty, the browser's
-    // `if (!img || !base) return` skipping every card, and the chips a no-op.
+    // Whether a declared theme redraws this preview: it needs a daemon twin, must not be a theme
+    // specimen ([isThemeSpecimen]), and must re-run its composable rather than replay
+    // ([irReplayFor]; replays are refused 409).
+    // One predicate feeds both the chip gate and the per-card URL, so the chips never appear when
+    // no card would respond.
     fun themeOverridable(p: ServePreview) =
       themeRenderable(p) && !isThemeSpecimen(p) && !irReplayFor(p.id)
     // The variant a card shows by default (server-side) — the one a declared theme re-renders.
@@ -12315,9 +10580,7 @@ ${captureControlsHtml().prependIndent("          ")}
       val l = card.light!!
       val d = card.dark!!
       // Default to the light render (dark-first systems open dark); the JS re-swaps to the sticky
-      // choice on load. Each theme's src / viewer href / id / label ride as data-* so the swap
-      // needs
-      // no URL-building in the browser.
+      // choice. Each theme's src/href/id/label ride as data-* so the browser builds no URLs.
       val def = if (darkFirst) d else l
       val defTheme = if (darkFirst) "dark" else "light"
       val lightLabel = gridDisplayName(l)
@@ -12395,11 +10658,8 @@ ${captureControlsHtml().prependIndent("          ")}
           """
           .trimIndent()
       }
-      // data-bg-theme is the thumbnail's background: what the preview declares for itself first,
-      // then the explicit id token, then the dark-first default. Without the first rung the grid
-      // and the reference page answered differently for the same preview — a card showing a
-      // deliberately white specimen on this catalog's dark plate, and the comparison of that same
-      // specimen on white.
+      // data-bg-theme: the preview's declared ground first, then the explicit id token, then the
+      // dark-first default — matching the reference page.
       val bgAttr =
         (declaredBackdropTheme(p) ?: bgTheme(p.id, darkFirst))?.let { " data-bg-theme=\"$it\"" }
           ?: ""
@@ -12417,13 +10677,11 @@ ${captureControlsHtml().prependIndent("          ")}
           """
         .trimIndent()
     }
-    // Every card carries the anchor its tree row jumps to. Derived from the default render's id
-    // rather than from position, so a row keeps pointing at the same component as the catalog
-    // grows.
+    // Every card carries its tree row's anchor, derived from the default render's id rather than
+    // position.
     fun cardHtml(card: GridCard): String {
-      // The `uses:` filter matches on the card's DEFAULT preview id, and one id is enough: a
-      // component's themes, states, sizes and content variants are renders of one declaration, so
-      // they share a source file and a body line and would every one of them carry the same answer.
+      // The `uses:` filter matches the card's default preview id; all its variants share one
+      // declaration.
       val usesId =
         if (usesFilter) " data-uses-id=\"${WebEscaping.htmlEscape(card.default.id)}\"" else ""
       val anchor = " id=\"${cardAnchors.getValue(card.default.id)}\"" + usesId
@@ -12435,11 +10693,9 @@ ${captureControlsHtml().prependIndent("          ")}
       } else {
         groups.joinToString("\n") { cardHtml(it) }
       }
-    // A catalog whose previews carry sections renders as TABS (one per section, e.g. Themes /
-    // Components / Screens / Animations) over per-section panels, with the component `group` as a
-    // sub-heading inside a tab. A section-less catalog keeps a single flat grid — but still gains
-    // synthesized family sub-group dividers ([synthesizeGroups]) when that helps a large catalog
-    // scan, so compose-m3's 84 tiles read as grouped clusters instead of one undivided wall.
+    // A sectioned catalog renders as tabs over per-section panels with `group` sub-headings. A
+    // section-less catalog keeps one flat grid, with synthesized family dividers
+    // ([synthesizeGroups]) when that helps.
     val sections = buildSections(groups)
     val hasTabs = sections.isNotEmpty()
     // The tree's All row, and the landing selection ([catalogTreeHtml]). One section is already
@@ -12464,9 +10720,8 @@ ${captureControlsHtml().prependIndent("          ")}
         g.slug = slug
       }
     }
-    // The component row for a card: its grid label, the card's own anchor, and the primary-axis
-    // variants the grid folded out from under it. Built from the render the grid actually paints,
-    // which on a dark-first system is the dark one.
+    // The component row for a card, built from the render the grid actually paints (dark on a
+    // dark-first system).
     fun treeComponent(card: GridCard): TreeComponent {
       val shown = card.rendered(darkFirst)
       return TreeComponent(
@@ -12479,13 +10734,11 @@ ${captureControlsHtml().prependIndent("          ")}
         thumbSrc = renderSrc(shown),
       )
     }
-    // The design file's pages, listed at the foot of whichever tree this catalog has. A catalog
-    // with no tree (too few previews to synthesize families from, and no authored sections) has
-    // nowhere to put them and keeps the header chip instead — see the action row below.
+    // The design file's pages go at the foot of the tree; a catalog with no tree keeps the header
+    // chip instead.
     val hasTree = hasTabs || synthGroups != null
-    // Pages become a PANE beside Components rather than a branch under them — but only for a
-    // catalog that has both, since a strip with one tab switches nothing. Without pages the tree
-    // is emitted exactly as before, branch argument and all, so those goldens do not move.
+    // Pages become a pane beside Components only when the catalog has both; otherwise the tree is
+    // emitted unchanged.
     val hasPanes = hasTree && designPages.isNotEmpty()
     val pagesBranch = if (hasTree && !hasPanes) pagesBranchHtml(designPages, basePath, q) else ""
     val tabBar =
@@ -12494,12 +10747,9 @@ ${captureControlsHtml().prependIndent("          ")}
         synthGroups != null -> catalogOutlineTreeHtml(synthGroups, ::treeComponent, pagesBranch)
         else -> ""
       }
-    // The grid body: either the tabbed section panels (id=cp-grid, so the search box's
-    // aria-controls
-    // + the filter script still target it) or the plain flat grid. The flat form reproduces the
-    // exact whitespace of the pre-tabs template (the `$cards` and `</div>` lines carried the body
-    // template's 8-space indent, which survives `trimIndent` because the interpolated cards sit at
-    // column 0) so a section-less catalog's committed golden is byte-for-byte unchanged.
+    // The grid body: tabbed section panels (id=cp-grid, targeted by the search box's aria-controls
+    // and the filter script) or the plain flat grid. The flat form keeps the original template
+    // whitespace so section-less goldens are unchanged.
     val gridBlock =
       if (!hasTabs && synthGroups != null) {
         // Section-less catalog with synthesized family dividers: a flat grid of labelled
@@ -12507,10 +10757,8 @@ ${captureControlsHtml().prependIndent("          ")}
         buildString {
           append("<div class=\"cp-grid-groups\" id=\"cp-grid\">\n")
           synthGroups.forEach { g ->
-            // `--cp-n` is the card count, and it is what stops a one-card family from reserving a
-            // whole five-column row: the sheet is a FLOW of clusters, each asking for the width
-            // its own cards occupy (see `.cp-subgroup` in serve.css). Written here rather than
-            // measured in CSS because only the server knows how many cards the group holds.
+            // `--cp-n` is the card count, so a small family claims only the width its cards need
+            // (see `.cp-subgroup` in serve.css). Only the server knows the count.
             append("<div class=\"cp-subgroup\" id=\"${flatGroupAnchorId(g.slug)}\"")
             append(" style=\"--cp-n:${g.cards.size}\">\n")
             if (g.name != null)
@@ -12549,14 +10797,12 @@ ${captureControlsHtml().prependIndent("          ")}
           append("</div>")
         }
       }
-    // A tree stands BESIDE what it navigates. Its filter is part of that navigation, so the two
-    // share one sidebar and remain together when the menu becomes sticky. A small catalog with no
-    // tree keeps the filter in the toolbar above its flat grid.
+    // With a tree, the filter shares its sticky sidebar; a small catalog with no tree keeps the
+    // filter in the toolbar.
     val sidebarSearch =
       if (tabBar.isEmpty() || previews.isEmpty()) "" else searchBoxHtml(usesFilter) + "\n"
-    // With both lists in play the tree becomes the Components PANE and the pages get their own,
-    // with the switch above the filter that serves them both. The strip leads: it says what the
-    // column is showing, and the filter below it reads as belonging to whichever that is.
+    // With pages too, the tree becomes the Components pane and the pane strip leads, above the
+    // shared filter.
     val sidebarBody =
       if (!hasPanes) tabBar
       else
@@ -12575,22 +10821,13 @@ ${captureControlsHtml().prependIndent("          ")}
         "<div class=\"cp-catalog-body\">\n" +
           "<aside class=\"cp-catalog-menu\" aria-label=\"Catalog menu\">\n" +
           "$sidebarHead$sidebarBody</aside>\n$gridBlock\n</div>"
-    // A catalog page links HOME (the front-door index) rather than sideways to its siblings: the
-    // old design-systems nav row is replaced by a single back button, shown whenever this server
-    // publishes catalogs (i.e. a home index exists to go back to). It rides in the site header's
-    // brand slot with every other page's breadcrumb, rather than as the body's first line — a
-    // catalog page's own heading and grid then start at the top of the content column.
+    // A catalog page links home via a single back button (in the header's brand slot) whenever this
+    // server has a home index.
     // The brand already links to the front door; an adjacent back button duplicated it.
     val back = ""
-    // The catalog-provenance strip (delivery branch, generation date, tool versions, regenerate
-    // link) rides in the site footer, next to the build and source links it belongs with, rather
-    // than interrupting the route from the catalog's heading to its content. It renders expanded:
-    // it is short, and the facts a visitor would cite a rendering by shouldn't need a click.
+    // The provenance strip rides in the site footer, expanded, beside the build and source links.
     val prov = provenance?.let { provenanceSection(it, refreshUrl) } ?: ""
-    // The Theme control shows when there is more than one theme to choose between: a baked
-    // light/dark pair to swap, and/or the app-declared themes this session can re-render under. A
-    // catalog with neither (mostly theme-neutral app screens on a static bundle) never sprouts a
-    // control that would do nothing.
+    // Show the Theme control only when there is more than one theme to choose between.
     val hasBakedThemes = groups.any { it.swappable }
     val hasThemes = hasBakedThemes || declaredThemeChips.isNotEmpty()
     val themeToggle =
@@ -12603,9 +10840,8 @@ ${captureControlsHtml().prependIndent("          ")}
       if (hasPreviews)
         "\n<p id=\"cp-empty\" class=\"cp-empty\" hidden>No previews match your filter.</p>"
       else ""
-    // The themed-render URLs in the grid's DOCUMENT order — the order the cards were just emitted
-    // in, which is what `document.querySelectorAll(".cp-card")` will report. Empty (no array, no
-    // theme-render machinery in the script) unless declared themes are actually offered.
+    // Themed-render URLs in grid document order (matching `document.querySelectorAll(".cp-card")`).
+    // Empty unless declared themes are offered.
     val orderedCards =
       when {
         hasTabs -> sections.flatMap { s -> s.groups.flatMap { it.cards } }
@@ -12632,9 +10868,8 @@ ${captureControlsHtml().prependIndent("          ")}
           usesUrl,
         )}</script>"
       else ""
-    // The long-press live lane, in the SAME document order as the cards above (and as
-    // [themeBaseJs]) — a card's entry is its light/dark pair of ids, or a pair of empty strings
-    // when this session can't stream it.
+    // Live-lane ids in the same document order as the cards (and [themeBaseJs]): a light/dark pair
+    // per card, or empty strings when it can't stream.
     val liveScript =
       if (componentBrowser) ""
       else
@@ -12654,24 +10889,14 @@ ${captureControlsHtml().prependIndent("          ")}
     val liveNote =
       if (liveScript.isEmpty()) ""
       else " · <span class=\"cp-live-note\">hold a card for a live session</span>"
-    // ---- The catalog's actions
-    // -------------------------------------------------------------------
-    //
-    // A row of M3 assist chips under the summary line, in place of the run of 0.75rem muted text
-    // links this line used to end with (`… · compare formats · design parity · try in playground`).
-    // Those were the page's only routes to the comparison and parity views, and they were styled to
-    // disappear: smaller than the body copy, grey until hovered, and separated by interpuncts that
-    // read as one sentence rather than as several destinations. A chip is the M3 vocabulary this
-    // page already speaks (the theme toggle right below it is the same shape), and it makes each
-    // route a thing you can see and hit.
+    // The catalog's actions: M3 assist chips under the summary line, so each route is visibly a
+    // destination.
     fun actionChip(href: String, label: String): String =
       "<a class=\"cp-action-chip\" href=\"${WebEscaping.htmlEscape(href)}\">" +
         "${WebEscaping.htmlEscape(label)}</a>"
 
-    // One action per comparison a visitor might actually want, rather than a single "compare
-    // formats" that made them discover the format switcher to find out what this catalog can even
-    // compare. Each deep-links the comparison page's own `?format=` so the landing already answers
-    // "compare *what*", and a catalog carrying only one of them shows only that one.
+    // One action per comparison, each deep-linking the comparison page's `?format=`; only available
+    // formats appear.
     fun compareChip(format: String, label: String): String {
       val query =
         listOf("format=$format", linkQuery(token, linkSessionId, basePath, isPublic))
@@ -12679,18 +10904,9 @@ ${captureControlsHtml().prependIndent("          ")}
           .joinToString("&")
       return actionChip("$basePath/compare?$query", label)
     }
-    // The chips, in NAMED GROUPS rather than one run-on line.
-    //
-    // The panel used to read `compare SVG · compare RC players · compare to Figma · design parity ·
-    // 325 motion captures · try in playground · Transparent` — seven destinations of four different
-    // kinds, each repeating the verb, and a reader looking for "how does this differ from the Wear
-    // implementation?" had to find out that the answer was spelled `design parity` (it was not) or
-    // that it was on the comparison wall behind a format switch (it was, and unlinked from here).
-    //
-    // Two groups, each answering one question. Every baseline this catalog can compare against is
-    // in the first, named by what it IS — the same words the wall's own Baseline group and the
-    // viewer's Compare-against group use, so the chip you press and the button you land on agree.
-    // See `docs/design/COMPARE_NAVIGATION.md`, §2 and §3.3.
+    // The chips in named groups. The first holds every baseline this catalog can compare against,
+    // named by what it is — the same words the wall's Baseline group and the viewer's
+    // Compare-against group use. See `docs/design/COMPARE_NAVIGATION.md`, §2 and §3.3.
     fun chipGroup(label: String, chips: List<String>): String =
       if (chips.isEmpty()) ""
       else
@@ -12712,20 +10928,15 @@ ${captureControlsHtml().prependIndent("          ")}
         compareChip("svg", "SVG").takeIf { hasSvgComparison },
         compareChip("rc", "Remote Compose players").takeIf { hasRcComparison },
       )
-    // The parity index, in a group of its own: it is not a comparison, it is the list that says
-    // which comparisons are worth opening. Under `Compare against` it read as a fifth baseline —
-    // "design parity" beside "Figma" and "SVG" — which is exactly the confusion §1 records.
+    // The parity index gets its own group: it is not a baseline but the list of which comparisons
+    // are worth opening.
     val reportChips =
       listOfNotNull(actionChip("$basePath/parity$q", "design parity").takeIf { hasParityView })
     val exploreChips =
       listOfNotNull(
-        // Pages live in the navigation tree, which is where this catalog's other *places* are.
-        // This chip is the fallback for a catalog too small to have a tree at all: without it
-        // the pages would be published and unreachable. The count is in the label because one
-        // page and thirty are different offers.
-        //
-        // It also now carries what `design parity` used to: coverage is "N of M components
-        // implemented", said against the sheet a reader can see. See §3.4 of the design note.
+        // Fallback Pages chip for a catalog too small for a tree, so pages stay reachable. The
+        // label carries the count and coverage ("N of M components implemented"; see §3.4 of the
+        // design note).
         designPages
           .takeIf { it.isNotEmpty() && !hasTree }
           ?.let {
@@ -12734,11 +10945,8 @@ ${captureControlsHtml().prependIndent("          ")}
               "${it.size} design ${if (it.size == 1) "page" else "pages"}",
             )
           },
-        // The motion browser. Captures are scattered one-per-component and invisible until you
-        // open the component that has one, so this is the only place a visitor can find out the
-        // catalog records anything at all. It is NOT gated on having a tree the way the pages chip
-        // is: there is no tree listing to fall back on, so without the chip the page would be
-        // published and unreachable on every catalog.
+        // The motion browser: the only place to discover the catalog's captures. Not gated on the
+        // tree, which has nothing to fall back on.
         motionCaptureCount
           .takeIf { it > 0 }
           ?.let {
@@ -12760,10 +10968,8 @@ ${captureControlsHtml().prependIndent("          ")}
       else ""
     val catalogActions =
       listOf(actionChips, transparentAction).filter { it.isNotBlank() }.joinToString("\n          ")
-    // …behind one `⋯` menu beside the Theme pill, at every width. These are the catalog's
-    // *destinations* — the comparison views, the parity view, the playground — plus the Transparent
-    // toggle: things a visitor goes looking for, not things they read on the way past, which is why
-    // they no longer spend a full row of their own above the grid on any viewport.
+    // …behind one `⋯` menu beside the Theme pill at every width: destinations (comparisons, parity,
+    // playground) plus the Transparent toggle.
     val primaryActions =
       catalogActions
         .takeIf { it.isNotBlank() }
@@ -12784,33 +10990,24 @@ ${captureControlsHtml().prependIndent("          ")}
         "\n<div class=\"cp-catalog-download\">" +
           actionChip("$basePath/bundle.zip$q", "download all (.zip)") +
           "</div>\n"
-    // The viewer's identity line, on the landing: name, trust verdict, id and the preview/view
-    // tally on ONE baseline (`.cp-preview-head` does the same three above the render). They all
-    // answer "what am I looking at", and as two stacked blocks with a chip row under them they
-    // answered it across three rows of a fold that is meant to be showing previews.
+    // The landing's identity line: name, trust verdict, id and preview/view tally on one baseline,
+    // like `.cp-preview-head` in the viewer.
     val subLine =
       if (componentBrowser) ""
       else
         "<p class=\"cp-sub\">${counted(previews.size, "preview(s)")}" +
           (if (systemViews > 0) " · ${formatViews(systemViews)}" else "") +
           "$liveNote</p>"
-    // …and the viewer's control row: the page's controls over what is *shown*, as compact pills at
-    // the trailing edge of one bar (`.cp-head-toggles`, the same class and the same trailing auto
-    // margin the viewer's title row uses), with the filter field taking the width beside them. The
-    // Theme chips and the action chips used to be two rows of their own; behind their pills the
-    // bar is one row on every viewport, and it is the row that sticks.
+    // …and the control row: compact pills at the trailing edge (`.cp-head-toggles`, as in the
+    // viewer's title row) with the filter field taking the remaining width, one sticky row on every
+    // viewport.
     val headToggles =
       (themeToggle + primaryActions)
         .takeIf { it.isNotBlank() }
         ?.let { "<div class=\"cp-head-toggles\">\n$it</div>\n" } ?: ""
-    // The toolbar row is the FILTER's row, and the pills are its passengers. Where the filter is
-    // not in it the row is a full-width sticky band holding two pills at its trailing edge and
-    // nothing else — an empty strip between the heading and the grid, which is what browser mode
-    // was given the identity row for. A SECTIONED catalog is the same case and was missed: its
-    // filter belongs to the tree's sidebar, so its toolbar carries the Theme pill and the `⋯`
-    // alone, and a catalog with one theme carries only the `⋯` — one 34px pill in an 80px band
-    // above 190 previews (issue #4224). So the toggles ride on the identity row whenever the
-    // toolbar has no filter to keep them company, and no toolbar row is emitted at all.
+    // The toolbar row exists for the filter. When the filter lives elsewhere (browser mode, or a
+    // sectioned catalog's sidebar), the toggles ride on the identity row and no toolbar row is
+    // emitted.
     val togglesOnTitleRow = componentBrowser || searchBox.isBlank()
     val titleRow =
       "<div class=\"cp-catalog-head-row\">" +
@@ -12819,10 +11016,8 @@ ${captureControlsHtml().prependIndent("          ")}
         "${compactTrustBadge(trust)}</h1>$catalogId</div>$subLine" +
         (if (togglesOnTitleRow) headToggles else "") +
         "</div>"
-    // The landing's page-scoped catalog report, under the identity row: this page shows a grid of
-    // components and singles out none, so — like the comparison wall — the report it files names
-    // the page. It is what gives the floating launcher a catalog half to offer on the surface most
-    // visitors arrive on, in Catalog mode as much as in Dev (issue #4704).
+    // The landing's page-scoped catalog report under the identity row, giving the floating launcher
+    // a catalog half on this page in both modes.
     val reportRow = pageReportRowHtml(reportIssue, "cp-page-links")
     val tools =
       (searchBox + if (togglesOnTitleRow) "" else headToggles)
@@ -12862,12 +11057,9 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * Display name for a design reference's `source.provider` token — `figma` → `Figma`.
-   *
-   * Null for a provider that names no design tool (a checked-in `png`, an `svg`, an `html` mock, or
-   * the default `file`), so a caller falls back to neutral wording instead of inventing a vendor
-   * the catalog never claimed. Only tokens we can name are mapped: an unknown provider is not
-   * title-cased into a plausible-looking product name.
+   * Display name for a design reference's `source.provider` token (`figma` → `Figma`). Null for
+   * providers naming no design tool (`png`, `svg`, `html`, `file`) and for unknown tokens, so
+   * callers use neutral wording.
    */
   fun designToolLabel(provider: String?): String? =
     when (provider?.trim()?.lowercase()) {
@@ -12889,112 +11081,74 @@ ${captureControlsHtml().prependIndent("          ")}
     trust: String? = null,
     declaredSurface: String? = null,
     /**
-     * The served catalog's own palette as an inline `:root` override for the chrome's custom
-     * properties, built by [ServeThemeCss] from the branch's `tokens.dtcg.json`. Empty ⇒ the page
-     * keeps the built-in chrome (a plain module, or a catalog that publishes no tokens).
+     * The catalog's palette as an inline `:root` override, built by [ServeThemeCss] from
+     * `tokens.dtcg.json`. Empty keeps the built-in chrome.
      */
     themeCss: String = "",
     hasSvgFor: (String) -> Boolean = { false },
     hasRemoteComposeFor: (String) -> Boolean = { false },
     /**
-     * The catalog's **published** Remote Compose player comparison, when it has one. Present ⇒ the
-     * `rc` format shows every player side by side from the offline run's renders (see
-     * [rcLanesSection]) instead of rendering one player's output in the visitor's browser.
+     * The catalog's published Remote Compose player comparison, if any. Present ⇒ the `rc` format
+     * shows every player's published render side by side ([rcLanesSection]) instead of rendering in
+     * the browser.
      */
     rcCompare: RcCompareManifest? = null,
     /**
-     * The Remote Compose players this host can raster for a preview **on demand** — normally
-     * [ServeHost.enabledRcPlayersFor]. The wall adds a column for every one of them the published
-     * run has none for, pointing it at `/render/<id>.png?rcPlayer=<wire>`.
+     * Remote Compose players this host can raster on demand (normally
+     * [ServeHost.enabledRcPlayersFor]). The wall adds a column for each one the published run
+     * lacks, pointing at `/render/<id>.png?rcPlayer=<wire>`.
      *
-     * The document is the artifact; a baked column is an optimisation over it. A live daemon can
-     * already replay `ir/<id>.rc` through the embedded Android player and the desktop one — the
-     * viewer has offered exactly that as a chip for a long time — so a wall that shows only what
-     * some offline run happened to draw is narrower than the host it is served from, and a reader
-     * counting columns cannot tell which of the two is missing (#4998).
-     *
-     * Cheap by construction: `?rcPlayer=` is answered from the published bytes when the parity run
-     * drew them and only reaches the renderer otherwise, so a lane that IS staged costs nothing
-     * extra and one that is not costs a render for the rows a reader actually scrolls to.
-     *
-     * Empty (the default, and every static host) leaves the wall exactly as the run published it.
+     * `?rcPlayer=` is served from published bytes when the run drew them and only renders
+     * otherwise, so staged lanes cost nothing extra. Empty (every static host) leaves the wall as
+     * published.
      */
     liveRcPlayersFor: (String) -> List<RcPlayerBackend> = { emptyList() },
     referencesFor: (String) -> List<DesignReference> = { emptyList() },
     /** A paired catalog's design reference, used only when this preview has no local mapping. */
     pairedDesignSourceFor: (ServePreview) -> SpecSource? = { null },
-    /**
-     * The paired catalog implementation whose rendered pixels form the parallel comparison lane.
-     */
+    /** The paired catalog implementation whose renders form the parallel comparison lane. */
     parallelSourceFor: (ServePreview) -> SpecSource? = { null },
     unfurl: UnfurlMetadata? = null,
     /**
-     * The **page-scoped** report this wall files against the catalog's own repo — the launcher's
-     * catalog half, which is hidden on any page carrying no `#cp-report` (issue #4289).
-     *
-     * Page-scoped rather than per-preview because that is what this page honestly knows: it shows
-     * every comparable component at once, and the thing that goes wrong here — a lane that scores
-     * everything at zero, references paired with the wrong render, a whole catalog drawn in the
-     * wrong palette — is about the wall, not about one row. A row's *own* defect already has a
-     * better route: the reference opens the focused Reference / Diff / Actual page, which files a
-     * report naming that exact preview and reference.
-     *
-     * Null (a session with no catalog to file against) renders nothing, and the launcher keeps
-     * offering the server half alone — the behaviour every page had before.
+     * The page-scoped report this wall files against the catalog's repo — the launcher's catalog
+     * half, hidden on pages without `#cp-report`. Page-scoped because the wall shows every
+     * component; a single row's defect is better reported from its focused comparison page. Null
+     * renders nothing.
      */
     reportIssue: ReportIssue? = null,
     /**
-     * The catalog's published GitHub issues (`parity/issues.json`), which the wall joins to its
-     * rows as the **Bugs** column.
-     *
-     * A row's score says how far the render is from its design; it cannot say whether anyone
-     * already knows. Those are different questions and a triager needs both at once — a 61% row
-     * with an open issue against it is somebody's work in progress, and a 61% row with nothing
-     * against it is the one to open. The dashboard and the viewer already join this index; the wall
-     * is where a reader is actually scanning for what to file (issue #4624).
-     *
-     * Empty (a session whose catalog publishes no index, or a plain local module) simply drops the
+     * The catalog's published GitHub issues (`parity/issues.json`), joined to rows as the **Bugs**
+     * column so a triager sees both the score and whether anyone already knows. Empty drops the
      * column.
      */
     parityIssues: List<ParityIssue> = emptyList(),
     /**
-     * When the catalog's issue index was generated (`ParityIssues.generatedAt`, ISO-8601), printed
-     * at the foot of an opened Bugs panel. Null on an index that declares none, which simply omits
-     * the line — the panel is still a snapshot, it just cannot say of when.
+     * When the issue index was generated (`ParityIssues.generatedAt`, ISO-8601), printed at the
+     * foot of an opened Bugs panel. Null omits the line.
      */
     parityIssuesGeneratedAt: String? = null,
-    /**
-     * Running server version (`SERVE_VERSION`), shown in the minimal footer. Null omits the build
-     * span.
-     */
+    /** Running server version (`SERVE_VERSION`) for the footer. Null omits the build span. */
     version: String? = null,
     displayTitle: String? = null,
     /**
-     * Whether this page is served as a **top-level site** ([ServeSites]) — its catalog rooted on a
-     * hostname of its own. The session is then implied by the ORIGIN, exactly as a `/<system>`
-     * mount implies it by the path, so same-session links must not repeat it as `?session=`. False
-     * (the default) leaves every existing caller's URLs byte-identical.
+     * Whether this page is served as a **top-level site** ([ServeSites]); the origin implies the
+     * session, so links must not repeat `?session=`.
      */
     sessionInOrigin: Boolean = false,
     /**
-     * The catalog change feed the footer offers as **Changelog** and the head declares as this
-     * page's RSS alternate. Empty when the server runs with the feed lane off. See [siteFooter].
+     * The catalog change feed offered as **Changelog** and declared as the page's RSS alternate.
+     * Empty when the feed lane is off. See [siteFooter].
      */
     changelogHref: String = "",
     /**
      * The delivery-branch commit this wall was assembled from, scoping every published frame it
-     * draws ([ServeCacheGeneration]). Null for a session with no delivery branch.
-     *
-     * The wall carries per-row match scores, which are the same kind of claim the focused
-     * comparison's verdict is: a number measured against one publish's pixels. Leaving the wall
-     * unscoped while the page it links to is scoped would leave the two disagreeing about which
-     * frame a score describes.
+     * draws ([ServeCacheGeneration]), so its scores and the focused comparison describe the same
+     * publish. Null without a delivery branch.
      */
     generation: String? = null,
   ): String {
-    // The session id links may carry. Null on a rooted site (and for the default session): the
-    // URL already says which catalog this is. `sessionId` itself stays intact below — it keys the
-    // per-catalog localStorage entries and the dark-first lookup, which a site still needs.
+    // The session id links may carry: null on a rooted site and for the default session.
+    // `sessionId` still keys per-catalog storage and the dark-first lookup.
     val linkSessionId = if (sessionInOrigin) null else sessionId
     val q = querySuffix(linkQuery(token, linkSessionId, basePath, isPublic))
     // The frame query: the page query plus the publish this wall is about. This page takes no pin
@@ -13005,15 +11159,9 @@ ${captureControlsHtml().prependIndent("          ")}
         if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
       )
     val heading = catalogHeading(displayTitle, moduleLabel)
-    // Native-format rows retain the catalog's one-default-card presentation. A design reference,
-    // however, names one exact preview state/props/size mapping, so that referenced variant must
-    // remain independently visible instead of being folded out with the landing-page variants.
-    //
-    // The size axis is folded on exactly that condition and no other. A kit draws its screen cells
-    // at one size, so the other breakpoints of a component carry no reference of their own and a
-    // row for each is four rows saying "no reference" under one name; but a kit that DOES publish a
-    // second size (Wear's `Picker`, at its `Larger Screen (BP)` cell) maps a reference to it, and
-    // that row is the whole point of the page.
+    // Native-format rows keep the one-default-card presentation, but a design reference names an
+    // exact state/props/size, so a referenced variant stays visible as its own row. Size is folded
+    // only when that size carries no reference.
     val comparableDarkFirst = isDarkFirstSystem(basePath, sessionId, declaredSurface)
     val comparablePrimarySizes = primarySizeByComponent(previews, comparableDarkFirst)
     val pairedDesignSources = previews.associateWith(pairedDesignSourceFor)
@@ -13034,9 +11182,8 @@ ${captureControlsHtml().prependIndent("          ")}
     val hasRc = comparablePreviews.any { hasRemoteComposeFor(it.id) } || rcCompare != null
     val hasReference = comparablePreviews.any(::hasEffectiveReference)
     val hasParallel = comparablePreviews.any { parallelSources[it] != null }
-    // Name the design lane after the tool the references actually came from ("PNG ↔ Figma"), the
-    // same wording the catalog's own action uses, so the two read as one route rather than two
-    // features. A catalog whose references are plain PNGs/mocks keeps the neutral label.
+    // Name the design lane after the references' tool ("PNG ↔ Figma"), matching the catalog's
+    // action; plain PNG/mock references keep the neutral label.
     val referenceToolLabel =
       comparablePreviews.firstNotNullOfOrNull { preview ->
         referencesFor(preview.id).firstNotNullOfOrNull { designToolLabel(it.source.provider) }
@@ -13045,77 +11192,44 @@ ${captureControlsHtml().prependIndent("          ")}
     val parallelLabel =
       comparablePreviews.firstNotNullOfOrNull { parallelSources[it]?.label }
         ?: "Parallel implementation"
-    // WHICH BASELINE THE WALL OPENS ON, and it used to open on the worst one.
-    //
-    // `svg` led because it was the first lane this page ever had. Two things are wrong with that
-    // now. It is the slowest pair to put on screen — the browser lays out and rasterises a vector
-    // document per row, against a PNG the decoder hands back whole — and it is the one lane that
-    // can be wrong in a way that is not the renderer's fault: an SVG resolves its own typefaces at
-    // paint time, so a face the visitor's browser cannot get draws tofu, and a wall of tofu is the
-    // first thing a reader sees on the page whose whole job is to say what looks wrong.
-    //
-    // So the raster pairs lead, in the order a reader wants them: the imported design reference
-    // first — the comparison the catalog's parity work is actually about — then the paired sibling
-    // catalog, and the two export lanes last. Both sides of the leading pair are PNGs.
-    // See `docs/design/COMPARE_NAVIGATION.md`, §3.2.
+    // Which baseline the wall opens on: raster pairs first — the design reference, then the paired
+    // sibling — and the export lanes last. `svg` is slowest to paint and can show tofu for fonts
+    // the browser lacks. See `docs/design/COMPARE_NAVIGATION.md`, §3.2.
     val defaultFormat =
       if (hasReference) "reference"
       else if (hasParallel) "parallel" else if (hasSvg) "svg" else if (hasRc) "rc" else "parallel"
-    // ONE order, every lane: **baseline · diff · ours**. The same order the viewer's spec lane
-    // states three ways (the Spec / Diff / Render triptych, the wipe's seam, and the focused
-    // Reference / Diff / Actual page), so a reader who steps from the wall into the viewer finds
-    // the two frames on the sides they were already on.
-    //
-    // The `svg` and `rc` lanes used to lead with the render, on the reasoning that an export is on
-    // trial against the render that produced it. Sound, and still wrong to read: pressing a
-    // baseline button then swapped both pictures' sides as well as relabelling both headers, so
-    // the one control that changes the question also moved the answer
-    // (`docs/design/COMPARE_NAVIGATION.md`, F3). `compare/columns.ts` owns the rule and
-    // `<cp-compare-wall>` re-asserts it on arrival, which is what normalises a page cached in the
-    // old shape.
-    // `loading="lazy"` on both pictures, and it applies however late the `src` arrives: the wall
-    // assigns them from `<cp-compare-wall>` rather than serving them, and a catalog of several
-    // hundred rows was asking the browser for that many full-resolution pairs at once for a reader
-    // looking at the first screen. The element measures the pair through its own fetches, which the
-    // same element now defers to the viewport — so the pictures and the scorer wait for the same
-    // moment instead of one flooding ahead of the other.
+    // One column order for every lane: baseline · diff · ours, matching the viewer's spec lane, so
+    // switching baseline never swaps sides. `compare/columns.ts` owns the rule and
+    // `<cp-compare-wall>` re-asserts it on arrival (`docs/design/COMPARE_NAVIGATION.md`, F3).
+    // `loading="lazy"` applies however late `<cp-compare-wall>` assigns the `src`; the element also
+    // defers its scoring fetches to the viewport, so pictures and scorer wait together.
     val renderCell =
       "<td class=\"cp-compare-render-cell\"><div class=\"cp-compare-shot\">" +
         "<img loading=\"lazy\" class=\"cp-compare-png\" alt=\"\"></div>" +
-        // Empty, and filled by `<cp-compare-wall>` from the decoded raster rather than served: the
-        // wall chooses which theme variant of the pair is on screen, so a size printed here would
-        // be describing a picture the reader may not be looking at.
+        // Filled by `<cp-compare-wall>` from the decoded raster, since the wall chooses which theme
+        // variant is on screen.
         "<span class=\"cp-compare-dim\" data-dim-for=\"png\"></span></td>"
-    // The Remote Compose canvas is CLASSED because a row now holds two of them — this one and the
-    // delta map below — and `<cp-compare-wall>` has to tell the one it plays into from the one it
-    // paints.
+    // Classed because a row holds two canvases (this and the delta map), which `<cp-compare-wall>`
+    // must tell apart.
     val targetCell =
       "<td class=\"cp-compare-target-cell\"><div class=\"cp-compare-shot\">" +
         "<img loading=\"lazy\" class=\"cp-compare-vector\" alt=\"\">" +
         "<canvas class=\"cp-compare-rc\" hidden></canvas>" +
         "</div><span class=\"cp-compare-dim\" data-dim-for=\"target\"></span></td>"
-    // The delta map, and it belongs BETWEEN the pair wherever the pair ends up — the reference lane
-    // leads with the spec, the vector lanes lead with the render, and either way the middle column
-    // is what moved between the two beside it. That is the detail page's triptych at catalog scale.
-    // Only the reference lane shows it (`serve.css` keys the column off
-    // `#cp-compare[data-format]`):
-    // the vector lanes compare a render against an export of THAT render, so a map of what moved
-    // between them would be describing the exporter rather than the design.
+    // The delta map sits between the pair. Only the reference lane shows it (`serve.css` keys off
+    // `#cp-compare[data-format]`); for vector lanes it would describe the exporter, not the design.
     val diffCell =
       "<td class=\"cp-compare-diff-cell\"><div class=\"cp-compare-shot\">" +
         "<canvas class=\"cp-compare-diff\" aria-label=\"Highlighted pixel difference\"></canvas>" +
         "</div></td>"
     val pictureCells = listOf(targetCell, diffCell, renderCell).joinToString("\n            ")
     val darkFirst = isDarkFirstSystem(basePath, sessionId, declaredSurface)
-    // A viewer deep-link may name a non-default state/props variant that is intentionally folded
-    // out of this gallery. Keep every sibling id as an alias on the included component row so the
-    // client can still select that row instead of presenting an empty comparison page.
+    // A viewer deep link may name a folded-out variant, so sibling ids alias onto the included row.
     val previewIdsByCard =
       previews.groupBy(::comparisonCardKey).mapValues { (_, values) -> values.map { it.id } }
 
-    // Only the raster is generation-scoped. The vector and player products are made for the
-    // request and served `no-store`, so they are never the cached half of a mismatched pair — and
-    // the render lane ignores a `gen=` on them for exactly that reason.
+    // Only the raster is generation-scoped; vector and player products are `no-store`, and the
+    // render lane ignores `gen=` on them.
     fun path(preview: ServePreview, extension: String): String =
       "$basePath/render/${WebEscaping.urlEncodeSegment(preview.id)}.$extension" +
         (if (extension == "png") assetQ else q)
@@ -13131,24 +11245,19 @@ ${captureControlsHtml().prependIndent("          ")}
     }
 
     /**
-     * The score the delivery branch already measured for one pair, when it carries one.
-     *
-     * `design-reference-score.mjs` bakes it into `references/index.json` at publish time by driving
-     * the wall's own scorer, and [ServeDesignReferenceStore] drops it unless it names this build's
-     * kernel — so a number that survives to here is the number this page would compute. Null for a
-     * catalog published before the producer existed, or by a run with no browser to score with.
+     * The score the delivery branch already measured for one pair, if any.
+     * `design-reference-score.mjs` bakes it into `references/index.json` with the wall's own
+     * scorer, and [ServeDesignReferenceStore] drops it unless it names this build's kernel. Null
+     * for older catalogs or runs without a browser.
      */
     fun bakedPercent(preview: ServePreview?): Double? = preview?.let {
       referencesFor(it.id).firstOrNull()?.match?.percent
     }
 
     /**
-     * The baked score of the pair this row is SERVED showing — the one `variantFor` resolves for
-     * the page's own theme, which is the catalog's theme and then `neutral`.
-     *
-     * This is what the served row order is taken on. It cannot follow the visitor into another
-     * theme (the document is written once), and it does not have to: `<cp-compare-wall>` re-seeds
-     * and re-sorts from the per-variant attributes whenever the lane or theme changes.
+     * The baked score of the pair this row is served showing (`variantFor` for the catalog's theme,
+     * then `neutral`), used for the served order. `<cp-compare-wall>` re-sorts from per-variant
+     * attributes when lane or theme changes.
      */
     fun servedReferencePercent(card: GridCard): Double? {
       val themed = if (darkFirst) card.dark else card.light
@@ -13177,10 +11286,8 @@ ${captureControlsHtml().prependIndent("          ")}
       }
       val raster = "$basePath/reference/${WebEscaping.urlEncodeSegment(reference.id)}.png$assetQ"
       val detail = detailHref(preview, reference)
-      // The published score rides along with the pair it describes, per variant, because the pair
-      // is per variant: a row's light and dark references are two independently-exported drawings
-      // and two independently-measured numbers. `<cp-compare-wall>` reads the one matching the
-      // variant it resolved, so switching theme cannot leave the other theme's number standing.
+      // The published score rides per variant with the pair it describes, so switching theme never
+      // leaves the other theme's number.
       val match =
         reference.match
           ?.let { " data-match-$theme=\"${String.format(Locale.ROOT, "%.2f", it.percent)}\"" }
@@ -13203,12 +11310,8 @@ ${captureControlsHtml().prependIndent("          ")}
           parallelSources[p] != null
       }
     }
-    // Every id that has a row of its own. A design reference names one exact state/props mapping,
-    // so that variant is deliberately kept OUT of the fold above and gets a row — which means it
-    // must not also ride along as an alias on its siblings' rows. It used to: `previewIdsByCard`
-    // is keyed state- and props-invariantly, so all fourteen published `button-elevated` rows
-    // carried the same twenty-eight ids, and filtering the page by one variant's id matched the
-    // lot. The alias exists for ids with NO row; an id that has one selects itself.
+    // Every id with a row of its own. A referenced variant gets its own row, so it must not also
+    // alias onto siblings' rows, or filtering by its id would match them all.
     val rowPreviewIds =
       shownCards
         .flatMap { card -> listOfNotNull(card.light, card.dark, card.neutral).map { it.id } }
@@ -13216,28 +11319,14 @@ ${captureControlsHtml().prependIndent("          ")}
     // The genuinely folded-out siblings still have to select something, so each is aliased onto
     // exactly ONE row — the first row of its comparison card — rather than onto all of them.
     val aliasesClaimed = mutableSetOf<String>()
-    // The **Bugs** column stands or falls with the catalog's published issue index: with no index
-    // there is nothing to join and the column would be a row of bare "+ file" links, which is a
-    // route every row already has through its reference. A catalog that publishes one gets the
-    // column on every row, INCLUDING the rows with nothing filed — an unfiled bad score is exactly
-    // what a reader is scanning this wall for, and a blank cell there would read as "no route from
-    // here" rather than as "nobody has reported this yet".
+    // The **Bugs** column appears only when the catalog publishes an issue index, and then on every
+    // row, including unfiled ones.
     val showBugs = parityIssues.isNotEmpty()
-    // **Served worst-first**, on the numbers the delivery branch already measured.
+    // **Served worst-first** using the delivery branch's published scores, so the page arrives in
+    // the order the client's measurement would settle into.
     //
-    // The wall's order is the wall's whole argument — the rows that are wrong have to be the ones
-    // on screen without scrolling — and until now that order only existed AFTER the browser had
-    // decoded and scored two rasters per row, which on a catalog the size of m3-catalog is tens of
-    // seconds of the page sitting in catalog order looking like nothing is wrong. The published
-    // scores answer the same question at serve time, so the document leaves here in the order it
-    // will settle into and the client's measurement becomes a refinement rather than the first
-    // draft (issue #4624).
-    //
-    // Only the reference lane: `svg` and `rc` publish no score of their own, and re-ordering their
-    // rows by a number about a different comparison would be worse than catalog order. A row with
-    // no published score sorts AFTER the scored ones rather than leading like an unmeasurable row
-    // does — "not scored yet" is not a finding, and a catalog published before the producer existed
-    // would otherwise serve its whole table under a banner of rows claiming to be the worst.
+    // Reference lane only (`svg` and `rc` publish no score). Unscored rows sort after scored ones;
+    // "not scored yet" is not a finding.
     val orderedCards =
       if (defaultFormat != "reference") shownCards
       else shownCards.sortedBy { servedReferencePercent(it) ?: Double.MAX_VALUE }
@@ -13246,17 +11335,13 @@ ${captureControlsHtml().prependIndent("          ")}
         val variants = listOfNotNull(card.light, card.dark, card.neutral)
         val current = if (darkFirst) card.dark ?: card.default else card.default
         val component = componentKey(current)
-        // The variant, spelled out. Every row of a component printed the bare component name, so
-        // a component with a reference per state published a run of identically-labelled rows in
-        // no stated order — fourteen rows reading `button-elevated`, each showing a different
-        // button, which looks like the pairing is wrong rather than like the label is missing.
+        // The variant spelled out, so a component's per-state rows are distinguishable.
         val variant = compareVariantLabel(current)
         val label = if (variant.isEmpty()) component else "$component — $variant"
         val viewer = "$basePath/p/${WebEscaping.urlEncodeSegment(current.id)}$q"
         val cardKey = comparisonCardKey(current)
-        // Claimed once per card, exactly as before — the fold's whole point is that an id with no
-        // row of its own selects ONE row rather than all of its card's. What changed is only WHERE
-        // the list is written: into the document's one alias table, instead of into this row.
+        // Claimed once per card, so an id with no row of its own selects one row; the list goes
+        // into the document's alias table.
         val folded =
           if (aliasesClaimed.add(cardKey))
             previewIdsByCard[cardKey].orEmpty().filterNot { it in rowPreviewIds }
@@ -13265,12 +11350,9 @@ ${captureControlsHtml().prependIndent("          ")}
         // attribute, so the aliases still resolve onto exactly one row.
         val aliasAttr =
           if (folded.isEmpty()) "" else " data-alias-card=\"${WebEscaping.htmlEscape(cardKey)}\""
-        // The row's OWN variants stay on the row: three ids at most, and they are what the pictures
-        // and the report are about. The FOLDED aliases — every sibling id this card stands for —
-        // move to the document's one alias table ([comparisonAliasTableHtml]). They used to be
-        // written per row, and on `remote-m3` that was 19,188 mentions of 538 ids: 967 KB of an
-        // attribute whose whole content is 26 KB of distinct text.
-        // See `docs/design/COMPARE_NAVIGATION.md`, F2.
+        // The row's own variants stay on the row; folded aliases go to the document's one alias
+        // table ([comparisonAliasTableHtml]) to avoid quadratic page size. See
+        // `docs/design/COMPARE_NAVIGATION.md`, F2.
         val ids = variants.map { it.id }.distinct().joinToString(" ")
         val previewAttrs =
           listOf("light" to card.light, "dark" to card.dark, "neutral" to card.neutral)
@@ -13286,11 +11368,9 @@ ${captureControlsHtml().prependIndent("          ")}
             ServeIssueReport.componentIdFor(current),
             variants.map { it.id },
           )
-        // Where "+ file" lands at rest: the focused Reference / Diff / Actual page for the pair
-        // this row is SERVED showing, which files a report naming that exact preview and reference.
-        // `<cp-compare-wall>` re-points it at the pair it resolves whenever the lane or theme
-        // changes; the viewer's own report is the fallback, and the whole of it on a row with no
-        // reference to focus on.
+        // Where "+ file" lands at rest: the focused Reference / Diff / Actual page for the served
+        // pair. `<cp-compare-wall>` re-points it as lane or theme changes; the viewer's report is
+        // the fallback.
         val servedDetail =
           listOfNotNull(if (darkFirst) card.dark else card.light, card.neutral)
             .firstNotNullOfOrNull { preview ->
@@ -13306,36 +11386,22 @@ ${captureControlsHtml().prependIndent("          ")}
               parityIssuesGeneratedAt,
             )
           else ""
-        // The row's component identity, which a locator has to name and the wall's picker cannot
-        // derive: `ServeIssueReport.componentIdFor` reads the catalog's own id where there is one
-        // and falls back to a route id parsed out of the preview id, and reproducing that fallback
-        // in the browser would be a second implementation of a rule with one right answer.
+        // The row's component identity for locators, from `ServeIssueReport.componentIdFor`, so the
+        // browser doesn't reimplement its fallback.
         val componentIdAttr =
           " data-component-id=\"${WebEscaping.htmlEscape(ServeIssueReport.componentIdFor(current))}\"" +
-            // …and what to CALL it, for the scope chip a `?component=` link arrives with. The id is
-            // a route slug (`AppCard`) and the name is prose ("App Card"); a chip that named the
-            // slug would be the one thing on the page speaking the URL's language rather than the
-            // reader's.
+            // …and its display name, for the scope chip a `?component=` link arrives with.
             " data-component-label=\"${WebEscaping.htmlEscape(component)}\""
-        // The multi-row picker, next to the row's own name because that is what it selects. Emitted
-        // on every row and hidden by `serve.css` until `<cp-compare-wall>` marks the wall pickable
-        // — the tick does nothing without a script to turn it into a locator, and a checkbox that
-        // silently does nothing is worse than no checkbox. Rows the current lane cannot pair are
-        // disabled from there for the same reason.
+        // The multi-row picker, hidden by `serve.css` until `<cp-compare-wall>` marks the wall
+        // pickable; rows the lane cannot pair are disabled.
         val pickCell =
           "<label class=\"cp-compare-pick\">" +
             "<input type=\"checkbox\" class=\"cp-compare-pick-input\" " +
             "aria-label=\"Include ${WebEscaping.htmlEscape(label)} in one report\">" +
             "</label>"
-        // The issue numbers join the haystack, so `#4624` narrows the wall to the rows a report
-        // names — the reverse of the join above, and the way back from an issue to the pictures it
-        // is about. Their TITLES join it too, and follow from the pill showing them: a filter box
-        // over a table has to match what the table says, or typing a phrase the reader can see in
-        // front of them empties the wall.
-        // …and the haystack carries neither. It used to repeat the same id list a second time —
-        // the two attributes measured almost identically because they held the same bytes — and
-        // `keepRow` now matches a typed id against the resolved alias list instead, which is the
-        // same search over text written once.
+        // Issue numbers and titles join the haystack, so `#4624` or a visible phrase narrows the
+        // wall.
+        // Ids are not repeated here; `keepRow` matches typed ids against the resolved alias list.
         val hay =
           (listOf(label) + bugs.flatMap { listOf("#${it.number}", it.title.trim()) })
             .filter { it.isNotEmpty() }
@@ -13361,12 +11427,8 @@ ${captureControlsHtml().prependIndent("          ")}
           parallelAttrs("light", card.light) +
             parallelAttrs("dark", card.dark) +
             parallelAttrs("neutral", card.neutral)
-        // The ground each variant declares for ITSELF, where it declares one. Only the preview's
-        // own rungs — the catalog default is the wall's `data-default-theme` and applying it here
-        // too would make every row claim to have declared something. Without this the wall could
-        // only choose between "the variant is named dark" and "the catalog is dark-first", so a
-        // neutral pairing whose preview asks for a light ground inside a dark-first catalog had no
-        // way to say so and landed on the dark sheet.
+        // The ground each variant declares for itself, if any — only the preview's own rungs; the
+        // catalog default is the wall's `data-default-theme`.
         val declaredBgAttrs =
           listOf("light" to card.light, "dark" to card.dark, "neutral" to card.neutral)
             .mapNotNull { (variant, preview) ->
@@ -13433,9 +11495,8 @@ ${captureControlsHtml().prependIndent("          ")}
           .trimIndent()
       else ""
 
-    // Named for the lane it is actually showing, not the constant `SVG` this used to be: with the
-    // columns free to swap, a header over the wrong picture does not merely omit a fact, it states
-    // the pair backwards. `compare/columns.ts` keeps the client's relabelling in step.
+    // Named for the lane actually showing; `compare/columns.ts` keeps the client's relabelling in
+    // step.
     val targetHead =
       when (defaultFormat) {
         "reference" -> referenceToolLabel
@@ -13443,11 +11504,8 @@ ${captureControlsHtml().prependIndent("          ")}
         "rc" -> "Remote Compose"
         else -> "SVG"
       }
-    // "Rendered PNG" named a FILE FORMAT where the reader wanted to know WHOSE picture this is,
-    // and it was the odd one out in a row whose other header is a design tool's name. The catalog's
-    // own title answers it, and the two `cp-compare-head-role` lines under the names say which of
-    // the pair is the yardstick and which is on trial — so neither header depends on the reader
-    // remembering which side means what.
+    // The catalog's title names whose picture this is; the `cp-compare-head-role` lines say which
+    // side is the yardstick.
     fun headHtml(cls: String, name: String, role: String): String =
       "<th class=\"$cls\"><span class=\"cp-compare-head-name\">" +
         "${WebEscaping.htmlEscape(name)}</span>" +
@@ -13488,12 +11546,8 @@ ${captureControlsHtml().prependIndent("          ")}
     // The wall's page-scoped catalog report, in a provenance row of its own — see
     // [pageReportRowHtml] for why it borrows the viewer's row rather than styling a new one.
     val reportRow = pageReportRowHtml(reportIssue, "cp-compare-links")
-    // What the row pickers have selected, said out loud above the report they feed.
-    //
-    // A live region rather than a count on the button: the report itself is a disclosure the reader
-    // may not have open, and "these comparisons" in its note would otherwise be the only thing on
-    // the page claiming to know what is about to be filed. Server-rendered `hidden` and unhidden by
-    // `<cp-compare-wall>`, like every other control here that means nothing without a script.
+    // What the row pickers have selected, as a live region above the report they feed.
+    // Server-rendered `hidden` and unhidden by `<cp-compare-wall>`.
     val pickedBar =
       "\n          <p id=\"cp-compare-picked\" class=\"cp-compare-picked\" role=\"status\" hidden>" +
         "<span class=\"cp-compare-picked-text\"></span>" +
@@ -13506,8 +11560,7 @@ ${captureControlsHtml().prependIndent("          ")}
         "data-has-parallel=\"${if (hasParallel) "1" else "0"}\" " +
         "data-reference-label=\"${WebEscaping.htmlEscape(referenceToolLabel)}\" " +
         "data-parallel-label=\"${WebEscaping.htmlEscape(parallelLabel)}\"" +
-        // The Bugs column is a fourth thing competing for the reference lane's row width, so
-        // `serve.css` has to know it is there to pay for it out of the panels rather than out of
+        // Tells `serve.css` the Bugs column is present so its width comes out of the panels, not
         // `Match`.
         (if (showBugs) " data-has-bugs=\"1\"" else "") +
         (if (rcLanes != null) " data-rc-lanes=\"1\"" else "")
@@ -13525,10 +11578,8 @@ ${captureControlsHtml().prependIndent("          ")}
       // The bar names the catalog you are in, from the same heading the page shows.
       siteName = heading,
       themeStorageKey = themeStorageKey(sessionId, basePath),
-      // The PNG ↔ Remote Compose comparison plays the document in a canvas on this page and
-      // *scores*
-      // the result, so an unregistered typeface here doesn't just look wrong — it lands in the
-      // reported fidelity number.
+      // The RC comparison plays and scores the document on this page, so an unregistered typeface
+      // would skew the fidelity number.
       rcFonts = hasRc,
       body =
         """
@@ -13569,46 +11620,22 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The backends a missing column may be filled from by rendering it live — NOT simply every
-   * backend the host can draw, which is the whole point of the distinction.
+   * The backends a missing column may be filled from live — not every backend the host can draw.
    *
-   * `androidx-embedded` is the embedded AndroidX player, and a catalog's baked capture goes through
-   * that same player (it is what `RemoteOverridablePreview` defaults to), so on an Android daemon
-   * `?rcPlayer=androidx-embedded` hands back the baked bytes themselves. Measured against the
-   * deployed `remote-m3` host: `appcard__ideal__default__compact` answers md5 `e69d5136…` to both
-   * the bare render and `?rcPlayer=androidx-embedded` (then spelled `cmp-android`), and
-   * `button-imagebackground__ideal__default__compact` answers `48794c07…` to both. A column filled
-   * from that would be a pixel-for-pixel copy of the baked column under another player's name —
-   * worse than an absent column, because it asserts that two players agree where nothing was
-   * compared.
-   *
-   * The offline `embedded` lane is a third thing again: the vendored/local-patch player under this
-   * repo's own Robolectric harness, a harness-vs-harness check on that same player. Nothing records
-   * which player baked a given row (see [ServeRcCompare.LANES]'s note on provenance), so the
-   * duplication cannot be detected per row either — carry that provenance before widening this set.
-   *
-   * `cmp-jvm` is safe: Compose Desktop / Skiko is a different rasteriser from anything an Android
-   * capture can be. `androidx-view` is genuinely distinct too, but maps to no published column, so
-   * filling one would invent a lane the offline vocabulary does not have.
+   * `androidx-embedded` is excluded: baked captures go through the same player, so on an Android
+   * daemon it returns the baked bytes and would duplicate the baked column under another name. The
+   * offline `embedded` lane is the same player too, and no row records which player baked it —
+   * carry that provenance before widening this set. `cmp-jvm` is a distinct rasteriser;
+   * `androidx-view` is distinct but maps to no published column; see [LIVE_ONLY_LANES].
    */
   private val LIVE_FILLABLE = setOf(RcPlayerBackend.CMP_JVM, RcPlayerBackend.ANDROIDX_VIEW)
 
   /**
-   * A column for a player the offline pipeline has no lane id for, so the wall has to name it
-   * itself. Only [RcPlayerBackend.ANDROIDX_VIEW] is in this position: the AOSP view-backed
-   * `RemoteComposePlayer`, which draws into a framework `Canvas` rather than into Compose nodes.
-   *
-   * It is a genuinely different renderer from everything else on the wall, and measurably so — on
-   * the deployed `remote-m3` host `?rcPlayer=androidx-view` answers `822c80a4…` where the baked
-   * capture is `e69d5136…`, so unlike `androidx-embedded` it is never the baked bytes wearing
-   * another name. That is exactly why [RcPlayerBackend.ANDROIDX_VIEW.rcCompareLane] is null: the
-   * lane mapping exists to answer a bare `?rcPlayer=` from staged bytes, and there are no staged
-   * bytes that are this player's.
-   *
-   * Kept out of [ServeRcCompare.LANES] deliberately. That list mirrors the offline pipeline's
-   * columns, and a catalog's published `rc-compare.html` will never carry an `androidx-view` one —
-   * so putting it there would make the absent-players note start reporting a player no run could
-   * ever publish, on every wall, forever.
+   * A player with no offline lane id, which the wall names itself. Only
+   * [RcPlayerBackend.ANDROIDX_VIEW]: the AOSP view-backed `RemoteComposePlayer` drawing into a
+   * framework `Canvas`, a genuinely different renderer (hence its null
+   * [RcPlayerBackend.ANDROIDX_VIEW.rcCompareLane]). Kept out of [ServeRcCompare.LANES], which
+   * mirrors the offline columns, so the absent-players note never reports it.
    */
   private val LIVE_ONLY_LANES =
     mapOf(
@@ -13621,39 +11648,20 @@ ${captureControlsHtml().prependIndent("          ")}
     )
 
   /**
-   * The **Remote Compose players** view: every player's published render of every `ir/<id>.rc`
-   * document, one column per player, with the baked capture (the offline Robolectric/Skiko render,
-   * and the reference the offline run scored everything against) first.
+   * The **Remote Compose players** view: every player's published render of each `ir/<id>.rc`
+   * document, one column per player, with the baked capture first.
    *
-   * Nothing is diffed until asked. Picking a column as the reference gives every *other* column a
-   * pixel diff and a mismatch chip — the point of the view, since "how far is cmp-wasm from
-   * cmp-jvm?" is a question no build-time artifact answers: the offline run only ever diffed each
-   * player against the baked render.
-   *
-   * It replays what the delivery branch already published, so the page costs a few `<img>` loads
-   * rather than a `.rc` fetch plus a canvas render per preview, and it shows five players where the
-   * in-browser lane can only show the one that runs in a browser. Mirror of the published
-   * `rc-compare.html` (`render-rc-compare-html.mjs`), built from the same data.
+   * Nothing is diffed until a reference column is picked; then every other column gets a pixel diff
+   * and mismatch chip. Replays the delivery branch's published images (mirror of `rc-compare.html`
+   * from `render-rc-compare-html.mjs`), so it costs a few `<img>` loads.
    */
   /**
    * The comparison page's **alias table**: every preview id the wall can be narrowed by, written
-   * once.
+   * once instead of per row (see `docs/design/COMPARE_NAVIGATION.md`, F2).
    *
-   * Both tables on this page fold a component's variants into one row, and both let a `?preview=`
-   * naming a folded-away sibling select the row that stands for it. Carried per row instead, that
-   * list is quadratic: on `remote-m3` it came to 19,188 mentions of 538 distinct ids — 2 MB of
-   * `data-preview-ids` and `data-hay` on a 6.4 MB page, for 26 KB of ids. See
-   * `docs/design/COMPARE_NAVIGATION.md`, F2.
-   *
-   * `cards` is each comparison card's full id list; `rowed` is every id that has a row of its own.
-   * The two consumers want different slices, and the difference is a RULE: a design reference names
-   * one exact state/props mapping, so that variant is kept out of the fold and gets its own row —
-   * which means it must not also alias onto its siblings' rows, or filtering by it would match the
-   * lot. The wall subtracts `rowed`; the Remote Compose lane wall, whose rows are one per preview
-   * and not per mapping, does not. Publishing both facts once and naming the rule here is what
-   * keeps the browser from re-deriving it (see the comment at `rowPreviewIds`).
-   *
-   * Empty ⇒ no element at all, so a catalog that folds nothing pays nothing.
+   * `cards` is each comparison card's full id list; `rowed` is every id with its own row. The wall
+   * subtracts `rowed` (a referenced variant must not alias onto siblings); the Remote Compose lane
+   * wall, with one row per preview, does not. Empty ⇒ no element.
    */
   private fun comparisonAliasTableHtml(
     previewIdsByCard: Map<String, List<String>>,
@@ -13665,10 +11673,9 @@ ${captureControlsHtml().prependIndent("          ")}
       cards.entries.joinToString(",") { (key, ids) ->
         "${WebEscaping.jsString(key)}:${WebEscaping.jsString(ids.joinToString(" "))}"
       }
-    // A JSON `<script>`, not a data attribute on the root: it is one string of several tens of
-    // kilobytes, and an attribute would have to escape every quote in it. The type is not one the
-    // browser executes, and [WebEscaping.jsString] escapes `<`, `>` and `&`, so no id can close
-    // the element early — the one way a JSON island turns into script injection.
+    // A JSON `<script>` rather than an attribute (tens of KB, no quote escaping). The type is
+    // non-executable and [WebEscaping.jsString] escapes `<`, `>` and `&`, so no id can close the
+    // element.
     return "<script type=\"application/json\" id=\"cp-compare-aliases\">" +
       "{\"cards\":{$entries}," +
       "\"rowed\":${WebEscaping.jsString(rowPreviewIds.joinToString(" "))}}" +
@@ -13691,10 +11698,8 @@ ${captureControlsHtml().prependIndent("          ")}
   ): String? {
     if (manifest.lanes.isEmpty() || manifest.rows.isEmpty()) return null
     val q = querySuffix(linkQuery(token, linkSessionId, basePath, isPublic))
-    // These rasters are published per catalog generation and restaged by a refresh, and the
-    // mismatch percentages beside them are baked into this HTML. Scoping them is what stops a
-    // cached wall showing one publish's scores against the next publish's player images (#4714
-    // review) — the same claim the primary render/reference pair makes, about a different pair.
+    // Generation-scoped because these rasters are restaged per publish while the mismatch
+    // percentages are baked into the HTML.
     val assetQ = ServeCacheGeneration.scope(q, generation)
     val previewsById = previews.associateBy { it.id }
     // Staged names are `<lane>/<slot>.png` and need the catalog's rc-compare prefix; a live lane's
@@ -13706,11 +11711,8 @@ ${captureControlsHtml().prependIndent("          ")}
         else -> "$basePath/${ServeRcCompare.DIRECTORY}/$name$assetQ"
       }
 
-    // ---- The live columns -------------------------------------------------------------------
-    //
-    // A player this host can draw, that the published run has no column for, and that cannot come
-    // back as a copy of a column already on the wall. [LIVE_FILLABLE] carries the last condition
-    // and the measurements behind it.
+    // Live columns: players this host can draw that the published run lacks, excluding any that
+    // would copy an existing column ([LIVE_FILLABLE]).
     val publishedLaneIds = manifest.lanes.mapTo(mutableSetOf()) { it.id }
     // A backend's column id: the offline lane it corresponds to, or the one this wall names for a
     // player the offline pipeline has none for.
@@ -13735,9 +11737,8 @@ ${captureControlsHtml().prependIndent("          ")}
     }
     val liveLaneIds = liveBackends.mapNotNullTo(mutableSetOf()) { laneIdOf(it) }
     val liveWireByLane = liveBackends.associate { laneIdOf(it)!! to it.wire }
-    // Every player this host reports for any row — including the ones [LIVE_FILLABLE] withholds.
-    // The note below has to tell "this host cannot draw it" apart from "it would draw a copy of a
-    // column already here", and only this set can.
+    // Every player the host reports for any row, including those [LIVE_FILLABLE] withholds, so the
+    // note can distinguish "cannot draw" from "would duplicate".
     val hostWires =
       manifest.rows.flatMapTo(mutableSetOf()) { row ->
         liveRcPlayersFor(row.previewId).map { it.wire }
@@ -13750,9 +11751,8 @@ ${captureControlsHtml().prependIndent("          ")}
             it.wire in hostWires
         }
         .mapTo(mutableSetOf()) { it.rcCompareLane!! }
-    // The live render endpoint, per preview and player. `?rcPlayer=` is answered from published
-    // bytes where the run drew them and from the renderer otherwise, so this one URL is right
-    // whether or not the lane was ever staged.
+    // The live render endpoint per preview and player; `?rcPlayer=` serves published bytes when
+    // staged, otherwise renders.
     val liveQuery = linkQuery(token, linkSessionId, basePath, isPublic)
     // The URL names the player in this server's vocabulary ([ServeRcPlayerIds]), not by the
     // compose-ai-tools wire spelling the membership sets above are keyed on.
@@ -13781,9 +11781,8 @@ ${captureControlsHtml().prependIndent("          ")}
           ServeRcCompare.LANES.filter { it.id in liveLaneIds }
             .map { RcCompareLane(it.id, it.label, it.short) } +
           LIVE_ONLY_LANES.values.filter { it.id in liveLaneIds })
-        // Published order first, this wall's own lanes after it. A live-only lane has no position
-        // in a vocabulary it is not part of, and `indexOfFirst` would hand it -1 — the first
-        // column, ahead of `baked`, which is the one place it must never sit.
+        // Published order first, then this wall's live lanes; `indexOfFirst` would otherwise put a
+        // live-only lane (-1) ahead of `baked`.
         .sortedBy { lane ->
           val i = ServeRcCompare.LANES.indexOfFirst { it.id == lane.id }
           if (i >= 0) i else ServeRcCompare.LANES.size
@@ -13818,11 +11817,8 @@ ${captureControlsHtml().prependIndent("          ")}
       ordered.withIndex().joinToString("\n") { (index, entry) ->
         val (row, label) = entry
         val preview = previewsById[row.previewId]
-        // The card this lane row belongs to, by KEY. Every row here used to carry its card's whole
-        // id list — with no claim-once rule, so a 66-variant card wrote 66 copies of the same 66
-        // ids — and then wrote them a second time into the haystack. That was the bulk of the two
-        // largest attributes on the page (`docs/design/COMPARE_NAVIGATION.md`, F2); the ids are now
-        // written once, in the shared alias table, and looked up from this key.
+        // The card this lane row belongs to, by key; ids live once in the shared alias table
+        // (`docs/design/COMPARE_NAVIGATION.md`, F2).
         val cardKey = preview?.let(::comparisonCardKey)
         val aliasAttr =
           cardKey
@@ -13834,9 +11830,8 @@ ${captureControlsHtml().prependIndent("          ")}
         val dims = if (row.width > 0 && row.height > 0) "${row.width}×${row.height}" else ""
         val cells =
           lanes.joinToString("") { lane ->
-            // Rendered on demand where this is a live column: no build-time diff and no
-            // build-time score, so the client measures it against whatever column the reader
-            // picks, exactly as it already does for any player pair the offline run never compared.
+            // A live column has no build-time diff or score; the client measures it against the
+            // picked column.
             val cell = liveCell(row.previewId, lane.id) ?: row.lanes[lane.id] ?: RcCompareCell()
             val live = cell.rendered && lane.id in liveLaneIds
             val body =
@@ -13872,22 +11867,13 @@ ${captureControlsHtml().prependIndent("          ")}
           .trimIndent()
       }
 
-    // The players this view knows about that the run did NOT publish, named out loud instead of
-    // left to be inferred from a column that isn't there. A reader who knows the vocabulary counts
-    // the columns and asks where the rest went (#4998); "that lane wasn't part of this catalog's
-    // run" is an answer no arrangement of the columns that ARE here can give, and the alternative —
-    // a column of empty cells per absent player — spends the wall's width saying nothing.
-    //
-    // [ServeRcCompare.LANES] is the vocabulary, and it is the same list [ServeRcCompare.plan]
-    // filters down to build `manifest.lanes`, so the two can't drift apart.
-    //
-    // Measured against the columns actually on the wall, not against what the run published: a
-    // player this host draws on demand is present, and reporting it missing because some offline
-    // job skipped it would be exactly the false claim the note exists to prevent.
+    // Names the players this view knows that the run did not publish, rather than leaving readers
+    // to infer them from missing columns. [ServeRcCompare.LANES] is the same vocabulary
+    // [ServeRcCompare.plan] filters for `manifest.lanes`. Measured against columns actually on the
+    // wall, so on-demand players count as present.
     val shown = lanes.mapTo(mutableSetOf()) { it.id }
     val absent = ServeRcCompare.LANES.filterNot { it.id in shown }
-    // Two different reasons to have no column, and stating only the first would be a false claim
-    // about the host: a withheld player is one this server CAN draw (#200 review).
+    // Two reasons for a missing column: a withheld player is one this server can draw, so say so.
     val withheld = absent.filter { it.id in withheldLaneIds }
     val absentNote =
       if (absent.isEmpty()) ""
@@ -13916,10 +11902,8 @@ ${captureControlsHtml().prependIndent("          ")}
     val model =
       ServeRcCompare.ClientModel(
         threshold = manifest.threshold,
-        // The COLUMNS, not the published lanes. `RcLanes` derives its lane ids from this and
-        // validates `?ref=` against it, so a live column missing here is a column the client never
-        // diffs and a `?ref=` nobody can share — the entire point of adding it, silently absent
-        // (#206 review). It was `manifest.lanes` from #199, so cmp-jvm was in that state too.
+        // The columns, not the published lanes: `RcLanes` derives lane ids from this and validates
+        // `?ref=` against it, so a live column missing here could never be diffed or shared.
         lanes = lanes,
         rows =
           ordered.map { (row, label) ->
@@ -13977,122 +11961,77 @@ $rows
     isPublic: Boolean = false,
     trust: String? = null,
     /**
-     * The catalog's declared stage surface (`catalog.json`'s `display.surface`), as everywhere
-     * else. This page went without one for far too long, which is the whole of
-     * yschimke/wear-m3-catalog#56: its three panels fell through to the `.cp-compare-shot`
-     * checkerboard, so a dark-first catalog's white-on-transparent sticker was compared against its
-     * reference while being nearly invisible in the panel meant to show it.
+     * The catalog's declared stage surface (`display.surface`), so a dark-first catalog's panels
+     * don't fall through to the checkerboard.
      */
     declaredSurface: String? = null,
     /**
-     * The served catalog's own palette as an inline `:root` override for the chrome's custom
-     * properties, built by [ServeThemeCss] from the branch's `tokens.dtcg.json`. Empty ⇒ the page
-     * keeps the built-in chrome (a plain module, or a catalog that publishes no tokens).
+     * The catalog's palette as an inline `:root` override, built by [ServeThemeCss] from
+     * `tokens.dtcg.json`. Empty keeps the built-in chrome.
      */
     themeCss: String = "",
     unfurl: UnfurlMetadata? = null,
-    /**
-     * Running server version (`SERVE_VERSION`), shown in the minimal footer. Null omits the build
-     * span.
-     */
+    /** Running server version (`SERVE_VERSION`) for the footer. Null omits the build span. */
     version: String? = null,
     displayTitle: String? = null,
     /**
-     * Typography / layout annotations for the reference raster and the rendered frame. Either side
-     * may be empty — a producer that annotates only one panel still gets that panel's layers, and a
-     * session with no annotations at all renders exactly as before (no toggles, no payload).
+     * Typography / layout annotations for the reference raster and the rendered frame. Either may
+     * be empty; with none, no toggles or payload are emitted.
      */
     referenceAnnotations: List<DesignAnnotation> = emptyList(),
     actualAnnotations: List<DesignAnnotation> = emptyList(),
     /**
-     * The parity run's verdict for this exact (preview, reference) pair, as the catalog published
-     * it in `parity/findings.json`. Empty ⇒ the page renders exactly as it did before the manifest
-     * existed, which is every catalog whose producer does not write one.
+     * The parity run's verdict for this (preview, reference) pair from `parity/findings.json`.
+     * Empty renders no verdict.
      */
     parityFindings: List<ParityFindingSet> = emptyList(),
     /**
-     * Whether the host can project the **derived** layers — typography, theme and layout read off
-     * the render's own semantics tree — for this preview, i.e. answer `/render/<id>.annotations`.
-     *
-     * Separate from [actualAnnotations], which is the *producer-authored* list a bundle publishes
-     * in `annotations/index.json`. This page carried only the authored one for as long as it has
-     * existed, which is why most catalogs show a redline over the Reference panel and nothing over
-     * the render — and why, before this, an element selector on the Actual side would have had
-     * nothing to point at on the side that matters.
+     * Whether the host can project the **derived** layers (typography, theme, layout from the
+     * render's semantics tree), i.e. answer `/render/<id>.annotations`. Separate from the
+     * producer-authored [actualAnnotations] in `annotations/index.json`.
      */
     derivedAnnotations: Boolean = false,
     /**
-     * Whether the catalog **published** typography over this preview's baked frame
-     * ([ServeHost.hasPublishedTypographyFor]) — the other lane behind the same Typography layer,
-     * and the only one a static bundle has.
+     * Whether the catalog published typography over this preview's baked frame
+     * ([ServeHost.hasPublishedTypographyFor]) — the other lane behind the Typography layer, and the
+     * only one a static bundle has.
      *
-     * The viewer has always drawn this distinction ([hasPublishedTypography] there) and the
-     * comparison must too, because the two lanes do not overlap where it matters. A static bundle
-     * answers `.annotations` from `annotations/index.json` and never re-renders, so it is the one
-     * host whose layers and PNG are the same frame by construction — which is exactly the host
-     * [annotationsSelectable] is for. Gating this page's mount on [derivedAnnotations] alone put
-     * the two behind mutually exclusive predicates: a bundle host has no daemon, so no mount was
-     * emitted at all, while every host that got one renders per request and so is not selectable.
-     * The intersection was empty and no deployed comparison offered a selectable box.
-     *
-     * Only the Typography row rides this lane. Theme attributes and Layout boxes are projected from
-     * a semantics tree and nothing authors them into a bundle, so they stay gated on
-     * [derivedAnnotations] rather than becoming checkboxes with nothing behind them.
+     * A static bundle never re-renders, so its layers and PNG are the same frame — exactly the host
+     * [annotationsSelectable] is for; gating on [derivedAnnotations] alone would never offer a
+     * selectable box. Only Typography rides this lane; Theme and Layout stay gated on
+     * [derivedAnnotations].
      */
     publishedTypography: Boolean = false,
     /**
-     * Whether a **tag** selection would describe the frame on screen, and so whether to offer the
-     * picker at all. The URL itself is built here rather than passed in, so it goes through the
-     * same [linkQuery] rules as every other link on the page — a hand-rolled query builder in the
-     * handler read only the request's query parameters and so dropped the credential entirely for a
-     * page authorized by header or by an agent's bearer grant, silently hiding the picker on a
-     * catalog that publishes a perfectly good index.
+     * The tag index URL when a tag selection would describe the frame on screen; null hides the
+     * picker. Built here via [linkQuery] so it keeps the credential however the page was
+     * authorized.
      *
-     * Null is not "no tags". `ServeHost.tagIndexForPreview` is the *published static* index,
-     * measured in CI over the baked render, and both live host wrappers delegate to their baked
-     * host — so an override-bearing or pinned frame is a different render than the one those bounds
-     * came from. A tag selection persists those bounds into the locator as the acceptance's
-     * baseline, so bounds read off another frame survive into a record that later reports an
-     * unchanged element as *moved*: a false invalidation with a plausible explanation attached,
-     * which is worse than a missing check. A dragged region has no such coupling — it is derived
-     * from the displayed pixels, so it describes what the reporter saw by construction — and stays
-     * offered either way.
-     *
-     * The index is a published artifact and is not scoped to the render query, so its URL carries
-     * the session keys and nothing else — no overrides (there are none, or this would be false) and
-     * no `reference=`.
+     * Null does not mean "no tags": `ServeHost.tagIndexForPreview` is the static index measured
+     * over the baked render, so for an override-bearing or pinned frame its bounds would be
+     * persisted as a false baseline. Dragged regions come from displayed pixels and stay offered.
+     * The URL carries only the session keys.
      */
     tagIndexAvailable: Boolean = false,
     /**
-     * Whether clicking one of the derived semantics boxes may **select** it.
-     *
-     * Separate from [derivedAnnotations], which decides whether the layers are drawn at all.
-     * Drawing them over a frame the server rendered for this request is fine — a reading aid a
-     * render out of date costs nothing. Recording one is not: `.annotations` is a separate request
-     * from the PNG the client already decoded, so on a host that renders per request the two can
-     * describe different frames wherever output varies, and a click would persist a region from one
-     * of them as the acceptance's authoring-time baseline.
+     * Whether clicking a derived semantics box may select it. Separate from [derivedAnnotations]
+     * (drawing): on a host that renders per request, `.annotations` and the decoded PNG may be
+     * different frames, so recording a box could persist the wrong baseline.
      */
     annotationsSelectable: Boolean = false,
     /**
-     * Why the tag picker is absent, when the reason is worth saying out loud. Shown beside the
-     * selector rather than left to be guessed at: "this catalog publishes no tag index" and "your
-     * overrides mean the index describes a different render" are different problems with different
-     * fixes, and a control that simply is not there teaches neither.
+     * Why the tag picker is absent, when worth saying ("no tag index" vs "overrides mean the index
+     * describes another render").
      */
     tagSelectionNote: String? = null,
     /**
-     * The catalog's published revisions and which one this page is pinned to. This is the page the
-     * permalink feature was raised against (issue #3723): a comparison URL names a preview and a
-     * reference, both of which are republished, so without a pin it describes whatever the pair
-     * happens to be when the link is opened.
+     * The catalog's published revisions and this page's pin, so a comparison URL can name a fixed
+     * publish of its preview and reference.
      */
     revisions: CatalogRevisions = CatalogRevisions.NONE,
     /**
-     * Whether this page is served as a **top-level site** ([ServeSites]) — its catalog rooted on a
-     * hostname of its own. The session is then implied by the ORIGIN, exactly as a `/<system>`
-     * mount implies it by the path, so same-session links must not repeat it as `?session=`. False
-     * (the default) leaves every existing caller's URLs byte-identical.
+     * Whether this page is served as a **top-level site** ([ServeSites]); the origin implies the
+     * session, so links must not repeat `?session=`.
      */
     sessionInOrigin: Boolean = false,
     /** Normalised render-lane query values that reproduce the compared candidate. */
@@ -14100,37 +12039,30 @@ $rows
     /** Prefilled parity report for this exact preview/reference comparison. */
     reportIssue: ReportIssue? = null,
     /**
-     * What the browser engine needs to evaluate this catalog's committed acceptances against this
-     * comparison, or null to leave the band off the page entirely.
-     *
-     * Null on every catalog that has accepted nothing, which is most of them — and the band is
-     * absent rather than empty, because "no acceptances here" and "nothing has been accepted in
-     * this catalog" are the same fact and neither deserves a row saying so.
+     * What the browser engine needs to evaluate the catalog's committed acceptances against this
+     * comparison, or null to omit the band (as for catalogs that have accepted nothing).
      */
     knownDifferences: KnownDifferenceScope? = null,
     parityIssues: List<ParityIssue> = emptyList(),
     /**
-     * When the catalog's issue index was generated (`ParityIssues.generatedAt`, ISO-8601), printed
-     * at the foot of an opened issue panel. Null on an index that declares none, which simply omits
-     * the line — the panel is still a snapshot, it just cannot say of when.
+     * When the issue index was generated (`ParityIssues.generatedAt`, ISO-8601), printed at the
+     * foot of an opened issue panel. Null omits the line.
      */
     parityIssuesGeneratedAt: String? = null,
     /**
-     * The complete issue index used to resolve acceptance lifecycle state. [parityIssues] remains
-     * the comparison-filtered list rendered in the Issues panel; an acceptance can legitimately
-     * refer to an issue whose independently published preview/reference locators are stale, so the
-     * lifecycle join must not inherit that display filter.
+     * The complete issue index for resolving acceptance lifecycle state. [parityIssues] is the
+     * display-filtered list; the lifecycle join must not inherit that filter, since an acceptance
+     * may cite an issue whose locators are stale.
      */
     acceptanceIssues: List<ParityIssue> = parityIssues,
     /**
-     * The catalog change feed the footer offers as **Changelog** and the head declares as this
-     * page's RSS alternate. Empty when the server runs with the feed lane off. See [siteFooter].
+     * The catalog change feed offered as **Changelog** and declared as the page's RSS alternate.
+     * Empty when the feed lane is off. See [siteFooter].
      */
     changelogHref: String = "",
   ): String {
-    // The session id links may carry. Null on a rooted site (and for the default session): the
-    // URL already says which catalog this is. `sessionId` itself stays intact below — it keys the
-    // per-catalog localStorage entries and the dark-first lookup, which a site still needs.
+    // The session id links may carry: null on a rooted site and for the default session.
+    // `sessionId` still keys per-catalog storage and the dark-first lookup.
     val linkSessionId = if (sessionInOrigin) null else sessionId
     val overrideQuery =
       overrides.entries
@@ -14148,18 +12080,13 @@ $rows
         if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
       )
     val heading = catalogHeading(displayTitle, moduleLabel)
-    // Both panels take the pin, or neither does. A pinned render scored against the current mock
-    // would be a comparison across time rather than between the two sides. Unpinned, both take the
-    // page's generation for the same reason one step removed: the verdict below was measured on
-    // this publish's frame, so a panel that quietly refreshed into the next publish's would put a
-    // claim about padding over pixels nobody measured ([ServeCacheGeneration]).
+    // Both panels take the pin or neither does; unpinned, both take the page's generation, so the
+    // verdict and the pixels describe the same publish ([ServeCacheGeneration]).
     val assetQuery = assetQuery(q, revisions)
     val actual = "$basePath/render/${WebEscaping.urlEncodeSegment(preview.id)}.png$assetQuery"
     val raster = "$basePath/reference/${WebEscaping.urlEncodeSegment(reference.id)}.png$assetQuery"
-    // The ground all three panels sit on. Both sides get the SAME one on purpose: the diff panel is
-    // only meaningful if the reference and the render were composited onto identical pixels, and
-    // showing each on its own preferred stage would put a ground difference into a comparison whose
-    // entire job is to isolate the component's difference.
+    // All three panels share one ground: the diff is only meaningful when both sides are composited
+    // onto identical pixels.
     val backdrop =
       backdropFor(
         preview,
@@ -14173,32 +12100,25 @@ $rows
     val stageClip = stageClipFor(preview, overrides)
     val stageAttrs =
       backdrop.color?.let { color ->
-        // The theme word drives the existing CSS; the exact colour rides along as a custom property
-        // so a catalog whose stage is neither of the two literal plates still gets its own ground
-        // rather than the nearest of them.
+        // The theme word drives the CSS; the exact colour rides as a custom property for stages
+        // that match neither plate.
         val clipProperty =
           stageClip?.let { "; --cp-stage-clip: ${WebEscaping.htmlEscape(it)}" } ?: ""
-        // The marker attribute AS WELL as the property, because the clip is not the only thing the
-        // rules it gates do: they also take the ground off the panel and hand it to the image, so
-        // the corners the clip opens up show the page's checkerboard rather than the stage colour.
-        // CSS cannot branch on whether a custom property was set, so without a marker every
-        // rectangular preview would lose its panel ground to buy a clip it never uses.
+        // A marker attribute as well as the property: the gated rules also move the ground from
+        // panel to image, and CSS cannot test whether a custom property is set.
         val clipMarker = if (stageClip != null) " data-cp-stage-clip=\"1\"" else ""
         " data-bg-theme=\"${if (backdrop.isDark) "dark" else "light"}\"" +
           clipMarker +
           " style=\"--cp-stage-backdrop: ${WebEscaping.htmlEscape(color.asCssColor())}$clipProperty\""
       } ?: ""
-    // One toggle per kind, offered only when some panel actually carries that kind — a control that
-    // reveals nothing is worse than no control. The payload rides inline rather than behind a fetch
-    // so the layers are there on first paint, like the rest of this page's data.
+    // One toggle per kind actually present in some panel. The payload is inline so layers are there
+    // on first paint.
     val annotated = referenceAnnotations + actualAnnotations
     val annotationControls =
       if (annotated.isEmpty()) ""
       else {
-        // Every kind [AnnotationKind.KNOWN] admits needs an entry here. A kind that loads and gets
-        // a box built for it but has no toggle is drawn into a layer CSS keeps permanently hidden —
-        // which is what happened to THEME: `ServeAnnotationStore` accepts it, `format-compare.js`
-        // builds its box and legend row, and nothing could ever reveal either.
+        // Every kind [AnnotationKind.KNOWN] admits needs an entry here, or its boxes are drawn into
+        // a layer that can never be revealed.
         val toggles =
           listOf(
               AnnotationKind.LAYOUT to "Layout",
@@ -14223,16 +12143,11 @@ $rows
         """
           .trimIndent()
       }
-    // The DERIVED layers, mounted over the Actual panel by the same `<cp-inspect-layers>` the
-    // viewer
-    // uses (see `inspect/host.ts`). Deliberately a second, separately-labelled control group rather
-    // than more checkboxes in the one above: those toggle the redline a producer AUTHORED and that
-    // this page inlines for both panels, these toggle what the render's own semantics tree SAYS,
-    // and only the render has one. Folding them together would offer a Typography toggle that means
-    // two different things depending on which panel you looked at.
-    // Typography rides either lane; Theme and Layout only the semantics one. Same rule as the
-    // viewer's Inspect group, and for the same reason: a row whose fetch can only come back empty
-    // is a dead control.
+    // The derived layers, mounted over the Actual panel by the viewer's `<cp-inspect-layers>` (see
+    // `inspect/host.ts`), as a separate group: the toggles above are producer-authored redlines for
+    // both panels, these are what the render's own semantics tree says.
+    // Typography rides either lane; Theme and Layout only the semantics one, as in the viewer's
+    // Inspect group.
     val derivedLayers = buildList {
       if (derivedAnnotations || publishedTypography) add("typography" to "Typography")
       if (derivedAnnotations) {
@@ -14267,14 +12182,11 @@ ${if (annotationsSelectable) "          data-cp-selectable=\"1\"\n" else ""}    
         """
           .trimIndent()
       }
-    // The element selector. A dragged region needs nothing from the server — it is read off the
-    // displayed pixels — so the control is offered on every focused comparison; the tag picker only
-    // appears where the index describes the frame being shown. See [tagIndexUrl].
-    // Generation-scoped like the frame it describes. The index is measured over the baked render,
-    // and clicking one of its entries persists its bounds as an acceptance baseline — so an index
-    // fetched from a publish other than the one on screen is precisely the record corruption this
-    // page's coupling exists to prevent. Scoping it means the lane can refuse a stale one instead
-    // of answering with today's bounds (#4714 review).
+    // The element selector. A dragged region needs nothing from the server, so it is always
+    // offered; the tag picker only appears where the index describes the shown frame
+    // ([tagIndexUrl]).
+    // The index is generation-scoped: its bounds become an acceptance baseline, so the lane must be
+    // able to refuse an index from another publish.
     val tagIndexUrl =
       if (!tagIndexAvailable) null
       else
@@ -14304,38 +12216,23 @@ ${if (annotationsSelectable) "          data-cp-selectable=\"1\"\n" else ""}    
         <cp-element-selection></cp-element-selection>
         """
           .trimIndent()
-    // The acceptance band and its payload. Both are absent together on a catalog that has accepted
-    // nothing — an empty band would say "0 accepted" on every comparison in every catalog, which is
-    // noise rather than information.
+    // The acceptance band and its payload are both absent for a catalog that has accepted nothing.
     //
-    // The band renders empty and `hidden`: the numbers are the browser's, computed from the same
-    // rasters the diff uses, and the server has no scorer to write them with. What the server does
-    // decide is whether the engine may run at all, which is the payload's presence.
-    // The acceptance band and its payload. Both are absent together on a catalog that has accepted
-    // nothing — an empty band would say "0 accepted" on every comparison in every catalog, which is
-    // noise rather than information, and the page would also carry the engine's bundle to evaluate
-    // nothing.
+    // The band renders empty and `hidden`: the numbers are computed in the browser from the same
+    // rasters the diff uses; the server only decides, via the payload's presence, whether the
+    // engine runs.
     //
-    // The band renders empty and `hidden`: the numbers are the browser's, computed from the same
-    // rasters the diff uses, and the server has no scorer to write them with. What the server
-    // decides is whether the engine may run at all, which is the payload's presence.
-    //
-    // Both strings carry their own leading newline and sit at column zero, like every other
-    // interpolated block on this page. That is not cosmetic: `trimIndent()` runs *after*
-    // interpolation, so a block indented to match the template would drag the whole page's
-    // indentation with it — and an empty one on its own template line would leave a blank line on
-    // every catalog that has accepted nothing, which is exactly the golden drift this shape avoids.
+    // Both strings carry their own leading newline at column zero: `trimIndent()` runs after
+    // interpolation, so an indented block would shift the page and an empty one would leave a blank
+    // line.
     val acceptanceBand =
       if (knownDifferences == null) ""
       else "\n" + """<div class="cp-acceptance" id="cp-acceptance" role="status" hidden></div>"""
     val acceptanceContext = knownDifferences?.let { scope ->
       encodeKnownDifferenceContext(
         KnownDifferenceContext(
-          // The document and the artifacts are published catalog files, not render output, so
-          // they take the session keys and nothing else — no overrides, no `reference=`. The pin
-          // is deliberately absent too: a historical revision's acceptances are not published, and
-          // quoting today's against yesterday's pixels would gate a comparison nobody accepted
-          // anything for.
+          // Published catalog files, not render output: session keys only, no overrides, no
+          // `reference=`, and no pin (historical acceptances aren't published).
           documentUrl =
             "$basePath/parity/known-differences.json" +
               querySuffix(linkQuery(token, linkSessionId, basePath, isPublic)),
@@ -14382,9 +12279,8 @@ ${scriptTag("known-differences.js")}
         ?.let { " · revision ${WebEscaping.htmlEscape(it)}" }
         .orEmpty()
     val referenceChoices = (references + reference).distinctBy { it.id }
-    // This page at a given pin (null ⇒ the live catalog), keeping the reference it is showing. Both
-    // the revision control and the sibling-reference picker below build their links through it, so
-    // moving between revisions and moving between references never drop each other.
+    // This page at a given pin (null ⇒ live), keeping its reference; the revision control and
+    // sibling-reference picker both build links through it.
     val pageHref: (String?, String) -> String = { pin, referenceId ->
       val query =
         listOfNotNull(
@@ -14465,11 +12361,9 @@ ${scriptTag("known-differences.js")}
   }
 
   /**
-   * The catalog's **Pages** index: one card per published design page.
-   *
-   * Only rendered when the catalog published at least one, so an ordinary catalog never grows an
-   * empty tab. Each card leads with the design's own drawing and states the coverage number the
-   * whole surface exists to surface — how many of the sheet's components this catalog implements.
+   * The catalog's **Pages** index: one card per published design page, leading with the drawing and
+   * stating how many of the sheet's components this catalog implements. Only rendered when at least
+   * one page exists.
    */
   fun designPagesIndexPage(
     moduleLabel: String,
@@ -14484,28 +12378,23 @@ ${scriptTag("known-differences.js")}
     version: String? = null,
     displayTitle: String? = null,
     /**
-     * Whether this page is served as a **top-level site** ([ServeSites]) — its catalog rooted on a
-     * hostname of its own. The session is then implied by the ORIGIN, exactly as a `/<system>`
-     * mount implies it by the path, so same-session links must not repeat it as `?session=`. False
-     * (the default) leaves every existing caller's URLs byte-identical.
+     * Whether this page is served as a **top-level site** ([ServeSites]); the origin implies the
+     * session, so links must not repeat `?session=`.
      */
     sessionInOrigin: Boolean = false,
     /**
-     * The catalog change feed the footer offers as **Changelog** and the head declares as this
-     * page's RSS alternate. Empty when the server runs with the feed lane off. See [siteFooter].
+     * The catalog change feed offered as **Changelog** and declared as the page's RSS alternate.
+     * Empty when the feed lane is off. See [siteFooter].
      */
     changelogHref: String = "",
     /**
-     * The page-scoped "report a catalog issue" for this surface, built by the caller from the
-     * session's catalog source/provenance via [ServeIssueReport]. It names the PAGE rather than a
-     * preview, because this one shows no single preview to name — see [pageReportRowHtml]. Null (a
-     * plain module, or any caller that has nothing to file against) omits it entirely.
+     * The page-scoped "report a catalog issue" for this surface, built via [ServeIssueReport];
+     * names the page rather than a preview ([pageReportRowHtml]). Null omits it.
      */
     reportIssue: ReportIssue? = null,
   ): String {
-    // The session id links may carry. Null on a rooted site (and for the default session): the
-    // URL already says which catalog this is. `sessionId` itself stays intact below — it keys the
-    // per-catalog localStorage entries and the dark-first lookup, which a site still needs.
+    // The session id links may carry: null on a rooted site and for the default session.
+    // `sessionId` still keys per-catalog storage and the dark-first lookup.
     val linkSessionId = if (sessionInOrigin) null else sessionId
     val q = querySuffix(linkQuery(token, linkSessionId, basePath, isPublic))
     val navSuffix =
@@ -14516,13 +12405,11 @@ ${scriptTag("known-differences.js")}
     val cards =
       pages.joinToString("\n") { page ->
         val id = WebEscaping.urlEncodeSegment(page.id)
-        // Counted against what a catalog could actually implement, not against every node on the
-        // sheet: a private component and a variant-set container are furniture, and counting them
-        // reports a complete family as one short. See `DesignPage.coverageGaps`.
+        // Counted against implementable components only; private components and variant-set
+        // containers are excluded. See `DesignPage.coverageGaps`.
         val linked = page.linked.size
-        // A sheet that is not a component inventory — the kit's icon page — has no fraction to
-        // state, and stating `0 of 499` was the loudest wrong number on this index. Say what the
-        // sheet is instead; the card still opens it.
+        // A sheet that is not a component inventory (e.g. icons) has no meaningful fraction;
+        // describe the sheet instead.
         val count =
           if (!page.inventory) "${page.nodes.size} nodes · not a component inventory"
           else "$linked of ${page.coverageTotal} components implemented"
@@ -14563,53 +12450,17 @@ ${scriptTag("known-differences.js")}
   /**
    * The **motion browser**: every recorded capture this catalog publishes, on one page.
    *
-   * ### Why this is a page of its own
+   * It answers catalog-wide questions a per-preview Motion lane can't: whether the system moves
+   * consistently (side by side, the odd one out is obvious), and what has motion at all.
    *
-   * A capture is per-preview surface — the viewer's Motion lane — and that is the right home for
-   * *reading one*. It is the wrong home for the question this page answers, which is a catalog-wide
-   * one: **does this design system move consistently?** Two containers that morph on the same
-   * spatial spring and a third that cross-fades is a system bug, and it is invisible from three
-   * separate component pages, each of which shows its own recording in isolation and says nothing
-   * about its neighbours. Putting the recordings side by side is the entire feature; a grid is what
-   * makes the odd one out obvious at a glance.
+   * Nothing plays until asked: each card opens on its component's still and swaps to the capture on
+   * press or **Play all**, so there is no autoplay for `prefers-reduced-motion` to suppress. The
+   * control is a button so it works on touch and keyboard.
    *
-   * It is also the only view that answers "what has motion at all". Captures are rare —
-   * [ServeMotion] exists precisely because most components publish only a still — so today a reader
-   * finds them by opening components one at a time and noticing a chip. That is not discovery, it
-   * is luck.
-   *
-   * ### Nothing plays until it is asked to
-   *
-   * Same posture as the viewer's lane, for the same reason: motion is the answer to a question most
-   * readers are not asking, and a page that starts thirty recordings at once is a page nobody can
-   * read. Each card opens on its component's **still** — the baked pixels, the same image the grid
-   * shows — and swaps to the capture only when someone presses it or presses **Play all**. That
-   * makes `prefers-reduced-motion` a non-question here: there is no autoplay to suppress. The
-   * per-card control is a button rather than a hover, so it works on a touch screen and from a
-   * keyboard, and its pressed state says which cards are running.
-   *
-   * ### Grouped by component, one card per distinct recording
-   *
-   * A capture is declared on a component but published on every *render* of it: the catalog's
-   * `variants.json` hangs the same recording off the default, the disabled state, the focus ring,
-   * the RTL variant and every breakpoint. Listed one card per render × capture, `compose-m3`'s five
-   * moving components filled this page with 320 cards pointing at ten files — the same two APNGs
-   * seventy times over under Icon Button Filled, a screen and a half of identical thumbnails before
-   * the next component. That is the opposite of the comparison the page exists for.
-   *
-   * So the page groups by [componentKey] — the same identity the grid folds its state / theme /
-   * props / size axes onto — and inside a component keeps one card per *distinct* capture id. What
-   * is folded is the repetition, not the captures: a component with two recordings still shows two
-   * cards, because "Baseline swaps the shape, Expressive travels between them" is one component and
-   * two things to compare, and folding those onto one card would hide the very comparison this page
-   * is for. The component is named once, above its cards; each card deep-links to
-   * `?mode=motion&motion=<id>` on the render that publishes it, so the viewer opens on that
-   * recording rather than on the component's first one.
-   *
-   * Captures are labelled by [MotionCaptureLabels] — the same split the viewer's picker uses, so a
-   * recording is called the same thing in both places — and a caption every recording of one
-   * component shares is printed once under the component name rather than under each card, for the
-   * same reason the name itself is: two cards repeating one sentence say it no better than one.
+   * A capture is published on every render of its component (`variants.json`), so the page groups
+   * by [componentKey] and keeps one card per distinct capture id. Each card deep-links
+   * `?mode=motion&motion=<id>` on its render. Labels come from [MotionCaptureLabels], as in the
+   * viewer; a caption shared by all of a component's recordings is printed once under its name.
    */
   fun motionIndexPage(
     moduleLabel: String,
@@ -14626,15 +12477,13 @@ ${scriptTag("known-differences.js")}
     /** See [designPagesIndexPage]; a rooted site implies its session by the origin. */
     sessionInOrigin: Boolean = false,
     /**
-     * The catalog change feed the footer offers as **Changelog** and the head declares as this
-     * page's RSS alternate. Empty when the server runs with the feed lane off. See [siteFooter].
+     * The catalog change feed offered as **Changelog** and declared as the page's RSS alternate.
+     * Empty when the feed lane is off. See [siteFooter].
      */
     changelogHref: String = "",
     /**
-     * The page-scoped "report a catalog issue" for this surface, built by the caller from the
-     * session's catalog source/provenance via [ServeIssueReport]. It names the PAGE rather than a
-     * preview, because this one shows no single preview to name — see [pageReportRowHtml]. Null (a
-     * plain module, or any caller that has nothing to file against) omits it entirely.
+     * The page-scoped "report a catalog issue" for this surface, built via [ServeIssueReport];
+     * names the page rather than a preview ([pageReportRowHtml]). Null omits it.
      */
     reportIssue: ReportIssue? = null,
   ): String {
@@ -14658,13 +12507,9 @@ ${scriptTag("known-differences.js")}
     class Take(val owner: ServePreview, val capture: ServeMotion)
 
     /**
-     * One recording of a component: the gesture, with its per-theme takes on ONE card.
-     *
-     * A catalog records a gesture once per theme and writes the caption once, so a light and a dark
-     * take are not two things to compare — they are one recording, photographed twice. [takes] is
-     * keyed by theme (`light` / `dark`) for the toolbar's Theme control to swap between in place,
-     * exactly as the landing grid swaps a component's baked light and dark stills; a recording with
-     * no theme in its id has a single unkeyed take and the control leaves it alone.
+     * One recording of a component: the gesture, with its per-theme takes on one card. [takes] is
+     * keyed by theme (`light` / `dark`) for the Theme control to swap in place; a recording with no
+     * theme in its id has one unkeyed take.
      */
     class Recording(val lead: Take, val takes: Map<String, Take>)
 
@@ -14676,15 +12521,9 @@ ${scriptTag("known-differences.js")}
     val leadTheme = if (isDarkFirstSystem(basePath, sessionId)) "dark" else "light"
 
     /**
-     * Which of a component's renders speaks for a capture — because after the fold ONE of them
-     * supplies the card's still and its deep link, and the wrong one puts a dark thumbnail on a
-     * light recording.
-     *
-     * A capture id is a flattened preview id, so the render that recorded it usually IS in the list
-     * under exactly that name; failing that, the render in the capture's own theme lane is the one
-     * whose still the recording opens from. Only when neither matches does authored order decide,
-     * which is the case for a hand-named capture (`card-filled__press`) that belongs to the whole
-     * component rather than to one of its renders.
+     * Which of a component's renders speaks for a capture, supplying the card's still and deep
+     * link. Prefer the render named by the capture id, then the render in the capture's theme lane,
+     * then authored order (for hand-named captures).
      */
     fun owner(renders: List<ServePreview>, capture: ServeMotion): ServePreview =
       renders.firstOrNull { it.id == capture.id }
@@ -14694,14 +12533,9 @@ ${scriptTag("known-differences.js")}
         ?: renders.first()
 
     /**
-     * The takes of one component, folded into recordings: grouped by the capture id with its theme
-     * token removed ([baseKey], the same key that pairs the grid's light and dark cards).
-     *
-     * Folding is all-or-nothing per group, for the reason [MotionCaptureLabels] numbers rather than
-     * half-names a set: a group folds only when every take in it names a theme and no two name the
-     * same one. Anything else — a hand-named capture that happens to share a stem, two takes in one
-     * theme — stays a card each, which is the behaviour every catalog had before the Theme control
-     * existed.
+     * The takes of one component folded into recordings, grouped by capture id minus its theme
+     * token ([baseKey]). All-or-nothing per group: it folds only when every take names a theme and
+     * no two name the same one; otherwise each take stays its own card.
      */
     fun fold(takes: List<Take>): List<Recording> =
       takes
@@ -14745,9 +12579,7 @@ ${scriptTag("known-differences.js")}
     // no control, rather than a pair of buttons one of which does nothing.
     val themed = components.any { component -> component.recordings.any { it.takes.size > 1 } }
 
-    /**
-     * The viewer, opened on this exact recording — see [ServeMotion] and the viewer's `?motion=`.
-     */
+    /** The viewer opened on this recording; see [ServeMotion] and the viewer's `?motion=`. */
     fun viewerHref(preview: ServePreview, capture: ServeMotion): String {
       val parts =
         listOf(query, "mode=motion", "motion=" + WebEscaping.urlEncodeSegment(capture.id)).filter {
@@ -14763,14 +12595,10 @@ ${scriptTag("known-differences.js")}
     }
 
     /**
-     * One card: one recording, opening on the still of the render that took it.
-     *
-     * [detailHoisted] says the component printed this caption above the cards already — see
-     * [componentHtml] — so repeating it here would be the same sentence twice on one screen. The
-     * per-theme `data-motion-*-light` / `-dark` attributes are what the Theme control swaps
-     * between: the recording, the still it returns to, the accessible name and the deep link all
-     * move together, because a card left pointing at the light take's viewer page after the reader
-     * switched to dark sends them somewhere they did not ask to go.
+     * One card: one recording, opening on the still of the render that took it. [detailHoisted]
+     * means the caption is already printed above ([componentHtml]). The per-theme
+     * `data-motion-*-light` / `-dark` attributes let the Theme control move the recording, still,
+     * name and link together.
      */
     fun cardHtml(
       component: MotionComponent,
@@ -14793,9 +12621,8 @@ ${scriptTag("known-differences.js")}
             " (${theme.replaceFirstChar { it.uppercaseChar() }})"
           else ""
       val leadTakeTheme = recording.takes.entries.firstOrNull { it.value === lead }?.key ?: ""
-      // The kind is what the annotation recorded, and it is a real distinction to a reader: a
-      // scripted gesture proves the component's own input plumbing drives the transition, a
-      // self-running animation proves only that the animation exists.
+      // The kind distinguishes a scripted gesture (proves the input plumbing) from a self-running
+      // animation.
       val kind =
         when (capture.kind) {
           "interaction" -> "Interaction"
@@ -14842,22 +12669,16 @@ ${scriptTag("known-differences.js")}
         .trimIndent()
     }
 
-    // Grouped by the landing's own top-level section, so a reader who knows where a component lives
-    // in the catalog finds its recording in the same place here. A catalog with no sections (a
-    // plain bundle, an uploaded module) renders one unlabelled run of components, exactly as its
-    // grid does — and its component names take the heading level the sections would have used, so
-    // the outline never skips one.
+    // Grouped by the landing's top-level sections; section-less catalogs render one unlabelled run,
+    // with component names taking the section heading level.
     val sections = components.groupBy { it.lead.section }
     val sectioned = sections.keys.any { !it.isNullOrBlank() }
     val componentTag = if (sectioned) "h3" else "h2"
 
     fun componentHtml(component: MotionComponent): String {
       val labels = MotionCaptureLabels.of(component.recordings.map { it.lead.capture })
-      // A caption that describes every recording of this component describes the COMPONENT, not one
-      // card, so it is printed once, above them — where there is a whole row to spend on it rather
-      // than a 220px column, and where two cards cannot repeat it at each other. That covers the
-      // ordinary single-recording component too: a paragraph set under one narrow card is a column
-      // of six-word lines.
+      // A caption shared by every recording describes the component, so it is printed once above
+      // the cards.
       val shared =
         labels
           .map { it.detail }
@@ -14880,9 +12701,7 @@ ${scriptTag("known-differences.js")}
         component.recordings
           .mapIndexed { i, recording -> cardHtml(component, recording, labels[i], shared != null) }
           .joinToString("\n")
-      // Who the component is on the left, what it records on the right — one row per component on a
-      // wide screen, stacked on a narrow one. A component with a single recording is the common
-      // case, and left as a full-width block it spent a whole screen height on one 220px card.
+      // Component on the left, recordings on the right; stacked on narrow screens.
       return """
         <article class="cp-motion-component">
           <div class="cp-motion-component-about">
@@ -14911,10 +12730,8 @@ $cards
     val componentCount = components.size
     val componentWord = if (componentCount == 1) "component" else "components"
     val captureWord = if (captureCount == 1) "recording" else "recordings"
-    // One axis, page-wide, in the same segmented shape the comparison views use: the light and the
-    // dark take of a gesture are the same recording, so this swaps every card between them rather
-    // than doubling the page. Server-rendered on the system's own lane; the script re-points it at
-    // the theme this catalog is already remembered on.
+    // One page-wide Theme axis swapping every card between its light and dark take. Server-rendered
+    // on the system's lane; the script re-points it at the remembered theme.
     val themeControl =
       if (!themed) ""
       else
@@ -14965,76 +12782,38 @@ $cards
   }
 
   /**
-   * The motion browser's whole behaviour: swap a card between its still and its recording, and swap
-   * every card between its light and its dark take.
+   * The motion browser's behaviour: swap a card between still and recording, and every card between
+   * light and dark takes.
    *
-   * Inline rather than an asset because it is the only page that has it — the built bundles under
-   * `cli/serve-web/` exist for the surfaces with real state machines (the viewer, the comparison
-   * scorer), and adding a per-page file to that build would cost a round-trip on every visit.
+   * Inline because only this page needs it. Swapping `src` is the whole mechanism: an `<img>` can't
+   * pause or seek an APNG/GIF (the viewer's canvas player does that), but restarts on each `src`
+   * set, and restoring the poster stops decoding.
    *
-   * Swapping `src` is deliberately the entire mechanism. An `<img>` playing an APNG or a GIF cannot
-   * be paused, sought, or rate-controlled from script — that is what the viewer's canvas player is
-   * for, and why every card links to it. What an `<img>` *can* do is decode the format natively and
-   * start over from frame one each time its `src` is set, which is exactly the two things a
-   * browsing grid needs. Restoring the poster is what stops a recording, because a still that is no
-   * longer decoding costs nothing while thirty of them are on screen.
-   *
-   * The Theme control re-points the card's `data-motion-*` pair (and its name and its link) at the
-   * other take and re-applies whatever the card was doing, so switching theme mid-playback keeps
-   * playing rather than silently stopping. It writes the choice where the rest of the catalog reads
-   * it — the `?theme=` param, this catalog's `localStorage` key, and `cpPageTheme` for the chrome —
-   * so a reader who picks Dark here finds the grid and the viewer already dark, and a reload opens
-   * where they left off. That is also why the page can be SERVER-rendered on the system's own lane
-   * and corrected on load: the choice lives outside this page.
+   * The Theme control re-points each card's `data-motion-*` pair and re-applies its state, and
+   * writes the choice to `?theme=`, this catalog's `localStorage` key and `cpPageTheme`, so the
+   * grid and viewer agree and reload resumes.
    */
   private const val MOTION_INDEX_SCRIPT =
     """(function(){var stages=[].slice.call(document.querySelectorAll(".cp-motion-card-stage"));if(!stages.length)return;function attr(el,name){return el.getAttribute(name)||"";}function set(b,on){var img=b.querySelector(".cp-motion-card-img");if(!img)return;var src=attr(b,on?"data-motion-src":"data-motion-poster");if(!src)return;b.setAttribute("aria-pressed",on?"true":"false");if(img.getAttribute("src")!==src||on)img.setAttribute("src",src);}stages.forEach(function(b){b.addEventListener("click",function(){set(b,b.getAttribute("aria-pressed")!=="true");sync();});});var all=document.getElementById("cp-motion-all");function playing(){return stages.filter(function(b){return b.getAttribute("aria-pressed")==="true";}).length;}function sync(){if(!all)return;var on=playing()===stages.length;all.setAttribute("aria-pressed",on?"true":"false");all.textContent=playing()?"Stop all":"Play all";}if(all)all.addEventListener("click",function(){var on=playing()!==stages.length;stages.forEach(function(b){set(b,on);});sync();});var themeBtns=[].slice.call(document.querySelectorAll("[data-motion-theme]"));function applyTheme(theme){stages.forEach(function(b){var src=attr(b,"data-motion-src-"+theme);if(!src)return;b.setAttribute("data-motion-src",src);b.setAttribute("data-motion-poster",attr(b,"data-motion-poster-"+theme));var label=attr(b,"data-motion-label-"+theme);if(label){b.setAttribute("title",label);b.setAttribute("aria-label",label);}var href=attr(b,"data-motion-href-"+theme),link=b.parentNode&&b.parentNode.querySelector(".cp-motion-card-title");if(link&&href)link.setAttribute("href",href);set(b,b.getAttribute("aria-pressed")==="true");});themeBtns.forEach(function(t){t.setAttribute("aria-pressed",attr(t,"data-motion-theme")===theme?"true":"false");});}themeBtns.forEach(function(t){t.addEventListener("click",function(){var theme=attr(t,"data-motion-theme");applyTheme(theme);try{var key=document.documentElement.getAttribute("data-cp-theme-key");if(key)sessionStorage.setItem(key,theme);}catch(e){}if(window.cpUrlState)window.cpUrlState.push({theme:theme});if(window.cpPageTheme)window.cpPageTheme.follow(theme);});});if(themeBtns.length){var opening="";try{var fromUrl=new URLSearchParams(location.search).get("theme");var key=document.documentElement.getAttribute("data-cp-theme-key");var remembered=key?sessionStorage.getItem(key):"";opening=fromUrl||remembered||"";}catch(e){}if(opening==="light"||opening==="dark")applyTheme(opening);}})();"""
 
   /**
-   * One **design page**: the sheet itself as inlined SVG, an outline over every component node on
-   * it, and — behind a toggle — this catalog's own renders standing in for the design's drawing.
+   * One **design page**: the sheet as inlined SVG, an outline over every component node, and
+   * optionally this catalog's renders standing in for the design's drawing.
    *
-   * ## Why the SVG is inlined rather than shown in an `<img>`
+   * The SVG is inlined so elements (named by `data-node-id`) can be reached and replaced. That is
+   * why [svg] is interpolated unescaped — the only third-party markup on this server.
+   * [ServeDesignPageStore] runs it through [SvgSanitizer] at load (allowlisted elements/attributes,
+   * no script, no `foreignObject`, no off-document URL) and refuses pages that don't survive.
    *
-   * Because an `<img>` is a picture and this needs to be a document. The entire feature is *take
-   * the design's own drawing of `Shape=Circle` out of the sheet and put our `Shape/Circle` render
-   * in the hole it leaves* — which means reaching a specific element inside the export, and nothing
-   * can reach inside an `<img>`. Inlining is what makes the sheet addressable; `data-node-id`,
-   * which the importer asks Figma for explicitly, is what names the elements.
+   * No geometry is recorded: `<cp-design-page>` measures each `[data-node-id]` element (Figma
+   * export boxes include effect bleed).
    *
-   * That is also why [svg] is interpolated **unescaped**, the only place on this server where
-   * third-party markup is. It is not raw: [ServeDesignPageStore] runs it through [SvgSanitizer] at
-   * load — allowlisted elements and attributes, no script, no `foreignObject`, no off-document URL
-   * — and the store refuses a page whose export does not survive that. Escaping it instead would
-   * print the markup as text; there is no third option that keeps the feature.
+   * `<cp-page-zoom>` (a Vue component in `cli/serve-web`) makes the stage zoomable — double-click
+   * drills one level in, ⌘/Ctrl + wheel zooms, drag pans. `.cp-page-canvas` exists so the export,
+   * overlays and renders share one transform; the tip and zoom bar sit outside it.
    *
-   * ## Geometry
-   *
-   * There isn't any, here or in the manifest. The SVG knows where its own nodes are, so
-   * `<cp-design-page>` measures each `[data-node-id]` element and places the outline over it. A
-   * recorded rectangle would be a second answer to that question, and a worse one — Figma's export
-   * box includes effect bleed, so it and the drawn shape disagree on anything with a shadow.
-   *
-   * ## Zoom
-   *
-   * The sheet is drawn at the size the design file drew it — m3-catalog's Styles page is 6263 px
-   * across — and it lands in a content column a sixth of that, so every type specimen and swatch
-   * number on it is sub-pixel. The `<cp-page-zoom>` element this page declares — a Vue component in
-   * `cli/serve-web`, alongside `<cp-design-page>` — therefore makes the stage zoomable:
-   * double-click drills one addressable level in (Figma's own gesture, and free here because a
-   * Figma export is a tree of `<g data-node-id>`, so "one level in" is the next element down the
-   * hit-test chain), ⌘/Ctrl + wheel zooms about the pointer, and dragging pans. That is also the
-   * only reason the `.cp-page-canvas` wrapper exists: the export, the overlays over it and the
-   * renders inside them are moved by ONE transform, so a slot cannot drift off the shape it stands
-   * in at any factor. The tip and the corner zoom bar sit OUTSIDE it, since a tooltip that scaled
-   * 12x would be unreadable and a control that panned away with the sheet could not be reached to
-   * undo the pan.
-   *
-   * ## Trust
-   *
-   * [page] is third-party data — layer names are free text authored in the design file — so every
-   * interpolation goes through [WebEscaping.htmlEscape], and the Figma deep link is reassembled
-   * from a validated key + node id by [ServeFigmaSpec.url] rather than taken from the manifest.
+   * [page] is third-party data, so every interpolation is escaped with [WebEscaping.htmlEscape],
+   * and the Figma deep link is rebuilt by [ServeFigmaSpec.url] from a validated key + node id.
    */
   fun designPage(
     moduleLabel: String,
@@ -15044,9 +12823,8 @@ $cards
     /** The file key the manifest declared, already validated. Empty ⇒ no design-tool deep links. */
     fileKey: String = "",
     /**
-     * Preview ids this session can actually render. A node the producer mapped to a preview this
-     * catalog doesn't publish keeps its outline (the mapping is still true) but gets no render and
-     * no link — better than a card that can only 404.
+     * Preview ids this session can render. A node mapped to an unpublished preview keeps its
+     * outline but gets no render or link.
      */
     renderablePreviewIds: Set<String> = emptySet(),
     token: String,
@@ -15059,35 +12837,25 @@ $cards
     version: String? = null,
     displayTitle: String? = null,
     /**
-     * Whether this page is served as a **top-level site** ([ServeSites]) — its catalog rooted on a
-     * hostname of its own. The session is then implied by the ORIGIN, exactly as a `/<system>`
-     * mount implies it by the path, so same-session links must not repeat it as `?session=`. False
-     * (the default) leaves every existing caller's URLs byte-identical.
+     * Whether this page is served as a **top-level site** ([ServeSites]); the origin implies the
+     * session, so links must not repeat `?session=`.
      */
     sessionInOrigin: Boolean = false,
     /**
-     * The catalog change feed the footer offers as **Changelog** and the head declares as this
-     * page's RSS alternate. Empty when the server runs with the feed lane off. See [siteFooter].
+     * The catalog change feed offered as **Changelog** and declared as the page's RSS alternate.
+     * Empty when the feed lane is off. See [siteFooter].
      */
     changelogHref: String = "",
     /**
-     * The page-scoped "report a catalog issue" for this surface, built by the caller from the
-     * session's catalog source/provenance via [ServeIssueReport]. It names the PAGE rather than a
-     * preview, because this one shows no single preview to name — see [pageReportRowHtml]. Null (a
-     * plain module, or any caller that has nothing to file against) omits it entirely.
+     * The page-scoped "report a catalog issue" for this surface, built via [ServeIssueReport];
+     * names the page rather than a preview ([pageReportRowHtml]). Null omits it.
      */
     reportIssue: ReportIssue? = null,
     /**
-     * The `compareWith` sibling's own render of each node, by node id — a second catalog's
-     * rendition of the very cells this sheet defines.
-     *
-     * Empty for the ordinary catalog, which declares no pairing, and empty on a top-level site,
-     * where a neighbouring system's `/render/` route is unreachable by construction ([ServeSites]).
-     * Empty is the whole switch: the sheet then offers exactly the two sources it always did, with
-     * no control that acts on nothing.
-     *
-     * URLs are built by the caller from a validated system and preview id, not taken from any
-     * manifest, and each carries the same credential as every other URL on the page.
+     * The `compareWith` sibling's render of each node, by node id. Empty without a pairing and on a
+     * top-level site ([ServeSites]), where the sibling's `/render/` is unreachable; empty also
+     * hides the third source. URLs are built by the caller from validated ids and carry the page's
+     * credential.
      */
     parallelRenders: Map<String, String> = emptyMap(),
     /** What that sibling catalog calls itself — the word its buttons read. */
@@ -15095,29 +12863,20 @@ $cards
     /** What THIS catalog's button reads. Falls back to a neutral "Ours". */
     ownLabel: String? = null,
     /**
-     * The shared backplates to paint beneath the export, in paint order, already resolved against
-     * the catalog's verified asset table.
-     *
-     * Resolved by the CALLER rather than read off [page] here, and that is the whole safety
-     * property: [ServeDesignPageStore] is what proves a plate's file is the format, size and path
-     * its record claims, so a placement that reaches this function has already been checked. Taking
-     * `page.background` directly would draw whatever the manifest asked for.
-     *
-     * Empty — the default, and the state of every catalog that publishes no plates — renders the
-     * stage byte-identically to before this existed.
+     * The shared backplates painted beneath the export, in paint order, already resolved against
+     * the catalog's verified asset table. Resolved by the caller because [ServeDesignPageStore] is
+     * what verifies each plate; reading `page.background` here would draw whatever the manifest
+     * asked. Empty renders the stage unchanged.
      */
     background: List<PageLayerPlacement> = emptyList(),
     /**
-     * The URL for a verified plate's bytes, by asset id. Returning null drops that placement.
-     *
-     * A function rather than a map because the href carries this request's credential and base
-     * path, which are the caller's to mint — the same reason [parallelRenders] is passed in built.
+     * URL for a verified plate's bytes by asset id; null drops the placement. A function because
+     * the href carries the caller's credential and base path (like [parallelRenders]).
      */
     assetHref: (String) -> String? = { null },
   ): String {
-    // The session id links may carry. Null on a rooted site (and for the default session): the
-    // URL already says which catalog this is. `sessionId` itself stays intact below — it keys the
-    // per-catalog localStorage entries and the dark-first lookup, which a site still needs.
+    // The session id links may carry: null on a rooted site and for the default session.
+    // `sessionId` still keys per-catalog storage and the dark-first lookup.
     val linkSessionId = if (sessionInOrigin) null else sessionId
     val q = querySuffix(linkQuery(token, linkSessionId, basePath, isPublic))
     val navSuffix =
@@ -15130,35 +12889,19 @@ $cards
     fun renderable(node: PageNode): String? =
       node.renderablePreviewId?.takeIf { it in renderablePreviewIds }
 
-    // Which unlinked nodes are actually missing components. `data-cp-gap` is what the "only what we
-    // don't implement" filter keys on — NOT `data-link="unlinked"`, which also catches the sheet's
-    // private furniture and its variant-set containers. Filtering on the latter is what made a
-    // fully-implemented Shape page report `.Header`, `.Header` and `Shape Set` as work to do.
+    // `data-cp-gap` marks nodes that are genuinely missing components; `data-link="unlinked"` also
+    // includes private furniture and variant-set containers, so the gaps filter keys on this.
     val gaps = page.coverageGaps.toSet()
 
-    // A hit area per node, and nothing else: no resting outline, no colour, no fill. The sheet is
-    // the content here, so a mark is something the reader asks for — by pointing at a component,
-    // or by turning the whole layer on — rather than the page's opening statement.
-    //
-    // An `<a>`, because pointing and going are now split. POINTING describes: the node's detail
-    // lands under the sheet as the pointer sweeps, so a reader can read several components without
-    // committing to any of them. CLICKING goes there.
-    //
-    // A control that navigates should BE a link, and making it one is not a formality: the middle
-    // click, the modifier click and the status-bar preview all start working, the destination is
-    // announced instead of a pressed state that was never true, and the sheet still navigates with
-    // no script at all.
+    // A hit area per node with no resting outline — marks appear on hover or when the layer is
+    // turned on. Hovering shows the node's detail under the sheet; clicking navigates, so it is a
+    // real `<a>` (middle-click, status bar, no-script navigation all work).
     val components = page.nodes.filter(PageNode::isComponent)
 
     /**
-     * A cell WE draw and the sibling does not.
-     *
-     * On the sibling's lane such a slot falls back to the design's own drawing, exactly as a failed
-     * render does — which, unmarked, reads as "the sibling draws it just like the design". It is
-     * the opposite: it is the sibling not drawing it at all, and a cell present on one side and
-     * absent on the other is the more interesting half of a parity comparison. So it is said out
-     * loud on the node rather than papered over, on the same principle as `ServeParallelPairing`'s
-     * stated fallback.
+     * A cell we draw and the sibling does not. On the sibling's lane it falls back to the design's
+     * drawing, so it is marked explicitly rather than read as a match (as `ServeParallelPairing`
+     * states its fallbacks).
      */
     fun unpaired(node: PageNode): Boolean =
       parallelRenders.isNotEmpty() &&
@@ -15178,9 +12921,8 @@ $cards
         val tag = if (href == null) "span" else "a"
         val hrefAttr = href?.let { " href=\"${WebEscaping.htmlEscape(it)}\"" }.orEmpty()
         "<$tag class=\"cp-page-node\" " +
-          // The anchor a section row in the catalog sidebar lands on. Every node carries one, not
-          // just the sets — a fragment is free, and the id is what lets `<cp-design-page>` find the
-          // node a URL names without a second lookup table.
+          // The anchor a sidebar section row lands on; every node gets one so `<cp-design-page>`
+          // can find a URL's node directly.
           "id=\"${nodeAnchorId(node.nodeId)}\" " +
           "data-link=\"${WebEscaping.htmlEscape(node.link.wire)}\"" +
           (if (node in gaps) " data-cp-gap" else "") +
@@ -15195,12 +12937,9 @@ $cards
           "${WebEscaping.htmlEscape(label)}</span></$tag>"
       }
 
-    // The renders live in an inert `<template>` and are adopted when the lane that needs them is
-    // entered. The page now OPENS on that lane, so on a live catalog this is a daemon render per
-    // node on first paint — `loading="lazy"` is what keeps that bounded, since a specimen sheet is
-    // tall and most of it is below the fold. The template still earns its place: a reader who flips
-    // to the spec and never flips back pays for nothing, and every URL in it stays server-built and
-    // server-escaped (reading one out of the DOM into `img.src` is CodeQL's `js/xss-through-dom`).
+    // Renders sit in an inert `<template>`, adopted when their lane is entered. The page opens on
+    // that lane, so `loading="lazy"` bounds daemon work to what's visible. URLs stay server-built
+    // and escaped (reading one from the DOM into `img.src` is CodeQL's `js/xss-through-dom`).
     val renders =
       components
         .mapNotNull { node ->
@@ -15211,11 +12950,8 @@ $cards
         }
         .joinToString("\n")
 
-    // The SIBLING catalog's renders of the same cells, in their own inert `<template>` — adopted
-    // only when a reader names that source, since they come off another catalog's daemon and a
-    // sheet that warmed them speculatively would charge every reader for a comparison almost none
-    // of them open. Keyed by node id exactly as ours are, so the element pairs them up without
-    // knowing anything about either catalog's preview vocabulary.
+    // The sibling catalog's renders in their own inert `<template>`, adopted only when that source
+    // is chosen; keyed by node id like ours.
     val parallelImages =
       components
         .mapNotNull { node ->
@@ -15229,9 +12965,7 @@ $cards
     val siblingNameHtml =
       WebEscaping.htmlEscape(parallelLabel?.takeIf { it.isNotBlank() } ?: "Sibling")
     val ourNameHtml = WebEscaping.htmlEscape(ownLabel?.takeIf { it.isNotBlank() } ?: "Ours")
-    // A catalog with no sibling sees no third source and no control that could name one. Whole
-    // options rather than disabled ones: a permanently dead button is a worse answer than a missing
-    // one, and every catalog on this server except the paired few would be looking at two of them.
+    // Without a sibling there is no third source option at all, rather than a disabled one.
     val parallelTemplate =
       if (!hasParallel) ""
       else "\n                <template data-cp-page-parallel-source>$parallelImages</template>"
@@ -15257,15 +12991,9 @@ $cards
           "data-cp-page-baseline>" +
           "\n                  <span>$siblingNameHtml</span></label>"
 
-    // The way out of the diff lane, one anchor per scoreable node, riding the same inert template
-    // trick as the renders. `?mode=spec&specView=diff` is the viewer's own deep link into the full
-    // Figma comparison — the diff map, the triptych, the wipe — so the sheet's number and the view
-    // it opens are the same instrument.
-    //
-    // An ANCHOR the script clicks, rather than a URL in a data attribute the script reads and
-    // assigns to `location`. That assignment is the taint path (`js/xss-through-dom`) the renders
-    // already avoid, and the destination here is built from a preview id that came off a design
-    // file. Cloning a server-built, server-escaped element has no sink in it at all.
+    // The way out of the diff lane: one anchor per scoreable node to the viewer's
+    // `?mode=spec&specView=diff`. An anchor the script clicks rather than a URL it assigns to
+    // `location`, avoiding the `js/xss-through-dom` taint path.
     val diffLinks =
       components
         .mapNotNull { node ->
@@ -15277,11 +13005,9 @@ $cards
         }
         .joinToString("\n")
 
-    // The audit list, and now also the source the selection strip is cloned from — which is why
-    // every row is a link wherever it can be. A node with code goes to its preview; a node without
-    // goes to the design file, built from the node's own id rather than parsed out of its `ref`
-    // (the two are the same thing by definition, but `ref` is optional and this deep link is the
-    // only link an unlinked node has).
+    // The audit list, also the source the selection strip clones from, so rows are links wherever
+    // possible: to the preview if there is code, else to the design file (built from the node id,
+    // since `ref` is optional).
     val rows =
       components.joinToString("\n") { node ->
         val previewId = renderable(node)
@@ -15304,9 +13030,8 @@ $cards
       }
 
     val linked = page.linked.size
-    // Counted against what a catalog could actually implement, not against every node on the sheet:
-    // a private component and a variant-set container are furniture, and counting them reports a
-    // complete family as one short. See `DesignPage.coverageGaps`.
+    // Counted against implementable components only; private components and variant-set containers
+    // are excluded. See `DesignPage.coverageGaps`.
     val total = page.coverageTotal
     // See the pages index: a non-inventory sheet says what it is rather than scoring itself.
     val coverageText =
@@ -15318,23 +13043,12 @@ $cards
           " · <a href=\"${WebEscaping.htmlEscape(it)}\" rel=\"noreferrer noopener\">Open in Figma</a>"
         }
         .orEmpty()
-    // A specimen sheet is wider than it is tall, the opposite of the phone screens this surface
-    // used
-    // to show — so the stage's aspect ratio is the sheet's own, from the export's viewBox. The
-    // design decides the shape of the box, not the stylesheet.
-    //
-    // Locale.ROOT, not `"%.4f".format(…)`: under a comma-decimal default locale the latter emits
-    // `aspect-ratio:1,1843`, which is not CSS at all, and the stage would collapse on a box whose
-    // LANG happened to be de_DE.
+    // The stage's aspect ratio comes from the export's viewBox. Locale.ROOT, since a comma-decimal
+    // locale would emit invalid CSS (`aspect-ratio:1,1843`).
     val aspect = String.format(java.util.Locale.ROOT, "%.4f", page.frame.width / page.frame.height)
 
-    // The scene beneath the sheet. Each placement's box is in the page's own coordinate space, so
-    // it becomes a percentage of the stage — the one unit that survives both the column's width and
-    // the zoom transform without restating the ratio anywhere.
-    //
-    // A placement whose plate has no URL is dropped rather than drawn as a broken image: the caller
-    // returns null for an asset that did not survive verification, and a hole in the scene is worse
-    // than a scene without that layer.
+    // The scene beneath the sheet: each placement's box becomes a percentage of the stage, which
+    // survives column width and zoom. Placements without a URL (failed verification) are dropped.
     val drawablePlates = background.filter { it.isWellFormed && assetHref(it.asset) != null }
     val plates =
       drawablePlates.joinToString("") { layer ->
@@ -15358,20 +13072,15 @@ $cards
           }
           if (layer.clip) append("overflow:hidden;")
         }
-        // `alt=""` and `aria-hidden`: a backplate is scenery, and announcing five of them ahead of
-        // the components would bury the thing the sheet is actually about. `loading=eager` because
-        // the plate is the backdrop the drawing above it is composited against — lazy-loading it
-        // would show the sheet washing in against nothing first, which is the exact artefact this
-        // whole mechanism exists to remove.
+        // `alt=""` and `aria-hidden`: backplates are scenery. `loading=eager` so the drawing never
+        // paints against nothing first.
         """<img class="cp-page-plate" src="${WebEscaping.htmlEscape(href)}" alt="" aria-hidden="true" """ +
           """loading="eager" decoding="async" data-fit="${WebEscaping.htmlEscape(layer.fit.lowercase())}" """ +
           """data-blend="${layer.blend.wire}" style="${WebEscaping.htmlEscape(style)}">"""
       }
 
-    // Blend modes reach the stylesheet as data ATTRIBUTES, never as inline style. The stylesheet
-    // enumerates the values it will act on, so the only compositing that can happen is compositing
-    // this server compiled in — a manifest string can no more become a `mix-blend-mode` than it can
-    // become a script. `source-over` is the default and is simply omitted.
+    // Blend modes reach the stylesheet as data attributes, never inline style, so only compositing
+    // the stylesheet enumerates can happen. `source-over` is the default and omitted.
     val sceneAttrs = buildString {
       if (drawablePlates.isNotEmpty()) append(" data-has-plates")
       if (page.designBlend != PageBlendMode.SOURCE_OVER) {
@@ -15396,10 +13105,8 @@ $cards
       themeCss = themeCss,
       // The bar names the catalog you are in, from the same heading the page shows.
       siteName = heading,
-      // The sheet is the content, and it is a wide one — the design file drew it thousands of
-      // pixels across. Holding it inside the chrome's reading column wasted the better half of a
-      // wide display and left every specimen sub-pixel, which is the whole complaint in issue
-      // #4750. The stage takes the width it is given, so giving it the viewport is the fix.
+      // The stage takes the viewport width rather than the reading column, since sheets are
+      // thousands of pixels wide.
       wide = true,
       body =
         """
@@ -15489,25 +13196,17 @@ $cards
 
   /**
    * The catalog's **Design parity** view: recent movement on both sides of the code ↔ design pair,
-   * how far apart they are, and what isn't mapped yet.
+   * how far apart they are, and what isn't mapped.
    *
-   * The page defaults to the two bands a reader can act on:
+   * 1. **Where we stand**: coverage (computed live), open Figma comments, and how recently each
+   *    side moved.
+   * 2. **Activity and issues**: the merged feed plus components whose two sides moved unevenly —
+   *    likely drift — each linking to its reference-vs-render comparison. The full inventory is a
+   *    collapsed table.
    *
-   * 1. **Where we stand** — coverage (how many components carry a design reference), open Figma
-   *    comments, and how recently each side moved. Computed live for the coverage half, so it is
-   *    right even for a catalog that publishes no feed at all.
-   * 2. **Activity and issues** — the merged feed plus components whose two sides moved *unevenly*
-   *    inside the window. This is the band that justifies putting the feeds together: a component
-   *    with a commit and no design change (or the reverse) is where the render and its reference
-   *    are drifting apart, and every row links straight to that component's reference-vs-render
-   *    comparison. The complete component inventory remains available in a collapsed comparison
-   *    table. This keeps the default view useful without turning 78 healthy mappings into the
-   *    page's main subject.
-   *
-   * Everything textual in [dashboard] is third-party — commit subjects and Figma comment bodies
-   * written by other people — so every interpolation goes through [WebEscaping.htmlEscape], and
-   * outbound hrefs were rebuilt from validated parts by [ServeParityActivityStore] rather than
-   * taken from the catalog.
+   * Everything textual in [dashboard] (commit subjects, Figma comments) is third-party, so every
+   * interpolation is escaped with [WebEscaping.htmlEscape], and outbound hrefs were rebuilt from
+   * validated parts by [ServeParityActivityStore].
    */
   fun parityPage(
     moduleLabel: String,
@@ -15519,77 +13218,58 @@ $cards
     trust: String? = null,
     themeCss: String = "",
     unfurl: UnfurlMetadata? = null,
-    /**
-     * Running server version (`SERVE_VERSION`), shown in the minimal footer. Null omits the build
-     * span.
-     */
+    /** Running server version (`SERVE_VERSION`) for the footer. Null omits the build span. */
     version: String? = null,
     displayTitle: String? = null,
     /** Whether a preview carries a design reference — decides "compare" vs "open" on a link. */
     hasReferenceFor: (String) -> Boolean = { false },
     parityIssues: List<ParityIssue> = emptyList(),
     /**
-     * When the catalog's issue index was generated (`ParityIssues.generatedAt`, ISO-8601), printed
-     * at the foot of an opened issue panel. Null on an index that declares none, which simply omits
-     * the line — the panel is still a snapshot, it just cannot say of when.
+     * When the issue index was generated (`ParityIssues.generatedAt`, ISO-8601), printed at the
+     * foot of an opened issue panel. Null omits the line.
      */
     parityIssuesGeneratedAt: String? = null,
     /**
-     * The complete issue index used to resolve acceptance lifecycle state, exactly as
-     * [referenceComparisonPage] takes it. [parityIssues] is the list this catalog *displays* —
-     * scoped to its own design system by [issuesForSystem] — and the lifecycle join must not
-     * inherit that filter: an acceptance resolves an issue by URL, and one filed against a sibling
-     * system published from the same repository is still positive evidence of closure. Scoping it
-     * would answer `unknown` where the index plainly says `closed`, and a stale acceptance would
-     * stop being reported.
+     * The complete issue index for acceptance lifecycle state, as [referenceComparisonPage] takes
+     * it. [parityIssues] is scoped to this system by [issuesForSystem]; the lifecycle join must not
+     * be, since an issue filed against a sibling system is still evidence of closure.
      */
     acceptanceIssues: List<ParityIssue> = parityIssues,
     /**
-     * The catalog inventory the acceptance walk resolves its targets against — null when this
-     * catalog publishes no known-difference document, which leaves the panel and the engine's
-     * bundle off the page entirely.
-     *
-     * The identity comes from the handler and the URLs are built here, the same split
-     * [KnownDifferenceScope] draws: every link on this page goes through one query builder, and a
-     * hand-rolled query is how a credential gets dropped on a header-authorized host.
+     * The catalog inventory the acceptance walk resolves targets against; null when the catalog
+     * publishes no known-difference document, omitting the panel and engine. Identity comes from
+     * the handler and URLs are built here through the one query builder ([KnownDifferenceScope]).
      */
     acceptanceAudit: List<KnownDifferenceCatalogPreview>? = null,
     /**
-     * The design tool this catalog is specified by ("Figma", …) — names the whole-catalog compare
-     * link. Null keeps the neutral "design references" wording. See [designToolLabel].
+     * The design tool label ("Figma", …) for the whole-catalog compare link; null keeps neutral
+     * wording. See [designToolLabel].
      */
     designToolLabel: String? = null,
     /**
-     * Whether this page is served as a **top-level site** ([ServeSites]) — its catalog rooted on a
-     * hostname of its own. The session is then implied by the ORIGIN, exactly as a `/<system>`
-     * mount implies it by the path, so same-session links must not repeat it as `?session=`. False
-     * (the default) leaves every existing caller's URLs byte-identical.
+     * Whether this page is served as a **top-level site** ([ServeSites]); the origin implies the
+     * session, so links must not repeat `?session=`.
      */
     sessionInOrigin: Boolean = false,
     /**
-     * The catalog change feed the footer offers as **Changelog** and the head declares as this
-     * page's RSS alternate. Empty when the server runs with the feed lane off. See [siteFooter].
+     * The catalog change feed offered as **Changelog** and declared as the page's RSS alternate.
+     * Empty when the feed lane is off. See [siteFooter].
      */
     changelogHref: String = "",
     /**
-     * The delivery-branch commit this dashboard was assembled from, scoping the render/reference
-     * pair each row hands the in-browser acceptance engine ([ServeCacheGeneration]).
-     *
-     * This is the surface where a mismatched pair is least visible and most consequential: the
-     * engine decodes both images and reports a percentage, and nothing on the page shows the reader
-     * which frame the number came from. Scoping both halves keeps a score about one publish.
+     * The delivery-branch commit this dashboard was assembled from, scoping each row's
+     * render/reference pair for the in-browser acceptance engine ([ServeCacheGeneration]), so a
+     * score is about one publish.
      */
     generation: String? = null,
   ): String {
-    // The session id links may carry. Null on a rooted site (and for the default session): the
-    // URL already says which catalog this is. `sessionId` itself stays intact below — it keys the
-    // per-catalog localStorage entries and the dark-first lookup, which a site still needs.
+    // The session id links may carry: null on a rooted site and for the default session.
+    // `sessionId` still keys per-catalog storage and the dark-first lookup.
     val linkSessionId = if (sessionInOrigin) null else sessionId
     fun esc(s: String) = WebEscaping.htmlEscape(s)
     val q = querySuffix(linkQuery(token, linkSessionId, basePath, isPublic))
-    // The frame query: the page query plus the publish this dashboard is about. Both halves of
-    // every scored pair take it, or neither does — a scored pair split across two publishes is a
-    // number about nothing.
+    // The frame query: page query plus this dashboard's publish. Both halves of every scored pair
+    // take it.
     val assetQ = ServeCacheGeneration.scope(q, generation)
     val navSuffix =
       querySuffix(
@@ -15599,9 +13279,8 @@ $cards
     val coverage = dashboard.coverage
 
     /**
-     * The strongest link we can offer for a preview: the reference-vs-render comparison when the
-     * catalog maps one, else the plain viewer. Never a dead link — the caller has already filtered
-     * to preview ids this session actually serves.
+     * The best link for a preview: its reference-vs-render comparison when mapped, else the viewer.
+     * The caller has already filtered to served preview ids.
      */
     fun previewHref(previewId: String): String {
       val seg = WebEscaping.urlEncodeSegment(previewId)
@@ -15856,28 +13535,21 @@ $cards
         val open = parityIssues.filter { it.state == "open" }
         val closed = parityIssues.filter { it.state == "closed" }
         val groups = open.groupBy { it.component ?: "Unscoped" }
-        // The component's name IS the disclosure's label. It used to be an `<h3>` above the panel
-        // and the panel said "Issues" underneath it — two elements for one fact, and on a catalog
-        // with thirty mapped components that is thirty headings each followed by an open list.
-        // Collapsed, this band becomes what a dashboard band should be: one line per component,
-        // scannable, with the reports one click away.
+        // The component's name is the disclosure's label, so the band is one scannable line per
+        // component.
         val summary =
           groups.entries.joinToString("\n") { (component, rows) ->
             "<section class=\"cp-parity-issue-group\">" +
               "${parityIssueRowsHtml(rows, generatedAt = parityIssuesGeneratedAt, label = component)}" +
               "</section>"
           }
-        // The heading counts *components*, and `open` is rows: an umbrella issue contributes one
-        // row per component it names, so counting rows here would report three components with an
-        // open issue where one issue names three.
+        // Counts components, not rows: an umbrella issue contributes one row per component it
+        // names.
         val openBand =
           "<h2 class=\"cp-status-sec\">Components with open issues (${groups.size})</h2>" +
             if (open.isEmpty()) "<p class=\"cp-muted\">No open issues.</p>" else summary
-        // The closed band is flat and its rows do not name a component, so one closed umbrella
-        // issue
-        // would otherwise render as three identical links under a count that claims three issues.
-        // The open band above needs no such collapse: it groups by component, which is exactly what
-        // distinguishes those rows from each other.
+        // The closed band is flat with no component names, so collapse an umbrella issue's
+        // duplicate rows.
         val closedIssues = closed.distinctBy { it.repository to it.number }
         val closedBand =
           if (closedIssues.isEmpty()) ""
@@ -15914,12 +13586,9 @@ $cards
           .trimIndent()
       }
 
-    // The whole "Visual differences" band belongs to `<cp-parity-scores>`, which scores every
-    // published render/reference pair and renders the result. The server used to emit the section
-    // and its empty table here, which cost two things: the element had to build the rows by
-    // hand-escaping into `innerHTML`, and a page with JavaScript off was left promising "Checking N
-    // mapped comparison(s)…" forever. Declaring the tag says where the band goes and nothing about
-    // what is in it, so a page that cannot run the scan shows nothing rather than a lie.
+    // The "Visual differences" band belongs entirely to `<cp-parity-scores>`, which scores every
+    // published pair and renders the result; with no script, nothing is shown rather than a
+    // perpetual "Checking…".
     val visualIssues =
       if (dashboard.comparisons.none { it.referenceId != null }) ""
       else "<cp-parity-scores></cp-parity-scores>"
@@ -15951,11 +13620,8 @@ $cards
               if (component.referenceId != null)
                 "<span class=\"cp-parity-score cp-muted\">Checking…</span>"
               else "—"
-            // The component's name is the way IN, not a label. This table is the page's index —
-            // the reader is here to find out which components are worth opening — and the thing
-            // worth opening is every variant of one component side by side, which is exactly what
-            // the wall does when it is handed a `?component=`. A row that only named the component
-            // left the reader to find it again by hand on a page of four hundred.
+            // The component name links to the wall filtered by `?component=`, showing every variant
+            // side by side.
             val scopedCompare =
               if (component.componentId.isEmpty()) esc(component.name)
               else {
@@ -15993,10 +13659,8 @@ $cards
           .trimIndent()
       }
 
-    // The catalog landing sends every design-tool question here ("compare to Figma"), so this page
-    // owes a way back out to the side-by-side table of ALL mapped components — the comparison
-    // page's `reference` format. Offered only when something is mapped; a feed-only catalog (no
-    // references) would land on an empty table.
+    // A way back to the side-by-side table of all mapped components (the comparison page's
+    // `reference` format), offered only when something is mapped.
     val compareAllLink =
       if (coverage.mapped == 0) ""
       else {
@@ -16005,22 +13669,15 @@ $cards
             .filter { it.isNotEmpty() }
             .joinToString("&")
         val against = designToolLabel?.let(::esc) ?: "the design references"
-        // The same assist chip the catalog landing uses for its actions, so the route on and the
-        // route back are the same affordance rather than a chip in one direction and a grey text
-        // link in the other.
+        // The same assist chip as the catalog landing's actions.
         "\n        <div class=\"cp-catalog-actions\">" +
           "<a class=\"cp-action-chip\" href=\"$basePath/compare?$query\">" +
           "compare every mapped component against $against</a></div>"
       }
 
-    // The catalog-wide acceptance audit. Both the band and its payload are absent together on a
-    // catalog that has accepted nothing: an empty panel would say "0 known differences" on every
-    // dashboard, and the page would carry the contract's whole engine to evaluate nothing.
-    //
-    // The band renders empty and `hidden` for the reason the comparison band does — the verdicts
-    // are
-    // the browser's, and a panel that appeared before the walk had run would be asserting something
-    // nobody had measured.
+    // The catalog-wide acceptance audit; band and payload are both absent when nothing has been
+    // accepted. The band renders empty and `hidden` because the verdicts are computed in the
+    // browser.
     val acceptanceAuditBand =
       if (acceptanceAudit == null) ""
       else {
@@ -16044,9 +13701,9 @@ ${scriptTag("known-differences.js")}
 <cp-acceptance-audit></cp-acceptance-audit>"""
       }
 
-    // `format-compare.js` still holds the scorer itself — `<cp-parity-scores>` calls into
-    // `window.ComposePreviewCompare` — so it loads for a catalog with published references, and
-    // must be defined before the components bundle upgrades the tag.
+    // `format-compare.js` holds the scorer `<cp-parity-scores>` calls
+    // (`window.ComposePreviewCompare`), so it must load before the components bundle upgrades the
+    // tag.
     val parityScripts = buildString {
       if (dashboard.comparisons.any { it.referenceId != null }) append(compareScorerTag())
       if (dashboard.feed.isNotEmpty() || dashboard.comparisons.any { it.referenceId != null })
@@ -16137,80 +13794,54 @@ ${scriptTag("known-differences.js")}
   /**
    * Viewer page for one preview: an `<img>` driven by the override controls.
    *
-   * [wasmSrc] (non-null only for a CMP catalog session the server carries a Wasm app for) adds a
-   * "Run in browser (Wasm)" toggle that mounts that app in a sandboxed `<iframe>` at the
-   * `data-mode="live"` seam — the M3 component renders **client-side** (no server round-trip), so
-   * it's safe to run even for an unverified session. The theme / font-scale / locale controls
-   * re-point the iframe's `?uiMode` / `?fontScale` / `?localeTag` so they drive the in-browser
-   * render (device / orientation stay server-render-only). Absent ⇒ the snapshot viewer as before.
+   * [wasmSrc] (non-null only for a CMP catalog with a Wasm app) adds a "Run in browser (Wasm)"
+   * toggle mounting the app in a sandboxed `<iframe>` at the `data-mode="live"` seam. It renders
+   * client-side, so it is safe even for an unverified session. Theme / font-scale / locale controls
+   * re-point its `?uiMode` / `?fontScale` / `?localeTag`; device and orientation stay server-only.
    */
   fun viewerPage(
     preview: ServePreview,
     token: String,
     sessionId: String? = null,
     /**
-     * The catalog this preview belongs to, named in the header bar ([siteHeader]). The viewer
-     * computes no heading of its own — its `<h1>` is the preview — so the name is supplied by the
-     * caller, which is also the only place that knows the catalog's published title.
+     * The catalog this preview belongs to, named in the header bar ([siteHeader]); supplied by the
+     * caller, which knows the published title.
      */
     catalogName: String = "",
     canApplyOverrides: Boolean = false,
     /**
-     * Whether the "Live (stream)" toggle is offered — the daemon live lane, distinct from
-     * [canApplyOverrides] (which drives whether *snapshots* re-render on override edits). Defaults
-     * to [canApplyOverrides] so plain daemon / static sessions are unchanged; a trusted-catalog
-     * live session ([ServeCatalogLiveHost]) passes `canApplyOverrides = false` (static, instant
-     * baked snapshots) with `hasLiveStream = true` (Live still offered on demand).
+     * Whether the "Live (stream)" toggle is offered. Distinct from [canApplyOverrides] (whether
+     * snapshots re-render on edits): a trusted-catalog live session ([ServeCatalogLiveHost]) has
+     * baked snapshots but Live on demand. Defaults to [canApplyOverrides].
      */
     hasLiveStream: Boolean = canApplyOverrides,
     /**
-     * Whether an override-bearing `/render` returns fresh pixels even though the *default* snapshot
-     * lane is baked ([canApplyOverrides] false) — true for a trusted-catalog live session
-     * ([ServeCatalogLiveHost]), whose carried daemon re-renders author-declared knob edits on
-     * demand. Drives whether the declared knob controls are live (an edit re-renders via `/render`)
-     * or disabled + informational. Defaults to [canApplyOverrides] so plain daemon / static
-     * sessions are unchanged.
+     * Whether an override-bearing `/render` returns fresh pixels although the default snapshot is
+     * baked — true for a trusted-catalog live session ([ServeCatalogLiveHost]). Decides whether
+     * declared knob controls are live or disabled. Defaults to [canApplyOverrides].
      */
     canRenderOverrides: Boolean = canApplyOverrides,
     /**
-     * The density this preview's renders are produced at, from [ServeBundleHost.renderDensityFor] —
-     * null when nothing this session carries says, which is what [FALLBACK_RENDER_DENSITY] is for.
-     *
-     * Per-preview rather than per-page because that is what it describes: two previews in one
-     * catalog differ the moment one of them names a device.
+     * The density this preview renders at ([ServeBundleHost.renderDensityFor]); null when unknown,
+     * hence [FALLBACK_RENDER_DENSITY]. Per-preview because a device can differ per preview.
      */
     renderDensity: Float? = null,
     /**
-     * The override params THIS REQUEST carried (`knob.<key>`, `rc.<name>`), already filtered to the
-     * render lane's own keys and normalised the way the page's links are (`requestOverrideParams`).
-     *
-     * Seeds the declared-knob controls, so a deep link opens with its values already on them. The
-     * page's snapshot `<img>` has always carried the query; the CONTROLS did not, and everything
-     * downstream reads the controls — the live socket's `setOverrides`, the export links, the next
-     * `/render`. `hydrateFromUrl` re-applies the same params client-side on load, so this is the
-     * server half of a restore the viewer already performs, not a second source of truth.
-     *
-     * Empty for a plain visit, which is exactly the previous behaviour.
+     * The override params this request carried (`knob.<key>`, `rc.<name>`), filtered and normalised
+     * like the page's links (`requestOverrideParams`). Seeds the declared-knob controls so a deep
+     * link opens with its values; `hydrateFromUrl` does the same client-side. Empty for a plain
+     * visit.
      */
     requestOverrides: Map<String, String> = emptyMap(),
     /**
-     * The override axes this request named that the page **withheld** from its controls
-     * (`knob.<key>` / `rc.<name>`) — the complement of [requestOverrides] over what the URL asked
-     * for.
-     *
-     * Published on the root as `data-unseeded-overrides`, because the server's decision is only
-     * half of it: `hydrateFromUrl` restores every control from `location.search` on load and on
-     * Back/Forward, so without being told it would put the withheld value straight back and the
-     * markup's honesty would last one frame. The viewer reads this and defers to the declaration
-     * for exactly these keys (`viewer/overrideSeeds.ts`).
-     *
-     * Empty for the ordinary page, where everything the URL names is seedable.
+     * The override axes this request named that the page withheld from its controls — the
+     * complement of [requestOverrides]. Published as `data-unseeded-overrides` so `hydrateFromUrl`
+     * (`viewer/overrideSeeds.ts`) doesn't restore them from `location.search`. Usually empty.
      */
     unseededOverrides: Set<String> = emptySet(),
     /**
-     * Whether the session can export a `compose/figma-svg` for its previews (a daemon-backed host
-     * or a catalog that carried baked vectors). Drives whether the copyable-links panel offers an
-     * SVG download URL alongside the PNG one. Defaults to false (a plain bundle has no SVG lane).
+     * Whether the session can export a `compose/figma-svg`, adding an SVG download URL to the
+     * copyable-links panel. Defaults to false.
      */
     hasSvgExport: Boolean = false,
     /** Whether the full-page raster/vector scroll export is available for this preview. */
@@ -16218,311 +13849,214 @@ ${scriptTag("known-differences.js")}
     /** Hydrated self-contained per-preview bundle download, when the server can provide one. */
     executableBundleHref: String? = null,
     /**
-     * Whether this session can produce the accessibility data products the viewer's **Accessibility
-     * inspection layer** draws from (`a11y/hierarchy`, plus ATF findings / touch targets where the
-     * backend has them) — [ServeHost.hasA11yOverlay]. False ⇒ the layer's checkbox is omitted
-     * rather than offered dead. Replaces the old daemon-composited "Accessibility (TalkBack)"
-     * overlay, which baked one focus ring and its spoken text into the pixels.
+     * Whether this session can produce the accessibility data the viewer's **Accessibility
+     * inspection layer** draws (`a11y/hierarchy`, plus ATF findings / touch targets where
+     * available) — [ServeHost.hasA11yOverlay]. False omits the checkbox.
      */
     hasA11yOverlay: Boolean = false,
     /**
      * Whether this session can derive the **Typography**, **Theme attributes** and **Layout boxes**
-     * inspection layers from a render's `compose/semantics` tree
-     * ([ServeHost.hasDesignAnnotations]). Same box + legend surface as the accessibility layer, and
-     * the same reason for the gate: a static bundle has no daemon to capture the tree.
+     * layers from `compose/semantics` ([ServeHost.hasDesignAnnotations]). A static bundle has no
+     * daemon to capture the tree.
      */
     hasDesignAnnotations: Boolean = false,
     /**
-     * Whether the catalog **published** typography annotations over this preview's baked frame
-     * ([ServeHost.hasPublishedTypographyFor]) — the other lane behind the same Typography layer,
-     * and the only one a static bundle has. Offers the checkbox where [hasDesignAnnotations] is
-     * false but `.annotations` still answers; the Theme attributes and Layout boxes rows stay gated
-     * on the semantics lane, which is the only thing that produces them.
+     * Whether the catalog published typography over this preview's baked frame
+     * ([ServeHost.hasPublishedTypographyFor]) — the other Typography lane, and the only one a
+     * static bundle has. Theme and Layout stay gated on the semantics lane.
      */
     hasPublishedTypography: Boolean = false,
     trust: String? = null,
     /**
      * Whether this preview carries a captured Remote Compose document
-     * ([ServeHost.hasRemoteComposeDoc]) the viewer can render client-side in its `<canvas>` lane.
-     * When true the viewer adds the "RC (browser)" toggle + `#cp-rc-canvas`: it loads the vendored
-     * player (`/rc-player/bundle.js`), fetches `/render/<id>.rc`, and paints the document in the
-     * browser with no daemon — and Remote Compose knob edits apply live via `setNamed*Override` +
-     * `repaint()` instead of a server round-trip. Defaults false (no doc ⇒ no canvas lane, knobs
-     * stay daemon-routed).
+     * ([ServeHost.hasRemoteComposeDoc]). When true the viewer adds the "RC (browser)" toggle +
+     * `#cp-rc-canvas`: it loads `/rc-player/bundle.js`, fetches `/render/<id>.rc`, paints
+     * client-side, and applies RC knob edits via `setNamed*Override` + `repaint()`.
      */
     hasRemoteComposeDoc: Boolean = false,
     /**
-     * Whether a server render of this preview **replays a captured document** rather than
-     * re-running the composable — the same host question ([ServeHost.hasRemoteComposeDoc])
-     * `ServeHttpServer.droppedOverridesFor` asks before reporting an override un-applied. Emitted
-     * as `data-ir-replay` so the viewer can grey out the controls the server would answer with a
-     * 409, instead of offering a slider that only produces an error.
+     * Whether a server render replays a captured document rather than re-running the composable —
+     * the same question `ServeHttpServer.droppedOverridesFor` asks. Emitted as `data-ir-replay` so
+     * the viewer greys controls the server would answer with 409.
      *
-     * Deliberately its own flag rather than reusing `data-has-rc-doc`, even though the two coincide
-     * on every host today: that one means "there are `.rc` bytes for the browser canvas lane", this
-     * one means "the daemon cannot recompose this preview". Keeping them separate is what stops a
-     * future host that serves a document for a class-backed preview from greying live controls.
-     *
-     * Note this covers a *narrow* set — see the `irReplay` block in `viewer.js`. Day/Night and font
-     * scale stay live, because a document can defer both to the host and resolve them at paint
-     * time.
+     * Separate from `data-has-rc-doc` (bytes exist for the canvas lane) even though they coincide
+     * today. Covers a narrow set (see the `irReplay` block in `viewer.js`): Day/Night and font
+     * scale stay live because a document can defer them to paint time.
      */
     irReplay: Boolean = false,
     /**
-     * Whether a declared theme can still be applied to this preview **despite** [irReplay] — the
-     * session publishes the theme's colours as named values (`ServeHost.themeReplayColors`), which
-     * the player rewrites on a replayed document with no recomposition.
-     *
-     * Its own flag rather than a softening of [irReplay], because the two say different things and
-     * only one of them moves: everything else [irReplay] greys out — locale, author knobs, string
-     * `rc.` seeds — still cannot be honoured by a replay. Emitted as `data-replay-themes` so
-     * `viewer.js` re-enables exactly the provider-theme options and nothing beside them.
+     * Whether a declared theme can still apply despite [irReplay]: the session publishes theme
+     * colours as named values (`ServeHost.themeReplayColors`) the player rewrites without
+     * recomposition. Emitted as `data-replay-themes` so `viewer.js` re-enables only provider-theme
+     * options.
      */
     replayThemes: Boolean = false,
     /**
-     * The Remote Compose render backends the viewer may offer for this preview as a per-preview
-     * **backend selector** — the [ServeRcPlayerIds] ids of the players the host reports via
-     * [ServeHost.enabledRcPlayersFor]. Non-empty for a Remote Compose preview: the viewer renders
-     * one option per [ServeRcPlayerIds.UNIVERSE] entry, enables those in this list, and disables
-     * the rest. The `camaelon-js` option drives the client-side `<canvas>` lane (so
-     * [hasRemoteComposeDoc] is what carries the doc for it), while `androidx-view` /
-     * `androidx-embedded` / `cmp-android` re-render through the Android daemon and `cmp-jvm`
-     * through its isolated desktop-player subprocess. A legacy spelling (`js`, `java`, `embedded`)
-     * is read as the player it always named. Empty ⇒ no selector at all (not a Remote Compose
-     * preview).
+     * The Remote Compose backends for this preview's backend selector: the [ServeRcPlayerIds] ids
+     * from [ServeHost.enabledRcPlayersFor]. The viewer renders one option per
+     * [ServeRcPlayerIds.UNIVERSE] entry and enables these. `camaelon-js` drives the client
+     * `<canvas>` lane ([hasRemoteComposeDoc]); `androidx-view` / `androidx-embedded` /
+     * `cmp-android` re-render on the Android daemon, `cmp-jvm` in its desktop-player subprocess.
+     * Legacy spellings (`js`, `java`, `embedded`) map to their players. Empty ⇒ no selector.
      */
     enabledRcPlayers: List<String> = emptyList(),
     /**
-     * The [ServeRcPlayerIds] id of the player this preview's **baked** artifact was drawn with
-     * ([ServeHost.bakedRcPlayer]), or empty when the session cannot name one — a preview with no
-     * captured Remote Compose document, or a host that does not track it.
-     *
-     * Emitted as `data-rc-baked-player` so the viewer can tell which of its chips is the one a
-     * *bare* `/render` URL already produces. That is exactly the lane that must NOT name itself in
-     * the query string: naming it splits one rendering across two cache entries and reads as a
-     * deliberate choice the visitor never made. Every other lane keeps naming itself, including
-     * `androidx-embedded` on a preview that pinned the view player — which is why this is reported
-     * rather than assumed viewer-side (`backendRequiresRenderParam`).
+     * The [ServeRcPlayerIds] id of the player this preview's baked artifact was drawn with
+     * ([ServeHost.bakedRcPlayer]), or empty. Emitted as `data-rc-baked-player` so the viewer knows
+     * which lane a bare `/render` already produces and must not name itself in the query (that
+     * would split the cache). Reported rather than assumed (`backendRequiresRenderParam`).
      */
     bakedRcPlayer: String = "",
     /**
-     * The operator's preferred default Remote Compose player (`serve --rc-default-player`), a
-     * canonical [ServeRcPlayerIds] id, or null for the built-in order. Honoured only when it is in
-     * [enabledRcPlayers] — see [ServeRcPlayerIds.defaultPlayer].
+     * The operator's preferred default Remote Compose player (`serve --rc-default-player`), or null
+     * for the built-in order. Honoured only when in [enabledRcPlayers]; see
+     * [ServeRcPlayerIds.defaultPlayer].
      */
     preferredRcPlayer: String? = null,
     wasmSrc: String? = null,
     /**
-     * Whether the Wasm iframe may run with `allow-same-origin` (real origin) rather than the
-     * opaque-origin `allow-scripts`-only sandbox. True ONLY for a **trusted** catalog's app —
-     * unverified catalog-provided Wasm stays opaque so it can't reach the parent viewer's tokened
-     * URLs / DOM. Defaults to false (fail-closed). See the `wasmFrame` sandbox note.
+     * Whether the Wasm iframe may use `allow-same-origin` rather than the opaque-origin
+     * `allow-scripts` sandbox. True only for a trusted catalog's app, so unverified Wasm can't
+     * reach the parent's tokened URLs or DOM. Defaults to false (fail-closed). See the `wasmFrame`
+     * sandbox note.
      */
     wasmSameOrigin: Boolean = false,
     /**
-     * URL prefix for this session's links (`/<system>` when served under a path, empty otherwise).
-     * The "← previews" link is prefixed with it; the viewer's own `/render` + `/ws` requests derive
-     * their prefix from `location.pathname` at runtime, so they work under either mount. Empty ⇒
-     * links are exactly as before.
+     * URL prefix for this session's links (`/<system>`, or empty). Prefixes the "← previews" link;
+     * `/render` and `/ws` derive their prefix from `location.pathname` at runtime.
      */
     basePath: String = "",
     /** Same-origin portable scene document; non-null replaces the flat stage with WebGL/WebXR. */
     spatialSceneUrl: String? = null,
     /**
-     * Public mode: drop the `token=` param from the server-rendered "← previews" link (every route
-     * is open, so the token gates nothing). The viewer's own `/render` + `/ws` requests read the
-     * token from the page URL at runtime, so they're naturally token-free too when the page arrived
-     * without one. Off by default so a token-gated box keeps the token in links.
+     * Public mode: drop `token=` from the server-rendered "← previews" link. The viewer's runtime
+     * requests read the token from the page URL, so they follow suit.
      */
     isPublic: Boolean = false,
     /**
-     * Label for the corner "backend" badge while showing the baked snapshot — the renderer that
-     * produced the PNG (e.g. `Android` for the design catalogs). The in-browser Wasm tier always
-     * reads `CMP-WASM`; the daemon stream reads [liveBackend]. Null ⇒ a generic `Snapshot`.
+     * Label for the corner backend badge while showing the baked snapshot (e.g. `Android`). The
+     * Wasm tier reads `CMP-WASM`; the live stream reads [liveBackend]. Null ⇒ `Snapshot`.
      */
     snapshotBackend: String? = null,
     /**
-     * Label for the badge while the daemon **live stream** drives the stage — the serving daemon's
-     * platform, since a live session can be desktop/JVM **or** Android (a `RobolectricHost` streams
-     * `BackendKind.ANDROID`), so it must come from the server, not a hard-coded tier name. Null ⇒ a
-     * generic `Live`.
+     * Label for the badge while the daemon live stream drives the stage — the daemon's platform
+     * (desktop/JVM or Android), so it comes from the server. Null ⇒ `Live`.
      */
     liveBackend: String? = null,
     /**
-     * The app's declared `@ThemeCatalog` themes (module-global). When non-empty, the viewer adds an
-     * "App theme" selector whose options re-render the preview under the chosen provider (the
-     * `themeProvider` override) — daemon-only, so it's enabled exactly when a knob edit would be
-     * (`canApplyOverrides || canRenderOverrides`). Empty ⇒ no selector (a static bundle, or a
-     * module that declares none).
+     * The app's declared `@ThemeCatalog` themes. Non-empty adds an "App theme" selector
+     * re-rendering under the chosen provider (`themeProvider`), enabled when a knob edit would be
+     * (`canApplyOverrides || canRenderOverrides`).
      */
     declaredThemes: List<ServeTheme> = emptyList(),
     /**
-     * Whether this session's daemon can apply the one-handed **gesture** override (Android backend
-     * only). Gates the "Show gesture hints" control, which is otherwise offered for a
-     * `@GestureHintPreview`-detected preview — a desktop-backed session ignores the override, so
-     * the control is omitted there rather than shown dead. Defaults false.
+     * Whether the daemon can apply the one-handed gesture override (Android only). Gates "Show
+     * gesture hints" for `@GestureHintPreview` previews. Defaults false.
      */
     gesturesRenderable: Boolean = false,
     /**
-     * The session's other previews, used to populate the left-hand **component nav** drawer (each
-     * links to its own viewer page). Typically the whole `renderHost.previews` list including
-     * [preview] itself — the current one is marked `aria-current` and never filtered out. When the
-     * list holds no preview *other than* [preview] (empty, or a single-preview module's one entry)
-     * the drawer and its toggle are omitted — there is nothing to navigate between.
+     * The session's other previews for the left-hand component nav drawer, typically including
+     * [preview] (marked `aria-current`). The drawer is omitted when there is no other preview.
      */
     siblings: List<ServePreview> = emptyList(),
     /**
-     * Every variant of the component [preview] belongs to, in catalog order, for the **compare
-     * strip** under the render ([comparisonStripHtml]) — including [preview] itself, which the
-     * strip marks and does not link.
-     *
-     * Distinct from [siblings], which is the whole catalog and feeds the navigation drawer. This is
-     * the one component, resolved by the handler because `ServeIssueReport.componentIdFor` and the
-     * per-preview reference lookup are the host's answers, not the page's.
-     *
-     * Empty (the default) omits the strip entirely, so a plain module's viewer is unchanged.
+     * Every variant of [preview]'s component in catalog order, for the compare strip
+     * ([comparisonStripHtml]), including [preview] itself. Resolved by the handler (it needs
+     * `ServeIssueReport.componentIdFor` and reference lookups). Empty omits the strip.
      */
     componentVariants: List<ComponentVariant> = emptyList(),
     /**
-     * The component's named groups for the drawer subtree — its recorded interactions, the samples
-     * that call it, whatever a later lane adds.
-     *
-     * Resolved by the handler for the same reason [componentVariants] is: a directory's rows reach
-     * another catalog's previews through the session registry, which is the host's answer and not
-     * this page's. Empty leaves the subtree the plain axes list it has always been.
-     *
-     * Keyed on the COMPONENT and not on the render on screen. A sample is written against the
-     * component — sometimes against one of its cells, but that is not worth a second lane — so the
-     * directory a reader finds on `Button` is the one they find on `Button · Pressed`, rather than
-     * vanishing the moment they step onto a variant.
+     * The component's named groups for the drawer subtree (recordings, calling samples, later
+     * lanes), resolved by the handler via the session registry. Keyed on the component, not the
+     * render, so they stay put across variants. Empty leaves the plain axes list.
      */
     componentDirectories: List<ComponentDirectory> = emptyList(),
     /**
-     * What kind of catalog this page belongs to — see [PageRole], which says what each role changes
-     * and why. Defaults to [PageRole.CATALOG], so every existing caller and every catalog that
-     * declares no role renders exactly the page it did before.
+     * What kind of catalog this page belongs to; see [PageRole]. Defaults to [PageRole.CATALOG].
      */
     pageRole: PageRole = PageRole.CATALOG,
     /**
-     * The catalog's declared stage surface (`catalog.json`'s `display.surface`) — decides whether
-     * an unthemed preview's stage backs on dark, and with it whether the page offers a day/night
-     * choice at all (a declared-dark catalog does not). Null ⇒ the system-name dark-first
-     * heuristic.
+     * The catalog's declared stage surface (`display.surface`), deciding the dark stage and whether
+     * day/night is offered (not for declared-dark). Null ⇒ the system-name heuristic.
      */
     declaredSurface: String? = null,
     /**
-     * The served catalog's own palette as an inline `:root` override for the chrome's custom
-     * properties, built by [ServeThemeCss] from the branch's `tokens.dtcg.json`. Empty ⇒ the page
-     * keeps the built-in chrome (a plain module, or a catalog that publishes no tokens).
+     * The catalog's palette as an inline `:root` override, built by [ServeThemeCss] from
+     * `tokens.dtcg.json`. Empty keeps the built-in chrome.
      */
     themeCss: String = "",
     /**
-     * Why this session is snapshot-only, when it is (no live bundle, unverified, …). When
-     * non-empty, a banner under the header explains the catalog-level reason — complementing the
-     * per-control `cp-note` (which explains what each override needs). Empty ⇒ no banner. See
-     * [degradeBanner].
+     * Why this session is snapshot-only, if it is; non-empty shows a banner ([degradeBanner])
+     * complementing the per-control `cp-note`.
      */
     degradations: List<ServeDegradation> = emptyList(),
     /** Engagement count for this preview on the running server. */
     engagement: PreviewEngagement = PreviewEngagement(),
     /** Absolute viewer + PNG URLs for Open Graph/Twitter link previews. */
     unfurl: UnfurlMetadata? = null,
-    /**
-     * Running server version (`SERVE_VERSION`), shown in the minimal footer. Null omits the build
-     * span.
-     */
+    /** Running server version (`SERVE_VERSION`) for the footer. Null omits the build span. */
     version: String? = null,
     /**
-     * Fully-formed GitHub link to this preview's source file, when it resolves — the caller builds
-     * it from the session's delivery provenance (repo + branch) and the preview's `sourceFile` via
-     * [ServeUrls.githubBlobUrl]. When non-null the header shows a "source" link beside the preview
-     * label; null (a local session with no provenance, or a preview with no recorded source)
-     * renders no link, matching how the footer/landing source links depend on a known repo.
+     * GitHub link to this preview's source file ([ServeUrls.githubBlobUrl] from the delivery
+     * provenance and `sourceFile`). Null renders no "source" link.
      */
     sourceHref: String? = null,
     /**
-     * Prefilled GitHub new-issue link for this preview, built by the caller from the session's
-     * catalog source/provenance via [ServeIssueReport]. Null omits the affordance entirely (a
-     * surface with nothing sensible to file against); see [reportIssueHtml].
+     * Prefilled GitHub new-issue link for this preview, built via [ServeIssueReport]. Null omits
+     * it; see [reportIssueHtml].
      */
     reportIssue: ReportIssue? = null,
     /**
-     * The Figma node this preview is specified by, when the served catalog publishes a Figma-backed
-     * design reference for it (see [ServeFigmaSpec]). Null — every catalog that names none — omits
-     * the affordance entirely rather than offering a guessed or dead link.
+     * The Figma node this preview is specified by, when the catalog publishes one
+     * ([ServeFigmaSpec]). Null omits the link.
      */
     figmaSpec: FigmaSpec? = null,
     /**
-     * The design reference this preview is specified by — the imported spec design-parity published
-     * into `references/index.json` (see [ServeDesignReferenceStore]) — when the served catalog
-     * carries one for this exact preview id.
+     * The design reference for this preview from `references/index.json`
+     * ([ServeDesignReferenceStore]), if any.
      *
-     * Present ⇒ the viewer offers a **Spec lane** beside the renderer chips: the same chip row that
-     * chooses which Remote Compose player draws the stage also offers the imported spec, so the
-     * visitor can flip between what the code renders and what the design says without leaving the
-     * page (and step into the focused Reference/Diff/Actual comparison from the same group).
-     *
-     * The raster is the catalog's own canonical, inert PNG, served from this server's
-     * `/reference/<id>.png` — nothing is fetched from Figma, here or anywhere else in `serve`. Null
-     * (every catalog that has not adopted design-parity) omits the lane entirely.
+     * Present ⇒ the viewer offers a **Spec lane** in the same chip row as the RC players, plus a
+     * route into the focused Reference/Diff/Actual comparison. The raster is the catalog's inert
+     * PNG at `/reference/<id>.png`; nothing is fetched from Figma.
      */
     designReference: DesignReference? = null,
     /**
-     * The counterpart component's render in the `compareWith` sibling system, when this catalog
-     * declares a pairing, the sibling is served on THIS host, and the counterpart has a render
-     * (issue #4621). Offered as a second SOURCE for the spec lane, not a second mode — see
-     * [SpecSource].
-     *
-     * Same origin as everything else the lane paints: the sibling is another catalog on this
-     * server, so its render is `/<sibling>/render/<id>.png` and needs no cross-repo fetch and no
-     * thumbnails baked at publish time. Null whenever any link of that chain is missing, which
-     * omits the picker and leaves the lane exactly as it was.
+     * The counterpart's render in the `compareWith` sibling, when the pairing is declared, the
+     * sibling is served on this host, and the counterpart has a render. A second [SpecSource] for
+     * the spec lane, same-origin at `/<sibling>/render/<id>.png`. Null omits the picker.
      */
     parallelSource: SpecSource? = null,
     /**
-     * The paired sibling preview's imported design reference, used as this preview's design source
-     * when it publishes no reference of its own. This is how a Remote Compose implementation can
-     * still be compared directly with the Figma node shared with its Wear M3 counterpart.
+     * The paired sibling preview's design reference, used when this preview publishes none — e.g. a
+     * Remote Compose implementation compared with the Figma node shared by its Wear M3 counterpart.
      */
     pairedDesignSource: SpecSource? = null,
     /**
-     * `/parallel/<preview>` — the **cross-catalog layer diff** for this render, offered beside the
-     * lane's own spec-diff link whenever [parallelSource] resolved (issue #4838).
+     * Whether to offer `/parallel/<preview>`, the **cross-catalog layer diff**, beside the lane's
+     * spec-diff link. A separate affordance because it compares what each side resolved (family,
+     * token, insets), not rasters.
      *
-     * A separate affordance rather than a fifth view of the lane, because it is a different kind of
-     * answer. The lane's four views put two rasters together, and two rasterisers of one design
-     * system differ mostly in antialiasing; the layer diff states what each side *resolved* — the
-     * family, the token, the insets — which is where a two-runtime disagreement is actually
-     * legible. False leaves the lane byte-identical to what a catalog with no pairing renders.
-     *
-     * Gated on the PAIRING rather than on [parallelSource], which is not the same condition: the
-     * raster source is withheld on a top-level site (a neighbour catalog's render is that site's
-     * own 404), while the layer diff is joined server-side and answers there like anywhere else.
+     * Gated on the pairing rather than [parallelSource]: the raster source is withheld on a
+     * top-level site, but the layer diff is joined server-side and still works there.
      */
     parallelLayers: Boolean = false,
     /**
-     * Typography/layout facts captured from [designReference]'s own raster. The default Figma lane
-     * draws these over the spec image; Diff/Triptych pair them with the current render and reduce
-     * the legend to changed typography only.
+     * Typography/layout facts captured from [designReference]'s raster, drawn over the spec image;
+     * Diff/Triptych pair them with the render and show only changed typography.
      */
     referenceAnnotations: List<DesignAnnotation> = emptyList(),
     /**
-     * `/playground?from=…` for this preview — opens its Kotlin in the editor against the catalog it
-     * came from. Null on a host with no playground lane, or for a preview whose source path the
-     * catalog never recorded; the affordance is then omitted rather than offered dead.
+     * `/playground?from=…` for this preview, opening its Kotlin against its catalog. Null without a
+     * playground lane or a recorded source path.
      */
     playgroundHref: String? = null,
     /**
-     * `/usage/<id>` for this preview — the plain-Compose usage code the **Source** chip shows, or
-     * null when this host cannot derive one and the chip is omitted rather than offered dead.
+     * `/usage/<id>` for this preview — the plain-Compose usage code the **Source** chip shows — or
+     * null to omit the chip. A URL so the snippet (a GitHub read on a cold cache) is fetched only
+     * when opened.
      *
-     * A URL, not the snippet: the panel fetches it on first press, so a visitor who never opens the
-     * panel costs the host nothing (deriving a snippet is a GitHub read on a cold cache).
-     *
-     * Deliberately independent of [playgroundHref]. Reading the code is useful wherever a catalog
-     * can be browsed; only *running* it needs a host that can compile that catalog, which most of
-     * the public deployment's catalogs have none. So a preview commonly offers Source without
-     * offering the playground, and the panel links onward to the editor only when there is one.
+     * Independent of [playgroundHref]: reading code is useful anywhere, while running it needs a
+     * host that compiles that catalog; the panel links to the editor only when there is one.
      */
     usageHref: String? = null,
     /** GitHub sign-in prompt shown when the daemon live stream is present but requires auth. */
@@ -16530,101 +14064,73 @@ ${scriptTag("known-differences.js")}
     /** Human catalog title used in the breadcrumb; falls back to a generic "Previews" label. */
     catalogTitle: String? = null,
     /**
-     * `POST` URL that keeps this session (and its daemon) alive while the visitor has the viewer
-     * open — see [presenceScript]. The viewer needs this at least as much as the grid does: it is
-     * where someone settles on one preview, and where the theme and knob actions that *need* a warm
-     * daemon are taken. Empty (the default) omits the heartbeat.
+     * Presence `POST` URL keeping this session and its daemon alive while the viewer is open
+     * ([presenceScript]). Empty omits the heartbeat.
      */
     presenceUrl: String = "",
     /**
-     * `history.json` on the delivery branch, or null when there is no delivery provenance (an
-     * uploaded bundle, a local project). Null omits the timeline entirely rather than shipping a
-     * control that can only fail — see [ServeUrls.historyManifestUrl].
+     * `history.json` on the delivery branch, or null without delivery provenance (which omits the
+     * timeline). See [ServeUrls.historyManifestUrl].
      */
     historyManifestUrl: String? = null,
     /**
-     * `owner/repo` of the delivery branch, used to address a historical render by commit sha.
-     * Paired with [historyManifestUrl]: both or neither, since a timeline you cannot click through
-     * to is not worth drawing.
+     * `owner/repo` of the delivery branch, for addressing a historical render by sha. Both this and
+     * [historyManifestUrl] or neither.
      */
     historyRepo: String? = null,
     /**
-     * A manifest payload inlined into the page instead of fetched. Exists so a fixture (and any
-     * offline viewer) renders the timeline without reaching raw.githubusercontent.com — without it
-     * the preview-harness capture is byte-identical whether the strip works or is deleted, which is
-     * no coverage at all.
+     * A manifest payload inlined instead of fetched, so fixtures and offline viewers render the
+     * timeline (and the preview-harness capture actually covers it).
      */
     historyInlineJson: String? = null,
     /**
-     * A `/api/render-runs` payload inlined into the revision menu instead of fetched, for exactly
-     * the reason [historyInlineJson] exists: the run markers are drawn client-side from that lane,
-     * so a harness capture would look the same whether they work or the feature is gone.
+     * A `/api/render-runs` payload inlined into the revision menu instead of fetched, for the same
+     * reason as [historyInlineJson].
      */
     revisionRunsInlineJson: String? = null,
     /**
-     * Project mode: the timeline was computed from the local repository ([ServeProjectHistory]), so
-     * its entries link at this server's own `/history/render/<blob>.png` rather than at
-     * raw.githubusercontent.com — a local checkout has no such URL. Also tells the viewer the strip
-     * describes *published baselines* rather than the stage, which in project mode is rendered from
-     * the working tree and so need not match the newest entry.
-     *
-     * Only honoured alongside [historyInlineJson]: with no payload there is nothing to link.
+     * Project mode: the timeline was computed locally ([ServeProjectHistory]), so entries link to
+     * this server's `/history/render/<blob>.png`, and the strip describes published baselines
+     * rather than the working-tree stage. Only honoured with [historyInlineJson].
      */
     historyLocalRenders: Boolean = false,
     /**
-     * The catalog's published revisions and which one this page is pinned to ([CatalogRevisions]).
-     *
-     * A pin makes the viewer a **reader of one publish**: the stage shows that revision's baked
-     * pixels and every control that would re-render is refused, because the daemon renders today's
-     * code and answering a request for the past with the present is precisely the failure a
-     * permalink exists to prevent. Empty ⇒ the viewer behaves exactly as it always has.
+     * The catalog's published revisions and this page's pin ([CatalogRevisions]). A pin makes the
+     * viewer a reader of one publish: the stage shows that revision's baked pixels and every
+     * re-rendering control is refused, since the daemon renders today's code.
      */
     revisions: CatalogRevisions = CatalogRevisions.NONE,
     /**
-     * Render overrides already present on the viewer URL, without a leading `?`. Revision links
-     * carry these between publishes so choosing a revision does not silently reset the selected
-     * theme (or any other explicit render state). The pin itself is added separately.
+     * Render overrides already on the viewer URL (no leading `?`), carried across revision links so
+     * choosing a revision keeps the selected theme etc. The pin is added separately.
      */
     revisionQuery: String = "",
     /**
-     * Whether this page is served as a **top-level site** ([ServeSites]) — its catalog rooted on a
-     * hostname of its own. The session is then implied by the ORIGIN, exactly as a `/<system>`
-     * mount implies it by the path, so same-session links must not repeat it as `?session=`. False
-     * (the default) leaves every existing caller's URLs byte-identical.
+     * Whether this page is served as a **top-level site** ([ServeSites]); the origin implies the
+     * session, so links must not repeat `?session=`.
      */
     sessionInOrigin: Boolean = false,
     parityIssues: List<ParityIssue> = emptyList(),
     /**
-     * When the catalog's issue index was generated (`ParityIssues.generatedAt`, ISO-8601), printed
-     * at the foot of an opened issue panel. Null on an index that declares none, which simply omits
-     * the line — the panel is still a snapshot, it just cannot say of when.
+     * When the issue index was generated (`ParityIssues.generatedAt`, ISO-8601), printed at the
+     * foot of an opened issue panel. Null omits the line.
      */
     parityIssuesGeneratedAt: String? = null,
     componentBrowser: Boolean = false,
     /**
-     * The catalog change feed the footer offers as **Changelog** and the head declares as this
-     * page's RSS alternate. Empty when the server runs with the feed lane off. See [siteFooter].
+     * The catalog change feed offered as **Changelog** and declared as the page's RSS alternate.
+     * Empty when the feed lane is off. See [siteFooter].
      */
     changelogHref: String = "",
     /**
-     * Per-preview **prebaked thumbnail** lookup for the component drawer, the same
-     * [ServeHeroImages.gridThumbFor] hash the catalog grid's cards carry. See [navDrawerHtml] for
-     * why the drawer needs it: its rows are ~40px thumbnails, and without this each one loads the
-     * preview's full-resolution render.
-     *
-     * The default `{ null }` keeps every row on the plain render URL — used by the fixture goldens,
-     * which must not churn with the bake.
+     * Per-preview prebaked thumbnail lookup for the component drawer (the same
+     * [ServeHeroImages.gridThumbFor] hash as the grid), so ~40px rows don't load full renders
+     * ([navDrawerHtml]). The default `{ null }` keeps plain render URLs for fixture goldens.
      */
     navThumbHash: (String) -> String? = { null },
   ): String {
-    // A SAMPLES catalog drops every comparison lane, for one reason that covers all of them: a
-    // sample is not a rendition of a reference. There is nothing this render is meant to match, so
-    // a design reference, the paired catalog's cell, the layer diff, the published parity issues
-    // and the compare strip would each invite a reader to read a difference as a defect. See
-    // [PageRole.SAMPLES].
-    //
-    // Shadowed at the top, exactly as Catalog mode's strip and the pin's are, so the rule holds by
-    // construction: there is no path below where a samples page reads a comparison input.
+    // A samples catalog drops every comparison lane, since a sample is not a rendition of a
+    // reference ([PageRole.SAMPLES]). Shadowed here so nothing below can read a comparison input.
     val samplesRole = pageRole == PageRole.SAMPLES
     @Suppress("NAME_SHADOWING") val parallelSource = parallelSource?.takeUnless { samplesRole }
     @Suppress("NAME_SHADOWING")
@@ -16632,20 +14138,14 @@ ${scriptTag("known-differences.js")}
     @Suppress("NAME_SHADOWING") val parallelLayers = parallelLayers && !samplesRole
     @Suppress("NAME_SHADOWING")
     val referenceAnnotations = if (samplesRole) emptyList() else referenceAnnotations
-    // The compare strip goes with them — it is the design comparison applied to this component's
-    // other variants, so on a samples page it is the same question asked once per row. The drawer
-    // subtree still lists those variants; navigation is not comparison.
+    // The compare strip goes too; the drawer subtree still lists the variants for navigation.
     @Suppress("NAME_SHADOWING")
     val componentVariants = if (samplesRole) emptyList() else componentVariants
     @Suppress("NAME_SHADOWING")
     val designReference = designReference?.takeUnless { componentBrowser || samplesRole }
     @Suppress("NAME_SHADOWING") val sourceHref = sourceHref?.takeUnless { componentBrowser }
-    // Deliberately NOT stripped in Catalog mode, unlike the developer affordances around it. That
-    // mode is the streamlined component browser — the presentation a design reviewer is handed —
-    // and a reviewer noticing that a component draws the wrong thing is exactly who this report is
-    // for. It is also the ONLY reporting affordance that mode can have: Catalog mode carries no
-    // site footer and no floating launcher, so with this stripped too a visitor looking at a wrong
-    // render had nowhere at all to say so (issue #4704).
+    // Deliberately kept in Catalog mode: design reviewers are exactly who files these, and Catalog
+    // mode has no footer or floating launcher, so this is its only reporting affordance.
     @Suppress("NAME_SHADOWING")
     val figmaSpec = figmaSpec?.takeUnless { componentBrowser || samplesRole }
     @Suppress("NAME_SHADOWING") val playgroundHref = playgroundHref?.takeUnless { componentBrowser }
@@ -16654,12 +14154,8 @@ ${scriptTag("known-differences.js")}
     @Suppress("NAME_SHADOWING") val historyRepo = historyRepo?.takeUnless { componentBrowser }
     @Suppress("NAME_SHADOWING")
     val historyInlineJson = historyInlineJson?.takeUnless { componentBrowser }
-    // Catalog mode hides the revision *control* — a component browser embedded in someone else's
-    // docs has no business offering a publish history. It must not drop the page's **generation**
-    // with it: that is not a control, it is which publish this HTML was assembled from, and losing
-    // it leaves the browser-built stage URL unscoped while the server-built Open Graph and
-    // issue-report URLs beside it still name the generation (#4714 review). Same page, two
-    // publishes.
+    // Catalog mode hides the revision control but keeps the page's generation, so the browser-built
+    // stage URL is scoped like the server-built OG and report URLs.
     @Suppress("NAME_SHADOWING")
     val revisions =
       if (componentBrowser) CatalogRevisions(generation = revisions.generation) else revisions
@@ -16667,29 +14163,19 @@ ${scriptTag("known-differences.js")}
     val parityIssues = if (componentBrowser || samplesRole) emptyList() else parityIssues
     @Suppress("NAME_SHADOWING")
     val degradations = if (componentBrowser) emptyList() else degradations
-    // The session id links may carry. Null on a rooted site (and for the default session): the
-    // URL already says which catalog this is. `sessionId` itself stays intact below — it keys the
-    // per-catalog localStorage entries and the dark-first lookup, which a site still needs.
+    // The session id links may carry: null on a rooted site and for the default session.
+    // `sessionId` still keys per-catalog storage and the dark-first lookup.
     val linkSessionId = if (sessionInOrigin) null else sessionId
     val idSeg = WebEscaping.urlEncodeSegment(preview.id)
-    // A pin turns off every lane that would *produce* something, for one reason that covers all of
-    // them: they run the catalog's current code. A knob edit, a declared theme, a live stream, the
-    // in-browser Wasm app, the SVG export, a Remote Compose player, the inspection layers, a
-    // full-page scroll capture, the downloadable bundle — each would answer a request for an old
-    // publish with today's output, under a URL whose entire promise is that it cannot change.
+    // A pin turns off every lane that produces output on demand from current code (knobs, declared
+    // themes, live stream, Wasm, SVG export, RC players, inspection layers, scroll capture, bundle
+    // download), since the URL promises a fixed publish. Published files (baked PNG, design
+    // reference) take the pin instead (see `specRasterUrl`).
     //
-    // The line is "produced on demand" vs. "published bytes", not "interactive" vs. "static": a
-    // baked PNG and a published design reference are both files on the branch at that commit, so
-    // both pin (see `specRasterUrl` below, which takes the pin rather than being dropped). An SVG
-    // is not — it is exported by the daemon per request — so it goes, however static it looks.
-    //
-    // The names are shadowed rather than threaded through the hundred-odd uses below so the rule
-    // holds by construction: there is no path through this function where a pinned page reads the
-    // un-pinned flag.
+    // The names are shadowed so no path below reads the unpinned flag.
     val pinned = revisions.pinned
-    // Remember capabilities before the pin suppresses their current-code implementations. A
-    // pinned toolbar keeps these controls visible but disabled, explaining why the same component
-    // has the feature at Current and cannot run it against historical bytes.
+    // Remember capabilities before the pin suppresses them, so a pinned toolbar can show those
+    // controls disabled with an explanation.
     val currentHasSvgExport = hasSvgExport
     @Suppress("NAME_SHADOWING") val canApplyOverrides = canApplyOverrides && pinned == null
     @Suppress("NAME_SHADOWING") val canRenderOverrides = canRenderOverrides && pinned == null
@@ -16699,24 +14185,16 @@ ${scriptTag("known-differences.js")}
     @Suppress("NAME_SHADOWING") val hasSvgExport = hasSvgExport && pinned == null
     @Suppress("NAME_SHADOWING")
     val hasScrollExport = hasScrollExport && pinned == null && !componentBrowser
-    // A component page offers only the one inspection product that explains its public API:
-    // measured content slots. The metadata says which parameters are slots; the daemon's existing
-    // `.slots` product says where the preview actually placed their `PreviewSlot` markers.
+    // A component page offers one inspection product: measured content slots — parameters declared
+    // as slots, placed via the daemon's `.slots` `PreviewSlot` markers.
     val hasSlotInspection =
       componentBrowser &&
         pinned == null &&
         hasDesignAnnotations &&
         preview.componentParameters.any { it.composableSlot }
-    // Catalog mode keeps the Remote Compose facet whole — the `.rc` canvas and every player the
-    // host offers, embedded included — rather than stripping it with the rest of the dev surface.
-    //
-    // It used to come off with `!componentBrowser`, and the cost was a broken link: with no canvas,
-    // no chips and no lane select, nothing on the page owned the `rcPlayer` parameter, so
-    // `url-state.js` cleared it from the address bar and a shared `?rcPlayer=…` silently became an
-    // ordinary baked snapshot. Which player drew a document is the *subject* of a Remote Compose
-    // catalog, not an operational detail, so a catalog reader is exactly who wants to switch
-    // between them — and the lane a preview opens on stays the embedded player here as it is in
-    // Dev, rather than the two modes disagreeing about what the default rendering of a document is.
+    // Catalog mode keeps the whole Remote Compose facet (canvas and every player): which player
+    // drew a document is the subject of an RC catalog, and without an owner for `rcPlayer`,
+    // `url-state.js` would strip a shared `?rcPlayer=…`.
     @Suppress("NAME_SHADOWING") val hasRemoteComposeDoc = hasRemoteComposeDoc && pinned == null
     @Suppress("NAME_SHADOWING")
     val enabledRcPlayers =
@@ -16730,13 +14208,9 @@ ${scriptTag("known-differences.js")}
     val hasDesignAnnotations = hasDesignAnnotations && pinned == null && !componentBrowser
     @Suppress("NAME_SHADOWING")
     val hasPublishedTypography = hasPublishedTypography && pinned == null && !componentBrowser
-    // A published capture is a file on the branch exactly as the baked render and the design
-    // reference are, so by the pinned-page rule it ought to STAY and take the pin. It cannot yet:
-    // `/motion/<id><ext>` reads the branch tip the session is holding, with no revision to resolve
-    // against. The stronger half of that rule — "a pinned request is never answered with current
-    // bytes" — decides it, so the lane comes off a pinned page entirely rather than playing today's
-    // recording beside a render from another commit. See docs/public-preview-server.md; when the
-    // route learns to resolve a capture at a revision this becomes `withPin` like the reference.
+    // Motion captures should take the pin like other published files, but `/motion/<id><ext>` only
+    // reads the branch tip, so the lane is dropped on pinned pages rather than playing current
+    // bytes. See docs/public-preview-server.md.
     val motionCaptures = if (pinned == null) preview.motion else emptyList()
     @Suppress("NAME_SHADOWING")
     val executableBundleHref = executableBundleHref?.takeIf { pinned == null && !componentBrowser }
@@ -16755,32 +14229,16 @@ ${scriptTag("known-differences.js")}
     // The baked fallback shown before any override is chosen. The unified Theme selector displays
     // this choice without sending a redundant uiMode override on first load.
     val viewerDarkFirst = isDarkFirstSystem(basePath, sessionId, declaredSurface)
-    // A dark-first surface has no day mode. Do not expose the generic day/night override: besides
-    // being meaningless there, an old light choice within the Wear catalog must not turn into a
-    // confetti-wear live render.
+    // A dark-first surface has no day mode, so the day/night override isn't exposed.
     //
-    // The DECLARED `display.surface` now counts too, not just the Wear/watch id heuristic. Reading
-    // the heuristic alone let a dark-only catalog whose id doesn't read as Wear (`remote-m3`:
-    // `modes: ["dark"]`, `display.surface: "dark"`, every document carrying explicit dark-first
-    // Material colours) draw its stickers on the dark stage — which goes through the
-    // declaration-first [isDarkFirstSystem] — while still offering a Light chip that nothing behind
-    // it could honour (wear-m3-catalog#99).
+    // Either signal makes a catalog dark-only: the Wear/watch id heuristic, or a declared dark
+    // `display.surface` (via [isDarkFirstSystem]). It's `||`, not [viewerDarkFirst] alone:
+    // [normalizeOverrideParams] drops `uiMode` for Wear ids unconditionally, so the id keeps its
+    // veto until normalization can read declarations.
     //
-    // It is `||`, not the resolved [viewerDarkFirst] alone, and that asymmetry is deliberate: a
-    // declaration can add an always-dark catalog, never take one away. [normalizeOverrideParams]
-    // drops `uiMode` for a Wear id **unconditionally**, on every render and socket lane, so a Wear
-    // catalog declaring `display.surface: "light"` would otherwise get an enabled Light choice that
-    // moves the control and the URL while the server returns the same pixels. The control and the
-    // request normalization have to agree about what has no day mode; until the normalization can
-    // read a declaration (it is handed a system id and nothing else), the id keeps its veto.
-    //
-    // And the declaration's half is narrowed by what the catalog actually PUBLISHES, because
-    // `display.surface` is a stage colour in the spec schema and not a statement about modes: a
-    // catalog can perfectly well bake a light/dark pair and ask for a dark stage under both. Only a
-    // declared-dark catalog with **no light render anywhere in the session** is dark-only, which is
-    // `remote-m3` (every capture is one transparent dark-first document, and there is no `__light`
-    // twin to swap to). One that bakes a light variant keeps its pair, and keeps `previewTheme`'s
-    // label honest about the pixels on screen.
+    // The declaration only counts when the session publishes no light render at all, since
+    // `display.surface` is a stage colour, not a statement about modes; a catalog baking a
+    // light/dark pair keeps it.
     val hasLightRender = (siblings + preview).any { previewTheme(it, darkFirst = false) == "light" }
     val wearAlwaysDark =
       SystemDisplay.isDarkFirst(basePath.trim('/').ifBlank { sessionId ?: "" }) ||
@@ -16789,39 +14247,29 @@ ${scriptTag("known-differences.js")}
     val irReplayAttr = if (irReplay) " data-ir-replay=\"1\"" else ""
     val replayThemesAttr = if (replayThemes) " data-replay-themes=\"1\"" else ""
     val viewerTheme = previewTheme(preview, viewerDarkFirst)
-    // The Wasm tier is opt-in via a toggle (like "Live (stream)"), so the always-works PNG snapshot
-    // stays the default. Both the iframe and the toggle are omitted entirely when no Wasm app backs
-    // this session.
+    // The Wasm tier is opt-in like "Live (stream)", so the PNG snapshot stays the default. Omitted
+    // when no Wasm app backs this session.
     val wasmAttr =
       if (wasmSrc != null) " data-wasm-src=\"${WebEscaping.htmlEscape(wasmSrc)}\"" else ""
-    // `allow-same-origin` (alongside `allow-scripts`) is granted ONLY for a [wasmSameOrigin]
-    // (trusted-catalog) app. That app is our own compiled catalog, served same-origin from this
-    // box's `/wasm/<system>/`, so it isn't hostile content the opaque origin needs to wall off, and
-    // the real origin stops the storage/history APIs the Kotlin/Wasm + Compose runtime touches
-    // (`window.caches` via `supportsCacheApi`, history.pushState, …) from throwing `SecurityError`
-    // in an opaque origin (console spam on every Wasm render), and lets Compose's resource loader
-    // use the Cache API. An UNTRUSTED catalog's Wasm app stays opaque (`allow-scripts` only): the
-    // `/wasm/` route serves an unverified catalog's app too, and same-origin there would let it
-    // read
-    // the parent viewer's tokened URLs / DOM or remove its own sandbox. `data-wasm-src` is
-    // additionally same-origin-checked before it reaches the frame (see wasmBaseSrc).
+    // `allow-same-origin` (with `allow-scripts`) only for a [wasmSameOrigin] (trusted-catalog) app
+    // served same-origin from `/wasm/<system>/`: the Kotlin/Wasm + Compose runtime's
+    // storage/history/Cache APIs throw `SecurityError` in an opaque origin. Untrusted catalogs'
+    // apps stay opaque so they can't reach the parent's tokened URLs/DOM or lift their sandbox.
+    // `data-wasm-src` is also same-origin-checked (see wasmBaseSrc).
     val wasmSandbox = if (wasmSameOrigin) "allow-scripts allow-same-origin" else "allow-scripts"
     val wasmFrame =
       if (wasmSrc != null)
         "<iframe id=\"cp-wasm\" hidden sandbox=\"$wasmSandbox\" title=\"$label (Wasm)\"></iframe>"
       else ""
-    // The render mode is a single Static⇄Live toggle now, not a radio row. Behind it sit the mode
-    // radios the transport JS still drives (`cp-mode-png` = static snapshot, `cp-live` = daemon
-    // stream, `cp-wasm-toggle` = in-browser Wasm) — kept in the DOM but visually removed. SVG is no
-    // longer an on-screen mode; it's an export format in the Direct-links group. The Wasm radio is
-    // present only when a Wasm app backs the session.
+    // The render mode is a single Static⇄Live toggle; the mode radios the transport JS drives
+    // (`cp-mode-png`, `cp-live`, `cp-wasm-toggle`) stay in the DOM but visually removed. SVG is an
+    // export format, not a mode. The Wasm radio exists only with a Wasm app.
     val wasmModeInput =
       if (wasmSrc != null)
         "<input type=\"radio\" name=\"cp-mode\" value=\"wasm\" id=\"cp-wasm-toggle\" tabindex=\"-1\">"
       else ""
-    // The SVG format toggle — swaps the static snapshot between the raster PNG and the vector SVG
-    // render. Offered only when the session can export SVG ([hasSvgExport]), the same gate as the
-    // SVG direct-link row.
+    // The SVG format toggle, swapping the snapshot between PNG and SVG. Gated on [hasSvgExport]
+    // like the SVG direct link.
     val svgFmtToggle =
       if (currentHasSvgExport && !componentBrowser) {
         val availability =
@@ -16837,11 +14285,8 @@ ${scriptTag("known-differences.js")}
           "<span class=\"cp-disabled-control\" tabindex=\"0\" " +
             "aria-describedby=\"cp-pinned-controls-note\">$button</span>"
       } else ""
-    // The exploded 3D toggle — the layered figma-svg tilted back and pulled apart into one sheet
-    // per visible drawing level ([ExplodedSvg]). It sits beside the SVG toggle because it is
-    // a view *of* that export rather than a separate renderer lane, and is gated on the same
-    // per-preview [hasSvgExport]: with no layered export there is nothing to pull apart, so the
-    // control is omitted rather than offered dead.
+    // The exploded 3D toggle: the layered figma-svg tilted and split into one sheet per drawing
+    // level ([ExplodedSvg]). A view of the SVG export, so it shares the [hasSvgExport] gate.
     val explodeToggle =
       if (currentHasSvgExport && !componentBrowser) {
         val availability =
@@ -16870,15 +14315,10 @@ ${scriptTag("known-differences.js")}
         "<span id=\"cp-svg-match\" class=\"cp-match\" role=\"status\" aria-live=\"polite\" hidden></span>" +
           "<a id=\"cp-svg-diff\" class=\"cp-format-link\" href=\"$basePath/compare?$compareQuery\" hidden>view diff →</a>"
       } else ""
-    // The in-browser Remote Compose canvas lane. Offered (a `#cp-rc-canvas`, a hidden mode radio,
-    // and
-    // a toggle button) only when this preview carries a captured `.rc` document
-    // ([hasRemoteComposeDoc]): the client loads the vendored player and paints the document with no
-    // daemon. `data-has-rc-doc` flags the page so the transport JS wires the lane; the doc + player
-    // URLs are built at runtime (the doc from the same `base` as the snapshot, the player from the
-    // constant `/rc-player/bundle.js`). Reuses `.cp-live-toggle` styling so it reads as a peer of
-    // the
-    // Live / Wasm toggles.
+    // The in-browser Remote Compose canvas lane (`#cp-rc-canvas`, hidden mode radio, toggle),
+    // offered only when the preview has a captured `.rc` ([hasRemoteComposeDoc]). `data-has-rc-doc`
+    // tells the transport JS to wire it; doc and player URLs are built at runtime
+    // (`/rc-player/bundle.js`). Reuses `.cp-live-toggle` styling.
     val rcAttr = if (hasRemoteComposeDoc) " data-has-rc-doc=\"1\"" else ""
     val rcCanvas = if (hasRemoteComposeDoc) "<canvas id=\"cp-rc-canvas\" hidden></canvas>" else ""
     val hasRcWasm = ServeRcPlayerIds.CMP_WASM in enabledRcPlayers
@@ -16895,12 +14335,9 @@ ${scriptTag("known-differences.js")}
       if (hasRcWasm)
         "<input type=\"radio\" name=\"cp-mode\" value=\"rc-wasm\" id=\"cp-rc-wasm-toggle\" tabindex=\"-1\">"
       else ""
-    // The **Spec lane**: the imported design reference for this exact preview, offered as one more
-    // entry in the renderer picker. Where the other lanes choose *which player draws the code*,
-    // this chooses to look at *what the design says* instead — the catalog's own inert PNG, from
-    // `/reference/<id>.png` (never fetched from Figma), swapped onto the same stage. Rendered only
-    // when the catalog published a reference for this preview id, i.e. only when design-parity is
-    // configured for the system; every other catalog's viewer is byte-identical to before.
+    // The **Spec lane**: the imported design reference for this preview (the catalog's PNG from
+    // `/reference/<id>.png`, never fetched from Figma) swapped onto the same stage. Rendered only
+    // when a reference is published for this id.
     val specLabel = designReference?.let { it.label.takeIf { l -> l.isNotBlank() } ?: it.id }
     val specProviderLabel =
       when (designReference?.source?.provider?.trim()?.lowercase()) {
@@ -16908,10 +14345,7 @@ ${scriptTag("known-differences.js")}
         null -> null
         else -> "Spec"
       }
-    // Pinned, not dropped: a design reference is a published file on the delivery branch like the
-    // baked render is, so the spec lane is one of the few produced-on-demand-looking surfaces that
-    // genuinely has a historical answer. Comparing this publish's render against this publish's
-    // spec is also the comparison a pinned page is *for*.
+    // Pinned, not dropped: a design reference is a published file with a historical answer.
     val specRasterUrl = designReference?.let {
       "$basePath/reference/${WebEscaping.urlEncodeSegment(it.id)}.png${assetQuery(q, revisions)}"
     }
@@ -16929,18 +14363,15 @@ ${scriptTag("known-differences.js")}
       // reading rather than silently landing on the live one.
       withPin("$basePath/compare/$idSeg${querySuffix(query)}", pinned)
     }
-    // The cross-catalog layer diff for this render. No pin: the layers are the tip catalog's, and
-    // pointing a historical page at them would state today's facts under a publish that never
-    // measured them — so a pinned page simply doesn't offer the link.
+    // The cross-catalog layer diff. Not offered on a pinned page, since the layers are the tip
+    // catalog's.
     val parallelLayersHref =
       if (!parallelLayers || pinned != null) ""
       else
         "$basePath/parallel/$idSeg" +
           querySuffix(linkQuery(token, linkSessionId, basePath, isPublic))
-    // Every source the comparison lane can put opposite this render. A catalog may publish a
-    // design reference, declare a parallel implementation, or do both. In particular, Remote
-    // Compose catalogs commonly have a Wear M3 counterpart before every preview has a Figma
-    // reference; the parallel raster is still a complete and useful pair on its own.
+    // Every source the comparison lane can put opposite this render: a design reference, a parallel
+    // implementation, or both (a parallel raster alone is a complete pair).
     val specSources =
       listOfNotNull(
         if (specRasterUrl == null || specProviderLabel == null) null
@@ -16959,16 +14390,9 @@ ${scriptTag("known-differences.js")}
     val primarySpecSource = specSources.firstOrNull()
     val specSurfaceUrl = primarySpecSource?.rasterUrl
     val parallelOnly = designReference == null && primarySpecSource?.id == "parallel"
-    // The four ways to look at the render/reference pair, offered on the stage itself the moment
-    // the lane is up. The lane used to be a flip — reference on the stage instead of the render —
-    // which
-    // answers "are these different?" only by asking the eye to hold one frame while looking at the
-    // other. That finds a wholesale colour change and misses the 4dp of padding that is the actual
-    // bug. The focused `/compare/<id>` page has always had the real instruments, but reaching it
-    // means leaving the viewer, and with it the overrides, knobs and theme that produced the render
-    // worth comparing. So the instruments come to the lane. `triptych` is the default (#4376): the
-    // lane is entered to ask how the two compare, and side-by-side answers that on arrival, while
-    // `spec` — the reference alone, the way the lane used to open — is one click away.
+    // The four ways to view the render/reference pair, on the stage once the lane is up, so the
+    // focused comparison's instruments are available without leaving the viewer's overrides.
+    // `triptych` is the default; `spec` (reference alone) is one click away.
     val referenceNoun = if (parallelOnly) primarySpecSource.label else "Spec"
     val comparisonAriaLabel = if (parallelOnly) "Render comparison" else "Design comparison"
     val specViews =
@@ -16987,11 +14411,9 @@ ${scriptTag("known-differences.js")}
           "triptych" to ("Triptych" to "Spec, diff and render side by side"),
           "slider" to ("Slider" to "One frame, wiped between the spec and the render"),
         )
-    // The spec lane's *carrier*, not a control: `data-spec-src` is the raster viewer.js paints onto
-    // the stage when the lane is entered, the comparison group beside it chooses how that pair is
-    // drawn, and the trailing link is the step out to the focused comparison page. Entering the
-    // lane is [specChipHtml]'s job — a chip of its own on the bar, not an `<option>` inside the
-    // renderer combo.
+    // The spec lane's carrier, not a control: `data-spec-src` is the raster viewer.js paints on
+    // entry; the comparison group chooses how the pair is drawn; the link steps out to the focused
+    // comparison. Entering the lane is [specChipHtml]'s job.
     val specSelector =
       if (primarySpecSource == null) ""
       else {
@@ -17000,17 +14422,10 @@ ${scriptTag("known-differences.js")}
           else
             "Compare this render against the imported design spec — " +
               (specLabel ?: primarySpecSource.label)
-        // Hidden until the lane is entered: while a render is on the stage there is no pair to
-        // compare, and a control that acts on nothing is worse than no control. `<cp-spec-compare>`
-        // reveals it from openSpec() and hides it again on the way out.
-        // The SOURCE picker: which pair the four views are instruments over. Emitted only when
-        // there is a genuine choice — one source collapses it away entirely, so every catalog that
-        // declares no `compareWith` pairing keeps exactly the lane it had.
-        //
-        // Each button carries its own raster and label, server-built and server-escaped like every
-        // other URL the lane paints, so switching source never means reading a URL out of the DOM
-        // and handing it to an image (CodeQL's `js/xss-through-dom`, and the reason `data-spec-src`
-        // is set here rather than assembled in the browser).
+        // Hidden until the lane is entered; `<cp-spec-compare>` reveals it from openSpec().
+        // The source picker, emitted only when there is more than one source. Each button carries
+        // its own server-built, escaped raster and label, so switching never reads a URL from the
+        // DOM into an image (CodeQL `js/xss-through-dom`).
         val sourceButtons =
           if (specSources.size < 2 && !parallelOnly) ""
           else
@@ -17035,9 +14450,8 @@ ${scriptTag("known-differences.js")}
               "title=\"${WebEscaping.htmlEscape(viewTip)}\">${WebEscaping.htmlEscape(viewLabel)}</button>"
           }
         "<span class=\"cp-spec-lane\" id=\"cp-spec-lane\" " +
-          // The FIRST source's raster and label stay on these two attributes, unchanged. They are
-          // what a single-source lane has always carried and what the backend badge still reads, so
-          // a catalog with no pairing produces byte-identical markup to before.
+          // The first source's raster and label stay on these attributes, which single-source lanes
+          // and the backend badge read.
           "data-spec-src=\"${WebEscaping.htmlEscape(primarySpecSource.rasterUrl)}\" " +
           "data-spec-label=\"${WebEscaping.htmlEscape(primarySpecSource.label)}\">" +
           sourceButtons +
@@ -17045,41 +14459,24 @@ ${scriptTag("known-differences.js")}
           "aria-label=\"$comparisonAriaLabel\" hidden>$viewButtons</span>" +
           "<span class=\"cp-spec-score\" id=\"cp-spec-score\" role=\"status\" " +
           "aria-live=\"polite\" hidden></span>" +
-          // The eyedropper's readout, LAST in the lane and on a row of its own (see `serve.css`):
-          // the lane wraps, so a readout among the controls re-flowed them the moment a reading
-          // arrived. Deliberately NOT a live region either — it is rewritten on every pointermove,
-          // and announcing that queues a stream of pixel values over everything else a screen
-          // reader user is doing. Only a frozen reading is announced, into the visually-hidden
-          // region beside it.
+          // The eyedropper readout, last and on its own row (see `serve.css`) so readings don't
+          // reflow the controls. Not a live region (rewritten on every pointermove); only a frozen
+          // reading is announced, via the hidden region beside it.
           "<span class=\"cp-spec-pick\" id=\"cp-spec-pick\" hidden></span>" +
           "<span class=\"cp-spec-pick-live\" id=\"cp-spec-pick-live\" " +
           "aria-live=\"polite\"></span></span>"
       }
-    // ---- The renderer picker -------------------------------------------------------------------
-    //
-    // One chip plus one combo box, in place of the row of per-lane chips this page used to carry
-    // (`Live preview · In-browser (Wasm) · RC: JS CMP Wasm Java CMP Android CMP JVM · Spec: Figma ·
-    // SVG · static snapshot`). That row asked a visitor to read up to eight independent
-    // pressed-states to answer one question — *what is drawing this?* — and grew another chip every
-    // time a lane was added.
-    //
-    // The replacement answers it once. [laneSelectHtml] is the single control that CHOOSES the
-    // renderer; the `#cp-live-toggle` chip beside it NAMES the chosen one ("Java") and toggles it
-    // live/interactive, with its status dot as the live indicator. viewer.js drives both from one
-    // lane value (`syncLaneSelect`), so the two can never disagree about what's on the stage.
+    // The renderer picker: one chip plus one combo box. [laneSelectHtml] chooses the renderer; the
+    // `#cp-live-toggle` chip names the chosen one and toggles live, its dot the live indicator.
+    // viewer.js drives both from one lane value (`syncLaneSelect`).
     val rcEnabled = enabledRcPlayers.toSet()
-    // The lane the viewer opens on for a Remote Compose preview: the operator's configured
-    // preference (`serve --rc-default-player`) when this preview enables it, else the server-side
-    // `androidx-embedded` player when it's available, else `androidx-view`, else the client
-    // `camaelon-js` canvas. Why embedded leads that order — and why switching the default to
-    // `cmp-android` is a configuration change — is written once, at
-    // [ServeRcPlayerIds.defaultPlayer].
+    // The lane a Remote Compose preview opens on: the operator's `serve --rc-default-player` when
+    // enabled, else `androidx-embedded`, else `androidx-view`, else the client `camaelon-js`
+    // canvas. The rationale lives at [ServeRcPlayerIds.defaultPlayer].
     val defaultRcBackend = ServeRcPlayerIds.defaultPlayer(enabledRcPlayers, preferredRcPlayer)
-    // Every lane this preview can be drawn by, in display order: the Remote Compose players (or the
-    // plain snapshot, when this isn't a Remote Compose preview), the in-browser Wasm app, and the
-    // imported design spec. A player the host doesn't offer is still listed — as a disabled option,
-    // the same "shown but unavailable" treatment its chip had — so the set of players stays legible
-    // from any session.
+    // Every lane this preview can be drawn by, in display order: RC players (or the plain
+    // snapshot), the Wasm app, and the design spec. Players the host doesn't offer are listed
+    // disabled.
     data class ViewerLane(val value: String, val label: String, val enabled: Boolean)
     val lanes = buildList {
       if (enabledRcPlayers.isEmpty()) add(ViewerLane("png", "Snapshot", true))
@@ -17089,34 +14486,18 @@ ${scriptTag("known-differences.js")}
         }
       if (wasmSrc != null) add(ViewerLane("wasm", "In browser (Wasm)", true))
     }
-    // The **design-spec chip** — the imported reference, promoted OUT of the renderer combo and
-    // onto
-    // the row as a control of its own.
-    //
-    // It used to be one `<option>` among the players ("Figma spec", after five Remote Compose
-    // backends and the Wasm app), which put the one lane that answers a different *question* behind
-    // the same menu as the ones that answer "which engine drew this?". Very few catalogs publish
-    // references at all, so on the ones that do it is the most interesting thing on the page and it
-    // was the least visible. As a chip it is one click from rest, it says which tool the spec came
-    // from ("Figma") instead of a generic label, and — like the Live chip beside it — its
-    // `aria-pressed` reports whether the spec is currently on the stage. viewer.js drives both from
-    // the same lane state, so the chip and the combo cannot disagree.
+    // The **design-spec chip**: the imported reference as its own control rather than a renderer
+    // option, since it answers a different question. It names the tool ("Figma") and its
+    // `aria-pressed` reports whether the spec is on stage; viewer.js keeps it in step with the
+    // combo.
     val specChipHtml =
       if (primarySpecSource == null) ""
       else {
         val name =
           if (parallelOnly) primarySpecSource.label
           else if (primarySpecSource.label == "Figma") "Figma" else "Design spec"
-        // The **verdict**, on the chip, at rest. The catalog exists to answer "does this render
-        // match its design?", and the chip that led to that answer used to say only which tool the
-        // design came from — the question was one click and two raster decodes away, on every page,
-        // including the ones where the answer is 57%.
-        //
-        // One page, one number: a preview has one render and one reference, so there is exactly one
-        // score to state. It is always printed rather than hidden behind a "clean" threshold — a
-        // number that is usually high is still the thing a reader came for, and suppressing it
-        // would make its absence ambiguous with "not scored". The BAND only picks the colour, so a
-        // quiet 99.7% and a loud 85.8% read differently without either being hidden.
+        // The verdict on the chip at rest: the one published score for this render/reference pair,
+        // always printed. The band only picks the colour.
         val match = designReference?.match
         val band = match?.let { specMatchBand(it.percent) }
         val label = if (match == null) name else "$name ${WebEscaping.formatPercent(match.percent)}"
@@ -17138,15 +14519,10 @@ ${scriptTag("known-differences.js")}
               append(" — click to see where")
             }
         val bandAttr = band?.let { " data-spec-match=\"$it\"" } ?: ""
-        // What the chip says once the render has moved OFF the snapshot the verdict was measured
-        // against. The baked number is taken against the catalog's own render — default theme,
-        // declared knob defaults — while the imported spec is exported once and never re-exported
-        // per theme. So a visitor who picks a theme changes one side of the comparison and not the
-        // other, and the published number goes on describing a frame that has left the stage. It
-        // does not merely go stale, it goes generous: a 99.6% chip over a render the spec lane
-        // scores at 88.9% reads as the lane being broken rather than as the chip being out of date.
-        // viewer.js publishes the baseline (`data-spec-baseline`) and `<cp-spec-compare>` swaps to
-        // this label until it has a live measurement to put there instead.
+        // The chip's label once the render moves off the snapshot the verdict was measured against
+        // (e.g. another theme): the published number would describe a frame no longer on stage.
+        // viewer.js publishes `data-spec-baseline` and `<cp-spec-compare>` shows this label until
+        // it has a live measurement.
         val staleTip =
           "The published match is measured against this catalog's default render — " +
             "click to compare the $specProviderLabel spec against what's on the stage now"
@@ -17159,26 +14535,12 @@ ${scriptTag("known-differences.js")}
           "data-spec-chip-tip=\"${WebEscaping.htmlEscape(tip)}\"$staleTipAttr " +
           "title=\"${WebEscaping.htmlEscape(tip)}\">${WebEscaping.htmlEscape(label)}</button>"
       }
-    // ---- The comparison group
-    // --------------------------------------------------------------------
+    // The comparison group: every source this render can be compared against, as peers, each with a
+    // way in from the resting bar (`docs/design/COMPARE_NAVIGATION.md` F1). The picker stays for
+    // switching once the lane is up.
     //
-    // EVERY source this render can be compared against, as PEERS.
-    //
-    // The lane has offered two since the `compareWith` pairing landed, but only one of them had a
-    // control: the chip named the kit ("Figma"), and the sibling lived in a picker that ships
-    // `hidden` until that chip is pressed. So the bar read as Figma-first with the second
-    // comparison nowhere on it — a button labelled with ONE source opening a panel of things that
-    // are not that source, which is `docs/design/COMPARE_NAVIGATION.md`'s F1 almost word for word.
-    //
-    // The picker stays: once the lane is up, switching between sources belongs beside the views it
-    // is switching for. What changes is that each source also has a way IN from the resting bar, so
-    // a reader who never presses the kit's chip can still discover that this catalog has a
-    // counterpart — and reach it in one click instead of two.
-    //
-    // These carry only the source ID. The raster, the label and the provenance stay on the picker's
-    // own buttons, which the server already built and escaped; `viewer.js` presses the matching one
-    // rather than re-deriving a pair from attributes copied onto a second element, so there is one
-    // description of each source rather than two that can disagree.
+    // These carry only the source id; `viewer.js` presses the matching picker button, which holds
+    // the server-built raster, label and provenance.
     val specPeerChips =
       if (primarySpecSource == null) ""
       else
@@ -17189,10 +14551,7 @@ ${scriptTag("known-differences.js")}
             "title=\"Compare this render against ${WebEscaping.htmlEscape(source.label)}\">" +
             "${WebEscaping.htmlEscape(source.label)}</button>"
         }
-    // Labelled, and only when there is more than one — on the ordinary catalog a group heading over
-    // a single chip is a word that earns nothing. The label is what makes the two read as answers
-    // to one question rather than as two unrelated buttons that happen to sit together, which is
-    // the same job `View`'s label does for the group below it.
+    // Labelled only when there is more than one source.
     val specGroupHtml =
       if (specChipHtml.isBlank()) ""
       else if (specPeerChips.isEmpty()) specChipHtml
@@ -17204,29 +14563,14 @@ ${scriptTag("known-differences.js")}
           "</span>"
     val sourceKnown = !usageHref.isNullOrBlank()
     val usageAvailable = sourceKnown && pinned == null
-    // The SIDE source lane: on a samples page the code stands beside the render instead of behind
-    // a chip that swaps it out.
-    //
-    // An attribute rather than a second panel, because the panel, its fetch and its editor are the
-    // same ones the chip opens — this changes where the panel sits and when it is filled, not what
-    // it is. The viewer script reads it to open the lane at load and to stop `closeSource` from
-    // putting the code away again; the stylesheet reads it to lay the stage out in two columns.
-    //
-    // Only when there IS source to stand beside: a samples catalog whose usage lane is unavailable
-    // (a pin, a preview whose source could not be derived) keeps the ordinary single-column stage
-    // rather than a column of nothing.
+    // The side source lane: on a samples page the code stands beside the render. An attribute
+    // rather than a second panel — the viewer script opens the lane at load and keeps `closeSource`
+    // from closing it; the stylesheet lays out two columns. Only when there is source to show.
     val sideSourceLane = samplesRole && usageAvailable
     val sourceLaneAttr = if (sideSourceLane) " data-source-lane=\"side\"" else ""
-    // The **Source chip** — the usage code behind this card, on the same row and for the same
-    // reason the design-spec chip is there rather than inside the renderer combo: that combo is
-    // headed "Switch renderer", and source is not a renderer. It answers a third question again,
-    // beside "which engine drew this?" (the combo) and "what was it specified as?" (the spec chip):
-    // *what do I type to get this?*
-    //
-    // Offered whenever this host can resolve a preview's source at all. It is deliberately NOT
-    // gated on the playground being able to compile the catalog — reading the code is useful on
-    // every host that can browse one, and most of the public deployment's catalogs cannot be
-    // compiled here.
+    // The **Source chip**: the usage code behind this card ("what do I type to get this?"), on the
+    // row rather than in the renderer combo. Offered whenever the host can resolve source,
+    // regardless of whether the playground can compile the catalog.
     val sourceChipHtml =
       if (!sourceKnown) ""
       else {
@@ -17254,22 +14598,10 @@ ${scriptTag("known-differences.js")}
       else
         "<button type=\"button\" id=\"cp-browser-preview-tab\" " +
           "class=\"cp-spec-chip cp-browser-tab\" role=\"tab\" aria-selected=\"true\">Preview</button>"
-    // Catalog mode shows the **baked snapshot**, exactly like Dev mode does, and this script only
-    // keeps the Preview / Source tab pair in sync with the source panel's own toggle.
-    //
-    // It used to force the in-browser Wasm app on every component page (`w.checked = true` at
-    // parse time, plus on every return from Source), so that "interactive by default" was the
-    // Catalog reading of a component browser. That was wrong twice over. It made the *snapshot*
-    // — the thing the catalog publishes, and the artifact every other surface here compares
-    // against — the one rendering Catalog mode never showed; and because entering an interactive
-    // lane CANCELS the in-flight snapshot (viewer.js gates the bookmarked `?mode=` on the
-    // snapshot having landed for exactly this reason, but a direct tick bypasses that gate), the
-    // stage's <img> never got a src at all. The Wasm iframe is sized to that <img>'s box, so it
-    // came up at the browser's ~104×20 alt-text placeholder and every Catalog preview looked
-    // blank — with the still it was supposed to fall back to never having loaded (#4091).
-    //
-    // The lane is still reachable: `?mode=wasm` pins it, and Dev mode carries the renderer combo
-    // and the Live chip.
+    // Catalog mode shows the baked snapshot, like Dev mode; this script only syncs the Preview /
+    // Source tab pair with the source panel's toggle. Forcing the Wasm lane here would cancel the
+    // snapshot load and leave the iframe sized to an empty `<img>`. `?mode=wasm` still pins the
+    // Wasm lane.
     val browserTabsScript =
       if (!componentBrowser) ""
       else
@@ -17277,50 +14609,23 @@ ${scriptTag("known-differences.js")}
         <script>(function(){var p=document.getElementById("cp-browser-preview-tab"),s=document.getElementById("cp-source-chip"),r=document.getElementById("cp-source-toggle");function sync(){if(!p||!s||!r)return;var source=!!r.checked;p.setAttribute("aria-selected",source?"false":"true");s.setAttribute("aria-selected",source?"true":"false");}if(p&&s&&r){p.addEventListener("click",function(){if(r.checked)s.click();setTimeout(sync,0);});s.addEventListener("click",function(){setTimeout(sync,0);});window.addEventListener("popstate",function(){setTimeout(sync,0);});}setTimeout(sync,0);})();</script>
         """
           .trimIndent()
-    // ---- The Motion lane -------------------------------------------------------------------
+    // The Motion lane: the recorded interaction (`@InteractionPreview` / `@AnimatedPreview`,
+    // published under `motion/`) on the stage in place of the still.
     //
-    // The recorded interaction behind this card, on the stage in place of the still.
-    //
-    // A screenshot can only ever show a component at rest. Whether its own interaction plumbing
-    // actually drives the transition — and what shape that transition has — is exactly what the
-    // still cannot answer, so a preview that declared `@InteractionPreview` / `@AnimatedPreview`
-    // publishes an animated capture beside its baked PNG (see the `motion/` directory on the
-    // delivery branch).
-    //
-    // Offered as a CHIP, never as the default frame, for two reasons that point the same way. Most
-    // readers open a component page to look at the component, and a page that starts animating at
-    // them is answering a question they did not ask — the same judgement the design-spec and Source
-    // chips already encode. And a capture is heavy: tens to hundreds of frames against one still,
-    // so autoplaying it would put that on every visitor to every card that has one. The bytes are
-    // requested on FIRST ENTRY and never at page load, exactly like the spec raster.
-    //
-    // Not an `<option>` inside the renderer combo, for the same reason the spec chip is not: that
-    // combo is headed "Switch renderer" and this is not a renderer — it is the same render, moving.
-    // What to call each capture, split in two by [MotionCaptureLabels]: a brief title for the menu
-    // and the annotation's caption in full for the readout beside the frames. The captions catalogs
-    // actually write are a line of instruction followed by a paragraph of what to watch for, and
-    // printing that on a control is what made this row wider than the render it introduces.
+    // A chip, never the default frame: most readers want the component at rest, and captures are
+    // heavy, so bytes are fetched on first entry only. Not a renderer option, since it is the same
+    // render moving.
+    // Captions are split by [MotionCaptureLabels]: a brief title for the menu, the full caption for
+    // the readout.
     val motionLabels = MotionCaptureLabels.of(motionCaptures)
-    // Session-scoped like every other asset link on this page. Deliberately NOT pin-carrying: the
-    // route reads the bytes straight off the delivery branch the session is holding, so a `pin`
-    // param would name a publish the handler has no way to honour — a link that quietly lies about
-    // which publish it is showing is worse than one that does not offer the choice.
+    // Session-scoped like other asset links, but not pin-carrying: the route reads the session's
+    // branch tip and could not honour a pin.
     fun motionSrc(capture: ServeMotion): String =
       "$basePath/motion/${WebEscaping.urlEncodeSegment(capture.id)}${capture.extension}$q"
-    // The picker, and the src holder. Rendered even for a single capture — the option IS where the
-    // lane reads its source from, so there is one code path rather than two — but the menu is
-    // `hidden` until there is genuinely a choice to make, because a "pick one of one" control is
-    // just noise on the bar.
-    //
-    // A menu rather than the segmented group the spec views use, which is where this started: a
-    // segment is as wide as its label, so N captions sat across the bar at once, each one a
-    // sentence, and the row grew past the render it introduces. A closed `<select>` shows ONE brief
-    // title at a fixed width however many recordings there are — and unlike the renderer combo
-    // beside it this is a state field, not a command menu: nothing else on the page names which
-    // recording is playing, so the control has to keep showing it.
-    //
-    // The caption in full rides on the option and is printed by the readout on pick, so the words
-    // the annotation wrote are one selection away rather than spent on the control.
+    // The picker and src holder, rendered even for one capture (one code path) but `hidden` until
+    // there is a choice. A closed `<select>` at fixed width rather than a segmented group, and a
+    // state field (it is the only thing naming which recording plays). The full caption rides on
+    // the option for the readout.
     val motionSelector =
       if (motionCaptures.isEmpty()) ""
       else {
@@ -17345,17 +14650,13 @@ ${scriptTag("known-differences.js")}
           "<span class=\"cp-motion-caption\" id=\"cp-motion-caption\" role=\"status\" " +
           "aria-live=\"polite\"></span></span>"
       }
-    // The chip itself, beside Source and for the same reason it is there. It answers a fourth
-    // question on that row: beside "which engine drew this?" (the combo), "what was it specified
-    // as?" (the spec chip) and "what do I type to get this?" (Source) — *what does it do?*
+    // The chip itself, beside Source: "what does it do?"
     val motionChipHtml =
       if (motionCaptures.isEmpty()) ""
       else {
         val tip =
           if (motionCaptures.size == 1)
-            // The caption IN FULL, not the menu's brief title: a tooltip has room for a sentence,
-            // and this is the one place a reader can find out what the recording shows without
-            // starting it. The readout inside the lane says the same thing once they have.
+            // The full caption, so the tooltip says what the recording shows before starting it.
             "Play this preview's recorded interaction \u2014 " +
               motionLabels[0].detail.ifBlank { motionLabels[0].title }
           else "Play this preview's recorded interactions (${motionCaptures.size})"
@@ -17366,35 +14667,19 @@ ${scriptTag("known-differences.js")}
           "data-motion-chip-tip=\"${WebEscaping.htmlEscape(tip)}\" " +
           "title=\"${WebEscaping.htmlEscape(tip)}\">Motion</button>"
       }
-    // The stage image the Motion lane FALLS BACK to: a sibling of the snapshot `<img>`, left
-    // `hidden` and src-less until the lane is entered — the same treatment [specImg] gets, and here
-    // it is what keeps an unopened capture from being fetched *and* from playing.
-    //
-    // No longer the primary path. An `<img>` plays a capture the way the file says to and offers
-    // the reader nothing: our APNGs are written with `loopCount = 0`, so a recording that toggles a
-    // switch on and then off runs on → off → on → off with no seam and the reader cannot tell a
-    // transition from its own reverse; there is no pausing it, no slowing it, and no sitting on the
-    // two frames either side of the moment being documented. The canvas below is what the lane
-    // actually uses. This stays for the browser that cannot decode frames for us (see `loadMotion`
-    // in `viewer.ts`), where a looping capture beats no capture.
+    // The fallback stage image for the Motion lane: hidden and src-less until entered, so an
+    // unopened capture is neither fetched nor played. The canvas below is the primary path (frame
+    // control, no seamless loop); this is for browsers that can't decode frames (see `loadMotion`
+    // in `viewer.ts`).
     val motionImg =
       if (motionCaptures.isEmpty()) ""
       else
         "<img id=\"cp-motion-img\" class=\"cp-motion-img\" hidden alt=\"" +
           "${WebEscaping.htmlEscape("$displayName \u2014 recorded interaction")}\">"
-    // The player: the capture on a canvas, with its transport under it.
-    //
-    // A canvas because every one of the four things this lane is asked for \u2014 play once, show
-    // where
-    // playback is, scrub to a frame, change speed \u2014 needs the frames addressable one at a
-    // time, and
-    // an animated `<img>` exposes none of them. `viewer.ts` decodes the capture with `ImageDecoder`
-    // and paints frame N here; nothing is fetched or decoded until the lane is entered, exactly as
-    // before.
-    //
-    // The transport is `hidden` in the markup and revealed only once a decode has actually
-    // succeeded, because a row of dead controls over a looping fallback would promise scrubbing the
-    // page cannot do.
+    // The player: the capture on a canvas with its transport. Play once, playback position,
+    // scrubbing and speed all need addressable frames, so `viewer.ts` decodes with `ImageDecoder`
+    // and paints frame N here, only once the lane is entered. The transport stays `hidden` until a
+    // decode succeeds.
     val motionPlayer =
       if (motionCaptures.isEmpty()) ""
       else {
@@ -17413,12 +14698,8 @@ ${scriptTag("known-differences.js")}
           "<button type=\"button\" id=\"cp-motion-replay\" class=\"cp-motion-transport-btn\" " +
           "title=\"Play again from the start\" aria-label=\"Play again from the start\">" +
           "\u21ba</button>" +
-          // A range input, not a bar drawn by hand: it is the one control here a reader drags, and
-          // the platform's own brings \u2190 / \u2192 frame stepping, Home / End, a focus ring and
-          // a screen
-          // reader that announces which frame of how many \u2014 all of which a `<div>` with a
-          // pointer
-          // handler would have to reimplement, and would get subtly wrong.
+          // A native range input: it brings arrow-key frame stepping, Home/End, focus and
+          // screen-reader announcements for free.
           "<input type=\"range\" id=\"cp-motion-scrub\" class=\"cp-motion-scrub\" " +
           "min=\"0\" max=\"0\" value=\"0\" step=\"1\" " +
           "title=\"Scrub to a frame\" aria-label=\"Frame\">" +
@@ -17427,29 +14708,20 @@ ${scriptTag("known-differences.js")}
           "title=\"Playback speed\" aria-label=\"Playback speed\">$rateOptions</select>" +
           "</div></div>"
       }
-    // The lane's hidden mode radio. Motion is not a renderer either, but joining the same radio
-    // group buys it every mechanism the other lanes get for free: `?mode=motion` in the URL,
-    // restore on load, and Back/Forward through the lane. Without it `currentMode()` would keep
-    // reporting the snapshot while a capture was on the stage.
+    // Motion's hidden mode radio, joining the radio group for `?mode=motion`, restore on load,
+    // Back/Forward and `currentMode()`.
     val motionModeInput =
       if (motionCaptures.isEmpty()) ""
       else
         "<input type=\"radio\" name=\"cp-mode\" value=\"motion\" id=\"cp-motion-toggle\" " +
           "tabindex=\"-1\">"
     val defaultLane = if (enabledRcPlayers.isEmpty()) "png" else "rc:$defaultRcBackend"
-    // Rendered only when there is genuinely something to switch *to*: a single-lane preview keeps
-    // the chip on its own rather than growing a combo box with one entry in it.
+    // Rendered only when there is another lane to switch to. A command menu: the placeholder shows
+    // at rest and `syncLaneSelect` returns to it after each pick, since the chip beside it names
+    // the current renderer.
     //
-    // It is a **command** menu, not a state field: the always-selected placeholder is what it shows
-    // at rest, and `syncLaneSelect` returns it there after every pick. The chip immediately to its
-    // left already names the current renderer, and a combo that repeated that name beside it read
-    // as two controls arguing about the same fact ("Java  [Java ▾]"). So the chip answers *what am
-    // I looking at* and this answers *what else could I look at* — which is the whole split.
-    //
-    // Catalog mode's switcher is the Remote Compose players and nothing else. The Wasm app already
-    // has a chip of its own there, and "Snapshot" is not a destination when it is the only other
-    // entry — so a Catalog page with no RC document keeps the bare chip row it always had, while a
-    // Remote Compose one grows the full player combo.
+    // In Catalog mode the switcher holds only Remote Compose players (Wasm has its own chip;
+    // "Snapshot" alone isn't a destination).
     val selectLanes = if (componentBrowser) lanes.filter { it.value.startsWith("rc:") } else lanes
     val laneSelectHtml =
       if (selectLanes.size < 2) ""
@@ -17462,12 +14734,8 @@ ${scriptTag("known-differences.js")}
               "title=\"Draw this preview with a different renderer\" " +
               "data-default=\"$defaultLane\" data-rc-default=\"$defaultRcBackend\"" +
               (if (bakedRcPlayer.isNotEmpty()) " data-rc-baked-player=\"$bakedRcPlayer\"" else "") +
-              // Catalog mode drops the renderer chip with the rest of the Live control, and that
-              // chip is what made this a *command* menu: "switch renderer…" at rest is only honest
-              // while something beside it names the renderer in use. Without it the menu is the
-              // sole indicator, so it has to hold its selection instead of bouncing back to the
-              // placeholder — otherwise picking Java leaves nothing on the page, or in the
-              // accessibility tree, saying Java is what is drawing.
+              // Catalog mode has no renderer chip, so the menu must hold its selection to show
+              // which renderer is drawing.
               (if (componentBrowser) " data-lane-state=\"1\"" else "") +
               ">" +
               "<option value=\"\" selected>Switch renderer…</option>",
@@ -17480,9 +14748,8 @@ ${scriptTag("known-differences.js")}
           "<option value=\"${lane.value}\"$disabledAttr>" +
             "${WebEscaping.htmlEscape(text)}</option>"
         }
-    // The step from "look at one player" to "look at them all": the format-comparison page, focused
-    // on this preview and opened on its Remote Compose lane. A subtle text link rather than another
-    // chip — it navigates away, so it deliberately stays out of the picker's affordance set.
+    // A subtle link to the format-comparison page focused on this preview's Remote Compose lane; it
+    // navigates away, so it isn't a chip.
     val comparePlayersHref =
       if (enabledRcPlayers.size < 2) ""
       else {
@@ -17496,22 +14763,9 @@ ${scriptTag("known-differences.js")}
             .joinToString("&")
         "$basePath/compare?$compareQuery"
       }
-    // ---- The step OUT of the viewer -------------------------------------------------------------
-    //
-    // Every full-page comparison surface this preview has, in one place. They are alike in the one
-    // way that matters to a reader deciding whether to click: each LEAVES the page, giving up the
-    // overrides, knobs and theme that produced the render worth comparing. The controls before them
-    // all act on the stage in front of you; these do not.
-    //
-    // Loose in the row they neither read as a set nor stayed together — the players link sat before
-    // the spec lane and the layer link inside it, so a pairing that had both put two small grey
-    // links either side of a wide control that grows with the length of a design tool's name. They
-    // were also each other's competition for the same width: `compare players →` and
-    // `Wear M3 layers →` and `spec diff →` is 40-odd characters of link text on a bar whose actual
-    // controls had to wrap around them.
-    //
-    // The destinations are unchanged, and so is the fact that this is a subtle grey affordance
-    // rather than another chip. What changes is that they are one affordance instead of three.
+    // The step out of the viewer: every full-page comparison surface for this preview, grouped
+    // because each one leaves the page (and its overrides). Still a subtle grey affordance, now one
+    // instead of several.
     val compareDestinations =
       listOfNotNull(
         specCompareHref?.let {
@@ -17524,16 +14778,9 @@ ${scriptTag("known-differences.js")}
         parallelLayersHref
           .takeIf { it.isNotEmpty() }
           ?.let {
-            // Named for the sibling when this page knows what it is called. It may not: the layer
-            // diff is joined server-side and so survives on a top-level site, where the sibling's
-            // own routes — and with them [parallelSource] — are unreachable by construction. The
-            // neutral wording is what that host keeps.
-            //
-            // This is also, on a viewer with both, the only thing on the resting page that NAMES
-            // the sibling: the source picker carries it but ships `hidden` until the lane is
-            // opened, so a reader who never opens this menu has no way to learn that this catalog
-            // has a counterpart at all — which is why the menu's own summary is not where the name
-            // was allowed to be lost.
+            // Named for the sibling when known. On a top-level site [parallelSource] is unreachable
+            // but the server-joined layer diff survives, so the neutral wording remains. On a
+            // viewer with both, this summary is the only resting place that names the sibling.
             val sibling = parallelSource?.label?.takeIf { name -> name.isNotBlank() }
             Triple(
               if (sibling == null) "Layer diff" else "$sibling layers",
@@ -17554,11 +14801,8 @@ ${scriptTag("known-differences.js")}
             )
           },
       )
-    // ONE destination is not a menu. A control whose panel holds a single row costs a click and a
-    // guess to reach what a link already said, so a preview with one comparison surface — which is
-    // most of them, and every catalog that declares no `compareWith` pairing — keeps exactly the
-    // inline link it had. The menu appears where it earns its keep: a paired catalog's Remote
-    // Compose preview, which has three.
+    // A single destination stays an inline link; the menu appears only with several (e.g. a paired
+    // RC preview).
     val compareMenuHtml =
       when (compareDestinations.size) {
         0 -> ""
@@ -17601,16 +14845,10 @@ ${scriptTag("known-differences.js")}
         "<template id=\"cp-source-properties\"><section class=\"cp-source-properties\" " +
           "aria-label=\"Component properties\"><h2>Properties</h2><ul>$parameters</ul></section></template>"
       }
-    // The stage image the Spec lane paints into: a sibling of the snapshot `<img>`, left `hidden`
-    // (and src-less) until the lane is entered, so a viewer that never opens it costs no request.
-    // The Source panel: a sibling of the snapshot `<img>` on the stage, left empty and `hidden`
-    // until the chip is pressed. The code is fetched then, from `/usage/<id>` — a preview most
-    // visitors look at without ever opening this, and the snippet costs a GitHub read on a cold
-    // cache, so a page load must not pay for one.
-    //
-    // Server-rendered empty (rather than created by the script) so the panel has a stable place in
-    // the stage and the layout does not jump the first time it is opened — the same reason the
-    // inspection legend is rendered empty.
+    // The Spec lane's stage image: hidden and src-less until the lane is entered.
+    // The Source panel: empty and `hidden` until the chip is pressed, then fetched from
+    // `/usage/<id>` (a GitHub read on a cold cache). Server-rendered empty so the layout doesn't
+    // jump on first open.
     val sourcePanelHtml =
       if (!usageAvailable) ""
       else
@@ -17621,12 +14859,9 @@ ${scriptTag("known-differences.js")}
       else
         "<img id=\"cp-spec-img\" class=\"cp-spec-img\" hidden alt=\"" +
           "${WebEscaping.htmlEscape("$displayName — design spec")}\">"
-    // The comparison surface the Diff / Triptych / Slider views paint into — a second stage child
-    // beside [specImg], `hidden` until one of them is picked. Every panel is a `<canvas>` rather
-    // than an `<img>` on purpose: `<cp-spec-compare>` normalises both frames to one pixel space
-    // before painting (a reference exported at a different scale than the render is the normal
-    // case), and only canvases can carry that redrawn result. Nothing is fetched until a
-    // comparison view is actually chosen.
+    // The surface the Diff / Triptych / Slider views paint into, `hidden` until picked. Canvases
+    // because `<cp-spec-compare>` normalises both frames to one pixel space first. Nothing is
+    // fetched until a view is chosen.
     val specCompare =
       if (specSurfaceUrl == null) ""
       else {
@@ -17652,17 +14887,13 @@ ${scriptTag("known-differences.js")}
           "<script type=\"application/json\" id=\"cp-spec-annotations\">" +
           encodeAnnotationPayload(AnnotationPayload(reference = referenceAnnotations)) +
           "</script>" +
-          // Drives the panel above: the view buttons, the four surfaces, and the verdict on the
-          // design-spec chip. Emitted immediately after it — `viewer.js` calls
-          // `window.cpSpecCompare` on the way into the lane, so the element has to be able to set
-          // itself up the moment the tag upgrades rather than one parse later. Renders nothing;
-          // `serve.css` hides the tag.
+          // Drives the panel above (views, surfaces, verdict). Emitted right after it because
+          // `viewer.js` calls `window.cpSpecCompare` on lane entry. Renders nothing; `serve.css`
+          // hides the tag.
           "<cp-spec-compare></cp-spec-compare>"
       }
-    // The Source lane's hidden mode radio. It is not a render lane, but it joins the same radio
-    // group as the rest so it inherits every mechanism they get for free: `?mode=source` in the
-    // URL, restore on load, and Back/Forward through the lane. Without it `currentMode()` — which
-    // reads the checked radio — would keep reporting the snapshot while the panel was on the stage.
+    // The Source lane's hidden mode radio, joining the group for `?mode=source`, restore on load,
+    // Back/Forward and `currentMode()`.
     val sourceModeInput =
       if (!usageAvailable) ""
       else
@@ -17673,10 +14904,8 @@ ${scriptTag("known-differences.js")}
       else
         "<input type=\"radio\" name=\"cp-mode\" value=\"spec\" id=\"cp-spec-toggle\" tabindex=\"-1\">"
     val isAppScreen = isScreenPreview(preview)
-    // A Wear catalog's screens are watch faces/tiles/activities — offering Pixel phones, a foldable
-    // and a tablet there is nonsense (and renders a watch-shaped composable onto a 1280dp stage).
-    // Same system-id signal the always-dark stage uses, so one heuristic decides "this is a Wear
-    // system" for both.
+    // A Wear catalog gets no phone/foldable/tablet devices; the same system-id signal as the dark
+    // stage decides "Wear".
     val isWearSystem = SystemDisplay.isWearOs(basePath.trim('/').ifBlank { sessionId ?: "" })
     val screenDeviceOptions =
       screenDevicesFor(isWearSystem).joinToString("\n                  ") { device ->
@@ -17684,61 +14913,34 @@ ${scriptTag("known-differences.js")}
         val label = WebEscaping.htmlEscape("${device.name} · ${device.kind} (${device.sizeDp})")
         "<option value=\"$value\">$label</option>"
       }
-    // A static bundle/catalog replays baked PNGs — the server can't re-render, so the override
-    // controls that rebuild the /render URL (device/locale/font scale/orientation + the live
-    // stream)
-    // do nothing. Disable them (with a note) instead of leaving dead knobs the user fiddles with.
-    // Theme is the exception when a Wasm app backs the session: it re-points the in-browser
-    // iframe's
-    // ?uiMode, so it stays live there. Live daemon sessions (canApplyOverrides) keep everything on.
+    // A static bundle replays baked PNGs, so controls that rebuild the /render URL
+    // (device/locale/font scale/orientation, live stream) are disabled with a note. Theme stays
+    // live when a Wasm app backs the session (it re-points the iframe's ?uiMode). Live daemon
+    // sessions (canApplyOverrides) keep everything on.
     val staticSnapshot = !canApplyOverrides
-    // Whether the server can produce a *fresh, overridden* render at all — either the default
-    // snapshot lane re-renders ([canApplyOverrides]) OR a carried catalog daemon re-renders an
-    // override on demand ([canRenderOverrides], the published-CMP-catalog case). When true the
-    // server-render controls (size, device, locale, …) are LIVE even before the Live toggle is
-    // flipped: editing one re-points `/render`, which the daemon serves freshly. This is what makes
-    // "most override modes" work for a CMP catalog (compose-m3) instead of sitting greyed out until
-    // a live stream is opened.
+    // Whether the server can produce a fresh overridden render at all: the snapshot lane re-renders
+    // ([canApplyOverrides]) or a carried catalog daemon renders overrides on demand
+    // ([canRenderOverrides]). When true the server-render controls are live before the Live toggle
+    // is flipped.
     val overridesLive = canApplyOverrides || canRenderOverrides
-    // Server-render controls (size / device / orientation): enabled whenever the
-    // server can render an override ([overridesLive]); a plain static bundle (neither) keeps them
-    // disabled with the note.
+    // Size / device / orientation: enabled whenever [overridesLive]; disabled with the note
+    // otherwise.
     val serverDis = if (overridesLive) "" else " disabled"
-    // The "Live (stream)" toggle keys off [hasLiveStream], NOT staticSnapshot: a trusted-catalog
-    // live session serves static baked snapshots (staticSnapshot=true) yet still offers the daemon
-    // stream on demand. For plain daemon / static sessions hasLiveStream tracks canApplyOverrides,
-    // so
-    // this is unchanged there.
+    // "Live (stream)" keys off [hasLiveStream], not staticSnapshot: a trusted-catalog live session
+    // serves baked snapshots yet offers the stream.
     val liveAuthBlocksStream = hasLiveStream && liveAuthPrompt != null
     val liveDis = if (hasLiveStream && !liveAuthBlocksStream) "" else " disabled"
-    // Whether the single Static⇄Live preview toggle has any interactive lane to switch to — the
-    // daemon stream ([hasLiveStream]) or the in-browser Wasm app ([wasmSrc]). Disabled (with the
-    // note) on a pure static bundle with neither.
+    // Whether the Static⇄Live toggle has a lane to switch to (daemon stream [hasLiveStream] or Wasm
+    // [wasmSrc]); disabled with the note otherwise.
     val liveToggleDis =
       if ((hasLiveStream || wasmSrc != null) && !liveAuthBlocksStream) "" else " disabled"
     val liveAuthTitle = liveAuthPrompt?.let { "Sign in with GitHub to enable Live preview." }
-    // The chip names the renderer on the stage and its dot is the live indicator, so the tooltip
-    // has to say what pressing it *does* — "Java" alone reads as a label, not a switch.
-    //
-    // This is only the OPENING text. The chip's state changes under the visitor (into Live, into a
-    // client-side player lane, back out), and a fixed tooltip would then contradict the control it
-    // is attached to — promising "click for live" on a chip whose click now exits to the snapshot.
-    // `updateLiveToggle()` re-derives it on every transition from the same state that decides the
-    // dot and the pressed flag; this string is what the server-rendered markup opens on, and it
-    // matches what that function computes for the initial (static, not-yet-interactive) state —
-    // including the honest wording for a session with no live lane to enter at all.
-    // The chip's opening label: the lane it opens on whenever something else on the row can put a
-    // different lane on the stage (the renderer combo, or the design-spec chip). With no such
-    // control the chip is the only lane affordance on the row and there is nothing to disambiguate
-    // against, so it names the STATE the stage is in instead — and which word does that depends on
-    // whether the chip is about to carry a verb:
-    //
-    //   - a lane to enter → "Snapshot", so the chip reads "Snapshot ▸ Live": a state and the switch
-    //     out of it. The old wording put the destination in the label, which read "Live preview ▸
-    //     Live" the moment the verb arrived — the chip naming the same lane twice.
-    //   - nothing to enter → "Live preview", the plain (disabled) invitation. There is no verb to
-    //     pair with here, and "Snapshot" alone beside a dead dot says nothing about what the chip
-    //     is for.
+    // The tooltip says what pressing the chip does. This is only the opening text;
+    // `updateLiveToggle()` re-derives it on every transition, and this matches its initial (static)
+    // state.
+    // The chip's opening label: the lane it opens on when another control can change lanes;
+    // otherwise the stage state — "Snapshot" when there is a lane to enter (reads "Snapshot ▸
+    // Live"), else "Live preview" (disabled invitation).
     val primaryLaneLabel =
       if (laneSelectHtml.isEmpty() && specChipHtml.isEmpty())
         if (liveToggleDis.isEmpty()) "Snapshot" else "Live preview"
@@ -17752,20 +14954,10 @@ ${scriptTag("known-differences.js")}
             else "Static snapshot — this session has no live lane to switch to"
         ) +
         "\""
-    // The chip has to read as a SWITCH, not a caption. Its label NAMES the lane on the stage
-    // ("Java", "Live preview") — a noun, sitting beside a status dot, which is the grammar of a
-    // readout rather than of a control, and that is why a visitor never learns it is clickable.
-    // The verb supplies the missing half by naming the DESTINATION instead ("Java ▸ Live"), so the
-    // chip states where a click goes without the label having to stop naming where it already is.
-    //
-    // `aria-hidden`, deliberately: the accessible name stays the lane's own name, and the
-    // `aria-pressed` flag plus the tooltip already carry the switch semantics. Without it the
-    // button announces "Java ▸ Live, toggle button, not pressed" — the arrow read aloud as a name.
-    //
-    // Empty when there is no lane to enter: a disabled chip must not promise a destination it
-    // cannot reach. `updateLiveToggle()` re-derives this on every transition from the same state
-    // that decides the dot, the tooltip and the stage hint — so the two halves of the chip can
-    // never disagree about which way the switch is pointing.
+    // The verb half of the chip ("Java ▸ Live"), naming where a click goes so the chip reads as a
+    // switch. `aria-hidden` so the accessible name stays the lane name (`aria-pressed` and the
+    // tooltip carry the switch semantics). Empty when there is no lane to enter;
+    // `updateLiveToggle()` keeps it in step.
     val liveToggleVerb =
       if (liveToggleDis.isEmpty())
         "            <span class=\"cp-live-toggle-verb\" id=\"cp-live-toggle-verb\" " +
@@ -17774,10 +14966,8 @@ ${scriptTag("known-differences.js")}
     val liveToggleButton =
       "<button type=\"button\" id=\"cp-live-toggle\" class=\"cp-live-toggle\" " +
         "aria-pressed=\"false\" " +
-        // What the chip goes back to naming when it leaves the design-spec lane on a preview with
-        // no renderer combo. `laneLabelText()` reads the combo's options for this everywhere else;
-        // with no combo there is nothing to read, and without this the chip would come back from
-        // the spec lane calling a static snapshot "Live preview".
+        // What the chip names when leaving the spec lane on a preview with no renderer combo (where
+        // `laneLabelText()` has no options to read).
         "data-default-lane-label=\"${WebEscaping.htmlEscape(primaryLaneLabel)}\"" +
         "$liveToggleTitleAttr$liveToggleDis>\n" +
         "            <span class=\"cp-live-dot\" aria-hidden=\"true\"></span>\n" +
@@ -17785,22 +14975,9 @@ ${scriptTag("known-differences.js")}
         "${WebEscaping.htmlEscape(primaryLaneLabel)}</span>\n" +
         liveToggleVerb +
         "          </button>"
-    // When sign-in is the ONLY thing between the visitor and the daemon lane, offer the sign-in
-    // itself rather than a dead control.
-    //
-    // What this replaces: a `disabled` button wrapped in a span carrying `data-github-login`. That
-    // said "sign in" three ways that a visitor cannot act on — a `title` tooltip (never shown on
-    // touch, and never announced for a `disabled` button, which is not focusable), a greyed-out
-    // chip that reads as "not available here" rather than "one click away", and a login URL sitting
-    // in the DOM that **no script ever read** (nothing anywhere referenced `data-github-login`), so
-    // clicking did nothing at all.
-    //
-    // An anchor fixes all three at once: the reason is in the visible label, it is focusable and
-    // keyboard-activatable, and following it is the browser's job rather than a handler that was
-    // never written. It deliberately does NOT carry `id="cp-live-toggle"` — `updateLiveToggle()`
-    // drives that element through `.disabled` and `aria-pressed`, which are meaningless on a link.
-    // Leaving the id off makes `liveToggle` null, so every `if (liveToggle)` branch skips instead
-    // of quietly writing button properties onto an anchor.
+    // When sign-in is the only thing between the visitor and the daemon lane, offer the sign-in as
+    // a real link with the reason in its label, instead of a disabled button. It has no
+    // `id="cp-live-toggle"`, so `liveToggle` is null and `updateLiveToggle()` skips it.
     val liveSignInLink = liveAuthPrompt?.let {
       "<a id=\"cp-live-signin\" class=\"cp-live-toggle cp-live-signin\" " +
         "href=\"${WebEscaping.htmlEscape(it.loginHref)}\" " +
@@ -17812,23 +14989,17 @@ ${scriptTag("known-differences.js")}
         "            <span>Live preview — sign in</span>\n" +
         "          </a>"
     }
-    // Only swap in the sign-in link when auth is what's blocking the stream. A pure static bundle
-    // has no lane to unlock, so it keeps the honestly-disabled toggle — inviting a sign-in that
-    // would change nothing is worse than the greyed chip.
+    // Only when auth is what's blocking the stream; a pure static bundle keeps the disabled toggle.
     val liveToggleIsSignIn = liveAuthBlocksStream && liveSignInLink != null
     val liveToggleHtml = if (liveToggleIsSignIn) liveSignInLink!! else liveToggleButton
-    // Controls the in-browser Wasm app also honours — day/night (uiMode), font scale (density),
-    // locale (layout direction): live whenever the server can render an override OR a Wasm app
-    // backs
-    // the session.
+    // Controls the Wasm app also honours (uiMode, font scale, locale): live whenever the server can
+    // render an override or a Wasm app backs the session.
     val wasmDis = if (overridesLive || wasmSrc != null) "" else " disabled"
-    // The static-snapshot note is only shown when overrides genuinely can't re-render on the server
-    // ([overridesLive] false): a plain static bundle, or a Wasm-only published catalog (where
-    // day/night, font scale, locale &amp; knobs apply in the browser but size/device/orientation
-    // need a live server). A catalog whose carried daemon re-renders on demand ([overridesLive]
-    // true) needs no note — its controls all take effect.
-    // Watches don't rotate, so a Wear screen gets the device picker without the Orientation control
-    // — and the notes below must not promise a knob that isn't on the page.
+    // The static-snapshot note shows only when overrides can't re-render server-side
+    // ([overridesLive] false): a plain bundle, or a Wasm-only catalog where size/device/orientation
+    // need a live server.
+    // Watches don't rotate, so Wear screens get no Orientation control and the notes must not
+    // mention one.
     val showOrientation = isAppScreen && !isWearSystem
     val serverOnlyOverrideNote =
       when {
@@ -17859,20 +15030,10 @@ ${scriptTag("known-differences.js")}
               ") need the live server, not a published catalog. " +
               "<a href=\"$LOCAL_SERVER_DOCS\">Enable a local preview server.</a></div>"
         }
-    // The stage's own invitation into the live lane.
-    //
-    // Until this, the only route in was the chip in the toolbar: nothing on the preview itself said
-    // the picture could be made interactive, and an affordance a visitor has to hover a toolbar to
-    // discover is one most of them never find. The grid solved exactly this for its cards with
-    // `.cp-live-hint` (`CatalogLive.ts`); that vocabulary never reached the single-preview page, so
-    // this reuses the same badge — same shape, same placement — and only the wording differs,
-    // because the gesture does. One click here, a long press there; a hint naming the wrong gesture
-    // would be worse than no hint.
-    //
-    // Rendered only when there is genuinely a lane to enter (the same condition the chip is enabled
-    // on) and never in the component browser, which carries no live toggle at all. It stays hidden
-    // until `updateLiveToggle()` reveals it, which is deliberate: the click it advertises is wired
-    // in `viewer.ts`, so a page whose script never ran must not offer a gesture nothing implements.
+    // The stage's own invitation into the live lane, reusing the grid's `.cp-live-hint` badge
+    // (`CatalogLive.ts`) with click wording. Rendered only when there is a lane to enter, never in
+    // the component browser, and hidden until `updateLiveToggle()` reveals it (the click is wired
+    // in `viewer.ts`).
     val stageLiveHint =
       if (componentBrowser || liveToggleDis.isNotEmpty()) ""
       else
@@ -17880,44 +15041,26 @@ ${scriptTag("known-differences.js")}
           "aria-hidden=\"true\">click for live</span>"
     val backendLabel = WebEscaping.htmlEscape(snapshotBackend ?: "Snapshot")
     val liveLabel = WebEscaping.htmlEscape(liveBackend ?: "Live")
-    // One Theme axis replaces the separate Day/Night + app-theme controls. The two defaults map to
-    // uiMode; every `theme:<provider>` option maps to themeProvider and deliberately clears uiMode,
-    // because an app-declared theme already owns its day/night palette.
+    // One Theme axis replacing separate Day/Night + app-theme controls: the defaults map to uiMode;
+    // `theme:<provider>` maps to themeProvider and clears uiMode.
     //
-    // A theme specimen documents ONE named theme, so the whole Theme axis is withdrawn here
-    // exactly as the landing withholds its themed-render URL. Without this the annotation stopped
-    // working the moment the card was opened: the viewer received every declared theme and
-    // happily re-rendered the specimen under another one, contradicting its own caption.
-    //
-    // BOTH axes go, not just `theme:<provider>`. Day/Night is not a navigation control — it maps
-    // to a `uiMode` override, and `CatalogLiveRouting.overridesAffectRender` routes a uiMode
-    // differing from the id's baked `__light`/`__dark` segment to a fresh daemon render. So on a
-    // specimen it either redraws a supposedly fixed sheet in the opposite mode, or (when the
-    // sheet hard-codes its theme) leaves the selector reading "Night" over unchanged light
-    // pixels. A light/dark pair of specimens is authored as two previews with their own cards;
-    // this control never reached the sibling.
+    // A theme specimen withdraws the whole axis, including Day/Night: a uiMode differing from the
+    // id's baked segment is routed to a fresh render (`CatalogLiveRouting.overridesAffectRender`),
+    // which would redraw the specimen or mislabel it.
     val themeFixed = isThemeSpecimen(preview)
     val viewerDeclaredThemes = if (themeFixed) emptyList() else declaredThemes
     /**
-     * Whether a theme choice can actually reach the pixels here — a daemon or a Wasm tier to
-     * re-render with, and not a fixed-theme specimen.
-     *
-     * Hoisted out of the selector markup because the answer is not only about the `<select>`: it
-     * also decides whether the pre-paint chrome script may follow a remembered choice
-     * ([pageThemeScript]). On a page that cannot re-render, the remembered theme describes nothing
-     * on screen — the stage keeps the baked image — so painting the chrome from it frames a light
-     * snapshot in dark chrome.
+     * Whether a theme choice can reach the pixels: a daemon or Wasm tier to re-render with, and not
+     * a fixed-theme specimen. Hoisted because it also decides whether the pre-paint chrome script
+     * may follow a remembered choice ([pageThemeScript]).
      */
     val themeChoiceApplies =
       !themeFixed &&
         ((!wearAlwaysDark && (overridesLive || wasmSrc != null)) ||
           (viewerDeclaredThemes.isNotEmpty() && overridesLive))
     /**
-     * What that control actually offers — the built-ins it emits (a dark-first Wear catalog offers
-     * Dark alone) plus every declared theme, which is a live option only while overrides are.
-     *
-     * Handed to the pre-paint script so it checks a remembered choice against the same list the
-     * sticky script will, rather than accepting anything that merely names a mode.
+     * What the Theme control offers (built-ins, e.g. Dark alone on Wear, plus declared themes while
+     * overrides are live), handed to the pre-paint script to validate a remembered choice.
      */
     val offeredThemes =
       (if (wearAlwaysDark) listOf("dark") else listOf("light", "dark")) +
@@ -17953,35 +15096,19 @@ ${scriptTag("known-differences.js")}
           "<option value=\"light\"$daySelected>Light (Default)</option>\n" +
             "            <option value=\"dark\"$nightSelected>Dark (Default)</option>"
       val providerOptions = body.trimEnd().let { if (it.isEmpty()) "" else "\n            $it" }
-      // Visually removed, deliberately — the same treatment the render-mode radios get. The Theme
-      // axis is now picked from the chips on the viewer bar ([themeBarHtml]), but this select stays
-      // the axis's single state holder: viewer.js reads it for every render (`activeThemeChoice`),
-      // the sticky script seeds it from the URL + localStorage, and Back/Forward hydration writes
-      // to it. Two visible controls for one value is worse than one, so only the chips are shown.
+      // Visually removed but still the Theme axis's single state holder: viewer.js reads it for
+      // every render (`activeThemeChoice`), the sticky script seeds it, and Back/Forward writes to
+      // it. Only the chips ([themeBarHtml]) are shown.
       //
-      // `data-default-theme` is the theme this preview is BAKED in — what the select shows with
-      // nothing picked. It rides as its own attribute because the `selected` option stops
-      // answering for it the moment the sticky script writes `el.value`, and every consumer that
-      // asks "has the visitor actually pinned a theme?" (`pinsTheme`) reads it after that point.
-      // Empty when NOTHING names a theme for this preview, which is deliberately not the same as
-      // "light": the select falls back to displaying Light, but a `uiMode=light` there is a real
-      // request the baked pixels may not answer, so it stays an override.
-      //
-      // "Nothing names it" is the narrow case it was always meant to be, and used not to be. An
-      // untagged sticker published beside its `__dark` twin is named by that pairing — it is the
-      // light half — which is what [ServeBakedTheme] resolves and what the render lane now routes
-      // on. While this attribute stayed empty for those, the toggle wrote `uiMode=light` into
-      // every URL as though it were a pin, and the same disagreement that costs a daemon render
-      // server-side (compose-ai-tools#4997) also pinned a parameter nobody chose.
-      // `data-theme-storage-key` is the catalog-scoped sticky key ([viewerThemeStickyScript] reads
-      // and writes the same one). It rides on the element so a chip that NAVIGATES to the twin card
-      // can record the pick before leaving: the destination reads this key on arrival, and landing
-      // there with the previous value showing would either press the wrong chip or — on an untagged
-      // id, where a remembered choice is still applied — re-override the very render the navigation
-      // existed to avoid. Writing the key directly rather than firing the select's `change` is the
-      // point: `change` is what starts a render, and the whole move is not to start one.
-      // `tabindex="-1"` keeps the hidden select out of the tab order, which is what makes the
-      // `aria-hidden` wrapper legitimate.
+      // `data-default-theme` is the theme this preview is baked in, read by `pinsTheme` after the
+      // sticky script overwrites `el.value`. Empty only when nothing names a theme; an untagged
+      // sticker paired with a `__dark` twin is the light half ([ServeBakedTheme]), so
+      // `uiMode=light` isn't written as a pin.
+      // `data-theme-storage-key` is the catalog-scoped sticky key ([viewerThemeStickyScript]), so a
+      // chip navigating to the twin card can record the pick directly without firing `change`
+      // (which would start a render).
+      // `tabindex="-1"` keeps the hidden select out of the tab order, which makes the `aria-hidden`
+      // wrapper legitimate.
       val bakedThemeName =
         viewerTheme
           ?: ServeBakedTheme.resolve(preview.id, preview.theme) { id ->
@@ -17998,31 +15125,16 @@ ${scriptTag("known-differences.js")}
         """
         .trimIndent()
     }
-    // The Theme BAR: the same chips the catalog grid carries ([themePickerHtml]), on the viewer's
-    // own toolbar — so picking a theme is one visible click on both pages instead of a chip row on
-    // the grid and a select buried in the ⚙ Overrides drawer here. The values are exactly the
-    // select's option values (`light` / `dark` / `theme:<providerFqn>`), which is what lets
-    // viewer.js drive one from the other: a chip click writes the select and fires its `change`,
-    // and every existing lane (daemon re-render, Wasm ?uiMode, URL state, the catalog-scoped sticky
-    // key) keeps working untouched. Day/Night rather than Light/Dark to match the labels the select
-    // used; a dark-first (Wear) system offers Night alone.
-    // …and, like the axes rows above, the bar FOLDS once a catalog declares enough themes that the
-    // chips stop fitting. Eight chips is the published compose-m3 shape: they ellipsise to stubs
-    // ("Light Medi…", "Dark Hig…") and the group scrolls within itself, so the row is spending full
-    // width to show names it has already truncated. Behind the title-bar toggle the *current*
-    // theme's full name is always readable and the chips are one click away. Under
-    // [THEME_CHIPS_INLINE] — a plain light/dark catalog, or one with a theme or two — the bar shows
-    // the chips inline.
-    // A built-in chip whose mode this catalog already BAKED as its own card links there instead of
-    // overriding this one. The pair differs in the theme axis alone ([ServeBakedTheme.twinIn]), so
-    // the twin's card is the same sticker in the other mode — with its own annotations, parity
-    // references and axes, all of which describe the frame the visitor lands on. Re-rendering this
-    // id under `uiMode` instead gives the same picture at the cost of a daemon render, and leaves
-    // the page's published overlays describing a frame that is not on screen.
+    // The Theme bar: the grid's chips ([themePickerHtml]) on the viewer's toolbar. Values match the
+    // select's options (`light` / `dark` / `theme:<providerFqn>`), so a chip click writes the
+    // select and fires `change`, keeping every lane working. Day/Night labels; a dark-first system
+    // offers Night alone.
+    // Folds behind a title-bar toggle beyond [THEME_CHIPS_INLINE] chips, which otherwise ellipsise;
+    // the toggle always shows the current theme's full name.
+    // A built-in chip whose mode is baked as its own card ([ServeBakedTheme.twinIn]) links there
+    // instead of re-rendering under `uiMode`, so the page's overlays describe the frame on screen.
     //
-    // Withheld on a pinned revision (its pixels are a permalink to what that commit published, and
-    // must not silently become the tip's) and on a theme specimen (the axis is withdrawn there
-    // entirely — see [themeFixed]).
+    // Withheld on a pinned revision and on a theme specimen ([themeFixed]).
     val themeTwinHrefs: Map<String, String> =
       if (pinned != null || themeFixed) emptyMap()
       else {
@@ -18050,10 +15162,8 @@ ${scriptTag("known-differences.js")}
             " aria-label=\"Preview theme\">\n" +
             "          $it\n        </span>"
         }
-    // The theme toggle's *value* is seeded server-side from the lane this preview is baked in, then
-    // kept in sync client-side (viewer-drawers.js mirrors whichever chip `viewer.js` marks pressed)
-    // — the theme is picked without a page load, so a server-rendered label alone would go stale on
-    // the first click.
+    // Seeded from the baked lane, then kept in sync client-side (viewer-drawers.js mirrors the
+    // pressed chip).
     val themeToggle =
       if (pinned != null)
         """
@@ -18076,19 +15186,12 @@ ${scriptTag("known-differences.js")}
       </details>
       """
           .trimIndent()
-    // Inspection layers (see `<cp-inspect-layers>`): what the frame is MADE OF, drawn over the
-    // pixels the server already sent — the accessibility focus map, the resolved typography, the
-    // resolved theme attributes. Each is a box + numbered badge on the stage and a readable row in
-    // the legend beside it, so the facts stay legible and hoverable instead of being composited
-    // into the render. This is what replaced the old "Accessibility (TalkBack)" toggle, which
-    // asked the daemon to bake one focus rectangle and a wall of spoken text into the PNG: it
-    // covered the component it was describing, couldn't be inspected, and said nothing about the
-    // other stops on the screen.
+    // Inspection layers (`<cp-inspect-layers>`): what the frame is made of — accessibility focus
+    // map, typography, theme attributes — drawn as boxes with numbered badges plus a legend, rather
+    // than composited into the render.
     //
-    // Each row is offered only when its host can actually produce the data (an a11y-capable daemon
-    // for the first, a semantics-capturing one for the rest) — never as a dead control.
-    // Published reference typography is self-contained, so static bundle viewers can inspect the
-    // Figma lane even though they cannot apply overrides or ask a daemon for render annotations.
+    // Each row is offered only when its host can produce the data. Published reference typography
+    // is self-contained, so static bundles can inspect the Figma lane.
     val hasTypographyInspection =
       hasDesignAnnotations ||
         hasPublishedTypography ||
@@ -18132,10 +15235,8 @@ ${scriptTag("known-differences.js")}
             </div>
         """
           .trimIndent()
-    // The legend panel beside the stage, populated client-side by `<cp-inspect-layers>` and hidden
-    // until a layer is on. Server-rendered (empty) rather than created by the script so the panel
-    // has a stable place in the flex row and the stage doesn't jump sideways the first time a
-    // layer is ticked.
+    // The legend panel, populated by `<cp-inspect-layers>` and hidden until a layer is on;
+    // server-rendered empty so the stage doesn't jump.
     val inspectLayerHtml =
       if (inspectRows.isEmpty()) ""
       else "<div class=\"cp-inspect-layer\" id=\"cp-inspect-layer\"></div>"
@@ -18144,20 +15245,14 @@ ${scriptTag("known-differences.js")}
       else
         "<div class=\"cp-inspect-legend\" id=\"cp-inspect-legend\" role=\"region\" " +
           "aria-label=\"Inspection legend\" hidden></div>" +
-          // Fills the layer and the legend above from the frame on screen. Emitted after both, so
-          // everything it reads exists the moment the tag upgrades. Renders nothing; `serve.css`
-          // hides the tag.
+          // Fills the layer and legend from the frame on screen; emitted after both. Renders
+          // nothing; `serve.css` hides the tag.
           "<cp-inspect-layers></cp-inspect-layers>"
-    // Live overlay toggles (touch visualization). The daemon composites these onto the held
-    // session's frames, so they mean nothing on a baked PNG — offered only when a Live Compose
-    // stream is available, and omitted entirely otherwise rather than left permanently dead.
-    // Rendered **enabled**: a visitor who ticks one while the viewer is still on the static
-    // snapshot is asking to see the overlay, so the JS switches into Live Compose for them (the
-    // ticked toggle rides in on the stream's initial overrides) instead of presenting a dead
-    // control that first demands a click on "Live preview". They carry `$liveDis` — the same gate
-    // as the live transport radio — so the one case where they really are dead (the stream exists
-    // but is behind sign-in) stays greyed out in the server-rendered markup, matching what
-    // `syncOverlayToggles()` reconciles to. `cp-overlay` marks them for the JS collector + sync.
+    // Live overlay toggles (touch visualization), composited by the daemon onto stream frames, so
+    // offered only when a Live Compose stream exists. Rendered enabled: ticking one on the static
+    // snapshot switches into Live with the overlay in the initial overrides. `$liveDis` greys them
+    // when the stream is behind sign-in, matching `syncOverlayToggles()`. `cp-overlay` marks them
+    // for the JS collector.
     val liveOverlaysHtml =
       if (hasLiveStream)
         """
@@ -18181,16 +15276,12 @@ ${scriptTag("known-differences.js")}
         </details>
         """
           .trimIndent()
-    // Detected-feature controls — shown ONLY for previews that actually support the feature (so
-    // it's
-    // never a dead control everywhere), and routed like a knob via onKnobChanged (`cp-feature`),
-    // disabled unless the host can render an override:
-    //  - "Keyboard focus" for a `@FocusedPreview` preview (`focus=0` — focus the first focusable +
-    //    draw the focus overlay). Honoured on both daemon backends.
-    //  - "Show gesture hints" for a `@GestureHintPreview` preview (`gestures=true`), but ONLY on an
-    //    Android-backed session ([gesturesRenderable]) — the desktop daemon ignores the override,
-    // so
-    //    the row is omitted there rather than shown dead.
+    // Detected-feature controls, shown only for previews that support the feature, routed like
+    // knobs via onKnobChanged (`cp-feature`) and disabled unless the host can render an override:
+    //  - "Keyboard focus" for `@FocusedPreview` (`focus=0`: focus the first focusable and draw the
+    // overlay). Both daemon backends.
+    //  - "Show gesture hints" for `@GestureHintPreview` (`gestures=true`), only on Android-backed
+    // sessions ([gesturesRenderable]).
     val featureDaemonDis = if (canApplyOverrides || canRenderOverrides) "" else " disabled"
     val showGestureRow = preview.supportsGestures && gesturesRenderable
     val featureRows = buildString {
@@ -18204,31 +15295,18 @@ ${scriptTag("known-differences.js")}
           "<label class=\"cp-live-row\"><input class=\"cp-feature\" id=\"cp-gestures\" " +
             "type=\"checkbox\"$featureDaemonDis> Show gesture hints</label>\n"
         )
-        // Firing the gesture, not just hinting at it (issue #5102). The hint animation plays and
-        // then the gesture cannot be taken up: a double pinch and a wrist turn are sensor events,
-        // no pointer stands in for them, and off a watch there is no gesture source at all. The
-        // daemon has been able to invoke a registered handler all along
-        // (`renderNow.overrides.gestures.invoke`); nothing in the viewer reached it.
-        //
-        // Labelled as the WEARER's gesture rather than the API's word for it — "Double pinch", not
-        // "Primary" — because someone reading a Wear catalog is looking up what a double pinch
-        // does. Two buttons, which is every gesture a wearer has; a preview that registered only
-        // one simply has nothing to run for the other, and the render comes back unchanged.
-        //
-        // Buttons rather than checkboxes because an invocation is an EVENT: it happens once, and
-        // the next render must not repeat it. `viewer.ts` reads the hidden input once per render
-        // and clears it.
+        // Firing the gesture, not just hinting: double pinch and wrist turn are sensor events with
+        // no pointer equivalent, so the daemon invokes the registered handler
+        // (`renderNow.overrides.gestures.invoke`). Labelled with the wearer's gesture names.
+        // Buttons because an invocation is a one-shot event; `viewer.ts` reads the hidden input
+        // once per render and clears it.
         append(
-          // Indented to land level with the row above once interpolated. `featureRows` is
-          // spliced into a `trimIndent()` block, so this line's own indentation is part of the
-          // minimum that gets stripped: too little and the whole group shifts, churning the
-          // committed golden for a reason that has nothing to do with this control.
+          // Indented to align once interpolated into the `trimIndent()` block; this line's
+          // indentation affects the stripped minimum.
           "              <div class=\"cp-live-row\"><span class=\"cp-feature-label\">Fire a " +
             "gesture" +
             "</span> " +
-            // `cp-bg-btn` is the viewer's outlined chip — the same style the "Fit width" and
-            // theme chips use, including a disabled state, so these read as controls of this panel
-            // rather than as raw browser buttons and no new CSS is invented for two buttons.
+            // `cp-bg-btn` is the viewer's outlined chip style, including its disabled state.
             "<button type=\"button\" class=\"cp-bg-btn cp-gesture-invoke\" " +
             "data-gesture=\"primary\"$featureDaemonDis>Double pinch</button> " +
             "<button type=\"button\" class=\"cp-bg-btn cp-gesture-invoke\" " +
@@ -18253,11 +15331,9 @@ ${scriptTag("known-differences.js")}
         </details>
         """
           .trimIndent()
-    // Catalog app screens represent a whole device surface. Arbitrary min/max constraints are
-    // useful for components, but are a poor model for a screen; give screens a handful of
-    // recognisable, deliberately varied device profiles instead — Android phones/foldable/tablet
-    // for a phone catalog, the Wear OS watch shapes for a Wear one. The select retains #cp-device,
-    // so the existing override transport and deep-link behaviour apply unchanged.
+    // Catalog screens get a handful of recognisable device profiles (phones/foldable/tablet, or
+    // Wear watch shapes) instead of min/max constraints. The select keeps #cp-device, so the
+    // override transport and deep links are unchanged.
     val orientationControlHtml =
       if (showOrientation)
         """
@@ -18331,28 +15407,16 @@ ${scriptTag("known-differences.js")}
     val controlsToggle =
       "<button type=\"button\" class=\"cp-drawer-toggle\" id=\"cp-controls-toggle\" " +
         "aria-expanded=\"false\" aria-controls=\"cp-controls\">⚙ ${if (componentBrowser) "Controls" else "Overrides"}</button>"
-    // Stage background follows the preview's theme (dark variant → dark stage), with a dark-first
-    // system (Wear) defaulting to dark — see the `.cp-viewer[data-bg-theme] .cp-stage` CSS. Kept
-    // separate from the filter's data-card-theme; the viewer JS re-syncs it on a Theme (uiMode)
-    // change so a re-render in the opposite theme doesn't clash with a stale backing color.
+    // Stage background follows the preview's theme, dark by default for dark-first systems (see
+    // `.cp-viewer[data-bg-theme] .cp-stage`). Separate from data-card-theme; the viewer JS re-syncs
+    // it on a uiMode change.
     val bgThemeAttr = viewerTheme?.let { " data-bg-theme=\"$it\"" } ?: ""
-    // The component's renders, as a SUBTREE of the catalog tree filtered to this component: the
-    // component row and every primary-axis render under it, the one on screen marked. This replaced
-    // two rows of chips — a `State` row and a `Variant` row — that keyed identically to the tree's
-    // own [primaryVariants] and so always listed the same renders, only in a second shape, in a
-    // second place, with the two axes torn apart into rows that never named their relationship.
-    // Empty for a component with no second render, exactly as the chip rows were.
-    // The component's recordings, as a directory beside the samples one.
-    //
-    // Built HERE and not by the handler, unlike [componentDirectories]: a capture already rides on
-    // the preview (`ServePreview.motion`), so the page has the whole answer and a round trip
-    // through the handler would only move it. The stage's Motion chip stays exactly as it was —
-    // that chip is a lane toggle for the render in front of you, while these rows are navigation
-    // to a recording the reader has no other way to discover exists.
-    //
-    // Every render of the component, not just the one on screen: a recording belongs to the
-    // preview that took it, so a capture declared on `Pressed` is invisible from the default page
-    // otherwise — which is the discovery problem this directory exists to fix.
+    // The component's renders as a subtree of the catalog tree filtered to this component, the one
+    // on screen marked. Empty for a component with no second render.
+    // The component's recordings, as a directory beside the samples one. Built here rather than by
+    // the handler ([componentDirectories]) since captures ride on the preview
+    // (`ServePreview.motion`). Covers every render of the component, so a capture declared on
+    // `Pressed` is discoverable from the default page. The stage's Motion chip is unchanged.
     val axesTree =
       componentSubtreeHtml(
         preview,
@@ -18363,9 +15427,8 @@ ${scriptTag("known-differences.js")}
         // Withheld from the component browser for the same reason its comparison chips are: that
         // chrome is a reading surface, and a route into another catalog is one it does not offer.
         directories = if (componentBrowser) emptyList() else componentDirectories,
-        // No recordings under a pin — the captures on the stage are the pinned revision's, and the
-        // rows would link at `?motion=` ids this publish may never have carried — nor in Catalog
-        // mode, which strips the motion lane entirely.
+        // No recordings under a pin (the publish may lack those `?motion=` ids) or in Catalog mode
+        // (no motion lane).
         includeMotion = !componentBrowser && pinned == null,
       )
     val navDrawer =
@@ -18447,43 +15510,22 @@ ${scriptTag("known-differences.js")}
           parts.joinToString("<span class=\"cp-browser-separator\" aria-hidden=\"true\">›</span>") +
           "</nav>"
       }
-    // Left to right: the chip that names the current renderer and toggles it live, the combo box of
-    // alternatives, the design-spec chip (top level, not an option inside the combo), the two
-    // subtle
-    // "go compare this elsewhere" links, then the SVG format toggle for whatever the chip is
-    // currently showing.
-    // ---- The renderer control ------------------------------------------------------------------
+    // Left to right: the renderer chip + alternatives combo, the design-spec chip, the "compare
+    // elsewhere" links, then the SVG format toggle.
+    // The renderer control: the chip names the renderer in use and toggles live; the combo chooses
+    // another. Both are driven from one lane value by `syncLaneSelect`, so they are joined into one
+    // segmented pill, with a native `<select>` sitting invisibly over the caret segment (keeping
+    // touch pickers, keyboard behaviour, and the ids `viewer.js`, `keyboardNavigation.ts` and the
+    // harness use).
     //
-    // ONE control, not two. The chip NAMES the renderer in use ("CMP Android") and toggles it live;
-    // the combo CHOOSES a different one — and the two have always been driven from one lane value
-    // by `syncLaneSelect`, precisely because they are two halves of one fact. Side by side as
-    // separate pills they read as two independent controls and spent the width of a whole second
-    // one on the words "Switch renderer…", which say what the caret beside a named renderer already
-    // says.
-    //
-    // Joined, they are one segmented pill: the chip is the wide left segment, and the right
-    // segment is a caret the native `<select>` sits invisibly on top of.
-    //
-    // A real `<select>` rather than a menu built out of divs, because three things come free with
-    // it and would all have to be reimplemented: the platform's own picker on touch, type-ahead
-    // and arrow keys on a keyboard, and every id, option and event that `viewer.js`,
-    // `keyboardNavigation.ts` and the harness already address it by. Only its presentation
-    // changes.
-    //
-    // NOT joined in the component browser, which drops the chip with the rest of the Live control:
-    // there the combo is the sole indicator of what is drawing, so it has to keep its own label and
-    // its full width rather than becoming a caret with nothing beside it to name.
+    // Not joined in the component browser, which has no chip; the combo keeps its label and width
+    // there.
     val rendererControl =
       when {
         componentBrowser -> laneSelectHtml
-        // The SIGN-IN variant is not a renderer control and must not be dressed as half of one.
-        //
-        // When auth is the only thing between the visitor and the daemon lane, the chip's slot
-        // holds an anchor that goes to GitHub instead of a button that toggles a lane. Joining it
-        // to the renderer caret would put a dashed segment against a solid one — and that dash is
-        // load-bearing, not decoration: it is what marks the control as an action to take rather
-        // than a state to read, which is exactly the distinction a shared outline would erase. It
-        // would also wrap a link to another origin in `role="group" aria-label="Renderer"`.
+        // The sign-in variant is an anchor to GitHub, not a renderer control, so it isn't joined to
+        // the caret: its dashed outline marks it as an action, and it must not sit inside
+        // `role="group" aria-label="Renderer"`.
         liveToggleIsSignIn ->
           listOf(liveToggleHtml, laneSelectHtml).filter { it.isNotBlank() }.joinToString("\n")
         liveToggleHtml.isBlank() || laneSelectHtml.isBlank() ->
@@ -18509,26 +15551,11 @@ ${scriptTag("known-differences.js")}
             compareMenuHtml,
             specSelector,
             motionSelector,
-            // ---- The VIEW group ---------------------------------------------------------------
-            //
-            // One cluster, wrapping as a unit. These answer a question none of the controls before
-            // them do — not "what is drawing this?" (the renderer picker) and not "what is it being
-            // compared against?" (the spec lane), but *what am I looking at?* Loose in the row they
-            // sorted by nothing wrap unpredictably, and because the spec lane is wide and grows
-            // with the length of a design tool's name, the line a control lands on changes with the
-            // lane's state — pressing the design-spec chip moves `SVG` onto the row below and
-            // `Transparent` up beside the comparison views, rearranging the bar a reader had just
-            // learned under the one control they pressed (`docs/design/COMPARE_NAVIGATION.md`, F1).
-            //
-            // Grouped, the row can still wrap — it has to, at phone width — but it wraps between
-            // groups instead of through one, so a control never changes neighbours.
-            //
-            // `Transparent` and `Fit width` live in the Overrides panel instead (see
-            // [stageViewGroupHtml]): this group is things that change the ARTEFACT on the stage — a
-            // vector export, an exploded projection, the raster it is matched against — rather than
-            // how the page presents it. On a preview with none of those the group collapses away
-            // entirely, which is most of the catalog, leaving the renderer control and the
-            // comparison chips.
+            // The View group: controls that change the artefact on stage (vector export, exploded
+            // projection, the matched raster), clustered so the row wraps between groups rather
+            // than through one and controls never change neighbours
+            // (`docs/design/COMPARE_NAVIGATION.md`, F1). `Transparent` and `Fit width` live in the
+            // Overrides panel ([stageViewGroupHtml]). Collapses away when empty.
             listOf(svgFmtToggle, explodeToggle, svgMatch)
               .filter { it.isNotBlank() }
               .let {
@@ -18543,30 +15570,11 @@ ${scriptTag("known-differences.js")}
           )
           .filter { it.isNotBlank() }
           .joinToString("\n")
-    // ---- Stage presentation, in the panel -------------------------------------------------------
-    //
-    // `Transparent` and `Fit width`, which used to sit on the viewer bar at the end of the View
-    // group. Neither renders anything: one paints a checkerboard behind bytes the server already
-    // sent, the other stops fitting them to the viewport. They are the two controls on that bar
-    // that a reader sets once — if ever — and then never touches again, and they were charging the
-    // resting toolbar of every preview in the catalog for that.
-    //
-    // The panel's own header comment explains why an "Appearance" group was removed from it: a
-    // Background select there read as a DUPLICATE of this Transparent toggle, "same word, same
-    // apparent job, two places, one of them buried behind a drawer". That reasoning was about the
-    // duplication, and it survives — this is the one control, moved, not a second one added. What
-    // it does mean is that the drawer is now where a reader looks for it, so the first thing in the
-    // panel is this group rather than the theme state.
-    //
-    // Open by default, unlike every other group in the panel. `<cp-group-memory>` remembers what a
-    // visitor folds, so this is only the state they arrive on: two toggles are a short group, and
-    // one collapsed to a summary reading "View" would have moved these controls twice — out of the
-    // bar and behind a second click.
-    // Not on a spatial preview, where neither control does anything. The scene is an opaque WebGL
-    // canvas (`alpha: false`), so a checkerboard behind it is never seen; and the zoom handler
-    // sizes `#cp-img` and the ordinary render canvases, never `cp-spatial-view`, so `Fit width`
-    // moves nothing. Two controls that answer no press are worse than an absent group — the reader
-    // presses them, sees nothing, and doubts the rest of the panel.
+    // Stage presentation in the panel: `Transparent` and `Fit width`, which change presentation,
+    // not output, and are set rarely. Moved here, not duplicated. Open by default
+    // (`<cp-group-memory>` remembers folding).
+    // Not on a spatial preview: the opaque WebGL canvas (`alpha: false`) hides the checkerboard,
+    // and the zoom handler never sizes `cp-spatial-view`.
     val stageViewGroupHtml =
       if (spatialSceneUrl != null) ""
       else
@@ -18598,17 +15606,14 @@ ${scriptTag("known-differences.js")}
         " data-history-url=\"${WebEscaping.htmlEscape(historyManifestUrl)}\"" +
           " data-history-repo=\"${WebEscaping.htmlEscape(historyRepo)}\""
       } else if (historyLocalRenders && !historyInlineJson.isNullOrBlank()) {
-        // The project-mode twin of the pair above: no delivery repo to address a historical render
-        // on, so the entries point back at this server, which reads the bytes out of the local
-        // object store by content sha. `{blob}` is substituted client-side — a template rather than
-        // one URL per version keeps the payload to the shas the manifest already carries.
+        // Project-mode twin of the pair above: entries point back at this server, which reads bytes
+        // from the local object store by sha. `{blob}` is substituted client-side.
         " data-history-blob-url=\"" +
           WebEscaping.htmlEscape("$basePath/history/render/{blob}.png$q") +
           "\""
       } else ""
-    // The revision control, and the attribute that makes the pin reach the pixels: `viewer.js`
-    // appends `at=<sha>` to every render request it builds, so the stage, the export links and the
-    // Copy PNG button all read the same publish the banner names.
+    // The revision control, and the attribute that pins the pixels: `viewer.js` appends `at=<sha>`
+    // to every render request it builds.
     val revisionBaseQuery =
       listOf(linkQuery(token, linkSessionId, basePath, isPublic), revisionQuery)
         .filter { it.isNotBlank() }
@@ -18616,11 +15621,8 @@ ${scriptTag("known-differences.js")}
     val revisionHref: (String?) -> String = { pin ->
       withPin("$basePath/p/$idSeg${querySuffix(revisionBaseQuery)}", pin)
     }
-    // What `<cp-revision-runs>` needs to mark which of those revisions actually differ: the lane
-    // that answers it, and the render URL to pin per run head. Deliberately built from the
-    // *unpinned* query (`q`, not `revisionBaseQuery`) — the element appends its own `at=<sha>` per
-    // thumbnail, and a page that is already pinned would otherwise hand it a URL carrying a second,
-    // contradictory pin.
+    // What `<cp-revision-runs>` needs: the runs lane and the render URL per run head, built from
+    // the unpinned query since the element appends its own `at=<sha>`.
     val runsAttrs =
       " data-runs-url=\"${WebEscaping.htmlEscape("$basePath/api/render-runs/$idSeg$q")}\"" +
         " data-render-url=\"${WebEscaping.htmlEscape("$basePath/render/$idSeg.png$q")}\""
@@ -18635,20 +15637,13 @@ ${scriptTag("known-differences.js")}
     val revisionBanner = revisionBannerHtml(revisions, revisionHref)
     val pinnedAttr =
       revisions.pinned?.let { " data-pinned-at=\"${WebEscaping.htmlEscape(it)}\"" }.orEmpty()
-    // The publish this page was assembled from. The viewer builds its own frame URL from the
-    // controls, so the coupling every server-written frame URL carries has to reach it as data —
-    // otherwise this one page keeps the gap the parameter exists to close ([ServeCacheGeneration]).
-    // Emitted alongside the pin and not instead of it: the script decides between them, on the same
-    // rule [assetQuery] uses.
+    // The publish this page was assembled from, passed as data because the viewer builds its own
+    // frame URL ([ServeCacheGeneration]). Emitted beside the pin; the script chooses between them
+    // like [assetQuery].
     val generationAttr =
       revisions.generation?.let { " data-generation=\"${WebEscaping.htmlEscape(it)}\"" }.orEmpty()
-    // The axes the URL named and this page withheld, for `hydrateFromUrl` to defer on. Sorted so
-    // the markup is stable across requests; absent entirely on the ordinary page.
-    //
-    // A JSON array rather than a delimited list, because a knob key is an author string and nothing
-    // forbids a comma in one. `knob.price,discount` comma-joined splits into two names that match
-    // nothing, and the real axis silently stops being withheld — on a pinned page, exactly the
-    // value the render ignored would come back.
+    // The axes the URL named that this page withheld, for `hydrateFromUrl`. Sorted for stable
+    // markup; a JSON array because knob keys may contain commas.
     val unseededAttr =
       unseededOverrides
         .takeIf { it.isNotEmpty() }
@@ -18681,14 +15676,10 @@ ${scriptTag("known-differences.js")}
         )
         .filter { it.isNotBlank() }
         .joinToString("\n")
-    // `format-compare.js` holds the comparison primitives — content-box normalisation, the
-    // edge-tolerant score, the magenta delta map — that BOTH the SVG/PNG fidelity toggle and the
-    // spec lane's Diff / Triptych / Slider views draw from, so it loads for either.
-    //
-    // `<cp-spec-compare>` sits on top of it and publishes `window.cpSpecCompare`, which `viewer.js`
-    // calls on the way into (and out of) the lane. The components bundle is emitted above both, and
-    // the element wires itself up as soon as its tag upgrades, so the ordering `spec-compare.js`
-    // needed is preserved without a script tag of its own.
+    // `format-compare.js` holds the comparison primitives (content-box normalisation, edge-tolerant
+    // score, delta map) used by both the SVG/PNG fidelity toggle and the spec lane's views.
+    // `<cp-spec-compare>` publishes `window.cpSpecCompare` for `viewer.js`; the components bundle
+    // is emitted above both.
     val compareScriptTags =
       listOfNotNull(
           compareScorerTag().takeIf {
@@ -18697,31 +15688,22 @@ ${scriptTag("known-differences.js")}
           }
         )
         .joinToString("") { "$it\n      " }
-    // The Source lane uses the same vendored Kotlin grammar as the playground, but only on pages
-    // that can actually offer source. CodeMirror is one of the deliberately selective heavy
-    // assets: a component without a derivable usage snippet should not pay its ~114 kB wire cost.
-    // viewer.js still paints a plain <pre><code> first, so either asset failing leaves readable
-    // source rather than turning an optional highlighter into a lane dependency.
+    // CodeMirror (the playground's Kotlin grammar) loads only on pages that can offer source, to
+    // avoid its ~114 kB elsewhere. viewer.js paints a plain `<pre><code>` first, so a failed asset
+    // still leaves readable source.
     val sourceCodeStylesheet =
       if (usageAvailable && spatialSceneUrl == null)
         "<link rel=\"stylesheet\" href=\"${assetHref("codemirror.css")}\">\n      "
       else ""
     val sourceCodeScriptTag =
       if (usageAvailable && spatialSceneUrl == null) "${scriptTag("codemirror.js")}\n      " else ""
-    // The provenance row (source / playground / report an issue / figma spec) no longer sits under
-    // the title. It is *about* the preview rather than a control over it, and four lines of small
-    // links between the heading and the renderer controls is four lines of chrome between the
-    // visitor and the render. It now rides directly above the export bar, where the other
-    // "take this away with you" affordances (the PNG and SVG links) already live.
+    // The provenance row (source / playground / report an issue / figma spec) sits above the export
+    // bar rather than under the title.
     //
-    // Emitted in Catalog mode too, though every OTHER entry in it is a developer affordance that
-    // mode drops: each of those is null by the time it gets here, so what is left is the catalog
-    // report alone — and the row omits itself entirely when that is null as well. Dropping the row
-    // wholesale is what left the streamlined browser with no way to report a wrong render at all,
-    // its site footer and floating launcher both being gone too (issue #4704).
-    // A preview that declares the A2UI playground's `document` knob can be opened in the playground
-    // itself — a sample catalog publishes each sample's payload that way. Not in Catalog mode, like
-    // the other developer affordances in this row.
+    // Emitted in Catalog mode too: the developer entries are null there, leaving the catalog report
+    // (the mode's only reporting affordance); the row omits itself when that is null as well.
+    // A preview declaring the A2UI `document` knob can be opened in the A2UI playground; not in
+    // Catalog mode.
     val a2uiPlaygroundHref =
       if (componentBrowser || a2uiDocumentKnob(preview) == null) null
       else {
@@ -18740,19 +15722,10 @@ ${scriptTag("known-differences.js")}
         parallelLayersHref,
         a2uiPlaygroundHref,
       )
-    // Every disclosure the page has, in one group, at the end of the identity row: the component
-    // list, the state/variant axes, the theme chips, the overrides drawer. They were scattered —
-    // two on the viewer bar, two implicit in rows that were simply always open — which is why the
-    // page had no single answer to "what can I put away". Ordered as the surfaces they own read on
-    // the page (left column, then the two rows below the title, then the right column), and each
-    // closed one still names its current value, so folding a row never costs the fact it carried.
-    // The render-history menu sits after Revision — both answer "which version of these pixels am
-    // I looking at" — and before the Overrides drawer, which stays last where the thumb expects it.
-    // `viewer-history.js` used to build the menu at runtime and then go looking for somewhere to
-    // put it, with a fallback for a page whose toggle row predated it; the server knows where the
-    // control belongs, so it declares the tag here and the placement question stops existing. The
-    // element draws nothing at all when the timeline is too short to be one, so an empty tag is the
-    // no-history case rather than an empty control.
+    // Every disclosure the page has, grouped at the end of the identity row and ordered as their
+    // surfaces read (component list, axes, theme chips, revision, render history, overrides drawer
+    // last). A closed one still names its current value. The `<cp-render-history>` tag is declared
+    // here; it draws nothing when the timeline is too short.
     val historyMenu = if (historyAttrs.isEmpty()) "" else "<cp-history-menu></cp-history-menu>"
     val headToggles =
       listOf(
@@ -18770,22 +15743,16 @@ ${scriptTag("known-differences.js")}
       if (!componentBrowser) ""
       else if (browserVariantLabel.isBlank()) ""
       else "<p class=\"cp-browser-variant\">" + WebEscaping.htmlEscape(browserVariantLabel) + "</p>"
-    // The component's authored one-line description, under its name. The catalog has always
-    // written this (`@CatalogComponent(caption = …)`) and the browse surface has never shown it,
-    // so every sheet named its components and left what they were FOR in the source: a reader who
-    // does not already know what "Button Loading" is had nowhere on the page to find out. One
-    // sentence, above the fold, in the design system's own words. Blank for a catalog that authors
-    // none and for a plain uploaded bundle, which is most of them — so nothing shifts there.
+    // The component's authored caption (`@CatalogComponent(caption = …)`) under its name. Blank
+    // when none.
     val captionHtml =
       preview.caption
         ?.takeIf { it.isNotBlank() }
         ?.let { "<p class=\"cp-preview-caption\">${WebEscaping.htmlEscape(it)}</p>" }
         .orEmpty()
-    // Title, trust badge, id and the view tally on ONE baseline-aligned row. They are all
-    // *identity* — three separate blocks said so three times, at the cost of ~90px above the fold.
-    // The compare strip, under the workspace: this component's variants against the same baseline.
-    // Withheld from the component browser for the same reason its comparison chips are — that
-    // chrome is a reading surface, and every route out of it is one it does not offer.
+    // Title, trust badge, id and view tally on one baseline-aligned row.
+    // The compare strip under the workspace; withheld from the component browser like its
+    // comparison chips.
     val comparisonStrip =
       if (componentBrowser || componentVariants.isEmpty()) ""
       else
@@ -18793,21 +15760,16 @@ ${scriptTag("known-differences.js")}
           variants = componentVariants,
           currentPreviewId = preview.id,
           componentId = ServeIssueReport.componentIdFor(preview),
-          // The preview's own display label, not `componentKey` — that answers with the id slug
-          // (`profile-screen`), and the strip's heading sits directly under an `<h1>` reading
-          // "Profile Screen". One page must not spell the same thing two ways.
+          // The preview's display label, matching the `<h1>`, not the `componentKey` slug.
           componentName = label,
-          // Named for what the rows actually stand opposite. The lane's source picker can put the
-          // paired catalog or the SVG export on the STAGE; the strip is the design comparison,
-          // which is the one published per variant.
+          // Named for what the rows stand opposite: the per-variant published design comparison.
           baselineLabel = specProviderLabel ?: "Design reference",
           catalogName = catalogName.ifBlank { "This catalog" },
           basePath = basePath,
           q = q,
           assetQ = assetQuery(q, revisions),
-          // …and the paired catalog beside it, so the strip can follow the lane's source picker.
-          // Named after the lane's own `parallel` source and opened on the lane's default, which
-          // is what keeps the pair on the stage and the pairs under it the same pair.
+          // …and the paired catalog beside it, opened on the lane's default source so the strip
+          // follows the source picker.
           parallelLabel = specSources.firstOrNull { it.id == "parallel" }?.label,
           defaultSource = primarySpecSource?.id ?: "kit",
         )
@@ -18938,14 +15900,9 @@ ${scriptTag("known-differences.js")}
   }
 
   /**
-   * A drawer row's pixel URL: the prebaked thumbnail lane when this preview has one, the plain
-   * render otherwise.
-   *
-   * Deliberately the same shape the grid's `renderSrc` builds — `?thumb=<hash>` appended to the
-   * card's own URL, everything else identical — so the two surfaces cannot drift about how a
-   * thumbnail is addressed. Kept as a named helper rather than inlined because the row markup is
-   * already a long interpolation, and because a future surface that lists previews should reach for
-   * this rather than reinvent the query-append.
+   * A drawer row's pixel URL: the prebaked thumbnail lane when available, else the plain render.
+   * The same `?thumb=<hash>` shape as the grid's `renderSrc`, so both address thumbnails
+   * identically.
    */
   private fun navThumbSrc(
     basePath: String,
@@ -18960,17 +15917,10 @@ ${scriptTag("known-differences.js")}
   }
 
   /**
-   * The component drawer's list body: the [previews] under the catalog's own section and group
-   * headings, or a plain run of rows when there is no outline to show (#252).
-   *
-   * This is the catalog menu's structure in the drawer that lists the same components. Buckets keep
-   * the authored order ([ServePreview.catalogOrder]) the landing tree reads its sections and groups
-   * in, so the two surfaces name the catalog's parts in the same sequence.
-   *
-   * Both heading levels are dropped when they would say nothing: a section heading only when the
-   * list spans more than one section (with one, the drawer IS that section), and a group heading
-   * only for a group the catalog named. A catalog carrying neither therefore renders exactly the
-   * flat list this drawer has always been.
+   * The component drawer's list body: the [previews] under the catalog's section and group
+   * headings, or plain rows when there is no outline. Buckets follow authored order
+   * ([ServePreview.catalogOrder]) like the landing tree. Section headings appear only when there
+   * are several sections, group headings only for named groups.
    */
   private fun navListHtml(
     previews: List<ServePreview>,
@@ -18991,9 +15941,7 @@ ${scriptTag("known-differences.js")}
       buckets.entries
         .sortedBy { (_, cards) -> cards.minOf { order(it) } }
         .map { it.key to it.value }
-    // One bucket is not an outline. A heading exists to say which of several parts a row belongs
-    // to, and over a list that is entirely one part it says only what the drawer already is —
-    // "Time · 1" over the single Time Text row, on a catalog whose drawer holds two components.
+    // A single bucket gets no heading.
     if (ordered.size < 2) return previews.joinToString("\n") { itemHtml(it) }
     fun headRow(kind: String, label: String, count: Int): String =
       "<li class=\"cp-nav-head-row cp-nav-$kind-row\">" +
@@ -19019,14 +15967,10 @@ ${scriptTag("known-differences.js")}
   }
 
   /**
-   * The left-hand component-nav drawer: a filterable list of the session's [siblings], each linking
-   * to its own viewer page (same `$basePath/p/<id>$q` shape the landing cards use). The current
-   * [preview] is marked `aria-current="page"`. Returns "" when there is nothing to navigate *to* —
-   * an empty [siblings], or a list whose only entry is [preview] itself — so a single-preview
-   * session omits both the drawer and its toggle rather than showing a one-item self-link. (Callers
-   * can pass the whole `renderHost.previews` list, current preview included, without special-casing
-   * the single-preview module.) The drawer starts closed (the `cp-nav-open` class is absent from
-   * `.cp-viewer` until the toggle adds it).
+   * The left-hand component-nav drawer: a filterable list of [siblings] linking to their viewer
+   * pages (`$basePath/p/<id>$q`), [preview] marked `aria-current="page"`. Returns "" when there is
+   * nothing else to navigate to, so callers can pass the whole `renderHost.previews` list. Starts
+   * closed (`cp-nav-open` absent).
    */
   private fun navDrawerHtml(
     preview: ServePreview,
@@ -19034,35 +15978,19 @@ ${scriptTag("known-differences.js")}
     basePath: String,
     q: String,
     /**
-     * The theme the viewer is currently showing (`"light"`/`"dark"`, or null when neither the
-     * preview nor a dark-first catalog forces one). Each collapsed entry links to its component's
-     * render in THIS theme when it has one, so navigating from a dark preview (or anywhere in a
-     * dark-first Wear catalog) stays on the dark render instead of snapping back to light — the
-     * same theme-preserving behaviour as the state/variant switchers.
+     * The theme the viewer is showing (`"light"`/`"dark"`, or null). Entries link to their
+     * component's render in this theme when available, so navigation stays in the current theme.
      */
     theme: String?,
     axesTree: String = "",
-    /**
-     * The catalog's primary lane, so the size fold resolves per lane exactly as the grid's does.
-     */
+    /** The catalog's primary lane, so the size fold resolves per lane as on the grid. */
     darkFirst: Boolean = false,
-    /**
-     * Per-preview prebaked-thumbnail hash, exactly as the grid's cards use it. Null for a preview
-     * whose pixels are not baked locally yet — that row keeps the plain render URL and picks a
-     * thumbnail up on a later page build.
-     */
+    /** Per-preview prebaked-thumbnail hash, as on the grid. Null keeps the plain render URL. */
     thumbHash: (String) -> String? = { null },
   ): String {
-    // Collapse to ONE entry per component — the same folding the landing grid does — so the nav
-    // reads as a list of components, not of every baked state/theme/props/size permutation
-    // (`button-filled` once, not ~14 times). The SIZE axis folds here for the same reason it folds
-    // on the grid (#4279): a catalog documenting five breakpoints otherwise fills the drawer with
-    // five identically-named rows per full-screen component — "Alert Dialog" five times over, with
-    // nothing in the row to say which watch each one is. Each entry links to the component's render
-    // in the viewer's current [theme] (falling back to its default when it has no such variant);
-    // the viewer's own state/variant/size switchers reach that component's other axes.
-    // `aria-current` pins the component being viewed, even when the current preview is a folded
-    // (non-default) variant that has no card of its own.
+    // Collapse to one entry per component (folding state/theme/props/size like the grid), linking
+    // to the component's render in the current [theme] when it has one. `aria-current` marks the
+    // viewed component even when the current preview is a folded variant.
     val navPrimarySizes = primarySizeByComponent(siblings, darkFirst)
     val representatives =
       groupPreviews(
@@ -19080,12 +16008,9 @@ ${scriptTag("known-differences.js")}
             else -> it.default
           }
         }
-        // ONE row per component, decided AFTER the lane pick. A sparse theme × size product leaves
-        // two survivors for one component (its light render at one breakpoint, its dark at another)
-        // whose ids differ by size, so [groupPreviews] cannot pair them into a single card and the
-        // drawer would name that component twice — once on a link that walks out of the theme being
-        // viewed. Prefer the survivor already in the viewer's [theme]; a component with nothing in
-        // that lane keeps its first survivor rather than vanishing from the list.
+        // One row per component, decided after the lane pick: a sparse theme × size product can
+        // leave two survivors [groupPreviews] can't pair. Prefer the one in the viewer's [theme],
+        // else the first.
         .let { picked ->
           val byComponent = LinkedHashMap<String, ServePreview>()
           picked.forEach { p ->
@@ -19106,46 +16031,22 @@ ${scriptTag("known-differences.js")}
       val segItem = WebEscaping.urlEncodeSegment(p.id)
       val labelItem = WebEscaping.htmlEscape(previewDisplayName(p))
       val idItem = WebEscaping.htmlEscape(p.id)
-      // data-search folds label + id so the drawer filter matches either. aria-current pins the
-      // one we're viewing (styled as active, and it stays visible even under a filter miss so the
-      // list never looks empty-of-self).
+      // data-search folds label + id for the filter. The aria-current row stays visible under a
+      // filter miss.
       val current = if (componentKey(p) == currentKey) " aria-current=\"page\"" else ""
-      // The row's tooltip is the component's caption when it has one, and its preview id
-      // otherwise. The id was the only thing here, which tells a reader who is already lost
-      // exactly what they already knew — the name in slug form. The caption is the sentence that
-      // answers "what IS this", which is the question a list of forty component names provokes.
+      // The tooltip is the component's caption when it has one, else its preview id.
       val tip = p.caption?.takeIf { it.isNotBlank() } ?: p.id
-      // A small thumbnail render to the left of the name — the same prebaked thumbnail the
-      // landing cards use, on the same `?thumb=<hash>` lane, so the nav reads like a mini gallery
-      // without shipping a full-resolution render per row. `alt=""` since the name label beside
-      // it already names the component (decorative image).
-      //
-      // The lane matters here for the same reason it does on the grid, at the same scale: a
-      // viewer page lists every sibling component (57 rows on the m3 catalog), each drawn at
-      // ~40px. On the plain `/render` URL that was 849 KB of full-resolution PNGs at
-      // `max-age=300` with no validator, so the five-minute expiry could not even end in a 304;
-      // the
-      // thumbnail lane serves the same 57 in 357 KB, `immutable` and ETagged, straight out of
-      // memory with no trip through the render machinery.
+      // A small thumbnail on the `?thumb=<hash>` lane (immutable, ETagged, served from memory)
+      // rather than a full render per row. `alt=""` since the label names the component.
       val thumbSrc = navThumbSrc(basePath, p.id, q, thumbHash)
       return "<li><a class=\"cp-nav-item\" href=\"$basePath/p/$segItem$q\"$current " +
         "title=\"${WebEscaping.htmlEscape(tip)}\" data-search=\"$labelItem $idItem\">" +
         "<img class=\"cp-nav-thumb\" loading=\"lazy\" alt=\"\" src=\"$thumbSrc\">" +
         "<span class=\"cp-nav-name\">$labelItem</span></a></li>"
     }
-    // The catalog menu's OUTLINE, brought to the drawer that lists the same components (#252). The
-    // drawer was a flat run of rows — every component of a sectioned catalog in one 240px column,
-    // with the sections and groups the catalog authored (and the landing page's tree publishes)
-    // thrown away on the way in. The rows keep their thumbnails, which is what the drawer had that
-    // the catalog tree did not; what they gain is the heading above them saying which part of the
-    // catalog they are.
-    //
-    // Headings are FLAT SIBLINGS of the rows rather than a nesting, because the filter hides rows
-    // one by one and a heading whose rows have all gone is hidden by the same pass
-    // (`ViewerDrawers`). A nested list would have made every row's visibility two questions.
-    // Degenerate levels are dropped rather than drawn: a catalog with one section says its name
-    // nowhere (the drawer IS that section), and an unnamed group gets no heading — so an
-    // unsectioned catalog's drawer is exactly the flat list it always was.
+    // The catalog's outline in the drawer. Headings are flat siblings of the rows, so the filter
+    // (`ViewerDrawers`) can hide an emptied heading in the same pass. One section draws no section
+    // heading; unnamed groups get none.
     val items = navListHtml(listRepresentatives, ::itemHtml)
     return """
       <aside class="cp-nav" id="cp-nav" aria-label="Components">
@@ -19166,17 +16067,12 @@ ${scriptTag("known-differences.js")}
 
   /**
    * The **cross-catalog layer diff** for one render: what this catalog and its `compareWith`
-   * sibling each resolved for the same cell, layer by layer (issue #4838).
+   * sibling each resolved for the same cell, layer by layer.
    *
-   * Not a picture. A pixel diff of two rasterisers is mostly antialiasing, and the disagreements
-   * that matter between two runtimes of one design system — a font family that fell back, a token
-   * that resolved to a different value, a box that grew an inset — are invisible at 227dp and
-   * stated outright in a row of text. So this page is a table, and every number on it is one the
-   * two catalogs already published.
-   *
-   * Rows only one side draws are kept and labelled rather than dropped, for the reason
-   * [ServeParallelLayers] gives: hiding them makes two catalogs look more aligned the further they
-   * have diverged.
+   * A table rather than a picture: two rasterisers differ mostly in antialiasing, while a
+   * fallen-back font family, a different token value or an extra inset are clear in text. Every
+   * number is one the two catalogs already published. One-sided rows are kept and labelled
+   * ([ServeParallelLayers]).
    */
   fun parallelLayersPage(
     moduleLabel: String,
@@ -19185,10 +16081,8 @@ ${scriptTag("known-differences.js")}
     siblingLabel: String,
     siblingPreviewId: String,
     /**
-     * The sibling render's own viewer URL, when this page can offer one. Empty on a top-level site
-     * host, where a neighbour catalog's `/{system}/…` is answered with this site's own 404 — the
-     * pairing still resolves and the diff is still real (it is read server-side), so the row names
-     * the counterpart in plain text rather than linking somewhere that cannot answer.
+     * The sibling render's viewer URL, or empty on a top-level site, where the neighbour's
+     * `/{system}/…` 404s; the counterpart is then named in plain text.
      */
     siblingHref: String = "",
     /** One clause naming how the pair was arrived at; see `ResolvedParallel.pairedOn`. */
@@ -19229,11 +16123,8 @@ ${scriptTag("known-differences.js")}
             .joinToString(" · ")
         val rows =
           layer.rows.joinToString("\n") { row ->
-            // The differing fields, spelled out. Two kinds of silence here, both deliberate: an
-            // agreement is the layer's count rather than a line of its own (printing every equal
-            // field buries the two that are not under thirty that are), and a ONE-SIDED row lists
-            // nothing at all — every field of it would read as a difference when the finding is
-            // simply that the other catalog draws no such node, which the badge already says.
+            // Only differing fields are listed. Agreements are counted, not listed, and a one-sided
+            // row lists nothing (the badge already says the other side draws no such node).
             val notes =
               if (row.presence != ServeParallelLayers.Presence.BOTH) ""
               else
@@ -19320,8 +16211,7 @@ ${scriptTag("known-differences.js")}
 
   /**
    * The Open Graph and Twitter card tags for one page, from unescaped [title] and [description].
-   * Its own function so a page [document] does not lay out — the UI builder's app shell — carries
-   * the same unfurl as every page that does.
+   * Separate so pages not laid out by [document] (the UI builder shell) share the same unfurl.
    */
   internal fun unfurlHeadHtml(title: String, description: String, unfurl: UnfurlMetadata): String {
     val metaTitle = WebEscaping.htmlEscape(title)
@@ -19379,70 +16269,54 @@ ${scriptTag("known-differences.js")}
     navSuffix: String = "",
     headerAction: String = "",
     /**
-     * The **Session** group for the header's Settings menu ([githubSessionSettings]). Separate from
-     * [headerAction] because the two halves of the sign-in state land in different places: the
-     * identity in the bar, what to do about it inside the menu.
+     * The **Session** group for the Settings menu ([githubSessionSettings]); separate from
+     * [headerAction], which shows identity in the bar.
      */
     headerSessionSettings: String = "",
     /**
-     * The header bar's collapsed search control ([headerSearchControl]), empty on every page that
-     * has nothing to search. See [siteHeader]'s `search`.
+     * The header's collapsed search control ([headerSearchControl]); empty where there is nothing
+     * to search. See [siteHeader]'s `search`.
      */
     headerSearch: String = "",
     /**
-     * The page's breadcrumb / back link, rendered in the header's brand slot by [siteHeader] rather
-     * than as the body's first line — see that function for why. Empty (the front door, which is
-     * already home) renders nothing.
+     * The breadcrumb / back link, rendered in the header's brand slot by [siteHeader]. Empty on the
+     * front door.
      */
     headerBreadcrumb: String = "",
     /** The UI builder's Designs index, linked from the header's nav panel. See [siteHeader]. */
     headerDesignsHref: String = "",
     /**
-     * Running server version (the CLI's `SERVE_VERSION`), shown in the minimal [siteFooter] every
-     * page ends with. Null omits just the build span; the fixture goldens pass a fixed string so a
-     * release never churns the committed HTML.
+     * Running server version (`SERVE_VERSION`) for [siteFooter]. Null omits the build span; fixture
+     * goldens pass a fixed string.
      */
     version: String? = null,
     /**
-     * The page's own block inside [siteFooter], above the source/`/version` links — the catalog
-     * landing's provenance disclosure. Empty on every other page.
+     * The page's own block inside [siteFooter], above the links (the landing's provenance
+     * disclosure). Empty elsewhere.
      */
     footerNote: String = "",
     /**
-     * The served catalog's own palette, projected onto the chrome's custom properties by
-     * [ServeThemeCss] and inlined after `serve.css` so it wins at equal specificity. Empty for a
-     * plain module / a catalog that publishes no tokens — the page then uses the built-in chrome.
+     * The catalog's palette from [ServeThemeCss], inlined after `serve.css` so it wins at equal
+     * specificity. Empty uses the built-in chrome.
      */
     themeCss: String = "",
     /**
-     * The catalog-scoped `sessionStorage` key this page's theme choice is remembered under (as
-     * produced by [themeStorageKey]) — published to the client on `<html data-cp-theme-key>` and
-     * read back by the pre-paint script and the Page theme setting, which need the remembered
-     * choice to resolve the page's colour scheme. Empty for a page with no theme control at all
-     * (the front door, `/status`, a shared document): those never pin a scheme.
+     * The catalog-scoped `sessionStorage` key for this page's theme choice ([themeStorageKey]),
+     * published on `<html data-cp-theme-key>` for the pre-paint script and Page theme setting.
+     * Empty for pages with no theme control.
      */
     themeStorageKey: String = "",
     /**
-     * Whether a remembered theme choice can actually change what this page shows.
-     *
-     * False on a viewer whose Theme control is disabled — a static bundle with no daemon or Wasm
-     * tier behind it, or a fixed-theme specimen. Such a page keeps its baked image whatever is
-     * remembered, so the pre-paint script must resolve the chrome from the baked theme instead:
-     * following the memory there frames a light snapshot in dark chrome and marks a chip the page
-     * cannot honour. Default true — the landing grid's chips re-point at published pixels, so a
-     * remembered choice always applies there.
+     * Whether a remembered theme choice can change what this page shows. False on a viewer whose
+     * Theme control is disabled (no daemon/Wasm, or a fixed-theme specimen), so the pre-paint
+     * script resolves the chrome from the baked theme instead. Default true.
      */
     themeChoiceApplies: Boolean = true,
     /**
-     * The theme values this page's own control offers, for the pre-paint script to check a
-     * remembered choice against. Empty where the caller does not enumerate them — the script then
-     * trusts a remembered value as far as it can resolve it.
-     *
-     * One key serves a catalog's viewer, its landing grid and its comparison wall, so the memory
-     * routinely arrives naming something the destination does not have: `light` picked on a Wear
-     * catalog's wall and then opened in a Wear viewer, which offers Dark alone. The viewer keeps
-     * its dark render — the sticky script finds no matching option — so the chrome must not paint
-     * light around it.
+     * The theme values this page's control offers, for the pre-paint script to validate a
+     * remembered choice. One key serves a catalog's viewer, grid and wall, so a memory may name
+     * something this page lacks (e.g. `light` in a Dark-only Wear viewer). Empty means trust
+     * whatever resolves.
      */
     offeredThemes: List<String> = emptyList(),
     /** The catalog this page belongs to, named in the header bar. See [siteHeader]. */
@@ -19452,12 +16326,9 @@ ${scriptTag("known-differences.js")}
      */
     declaredThemes: List<ServeTheme> = emptyList(),
     /**
-     * Register the vendored Remote Compose typefaces ([ServeRcFonts]) on this page. True for the
-     * pages that play a `.rc` document **client-side** — without the faces the player's `Roboto,
-     * sans-serif` request falls through to whatever the *viewer's* machine calls `sans-serif`, so
-     * the same document renders in a different typeface, at different metrics and without the
-     * Medium weight, depending on who is looking (issue #3480). Off elsewhere: the page chrome is
-     * deliberately system-font, and a page with no canvas lane shouldn't carry the block.
+     * Register the vendored Remote Compose typefaces ([ServeRcFonts]) on pages that play `.rc`
+     * documents client-side, so `Roboto, sans-serif` doesn't fall through to the viewer machine's
+     * font. Off elsewhere; page chrome is system-font.
      */
     rcFonts: Boolean = false,
     /** Streamlined component-browser chrome; full mode remains the default. */
@@ -19465,25 +16336,18 @@ ${scriptTag("known-differences.js")}
     /** Show and persist the Catalog / Dev switch on pages that support both presentations. */
     interfaceModeControl: Boolean = false,
     /**
-     * Offer the footer's "report a bug" entry. False only on the report page itself, which is what
-     * that entry opens — see [reportBugFormHtml]. Independent of [componentBrowser], which drops
-     * the footer altogether: this chooses what the footer contains, that chooses whether there is
-     * one.
+     * Offer the footer's "report a bug" entry; false only on the report page itself
+     * ([reportBugFormHtml]). Independent of [componentBrowser], which drops the footer entirely.
      */
     bugReport: Boolean = true,
     /**
-     * The catalog change feed this page's footer links as **Changelog**, and that the head declares
-     * as the page's RSS alternate so a reader's subscribe affordance finds it. Empty on every page
-     * that belongs to no published catalog. See [siteFooter].
+     * The catalog change feed linked as **Changelog** and declared as the page's RSS alternate.
+     * Empty on pages belonging to no published catalog. See [siteFooter].
      */
     changelogHref: String = "",
     /**
-     * Let the page's chrome span the whole viewport instead of the 1440px reading column. For a
-     * surface whose subject is a WIDE IMAGE — a design page's specimen sheet, drawn thousands of
-     * pixels across — the column is not a reading aid, it is a crop: on a 2560px display the sheet
-     * lands in little over half the glass and every specimen on it is sub-pixel (issue #4750). A
-     * page of prose still wants the column, so this is opt-in per surface rather than a change to
-     * `.cp-main`.
+     * Span the whole viewport instead of the 1440px reading column, for surfaces whose subject is a
+     * wide image (a design page's specimen sheet). Opt-in per surface.
      */
     wide: Boolean = false,
   ): String {
@@ -19500,9 +16364,8 @@ ${scriptTag("known-differences.js")}
       if (componentBrowser) ""
       else
         "\n${siteFooter(version, footerNote, bugReport, changelogHref).prependIndent("        ")}"
-    // The floating launcher rides the same two conditions as the footer entry it duplicates from a
-    // fixed position: dropped in component-browser mode (which has no site chrome at all) and on
-    // the report page itself, where it would be a button back to the page you are already on.
+    // The floating launcher follows the footer entry's conditions: not in component-browser mode,
+    // not on the report page.
     val launcherBlock =
       if (componentBrowser || !bugReport) ""
       else "\n${reportLauncherHtml(assetHref("report-capture.js")).prependIndent("        ")}"
@@ -19526,41 +16389,30 @@ ${scriptTag("known-differences.js")}
       themeStorageKey
         .takeIf { it.isNotBlank() }
         ?.let { " data-cp-theme-key=\"${WebEscaping.htmlEscape(it)}\"" } ?: ""
-    // Carry the mode over from the `localStorage` key this switch used before it became a cookie,
-    // so an upgrade doesn't quietly drop a visitor back into the server's default presentation. It
-    // clears the key whatever it held, so it runs at most once per browser and the whole block can
-    // be deleted a release or two from now. The reload is what makes the carried-over mode take
-    // effect: the server has already rendered this page, and it rendered it without the cookie.
+    // Migrate the mode from the pre-cookie `localStorage` key once, then reload so the server
+    // renders with the cookie. Safe to delete in a release or two.
     val interfaceModeBoot =
       if (interfaceModeControl)
         "\n        " +
           """<script>try{var s=localStorage.getItem("cp-interface-mode");if(s){localStorage.removeItem("cp-interface-mode");if((s==="catalog"||s==="dev")&&document.cookie.indexOf("$INTERFACE_MODE_COOKIE=")<0){document.cookie="$INTERFACE_MODE_COOKIE="+s+"$INTERFACE_MODE_COOKIE_ATTRS"+(location.protocol==="https:"?"; secure":"");if(document.cookie.indexOf("$INTERFACE_MODE_COOKIE="+s)>=0&&!/[?&]chrome=/.test(location.search))location.reload();}}}catch(e){}</script>"""
       else ""
-    // The switch itself: remember the choice in the cookie the server reads, drop any `?chrome=`
-    // the current URL pinned (an explicit permalink outranks the cookie, so leaving it on would
-    // make the button appear to do nothing), and reload into the chosen mode. Nothing rewrites the
-    // page's links any more — the cookie travels on its own.
+    // The switch: write the cookie, drop any `?chrome=` (an explicit permalink outranks the
+    // cookie), and reload.
     val interfaceModeControls =
       if (interfaceModeControl)
         "\n        " +
           """<script>(function(){var key="$INTERFACE_MODE_COOKIE";document.querySelectorAll("[data-cp-interface-mode]").forEach(function(b){b.addEventListener("click",function(){var mode=b.getAttribute("data-cp-interface-mode");if(mode!=="catalog"&&mode!=="dev")return;try{document.cookie=key+"="+mode+"$INTERFACE_MODE_COOKIE_ATTRS"+(location.protocol==="https:"?"; secure":"");}catch(e){}var u=new URL(location.href);u.searchParams.delete("chrome");if(document.cookie.indexOf(key+"="+mode)<0)u.searchParams.set("chrome",mode);var q=u.searchParams.toString();location.assign(u.pathname+(q?"?"+q:"")+u.hash);});});})();</script>"""
       else ""
-    // The body's own classes, in one place now that two independent surfaces set one. Kept as a
-    // single `class` attribute rather than two, so the existing
-    // `contains("class=\"cp-component-browser\"")` assertions still describe the component
-    // browser's own markup — nothing else sets both.
+    // The body's classes in one `class` attribute, so `contains("class=\"cp-component-browser\"")`
+    // assertions keep matching.
     val bodyClasses =
       listOfNotNull("cp-component-browser".takeIf { componentBrowser }, "cp-wide".takeIf { wide })
     val bodyClassAttr =
       if (bodyClasses.isEmpty()) "" else " class=\"${bodyClasses.joinToString(" ")}\""
-    // `serve-chrome.js` is emitted as the first thing in <body>, ahead of every surface's own
-    // scripts, because they read the globals it installs: the component bundle's Transparent
-    // toggle wires Back through the URL-state global as it upgrades, and three of the legacy
-    // enhancement scripts read it at their own IIFE time. It is unconditional because it also
-    // carries the Page theme setting, which every page has — and it can afford to be, at ~1 kB
-    // gzipped with no Vue in it. Deliberately NOT commented in the emitted HTML: a note naming
-    // those script files would ship to every visitor, and `html.contains("format-compare.js")` is
-    // exactly how several tests ask whether a lane is loaded.
+    // `serve-chrome.js` is first in `<body>` because other scripts read the globals it installs as
+    // they upgrade. Unconditional since it also carries the Page theme setting (~1 kB gzipped). Not
+    // annotated in the HTML: tests check `html.contains("format-compare.js")` to detect loaded
+    // lanes.
     return """
     <!doctype html>
     <html lang="en"$themeKeyAttr>
@@ -19590,15 +16442,9 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
   }
 
   /**
-   * Same-origin links this page may **prefetch** — the document only, never prerendered — when the
-   * visitor shows intent (`moderate`: a hover of about 200ms, or a press). Catalog → component →
-   * variant is a chain of plain page loads, and fetching the next document during the hover takes
-   * most of the wait out of the click.
-   *
-   * Prefetch and not prerender: a viewer page that ran would open a render socket, wake a daemon
-   * and count a view for a page nobody opened. A prefetch is one GET of the HTML. Everything that
-   * acts, signs in or out, streams, or is heavy is excluded by path, and a link the page marks as a
-   * download, a new tab or `nofollow` is left alone.
+   * Same-origin links this page may prefetch (document only, never prerender) on `moderate` intent.
+   * Prerender would open sockets, wake daemons and count views. Paths that act, authenticate,
+   * stream or are heavy are excluded, as are download, new-tab and `nofollow` links.
    */
   internal val SPECULATION_RULES: String =
     """<script type="speculationrules">{"prefetch":[{"source":"document","where":{"and":[""" +
@@ -19632,26 +16478,14 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
       """[data-cp-no-prefetch]"}}]},"eagerness":"moderate"}]}</script>"""
 
   /**
-   * Pin the page's colour scheme to the selected preview theme **before first paint**, when the
-   * Page theme setting is on (its default — see `chrome/pageTheme.ts` for why it is a setting).
+   * Pin the page's colour scheme to the selected preview theme before first paint when the Page
+   * theme setting is on (see `chrome/pageTheme.ts`). Inline in `<head>` to avoid a full-screen
+   * flash; self-contained because the shell bundle hasn't loaded.
    *
-   * Inline and in the `<head>` for the same reason the Transparent restore above is: resolving this
-   * from the deferred shell bundle would paint the page in the wrong mode first and correct it a
-   * frame later, which on a dark-to-light swap is a full-screen flash. It is deliberately the whole
-   * resolution rather than a call into that file — the file has not loaded yet.
-   *
-   * The order is the same one the grid and the viewer use for the theme itself: the URL wins
-   * (`?theme=` on a catalog landing, `?uiMode=` in the viewer — someone picked that chip or was
-   * handed the link), then the choice THIS TAB remembers for the catalog ([themeStorageKey], in
-   * `sessionStorage`), and only then the theme a `…__light` / `…__dark` preview bakes into its id.
-   *
-   * The remembered choice sits above the baked one because the viewer applies it too: a tab that
-   * picked a dark theme and then opened a `__light` preview is looking at a dark re-render, and
-   * resolving the chrome from the id would paint that render into a light page. A tab that picked
-   * nothing remembers nothing, so a shared `__light` link still opens light without a flash.
-   *
-   * A declared theme moves the chrome when [ServeTheme.mode] is unambiguous; unqualified themes
-   * still follow the visitor's OS.
+   * Order: the URL (`?theme=` on a landing, `?uiMode=` in the viewer), then this tab's remembered
+   * choice ([themeStorageKey], `sessionStorage`), then the theme baked into a `…__light` /
+   * `…__dark` id. The memory outranks the id because the viewer applies it too. A declared theme
+   * moves the chrome only when [ServeTheme.mode] is unambiguous; otherwise the OS decides.
    */
   private fun pageThemeScript(
     themeStorageKey: String,
@@ -19672,24 +16506,11 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
     val bakedTheme =
       "((decodeURIComponent(location.pathname).split('/').pop()||\"\")" +
         ".match(/(?:^|__)(light|dark)(?:__|$)/)||[])[1]"
-    // `r()` decides what the REMEMBERED value contributes, and it is a fallback rather than a
-    // filter: a value this page can take resolves through the mode table, and one it cannot gives
-    // way to the theme the id bakes.
-    //
-    // Deciding here rather than after the whole chain is what keeps an unusable memory from eating
-    // the baked theme. `t = stored || baked` with one resolve at the end paints NOTHING for a
-    // theme removed while the tab stayed open: the stored string is truthy, so the baked theme is
-    // never reached, and the mode table cannot answer for a provider it no longer has an entry
-    // for. The chrome then falls back to the OS over a plainly light preview.
-    //
-    // "Can take" is offer-checked where the caller says what this page offers ([offeredThemes]).
-    // One key serves a catalog's viewer, its landing grid and its comparison wall, so a memory
-    // routinely arrives naming a choice the destination does not have: `light` picked on a Wear
-    // catalog's wall, opened in a Wear viewer that offers Dark alone. It resolves perfectly well
-    // and is still not what the stage is drawing. Where the caller says nothing, resolvability is
-    // the only test available, and an unqualified-but-offered theme deliberately contributes ""
-    // for the OS to answer — the same thing [pageTheme.follow] does with such a theme picked
-    // outright, so the two halves cannot disagree across the first paint.
+    // `r()` resolves the remembered value as a fallback, not a filter: an unusable memory (e.g. a
+    // removed theme) yields to the baked theme rather than painting nothing. Where the caller lists
+    // [offeredThemes], being offered is the test (a memory may name a choice this page lacks);
+    // otherwise resolvability is. An offered theme with no declared mode yields "" for the OS,
+    // matching [pageTheme.follow].
     val readsMemory = themeStorageKey.isNotBlank() && themeChoiceApplies
     val offered = offeredThemes.takeIf { readsMemory && it.isNotEmpty() }
     val offerInit =
@@ -19697,9 +16518,8 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
         "o={${it.joinToString(",") { value -> "${WebEscaping.jsString(value)}:1" }}},"
       } ?: ""
     val resolve = if (modeEntries.isEmpty()) "t" else "m[t]||t"
-    // Two shapes, one rule. Where the page says what it offers, being offered IS the test — an
-    // offered theme with no declared mode passes through unresolved for the OS to answer. Where it
-    // does not, a value is trusted as far as it can be read.
+    // With an offer list, being offered is the test (unresolved modes defer to the OS); without
+    // one, a value is trusted as far as it resolves.
     val resolveFn =
       when {
         !readsMemory -> ""
@@ -19722,27 +16542,17 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
   }
 
   /**
-   * The export bar: the `/render/<id>.png` (and, when [hasSvgExport], `.svg`) URL for the preview
-   * **with the current overrides applied**, offered as three plainly-named actions per format —
-   * "Copy link" (the shareable, `curl`-able render URL), "Copy PNG"/"Copy SVG" (the rendered
-   * artefact itself onto the clipboard: real `image/png` bytes, or SVG markup verbatim), and
-   * "Download" (`<a download>`). The viewer JS keeps the URLs in sync as the controls / knobs
-   * change (see `refreshLinks`), so whatever is copied always reflects the on-screen state. The
-   * URLs are built client-side from `location.origin` + the session base, so they're absolute and
-   * work from anywhere; the `#cp-url-<ext>` fields that hold them start empty and are filled on
-   * first render.
+   * The export bar: the `/render/<id>.png` (and `.svg` with [hasSvgExport]) URL with current
+   * overrides applied, offered per format as "Copy link", "Copy PNG"/"Copy SVG" (the artefact
+   * itself) and "Download". `refreshLinks` keeps them in sync; URLs are absolute, built from
+   * `location.origin`, and the `#cp-url-<ext>` fields fill on first render.
    *
-   * Two deliberate shapes here:
-   * * It is **one always-visible line**, not a `<details>`. Grabbing the URL / PNG / SVG of what's
-   *   on screen is the viewer's primary hand-off; a disclosure hid the whole hand-off behind a
-   *   click, and a URL field per format wrapped the row onto three lines for no one's benefit.
-   * * The URL itself lives in a `tabindex="-1"` field the CSS takes out of the flow rather than on
-   *   screen: an 200-character absolute `/render` URL is not something anyone reads, and "Copy
-   *   link" says what the field's `title="Click to copy"` never managed to. It stays a real input
-   *   because `refreshLinks` and both copy buttons read it, and it is what the lane e2e asserts on.
+   * * One always-visible line rather than a `<details>`, since this is the viewer's primary
+   * hand-off.
+   * * The URL lives in an off-flow `tabindex="-1"` field: `refreshLinks`, both copy buttons and the
+   * lane e2e read it.
    *
-   * The one control that genuinely *shapes* the export — "Full page (scroll)" — lives in the
-   * overrides drawer's Scroll group instead ([scrollGroupHtml]).
+   * "Full page (scroll)" lives in the drawer's Scroll group ([scrollGroupHtml]).
    */
   private fun downloadLinksHtml(hasSvgExport: Boolean): String {
     fun group(kind: String, ext: String): String =
@@ -19772,10 +16582,8 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
   }
 
   /**
-   * The drawer groups that shape the *export* rather than the render — Scroll and Exploded 3D —
-   * joined into one slot so a session that offers neither contributes nothing at all. (Interpolated
-   * separately, an absent group left a blank line in every viewer that can't export SVG, which is
-   * most of them.)
+   * The export-shaping drawer groups (Scroll and Exploded 3D) joined in one slot so absent groups
+   * leave no blank line.
    */
   private fun exportShapeGroupsHtml(hasScrollExport: Boolean, hasSvgExport: Boolean): String =
     listOf(scrollGroupHtml(hasScrollExport, hasSvgExport), explodeGroupHtml(hasSvgExport))
@@ -19783,20 +16591,10 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
       .joinToString("\n          ")
 
   /**
-   * The overrides drawer's "Exploded 3D" group: the camera and separation knobs behind the viewer
-   * bar's **3D** toggle.
-   *
-   * The toggle alone is the whole feature for most visitors — the defaults are the readable preset
-   * — so the axes live in the drawer rather than on the bar, next to the other things that shape an
-   * export. They are `<input type="range">` rather than numbers because nobody knows what tilt they
-   * want in degrees; they know it when they see it, and the SVG re-projects per drag.
-   *
-   * Every knob carries `data-cp-default`, which is what lets the viewer JS omit an untouched axis
-   * from the URL (so the common link stays `?exploded=1`) and reset it on a Back that drops the
-   * param. The values must therefore stay equal to `ExplodedSvg.Options`' own defaults; the fixture
-   * test is what notices when they drift apart.
-   *
-   * Empty when the session can't export SVG at all — there is no layered vector to pull apart.
+   * The drawer's "Exploded 3D" group: camera and separation sliders behind the bar's **3D** toggle
+   * (defaults are the readable preset). Each knob's `data-cp-default` lets the viewer omit
+   * untouched axes from the URL (`?exploded=1`) and reset on Back, so it must equal
+   * `ExplodedSvg.Options`' defaults (a fixture test checks). Empty without SVG export.
    */
   private fun explodeGroupHtml(hasSvgExport: Boolean): String {
     if (!hasSvgExport) return ""
@@ -19835,12 +16633,9 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
   }
 
   /**
-   * The overrides drawer's Scroll group: "Full page (scroll)", which points the copyable /
-   * downloadable PNG and SVG exports at the full-page `?scroll=long` render of a scrolling preview
-   * (a tall Wear capsule / grown LazyColumn) instead of the viewport-sized image. It's an override
-   * on what gets rendered — not a link — so it sits with the other axes in the drawer rather than
-   * in the always-visible export section. The viewer JS (`withScroll`) folds it into both export
-   * URLs; empty when the session can't export SVG at all.
+   * The drawer's Scroll group: "Full page (scroll)" points the PNG and SVG exports at the
+   * `?scroll=long` render of a scrolling preview. The viewer JS (`withScroll`) folds it into both
+   * URLs. Empty without SVG export.
    */
   private fun scrollGroupHtml(hasScrollExport: Boolean, hasSvgExport: Boolean): String =
     if (!hasScrollExport) ""
@@ -19857,34 +16652,20 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
         .trimIndent()
 
   /**
-   * Renders the preview's author-declared editable knobs (the `compose/overrides` payload carried
-   * in a bundle's `previews/<id>.overrides.json`) as a labelled control list. Indexed knobs
-   * (per-item values on a repeated component) are grouped under their base key with a `#<index>`
-   * suffix. The controls are live when [canApplyOverrides] (a daemon re-renders the edit) **or**
-   * [wasmAvailable] (the in-browser catalog app seeds its `catalogOverride*` from the edit); a
-   * plain static bundle with neither leaves them disabled with a one-line note. Empty string when
-   * the preview declared no knobs (the common case).
+   * Renders the preview's author-declared knobs (`previews/<id>.overrides.json`) as labelled
+   * controls; indexed knobs are grouped under their base key with a `#<index>` suffix. Live when
+   * [canApplyOverrides] or [wasmAvailable] (the Wasm app seeds `catalogOverride*`); otherwise
+   * disabled with a note. Empty when none are declared.
    */
   /**
-   * The fonts.google.com family names offered in a font knob's autocomplete, loaded once from the
-   * committed `google-fonts.txt` classpath resource (regenerated by
-   * `scripts/fonts/build-google-fonts-list.mjs`). Lines starting with `#` are provenance and
-   * skipped. Empty if the resource is somehow absent — a font knob's datalist then carries only its
-   * declared [PreviewOverrideDeclaration.suggestions].
+   * fonts.google.com family names for font-knob autocomplete, loaded once from the
+   * `google-fonts.txt` resource (regenerated by `scripts/fonts/build-google-fonts-list.mjs`; `#`
+   * lines skipped). Empty if absent, leaving only [PreviewOverrideDeclaration.suggestions].
    */
   /**
-   * The locale field's **value set** — the tags worth offering, each with the name the picker
-   * shows.
-   *
-   * Open rather than exhaustive: these drop down for quick picking, and any valid BCP-47 tag the
-   * server accepts stays typeable, which is why the control remains an `<input list>` rather than
-   * becoming a `<select>`. Declared here as data so it renders through the same
-   * [datalistOptionsHtml] an author-declared value set does instead of being hand-written HTML. The
-   * labels are the whole reason a bare tag list is a poor control, so they belong somewhere
-   * reusable.
-   *
-   * Pseudolocales lead (they are the reason to reach for this control at all), then the real RTL
-   * languages, then common tags.
+   * The locale field's value set: tags worth offering, with display names. Open, not exhaustive —
+   * the control stays an `<input list>` so any BCP-47 tag is typeable — and rendered via
+   * [datalistOptionsHtml]. Pseudolocales first, then RTL languages, then common tags.
    */
   private val LOCALE_PRESETS: List<PreviewOverrideOption> =
     listOf(
@@ -19921,10 +16702,8 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
   }
 
   /**
-   * `<option>`s for a font knob's `<datalist>`: the declared [suggestions] first (so "by default
-   * show the typography catalog" holds), then — when [googleFonts] — the full fonts.google.com
-   * list, de-duplicated (a suggestion that's also a Google family isn't repeated). Order is
-   * preserved.
+   * `<option>`s for a font knob's `<datalist>`: declared [suggestions] first, then (with
+   * [googleFonts]) the full Google list, de-duplicated, order preserved.
    */
   private fun fontDatalistOptions(suggestions: List<String>, googleFonts: Boolean): String {
     val seen = LinkedHashSet<String>()
@@ -19934,19 +16713,14 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
   }
 
   /**
-   * `<option>`s for a **`<datalist>`** — the open form of a value set, where the field stays
-   * free-text and the options are a shortlist.
-   *
-   * A value whose label differs from it carries `label=`, which is what lets the locale presets
-   * read "Accented (pseudo)" while seeding `en-XA`; a self-labelling value emits the bare `value=`
-   * a font family always did, so a font knob's markup is unchanged.
+   * `<option>`s for a `<datalist>` (open value set). Values with a distinct label carry `label=`;
+   * self-labelling values emit a bare `value=`.
    */
   private fun datalistOptionsHtml(
     options: List<PreviewOverrideOption>,
     /**
-     * Leading whitespace for each line after the first. A template interpolation only indents where
-     * the `$…` sits, so a multi-line block otherwise lands flush against the margin — invisible in
-     * a browser, but the viewer pages are checked in as golden fixtures and read by humans there.
+     * Indent for lines after the first, since interpolation only indents the first line; the viewer
+     * pages are checked-in goldens.
      */
     indent: String = "",
   ): String =
@@ -19957,13 +16731,8 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
     }
 
   /**
-   * `<option>`s for a **`<select>`** — the closed form, where [selected] is the value the control
-   * opens on.
-   *
-   * A [selected] outside the set is emitted as an extra leading option rather than dropped. The set
-   * is what the *author* declared, and a render can still be reached carrying something else (a
-   * hand-written `knob.size=xxl`, a link from before a value was renamed); showing it keeps the
-   * control honest about what is on screen, where silently snapping to the first option would lie.
+   * `<option>`s for a `<select>` opening on [selected]. A [selected] outside the declared set is
+   * emitted as a leading extra option, so the control reflects what is on screen.
    */
   private fun selectOptionsHtml(options: List<PreviewOverrideOption>, selected: String): String {
     val known = options.any { it.value == selected }
@@ -19976,14 +16745,8 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
   }
 
   /**
-   * A knob's boolean text, read the way [ServeOverrides.parse] reads one: `true` for `1` or `true`
-   * in any case.
-   *
-   * Case-insensitive because the parser is (`equals("true", ignoreCase = true)`), and the parser is
-   * what decides the pixels. `?knob.enabled=bool:TRUE` is an accepted deep link that renders true,
-   * so a control testing only the lowercase spelling would draw the box unticked beside it. The
-   * declaration's own text is always `true` / `false` — `Boolean.toString()` — so this widened rule
-   * changes nothing for a plain visit.
+   * A knob's boolean text, read as [ServeOverrides.parse] does: `1` or `true` in any case, so
+   * `?knob.enabled=bool:TRUE` ticks the box.
    */
   private fun boolText(raw: String): String =
     if (raw == "1" || raw.equals("true", ignoreCase = true)) "true" else "false"
@@ -19995,12 +16758,9 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
     requestOverrides: Map<String, String> = emptyMap(),
   ): String {
     if (preview.overrides.isEmpty()) return ""
-    // Editable when the server can re-render (canApplyOverrides) OR an in-browser app can honour
-    // the
-    // edit (wasmAvailable — its `catalogOverride*` seed from the `knob.<key>` patch). A plain
-    // static
-    // bundle with neither shows *what* is editable but stays disabled. The viewer JS collects
-    // `.cp-knob` values into `knob.<key>=<value>` params.
+    // Editable when the server can re-render (canApplyOverrides) or a Wasm app can honour the edit
+    // (wasmAvailable). Otherwise shown disabled. The viewer JS collects `.cp-knob` values into
+    // `knob.<key>=<value>`.
     val editable = canApplyOverrides || wasmAvailable
     val dis = if (editable) "" else " disabled"
     val rows =
@@ -20011,42 +16771,26 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
         val rawWireKey = if (d.index == null) d.key else "${d.key}[${d.index}]"
         val wireKey = WebEscaping.htmlEscape(rawWireKey)
         val kind = knobKind(d.type)
-        // What the preview DECLARES: the author default, or the `@OverrideVariant` seed on a
-        // synthetic variant. Both `data-*` attributes below are read off this, never off the
-        // request.
+        // What the preview declares (author default, or the `@OverrideVariant` seed); the `data-*`
+        // attributes below read this, never the request.
         val declared = overrideValueText(d.current ?: d.default)
-        // …and what THIS REQUEST asks for, which is not the same question. A deep link names values
-        // the declaration doesn't — `?knob.secondary=true`, a copied "Direct links — overrides
-        // applied" URL, the viewer link in a bug report — and the control has to OPEN on those or
-        // the page disagrees with its own address: the snapshot `<img>` carries the query, so it
-        // shows the override while everything that reads the CONTROLS instead (the live socket's
-        // `setOverrides`, the export links, the next `/render`) sends the declared value.
-        // `hydrateFromUrl` corrects this client-side on load; seeding it here is what stops the
-        // first paint from disagreeing, and what keeps the markup honest for anything reading it
-        // without running the viewer's JS.
-        // …with any legacy `<kind>:` wire tag stripped exactly where the parser strips it, so
-        // `?knob.count=int:3` puts `3` in the number input rather than `int:3` — which the browser
-        // sanitizes to empty, leaving the control blank beside a render that used the value.
+        // …and what this request asks for: a deep link's value must seed the control, or the
+        // controls (live `setOverrides`, export links, next `/render`) would send the declared
+        // value while the snapshot shows the override. `hydrateFromUrl` does the same client-side.
+        // Any legacy `<kind>:` wire tag is stripped as the parser does, so `int:3` shows `3`.
         val shown =
           requestOverrides[ServeOverrides.KNOB_PREFIX + rawWireKey]?.let {
             ServeOverrides.knobControlValue(it, kind)
           } ?: declared
         val value = WebEscaping.htmlEscape(shown)
-        // `data-knob-initial` stays the DECLARED value even when the request seeds another, and
-        // that gap is load-bearing rather than an oversight: the viewer omits a knob still equal to
-        // it, so a plain visit carries no `knob.*` and the published catalog serves the instant
-        // baked PNG rather than waking the daemon for a fresh (slower, subtly different) re-render
-        // — while a deep-linked knob DIFFERS from it and therefore rides into every render the page
-        // asks for. Pointing this at the request would swallow exactly the override the visitor
-        // came for.
+        // `data-knob-initial` stays the declared value: the viewer omits a knob equal to it, so
+        // plain visits get the baked PNG while a deep-linked value differs and rides into every
+        // render.
         val bool = kind == "bool"
         val initial = if (bool) boolText(declared) else WebEscaping.htmlEscape(declared)
-        // …and `data-knob-default` is the AUTHOR default, which for a seeded variant is not the
-        // same thing. A `@OverrideVariant` preview opens on `current` (`enabled=false`) while its
-        // author default is `true`, and the Wasm tier — unlike the PNG lane — has no baked artifact
-        // carrying that seed: it mounts the live component and has to be told. So the Wasm patch
-        // compares against this rather than against `initial`, or a variant would mount as its
-        // primary (see `wasmOverridePatch`).
+        // `data-knob-default` is the author default, which differs for a seeded `@OverrideVariant`.
+        // The Wasm tier has no baked artifact and must be told the seed, so `wasmOverridePatch`
+        // compares against this, not `initial`.
         val authorDefault = overrideValueText(d.default)
         val defaultAttr =
           if (bool) boolText(authorDefault) else WebEscaping.htmlEscape(authorDefault)
@@ -20057,13 +16801,8 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
           val checked = if (boolText(shown) == "true") " checked" else ""
           "<label class=\"cp-live-row\"><input type=\"checkbox\" $attrs$checked$dis> $label</label>"
         } else if (d.optionsExhaustive && d.options.isNotEmpty()) {
-          // A CLOSED value set (`previewOverrideChoice`): every value is on screen and nothing else
-          // is expressible, so this is a `<select>` rather than a field the visitor has to already
-          // know the vocabulary for. `xs`/`s`/`m`/`l`/`xl` was previously a text box showing `s` —
-          // the current value was visible, the alternatives were not.
-          //
-          // The viewer JS needs no branch for it: it reads `.value` / `.disabled` off the control
-          // and only special-cases `type === "checkbox"`, which a `<select>` (`select-one`) is not.
+          // A closed value set (`previewOverrideChoice`) renders as a `<select>`. The viewer JS
+          // needs no branch: it reads `.value`/`.disabled` and only special-cases checkboxes.
           """
           <label>${label}
             <select $attrs$dis>
@@ -20074,13 +16813,10 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
             .trimIndent()
         } else {
           val inputType = if (d.type == "int" || d.type == "float") "number" else "text"
-          // Any knob that carries discovered options — a font knob (declared via
-          // `previewOverrideFont` / `catalogOverrideFont`, with autocomplete suggestions and/or the
-          // Google Fonts flag), a non-exhaustive value set, or any other knob with declared
-          // `suggestions` (e.g. `theme.colors`) — renders as a combobox "like Locale": a free-text
-          // `<input list>` bound to a `<datalist>` (declared names first, then, for a font knob,
-          // the
-          // full fonts.google.com list). Any knob with no options stays a plain text/number input.
+          // A knob with discovered options (font knobs via `previewOverrideFont` /
+          // `catalogOverrideFont`, open value sets, or declared `suggestions` like `theme.colors`)
+          // renders as an `<input list>` combobox: declared names first, then the Google list for
+          // fonts. Others stay plain inputs.
           val hasOptions = d.googleFonts || d.suggestions.isNotEmpty() || d.options.isNotEmpty()
           if (hasOptions) {
             val listId = "cp-dl-" + wireKey.replace(Regex("[^A-Za-z0-9_-]"), "-")
@@ -20097,12 +16833,9 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
             """
               .trimIndent()
           } else if (inputType == "text" && isLongTextKnob(authorDefault)) {
-            // A multi-line or long string default — an A2UI document, a paragraph of copy — is
-            // unreadable in a one-line field. Same `.cp-knob` control, so the viewer JS (which
-            // reads `.value` off any control) needs no branch. Concatenated rather than a
-            // `trimIndent()` template: the value is multi-line, and trimming indent over it would
-            // change the text. The newline after the open tag is the one the HTML parser drops,
-            // so a value that itself starts with one keeps it.
+            // Multi-line or long string defaults (an A2UI document, copy) get a textarea, still
+            // `.cp-knob`. Concatenated rather than `trimIndent()`, which would alter the value; the
+            // newline after the open tag is the one the HTML parser drops.
             "<label>$label\n  <textarea $attrs rows=\"6\" spellcheck=\"false\"$dis>\n" +
               value +
               "</textarea>\n</label>"
@@ -20136,9 +16869,7 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
       .trimIndent()
   }
 
-  /**
-   * Map a declaration's `type` string to the [PreviewOverrideValue] wire kind the daemon expects.
-   */
+  /** Map a declaration's `type` to the daemon's [PreviewOverrideValue] wire kind. */
   private fun knobKind(type: String): String = ServeOverrides.knobKind(type)
 
   /** Human text for a [ee.schimke.composeai.daemon.protocol.PreviewOverrideValue] in the viewer. */
@@ -20155,17 +16886,12 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
     }
 
   /**
-   * Renders the preview's declared **Remote Compose** named-value knobs (the
-   * `compose/remotecompose` payload carried in a bundle's `previews/<id>.remotecompose.json`) as a
-   * labelled control list — the RC counterpart of [overrideKnobsHtml]. One control per knob
-   * (checkbox for bool, number for int / float / dp, text for string and `#AARRGGBB` colour), whose
-   * edits round-trip through the `rc.<name>=<kind>:<value>` render param ([ServeOverrides] parses
-   * it back into `PreviewOverrides.remoteCompose.namedValues`). Live when [canApplyOverrides]
-   * includes server rendering or the CMP/Wasm host; a plain static bundle without either player
-   * shows the controls disabled with a one-line note. Empty string when the preview declared no RC
-   * knobs (the common case). The controls are marked `.cp-rc-knob` and carry `data-rc-name` /
-   * `data-rc-kind` / `data-rc-initial`; the viewer JS collects them into typed values and routes
-   * edits through the active player.
+   * Renders the preview's declared **Remote Compose** named-value knobs
+   * (`previews/<id>.remotecompose.json`) — the RC counterpart of [overrideKnobsHtml]. Checkbox for
+   * bool, number for int/float/dp, text for string and `#AARRGGBB` colour; edits round-trip via
+   * `rc.<name>=<kind>:<value>` ([ServeOverrides] → `PreviewOverrides.remoteCompose.namedValues`).
+   * Live with server rendering or the CMP/Wasm host; otherwise disabled with a note. Empty when
+   * none. Controls carry `.cp-rc-knob`, `data-rc-name`, `data-rc-kind`, `data-rc-initial`.
    */
   private fun remoteComposeKnobsHtml(
     preview: ServePreview,
@@ -20181,30 +16907,20 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
         val wireName = WebEscaping.htmlEscape(d.name)
         val kind = rcKnobKind(d.default)
         val declared = rcKnobValueText(d.default)
-        // The request's value for this knob, seeded onto the control exactly as `overrideKnobsHtml`
-        // seeds a declared one and for the same reason — but under RC's own typing rules, which are
-        // stricter: an RC seed carries its kind on the wire and defaults to `string` with no
-        // declaration lookup, so only a seed that will PARSE as this knob's kind may be shown.
-        // `ServeOverrides.rcControlValue` holds that rule and returns null for the rest, leaving
-        // the
-        // control on what the render actually used.
+        // Seed the request's value like `overrideKnobsHtml`, but under RC's stricter typing: only a
+        // seed that parses as this knob's kind is shown (`ServeOverrides.rcControlValue`),
+        // otherwise the control keeps what the render used.
         val shown =
           requestOverrides[ServeOverrides.RC_NAMED_PREFIX + d.name]?.let {
             ServeOverrides.rcControlValue(it, kind)
           } ?: declared
         val value = WebEscaping.htmlEscape(shown)
-        // `data-rc-initial` is the AUTHOR default, not what the control opens on when a deep link
-        // seeds it — same load-bearing gap as `data-knob-initial`: the viewer omits a knob still
-        // equal to it, so a plain visit carries no `rc.*` and a published catalog serves the
-        // instant baked snapshot, while a deep-linked value differs and rides into the render.
+        // `data-rc-initial` is the author default (same reasoning as `data-knob-initial`).
         val attrs =
           "class=\"cp-rc-knob\" data-rc-name=\"$wireName\" data-rc-kind=\"$kind\" " +
             "data-rc-initial=\"${WebEscaping.htmlEscape(declared)}\""
         if (kind == "bool") {
-          // `true` OR `1`, the same rule the parser and `hydrateFromUrl` read a bool by. Testing
-          // only for `true` was safe while this always rendered the declaration (whose text is
-          // `true`/`false`); a deep-linked `rc.enabled=bool:1` is a real value the render obeys and
-          // would have drawn the box unticked beside it.
+          // `true` or `1`, as the parser and `hydrateFromUrl` read a bool.
           val checked = if (boolText(shown) == "true") " checked" else ""
           "<label class=\"cp-live-row\"><input type=\"checkbox\" $attrs$checked$dis> $label</label>"
         } else {
@@ -20259,46 +16975,31 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
     }
 
   /**
-   * A small built-in device menu for the viewer dropdown. Pairs are `device-token` → display name;
-   * the tokens are the `@Preview(device=…)` grammar the daemon resolves. TODO: source the full list
-   * from the daemon's `DeviceDimensions` catalog so the menu always matches what the backend knows.
+   * A small built-in device menu: `device-token` → display name, using the `@Preview(device=…)`
+   * grammar. TODO: source the full list from the daemon's `DeviceDimensions` catalog so the menu
+   * always matches the backend.
    */
   /**
-   * Where the snapshot note sends a viewer who wants the disabled overrides to work: the doc that
-   * explains running your own `compose-preview serve` (the live, daemon-backed tier that re-renders
-   * device/orientation/locale/font-scale for real). A published catalog like `preview.coo.ee` only
-   * replays baked PNGs, so those knobs need a local live server. Points at the source doc on `main`
-   * (matching the landing page's `source` link) since the published docs site has no serve page.
+   * Where the snapshot note points viewers who want the disabled overrides: the source doc on
+   * `main` about running a live `compose-preview serve`, since published catalogs only replay baked
+   * PNGs and the docs site has no serve page.
    */
   private const val LOCAL_SERVER_DOCS =
     "https://github.com/yschimke/compose-ai-tools/blob/main/docs/public-preview-server.md#running-one"
 
   /**
-   * The density a page falls back to when nothing this session carries says what the preview
-   * renders at — the last step of the render lane's own chain (`density ?: params.density ?: device
-   * density ?: 2.0`), and correct for exactly the previews that reach that step.
+   * The density a page falls back to when nothing says what the preview renders at — the last step
+   * of the render lane's chain (`density ?: params.density ?: device density ?: 2.0`).
    *
-   * It used to be the ONLY answer: `data-render-density` was this constant on every page of every
-   * catalog, so the value was right only by coincidence. The size-override inputs are authored in
-   * **dp** (the Compose unit) and the viewer converts dp→px against this factor before sending the
-   * px-valued `widthPx` / `min…Px` / `max…Px` params, so on a preview that renders at another
-   * density every one of those numbers reached the renderer in the wrong unit. That is the ordinary
-   * case rather than a corner one: 42 of the 56 device ids `DeviceDimensions` knows are not 2.0, so
-   * `@Preview(device = "id:pixel_5")` renders at 2.75, and a 200dp frame typed into the Fixed box
-   * went out as 400px where the renderer wanted 550.
-   *
-   * [ServeBundleHost.renderDensityFor] answers for a preview whose manifest — or whose device —
-   * says; this is what a page carries when neither does.
+   * The viewer converts dp size overrides to px with this factor, so it must be right per preview:
+   * most `DeviceDimensions` ids are not 2.0. [ServeBundleHost.renderDensityFor] answers when the
+   * manifest or device says; this is the fallback.
    */
   private const val FALLBACK_RENDER_DENSITY = 2f
 
   /**
-   * `data-render-density`'s value: the preview's own density, else [FALLBACK_RENDER_DENSITY].
-   *
-   * Written without a trailing `.0`, so the common densities stay the short strings they were (`2`,
-   * not `2.0`) and a fractional one keeps its digits (`2.625`). The viewer parses it with
-   * `parseFloat`, which reads either, but the attribute is also what a reader inspecting the page
-   * sees when they ask why a dp box became the px it did.
+   * `data-render-density`'s value: the preview's density, else [FALLBACK_RENDER_DENSITY], without a
+   * trailing `.0` (`2`, `2.625`). The viewer uses `parseFloat`.
    */
   internal fun renderDensityAttr(density: Float?): String {
     val value = density?.takeIf { it > 0f && it.isFinite() } ?: FALLBACK_RENDER_DENSITY
@@ -20322,11 +17023,9 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
     )
 
   /**
-   * Watch profiles offered instead for a Wear system's screens. Same ids and dimensions the
-   * renderer already resolves for `@Preview(device = …)`
-   * ([ee.schimke.composeai.daemon.devices.DeviceDimensions]), so a chosen override renders at the
-   * shape the author would have got from the annotation. Round shapes lead because Wear OS is
-   * overwhelmingly round; square/rectangular stay available for the shapes that still ship.
+   * Watch profiles for a Wear system's screens, with the ids and dimensions the renderer resolves
+   * for `@Preview(device = …)` ([ee.schimke.composeai.daemon.devices.DeviceDimensions]). Round
+   * shapes first.
    */
   private val WEAR_SCREEN_DEVICES: List<ScreenDevice> =
     listOf(
@@ -20338,7 +17037,7 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
     )
 
   /**
-   * The device profiles a screen's "Device size" picker offers — watch shapes for a Wear system,
+   * The device profiles a screen's "Device size" picker offers: watch shapes for Wear,
    * phones/foldable/tablet otherwise.
    */
   private fun screenDevicesFor(isWearSystem: Boolean): List<ScreenDevice> =
@@ -20346,16 +17045,10 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
 }
 
 /**
- * The contract's own spelling of a compositing mode — `screen`, `plus-lighter` — for the one place
- * the value has to leave Kotlin: a `data-` attribute the stylesheet selects on.
- *
- * Taken from the enum's `@SerialName` rather than `name.lowercase()` so the CSS and the wire cannot
- * drift apart on a hyphen, exactly as [PageNodeLink.wire] does for the link method.
- *
- * Deliberately NOT [PageBlendMode.css]: that is the CSS *keyword* (`source-over` is spelled
- * `normal` there), and it is what a renderer emits as a property VALUE. This is an identifier the
- * stylesheet matches, and the stylesheet is what turns it into a property — which is the whole
- * reason a manifest string cannot become one.
+ * The contract's spelling of a compositing mode (`screen`, `plus-lighter`) for the `data-`
+ * attribute the stylesheet selects on. Taken from `@SerialName` so CSS and wire cannot drift (as
+ * [PageNodeLink.wire] does). Not [PageBlendMode.css], which is the CSS keyword; here the stylesheet
+ * maps the identifier to a property, so a manifest string can't become one.
  */
 internal val PageBlendMode.wire: String
   get() =

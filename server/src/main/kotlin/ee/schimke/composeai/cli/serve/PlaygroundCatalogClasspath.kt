@@ -10,23 +10,17 @@ import okio.FileSystem
 import okio.Path.Companion.toPath
 
 /**
- * Resolves a catalog's packed **liveBundle** into the classpath a playground snippet compiles
- * against — the production backing for [PlaygroundCompileService]'s `catalogClasspath` seam
- * (`docs/design/PLAYGROUND.md` §8).
+ * Resolves a catalog's packed liveBundle into the classpath a playground snippet compiles against,
+ * backing [PlaygroundCompileService]'s `catalogClasspath` seam (`docs/design/PLAYGROUND.md` §8).
  *
- * This is the compile-time twin of [ServeBundleDaemon.materialize]'s classpath resolution, minus
- * the daemon launch: extract the bundle's `classes/app.jar` (the catalog's own composables) and
- * resolve its `manifest.classpath` Maven coordinates to jars via [CoordinateResolver] (Central +
- * Google Maven + any [extraMavenRepos]). A snippet compiled against the result can `import` both
- * the resolved library (e.g. `androidx.compose.material3.*`, complete because it comes from the
- * unminimized library jar) and whatever of the catalog's own composables survived bundle
- * minimization.
+ * The compile-time twin of [ServeBundleDaemon.materialize]'s resolution, minus the daemon: extract
+ * `classes/app.jar` and resolve `manifest.classpath` coordinates via [CoordinateResolver] (Central,
+ * Google Maven, [extraMavenRepos]). Snippets can import the full libraries and whatever catalog
+ * composables survived minimization.
  *
- * **One flat classpath, no parent/child split.** [ServeBundleDaemon.bundleDaemonClasspaths]
- * partitions jars into a daemon-parent overlay and a user-child loader — but that split is a
- * *render-time* classloader-delegation concern. For *compiling* the snippet, every jar belongs on
- * one classpath, so this resolver keeps it flat (catalog classes first, then embedded libs, then
- * resolved deps).
+ * One flat classpath (catalog classes, embedded libs, resolved deps):
+ * [ServeBundleDaemon.bundleDaemonClasspaths]' parent/child split is a render-time classloading
+ * concern.
  */
 object PlaygroundCatalogClasspath {
 
@@ -124,35 +118,22 @@ object PlaygroundCatalogClasspath {
   }
 
   /**
-   * `android.jar` for an `android`-backend bundle, no platform jars for another backend, or null
-   * when an Android bundle cannot be compiled honestly on this host.
+   * `android.jar` for an `android`-backend bundle, nothing for another backend, or null when an
+   * Android bundle can't be compiled honestly on this host.
    *
-   * The framework is not a Maven coordinate and never appears in `manifest.classpath`, so nothing
-   * above puts it on the compile classpath. Every `androidx.*` class does arrive — an AAR's
-   * `classes.jar` is a resolved dependency like any other — which is why this was invisible for as
-   * long as generated Kotlin named only `androidx.*`: a snippet that imports `android.util.Base64`
-   * or `android.graphics.BitmapFactory` is the first one to need the platform itself, and the Wear
-   * widget native-preview lane emits exactly those two to decode an inlined picture
-   * (`InlineBitmapDeclarations`). Without this the compile fails with `Unresolved reference
-   * 'graphics'` on the import line — a message that reads like a defect in the design rather than a
-   * hole in the host's classpath.
+   * The framework isn't a Maven coordinate, so nothing above adds it; `androidx.*` arrives via
+   * AARs, but a snippet importing `android.util.Base64` or `android.graphics.BitmapFactory` (as the
+   * Wear widget lane's `InlineBitmapDeclarations` does) needs the platform. The render side already
+   * has it (`ServeRunner.buildPlaygroundAndroidDaemonOpener`), so this closes a compile/render
+   * asymmetry.
    *
-   * The render half was never missing it: `ServeRunner.buildPlaygroundAndroidDaemonOpener` puts
-   * `android.jar` on the daemon classpath and disables the Android modes when it cannot find one.
-   * So this closes a compile/render asymmetry rather than adding a new requirement.
+   * A missing platform fails the Android catalog closed, like a missing Maven dependency, rather
+   * than producing misleading `Unresolved reference 'android'` diagnostics; desktop catalogs are
+   * unaffected.
    *
-   * A missing platform fails this Android catalog closed, just like a missing Maven dependency.
-   * Returning a partial classpath would merely turn the host configuration error into misleading
-   * `Unresolved reference 'android'` diagnostics. The decision is scoped by [backend], so a host
-   * without an SDK still resolves every desktop catalog exactly as before.
-   *
-   * [AndroidBundleLaunch.resolveAndroidJar] selects the highest installed SDK stub. That is not the
-   * same jar Robolectric executes: the renderer separately selects an `android-all` runtime SDK (35
-   * by default, overrideable and clamped to Robolectric's supported range). Nor does it reproduce
-   * the catalog producer's `compileSdk`, because the bundle manifest does not carry that value. The
-   * policy here is consequently only "supply an installed Android API surface"; exact producer-SDK
-   * replay needs an additive bundle-format field and coordinated producer/consumer support rather
-   * than an inference in this server.
+   * [AndroidBundleLaunch.resolveAndroidJar] picks the highest installed SDK stub, which matches
+   * neither Robolectric's runtime SDK nor the producer's `compileSdk` (not in the manifest). Exact
+   * replay would need a bundle-format field.
    */
   internal fun requiredAndroidPlatformJars(
     system: String,
@@ -177,26 +158,16 @@ object PlaygroundCatalogClasspath {
 
   /**
    * [coords], plus this host's `skiko-awt-runtime` when the bundle records Skiko bindings without
-   * the native for them.
+   * the native for them, mirroring compose-ai-tools' `SkikoNativePairing` on the live path.
    *
-   * The repair compose-ai-tools' `SkikoNativePairing` applies on the live path
-   * (`ServeBundleDaemon.materialize`), which this twin skipped. A packed bundle records
-   * `skiko-awt:V` but not the platform jar carrying `libskiko` — a Gradle constraint, not a
-   * classpath entry — and the render path promotes those bindings ahead of the desktop sidecar
-   * ([ServeBundleDaemon.jarPrecedesDaemonSidecar]). So the only native left was the sidecar's own:
-   * m3-catalog's bundle on Skiko 0.150.1 linked against the image's 0.144.6 and every native render
-   * died on `UnsatisfiedLinkError: ParagraphKt._nGetUnresolvedCodepointsCount`, then waited out the
-   * render budget. The resolved native lands in the same Maven layout as its bindings, so it is
-   * promoted beside them.
+   * A packed bundle records `skiko-awt:V` but not the platform native jar, and the render path
+   * promotes bindings ahead of the desktop sidecar ([ServeBundleDaemon.jarPrecedesDaemonSidecar]),
+   * so without this the sidecar's mismatched `libskiko` loads and renders die with
+   * `UnsatisfiedLinkError`. Narrow: only bundles with bindings and no host native at their version
+   * gain a coordinate (no `sha256`, since the bundle never recorded one).
    *
-   * Narrow on purpose, as the original is: only a bundle that carries bindings and no native for
-   * this host at their version gains a coordinate. No `sha256`, because the bundle never recorded
-   * the artifact; the version comes from the bindings it did record.
-   *
-   * A native for this host at **another** version is replaced, not joined. Both would be promoted
-   * together, in manifest order, and Skiko loads the first `libskiko` its resource lookup finds —
-   * the stale one — so appending the right jar behind it would reproduce the very link error this
-   * exists to prevent. Other hosts' natives are left alone: they are never loaded here.
+   * A host native at another version is replaced, not joined: Skiko loads the first `libskiko` it
+   * finds, so appending would reproduce the link error. Other hosts' natives are left alone.
    */
   internal fun withHostSkikoNative(
     coords: List<BundleReader.ClasspathEntry.Maven>,
@@ -249,12 +220,10 @@ object PlaygroundCatalogClasspath {
   private const val SKIKO_RUNTIME_PREFIX = "skiko-awt-runtime-"
 
   /**
-   * Every declared coordinate must resolve, or the compile classpath is **incomplete** and the mode
-   * is reported unavailable (return null). Unlike the live-daemon path — which tolerates a partial
-   * classpath and falls back to baked PNGs — a playground compile against a missing catalog library
-   * would surface a misleading `unresolved reference` to the user instead of the honest
-   * mode-unavailable response. So fail closed: log the misses and refuse the whole classpath rather
-   * than assembling a partial one. Returns the resolved jars when every coordinate resolved.
+   * Every declared coordinate must resolve, or the mode is reported unavailable (null). Unlike the
+   * live-daemon path, which tolerates gaps and falls back to baked PNGs, a partial compile
+   * classpath would surface misleading `unresolved reference` errors. Returns the jars when all
+   * resolved.
    */
   internal fun requireAllResolved(
     system: String,
@@ -273,13 +242,9 @@ object PlaygroundCatalogClasspath {
   }
 
   /**
-   * Pure classpath assembly: catalog classes first, then embedded libs, then every resolved Maven
-   * jar, then [platformJars], deduplicated and order-preserving. Separated from [resolve]'s IO so
-   * the ordering/dedup can be unit-tested without a real bundle.
-   *
-   * The platform comes last deliberately. `android.jar` carries stubbed method bodies and a few
-   * types the support libraries also ship, so a catalog jar that declares one of them must win —
-   * the same precedence a Gradle Android compilation gives its bootclasspath.
+   * Pure classpath assembly: catalog classes, embedded libs, resolved Maven jars, then
+   * [platformJars], deduplicated in order. The platform comes last so a catalog jar declaring a
+   * type `android.jar` stubs wins, as with a Gradle bootclasspath.
    */
   internal fun assemble(
     system: String,

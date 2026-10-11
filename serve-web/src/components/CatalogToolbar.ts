@@ -1,15 +1,8 @@
-// `<cp-catalog-toolbar>` — the catalog landing's one toolbar row on a phone.
-//
-// CSS cannot put the filter field (which lives in the tree's sidebar above
-// 960px) on the same row as the Theme and action menus, so this moves it there
-// and back. In the DOM rather than with `order`, so reading, paint and tab order
-// agree at every width (the rule `<cp-viewer-drawers>` follows too).
-//
-// A controller element in the `<cp-group-memory>` shape: it renders nothing and
-// holds no state. On a sectioned catalog the server emits no toolbar, so on a
-// phone this builds the row and removes it again on the way back up. Nothing
-// here is required: without the bundle every control stays in its served
-// position and the `<details>` menus still open.
+// `<cp-catalog-toolbar>`: the catalog landing's single toolbar row on a phone. CSS can't move the
+// filter field (in the sidebar above 960px) onto the row with the Theme and action menus, so this
+// moves it in the DOM (keeping reading, paint and tab order in sync, like `<cp-viewer-drawers>`).
+// Stateless; on a sectioned catalog (no served toolbar) it builds the row on a phone and removes it
+// on the way back. Without the bundle every control stays put and the `<details>` menus still work.
 
 import { ControllerElement, customElement } from "../controllerElement.js";
 
@@ -41,19 +34,10 @@ export class CatalogToolbar extends ControllerElement {
     private readonly onBreakpoint = () => this.reflow();
 
     /**
-     * A menu closes when it is used.
-     *
-     * Picking a theme re-renders the grid in place — no navigation, nothing to dismiss the panel —
-     * so the menu stayed open over the previews the visitor had just asked to see, for as long as
-     * the declared-theme renders took to arrive. The same for Transparent, which is a toggle on the
-     * cards behind it. The Theme chips are INSIDE their `<details>` (`.cp-theme-menu-panel`, the
-     * viewer's own control), so that one closes the way `<cp-viewer-drawers>` closes it; the actions
-     * panel is still its disclosure's sibling, which `closest()` cannot walk, so that one is named
-     * here. A link in the actions panel navigates and takes the whole page with it, closed or not.
-     *
-     * On `document`, not on each panel: the actions panel is moved in and out of the toolbar by
-     * the reflow above, and a listener on the thing being moved is a listener that has to be
-     * re-bound every time the viewport crosses the breakpoint.
+     * A menu closes when used: theme picks and Transparent update the grid in place, so nothing
+     * else dismisses it. The Theme chips are inside their `<details>`; the actions panel is a
+     * sibling `closest()` can't reach, so it is named here. On `document`, since the panels move
+     * with the reflow.
      */
     private readonly onPick = (event: Event) => {
         const target = event.target as Element | null;
@@ -67,18 +51,9 @@ export class CatalogToolbar extends ControllerElement {
     };
 
     /**
-     * The toolbar's two menus are one menu bar, so only one of them is ever open.
-     *
-     * `Theme` and `⋯` are independent `<details>`, and nothing made opening one close the other —
-     * so opening `⋯` and then Theme left both open, their absolutely positioned panels overlapping
-     * at the same `z-index`, with the actions panel (later in the DOM) painting over the Theme
-     * panel's first rows. Measured on a 1280px page: Theme spans x=1060–1200, actions x=1118–1252,
-     * and `elementFromPoint` over Theme's first row answered `cp-bg-btn` — the Transparent button,
-     * not the theme the visitor was reaching for. The choice underneath was unclickable until the
-     * `⋯` was dismissed by hand.
-     *
-     * Driven by `toggle` rather than by clicks on the summaries, so it holds however the disclosure
-     * was opened — pointer, Enter, or a script.
+     * The two toolbar menus behave as one menu bar: opening one closes the other, since their
+     * panels overlap at the same `z-index` and one would cover the other's options. Driven by
+     * `toggle`, so it holds however a disclosure opens.
      */
     private readonly onDisclosureToggle = (event: Event) => {
         const opened = event.target as HTMLDetailsElement | null;
@@ -89,18 +64,13 @@ export class CatalogToolbar extends ControllerElement {
 
     connectedCallback(): void {
         super.connectedCallback();
-        // The sticky toolbar: it holds the Theme pill and the `⋯` menu, and it is already what
-        // sticks. The actions row is nested inside it, so the old fallback to that row — for a
-        // catalog with no Theme control, back when the actions stood on their own above the
-        // toolbar — no longer names anything the toolbar does not already contain.
+        // The sticky toolbar holding the Theme pill and `⋯` menu (the actions row is nested
+        // inside).
         this.bar = document.querySelector(".cp-catalog-tools");
         this.search = document.querySelector(".cp-catalog-menu .cp-searchbar");
         this.sub = document.querySelector(".cp-sub");
-        // The pills, when the server put them on the IDENTITY row rather than in a toolbar — a
-        // sectioned catalog, whose filter belongs to the sidebar, and browser mode. They come down
-        // into the phone's one row beside the filter, which is where they were before that row
-        // stopped being emitted; a toolbar that already holds them matches nothing here and is
-        // left alone.
+        // The pills when the server put them on the identity row (sectioned catalogs, browser
+        // mode); on a phone they move into the row beside the filter.
         this.toggles = document.querySelector(
             ".cp-catalog-head-row > .cp-head-toggles",
         );
@@ -118,9 +88,7 @@ export class CatalogToolbar extends ControllerElement {
         this.reflow();
         this.watchThemeValue();
         document.addEventListener("click", this.onPick);
-        // `toggle` does not bubble, so this listens in the CAPTURE phase, which reaches a
-        // non-bubbling event on the way down. On `document` rather than on each `<details>` for the
-        // same reason `onPick` is: the panels are moved in and out of the toolbar by the reflow.
+        // `toggle` doesn't bubble, so listen in the capture phase, on `document` since panels move.
         document.addEventListener("toggle", this.onDisclosureToggle, true);
     }
 
@@ -141,12 +109,8 @@ export class CatalogToolbar extends ControllerElement {
     private reflow(): void {
         if (!this.homes.length) return;
         const phone = !!this.phone?.matches;
-        // Only on a CROSSING. Re-inserting a node where it already is looks like a no-op and is
-        // not one: it detaches and re-attaches the element, and the browser rebuilds what it hangs
-        // off the attachment. The filter field is an `<input type="search">`, whose clear button
-        // and focus ring are exactly that — so a desktop page that "restored" what it had never
-        // moved came back subtly different from one this element never touched, which is how the
-        // page capture caught it. Nothing to do until the shape actually changes.
+        // Only on a crossing: re-inserting a node in place still detaches it, resetting the search
+        // field's clear button and focus ring.
         if (phone === this.moved) return;
         if (phone && !this.openBar()) return;
         this.moved = phone;
@@ -159,14 +123,8 @@ export class CatalogToolbar extends ControllerElement {
     }
 
     /**
-     * The row to move into on a phone, built if the server emitted none.
-     *
-     * The server emits one only for a catalog whose filter field is in it (a flat grid's); where
-     * the tree owns the filter, that row would be a sticky band carrying two pills, so the pills
-     * are on the identity row instead and there is nothing here to fill. A phone still wants them
-     * and the filter together above the grid, and it is the only width that does — so the row is
-     * built on the way down and taken away again on the way back up, rather than served to
-     * everybody as an empty element to be hidden.
+     * The phone row, built if the server emitted none (it only does for flat grids where the filter
+     * lives in it), and removed again on the way back up.
      */
     private openBar(): Element | null {
         if (this.bar) return this.bar;
@@ -191,13 +149,9 @@ export class CatalogToolbar extends ControllerElement {
     /** Where a moved block goes on a phone. */
     private placeOnPhone(el: Element): void {
         if (!this.bar) return;
-        // The summary line — "1194 preview(s) · 186 views · hold a card for a live session" — is a
-        // TALLY, not a control: it says what the catalog holds, which is a thing to read once and
-        // never again, and on a phone it was the last row standing between the toolbar and the
-        // previews it counts. It goes below the grid, beside the download action and the
-        // provenance strip, where the rest of the catalog's own metadata already sits. Not
-        // hidden: the live-session hint in it is the only place a phone is told a card can be
-        // held, and a phone is where that gesture exists.
+        // The summary line is a tally, not a control, so on a phone it moves below the grid with
+        // the other metadata. Not hidden: it carries the only hint that a card can be held for a
+        // live session.
         if (el === this.sub) {
             const download = document.querySelector(".cp-catalog-download");
             if (download?.parentNode)
@@ -205,27 +159,20 @@ export class CatalogToolbar extends ControllerElement {
             else document.querySelector(".cp-main")?.appendChild(el);
             return;
         }
-        // The menus ride at the trailing edge, which is where they already are in a bar that was
-        // served with them — and where they land in one this element built, since the filter goes
-        // in ahead of them.
+        // The menus sit at the trailing edge.
         if (el === this.toggles) {
             this.bar.appendChild(el);
             return;
         }
-        // The filter takes the width — so it goes in front of the `.cp-head-toggles` group that
-        // holds the menus, and first when the bar has no such group yet (one built here, or a
-        // catalog with neither a Theme control nor an action to offer).
+        // The filter takes the width, so it goes before the `.cp-head-toggles` group (or first if
+        // none).
         const toggles = this.bar.querySelector(".cp-head-toggles");
         this.bar.insertBefore(el, toggles ?? this.bar.firstChild);
     }
 
     /**
-     * Keep the Theme pill naming the theme in force.
-     *
-     * Folded away, the pill is all that says which theme the grid is on, and the answer is the
-     * visitor's: the landing's own script marks a chip pressed from what this tab remembers (or
-     * from `?theme=`) on load, and again on every click, with no page load in between. Mirroring
-     * `aria-pressed` keeps this decoupled from that script, which has no hook of its own.
+     * Keep the Theme pill naming the theme in force by mirroring the chips' `aria-pressed`, which
+     * the landing script sets on load and on every click.
      */
     private watchThemeValue(): void {
         const bar = document.getElementById("cp-catalog-theme-bar");
@@ -236,9 +183,7 @@ export class CatalogToolbar extends ControllerElement {
                 '.cp-theme-btn[aria-pressed="true"]',
             );
             const name = pressed?.textContent?.trim();
-            // Only when it actually changes: the server seeds the pill with the leading built-in,
-            // which is the right answer for most visitors, and rewriting the same string is a DOM
-            // mutation for nothing.
+            // Only when it changes.
             if (name && name !== value.textContent) value.textContent = name;
         };
         sync();

@@ -20,13 +20,9 @@ import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
 
 /**
- * The runtime catalog-admin surface over real HTTP: publishing a catalog with `POST
- * /admin/catalogs`, listing with `GET`, retiring with `DELETE` — and, most importantly, that the
- * routes are gated by the **admin** token even though this server runs `--public`, and that a newly
- * published catalog shows up on the front-page index without a restart.
- *
- * The catalog fetch is stubbed (a static bundle host registered on demand); what's exercised here
- * is the route wiring, the gate, and the effect on the server's live view of its catalog set.
+ * The runtime catalog-admin surface over real HTTP: publish (`POST /admin/catalogs`), list (`GET`),
+ * retire (`DELETE`), gated by the admin token even on a `--public` server, and a newly published
+ * catalog appears on the front page without a restart. The catalog fetch is stubbed.
  */
 class ServeAdminRoutingTest {
 
@@ -92,9 +88,9 @@ class ServeAdminRoutingTest {
     )
 
   /**
-   * The delivery branches each repository publishes, as the onboarding flow will see them. Keyed by
-   * `<owner>/<repo>`; a repository absent from the map is one `git ls-remote` couldn't read at all,
-   * which is a different answer from one that publishes nothing (see [ServeOnboarding]).
+   * The delivery branches each repository publishes, keyed by `<owner>/<repo>`. An absent
+   * repository is one `git ls-remote` couldn't read, which differs from one publishing nothing (see
+   * [ServeOnboarding]).
    */
   private val remoteBranches =
     mutableMapOf(
@@ -111,9 +107,8 @@ class ServeAdminRoutingTest {
     )
 
   /**
-   * The source-onboarding lane: a read of a pasted repository, and nothing more. There is no build
-   * route to drive, by design — an imported project is built on a runner in the import staging
-   * repository and arrives here as an ordinary `design-artifacts/` branch.
+   * The source-onboarding lane only reads a pasted repository; imports are built elsewhere and
+   * arrive as `design-artifacts/` branches.
    */
   private val sourceOnboarding =
     ServeSourceOnboarding(
@@ -158,25 +153,22 @@ class ServeAdminRoutingTest {
     )
 
   /**
-   * The in-browser Wasm apps, as the server sees them: a LIVE map, empty at boot. A catalog
-   * published at runtime can carry one, so the `/wasm/` route has to exist and read through to the
-   * current contents rather than a boot-time snapshot.
+   * The Wasm apps as a live map, empty at boot: a runtime-published catalog can carry one, so
+   * `/wasm/` must read the current contents.
    */
   private val wasmCatalogs = java.util.concurrent.ConcurrentHashMap<String, File>()
 
   /**
-   * The live trust store + its admin, wired the way `serve` wires them. Starts empty so a test can
-   * observe the whole point of the feature: a producer trusted over HTTP is in force on the running
-   * server, without the image rebuild the baked trust store used to require.
+   * The live trust store and its admin, empty at start, so a producer trusted over HTTP is shown to
+   * take effect on the running server.
    */
   private val trustStoreFile = ServeTrustStoreFile("/config/producers.json".toPath(), fs)
   private val trust = MutableTrustStore()
   private val trustAdmin = ServeTrustAdmin(trust, trustStoreFile, onLog = {})
 
   /**
-   * The live site map + its admin, started EMPTY on purpose. A box with no sites at boot is the
-   * case that used to be unfixable without a restart, so it is the one worth driving over HTTP: the
-   * request-path interceptor has to exist on a server that was configured with no hostnames.
+   * The live site map, empty on purpose: the request-path interceptor must exist on a server
+   * configured with no hostnames.
    */
   private val siteRegistry = ServeSiteRegistry.empty()
   private val siteAdmin =
@@ -188,10 +180,7 @@ class ServeAdminRoutingTest {
     )
   private val optimizerWork = ServeBackgroundWork()
 
-  /**
-   * The UI builder's catalog settings, over an environment that serves `m3-catalog` and `remote-m3`
-   * — what an operator's `.env` gives before any `uiBuilder` block exists.
-   */
+  /** The UI builder's catalog settings over an environment serving `m3-catalog` and `remote-m3`. */
   private val uiBuilderEnvironment =
     ServeUiBuilderSettings.Effective(
       catalogs = setOf("m3-catalog", "remote-m3"),
@@ -221,8 +210,8 @@ class ServeAdminRoutingTest {
     )
 
   /**
-   * The deployment's settings.json, as the entrypoint left a box: the guidelines model came from
-   * settings.json, the catalog MCP from `.env`. The model is live; the MCP is bound at startup.
+   * The deployment's settings as the entrypoint leaves them: the guidelines model is live, the
+   * catalog MCP is bound at startup.
    */
   private val liveModels = mutableListOf<String?>()
   private val settingsAdmin =
@@ -487,9 +476,8 @@ class ServeAdminRoutingTest {
 
   @Test
   fun `scanning a project that publishes nothing reports its modules`() {
-    // The gap this closes: `POST /admin/onboard` answers 404 for a repository with no delivery
-    // branch, which is every repository the first time. Scanning it answers the question the person
-    // pasting the URL actually has.
+    // `POST /admin/onboard` 404s for a repository with no delivery branch (every repository at
+    // first); scanning answers what the person pasting the URL wants to know.
     val (code, body) =
       send(
         "/admin/onboard/scan",
@@ -513,9 +501,8 @@ class ServeAdminRoutingTest {
 
   @Test
   fun `forcing a refresh needs the admin token, and without it does no work`() {
-    // The counterpart to the public-server refusal: with the credential the operator configured,
-    // `?force=1` reaches the refresher; without it the request is refused the way every other
-    // admin action is, and nothing is reloaded.
+    // With the admin credential `?force=1` reaches the refresher; without it it's refused like any
+    // admin action.
     assertEquals(404, send("/compose-m3/refresh?force=1", method = "POST", token = null).first)
     assertEquals(404, send("/compose-m3/refresh?force=1", method = "POST", token = "wrong").first)
     assertTrue(refreshes.isEmpty(), "a refused force must do no remote work: $refreshes")
@@ -544,9 +531,8 @@ class ServeAdminRoutingTest {
 
   @Test
   fun `the per-catalog theme-cache actions are gated like every other admin route`() {
-    // The pair an operator reaches for when a catalog's pixels look wrong. Both mutate a durable
-    // store, so both sit behind the same credential as the rest of the admin surface — and a
-    // missing or wrong token 404s rather than confirming the route is there.
+    // Regenerate and drop mutate a durable store, so both need the admin credential; a missing or
+    // wrong token 404s.
     for (action in listOf("regenerate", "drop")) {
       val path = "/admin/catalogs/compose-m3/theme-cache/$action"
       assertEquals(404, send(path, method = "POST", token = null).first, action)
@@ -632,10 +618,8 @@ class ServeAdminRoutingTest {
       502,
       send("/admin/catalogs", method = "POST", body = """{"system":"ghost"}""").first,
     )
-    // A duplicate of an already-served catalog is a conflict, not a silent overwrite — once the
-    // config file agrees with what is running. When it does NOT, the same request is the retry path
-    // that repairs a swap whose persistence failed, and answers 200; the fixture's tracker is
-    // seeded without a matching file entry, so this states the agreement it is testing.
+    // A duplicate of a served catalog is a conflict once the config file agrees; when it doesn't,
+    // the same request is the retry that repairs a failed persistence (200).
     configFile.save(
       configFile
         .load()
@@ -658,9 +642,8 @@ class ServeAdminRoutingTest {
 
   @Test
   fun `a Wasm app registered after boot is served, and unregistering stops it`() {
-    // An admin-enabled server starts with no Wasm apps at all, so the route must be registered
-    // anyway and resolve against the live map — otherwise a catalog published at runtime gets no
-    // /wasm/<system>/ lane until the container is recreated.
+    // The `/wasm/` route must be registered even with no apps at boot, resolving against the live
+    // map.
     assertEquals(404, send("/wasm/latecomer/index.html", token = null).first)
 
     val dir = Files.createTempDirectory("admin-wasm").toFile().also { it.deleteOnExit() }
@@ -859,10 +842,8 @@ class ServeAdminRoutingTest {
     val (code, msg) =
       send("/admin/catalogs", method = "POST", body = """{"system":"moved","repo":"someorg/two"}""")
 
-    // This used to be a 409 telling the caller to retire it first — a two-step dance whose failure
-    // mode was a catalog published nowhere, and whose 409 read as success to the deployment
-    // reconcile that drives this route. A repo change is now one atomic swap: fetch the new source,
-    // then record where the bytes come from.
+    // A repo change is one atomic swap (fetch the new source, record its origin), not a 409
+    // demanding a retire first.
     assertEquals(200, code, msg)
     assertEquals("someorg/two", tracker.configFor("moved")?.repo)
     assertTrue(send("/admin/catalogs").second.contains("someorg/two"))
@@ -993,9 +974,7 @@ class ServeAdminRoutingTest {
 
   @Test
   fun `a site published over HTTP serves that hostname immediately`() {
-    // The whole point: this server booted with NO sites, so before the POST the hostname is just
-    // another vhost and `/compose-m3/` is the ordinary canonical path. Adding it used to need
-    // SERVE_SITES in the box's .env and a container recreate.
+    // This server booted with no sites, so adding one over HTTP must take effect without a restart.
     assertEquals(
       200,
       send("/compose-m3/", host = "m3.example.com", followRedirects = false).first,

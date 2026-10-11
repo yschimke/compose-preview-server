@@ -1,23 +1,12 @@
-// `<cp-acceptance-audit>` — the catalog-wide view of what this catalog has accepted, on the design
-// parity dashboard.
+// `<cp-acceptance-audit>` — the catalog-wide view of accepted differences on the design parity
+// dashboard. `<cp-acceptance>` evaluates one comparison, so an acceptance whose target was removed
+// or renamed (`orphaned-target`) never shows there; this runs `walkCatalog` against the preview
+// inventory with no comparison. It is a validation-only pass (no rasters, so healthy records come
+// back `out-of-scope`), so it reports:
 //
-// The band next door (`<cp-acceptance>`) evaluates **one comparison**, and that is the whole reason
-// this one exists. An acceptance whose target no longer exists — a removed or renamed preview,
-// reference, component or variant — is never scoped into any comparison, so a browser that only ever
-// evaluates from inside one leaves `orphaned-target` permanently invisible while `design-parity`
-// reports it for the same record. The rule that catches it is `walkCatalog`: the same engine, run
-// once against the catalog's preview inventory with no comparison at all.
-//
-// **It runs the validation-only pass, and says only what that pass can support.** With no rasters
-// there are no gates and no scores, so a record whose target exists comes back `out-of-scope` — the
-// token that means "not evaluated here", not "valid". This band therefore reports two things and
-// refuses to report a third:
-//
-//   - **refusals and orphans**, which are document facts and need no comparison to be true;
-//   - **the lifecycle join** — an acceptance whose tracking issue is closed while the record is
-//     still committed, which is the stale configuration §6 asks to surface;
-//   - and **never a verdict**: whether an acceptance still matches its recorded difference is a
-//     per-comparison answer, and it stays on the comparison page where the pixels are.
+// - **refusals and orphans** — document facts needing no comparison;
+// - **the lifecycle join** — acceptances whose tracking issue is closed while the record remains;
+// - **never a verdict** — matching is per-comparison and stays on the comparison page.
 
 import { ControllerElement, customElement } from "../controllerElement.js";
 import { Fragment, h, render, type VNode, type VNodeChild } from "../vue.js";
@@ -39,11 +28,8 @@ interface Payload {
 }
 
 /**
- * How a walk's statuses read.
- *
- * `out-of-scope` is deliberately absent: in a validation-only pass it is every healthy record, and
- * naming it in a row would publish "authored for another comparison" against acceptances authored
- * for this catalog's own comparisons.
+ * How a walk's statuses read. `out-of-scope` is omitted: in a validation-only pass it is every
+ * healthy record.
  */
 const STATUS_LABELS: Record<string, string> = {
     refused: "refused",
@@ -53,12 +39,8 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 /**
- * The one reason worth a sentence rather than its token.
- *
- * `orphaned-target` is a **reason** under `refused`, not a status of its own — and it is the reason
- * this panel exists, so a row that spelled it as one more grep token beside `artifact-unreadable`
- * would bury the finding no comparison can reach. The rest stay verbatim: they are what an author
- * greps for, and a paraphrase per token would be a second vocabulary for the same set.
+ * `orphaned-target` is a reason under `refused`, and the one this panel exists for, so it gets a
+ * sentence; other tokens stay verbatim for grepping.
  */
 const ORPHANED = "orphaned-target";
 
@@ -114,8 +96,7 @@ export class AcceptanceAudit extends ControllerElement {
                 payload.issues ?? [],
             );
         } catch {
-            // An engine that threw has audited nothing, and a panel that then rendered "0 problems"
-            // would be a clean bill of health nobody measured.
+            // An engine that threw audited nothing, so no "0 problems".
             this.failed = true;
         }
         if (evaluation !== this.evaluation || !this.isConnected) return;
@@ -161,9 +142,8 @@ export class AcceptanceAudit extends ControllerElement {
         }
         const report = this.report;
         if (!report) return null;
-        // `unavailable` is not `absent`, for the reason the comparison band draws the same line: the
-        // server only mounts this panel for a catalog that publishes a document, so "could not
-        // fetch" must not render as "accepts nothing".
+        // `unavailable` is not `absent`: the panel only mounts for catalogs that publish a
+        // document.
         if (report.state === "unavailable") {
             return h(Fragment, null, [
                 h("h2", { class: "cp-status-sec" }, "Known differences"),
@@ -199,10 +179,8 @@ export class AcceptanceAudit extends ControllerElement {
 
         const entries = Object.entries(report.statuses);
         if (entries.length === 0) return null;
-        // Two axes, joined here and nowhere else: `status` is what the walk concluded, `lifecycle`
-        // is what the published issue index says. A record can be in both lists — an orphan whose
-        // issue also closed is two separate pieces of cleanup — and neither is derived from the
-        // other.
+        // Two independent axes joined here: `status` from the walk, `lifecycle` from the issue
+        // index. A record can be in both lists.
         const problems = entries.filter(
             ([, entry]) => entry.status !== "out-of-scope",
         );
@@ -229,13 +207,8 @@ export class AcceptanceAudit extends ControllerElement {
     }
 
     /**
-     * The nothing-to-do line — and it says only as much as the evidence supports.
-     *
-     * **An unknown lifecycle is not an open one.** The index is fail-soft, capped, and can lag; an
-     * acceptance it does not mention stays `unknown`, and that is missing evidence, not a live
-     * issue. Reporting "every tracking issue is open" over a set containing one would turn an index
-     * that failed to parse into a clean bill of health for a catalog whose acceptances might all be
-     * stale — the same inference-from-absence the join itself refuses to make one level down.
+     * The nothing-to-do line, claiming only what the evidence supports: an `unknown` lifecycle (the
+     * index is fail-soft, capped and can lag) is missing evidence, not an open issue.
      */
     private allClear(
         entries: Array<[string, AcceptanceReport["statuses"][string]]>,
@@ -256,12 +229,7 @@ export class AcceptanceAudit extends ControllerElement {
         );
     }
 
-    /**
-     * Refusals and orphans — the findings a validation-only pass can stand behind.
-     *
-     * `orphaned-target` is the one this panel exists for: no comparison scopes it in, so the
-     * per-comparison band cannot show it at all.
-     */
+    /** Refusals and orphans, which a validation-only pass can stand behind. */
     private problems(
         rows: Array<[string, AcceptanceReport["statuses"][string]]>,
     ): VNode | null {
@@ -296,11 +264,8 @@ export class AcceptanceAudit extends ControllerElement {
     }
 
     /**
-     * Acceptances whose tracking issue is closed while the record is still committed.
-     *
-     * **Positive evidence only.** An acceptance missing from the index stays `unknown` and is not
-     * listed: the index is fail-soft, capped and can lag, and inferring closure from absence would
-     * mark a whole catalog stale the first time the file failed to parse.
+     * Acceptances whose tracking issue is closed while the record is still committed. Positive
+     * evidence only: absence from the index stays `unknown`.
      */
     private closed(
         rows: Array<[string, AcceptanceReport["statuses"][string]]>,

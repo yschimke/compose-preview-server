@@ -1,40 +1,19 @@
-// Where a recorded interaction is up to, and what pressing anything on the transport does to that.
+// Where a recorded interaction is up to, and what each transport control does. The browser loops an
+// APNG forever (`loopCount = 0`) with no pausing or slowing, so on → off → on is indistinguishable
+// from its reverse; the viewer drives playback itself. This is the DOM-free part (position in ms,
+// rate, running); `viewer.ts` owns the decoder, canvas and clock.
 //
-// ### Why a playhead exists at all
-//
-// The lane used to hand the capture to an `<img>` and let the browser play it. That is one line of
-// code and it answers none of the questions a reader actually has: an APNG published by this
-// project loops forever (`loopCount = 0`), so a capture that toggles a switch on and then off runs
-// on → off → on → off with no seam, and the reader cannot tell a transition from its own reverse.
-// There is no pausing it, no slowing it down, and no way to sit on the two frames either side of
-// the moment being documented — which is the entire reason someone opened a recording rather than
-// looking at the still.
-//
-// So the viewer drives playback itself, frame by frame, and this is the part of that with no DOM
-// in it: a position in milliseconds, a rate, and whether it is running. `viewer.ts` owns the
-// decoder, the canvas and the clock; every decision about what those should show is here, with
-// tests beside it.
-//
-// ### Play once, then offer it again
-//
-// [tick] stops dead on the last frame instead of wrapping. A loop is the right default for a
-// capture embedded in a README, where nobody is going to press anything; it is the wrong one for a
-// reader studying a transition, because the recording never sits still long enough to be read and
-// the reader has no idea which pass they are watching. Pressing play from the end restarts from
-// the top ([toggle]), which is what every video player does and what "watch that again" means.
+// [tick] stops on the last frame instead of wrapping, so a transition can be read; play from the
+// end restarts from the top ([toggle]).
 
 /** The frames a capture published, and how long each is held. */
 export interface MotionTimeline {
     /** Frames in the capture. Always ≥ 1 — a capture with none is not a capture. */
     frameCount: number;
     /**
-     * How long ONE frame is held, in milliseconds.
-     *
-     * Uniform on purpose, because every capture this project publishes is: the recorder advances
-     * its clock by a fixed `frameIntervalMs` and both encoders write that one delay onto every
-     * frame. Reading a per-frame duration table off the decoder would model a generality the
-     * format allows and this pipeline never produces, and it would make the timeline's scale
-     * depend on frames that have not been decoded yet.
+     * How long one frame is held, in ms. Uniform because every capture here is (the recorder
+     * advances a fixed `frameIntervalMs` and both encoders write that delay), and a per-frame table
+     * would depend on undecoded frames.
      */
     frameDurationMs: number;
 }
@@ -50,12 +29,8 @@ export interface PlaybackState {
 }
 
 /**
- * The rates offered, slowest first.
- *
- * Captures are recorded at 60fps and the motion being documented is often a single spring settling
- * over ~300ms, so the useful end of this range is the slow end: at 0.25× that settle takes over a
- * second and its overshoot is separable by eye. 2× is there for the long scripted interactions
- * (three taps with a 700ms gap between them) where the gaps, not the motion, are most of the run.
+ * Offered rates, slowest first. Captures are 60fps and often document a ~300ms spring, so 0.25×
+ * makes overshoot visible; 2× suits long scripted interactions where gaps dominate.
  */
 export const PLAYBACK_RATES = [0.25, 0.5, 1, 2] as const;
 
@@ -63,26 +38,15 @@ export const PLAYBACK_RATES = [0.25, 0.5, 1, 2] as const;
 export const DEFAULT_RATE = 1;
 
 /**
- * How far the playhead can travel: the last frame's timestamp, at 1×.
- *
- * One frame short of how long the capture *runs* (`frameCount × frameDurationMs`), and that is the
- * right quantity for every consumer here. The playhead addresses frames, so its range is first
- * frame → last frame; measuring the bar against the run time instead would leave the fill at
- * `(N-1)/N` — a timeline that reads 93% full while the thumb sits hard against its right end and
- * the counter says frame 14 of 14. The last frame is still held for its own duration on screen;
- * nothing here is shortened, and only the number attached to the end of the bar changes.
+ * How far the playhead can travel: the last frame's timestamp at 1×, one frame short of the run
+ * time, since the playhead addresses frames (otherwise the bar reads (N-1)/N full at the last
+ * frame).
  */
 export function spanMs(timeline: MotionTimeline): number {
     return Math.max(0, timeline.frameCount - 1) * timeline.frameDurationMs;
 }
 
-/**
- * Which frame is on screen at [positionMs].
- *
- * Clamped at both ends rather than wrapped: the position is already clamped by [tick] and [seek],
- * and a frame index that wrapped would show frame 0 for the final instant of a capture that had
- * just been played to its end.
- */
+/** Which frame is on screen at [positionMs], clamped at both ends rather than wrapped. */
 export function frameAt(timeline: MotionTimeline, positionMs: number): number {
     if (timeline.frameDurationMs <= 0) return 0;
     const raw = Math.floor(positionMs / timeline.frameDurationMs);
@@ -116,16 +80,8 @@ export function atEnd(timeline: MotionTimeline, positionMs: number): boolean {
 }
 
 /**
- * Advance the clock by [elapsedMs] of wall time.
- *
- * Wall time × rate, so slowing playback down stretches the capture rather than dropping frames out
- * of it — at 0.25× every frame is held four times as long and none is skipped. A paused state is
- * returned untouched, which is what lets the caller drive this from a single animation frame
- * callback without tracking whether the last one was during playback.
- *
- * Lands ON the last frame and stops. Not one frame past it and not back at the start: the final
- * frame is the resting state the interaction ended in, and leaving it on screen is the answer to
- * "what did that do?".
+ * Advance by [elapsedMs] × rate, so slower playback holds frames longer without skipping any.
+ * Paused state is returned untouched. Stops on the last frame, the interaction's resting state.
  */
 export function tick(
     state: PlaybackState,
@@ -139,13 +95,7 @@ export function tick(
     return { ...state, positionMs: advanced };
 }
 
-/**
- * Play / pause — and, from a finished pass, play AGAIN from the top.
- *
- * The restart is the whole reason this is not a one-line boolean flip. A transport whose play
- * button did nothing once the capture had run to its end would strand the reader on the last frame
- * with the control that looks like it should help greyed out in spirit if not in markup.
- */
+/** Play/pause, and from a finished pass, play again from the top. */
 export function toggle(
     state: PlaybackState,
     timeline: MotionTimeline,
@@ -161,12 +111,7 @@ export function replay(state: PlaybackState): PlaybackState {
     return { ...state, positionMs: 0, playing: true };
 }
 
-/**
- * Scrub to a frame.
- *
- * Pauses, always. Dragging the timeline is an act of inspection — the reader is choosing a moment
- * to look at — and a playhead that kept running would carry them off it before they had read it.
- */
+/** Scrub to a frame; always pauses, since scrubbing is inspection. */
 export function seek(
     state: PlaybackState,
     timeline: MotionTimeline,
@@ -200,12 +145,8 @@ export function normaliseRate(raw: number | string | null | undefined): number {
 }
 
 /**
- * The transport's readout: elapsed of total, then which frame that is.
- *
- * Seconds to one decimal, because a capture is one to three seconds long and a minutes:seconds
- * clock would spend its first three characters saying "0:0". The frame count rides beside it
- * because it is the unit the ← / → keys move in — a reader stepping through a spring wants to know
- * they are on frame 84 of 147, not at 1.4 seconds of 2.4.
+ * The readout: elapsed of total in seconds (one decimal), then the frame number, the unit the ← / →
+ * keys step in.
  */
 export function readout(timeline: MotionTimeline, positionMs: number): string {
     const seconds = (ms: number) => `${(ms / 1000).toFixed(1)}s`;

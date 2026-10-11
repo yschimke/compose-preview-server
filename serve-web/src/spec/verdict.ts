@@ -1,12 +1,6 @@
-// What the spec lane says about the pair in front of the visitor.
-//
-// Two surfaces report one comparison — the readout under the views, and the design-spec chip up in
-// the identity row — and the reason they are decided together here is that they used to be able to
-// disagree. The chip carries the score baked at PUBLISH; the moment an override, a knob or a theme
-// moves the render, that number describes a frame that is no longer on the stage. So the lane
-// overwrites it while it has a live measurement, and restores the published one on the way out —
-// off the lane there is nothing live to describe, and leaving a knob-bent number there would
-// misreport every later visit as if it were the publish.
+// What the spec lane says about the pair on screen. The readout and the identity row's design-spec
+// chip are decided together so they can't disagree: the chip's score is baked at publish, so the
+// lane overwrites it with a live measurement while active and restores the published one on exit.
 
 // Shared rather than restated: the parity page decides a pair is worth opening on the same number
 // this lane then judges it by, and the two disagreeing reads as a broken page.
@@ -18,14 +12,9 @@ export { GEOMETRY_REPORT_THRESHOLD };
 export type MatchBand = "match" | "close" | "off";
 
 /**
- * The bands read the distribution a real catalog produces, so they moved when the metric did.
- *
- * They used to be 99.5 / 97, taken over a score that averaged its cost across every pixel of the
- * canvas — which put nearly every pair in the high nineties whatever it looked like. Now that the
- * score is measured over drawn content (`scorer/planes.ts`), wear-m3-catalog's 186 published pairs
- * run from 4% to 100% with a median of 91: 63 sit at or above 95, and the 59 below 85 are the
- * divergences a reader would name on sight — a 4% scroll indicator, a 52% picker, a 70% stepper
- * that lost its button fills.
+ * Bands calibrated to the content-measured score (`scorer/planes.ts`): on wear-m3-catalog's
+ * published pairs scores span 4–100% with a median of 91, and pairs below 85 are visible
+ * divergences.
  */
 export function matchBand(percent: number): MatchBand {
     if (percent >= 95) return "match";
@@ -39,12 +28,8 @@ export function chipText(name: string, percent: number): string {
 }
 
 /**
- * The readout under the view buttons.
- *
- * Two numbers, not one, because they answer different questions: the match percentage is
- * structural (how alike are these?), the changed-pixel percentage is literal (how much of the frame
- * moved?). A 99% structural match with 8% of pixels differing is a uniform shift; the reverse is a
- * small element in the wrong place. Reporting only one loses that.
+ * The readout under the view buttons: match % is structural ("how alike"), changed-pixel % literal
+ * ("how much moved"); together they distinguish a uniform shift from a misplaced element.
  */
 export function readout(
     percent: number,
@@ -69,22 +54,10 @@ export function changedPercentOf(
 }
 
 /**
- * Said in place of a match score when the render on the stage is not the one the spec describes.
- *
- * A design spec is imported ONCE, at the catalog's baseline — default theme, declared knob
- * defaults, no overrides. There is no per-theme, per-locale or per-font-scale export, and the
- * comparison has no way to synthesise one. So the moment an override moves the render, the two
- * frames are answering different questions and any percentage taken across them is measuring the
- * override rather than the component.
- *
- * On `shape-bun` under Light Medium Contrast that is not a subtle overstatement: the geometry is
- * identical and only the token colour moves, so 89% of the pixels "differ" and the lane reported
- * "90.5% match" — a number that reads as a parity finding and is nothing of the kind. Suppressing
- * it costs a reader nothing, because there was no honest number to lose.
- *
- * The changed-pixel count still goes out, because it is literally true about the two frames in
- * front of the visitor. What it is NOT is a verdict, and the line says so rather than leaving the
- * reader to infer it.
+ * Said instead of a match score when the stage's render is not the one the spec describes. A spec
+ * is imported once at the catalog baseline (default theme, knob defaults, no overrides), so a score
+ * across an overridden render measures the override, not the component. The changed-pixel count is
+ * still reported, explicitly not as a verdict.
  */
 export function offBaselineReadout(
     changedPercent: number,
@@ -97,13 +70,8 @@ export function offBaselineReadout(
 }
 
 /**
- * Names the thing on the other side of the pair in [offBaselineReadout].
- *
- * The argument is the same whichever source is picked and the wording must not pretend otherwise: a
- * sibling catalog's render is produced at ITS baseline, under its own theme and knobs, so an
- * overridden render is as incomparable to it as it is to an imported spec. What changes is only
- * which noun the sentence has to use, and saying "the imported spec" over a panel showing
- * wear-m3-catalog's render would be the lane describing a pair it is not showing.
+ * The noun for the other side in [offBaselineReadout]: a sibling catalog's render is equally
+ * incomparable once overridden, so only the wording changes.
  */
 export function counterpartName(label: string): string {
     const name = label.trim();

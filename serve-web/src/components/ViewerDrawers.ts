@@ -1,16 +1,6 @@
-// `<cp-viewer-drawers>` — the viewer's two drawers, the phone reflow, the theme toggle's value,
-// and the component filter.
-//
-// A page-level controller, not a control: everything it owns is server-rendered markup it wires
-// behaviour onto (the same shape as `<cp-group-memory>`), so it renders nothing and `serve.css`
-// hides the tag. The decisions live in `viewer/drawerState.ts` and `viewer/navFilter.ts` as pure
-// functions, because that is where this file's real content is — three viewport bands crossed with
-// a stored preference and a server default — and none of it needs a browser to be right or wrong.
-//
-// Dropped in the port: `bindFold("cp-axes-toggle", "cp-axes")`. #3893 deleted both that toggle and
-// its target, so the binding had nothing to find and no other fold used the mechanism. Porting it
-// would have carried dead code across, and the harness states that clicked it were failing on
-// `main` for the same reason.
+// `<cp-viewer-drawers>` — the viewer's two drawers, phone reflow, theme toggle value and component
+// filter. A page-level controller that wires server-rendered markup and renders nothing; the
+// decisions are pure functions in `viewer/drawerState.ts` and `viewer/navFilter.ts`.
 
 import { ControllerElement, customElement } from "../controllerElement.js";
 import {
@@ -84,9 +74,7 @@ export class ViewerDrawers extends ControllerElement {
         return { mobile: matches(PHONE_QUERY), wide: matches(WIDE_QUERY) };
     }
 
-    // ── storage ──────────────────────────────────────────────────────────────────────────────
-    // Best-effort throughout: a visitor with storage blocked gets the defaults and drawers that
-    // still work, never a viewer that fails to wire up.
+    // Storage is best-effort: blocked storage yields defaults, never a broken viewer.
 
     private readFold(id: string): string | null {
         try {
@@ -117,16 +105,11 @@ export class ViewerDrawers extends ControllerElement {
                 .getElementById(toggleIdFor(other))
                 ?.setAttribute("aria-expanded", "false");
         }
-        // The comparisons sheet goes with them. On a phone it is `position: fixed` above the FAB,
-        // so it paints over a drawer (z-index 40) and its scrim (35) — and the summary that would
-        // close it is BEHIND that scrim, so the sheet cannot be dismissed while the drawer it is
-        // covering stays open. `drawerToClose` only knows about the other drawer; this disclosure
-        // is the third thing that owns the bottom of a phone screen.
+        // Close the comparisons sheet too: on a phone it is fixed above the drawer and its scrim,
+        // and its own summary is behind the scrim, so it could not be dismissed.
         if (open) this.closeComparisonMenus();
         viewer.classList.toggle(drawer, open);
-        // The nav's closed state has to be said out loud, not merely implied by the absence of
-        // `cp-nav-open`: above 1100px the absence means OPEN, so without this class the toggle
-        // would be inert at the width where the 240px column costs most.
+        // Closed nav must be explicit: above 1100px the absence of `cp-nav-open` means open.
         if (drawer === "cp-nav-open") {
             viewer.classList.toggle("cp-nav-closed", !open);
         }
@@ -137,10 +120,8 @@ export class ViewerDrawers extends ControllerElement {
     }
 
     /**
-     * Close any open comparisons disclosure in the viewer's control row.
-     *
-     * Only the ones inside `.cp-preview-primary`: that is the row whose panel becomes a fixed sheet
-     * at phone widths. A `<details>` elsewhere on the page is nobody's business here.
+     * Close open comparison disclosures in `.cp-preview-primary` only — the row whose panel becomes
+     * a fixed sheet on phones.
      */
     private closeComparisonMenus(): void {
         document
@@ -153,8 +134,8 @@ export class ViewerDrawers extends ControllerElement {
     }
 
     /**
-     * On a phone the drawers open as bottom sheets over the preview, so a scrim goes behind
-     * whichever is open. Off the phone they are inline columns and the scrim's CSS never applies.
+     * On a phone the drawers are bottom sheets over the preview, so a scrim goes behind the open
+     * one.
      */
     private syncScrim(): void {
         const viewer = this.viewer;
@@ -169,8 +150,7 @@ export class ViewerDrawers extends ControllerElement {
         const viewer = this.viewer;
         if (!viewer) return;
         const viewport = this.viewport();
-        // Read the server's own default BEFORE touching the class — it is the third input to the
-        // rule, and #3893 changing it is what silently closed this drawer everywhere.
+        // Read the server default before touching the class; it is the third input to the rule.
         const serverDefault = viewer.classList.contains("cp-controls-open");
         this.setOpen(
             "cp-controls-open",
@@ -226,10 +206,8 @@ export class ViewerDrawers extends ControllerElement {
     }
 
     /**
-     * Re-resolve on a breakpoint crossing. Making the state explicit is what lost the CSS
-     * default's own responsiveness: a page opened wide and then narrowed to a phone would
-     * otherwise keep `cp-nav-open`, which below 640px is a fixed bottom sheet and a scrim dropped
-     * over a viewer nobody asked to cover.
+     * Re-resolve on breakpoint crossings, so a page narrowed to phone width does not keep
+     * `cp-nav-open` as a fixed sheet with a scrim.
      */
     private bindBreakpoints(): void {
         for (const query of [PHONE_QUERY, WIDE_QUERY]) {
@@ -245,12 +223,8 @@ export class ViewerDrawers extends ControllerElement {
                         ),
                     );
                 }
-                // Arriving at the phone layout is the other way the sheet ends up over a drawer,
-                // and `setOpen` never sees it: the call above passes `false` on a phone, and an
-                // already-open Overrides drawer is not re-opened at all. So a page held wide with
-                // both showing, then rotated, would land with the sheet (fixed, z-index 70) over
-                // the drawer (fixed, 40) and its scrim — the same trap, reached by turning the
-                // device rather than by tapping.
+                // Arriving at the phone layout (e.g. rotating) can also leave the sheet over an
+                // open drawer, and `setOpen` doesn't see it.
                 if (this.viewport().mobile) this.closeComparisonMenus();
                 this.reflowRows();
             };
@@ -261,12 +235,8 @@ export class ViewerDrawers extends ControllerElement {
         }
     }
 
-    // ── the phone's row order ────────────────────────────────────────────────────────────────
-    // On a phone the page order is bar, title, preview — so the two control rows that sat between
-    // the title and the stage move BELOW it, and everything above the render is the one line
-    // saying which component this is. Moved in the DOM rather than with `order`, so reading,
-    // painting and tab order stay the same order at every width; a CSS re-order would leave a
-    // keyboard walking to controls a screenful further down than they look.
+    // On a phone the order is bar, title, preview, so the two control rows move below the stage.
+    // Moved in the DOM rather than with `order` so tab order matches visual order.
 
     private captureRowHomes(): void {
         const rows = [
@@ -301,10 +271,8 @@ export class ViewerDrawers extends ControllerElement {
     // ── the theme toggle's value ─────────────────────────────────────────────────────────────
 
     /**
-     * The Theme menu must still say which theme is showing, and the theme changes without a page
-     * load — so the toggle's value half mirrors whichever chip `viewer.js` has marked pressed,
-     * rather than the lane the server baked. Observing `aria-pressed` keeps this decoupled from
-     * that file's own `syncThemeBar`, which has several callers and no hook of its own.
+     * Mirror whichever theme chip `viewer.js` has pressed into the toggle's value, since the theme
+     * changes without a page load. Observing `aria-pressed` avoids coupling to `syncThemeBar`.
      */
     private bindThemeValue(): void {
         const bar = document.getElementById("cp-theme-bar");
@@ -339,9 +307,7 @@ export class ViewerDrawers extends ControllerElement {
         ) as HTMLInputElement | null;
         if (!search) return;
         this.on(search, "input", () => {
-            // Every child of the list, not only the links: a sectioned catalog's drawer carries the
-            // catalog's own section and group headings between its rows, and a heading has to go
-            // when the rows it heads do.
+            // Every child, not only links: section/group headings must go with the rows they head.
             const lines = [
                 ...document.querySelectorAll<HTMLElement>("#cp-nav-list > li"),
             ];
@@ -386,14 +352,8 @@ export class ViewerDrawers extends ControllerElement {
 }
 
 /**
- * Move `el` before `before` under `parent` — but only when it is not already exactly there.
- *
- * The guard is the point. `insertBefore` of a node into the position it already occupies looks
- * like a no-op and is not: it detaches and re-attaches the element, and the browser rebuilds what
- * hangs off the attachment. The catalog toolbar shipped that bug — a desktop load "restored" rows
- * that had never moved, and an `<input type="search">` quietly lost its clear button and focus
- * ring, caught only by a capture of a state two steps later. Same hazard here, since this restores
- * on every breakpoint event at every width.
+ * Move `el` before `before` under `parent` only if it is not already there: `insertBefore` into the
+ * same position detaches and re-attaches, which can drop a search input's clear button and focus.
  */
 function moveIfNeeded(
     parent: Node,

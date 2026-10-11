@@ -6,26 +6,14 @@ import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
 
 /**
- * The site icon, in the three forms the web actually asks for.
- *
- * The server had **none** before this: no `<link rel="icon">` on any page, and `/favicon.ico`
- * answered 404 with an HTML body. That is not only a blank browser tab. Every surface that renders
- * a link-unfurl card — Slack, iMessage, Discord, Google's result rows — puts the site's icon beside
- * the card, and resolves it by reading the page's icon links and then, failing that, probing
- * `/favicon.ico`. With nothing to find, each fell back to a generic globe, and the card read as an
- * anonymous link rather than as this product.
- *
- * Three forms, because no single one is understood everywhere:
- * * [svg] — a vector, for browser tabs. Crisp at every density and a few hundred bytes, but not
- *   accepted by any of the unfurlers above.
- * * [appleTouchIcon] — a 180×180 PNG. Declared as `apple-touch-icon`, which despite the name is
- *   what most chat clients and link fetchers read first, and the only form several of them accept.
- * * [ico] — a 32×32 PNG wrapped in an ICO container, served at the well-known `/favicon.ico` path
- *   for the fetchers that probe it directly and never read the page's markup at all.
- *
- * All three are drawn from [ServeBrand], so the icon is the same mark, in the same palette, as the
- * one in the site header and on the unfurl card. Rasters are baked once per process (the mark is
- * fixed at build time) and served with a content ETag.
+ * The site icon in the three forms the web asks for. Unfurlers (Slack, iMessage, Discord, Google)
+ * show it beside link cards, found via the page's icon links or a `/favicon.ico` probe.
+ * * [svg]: a vector for browser tabs; no unfurler accepts it.
+ * * [appleTouchIcon]: a 180×180 PNG, which most chat clients and link fetchers read first.
+ * * [ico]: a 32×32 PNG in an ICO container at `/favicon.ico`, for fetchers that only probe that
+ *   path.
+ *   All drawn from [ServeBrand] so the mark matches the header and unfurl card; rasters baked once
+ *   per process and served with a content ETag.
  */
 internal object ServeSiteIcon {
 
@@ -76,12 +64,8 @@ internal object ServeSiteIcon {
   }
 
   /**
-   * The mark as SVG.
-   *
-   * Generated from [ServeBrand]'s colours rather than committed as a static asset, so the icon
-   * cannot drift from the palette the pages and the unfurl card are drawn in — there is one place
-   * the brand is decided. The diamond is a path for the same reason [ServeBrand.drawMark] strokes
-   * one: `◇` as a character depends on the viewer having a font that carries U+25C7.
+   * The mark as SVG, generated from [ServeBrand]'s colours so it can't drift from the palette. The
+   * diamond is a path, not `◇`, which depends on font coverage.
    */
   val svg: Icon by lazy {
     val text =
@@ -104,12 +88,8 @@ internal object ServeSiteIcon {
   private val png32: Icon by lazy { pngIcon(ICO_SIZE) }
 
   /**
-   * The ICO served at `/favicon.ico`: an ICO container wrapping [png32]'s PNG.
-   *
-   * PNG-in-ICO rather than the older BMP-in-ICO encoding. It is a fifth of the bytes, needs no
-   * bottom-up row order or AND-mask padding to get right, and every browser and fetcher that
-   * matters has read it for well over a decade. The container itself is 22 bytes: a 6-byte
-   * directory header and one 16-byte entry pointing at the payload.
+   * The `/favicon.ico` ICO wrapping [png32]'s PNG: PNG-in-ICO is smaller and simpler than
+   * BMP-in-ICO and universally supported. The container is a 6-byte header plus one 16-byte entry.
    */
   val ico: Icon by lazy {
     val payload = png32.bytes
@@ -140,9 +120,8 @@ internal object ServeSiteIcon {
   val appIcon512: Icon by lazy { pngIcon(512) }
 
   /**
-   * 512×512 with the mark inside the central 80% on a full-bleed background — the safe zone a
-   * launcher's mask (circle, squircle, teardrop) is guaranteed not to crop into. The plain icons
-   * are the round mark on transparency, which a mask would shrink into a disc inside a disc.
+   * 512×512 with the mark inside the central 80% on a full-bleed background, the safe zone launcher
+   * masks won't crop.
    */
   val maskableIcon: Icon by lazy {
     val size = 512
@@ -162,16 +141,9 @@ internal object ServeSiteIcon {
   }
 
   /**
-   * The notification badge: [ServeBrand.drawMonochromeGlyph], [BADGE_SIZE] square, white on a
-   * transparent ground.
-   *
-   * Android draws a notification's `badge` in the status bar as an **alpha mask** — it discards the
-   * colour and tints whatever is opaque. The push worker used [appIcon192] for it before this, and
-   * a full-colour round icon is opaque edge to edge, so the status bar showed a solid white disc.
-   * This is the mark's diamond with its container dropped, at a stroke that holds up at 24dp.
-   *
-   * It is also the manifest's `monochrome` icon, which is the same contract: only the alpha is
-   * read. Chrome packages that one into an installed WebAPK as its notification icon.
+   * The notification badge: [ServeBrand.drawMonochromeGlyph], [BADGE_SIZE] square, white on
+   * transparent. Android uses the badge as an alpha mask, so a full-colour icon showed as a solid
+   * white disc. Also the manifest's `monochrome` icon (same contract).
    */
   val badgeIcon: Icon by lazy {
     val image = BufferedImage(BADGE_SIZE, BADGE_SIZE, BufferedImage.TYPE_INT_ARGB)
@@ -190,12 +162,9 @@ internal object ServeSiteIcon {
   data class Shortcut(val name: String, val url: String, val description: String)
 
   /**
-   * The web app manifest, which is all Chrome needs to offer **Install** (current Chrome no longer
-   * asks for a service worker): a name, a start URL, a standalone display and icons at 192 and 512.
-   * Installed, the site opens in its own window from the launcher, dock or start menu, and
-   * [shortcuts] — the UI builder and its designs, where this box has one — sit in its menu.
-   *
-   * The `id` is fixed at `/` so the installed app keeps its identity if [startUrl] ever moves.
+   * The web app manifest, enough for Chrome to offer Install: name, start URL, standalone display,
+   * 192 and 512 icons, and [shortcuts] where a UI builder exists. `id` is fixed at `/` so the app
+   * keeps its identity if [startUrl] moves.
    */
   fun manifest(
     name: String,
@@ -203,9 +172,8 @@ internal object ServeSiteIcon {
     startUrl: String,
     shortcuts: List<Shortcut>,
     /**
-     * The installed app's identity. Resolved against the manifest's own origin, so `/` on a site
-     * host (`m3.preview.coo.ee`) is already a different app from `/` on the main host — which is
-     * what lets each top-level site install as its own app rather than as the box.
+     * The installed app's identity, resolved against the manifest's origin, so each top-level site
+     * installs as its own app.
      */
     id: String = "/",
     scope: String = "/",
@@ -223,10 +191,9 @@ internal object ServeSiteIcon {
         put("start_url", str(startUrl))
         put("scope", str(scope))
         put("display", str("standalone"))
-        // Tried in order before `display`. Not `window-controls-overlay`: the site header is a
-        // sticky bar that knows nothing of `env(titlebar-area-*)`, so the desktop window controls
-        // would sit over its trailing actions. `minimal-ui` is the fallback a browser that cannot
-        // do standalone (or a user who declined it) still gets a back button from.
+        // Tried before `display`. Not `window-controls-overlay` (the sticky header ignores
+        // `env(titlebar-area-*)`); `minimal-ui` keeps a back button where standalone isn't
+        // available.
         put(
           "display_override",
           kotlinx.serialization.json.buildJsonArray {
@@ -296,9 +263,8 @@ internal object ServeSiteIcon {
             }
           },
         )
-        // Installed, the app appears in the OS share sheet. A shared screenshot lands in the
-        // bug-report flow as a capture, and a shared link opens if it is one of this server's own
-        // pages. See [ServeShareTarget].
+        // Installed, the app appears in the OS share sheet: shared screenshots land in the
+        // bug-report flow and shared links open if they're this server's. See [ServeShareTarget].
         put(
           "share_target",
           kotlinx.serialization.json.buildJsonObject {
@@ -364,9 +330,8 @@ internal object ServeSiteIcon {
   }
 
   /**
-   * The `<head>` links every page carries. Constant, well-known paths rather than content-hashed
-   * ones: an icon fetcher that guesses a URL guesses these, and unlike a page asset an icon is
-   * small enough that a day's cache costs nothing to get wrong.
+   * The `<head>` icon links every page carries. Fixed well-known paths rather than content-hashed,
+   * since icon fetchers guess these and a day's cache costs little.
    */
   fun linkTags(themeCss: String = "", appTitle: String = "Compose Preview"): String {
     val (light, dark) = themeColors(themeCss)
@@ -387,10 +352,9 @@ internal object ServeSiteIcon {
   }
 
   /**
-   * The browser chrome's colour in each scheme: the page's own surface, which is what the sticky
-   * site header paints (`--cp-bg`), so the status bar and the header read as one strip. A catalog
-   * that publishes a palette ([ServeThemeCss]) re-themes `--md-sys-color-surface`, and the strip
-   * follows it; anything else gets the M3 baseline surface the stylesheet declares.
+   * Browser chrome colour per scheme: the page surface the sticky header paints (`--cp-bg`), so
+   * status bar and header read as one. Follows a catalog palette ([ServeThemeCss]), else the M3
+   * baseline surface.
    */
   fun themeColors(themeCss: String = ""): Pair<String, String> {
     val match = SURFACE_PAIR.find(themeCss)
@@ -417,10 +381,7 @@ internal object ServeSiteIcon {
     val label: String,
   )
 
-  /**
-   * The manifest's screenshots: committed captures of the catalog page, a phone and a desktop.
-   * Small on purpose — a few tens of kilobytes each — because an install dialog is the only reader.
-   */
+  /** Manifest screenshots: small committed captures (phone and desktop) for the install dialog. */
   val screenshots: List<Screenshot> =
     listOf(
       Screenshot(

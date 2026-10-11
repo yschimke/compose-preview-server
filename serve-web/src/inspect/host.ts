@@ -1,28 +1,14 @@
-// Which surface `<cp-inspect-layers>` is drawing over.
-//
-// The element used to reach straight for the viewer's own ids — `.cp-viewer`, `#cp-img`,
-// `#cp-inspect-layer`, `#cp-inspect-legend`, `.cp-inspect` — which is why the derived semantics
-// layers (typography, theme, layout projected from the render's own semantics tree) were viewer-only
-// for as long as they existed. The focused comparison needs the same layers over its Actual panel,
-// and it has none of those ids: its frame is one `<img>` inside a `.cp-compare-shot`, its legend
-// sits under the grid, and its toggles are page-level controls beside the authored redline's.
-//
-// So the wiring is a value now, resolved once at install time. The viewer's tag carries no
-// attributes and gets exactly what it always got; a tag that names a host reads its parts from
-// there instead. Everything downstream — fetching, drawing, placing — takes the descriptor and has
-// no idea which page it is on.
+// Which surface `<cp-inspect-layers>` draws over: the viewer, or the focused comparison's Actual
+// panel, whose frame, legend and toggles live elsewhere. The wiring is a descriptor resolved at
+// install; an attribute-less tag gets the viewer's, and everything downstream is page-agnostic.
 
 import { baseFrom } from "./layers.js";
 
 /**
- * How a layer is positioned over the frame it describes.
- *
- * `offset` is the viewer: the stage centres a frame inside a box wider than it, so the layer has to
- * sit at the image's own `offsetLeft`/`offsetTop` or every box drifts left by half the slack.
- *
- * `centred` is a panel whose stylesheet already centres the layer over the shot (`.cp-compare-shot`
- * is `display: grid; place-items: center`). There the layer needs its *size* set and nothing else —
- * writing `left`/`top` would fight the `translate(-50%, -50%)` that puts it there.
+ * How a layer is positioned over its frame. `offset` (viewer): the frame is centred in a wider
+ * stage, so the layer sits at the image's `offsetLeft`/`offsetTop`. `centred`: the panel's CSS
+ * already centres it, so only the size is set (`left`/`top` would fight its `translate(-50%,
+ * -50%)`).
  */
 export type LayerAnchor = "offset" | "centred";
 
@@ -41,12 +27,8 @@ export interface InspectHost {
     /** The checkboxes that decide which layers are on, each carrying `data-cp-inspect`. */
     toggles: HTMLInputElement[];
     /**
-     * The attribute holding the URL of the frame currently **decoded**.
-     *
-     * The viewer swaps its frame as the knobs change and stamps `data-cp-src` once the replacement
-     * has decoded, so that attribute — not `src` — is the honest "these are the pixels on screen"
-     * signal there. A server-rendered panel never swaps its frame, so its `src` is that signal and
-     * reading `data-cp-src` would leave it with no address at all until the fallback kicked in.
+     * The attribute holding the URL of the frame currently decoded: `data-cp-src` on the viewer
+     * (stamped after a swap decodes), `src` on a server-rendered panel that never swaps.
      */
     frameSource: string;
     /** Whether this host has the viewer's spec / comparison modes at all. */
@@ -66,12 +48,7 @@ export interface InspectHost {
     base: string;
 }
 
-/**
- * The viewer's wiring — the one this element was written for, unchanged.
- *
- * Returns null when any load-bearing part is missing, which is what makes the tag inert on a viewer
- * whose host can produce none of the inspection products.
- */
+/** The viewer's wiring; null when a load-bearing part is missing, making the tag inert. */
 export function viewerHost(): InspectHost | null {
     const root = document.querySelector<HTMLElement>(".cp-viewer");
     const frame = document.getElementById("cp-img") as HTMLImageElement | null;
@@ -99,13 +76,8 @@ export function viewerHost(): InspectHost | null {
 }
 
 /**
- * A panel's wiring, named by attributes on the mount tag.
- *
- * Explicit selectors rather than a fixed shape under the host, because the parts genuinely do not
- * nest: on the focused comparison the frame is inside the Actual panel while the legend is a
- * sibling of the whole grid and the toggles sit in the page's control bar. Anything the page does
- * not name is not defaulted to a viewer id — it makes the mount inert, which is the safe direction
- * for a page that simply has no derived layers to show.
+ * A panel's wiring, named by selectors on the mount tag because the parts don't nest. Anything not
+ * named makes the mount inert rather than defaulting to viewer ids.
  */
 export function panelHost(mount: HTMLElement): InspectHost | null {
     const select = <T extends Element>(name: string): T | null => {

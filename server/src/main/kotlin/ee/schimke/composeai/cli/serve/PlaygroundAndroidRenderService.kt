@@ -14,11 +14,9 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 
 /**
- * Opens a bundle-less render session over a compiled playground snippet — the injected daemon seam
- * shared by [PlaygroundAndroidRenderService] and [PlaygroundRcCaptureService], both of which stand
- * one Android/Robolectric daemon over a snippet's own classes. Production binds this to
- * [SubprocessRenderSessions.openBundleDaemon] with the Android backend; tests supply a fake
- * session.
+ * Opens a bundle-less render session over a compiled playground snippet, shared by
+ * [PlaygroundAndroidRenderService] and [PlaygroundRcCaptureService]. Production binds it to
+ * [SubprocessRenderSessions.openBundleDaemon]; tests supply a fake.
  */
 fun interface PlaygroundAndroidSessionOpener {
   fun open(
@@ -30,31 +28,15 @@ fun interface PlaygroundAndroidSessionOpener {
 }
 
 /**
- * The production [PlaygroundCompileService] `renderFirstFrame`: render a freshly-compiled Compose
- * snippet on a daemon and return the PNG the daemon drew — the still frame the Stage-1 response
- * surfaces as its `image` (`docs/design/PLAYGROUND.md` §7 Phase 2, epic #3015).
+ * The production [PlaygroundCompileService] `renderFirstFrame`: render a freshly compiled snippet
+ * on a daemon and return its PNG (`docs/design/PLAYGROUND.md` §7). Backend-agnostic: [openSession]
+ * picks desktop Skiko or Robolectric.
  *
- * **Backend-agnostic:** the flow (open → render → read the `pngPath`) is identical for CMP (desktop
- * Skiko daemon) and Android (Robolectric); the injected [openSession] selects the backend, so the
- * same service wires both modes' first frame — only the daemon sidecar differs.
- *
- * The flow is the render half of [PlaygroundRcCaptureService]'s open → render → await → fetch
- * shape, over a bundle-less daemon standing on the snippet's own compiled classes:
- * 1. synthesize a `previews.json` from the snippet's discovered `@Preview` ids
- *    ([PlaygroundPreviews]);
- * 2. [openSession] over the snippet's `classesDir` + full compile classpath (the production opener
- *    is [SubprocessRenderSessions.openBundleDaemon] with the Android backend —
- *    `lib-daemon-android` + `android.jar` on the daemon classpath, the Robolectric
- *    jvmArgs/sysprops, and the snippet classpath as `userClassDirs`);
- * 3. `renderNow` the preview and await its terminal `renderFinished` / `renderFailed` notification;
- * 4. read the PNG the daemon wrote to the `renderFinished` `pngPath` — no data-product fetch and no
- *    extension enable, unlike the RC capture: a plain first frame is the base render product.
- *
- * [openSession] is injected so the orchestration is unit-testable against a fake `RenderSession`
- * without a real daemon subprocess (the same seam split [PlaygroundRcCaptureService] uses). Returns
- * null — a clean "no frame" — on any miss: the render couldn't queue, it failed or timed out, or it
- * produced no PNG. A null first frame is never fatal to the run: the Stage-1 response simply
- * carries no still image while the preview token is still minted.
+ * Flow: synthesize a `previews.json` from the discovered `@Preview` ids ([PlaygroundPreviews]);
+ * [openSession] over the snippet's `classesDir` and compile classpath; `renderNow` and await
+ * `renderFinished` / `renderFailed`; read the PNG at `pngPath` (no data-product fetch, unlike RC
+ * capture). Returns null on any miss, which only means the response carries no still; the token is
+ * still minted.
  */
 class PlaygroundAndroidRenderService(
   private val openSession: PlaygroundAndroidSessionOpener,
@@ -71,11 +53,8 @@ class PlaygroundAndroidRenderService(
   fun render(snippet: PlaygroundTokenStore.PlaygroundSnippet): ByteArray? = renderFrame(snippet).png
 
   /**
-   * [render], with the reason when there is no frame.
-   *
-   * The reason used to stop at the host log, so a render that died on an `UnsatisfiedLinkError`
-   * reached the UI builder as "this host's renderer produced no frame": true, and no help to anyone
-   * who could not read the operator's stderr. It now travels with the (absent) bytes.
+   * [render] plus the reason when there is no frame, so causes like `UnsatisfiedLinkError` reach
+   * the UI builder rather than only the host log.
    */
   fun renderFrame(snippet: PlaygroundTokenStore.PlaygroundSnippet): PlaygroundFirstFrame {
     val workDir = newWorkDir().apply { mkdirs() }
@@ -90,10 +69,8 @@ class PlaygroundAndroidRenderService(
       val userClasspath = snippet.classpath.map { File(it.toString()).absolutePath }
       val session = openSession.open(classesDir, previewsJson, workDir, userClasspath)
       try {
-        // Enable the named-override connector BEFORE the render: like the Remote Compose capture,
-        // its data product is registered inactive, and the declarations are collected during the
-        // render it isn't active for. Best-effort — a backend without the connector still renders a
-        // first frame, it just yields no knobs.
+        // Enable the named-override connector before the render, since its data product is
+        // registered inactive. Best-effort: without it there are just no knobs.
         val knobsArmed =
           runCatching { session.enableExtensions(listOf(OVERRIDES_EXTENSION_ID)) }
             .getOrNull()
@@ -107,9 +84,8 @@ class PlaygroundAndroidRenderService(
         runCatching { session.close() }
       }
     } catch (t: Exception) {
-      // A render failure is a clean "no frame" to the caller; it must never escape as a throwable
-      // out of the render seam. It must not vanish either: the caller sees a null it cannot explain
-      // and the operator has the only copy of the cause, so say it here before dropping it.
+      // A render failure becomes a clean "no frame", never a throwable, but is logged so the cause
+      // isn't lost.
       val reason = "${t.javaClass.simpleName}: ${t.message ?: "no message"}"
       reportNoFrame(snippet, reason)
       PlaygroundFirstFrame(null, reason)
@@ -119,12 +95,8 @@ class PlaygroundAndroidRenderService(
   }
 
   /**
-   * The one place a swallowed render failure becomes visible.
-   *
-   * Nothing downstream can report this: [render]'s contract is `ByteArray?`, the compile lane
-   * carries the null through as a frameless response, and every surface above sees only the
-   * absence. So the host log is where "why was there no frame" is answered — for the playground's
-   * still image, and for the UI builder's native pane, which is the same seam.
+   * The one place a swallowed render failure is logged: [render] returns only `ByteArray?`, so
+   * nothing downstream can explain the absence.
    */
   private fun reportNoFrame(snippet: PlaygroundTokenStore.PlaygroundSnippet, reason: String?) {
     System.err.println(
@@ -134,13 +106,8 @@ class PlaygroundAndroidRenderService(
   }
 
   /**
-   * One render attempt: the PNG, or why there isn't one.
-   *
-   * Six different things end this method without bytes — a rejected request, an expired budget, a
-   * `renderFailed` notification, a daemon that finished without naming a file, a path that isn't
-   * one, and an unreadable file — and until they were named they were one indistinguishable null.
-   * They are not the same problem and they do not have the same fix, so the reason travels with the
-   * (absent) bytes rather than being reconstructed by a reader of the log.
+   * One render attempt: the PNG, or why not. Six distinct causes (rejected request, expired budget,
+   * `renderFailed`, no file named, bad path, unreadable file) each get their own reason.
    */
   private data class FrameAttempt(val png: ByteArray?, val reason: String? = null)
 
@@ -161,10 +128,9 @@ class PlaygroundAndroidRenderService(
           }
         }
         "renderFailed" -> {
-          // Released whatever the payload looks like. Reading it used to throw on the daemon's
-          // real shape (`error` is an object), inside the listener and before this count-down, so
-          // a render that failed in its first second was reported as "the render budget of 3m
-          // expired" three minutes later.
+          // Released whatever the payload shape: the daemon's `error` is an object, and parsing it
+          // used to throw before the count-down, turning an instant failure into a budget expiry
+          // minutes later.
           try {
             failure.set(
               renderFailureDetail(params)?.let { "daemon reported renderFailed: $it" }
@@ -207,22 +173,11 @@ class PlaygroundAndroidRenderService(
   }
 
   /**
-   * Persist the knobs the snippet's `@Preview` declared during the still render
-   * (`compose/overrides` — the `previewOverride*` / `catalogOverride*` surface) into the
-   * **snippet's own** work dir as `previews/<id>.overrides.json`.
-   *
-   * That is exactly the sidecar a bundle carries and [ServeBundleDaemon.readPreviews] folds into
-   * [ServePreview.overrides], so a redeemed `/pg/` session gets the viewer's live knob drawer for
-   * free — the same controls a published catalog's preview has. Without it a snippet's dynamic
-   * overrides were declared, seeded, and then invisible: the live session advertised no knobs at
-   * all, so the only way to see another variant was to edit the source and recompile.
-   *
-   * This service's own [workDir] is a throwaway that's deleted with the render, hence writing into
-   * `snippet.workDir` — the dir the token owns and redemption later materializes from.
-   *
-   * Entirely best-effort: any miss (no declarations, an unreadable payload, an unwritable dir)
-   * leaves the session exactly as it was before, with no knobs. Covers the rendered preview only —
-   * the snippet's other previews declare their knobs on renders that haven't happened yet.
+   * Persist the knobs the snippet's `@Preview` declared during the render (`compose/overrides`)
+   * into the snippet's own work dir as `previews/<id>.overrides.json`, the sidecar
+   * [ServeBundleDaemon.readPreviews] folds into [ServePreview.overrides], so a redeemed `/pg/`
+   * session gets the live knob drawer. Written to `snippet.workDir` (owned by the token) since this
+   * service's [workDir] is deleted. Best-effort; covers only the rendered preview.
    */
   private fun drainOverrideDeclarations(
     session: RenderSession,
@@ -248,35 +203,18 @@ class PlaygroundAndroidRenderService(
     internal val FALLBACK_RENDER_BUDGET: Duration = 180.seconds
 
     /**
-     * Cold render budget for one first frame, `composeai.serve.renderTimeoutSeconds` or 180s.
-     *
-     * **Every render on this lane is a cold one.** `openSession` opens a fresh daemon subprocess
-     * per call and closes it in the `finally` below, so there is no warm pool to amortise a JVM
-     * start, a Skiko or Robolectric init and a first composition against — which is why this reads
-     * the *cold-start* property rather than `frameRenderTimeoutSeconds`, the per-frame cap that
-     * only means anything to a daemon which is already up.
-     *
-     * It reads a property at all because 180s was neither configurable nor chosen for both lanes.
-     * `ServeRenderHost` has its own 180s default for the same quantity and has been overridable
-     * since it was written — its KDoc says "180s covers a desktop/Skiko daemon, but an
-     * Android/Robolectric daemon's first render is much slower … so make it overridable" — and an
-     * operator who raises it is answering exactly the question this constant also asks. Before
-     * this, that answer reached `ServeRenderHost` and not here, so a host configured with 900s
-     * still cut its playground first frame off at three minutes and reported "this host's renderer
-     * produced no frame for it"
-     * ([#481](https://github.com/yschimke/compose-preview-server/issues/481)).
-     *
-     * The default is unchanged, so a host that sets nothing behaves exactly as before.
+     * Cold render budget for one first frame: `composeai.serve.renderTimeoutSeconds`, default 180s.
+     * Every render here is cold (a fresh daemon per call), hence the cold-start property rather
+     * than the per-frame one. Shares the property `ServeRenderHost` honours, so an operator raising
+     * it affects both lanes (#481).
      */
     val DEFAULT_RENDER_BUDGET: Duration
       get() = renderBudgetFrom(System.getProperty(RENDER_BUDGET_PROPERTY))
 
     /**
-     * The property's value as a budget, or [FALLBACK_RENDER_BUDGET] when it is absent or nonsense.
-     *
-     * Split out so the parsing is testable without setting a system property, and clamped at one
-     * second for the reason `ServeRenderHost` clamps: a zero or negative budget would make every
-     * render report an expiry it never waited for.
+     * The property as a budget, or [FALLBACK_RENDER_BUDGET] when absent or invalid. Clamped to at
+     * least one second, like `ServeRenderHost`, since a non-positive budget would report an expiry
+     * it never waited for.
      */
     internal fun renderBudgetFrom(property: String?): Duration =
       property?.toLongOrNull()?.coerceAtLeast(1)?.seconds ?: FALLBACK_RENDER_BUDGET
@@ -284,8 +222,8 @@ class PlaygroundAndroidRenderService(
     val DEFAULT_ACK_TIMEOUT: Duration = 30.seconds
 
     /**
-     * The daemon's named-override connector **id** (`DaemonMain`'s `tryAdd("data/overrides")`) —
-     * distinct from the data-product **kind** below. `extensions/enable` resolves by id.
+     * The named-override connector's id (`DaemonMain`'s `tryAdd("data/overrides")`), distinct from
+     * the data-product kind; `extensions/enable` resolves by id.
      */
     const val OVERRIDES_EXTENSION_ID: String = "data/overrides"
 
@@ -293,29 +231,22 @@ class PlaygroundAndroidRenderService(
     const val OVERRIDES_KIND: String = "compose/overrides"
 
     /**
-     * Sidecar filename suffix, in lockstep with `PreviewBundleFormat.BUNDLE_OVERRIDES_SIDECAR_EXT`
-     * and the `OVERRIDES_SUFFIX` [ServeBundleDaemon.readPreviews] looks for.
+     * Sidecar suffix, in lockstep with `PreviewBundleFormat.BUNDLE_OVERRIDES_SIDECAR_EXT` and
+     * [ServeBundleDaemon.readPreviews]'s `OVERRIDES_SUFFIX`.
      */
     const val OVERRIDES_SIDECAR_SUFFIX: String = ".overrides.json"
 
     /**
-     * Where a `renderFailed` notification might carry its cause, most specific first.
-     *
-     * A list rather than one key because the notification is the daemon's, not this repository's:
-     * backends spell the field differently and a future one may spell it differently again, and
-     * reading three keys costs nothing next to logging "renderFailed" with no cause at all.
+     * Where a `renderFailed` notification may carry its cause, most specific first; backends spell
+     * it differently.
      */
     private val FAILURE_DETAIL_KEYS = listOf("message", "reason", "error")
 
     /**
-     * The cause a `renderFailed` notification carries, as one line, or null when it names none.
-     *
-     * The daemon sends `error` as an object — `{kind, message, suggestion}`, its `RenderError` —
-     * and the kind and the suggestion are the half a reader can act on ("Skiko bindings and native
-     * differ; pair them"), so both are kept. A bare string under any of [FAILURE_DETAIL_KEYS] is
-     * still read, for a backend that spells it that way. Never throws: this runs inside a
-     * notification listener, where an exception is swallowed by the reader and the wait it was
-     * meant to end runs out its whole budget instead.
+     * The cause a `renderFailed` notification carries, as one line, or null. The daemon sends
+     * `error` as `{kind, message, suggestion}` and kind and suggestion are kept as the actionable
+     * half; a bare string under any [FAILURE_DETAIL_KEYS] is also read. Never throws: it runs in a
+     * notification listener, where a throw would turn into a full budget wait.
      */
     internal fun renderFailureDetail(params: JsonObject): String? {
       val error = params["error"] as? JsonObject

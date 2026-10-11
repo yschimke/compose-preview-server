@@ -5,39 +5,15 @@ import ee.schimke.composeai.agentgrants.AgentGrantScope
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
 
 /**
- * `compose-preview-server design …` — getting a design's pixels or its source onto disk.
+ * `compose-preview-server design …`: get a design's pixels or source onto disk (see #529).
  *
- * ## Why a command
+ * A client, not a server: it runs against an already-running server (`--server`) and exits, keeping
+ * [ServerCommands] for serving commands. With `--local` it compiles and renders in-process instead,
+ * from a `--document` file or a design a server only read out, explaining a missing frame rather
+ * than relying on the possibly misbehaving server (#551, [DesignLocalLane]).
  *
- * Everything this command does was already reachable, and every session re-invented the reaching. A
- * render came out of `curl`ing `/mcp`, unwrapping the JSON-RPC envelope with `jq`, and piping the
- * artifact through `base64 -d`; the generated Kotlin came out of a throwaway JVM test that
- * deserialised a document saved by hand. None of that is hard and all of it is per-session, which
- * is the shape of a command rather than of a note in a README
- * ([#529](https://github.com/yschimke/compose-preview-server/issues/529)).
- *
- * ## A client, not a server
- *
- * Every other command this binary has — `serve`, `ui`, `playground` — starts a server and stays up.
- * This one runs against a server that is already up (`--server`) and exits, which is how anyone
- * would use it against `preview.coo.ee` and keeps every *serving* command in [ServerCommands] a
- * serving command.
- *
- * ## …except with `--local`, which is a compiler
- *
- * The cost above used to be paid rather than fixed: with no server there was nothing to render
- * against, and a design could not be rendered straight from a file — so when the render lane itself
- * misbehaved, the only surface that could reproduce it was the misbehaving server, whose reply is
- * deliberately lossy. `--local` compiles and renders here instead, off a `--document` on disk or a
- * design a server merely *read* out for it, and says why a frame is missing rather than only that
- * it is ([#551](https://github.com/yschimke/compose-preview-server/issues/551), [DesignLocalLane]).
- * It is still a client: nothing is served, and the process exits.
- *
- * ## Parsing is separated from doing
- *
- * As in [ServerCommands], and for the same reason: the whole surface is a pure function of argv and
- * the environment, so it is pinned by tests that open no socket. [DesignCommandRunner] is the half
- * that talks.
+ * As in [ServerCommands], parsing is a pure function of argv and environment, tested without
+ * sockets; [DesignCommandRunner] does the talking.
  */
 internal object DesignCommand {
 
@@ -58,27 +34,16 @@ internal object DesignCommand {
     listOf(LIST, STATUS, GET, RENDER, VIEW, REFERENCE, COMPARE, EXPORT, VALIDATE)
 
   /**
-   * The verbs `--local` has an answer for.
-   *
-   * `list` and `get` read a server's design state, and this process holds no copy of it — a local
-   * `list` could only ever be empty, and a local `get` would be `cat`. Refused by name rather than
-   * quietly ignoring the flag.
+   * Verbs `--local` supports. `list` and `get` read server state this process doesn't hold, so they
+   * are refused by name rather than the flag ignored.
    */
   val LOCAL_VERBS: List<String> = listOf(RENDER, EXPORT)
 
   /**
-   * The credential, from the environment and never from a flag.
-   *
-   * `--token` would undo the export routes' own rule — a shared link is an address, not a
-   * credential — at the first `--verbose`, and would land in a shell history and a CI log besides.
-   * [`design-sync.mjs`](../../../../../../../scripts/ui-builder/design-sync.mjs) reached the same
-   * conclusion first and says so in the same words.
-   *
-   * **Which name wins.** Two existed: `COMPOSE_PREVIEW_TOKEN`, which `.mcp.json` sends as
-   * `X-Compose-Preview-Token`, and `COMPOSE_PREVIEW_UI_BUILDER_TOKEN`, which `design-sync.mjs`
-   * reads. They name the same grant against the same server, so this command reconciles them rather
-   * than inventing a third: the header's own name is primary, the script's is still read, and the
-   * script now reads both too. A shell that exports one works with either tool.
+   * The credential, from the environment only: a `--token` flag would leak into shell history, CI
+   * logs and `--verbose` output. `COMPOSE_PREVIEW_TOKEN` (the `X-Compose-Preview-Token` header's
+   * name, as in `.mcp.json`) is primary; the older `COMPOSE_PREVIEW_UI_BUILDER_TOKEN` used by
+   * `design-sync.mjs` is still read.
    */
   const val TOKEN_ENV: String = "COMPOSE_PREVIEW_TOKEN"
 
@@ -112,22 +77,13 @@ internal object DesignCommand {
     val authorize: Boolean,
     val timeoutSeconds: Long,
     /**
-     * Compile and render in this process instead of asking a server.
-     *
-     * The half of this command
-     * [#529](https://github.com/yschimke/compose-preview-server/issues/529) left outstanding: with
-     * `--local` the design's pixels are produced by the same generator, compiler and daemon a
-     * server would drive, in a process a debugger can attach to and with the reason for a missing
-     * frame on stderr rather than in somebody else's log
-     * ([#551](https://github.com/yschimke/compose-preview-server/issues/551)).
+     * Compile and render in this process rather than asking a server, with the same generator,
+     * compiler and daemon, so it is debuggable and reports why a frame is missing (#551).
      */
     val local: Boolean = false,
     /**
-     * A design document read straight off disk, instead of from a server.
-     *
-     * This is what makes a broken host reproducible: `design get` captures the document from it — a
-     * read, not the render lane under suspicion — and the file then replays against a known-good
-     * tree, or against yesterday's bundle, or under a debugger.
+     * A design document read from disk instead of a server, so a broken host's design can be
+     * captured with `design get` and replayed elsewhere.
      */
     val document: String? = null,
     /** The catalog bundle a `--local` render compiles against. */
@@ -143,9 +99,9 @@ internal object DesignCommand {
     /** Emit only a fixed, credential-free SessionStart sentence. */
     val summary: Boolean = false,
     /**
-     * [VALIDATE]: a file of design mutations to check against the stored design — a JSON array of
-     * `DesignMutationV1`, or an object carrying one as `operations`, which is what an
-     * `ui_builder_apply` call's arguments already look like.
+     * [VALIDATE]: a file of design mutations to check against the stored design, as a JSON array of
+     * `DesignMutationV1` or an object with `operations` (the shape of `ui_builder_apply`'s
+     * arguments).
      */
     val operations: String? = null,
     /** [VIEW]: node ids to show as selected. */
@@ -173,18 +129,13 @@ internal object DesignCommand {
   ) {
 
     /**
-     * The least this verb needs, so an approver is asked for that and not for everything.
-     *
-     * Reading a design and exporting one are separate capabilities on this server precisely so that
-     * they can be granted separately; a command that asked for both every time would make the
-     * distinction decorative.
+     * The least capability this verb needs, so an approver isn't asked for more; read and export
+     * are deliberately separate grants.
      */
     val capabilities: List<AgentGrantCapability>
       get() =
         when {
-          // A `--local` run asks a server for nothing but the document, and reading one is a
-          // read. Asking for `ui-builder-export` here would have an approver grant the capability
-          // to make the server produce artifacts for a run that never asks it to.
+          // A `--local` run only reads the document from the server.
           local -> listOf(AgentGrantCapability.UI_BUILDER_READ)
           // Looking at a design is reading it; only the native frame, which compiles the design's
           // Kotlin, is gated as an export -- the same split `ui_builder_view` makes.
@@ -203,8 +154,8 @@ internal object DesignCommand {
         }
 
     /**
-     * A made-to-order render is not a published preview, so `render` asks for `live`; everything
-     * else reads what is already committed and asks for `preview`.
+     * `render` is a made-to-order render, so it asks for `live`; everything else reads committed
+     * state and asks for `preview`.
      */
     val scope: AgentGrantScope
       get() =
@@ -216,10 +167,8 @@ internal object DesignCommand {
       get() = out ?: defaultOut(verb, designId.ifBlank { documentName() }, format)
 
     /**
-     * The name a `--document` file stands in for, so `--out` still has a sensible default.
-     *
-     * `design render --document broken.json --local` writes `broken.png` beside it, which is what
-     * anyone comparing a replay against the original wants — and never the document itself.
+     * The name a `--document` file stands for, so `--out` defaults to e.g. `broken.png` beside
+     * `broken.json`.
      */
     private fun documentName(): String =
       document?.let { java.io.File(it).name.substringBeforeLast('.') }?.takeIf { it.isNotBlank() }
@@ -236,10 +185,8 @@ internal object DesignCommand {
   }
 
   /**
-   * Read argv and the environment into an [Options], or say why not.
-   *
-   * [env] is a parameter so the whole surface — including which token name wins and what `--server`
-   * defaults to — is testable without touching the process environment.
+   * Read argv and environment into an [Options], or say why not. [env] is a parameter so the whole
+   * surface is testable.
    */
   fun parse(args: List<String>, env: (String) -> String? = System::getenv): Parsed {
     if (args.isEmpty()) return Parsed.Help
@@ -780,9 +727,7 @@ internal fun ExportFormatV1?.extension(): String =
     ExportFormatV1.COMPOSE -> "kt"
     // An archive: source plus the picture bytes as files. `application/zip` per the contract.
     ExportFormatV1.BUNDLE -> "zip"
-    // Added by contracts 2.17.0. A remote document is `.rc`, and its JSON form is `.json` —
-    // the same extension a null format already means here, because both are the design's own
-    // JSON.
+    // JSON and RC exports (contracts 2.17.0); a null format already means `.json`.
     ExportFormatV1.JSON -> "json"
     ExportFormatV1.RC -> "rc"
     null -> "json"

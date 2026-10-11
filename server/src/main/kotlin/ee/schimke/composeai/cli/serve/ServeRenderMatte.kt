@@ -14,51 +14,28 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * `?bg=` on `/render/<id>.png`: the preview's resolved stage, composited **into the bytes**.
+ * `?bg=` on `/render/<id>.png`: the preview's resolved stage composited into the bytes.
  *
- * Every surface this server draws already puts a preview on a ground — the grid card, the viewer,
- * the compare wall, the reference-compare page — and every one of them does it in CSS, out of
- * [PreviewBackdrop] for the colour and [PreviewClip] for the shape. The pixels never carry any of
- * it. That is right for the archived artefact (a `showBackground = false` sticker is transparent so
- * a designer can drop it onto any canvas, the header's Transparent toggle inspects the raw alpha,
- * and the fidelity scorer masks with the clip) and wrong the moment a PNG **leaves the page**: a
- * GitHub embed, Copy PNG, a paste into a prompt. Then only the alpha travels, and a dark-first
- * catalog's light-on-nothing sticker lands on white as a blank rectangle.
+ * Pages draw a preview's ground in CSS from [PreviewBackdrop] and [PreviewClip], so the PNG itself
+ * stays transparent, which is right for the archived artefact but wrong once it leaves the page (a
+ * GitHub embed, Copy PNG): a dark-first catalog's light sticker lands on white as a blank rectangle
+ * (see wear-m3-catalog#284). This applies the same two resolvers to bytes. A request without `bg=`
+ * is byte-identical to before.
  *
- * Measured on this repo's own hosted catalog, `appcard__ideal__icon-outlined-gallery-2__compact`:
- * 19.6% of its pixels carry any alpha at all and the ink that is there has mean luminance 237/255.
- * Filed as [wear-m3-catalog#284](https://github.com/yschimke/wear-m3-catalog/issues/284), where the
- * embedded render shows as an all-but-empty frame and the finding — an outline card missing its
- * border — cannot be seen at all.
- *
- * So this is the same two resolvers the pages use, applied to bytes rather than to CSS. It changes
- * nothing about what is baked or published: a request without `bg=` is byte-identical to before,
- * and the stage is a post-processing pass over whatever the lane produced.
- *
- * ### The shape is the point
- *
- * A square of stage under a round Wear capture draws the watch as a rectangle — the fault
- * `wear-device-clip` was written to prevent, and reproduced exactly by an early cut of this code. A
- * square under a *component* sticker is legible but says the component is a black rectangle. So the
- * stage takes the shape of what is actually on the canvas:
- *
- * - [Mode.CIRCLE] for a round device, straight off [PreviewClip], stopping at the bezel.
- * - [Mode.PLATES] for everything else: the islands of non-transparent pixels, each padded out to a
- *   rounded plate, overlapping plates merged. A stage, not a component — it paints no border and
- *   fills no shape the render did not draw, so #284's missing outline is still missing, and now
- *   visible as missing.
- * - [Mode.SQUARE] for the whole frame, when a caller wants the old blunt answer.
+ * The stage takes the shape of what is on the canvas, since a square under a round capture draws
+ * the watch as a rectangle:
+ * - [Mode.CIRCLE] for a round device, from [PreviewClip], stopping at the bezel;
+ * - [Mode.PLATES] otherwise: each island of non-transparent pixels padded to a rounded plate,
+ *   overlaps merged. It paints no border or fill the render didn't draw;
+ * - [Mode.SQUARE] for the whole frame, on request.
  */
 object ServeRenderMatte {
   /** The query parameter. Shares its name with the pages' stage/checkerboard toggle by design. */
   const val PARAM: String = "bg"
 
   /**
-   * What ground to composite in.
-   *
-   * `on`/`off` are accepted as aliases of [AUTO]/[OFF] because the viewer and landing pages already
-   * spell the page-wide stage toggle `?bg=on|off`, and a URL that picked one up on the way to a
-   * render lane should mean the nearest sensible thing rather than 400.
+   * What ground to composite in. `on`/`off` alias [AUTO]/[OFF] because pages spell their stage
+   * toggle `?bg=on|off`, and such a URL should mean the nearest sensible thing rather than 400.
    */
   enum class Mode(val wire: String) {
     /** Decide from the render and its stage — see [decide]. The one a link should carry. */
@@ -89,13 +66,9 @@ object ServeRenderMatte {
   }
 
   /**
-   * Everything the matte needs about the preview, resolved by the caller through the same two
-   * chains the pages use.
-   *
-   * The device frame's dp arrive alongside the [clip] because a clip is stated in **dp** and the
-   * pixels are not: the scale is `imagePx / frameDp`, and a circle scaled by anything else is a
-   * circle in the wrong place. Both null together means the render names no frame, which is the
-   * ordinary case for a component sticker.
+   * Everything the matte needs about the preview, resolved through the pages' two chains. Device
+   * frame dp travel with [clip] because a clip is in dp and the scale is `imagePx / frameDp`. Both
+   * null means no frame (usual for a component sticker).
    */
   data class Stage(
     val backdrop: PreviewBackdrop.Backdrop,
@@ -105,21 +78,15 @@ object ServeRenderMatte {
   )
 
   /**
-   * [png] with [mode]'s ground composited under it, or the input unchanged.
-   *
-   * Unchanged rather than failing is deliberate and applies to every way this can decline:
-   * [Mode.OFF], a backdrop that resolved no colour, an image ImageIO cannot decode, one larger than
-   * [MAX_SIDE_PX], and [AUTO] deciding the render needs nothing. A render that cannot be matted is
-   * still a render, and answering 500 because a cosmetic pass failed would take out the lane this
-   * is a convenience on.
+   * [png] with [mode]'s ground composited under it, or unchanged when [Mode.OFF], no backdrop
+   * colour, undecodable, larger than [MAX_SIDE_PX], or [AUTO] decides nothing is needed. A cosmetic
+   * pass never fails the lane.
    */
   fun apply(png: ByteArray, mode: Mode, stage: Stage): ByteArray {
     if (mode == Mode.OFF) return png
     val colour = parseColour(stage.backdrop.color) ?: return png
-    // Size is read from the header BEFORE decoding, not from the decoded image. A `?scroll=long`
-    // capture is a full-page render and can be tens of thousands of pixels tall; decoding one to
-    // find out it is too big to stage would allocate the whole thing first, which is the cost this
-    // ceiling exists to refuse.
+    // Size comes from the header before decoding, so an oversized `?scroll=long` capture is refused
+    // without allocating it.
     val size = dimensions(png) ?: return png
     if (max(size.first, size.second) > MAX_SIDE_PX) return png
     val image = decode(png) ?: return png
@@ -144,49 +111,20 @@ object ServeRenderMatte {
   }
 
   /**
-   * What [Mode.AUTO] resolves to, from four signals measured in one pass over the pixels.
+   * What [Mode.AUTO] resolves to, from signals measured in one pass. Thresholds were chosen from
+   * measurements across the hosted `remote-m3` catalog, picking cuts with the widest margins. In
+   * order:
    *
-   * The thresholds are not taste. They come from measuring every candidate signal across a spread
-   * of the hosted `remote-m3` catalog and picking the cuts with the widest margins:
-   * ```
-   * preview                                       solid  interior   pale   AUTO
-   * button-child__ideal__disabled__compact        0.000     0.360  0.000   plates
-   * button-filled__ideal__disabled__compact       0.000     0.360  0.000   plates
-   * text-body__ideal__default__compact            0.015     0.003  1.000   plates
-   * button-outlined__ideal__default__compact      0.021     0.001  0.340   plates
-   * appcard__ideal__icon-outlined-gallery-2       0.168     0.003  0.993   plates
-   * theme-systemthemeswatches__ideal__default     0.256     0.000  0.333   plates
-   * button-filled__ideal__default__compact        0.366     0.000  0.959   plates
-   * appcard__ideal__content-image__compact        0.621     0.000  0.364   off
-   * scaffold__ideal__default__compact             0.781     0.001  0.014   off
-   * widgetcontainer-gradientbackground__216dp     0.961     0.001  0.013   off
-   * shader-lineargradient__ideal__default         1.000     0.000  0.006   off
-   * circularprogressindicator__complete__192dp    0.116     0.001  1.000   circle (round)
-   * ```
+   * 1. Light stage: nothing. Dark ink is already legible on GitHub's white (a white specimen in a
+   *    light catalog isn't fixable by colour; use `bg=square`).
+   * 2. Round device: the circle, always, since a round capture's bezel otherwise has no edge.
+   * 3. Translucent interior ([Stats.interiorPartialFraction], partly covered but not an antialiased
+   *    edge): plates. Wear's disabled states are drawn entirely at reduced alpha with no solid
+   *    pixels, invisible on white (0.360 vs ≤0.003 elsewhere).
+   * 4. Paints its own legible ground (mostly solid and not mostly pale: screens, shaders, photo
+   *    cards): nothing.
    *
-   * Four questions, in order:
-   *
-   * 1. **Is the stage light?** Then nothing. A light stage means dark ink, and dark ink is already
-   *    legible on the white body of a GitHub issue — a white plate under it would be invisible and
-   *    pointless. (A deliberately *white* specimen in a light catalog is genuinely invisible on
-   *    white and this does not fix it; nothing colour-shaped can, and `bg=square` is the honest
-   *    escape.)
-   * 2. **Is it a round device?** Then the circle, always — even for a render the rungs below would
-   *    leave alone, because a round capture's readability problem is that its bezel has no edge at
-   *    all. This is the rung that stops a watch being drawn as a rounded square.
-   * 3. **Is it translucent on the inside?** [Stats.interiorPartialFraction] is the share of the
-   *    frame that is *partly* covered and not merely an antialiased edge — a real translucent fill,
-   *    which composites to a different colour on every ground and is therefore simply WRONG on any
-   *    but its own. Wear's disabled states are the case, and they are the reason this rung exists:
-   *    `button-*__disabled` is drawn entirely at reduced alpha, so it has **no solid pixels at
-   *    all** — it is invisible on white, and an earlier cut of this code that averaged ink
-   *    luminance read its zero solid pixels as "dark ink, fine as it is" and left it that way. The
-   *    separation is 0.360 against 0.003, so the cut sits two orders of magnitude clear of both.
-   * 4. **Does it paint its own legible ground?** Mostly solid AND not mostly pale: a screen
-   *    template, a shader fill, a photo card. Those carry their own surface and need no stage — a
-   *    plate under `scaffold` does nothing but poke rounded corners out past the watch face.
-   *
-   * Everything else is a sticker on transparency, and gets plates.
+   * Everything else is a sticker on transparency and gets plates.
    */
   private fun decide(stats: Stats, stage: Stage): Mode =
     when {
@@ -311,13 +249,8 @@ object ServeRenderMatte {
   }
 
   /**
-   * The device circle in image pixels, or the frame's inscribed circle when the preview names no
-   * device.
-   *
-   * A clip is dp against the *frame*, and the PNG's pixels are that frame at the render's density,
-   * so the scale is the ratio of the two. Falling back to the inscribed circle rather than
-   * declining keeps an explicit `bg=circle` predictable: it is what a caller asking for a circle on
-   * a square capture can only mean.
+   * The device circle in image pixels (clip dp scaled by image px over frame dp), or the frame's
+   * inscribed circle when no device is named, so an explicit `bg=circle` stays predictable.
    */
   private fun circleOf(image: BufferedImage, stage: Stage): Ellipse2D.Float {
     val shape = stage.clip as? PreviewClip.Shape.Circle
@@ -339,10 +272,8 @@ object ServeRenderMatte {
   }
 
   /**
-   * The alpha mask plus the four signals [decide] reads, from one pass over the pixels.
-   *
-   * Not a data class: it carries an array, and array identity equality on a generated `equals` is
-   * the kind of thing that is only ever wrong.
+   * The alpha mask plus the signals [decide] reads, from one pass. Not a data class, since it holds
+   * an array.
    */
   private class Stats(
     /** Alpha >= [ALPHA_MIN]: what the plates are cut from. */
@@ -352,9 +283,8 @@ object ServeRenderMatte {
     /** Share of the frame that is all but opaque. */
     val solidFraction: Double,
     /**
-     * Share of the frame that is partly covered and **not an edge** — every 4-neighbour is covered
-     * too. An antialiased fringe always borders transparency, so it is excluded by construction;
-     * what is left is a genuine translucent fill.
+     * Share of the frame partly covered where every 4-neighbour is also covered: excludes
+     * antialiased fringes, leaving genuine translucent fills.
      */
     val interiorPartialFraction: Double,
     /** Of the solid pixels, the share close enough to white to vanish on a white page. */
@@ -461,17 +391,15 @@ object ServeRenderMatte {
   /** Pixels an island needs before it earns a plate. Below this it is antialiasing. */
   private const val MIN_ISLAND_PX = 12
 
-  /**
-   * How far a plate stands off its content, in image pixels (~5dp at the density Wear renders at).
-   */
+  /** How far a plate stands off its content, in image pixels (~5dp at Wear's density). */
   private const val PLATE_PAD_PX = 10
 
   /** A plate's corner radius, in image pixels. */
   private const val PLATE_RADIUS_PX = 14f
 
   /**
-   * Interior translucency above which the render composites wrongly on any ground but its own.
-   * Measured: 0.360 on Wear's disabled states, <= 0.003 on everything else. See [decide].
+   * Interior translucency above which a render composites wrongly on any ground but its own; see
+   * [decide].
    */
   private const val TRANSLUCENT_INTERIOR = 0.02
 
@@ -482,9 +410,8 @@ object ServeRenderMatte {
   private const val PALE_INK_LIMIT = 0.5
 
   /**
-   * Longest edge this will touch. A full-page `?scroll=long` capture can be tens of thousands of
-   * pixels tall, and the pass is linear in area; declining is better than spending a request thread
-   * on a stage nobody asked to wait for.
+   * Longest edge this will process: the pass is linear in area and long scroll captures can be
+   * huge.
    */
   private const val MAX_SIDE_PX = 4096
 }

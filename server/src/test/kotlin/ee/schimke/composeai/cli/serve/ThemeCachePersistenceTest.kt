@@ -15,13 +15,9 @@ import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 
 /**
- * The disk tier for warmed theme renders, and the identity that decides when it may be read.
- *
- * The measurement this exists to make impossible again: `m3-catalog` needs ~28 hours of lane time
- * to warm its 10,120 targets, and on 2026-08-17 its cache was dropped seven times — three
- * delivery-branch regenerations and four server releases. It had never once had a window long
- * enough to finish. Persistence only helps if the identity is right, so most of what is asserted
- * here is about *when a generation must not be reused*.
+ * The disk tier for warmed theme renders, and the identity that decides when it may be read. A
+ * large catalog needs about a day of lane time to warm, so frequent invalidation means it never
+ * finishes; most of what's asserted here is when a generation must not be reused.
  */
 class ThemeCachePersistenceTest {
 
@@ -51,9 +47,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `the same bytes staged in a different directory are the same generation`() {
-    // The property the whole design rests on. A catalog load stages its bundle into a fresh
-    // directory every time, so a fingerprint that looked at paths would call every load a new
-    // generation and persistence would buy exactly nothing.
+    // A catalog load stages its bundle into a fresh directory each time, so a path-based
+    // fingerprint would make every load a new generation.
     val first = tempDir()
     val second = tempDir()
     val a = listOf(jar(first, "catalog.jar", "CLASSES"), jar(first, "compose.jar", "DEPS"))
@@ -73,10 +68,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `classpath order is part of the generation, because precedence decides the pixels`() {
-    // When two entries carry the same class or resource the JVM resolves the earlier one, so the
-    // same jars in a different order can genuinely render differently. Hashing order-insensitively
-    // would let a render be reused from the wrong resolution order — a wrong pixel, where being
-    // order-sensitive costs at worst an unnecessary re-warm.
+    // Classpath order matters (the JVM resolves the earlier entry), so hashing is order-sensitive:
+    // the worst case is an unnecessary re-warm rather than a wrong pixel.
     val dir = tempDir()
     val one = jar(dir, "a.jar", "A")
     val two = jar(dir, "b.jar", "B")
@@ -97,16 +90,9 @@ class ThemeCachePersistenceTest {
   }
 
   /**
-   * The version used to be keyed on, and a release therefore orphaned every warmed render on the
-   * box. On preview.coo.ee, where a full pass is 18,604 entries and the better part of a day, four
-   * versions shipped inside four hours — so the cache was invalidated faster than it could ever be
-   * filled, and was adopted exactly zero times.
-   *
-   * It was never proof of anything either: it stood *proxy* for the container image, which a
-   * base-image bump changes without moving the version at all. What actually covers a renderer that
-   * moved is the load-time sample verification, which the next test exercises — crossing a version
-   * boundary is simply the adopted-entry case, and adopted entries are withheld until the sample
-   * agrees.
+   * The tool version is not part of the key: releases came faster than a full pass, so the cache
+   * was never adopted, and the version never covered base-image changes anyway. A moved renderer is
+   * caught by load-time sample verification; crossing versions is just the adopted-entry case.
    */
   @Test
   fun `a new build reads the previous build's generation`() {
@@ -134,9 +120,8 @@ class ThemeCachePersistenceTest {
   }
 
   /**
-   * The dirty model in one test: renders inherited across a build are warm, servable and marked;
-   * re-rendering one clears its mark; and a mark is derived from the file's own timestamp rather
-   * than an index someone has to keep in step with 18,604 files.
+   * The dirty model: renders inherited across a build are warm, servable and marked; re-rendering
+   * clears the mark; marks derive from each file's timestamp rather than a separate index.
    */
   @Test
   fun `renders inherited from another build are dirty until re-rendered`() {
@@ -168,13 +153,8 @@ class ThemeCachePersistenceTest {
   }
 
   /**
-   * The status row counts a dirty render the pass cannot replace.
-   *
-   * `failed` counted only keys that are not cached, which is right while a gap is a gap: a key that
-   * failed and has since rendered is no longer a failure. A **dirty** key breaks that equivalence,
-   * because it is cached on purpose — serving another build's pixels is what the dirty model buys —
-   * so a re-render failing over and over was counted as zero, and the one row that exists to say a
-   * warm catalog is not really finished could never say it.
+   * The status row counts a dirty render the pass can't replace as failed: a dirty key is cached on
+   * purpose, so "not cached" no longer implies "not failed".
    */
   @Test
   fun `a dirty render the pass cannot regenerate is counted as failed`() {
@@ -237,14 +217,9 @@ class ThemeCachePersistenceTest {
   }
 
   /**
-   * What a failed sample must take, and why "dirty" is the wrong set to narrow to.
-   *
-   * The sample draws its candidates from `wasAdopted` — entries present when this generation opened
-   * — so adoption is the boundary it actually tests. Dirtiness asks a different question, "did a
-   * different BUILD write this", and a same-version restart of a partly converged generation
-   * inherits the previous process's renders as clean. Narrowing to dirty would delete an older
-   * build's leftovers, report a positive count that suppresses the fallback discard, lift the
-   * quarantine, and go on serving the very entries the sample disagreed with.
+   * A failed sample takes everything adopted (`wasAdopted`), not just dirty entries: a same-version
+   * restart inherits renders as clean, and narrowing to dirty would keep serving the very entries
+   * the sample disagreed with.
    */
   @Test
   fun `a failed sample takes everything inherited, not just what an older build wrote`() {
@@ -311,13 +286,9 @@ class ThemeCachePersistenceTest {
   }
 
   /**
-   * The rollout case, which a timestamp comparison alone gets wrong.
-   *
-   * `deploy/image` rolls out zero-downtime: the outgoing replica keeps serving — and keeps
-   * rendering into this same directory — while the incoming one boots. A render it writes after the
-   * new build set its boundary carries a LATER timestamp, so a bare `now` boundary files an
-   * old-build render as current, and the sample cannot catch it either because the sample only
-   * examines what was present at open.
+   * Zero-downtime rollout: the outgoing replica keeps rendering into this directory after the new
+   * build sets its boundary, so a bare `now` boundary would file old-build renders as current (and
+   * the sample only checks what existed at open).
    */
   @Test
   fun `a render written during the rollout overlap is not mistaken for this build's work`() {
@@ -350,13 +321,9 @@ class ThemeCachePersistenceTest {
   }
 
   /**
-   * The volume that cannot record the boundary.
-   *
-   * A cross-build open whose manifest write fails used to record the failure and carry on, and the
-   * generation then re-read the PREVIOUS manifest — commonly a boundary of zero — and concluded
-   * that another build's renders were its own. A five-entry sample verifies the generation and a
-   * renderer change outside that sample is served for the life of the process. Unknown provenance
-   * has to read as dirty, not as ours.
+   * If a cross-build open can't write its manifest, the generation would re-read the previous one
+   * (often a zero boundary) and claim another build's renders. Unknown provenance must read as
+   * dirty.
    */
   @Test
   fun `renders are dirty when the boundary could not be recorded`() {
@@ -387,13 +354,9 @@ class ThemeCachePersistenceTest {
   }
 
   /**
-   * The boundary is a line, and a line left behind after everything crossed it re-dirties the very
-   * work that crossed.
-   *
-   * A cross-build open dates the boundary a grace window into the FUTURE, deliberately, so the
-   * outgoing replica's later writes are caught. The cost is that this build's own early renders
-   * fall under it too — fine once, and a bug forever: left in the manifest, every restart
-   * reclassifies them and regenerates them again.
+   * A cross-build boundary is dated a grace window into the future to catch the outgoing replica's
+   * writes, which also covers this build's early renders. It must be cleared once crossed, or every
+   * restart re-dirties them.
    */
   @Test
   fun `the boundary is cleared once every render is this build's own`() {
@@ -433,12 +396,8 @@ class ThemeCachePersistenceTest {
   }
 
   /**
-   * The half of the rollout overlap a boundary cannot see.
-   *
-   * Classification happens once, at open. A key the incoming replica renders FIRST leaves the dirty
-   * set by its own write, so the outgoing replica renaming over it afterwards is invisible however
-   * the boundary is dated — memory keeps serving the right pixels until it evicts, and the read
-   * then falls through to another build's bytes under a generation reporting itself converged.
+   * Classification happens once at open, so an outgoing replica renaming over a key the incoming
+   * one already rendered is invisible to the boundary; the deferred reconcile catches it.
    */
   @Test
   fun `a render the outgoing replica overwrote after ours goes back on the queue`() {
@@ -448,9 +407,8 @@ class ThemeCachePersistenceTest {
     first.put("seed|dark", ByteArray(8) { 1 })
     ageRenders(root, "m3-catalog", fp, byMillis = 10_000)
 
-    // A real grace window — the overlap allowance IS the window, and the helper store uses zero —
-    // and a clock the test can push past it, since the reconcile is deliberately deferred until
-    // the overlap is over and there is no second writer left to race.
+    // A real grace window and a clock the test can push past it: the reconcile waits until the
+    // overlap is over.
     var now = System.currentTimeMillis()
     val incoming =
       assertNotNull(
@@ -466,9 +424,8 @@ class ThemeCachePersistenceTest {
     incoming.put("seed|dark", ByteArray(8) { 2 }, replaceExisting = true)
     assertEquals(0, incoming.dirtyCount(), "clean, as far as this replica knows")
 
-    // The OUTGOING replica, still live on the old build, renames its own copy over the top. Only
-    // one render is in this generation, so the file is unambiguous without hashing the key — which
-    // the test could not do anyway, the name being a one-way hash.
+    // The outgoing replica renames its copy over the top; with one render in the generation the
+    // file is unambiguous.
     val png =
       assertNotNull(
         File(File(root, "m3-catalog"), fp).listFiles()?.singleOrNull { it.name.endsWith(".png") }
@@ -488,11 +445,8 @@ class ThemeCachePersistenceTest {
   }
 
   /**
-   * A manifest that says nothing is not a manifest saying "this build made these".
-   *
-   * A write interrupted mid-flight leaves exactly this: a full set of another build's PNGs beside a
-   * missing or unparseable manifest. Reading that absence as "we created the generation" opens it
-   * with a zero boundary, and a five-entry sample then verifies renders nobody can account for.
+   * A missing or unparseable manifest beside another build's PNGs (an interrupted write) must not
+   * open with a zero boundary.
    */
   @Test
   fun `renders beside an unreadable manifest are of unknown ownership, so dirty`() {
@@ -504,8 +458,7 @@ class ThemeCachePersistenceTest {
     ageRenders(root, "m3-catalog", fp, byMillis = 10_000)
     assertTrue(File(File(File(root, "m3-catalog"), fp), ThemeCacheStore.MANIFEST_NAME).delete())
 
-    // Same tool version, so nothing about the BUILD says these are suspect — only the fact that
-    // the volume can no longer account for them.
+    // Same tool version: only the unaccountable volume makes these suspect.
     val next = assertNotNull(store(root).open("m3-catalog", fp, inputs(fp)))
     assertEquals(
       2,
@@ -515,12 +468,9 @@ class ThemeCachePersistenceTest {
   }
 
   /**
-   * The reconcile is a way of reaching convergence, so it has to be able to finish the job.
-   *
-   * In the ordinary rollout — nobody overwrote anything — the dirty set empties first and the
-   * at-risk set empties later, in the reconcile, with no further write to notice. Leaving the clear
-   * to `put` alone strands the future-dated boundary in the manifest, which is the very thing that
-   * re-dirties this build's own renders on the next restart.
+   * The reconcile must be able to finish convergence: in an ordinary rollout the at-risk set
+   * empties in the reconcile with no further write, so leaving the clear to `put` would strand the
+   * future-dated boundary.
    */
   @Test
   fun `convergence reached by the overlap reconcile clears the boundary too`() {
@@ -620,12 +570,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `an eviction makes the outgoing replica's repopulated renders dirty`() {
-    // The rollout this store was built for is zero-downtime: the outgoing replica keeps serving,
-    // and keeps writing PNGs, against the same volume while the incoming one boots and evicts.
-    // `evictAll` runs before this process opens anything, so it cannot race THIS process — which
-    // was the whole of the old reasoning, and is a single-process argument about a volume that is
-    // not single-process. Everything the old replica publishes in that window is precisely the
-    // pixels the eviction was meant to destroy, landing after the deletion with fresh timestamps.
+    // Zero-downtime rollout: the outgoing replica may keep writing PNGs after `evictAll`, landing
+    // exactly the pixels the eviction meant to destroy with fresh timestamps.
     val root = tempDir()
     val grace = 60 * 60_000L
 
@@ -633,9 +579,8 @@ class ThemeCachePersistenceTest {
     val old = assertNotNull(outgoing.open("m3-catalog", "fp-a", inputs("fp-a")))
     old.put("preview|dark", ByteArray(8) { 1 })
 
-    // The incoming replica evicts. SAME build: an operator who knows the pixels moved does not need
-    // a release to say so, and that is the case a version comparison alone cannot see — the early
-    // return would fire on the matching version and keep whatever boundary was already recorded.
+    // The incoming replica evicts on the same build (an operator who knows pixels moved), which a
+    // version comparison can't see.
     val incoming = ThemeCacheStore(root, graceMillis = grace)
     assertEquals(1, incoming.evictAll())
     assertTrue(File(root, ThemeCacheStore.EVICTED_NAME).isFile, "the boundary is on the volume")
@@ -655,11 +600,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `renders written past the eviction's grace window are clean again`() {
-    // The boundary is a window, not a permanent condemnation of the volume. Once every writer that
-    // could predate the eviction has had the rollout's grace to stop, what lands next is this
-    // build's own work; re-rendering it forever would be a treadmill rather than a safeguard.
-    //
-    // An eviction stamped in the past with no grace, so every real render timestamp is past it.
+    // The eviction boundary is a window: once the grace has passed, new renders are this build's
+    // own and must not be re-rendered forever. An eviction in the past with no grace.
     val root = tempDir()
     val store = ThemeCacheStore(root, graceMillis = 0, clock = { 1_000_000L })
     assertEquals(0, store.evictAll())
@@ -705,9 +647,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `an unreadable classpath declines to name the generation at all`() {
-    // Null means "do not persist". Inventing an identity for a classpath we could not read is how
-    // two different generations end up agreeing on a name, which is the origin of every wrong pixel
-    // this cache could serve.
+    // Null means "don't persist"; inventing an identity for an unreadable classpath lets different
+    // generations share a name.
     val dir = tempDir()
     assertNull(fingerprint(listOf(File(dir, "missing.jar"))))
     assertNull(fingerprint(emptyList()))
@@ -715,9 +656,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `exploded class directories are hashed by content, not skipped`() {
-    // A from-source catalog puts a directory on the classpath. Skipping it would fingerprint the
-    // generation by its dependencies alone — so editing the catalog's own code would reuse the old
-    // renders.
+    // A from-source catalog puts a directory on the classpath; skipping it would reuse renders
+    // after editing the catalog's code.
     val dir = tempDir()
     val classes = File(dir, "classes").apply { mkdirs() }
     jar(classes, "Button.class", "v1")
@@ -731,9 +671,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `a bumped JVM is a different generation, with the classpath untouched`() {
-    // The case the tool version used to stand proxy for and failed open on: a base-image bump moves
-    // the renderer while every hashed catalog input holds still. Before this was keyed on, the only
-    // thing standing between that and a wrong pixel was a five-entry sample.
+    // A base-image bump moves the renderer while catalog inputs stay still; this input must be
+    // keyed.
     val dir = tempDir()
     val classpath = listOf(jar(dir, "catalog.jar", "CLASSES"))
 
@@ -868,12 +807,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `the catalog's own classes are fingerprinted, not just its framework dependencies`() {
-    // The collision this closes. `splitBundleRuntime` puts the bundle's own classes/ directory into
-    // `composeai.daemon.userClassDirs` and leaves `classpath` holding parent overlays and daemon
-    // sidecars only — so hashing `classpath` alone gave two catalog revisions with unchanged
-    // dependencies the SAME name, and the new revision would adopt the old one's pixels. That is
-    // exactly the failure this whole mechanism exists to prevent, and it is invisible from the
-    // parent classpath.
+    // `splitBundleRuntime` puts the bundle's classes/ in `composeai.daemon.userClassDirs`, so
+    // hashing only `classpath` gave two revisions with unchanged dependencies the same name.
     val dir = tempDir()
     val framework = jar(dir, "compose-runtime.jar", "UNCHANGED")
     val classes = File(dir, "classes").apply { mkdirs() }
@@ -931,10 +866,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `declared themes persist even when the eager optimizer pass is switched off`() {
-    // With `-Dcomposeai.serve.themeOptimization=false` the pass never declares its targets, so
-    // gating persistence on the target set refused every render a visitor actually asked for and
-    // each restart began again — persistence doing nothing on precisely the configuration where the
-    // renders it does get are most worth keeping.
+    // With `-Dcomposeai.serve.themeOptimization=false` no targets are declared, so gating
+    // persistence on targets discarded every visitor render on each restart.
     val root = tempDir()
     val fp = "a".repeat(64)
     val generation = store(root).open("m3-catalog", fp, inputs(fp))!!
@@ -950,10 +883,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `the alias routing is part of the generation`() {
-    // Persisted keys name the published catalog id, but a render resolves it through the alias map
-    // first. A delivery-branch update can repoint an id at a different daemon preview while
-    // shipping
-    // a byte-identical bundle — same classpath, same key, different pixels.
+    // Persisted keys use the catalog id, but rendering resolves it through the alias map first; an
+    // alias change with an identical bundle means different pixels.
     val dir = tempDir()
     val cp = listOf(jar(dir, "catalog.jar", "CLASSES"))
     fun fp(alias: Map<String, String>) =
@@ -974,10 +905,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `render-affecting system properties are part of the generation, but their paths are not`() {
-    // Excluding the whole system-property map was the same mistake as excluding the user classpath:
-    // most of it is staging paths that churn every load, but `composeai.fonts.offline` and the
-    // Android launch's `robolectric.*` settings genuinely change what the renderer produces —
-    // offline font resolution substitutes fallback glyphs for downloaded faces.
+    // Most system properties are churning staging paths, but `composeai.fonts.offline` and
+    // Android's `robolectric.*` settings change the output, so they are keyed.
     val online = mapOf("composeai.fonts.offline" to "false")
     val offline = mapOf("composeai.fonts.offline" to "true")
 
@@ -1009,27 +938,17 @@ class ThemeCachePersistenceTest {
   // ---- store ----------------------------------------------------------------------------------
 
   /**
-   * A store whose sweep grace window is disabled, so a test can assert reclamation directly.
-   *
-   * Production keeps a grace window for the zero-downtime rollout case — see the dedicated test
-   * below — but every other assertion here is about what the sweep decides, not about how long it
-   * waits to decide it.
+   * A store with no sweep grace window, so tests can assert reclamation directly (the grace case
+   * has its own test).
    */
   private fun store(root: File, maxBytes: Long = ThemeCacheStore.DEFAULT_MAX_BYTES) =
     ThemeCacheStore(root, maxBytes = maxBytes, graceMillis = 0)
 
   /**
-   * Backdate every render in a generation, so a boundary set "now" is unambiguously after them.
-   *
-   * The dirty boundary is compared against each PNG's filesystem timestamp, and a test writes its
-   * fixtures and opens the next generation inside the same millisecond — which a strict comparison
-   * correctly reads as "not older". Production never has that problem: the boundary is set when a
-   * different build opens the generation, a restart later than the renders it inherits. Aging the
-   * fixtures says exactly that, where skewing the store's clock would also distort the writes the
-   * test then makes THROUGH it, leaving regenerated entries permanently dirty.
-   *
-   * The strict comparison is deliberate: a loose one would let an entry written in the same tick as
-   * the boundary stay dirty through its own regeneration, and re-render forever.
+   * Backdate a generation's renders so a "now" boundary is unambiguously after them. Tests write
+   * fixtures and open within the same millisecond, which the strict comparison reads as "not
+   * older"; skewing the store's clock instead would distort later writes. The comparison is strict
+   * so an entry written in the boundary's tick doesn't stay dirty after regeneration.
    */
   private fun ageRenders(root: File, system: String, fingerprint: String, byMillis: Long) {
     val at = System.currentTimeMillis() - byMillis
@@ -1058,12 +977,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `a generation young enough to belong to another replica is not reclaimed`() {
-    // The image deployment rolls out zero-downtime: a new replica boots beside the running one on
-    // the same volume and sees the old one's generations as unreferenced. Sweeping them would
-    // delete
-    // a possibly 28-hour cache belonging to the replica still serving production — and still
-    // serving
-    // it if the new replica fails readiness.
+    // During a zero-downtime rollout the new replica sees the old one's generations as
+    // unreferenced; sweeping would delete the serving replica's cache.
     val root = tempDir()
     val theirs = "a".repeat(64)
     val ours = "b".repeat(64)
@@ -1091,10 +1006,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `captured IR payloads are part of the generation`() {
-    // A bundle can regenerate a Remote Compose / protolayout capture without touching a class. The
-    // daemon renders FROM those bytes, and they arrive as system-property paths rather than
-    // classpath entries — so anything reading only the classpath calls two different scenes one
-    // generation.
+    // A bundle can regenerate a Remote Compose / protolayout capture without touching a class;
+    // those bytes arrive as system-property paths, so they must be part of the identity.
     val dir = tempDir()
     val jarFile = jar(dir, "catalog.jar", "UNCHANGED")
     val ir = File(dir, "ir").apply { mkdirs() }
@@ -1131,10 +1044,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `adopted renders are withheld from reads until verification settles`() {
-    // Verification is asynchronous — it needs a lane and a warm daemon — so between adopting a
-    // generation and checking it there is a window where the fingerprint might be wrong. Serving
-    // those bytes in that window is the one thing the safety check exists to prevent, and traffic
-    // can hold the window open by keeping the box non-idle.
+    // Verification is async, so adopted entries are withheld until it passes; serving them in the
+    // window is what the check prevents, and traffic can hold the window open.
     val root = tempDir()
     val fp = "a".repeat(64)
     store(root).open("m3-catalog", fp, inputs(fp))!!.also { it.put("one", byteArrayOf(1)) }
@@ -1168,9 +1079,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `concurrent writers do not share a temporary file`() {
-    // The zero-downtime rollout puts two processes on this volume at once. A temp path shared by
-    // cache key lets one replica rename the inode while the other is still writing it, publishing a
-    // half-PNG under a name that claims to be complete.
+    // Two processes share the volume during rollout; a temp path shared by cache key could publish
+    // a half-written PNG.
     val root = tempDir()
     val fp = "a".repeat(64)
     val one = store(root).open("m3-catalog", fp, inputs(fp))!!
@@ -1232,9 +1142,7 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `a live set over the cap is reported, never evicted`() {
-    // Deleting what is currently being warmed to fit a cap turns the cap into a treadmill: the
-    // optimizer re-renders exactly what the sweep discarded, forever, and the box looks busy while
-    // making no progress.
+    // Never delete what's being warmed to fit a cap, or the optimizer re-renders it forever.
     val root = tempDir()
     val fp = "a".repeat(64)
     val store = store(root, maxBytes = 1)
@@ -1260,9 +1168,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `verification cannot be satisfied by renders this process just made`() {
-    // On a partly warmed restart, foreground traffic persists missing keys before the idle
-    // verification task runs. Sampling those would let five fresh renders "verify" a generation
-    // whose adopted bytes were never looked at — the cache vouching for itself.
+    // Foreground renders persisted before verification must not be sampled, or the cache would
+    // vouch for itself.
     val root = tempDir()
     val fp = "a".repeat(64)
     store(root).open("m3-catalog", fp, inputs(fp))!!.put("adopted", byteArrayOf(1))
@@ -1280,10 +1187,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `a fresh render replaces the quarantined copy on disk`() {
-    // While quarantined a foreground request misses the adopted copy and renders fresh bytes. If
-    // the
-    // stale PNG stayed on disk, verification passing on OTHER keys would expose it again the moment
-    // the fresh copy fell out of the memory tier.
+    // While quarantined, requests render fresh; the stale PNG must be deleted, or verification
+    // passing on other keys would expose it once the fresh copy leaves memory.
     val root = tempDir()
     val fp = "a".repeat(64)
     store(root).open("m3-catalog", fp, inputs(fp))!!.put("one", byteArrayOf(1))
@@ -1315,9 +1220,8 @@ class ThemeCachePersistenceTest {
     generation.put("two", byteArrayOf(2))
     if (!dir.setWritable(false)) return
     try {
-      // Skipped where the filesystem does not actually enforce it: as root — which is how this
-      // container runs, though CI does not — a read-only directory still accepts deletes, and the
-      // assertion would pass without testing anything.
+      // Skipped where the filesystem doesn't enforce it (as root, a read-only directory still
+      // accepts deletes).
       if (writable(dir)) return
       assertFalse(generation.discard(), "an incomplete discard must not report success")
     } finally {
@@ -1326,11 +1230,8 @@ class ThemeCachePersistenceTest {
   }
 
   /**
-   * Whether [dir] genuinely accepts new files.
-   *
-   * `createNewFile` **throws** in a read-only directory rather than returning false, which is
-   * exactly how the first version of this test passed locally (as root, where the throw never
-   * happened) and failed on CI.
+   * Whether [dir] really accepts new files. `createNewFile` throws (rather than returning false) in
+   * a read-only directory.
    */
   private fun writable(dir: File): Boolean = runCatching {
     val probe = File(dir, "probe")
@@ -1342,10 +1243,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `a target evicted from memory still counts as cached while it is on disk`() {
-    // The reason `cached` asks both tiers. Memory is capped at 128 MB and a warmed m3-catalog is
-    // several times that, so counting memory alone would report a fully warmed catalog as partially
-    // cached the moment the window started evicting — and send the optimizer back to re-render what
-    // was already on disk.
+    // `cached` asks both tiers: memory (128 MB) holds a fraction of a warmed catalog, so counting
+    // memory alone would send the optimizer back to re-render what's on disk.
     val root = tempDir()
     val fp = "a".repeat(64)
     val generation = store(root).open("m3-catalog", fp, inputs(fp))!!
@@ -1366,9 +1265,7 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `verification drops the whole generation when a cached render no longer matches`() {
-    // The safety net for the input nobody thought of. A mismatch means the fingerprint failed to
-    // capture something, so every entry under it is suspect — keeping the rest would be trusting
-    // the same identity that just proved untrustworthy.
+    // A mismatch means the fingerprint missed an input, so every entry under it is suspect.
     val root = tempDir()
     val fp = "a".repeat(64)
     // Written by one process...
@@ -1389,14 +1286,9 @@ class ThemeCachePersistenceTest {
   }
 
   /**
-   * A discard the write lock refuses is not a discard, and must not be reported as one.
-   *
-   * `verifySample` used to set `persistenceTrusted` on any mismatch, ignoring whether `discard`
-   * actually succeeded — so PNGs it had just proved wrong stayed on disk and were immediately
-   * servable as verified. Honouring the result fixed that, but returning plain `MISMATCH` was still
-   * wrong one level up: `ServeCatalogLiveHost` latches `persistenceVerified` for MISMATCH, so the
-   * retry this case depends on would never come, and the entries would stay withheld from reads
-   * while `contains` kept the optimizer from re-warming them.
+   * A discard the write lock refuses isn't a discard: ignoring the result left wrong PNGs servable
+   * as verified, and returning plain `MISMATCH` made `ServeCatalogLiveHost` latch
+   * `persistenceVerified`, so the needed retry never came.
    */
   @Test
   fun `a discard blocked by the write lock is not reported as settled`() {
@@ -1432,14 +1324,8 @@ class ThemeCachePersistenceTest {
   }
 
   /**
-   * The reconcile's convergence clear races the operator's regenerate, and used to lose it.
-   *
-   * `dirtyCount()` can reach the clear concurrently with `markAllDirty`, and unlike the clear
-   * inside `put` it held no generation write lock. It could observe both sets empty; `markAllDirty`
-   * could then take the lock, persist a fresh boundary, repopulate the queue and answer the admin
-   * route `{"queued": true, "entries": N}`; and the reconcile — still acting on what it saw before
-   * any of that — would write a zero boundary over the new mark and clear the queue it never looked
-   * at. A durable request, promised to survive the next roll, gone in both tiers.
+   * The reconcile's convergence clear could race `markAllDirty` without the generation write lock,
+   * overwriting a fresh operator mark and clearing the queue. It now re-checks under the lock.
    */
   @Test
   fun `the convergence clear is refused while the generation write lock is held`() {
@@ -1509,20 +1395,16 @@ class ThemeCachePersistenceTest {
     assertEquals(1, generation.markAllDirty(), "the regenerate takes the lock and lands")
     assertEquals(now, boundaryOf(root, fp))
 
-    // The reconcile runs afterwards and must leave the mark alone: it re-reads the condition under
-    // the lock, and the queue is no longer empty.
+    // The reconcile runs afterwards and must leave the mark alone.
     assertEquals(1, generation.dirtyCount(), "the operator's request survives")
     assertEquals(now, boundaryOf(root, fp), "on disk too, so it survives the next roll")
   }
 
   @Test
   fun `a disabled optimizer has no targets to wake, even though it still persists`() {
-    // `-Dcomposeai.serve.themeOptimization=false` configures the persistable set and deliberately
-    // leaves the target set empty: renders still reach disk, but no pass has a queue to work. The
-    // regenerate route already refuses on this (`markPersistedDirty` answers -1); the drop route
-    // succeeded and then woke the optimizer anyway, resuming a suspended host and carrying
-    // `keepLiveWarm` on into `scheduleWarm` — an Android daemon cold start and a live seat spent on
-    // a refill that cannot happen.
+    // With `-Dcomposeai.serve.themeOptimization=false` there are no targets, so the drop route must
+    // not wake the optimizer (resuming a host and spending a daemon cold start on a refill that
+    // can't happen).
     val root = tempDir()
     val fp = "e".repeat(64)
     val generation = assertNotNull(store(root).open("m3-catalog", fp, inputs(fp)))
@@ -1552,9 +1434,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `a daemon that cannot render verifies nothing rather than wiping the cache`() {
-    // A null render is "could not answer", not "answered differently". Treating the two alike would
-    // let a busy or cold daemon at startup throw away a fully warmed catalog — the exact loss this
-    // whole change exists to prevent.
+    // A null render is "could not answer", not "answered differently"; a cold daemon at startup
+    // must not discard a warmed catalog.
     val root = tempDir()
     val fp = "a".repeat(64)
     store(root).open("m3-catalog", fp, inputs(fp))!!.put("one", byteArrayOf(7))
@@ -1572,11 +1453,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `only configured targets are written to disk`() {
-    // `put` also takes foreground renders with arbitrary overrides — widths, locales, devices, knob
-    // values — and those are unbounded where `previews × declaredThemes` is not. Since a live
-    // generation is never evicted to honour the cap, persisting them would let a visitor on a
-    // public
-    // box grow the store until the volume filled.
+    // Foreground renders with arbitrary overrides are unbounded, and a live generation is never
+    // evicted, so persisting them would let a visitor fill the volume.
     val root = tempDir()
     val fp = "a".repeat(64)
     val generation = store(root).open("m3-catalog", fp, inputs(fp))!!
@@ -1597,9 +1475,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `a render too large for the memory window is still persisted`() {
-    // The disk tier has its own budget and is the authoritative store behind a deliberately smaller
-    // memory window. Gating the durable write on the memory cap made a small-memory deployment
-    // silently re-render everything after each restart.
+    // The disk tier has its own budget; gating durable writes on the smaller memory cap meant
+    // re-rendering everything after each restart.
     val root = tempDir()
     val fp = "a".repeat(64)
     val generation = store(root).open("m3-catalog", fp, inputs(fp))!!
@@ -1615,9 +1492,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `a discarded generation can still be rebuilt`() {
-    // Discarding deletes the stale PNGs but must leave a writable directory: the same Generation
-    // stays attached to the live cache, and if its directory vanished every later write would fail
-    // silently and the catalog would re-render into memory alone, losing it all again at restart.
+    // Discarding deletes stale PNGs but must leave a writable directory, or later writes fail
+    // silently.
     val root = tempDir()
     val fp = "a".repeat(64)
     store(root).open("m3-catalog", fp, inputs(fp))!!.put("one", byteArrayOf(1))
@@ -1637,9 +1513,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `a system absent from the live set keeps its generations`() {
-    // A catalog whose load failed this pass — a transient fetch error, a shutdown before the loader
-    // reached it — has no live generation. Sweeping it would make the refresher's later success
-    // restart ~28 hours of warming, punishing a catalog for a network blip.
+    // A catalog whose load failed this pass has no live generation; sweeping it would restart its
+    // warming over a network blip.
     val root = tempDir()
     val fp = "a".repeat(64)
     val store = store(root)
@@ -1658,9 +1533,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `a superseded generation of a loaded system is still reclaimed`() {
-    // The other half of the same rule: scoping the sweep to loaded systems must not stop it
-    // reclaiming that system's own previous fingerprint, or a branch regenerating several times a
-    // day accumulates generations until the volume fills.
+    // Scoping the sweep to loaded systems must still reclaim that system's own previous
+    // fingerprints.
     val root = tempDir()
     val old = "a".repeat(64)
     val new = "b".repeat(64)
@@ -1694,9 +1568,7 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `read counters separate a cache that is used from one that is only filled`() {
-    // A cache that fills and a cache that fills and is never read report identical occupancy, and
-    // with a disk tier the second costs I/O on every render to buy nothing. These are the counters
-    // that tell them apart.
+    // Counters that distinguish a cache that fills and is read from one that is never read.
     val root = tempDir()
     val fp = "a".repeat(64)
     store(root).open("m3-catalog", fp, inputs(fp))!!.put("warm", byteArrayOf(1))
@@ -1739,9 +1611,7 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `the disk tier reports what it adopted, so a key that moved is visible`() {
-    // `adopted` is the only evidence that persistence carried anything across a process boundary.
-    // A restart onto a fingerprint that moved adopts nothing and writes everything again, which is
-    // indistinguishable from a working cache in every other counter.
+    // `adopted` is the only evidence persistence carried anything across a restart.
     val root = tempDir()
     val stable = "a".repeat(64)
     val moved = "b".repeat(64)
@@ -1769,8 +1639,7 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `a catalog that fell back to memory-only says why`() {
-    // Every reason a catalog loses its disk tier used to look identical to running the server
-    // without one, and all of them are permanent for the life of the host.
+    // Every reason a catalog loses its disk tier used to look like running without one.
     val silent = CatalogThemeCache()
     assertNull(silent.renderCacheSnapshot().persistenceOff)
 
@@ -1780,9 +1649,8 @@ class ThemeCachePersistenceTest {
 
   @Test
   fun `the census counts generations per system, so fingerprint churn is visible`() {
-    // Three generations for one catalog on a box that has only ever served it one way is churn, and
-    // churn reports itself as success in every other counter: writes climb, the volume fills, and
-    // nothing is ever adopted.
+    // Several generations for one catalog served one way is churn, which otherwise looks like
+    // success.
     val root = tempDir()
     var now = 1_000_000L
     val churning = ThemeCacheStore(root, graceMillis = 60 * 60_000, clock = { now })

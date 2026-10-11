@@ -21,90 +21,55 @@ import okio.FileSystem
 import okio.Path.Companion.toPath
 
 /**
- * Owner of every per-(workspace, module) [DaemonClient] in this MCP server process. Multi-workspace
- * by design — see the chat thread leading into this PR — so a single MCP server can host previews
- * from multiple distinct projects, including two worktrees of the same repo.
- *
- * **Workspace registration is explicit.** Clients call the `register_project` MCP tool (or the
- * server is started with `--project <path>` CLI args); the supervisor canonicalises the path,
- * derives a [WorkspaceId], and remembers the project. Daemons within the workspace are spawned
- * lazily on first `read`/`render_preview`/`watch` reference.
- *
- * **Notification routing.** The supervisor demultiplexes every daemon's notification stream by
- * method and dispatches via the [NotificationRouter] handlers. Callers register one router up
- * front; the supervisor never assumes only one client cares about a given event.
+ * Owner of every per-(workspace, module) [DaemonClient] in this MCP server process.
+ * Multi-workspace, so one server can host previews from several projects (including two worktrees
+ * of one repo). Workspaces are registered explicitly (`register_project` or `--project`); daemons
+ * spawn lazily on first reference. Every daemon's notifications are demultiplexed by method through
+ * the [NotificationRouter].
  */
 class DaemonSupervisor(
   private val descriptorProvider: DescriptorProvider,
   private val clientFactory: DaemonClientFactory,
   private val router: NotificationRouter = NotificationRouter(),
   /**
-   * Concurrent render slots per (workspace, module) beyond the first. SANDBOX-POOL.md — the
-   * supervisor passes `composeai.daemon.sandboxCount = 1 + replicasPerDaemon` as a sysprop on the
-   * launch descriptor; the daemon's
-   * [`RobolectricHost`][ee.schimke.composeai.daemon.RobolectricHost] then hosts one sandbox itself
-   * and spawns a worker JVM for each remaining slot (Robolectric's native runtime allows exactly
-   * one sandbox per process — issue #3072), dispatching concurrent `renderNow` requests across
-   * them.
-   *
-   * **Default 4** — the daemon comes up with 5 sandboxes (1 + 4) so a typical preview grid can
-   * render in parallel without the user opting in. Each slot beyond the first is a worker JVM the
-   * daemon spawns and owns, so the marginal cost is a whole JVM: turn the knob down (or to `0`,
-   * which keeps a single sandbox, bit-identical with the pre-pool path) on memory-constrained
-   * hosts.
-   *
-   * Wire-protocol-visible behaviour (initialize, renderNow, fileChanged fan-out) is unchanged from
-   * the consumer's perspective — the supervisor still talks to exactly one daemon process per
-   * (workspace, module), and that daemon fans renders out to its workers internally.
+   * Concurrent render slots per (workspace, module) beyond the first (SANDBOX-POOL.md). Passed as
+   * `composeai.daemon.sandboxCount = 1 + replicasPerDaemon`; the daemon's
+   * [`RobolectricHost`][ee.schimke.composeai.daemon.RobolectricHost] hosts one sandbox and spawns a
+   * worker JVM per remaining slot (Robolectric allows one sandbox per process). Each extra slot
+   * costs a JVM; `0` keeps a single sandbox. The wire protocol is unchanged: one daemon process per
+   * module.
    */
   private val replicasPerDaemon: Int = DEFAULT_REPLICAS_PER_DAEMON,
   /**
-   * How long [spawn] waits for the `initialize` response. A Robolectric daemon reads nothing until
-   * its first sandbox is up, which took ~45s for a Wear OS module; the client's 30s default then
-   * failed the handshake and left the cached capabilities, devices and discovery empty for the
-   * daemon's lifetime even though renders worked. See [DEFAULT_INITIALIZE_TIMEOUT].
+   * How long [spawn] waits for `initialize`. A Robolectric daemon reads nothing until its first
+   * sandbox is up (~45s for a Wear OS module), so the client's 30s default failed the handshake and
+   * left cached capabilities empty. See [DEFAULT_INITIALIZE_TIMEOUT].
    */
   private val initializeTimeout: Duration = DEFAULT_INITIALIZE_TIMEOUT,
   /**
-   * D1 — kinds the supervisor passes through `initialize.options.attachDataProducts` to every
-   * spawned daemon. Configures "always-on" data products (e.g. `a11y/atf` for ambient diagnostic
-   * squigglies). Empty list (the default) keeps the wire absent — no global attach.
-   *
-   * No production entry point sets this today: [DaemonMcpMain] used to expose a
-   * `--attach-data-product KIND` CLI flag, but it was deemed speculative (the design doc reserves
-   * `attachDataProducts` for "always-on everywhere" cases that no real operator deployment needs
-   * yet) and dropped. The parameter stays so a future agent-driven negotiation tool — or embedding
-   * consumer that wires a non-default config — can populate it without re-plumbing the supervisor →
-   * `initialize` path. Tests use it directly (see `DaemonMcpServerTest`).
+   * Kinds passed through `initialize.options.attachDataProducts` to every daemon ("always-on"
+   * products). Empty keeps the field absent. No production entry point sets it; kept for embedders
+   * and tests.
    */
   private val globalAttachDataProducts: List<String> = emptyList(),
   /**
-   * Extension ids the supervisor enables on every spawned daemon right after `initialize` succeeds.
-   * Maps onto the daemon's `extensions/enable` JSON-RPC method (PROTOCOL.md § 3a). Daemons start
-   * with everything inactive; the supervisor opts in to the contributions this MCP session needs.
-   *
-   * Defaults to empty so a baseline daemon is as lean as possible. Production entry points
-   * ([DaemonMcpMain]) and embedding consumers populate this with the kinds their tools require. The
-   * supervisor passes them through verbatim — unknown ids land in the daemon's `extensions/enable`
-   * response under `unknown` and are logged but not retried.
+   * Extension ids enabled on every daemon right after `initialize` (`extensions/enable`,
+   * PROTOCOL.md § 3a). Daemons start with everything inactive; empty keeps a baseline daemon lean.
+   * Passed through verbatim; unknown ids are logged, not retried.
    */
   private val defaultExtensions: List<String> = emptyList(),
   private val fileSystem: FileSystem = SystemFileSystem,
   /**
-   * Where registrations live beyond this object: the id → path map [project] and [daemonFor] fall
-   * back to when asked for an id they do not hold. In memory by default; [DaemonMcpMain] passes the
-   * persistent one so a registration survives a restart and is shared with sibling server
-   * processes.
+   * Where registrations live beyond this object: [project] and [daemonFor] fall back to it for
+   * unknown ids. In memory by default; [DaemonMcpMain] passes the persistent one, shared with
+   * sibling processes.
    */
   val workspaceStore: WorkspaceStore = WorkspaceStore(file = null),
   /**
-   * How many registered builds may have live daemons at once; `0` means no limit. A render that
-   * starts the first daemon of another build stops the daemons of the least recently used builds
-   * beyond it, so an agent that moves from one sample of a multi-build repository to the next does
-   * not leave every sample it touched rendering in the background (yschimke/compose-ag-plugin#64:
-   * ComposeStarter's daemon and its workers were still up hours after the agent moved to
-   * WearOAuth). A stopped build comes back on its next render. [DaemonMcpMain] passes
-   * [DEFAULT_MAX_ACTIVE_PROJECTS]; the default here stays unlimited for embedders.
+   * How many registered builds may have live daemons at once (`0` = unlimited). Starting another
+   * build's first daemon stops the least recently used builds beyond the limit, so moving between
+   * samples of a multi-build repo doesn't leave each one running. Stopped builds respawn on their
+   * next render. [DaemonMcpMain] passes [DEFAULT_MAX_ACTIVE_PROJECTS].
    */
   private val maxActiveProjects: Int = 0,
 ) {
@@ -119,15 +84,9 @@ class DaemonSupervisor(
   private val lastUsedNanos = ConcurrentHashMap<WorkspaceId, Long>()
 
   /**
-   * Registers a project at [absolutePath] (must already exist on disk). Returns the assigned
-   * [WorkspaceId]; idempotent — re-registering the same canonical path returns the existing id.
-   *
-   * [rootProjectName] may be supplied (e.g. parsed from `settings.gradle.kts`) for nicer ids; if
-   * null, the directory's basename is used.
-   *
-   * [knownModules] is the optional initial set of preview-eligible Gradle module paths in this
-   * project. The supervisor will not spawn daemons for them — that stays lazy — but `list_projects`
-   * and the resource list can advertise them up front so a client doesn't have to probe.
+   * Registers a project at [absolutePath] and returns its [WorkspaceId]; idempotent per canonical
+   * path. [rootProjectName] gives nicer ids (default: the directory name). [knownModules] are
+   * advertised up front (daemons still spawn lazily).
    */
   fun registerProject(
     absolutePath: File,
@@ -184,15 +143,9 @@ class DaemonSupervisor(
   fun listProjects(): List<RegisteredProject> = projects.values.toList()
 
   /**
-   * Drops live projects that another server process removed from the shared [workspaceStore].
-   *
-   * The sidebar app and a chat normally use separate MCP processes. An `unregister_project` call in
-   * the chat updates their shared store, but cannot directly mutate the sidebar process's live
-   * [projects] map. Reconcile before a library snapshot so that process does not keep advertising
-   * the removed project until it restarts.
-   *
-   * Only ids observed disappearing from the shared file are removed, so in-memory registrations and
-   * failed store writes do not make projects disappear from this process.
+   * Drops live projects another server process removed from the shared [workspaceStore] (e.g. the
+   * sidebar app's process after a chat's `unregister_project`). Only ids observed disappearing are
+   * removed, so in-memory registrations and failed store writes survive.
    */
   fun forgetProjectsMissingFromStore(): Set<WorkspaceId> {
     val removed =
@@ -206,17 +159,15 @@ class DaemonSupervisor(
   }
 
   /**
-   * The project for [workspaceId], registering it again from [workspaceStore] when this supervisor
-   * does not hold it (a restart, or a registration made by another server process): a known id
-   * never answers "workspace not registered".
+   * The project for [workspaceId], re-registering from [workspaceStore] when not held (a restart,
+   * or another process's registration).
    */
   fun project(workspaceId: WorkspaceId): RegisteredProject? =
     projects[workspaceId] ?: restore(workspaceId)
 
   /**
-   * Re-registers every stored workspace whose path is one of [dirs], lies inside one, or holds one:
-   * after a restart, the client's roots (or the working directory) bring their builds back without
-   * a `register_project`. Returns the projects restored or already live.
+   * Re-registers every stored workspace whose path is in, under, or above one of [dirs], so a
+   * restart's roots bring builds back without `register_project`.
    */
   fun restoreMatching(dirs: List<File>): List<RegisteredProject> {
     val wanted = dirs.map { runCatching { it.canonicalFile }.getOrDefault(it.absoluteFile) }
@@ -244,16 +195,10 @@ class DaemonSupervisor(
   }
 
   /**
-   * Forgets the [SupervisedDaemon] for [workspaceId] + [modulePath] and tears down any peer
-   * replicas. Intended for the `classpathDirty` respawn flow: the dirty replica is already exiting
-   * on its own, but with `replicasPerDaemon > 0` the peers are still alive on the same stale
-   * classpath and must be killed explicitly. Shutdown of the dirty replica is a no-op (its wire is
-   * already closing); peer shutdowns send `shutdown`/`exit` per protocol.
-   *
-   * The next [daemonFor] for the same coordinates spawns afresh against the (presumably refreshed)
-   * descriptor. Returns `true` if a daemon entry was actually removed — the second of two racing
-   * `classpathDirty` events from different replicas of the same group sees `false` and can skip the
-   * respawn-counter bump.
+   * Forgets the [SupervisedDaemon] for [workspaceId] + [modulePath] and shuts down peer replicas
+   * (still alive on the stale classpath) for the `classpathDirty` respawn flow. Returns `true` if
+   * an entry was removed, so the second of two racing `classpathDirty` events skips the respawn
+   * bump.
    */
   fun forgetDaemon(workspaceId: WorkspaceId, modulePath: String): Boolean {
     val project = projects[workspaceId] ?: return false
@@ -264,10 +209,8 @@ class DaemonSupervisor(
 
   /**
    * Returns (and lazily spawns) the daemon for [workspaceId] + [modulePath]. Throws when the
-   * workspace isn't registered or the module's daemon descriptor is missing.
-   *
-   * Spawn cost is paid by the calling thread — typical first-request latency is the daemon's
-   * cold-start time (3-10s for Robolectric, ~600ms for desktop).
+   * workspace isn't registered or the descriptor is missing. The calling thread pays the cold start
+   * (3-10s Robolectric, ~600ms desktop).
    */
   fun daemonFor(workspaceId: WorkspaceId, modulePath: String): SupervisedDaemon {
     val project = project(workspaceId) ?: error("workspace not registered: $workspaceId")
@@ -281,9 +224,8 @@ class DaemonSupervisor(
   }
 
   /**
-   * Before [active] starts its first daemon, stops every daemon of the least recently used other
-   * builds beyond [maxActiveProjects]. Registrations stay, so the next render of a stopped build
-   * spawns it again.
+   * Before [active] starts its first daemon, stop every daemon of the least recently used other
+   * builds beyond [maxActiveProjects]. Registrations stay.
    */
   private fun retireIdleProjects(except: RegisteredProject) {
     if (maxActiveProjects <= 0) return
@@ -313,17 +255,13 @@ class DaemonSupervisor(
   /** Returns the [NotificationRouter] so callers can register handlers. */
   fun router(): NotificationRouter = router
 
-  // -------------------------------------------------------------------------
-  // Internals
-  // -------------------------------------------------------------------------
+  // Internals.
 
   private fun spawn(project: RegisteredProject, modulePath: String): SupervisedDaemon {
     val baseDescriptor = descriptorProvider.descriptorFor(project, modulePath)
-    // SANDBOX-POOL.md — inject `composeai.daemon.sandboxCount = 1 + replicasPerDaemon` into the
-    // descriptor's systemProperties so the spawned daemon owns that many sandboxes (one in its own
-    // JVM, the rest in worker JVMs it spawns). DaemonMain reads the sysprop and passes it on. We
-    // merge into a copy rather than mutating the original — the descriptor object is cached by
-    // `DescriptorProvider.readingFromDisk` and shared across `daemonFor` calls.
+    // Inject `composeai.daemon.sandboxCount = 1 + replicasPerDaemon` (SANDBOX-POOL.md) into a copy
+    // of the descriptor's systemProperties; the descriptor is cached and shared across `daemonFor`
+    // calls.
     val descriptor =
       baseDescriptor.withSandboxCount(1 + replicasPerDaemon).let {
         if (replicasPerDaemon > 0) it.withSystemProperty(ON_DEMAND_WORKER_BOOT_PROP, "true") else it
@@ -342,17 +280,14 @@ class DaemonSupervisor(
             .absolutePath
         }
 
-    // Single synchronous spawn — the calling thread blocks on cold-start and the catalog is seeded
-    // before `daemonFor` returns. With sandboxCount > 1 the daemon's per-sandbox bootstrap is
-    // sequenced internally (RobolectricHost.start), so the wall-clock here is roughly
-    // (1 + replicasPerDaemon) × per-sandbox-boot.
+    // Synchronous spawn: the catalog is seeded before `daemonFor` returns. Sandbox bootstrap is
+    // sequenced inside the daemon.
     val spawn = clientFactory.spawn(project.workspaceId, descriptor)
     spawn.client(
       onNotification = { method, params ->
         router.dispatch(supervised, method, params)
-        // Fan out to any RenderSession listeners registered via `supervised.session
-        // .onNotification(...)`. Mirrors the router dispatch but reaches a different
-        // subscriber pool (the public-API consumers, not the MCP-internal routing).
+        // Also fan out to RenderSession listeners registered via
+        // `supervised.session.onNotification(...)`.
         supervised.notificationFanout.dispatch(method, params)
       },
       onClose = {
@@ -362,9 +297,8 @@ class DaemonSupervisor(
       },
     )
     supervised.attachSpawn(spawn)
-    // Capture the workspace root before initialize so the `session` view's
-    // `RenderSession.workspaceRoot` returns a real absolute path even if a caller reaches the
-    // session getter before the runCatching block below populates `initializeResult`.
+    // Capture the workspace root before initialize so `RenderSession.workspaceRoot` is real even
+    // before `initializeResult` is set.
     supervised.workspaceRootPath = project.path.absolutePath
     runCatching {
       val result =
@@ -375,16 +309,10 @@ class DaemonSupervisor(
           attachDataProducts = globalAttachDataProducts.takeIf { it.isNotEmpty() },
           timeout = initializeTimeout,
         )
-      // Cache the full result so the public RenderSession view (`supervised.session`) can
-      // expose it through `RenderSession.initializeResult`. Subsequent successful re-spawns
-      // (classpathDirty respawn path) overwrite this with the fresh handshake's result.
+      // Cache the full result for `RenderSession.initializeResult`; respawns overwrite it.
       supervised.initializeResult = result
-      // PROTOCOL.md § 3a — the daemon comes up with every extension inactive so
-      // `initialize.capabilities.dataProducts` / `dataExtensions` / `previewExtensions` are
-      // empty.
-      // Opt the daemon into the configured `defaultExtensions` set; the response carries the
-      // updated public capability lists which we cache below so the MCP catalogue surfaces them
-      // without a follow-up `extensions/list` round-trip.
+      // Daemons start with every extension inactive (PROTOCOL.md § 3a), so enable
+      // `defaultExtensions` and cache the updated capability lists from the response.
       val initialDataProducts: List<DataProductCapability>
       val initialDataExtensions: List<ee.schimke.composeai.daemon.protocol.DataExtensionDescriptor>
       if (defaultExtensions.isNotEmpty()) {
@@ -403,28 +331,21 @@ class DaemonSupervisor(
       }
       supervised.dataProductCapabilities = initialDataProducts
       supervised.dataExtensionDescriptors = initialDataExtensions
-      // PROTOCOL.md § 3 — cache the daemon's advertised supportedOverrides + knownDevice ids so
-      // `DaemonMcpServer.toolRenderPreview` can validate inbound `overrides` against what this
-      // backend will actually apply (instead of silently no-op'ing fields the backend ignores)
-      // and
-      // reject typo'd `device` ids before they fall back to the default. Pre-feature daemons
-      // advertise `[]` for both, in which case validation falls open — clients are exactly where
-      // they were before the capability landed.
+      // Cache supportedOverrides and knownDevice ids so `DaemonMcpServer.toolRenderPreview` can
+      // reject fields the backend ignores and typo'd devices (PROTOCOL.md § 3). Older daemons
+      // advertise `[]`, so validation falls open.
       supervised.supportedOverrides = result.capabilities.supportedOverrides.toSet()
       supervised.knownDeviceIds = result.capabilities.knownDevices.map { it.id }.toSet()
       supervised.backendKind = result.capabilities.backend
       // RECORDING.md § "encoded formats" — same pattern. Empty list pre-feature; validation falls
       // open and `record_preview` calls round-trip without the diagnostic.
       supervised.recordingFormats = result.capabilities.recordingFormats.toSet()
-      // Cache the manifest path so the MCP server's background poller can detect a Gradle
-      // `composePreviewDiscover` re-run between renders and re-load the manifest into the catalog
-      // (issue #834). Blank for backends that don't ship a `previews.json`.
+      // Cache the manifest path so the background poller can reload it after a
+      // `composePreviewDiscover` re-run. Blank for backends without `previews.json`.
       supervised.manifestPath = result.manifest.path.takeIf { it.isNotBlank() }
-      // The daemon only emits `discoveryUpdated` for *deltas* — the initial preview set comes
-      // via `initialize.manifest.path` (a `previews.json` written by the gradle plugin's
-      // `composePreviewDiscover` task). Synthesise an initial `discoveryUpdated` notification by
-      // reading that file and dispatching it through the router as if it were a wire-level
-      // event.
+      // The daemon only emits `discoveryUpdated` deltas; the initial set is in
+      // `initialize.manifest.path`. Synthesise an initial `discoveryUpdated` from that file through
+      // the router.
       synthesiseInitialDiscovery(supervised, result.manifest.path)
       supervised.initialDiscoveryComplete = true
     }
@@ -463,27 +384,23 @@ class DaemonSupervisor(
 
   companion object {
     /**
-     * Out-of-the-box value for [replicasPerDaemon]. Picked so a typical preview grid renders
-     * concurrently without the user opting in: 5 sandboxes per daemon (1 primary + 4 replicas). The
-     * cost is one JVM per sandbox beyond the first (#3072 moved the pool out of process — a second
-     * Robolectric sandbox cannot share a JVM); see SANDBOX-POOL.md. Override via the MCP CLI's
-     * `--replicas-per-daemon N` flag or the `composeai.mcp.replicasPerDaemon` system property.
+     * Default [replicasPerDaemon]: 5 sandboxes per daemon so a preview grid renders concurrently.
+     * Each sandbox beyond the first is a JVM (SANDBOX-POOL.md). Override via `--replicas-per-daemon
+     * N` or `composeai.mcp.replicasPerDaemon`.
      */
     const val DEFAULT_REPLICAS_PER_DAEMON: Int = 4
 
     /**
-     * Default [initializeTimeout]: long enough for a cold Robolectric sandbox boot on a busy
-     * machine. Override via the `composeai.mcp.initializeTimeoutSeconds` system property or the
-     * `COMPOSE_PREVIEW_INITIALIZE_TIMEOUT_SECONDS` environment variable.
+     * Default [initializeTimeout], long enough for a cold Robolectric boot on a busy machine.
+     * Override via `composeai.mcp.initializeTimeoutSeconds` or
+     * `COMPOSE_PREVIEW_INITIALIZE_TIMEOUT_SECONDS`.
      */
     val DEFAULT_INITIALIZE_TIMEOUT: Duration = 120.seconds
 
     /**
-     * The out-of-the-box replica count for a machine with [cores] processors: half the cores less
-     * the primary, capped at [DEFAULT_REPLICAS_PER_DAEMON]. Each replica is a sandbox JVM that
-     * boots in the background (6–14 s each on a 4-core machine) and competes with the first renders
-     * (issue #1174), so a 4-core machine gets 1 and an 8-core one 3. `--replicas-per-daemon` and
-     * `composeai.mcp.replicasPerDaemon` still override it.
+     * Default replicas for [cores] processors: half the cores less the primary, capped at
+     * [DEFAULT_REPLICAS_PER_DAEMON]. Replica boots compete with the first renders, so 4 cores get 1
+     * and 8 get 3. Overridable as above.
      */
     fun defaultReplicasFor(cores: Int): Int =
       (cores / 2 - 1).coerceIn(0, DEFAULT_REPLICAS_PER_DAEMON)
@@ -492,18 +409,17 @@ class DaemonSupervisor(
     const val DEFAULT_MAX_ACTIVE_PROJECTS: Int = 1
 
     /**
-     * Daemon property (compose-preview-daemon's `DaemonProperties.onDemandWorkerBoot`): the
-     * replicas' worker JVMs boot when two different previews render at once, not behind the first
-     * sandbox at start, where their Robolectric boots competed with an agent's first compile and
-     * render. A daemon older than the property ignores it and boots them in the background.
+     * Daemon property (`DaemonProperties.onDemandWorkerBoot`): worker JVMs boot when two different
+     * previews render at once rather than at start, where they competed with the first compile.
+     * Older daemons ignore it.
      */
     const val ON_DEMAND_WORKER_BOOT_PROP: String = "composeai.daemon.onDemandWorkerBoot"
   }
 }
 
 /**
- * One registered project — a workspace. Holds the canonical path, the assigned id, the (lazily
- * populated) daemon map, and the optional seed list of preview-eligible modules.
+ * One registered project: canonical path, assigned id, lazily populated daemon map, and optional
+ * seed module list.
  */
 data class RegisteredProject(
   val workspaceId: WorkspaceId,
@@ -514,73 +430,52 @@ data class RegisteredProject(
 )
 
 /**
- * A live daemon — owned by [DaemonSupervisor]. SANDBOX-POOL.md: one *supervised* daemon process per
- * (workspaceId, modulePath); concurrent render capacity comes from that daemon's own sandbox pool,
- * configured via `composeai.daemon.sandboxCount` on the launch descriptor (the supervisor passes
- * `1 + replicasPerDaemon`) and realised as one in-daemon sandbox plus N worker JVMs.
- *
- * Pre-Layer-3 this class fronted N+1 separate JVM subprocesses; the public surface ([client],
- * [allClients], [clientForRender]) survives that change because the daemon-side slot dispatch
- * handles render affinity internally.
+ * A live daemon owned by [DaemonSupervisor]: one process per (workspaceId, modulePath), with
+ * concurrent capacity from its own sandbox pool (SANDBOX-POOL.md). [client], [allClients] and
+ * [clientForRender] keep their multi-replica shapes for source compatibility.
  */
 class SupervisedDaemon(val workspaceId: WorkspaceId, val modulePath: String) {
 
   /**
-   * The single [DaemonSpawn] backing this supervised daemon. `null` between construction and
-   * [attachSpawn]; set once and cleared by [detachSpawn] / [shutdown]. `@Volatile` because the
-   * onNotification / onClose callbacks fire on the spawn's reader thread and the supervisor's
-   * caller thread reads this through [client] / [allClients] without external synchronisation.
+   * The single [DaemonSpawn], set by [attachSpawn] and cleared by [detachSpawn] / [shutdown].
+   * `@Volatile`: written on the reader thread, read from caller threads.
    */
   @Volatile private var spawn: DaemonSpawn? = null
 
   /**
-   * True once the supervisor has completed the initialize round-trip and attempted to seed the MCP
-   * catalog from the daemon's initial manifest. A daemon can be discovery-complete with zero
-   * previews; clients should pair this flag with the MCP catalog's preview count rather than
-   * treating an empty resource list as "still warming".
+   * True once initialize completed and the catalog was seeded from the initial manifest. A
+   * discovery-complete daemon may have zero previews, so pair this with the catalog's count.
    */
   @Volatile
   var initialDiscoveryComplete: Boolean = false
     internal set
 
   /**
-   * D1 — kinds the daemon advertised via `initialize.capabilities.dataProducts`. Populated by
-   * [DaemonSupervisor.spawn] right after the initialize round-trip, before [attachSpawn] returns to
-   * the caller. Empty list pre-D2 (no producers wired) — matches the daemon's default. Read by
-   * `DaemonMcpServer.toolListDataProducts` to answer without a wire round-trip.
+   * Kinds advertised via `initialize.capabilities.dataProducts`, set by [DaemonSupervisor.spawn];
+   * read by `DaemonMcpServer.toolListDataProducts` without a round trip.
    */
   @Volatile
   var dataProductCapabilities: List<DataProductCapability> = emptyList()
     internal set
 
   /**
-   * PROTOCOL.md § 3 — `PreviewOverrides` field names this daemon's host actually applies (see
-   * `RenderHost.supportedOverrides`). Populated by [DaemonSupervisor.spawn] right after the
-   * initialize round-trip. Read by `DaemonMcpServer.toolRenderPreview` to reject inbound
-   * `overrides` fields the backend would silently ignore. Empty set on pre-feature daemons —
-   * validation falls open and the request goes through unchanged (no behaviour change for old
-   * daemons, the caller just doesn't get the new diagnostic).
+   * `PreviewOverrides` fields this daemon applies (PROTOCOL.md § 3), set at spawn; used by
+   * `DaemonMcpServer.toolRenderPreview` to reject ignored fields. Empty on older daemons
+   * (validation falls open).
    */
   @Volatile
   var supportedOverrides: Set<String> = emptySet()
     internal set
 
   /**
-   * PROTOCOL.md § 3 — `device` ids the daemon's catalog recognises (see
-   * `ServerCapabilities.knownDevices`). Populated by [DaemonSupervisor.spawn] right after the
-   * initialize round-trip. Read by `DaemonMcpServer.toolRenderPreview` to reject typo'd `device`
-   * overrides before they silently fall back to the default. The free-form `spec:width=…` grammar
-   * is not enumerable and not stored here — the validator passes those through.
+   * `device` ids the daemon's catalog recognises (`ServerCapabilities.knownDevices`), used to
+   * reject typo'd devices. `spec:` geometry isn't enumerable and passes through.
    */
   @Volatile
   var knownDeviceIds: Set<String> = emptySet()
     internal set
 
-  /**
-   * PROTOCOL.md § 3 — renderer backend advertised by the daemon. Populated from
-   * `InitializeResult.capabilities.backend` during [DaemonSupervisor.spawn], alongside the other
-   * capability-derived MCP validation inputs.
-   */
+  /** Renderer backend advertised in `InitializeResult.capabilities.backend`. */
   @Volatile
   var backendKind: BackendKind? = null
     internal set
@@ -591,35 +486,24 @@ class SupervisedDaemon(val workspaceId: WorkspaceId, val modulePath: String) {
     internal set
 
   /**
-   * RECORDING.md § "encoded formats" — wire format spellings the daemon's host can produce
-   * (`"apng"`, `"mp4"`, `"webm"`). Populated by [DaemonSupervisor.spawn] right after the initialize
-   * round-trip. Read by `DaemonMcpServer.toolRecordPreview` to reject formats the daemon doesn't
-   * advertise before `record_preview` round-trips a request that would only fail. Empty set on
-   * pre-feature daemons — validation falls open (assume any format might work; caller sees the
-   * underlying error if it doesn't), matching the same pattern `supportedOverrides` uses.
+   * Recording formats the daemon can encode (RECORDING.md), used by
+   * `DaemonMcpServer.toolRecordPreview` to reject others up front. Empty on older daemons (falls
+   * open).
    */
   @Volatile
   var recordingFormats: Set<String> = emptySet()
     internal set
 
   /**
-   * Path to `previews.json` (the per-module manifest written by the gradle plugin's
-   * `composePreviewDiscover` task). Captured at `initialize` time from the daemon's
-   * `InitializeResult.manifest.path`. The `DaemonMcpServer`'s background poller stats this file
-   * each cycle so a `composePreviewDiscover` re-run between renders publishes new preview ids into
-   * the MCP catalog without an MCP server restart — closes the "manifest doesn't auto-refresh" gap
-   * reported in issue #834. Null/blank when the daemon doesn't advertise a manifest path (older
-   * daemons / non-Gradle backends).
+   * Path to the module's `previews.json`, from `InitializeResult.manifest.path`. The background
+   * poller stats it so a `composePreviewDiscover` re-run reaches the catalog without a restart.
+   * Null/blank when not advertised.
    */
   @Volatile
   var manifestPath: String? = null
     internal set
 
-  /**
-   * The single [DaemonClient]. Used for everything — control-plane operations (`initialize`,
-   * `history*`), render dispatch, and fan-out broadcasts. Throws if [attachSpawn] hasn't run yet
-   * (only possible during the brief window before the synchronous spawn returns).
-   */
+  /** The single [DaemonClient], used for everything. Throws before [attachSpawn] has run. */
   val client: DaemonClient
     get() {
       val s = spawn
@@ -628,53 +512,37 @@ class SupervisedDaemon(val workspaceId: WorkspaceId, val modulePath: String) {
     }
 
   /**
-   * Cached `initialize` round-trip result — backing for the [session] view's
-   * [RenderSession.initializeResult]. Populated by [DaemonSupervisor.spawn] right after the
-   * handshake; cleared by [detachSpawn]. `@Volatile` for the same reasons [spawn] is — read on the
-   * caller thread, written on the spawn coroutine.
+   * Cached `initialize` result backing [RenderSession.initializeResult]; set at spawn, cleared by
+   * [detachSpawn].
    */
   @Volatile
   internal var initializeResult: ee.schimke.composeai.daemon.protocol.InitializeResult? = null
 
   /**
-   * Canonical workspace-root path the supervised daemon was spawned against — backing for the
-   * [session] view's [ee.schimke.composeai.render.session.RenderSession.workspaceRoot]. Captured
-   * from the [RegisteredProject.path] at spawn time so the public API returns a real absolute path
-   * instead of a placeholder. Cleared by [detachSpawn] when the spawn tears down.
+   * Canonical workspace root the daemon was spawned against, backing
+   * [ee.schimke.composeai.render.session.RenderSession.workspaceRoot]. Cleared by [detachSpawn].
    */
   @Volatile internal var workspaceRootPath: String? = null
 
   /**
-   * Actual Gradle project directory recorded by the launch descriptor. This can differ from the
-   * directory reconstructed from [modulePath] when settings.gradle.kts remaps a project's
-   * `projectDir` (for example `:featureTasks` to `shared/features/tasks`). Discovery source paths
-   * are module-relative, so the MCP catalog resolves them against this directory.
+   * The Gradle project directory from the launch descriptor, which differs from [modulePath]'s
+   * implied directory when settings.gradle.kts remaps `projectDir`. Discovery source paths resolve
+   * against it.
    */
   @Volatile internal var moduleProjectDirPath: String? = null
 
   /**
-   * Notification fan-out installed by [DaemonSupervisor.spawn]. The supervisor's existing
-   * `onNotification` callback dispatches both into its own [NotificationRouter] and into this
-   * fanout; [session] consumers can register listeners via
-   * [ee.schimke.composeai.render.session.RenderSession.onNotification] without disturbing the
-   * router's own subscriber set.
+   * Notification fan-out for [session] listeners
+   * ([ee.schimke.composeai.render.session.RenderSession.onNotification]), alongside the
+   * [NotificationRouter].
    */
   internal val notificationFanout: NotificationFanout = NotificationFanout()
 
   /**
-   * Public [RenderSession] view of this supervised daemon. Surface-only migration of `:mcp` onto
-   * the published render-session library — third-party consumers that compile against
-   * `:render-session-api` can drive the daemon through the same contract `:render-session-
-   * subprocess` and `:render-session-embedded-desktop` expose, without seeing the internal
-   * [DaemonClient].
-   *
-   * Lifecycle is owned by the supervisor: `close()` on the returned session is a no-op (other
-   * callers may be sharing the same client). The supervisor's [shutdown] / [detachSpawn] is the
-   * single seam that tears down the daemon JVM.
-   *
-   * Each access returns a fresh view object — the underlying state ([client], [initializeResult],
-   * [notificationFanout]) is shared. Throws if the spawn / initialize handshake hasn't completed
-   * yet (same precondition as [client]).
+   * Public [RenderSession] view of this daemon, so `:render-session-api` consumers can drive it
+   * without the internal [DaemonClient]. `close()` is a no-op (the client may be shared);
+   * [shutdown] / [detachSpawn] own teardown. Each access returns a fresh view over shared state;
+   * throws until the handshake completes.
    */
   val session: ee.schimke.composeai.render.session.RenderSession
     get() {
@@ -699,26 +567,18 @@ class SupervisedDaemon(val workspaceId: WorkspaceId, val modulePath: String) {
       )
     }
 
-  /**
-   * Snapshot of every active client — for fan-out APIs (e.g. `fileChanged`, `setVisible`). Always a
-   * singleton list — one supervised daemon per module; kept as a list for source-compatibility with
-   * callers that iterate it (they keep working unchanged).
-   */
+  /** Every active client, for fan-out APIs. Always one element; a list for source compatibility. */
   fun allClients(): List<DaemonClient> = spawn?.let { listOf(it.client) } ?: emptyList()
 
   /**
-   * Returns the client for a render keyed on [previewId]. Always the single client; the daemon-side
-   * `RobolectricHost.submit` dispatches across its sandbox slots (in-process plus workers). The
-   * [previewId] argument is informational — kept on the API so a future affinity-aware wire change
-   * can use it without breaking callers.
+   * The client for a render keyed on [previewId]: always the single client, since the daemon
+   * dispatches across its sandbox slots. [previewId] is kept for future affinity.
    */
   fun clientForRender(@Suppress("UNUSED_PARAMETER") previewId: String): DaemonClient = client
 
   /**
-   * Always 1 — one *supervised* subprocess per daemon. Concurrent render capacity is `1 +
-   * replicasPerDaemon` and is realised by the daemon's own sandbox pool (whose worker JVMs the
-   * supervisor neither spawns nor counts). Kept for source-compatibility with callers that asserted
-   * "primary plus N replicas" — those assertions are now wrong, but the method itself doesn't lie.
+   * Always 1: one supervised subprocess per daemon; capacity comes from the daemon's own pool. Kept
+   * for source compatibility.
    */
   fun replicaCount(): Int = if (spawn != null) 1 else 0
 
@@ -730,9 +590,8 @@ class SupervisedDaemon(val workspaceId: WorkspaceId, val modulePath: String) {
   }
 
   /**
-   * Detaches [s] if it's the current spawn. Returns `true` if a spawn was actually removed —
-   * callers use this to decide whether to fire group-level cleanup (e.g. dispatching `onClose` to
-   * handlers that own per-(workspace, module) state).
+   * Detaches [s] if current. Returns `true` if removed, so callers know whether to run group-level
+   * cleanup (e.g. `onClose`).
    */
   internal fun detachSpawn(s: DaemonSpawn): Boolean {
     if (this.spawn !== s) return false
@@ -756,29 +615,23 @@ class SupervisedDaemon(val workspaceId: WorkspaceId, val modulePath: String) {
 }
 
 /**
- * Pluggable seam for resolving the per-module daemon launch descriptor. The default implementation
- * reads `<workingDir>/build/compose-previews/daemon-launch.json` written by
- * [`composePreviewDaemonStart`][ee.schimke.composeai.plugin.daemon.DaemonBootstrapTask] in the
- * gradle plugin. Tests substitute an in-memory provider.
+ * Resolves the per-module daemon launch descriptor. The default reads
+ * `<workingDir>/build/compose-previews/daemon-launch.json` written by
+ * [`composePreviewDaemonStart`][ee.schimke.composeai.plugin.daemon.DaemonBootstrapTask]; tests
+ * substitute an in-memory provider.
  */
 fun interface DescriptorProvider {
   fun descriptorFor(project: RegisteredProject, modulePath: String): DaemonLaunchDescriptor
 
   companion object {
     /**
-     * Returns a descriptor provider that reads `build/compose-previews/daemon-launch.json` for each
-     * module from disk. The file is written by the user running `./gradlew
-     * :<module>:composePreviewDaemonStart` — the supervisor surfaces a clear error if it's missing.
-     * A future enhancement may invoke Gradle's Tooling API itself; for v0 we keep the seam clean
-     * and let the user (or VS Code) drive the bootstrap.
+     * Reads `build/compose-previews/daemon-launch.json` per module from disk, written by `./gradlew
+     * :<module>:composePreviewDaemonStart`; a clear error is raised if missing.
      */
     fun readingFromDisk(fileSystem: FileSystem = SystemFileSystem): DescriptorProvider {
-      // Per-project-root index of modulePath -> descriptor file, populated on the first miss of the
-      // layout fast-path below. Only *positive* results are cached: a lookup for a module absent
-      // from the cached index rescans (a descriptor may have been written since — exactly what the
-      // "run composePreviewDaemonStart first" error tells the user to do), so a long-lived server
-      // picks up a newly-generated descriptor without a restart. The fast path spares normal
-      // layouts the scan entirely, so the rescan-on-miss cost only lands on the error path.
+      // Per-project-root index of modulePath -> descriptor file, built on the first fast-path miss.
+      // Only positive results are cached, so a newly written descriptor is found without a restart;
+      // the rescan cost lands only on the error path.
       val scannedIndexByRoot = ConcurrentHashMap<String, Map<String, File>>()
       return DescriptorProvider { project, modulePath ->
         // Fast path: the Gradle path mirrors the directory layout (`:a:b` → <root>/a/b).
@@ -791,12 +644,9 @@ fun interface DescriptorProvider {
           if (guessed.isFile) {
             guessed
           } else {
-            // Fallback: a project can remap projectDir in settings.gradle.kts (e.g. `:featureTasks`
-            // → shared/features/tasks), so the Gradle path is not the on-disk layout. Locate the
+            // Fallback for projects that remap projectDir in settings.gradle.kts: find the
             // descriptor by the modulePath recorded inside each daemon-launch.json. Reuse the
-            // cached
-            // index only if it already resolves this module; otherwise rebuild it (a descriptor may
-            // have appeared) and cache the fresh scan before giving up.
+            // cached index only if it resolves this module; otherwise rescan and cache.
             val root = project.path.absolutePath
             scannedIndexByRoot[root]?.get(modulePath)
               ?: run {
@@ -823,11 +673,9 @@ fun interface DescriptorProvider {
     }
 
     /**
-     * Scans [projectRoot] for `build/compose-previews/daemon-launch.json` descriptors and indexes
-     * each by the `modulePath` it records. Handles projects that remap `projectDir` in
-     * settings.gradle.kts, where the Gradle module path is not the directory layout. Prunes VCS,
-     * Gradle/IDE metadata, `node_modules`, `src`, and non-`compose-previews` `build/` subtrees so
-     * the walk stays cheap.
+     * Scans [projectRoot] for `build/compose-previews/daemon-launch.json` and indexes each by its
+     * recorded `modulePath`. Prunes VCS, Gradle/IDE metadata, `node_modules`, `src` and other
+     * `build/` subtrees.
      */
     internal fun indexDescriptorsByModulePath(
       projectRoot: File,
@@ -859,15 +707,11 @@ fun interface DescriptorProvider {
   }
 }
 
-// -----------------------------------------------------------------------------
-// Notification routing — keeps Subscriptions / WatchSets / classpathDirty handlers
-// out of the core supervisor wiring.
-// -----------------------------------------------------------------------------
+// Notification routing.
 
 /**
- * Demultiplexes daemon notifications by method name. Multiple handlers per method are supported;
- * each is called in registration order on the daemon's reader thread, so handlers must be cheap and
- * non-blocking.
+ * Demultiplexes daemon notifications by method. Handlers run in registration order on the daemon's
+ * reader thread, so they must be cheap and non-blocking.
  */
 class NotificationRouter {
   private val handlers =
@@ -893,8 +737,7 @@ class NotificationRouter {
   }
 
   /**
-   * Convenience: extract `params.id` from a `renderFinished` / `renderStarted` envelope. Returns
-   * null when missing so callers can treat malformed events as drops rather than throws.
+   * Extract `params.id` from a `renderFinished` / `renderStarted` envelope, or null when missing.
    */
   fun previewIdOf(params: JsonObject?): String? = params?.get("id")?.jsonPrimitive?.contentOrNull
 

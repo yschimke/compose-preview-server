@@ -39,13 +39,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 
 /**
  * End-to-end routing check for [ServeHttpServer]: a real embedded server fronting two static
- * [ServeBundleHost] sessions, exercised over HTTP. Guards the two access forms — the legacy
- * `?session=` query lane and the canonical path lane (`/<system>/…`) — and, crucially, that the
- * constant top-level routes (`/healthz`, `/readyz`, `/version`) still win over the `/{system}`
- * catch-all in Ktor's route scoring (a regression here would 404 liveness/readiness checks or
- * shadow `/version`).
- *
- * Runs public (no token) so the assertions stay about routing, not the auth gate ([ServeAuthTest]).
+ * [ServeBundleHost] sessions. Covers the `?session=` and path (`/<system>/…`) forms, and that the
+ * constant routes (`/healthz`, `/readyz`, `/version`) outscore the `/{system}` catch-all. Runs
+ * public so assertions are about routing, not auth ([ServeAuthTest]).
  */
 class ServeHttpRoutingTest {
 
@@ -94,9 +90,8 @@ class ServeHttpRoutingTest {
     }
 
   /**
-   * A session whose live lane exists but cannot serve right now — the daemon is down / cold / out
-   * of seats — so an override-bearing render falls back to the catalog's baked PNG. Exactly the
-   * state #3449 was reported in: the pixels are published bytes that ignore the override.
+   * A session whose live lane exists but can't serve right now, so an override-bearing render falls
+   * back to the baked PNG, which ignores the override.
    */
   private val liveDownHost =
     object : ServeHost {
@@ -122,15 +117,10 @@ class ServeHttpRoutingTest {
     }
 
   /**
-   * [liveDownHost]'s Remote Compose twin: the same "live lane exists but can't serve right now"
-   * state, on a preview that carries a captured `ir/<id>.rc` document and is therefore **replayed**
-   * rather than recomposed.
-   *
-   * This is the shape the refusal used to get wrong. Being replayed was read as "no retry can ever
-   * help", so every transient baked fallback here answered `409` + "the override can never apply" —
-   * about a daemon that returns `200` the moment it is warm. The viewer treats `409` as final, so a
-   * cold start permanently disabled the lane. Terminality belongs to the *axis*, and only the
-   * handful in [CatalogLiveRouting.irReplayDroppedOverrideNames] have it.
+   * [liveDownHost]'s Remote Compose twin: same transient state, on a preview replayed from a
+   * captured `ir/<id>.rc`. Being replayed doesn't make a transient fallback terminal: only the axes
+   * in [CatalogLiveRouting.irReplayDroppedOverrideNames] are (a `409` would permanently disable the
+   * viewer's lane).
    */
   private val liveDownRcHost =
     object : ServeHost {
@@ -140,9 +130,8 @@ class ServeHttpRoutingTest {
 
       override fun remoteComposeDoc(previewId: String): ByteArray? = rcDocBytes
 
-      // This session CAN name the player its baked pixels came from — the ordinary case, and the
-      // premise every androidx-embedded assertion below rests on. Stated rather than inherited: the
-      // interface default is "cannot say", so a host that has the fact has to say so.
+      // This session can name its baked pixels' player; stated explicitly since the interface
+      // default is "cannot say".
       override fun bakedRcPlayer(previewId: String): RemoteComposePlayerKind? =
         RemoteComposePlayerKind.EMBEDDED
 
@@ -170,12 +159,8 @@ class ServeHttpRoutingTest {
       .toByteArray()
 
   /**
-   * [liveDownRcHost] plus the catalog's published `rc-compare` staging — the offline parity run
-   * having already drawn this document with every player.
-   *
-   * The daemon here is permanently unavailable (every render falls back to baked), which is what
-   * makes the assertions unambiguous: anything this host answers with published bytes it answered
-   * WITHOUT a renderer.
+   * [liveDownRcHost] plus the catalog's published `rc-compare` staging. The daemon never serves, so
+   * any published bytes answered here came without a renderer.
    */
   private val rcPublishedHost =
     object : ServeHost {
@@ -185,9 +170,8 @@ class ServeHttpRoutingTest {
 
       override fun remoteComposeDoc(previewId: String): ByteArray? = rcDocBytes
 
-      // This session CAN name the player its baked pixels came from — the ordinary case, and the
-      // premise every androidx-embedded assertion below rests on. Stated rather than inherited: the
-      // interface default is "cannot say", so a host that has the fact has to say so.
+      // This session can name its baked pixels' player; stated explicitly since the interface
+      // default is "cannot say".
       override fun bakedRcPlayer(previewId: String): RemoteComposePlayerKind? =
         RemoteComposePlayerKind.EMBEDDED
 
@@ -220,13 +204,8 @@ class ServeHttpRoutingTest {
         RenderOutcome.Ok(png(), RenderOutcome.Generation.BAKED)
 
       /**
-       * Local baked pixels, exactly as a real bundle host has — and, like the real one, answered
-       * WITHOUT consulting the overrides.
-       *
-       * This is what makes the ordering load-bearing rather than incidental. The published lane was
-       * first written after this call, so on any host that actually implements it the lane was dead
-       * code: the bare `?rcPlayer=` request got the baked PNG (the *Java* capture) and was then
-       * refused for dropping `rcPlayer`, with the staged raster it asked for sitting unread.
+       * Local baked pixels, answered without consulting the overrides, like a real bundle host.
+       * That is why the published lane must be consulted first (see the ordering test).
        */
       override fun bakedRender(previewId: String, overrides: PreviewOverrides): RenderOutcome.Ok? =
         RenderOutcome.Ok(png(), RenderOutcome.Generation.BAKED)
@@ -264,15 +243,9 @@ class ServeHttpRoutingTest {
     RemoteComposeKnobDeclaration("shaderColor", RemoteNamedValue.ColorValue("#FF7DE2FF"))
 
   /**
-   * A **real** Remote Compose document, carried into the bundle as an `ir/<id>.rc`.
-   *
-   * It used to be five arbitrary bytes, which was enough while every lane over it copied bytes
-   * verbatim. `GET /render/<id>.rc.json` inflates them, so the fixture now has to be a document —
-   * and a fixture that is "plausible but not a document" is precisely the class of thing this whole
-   * area is about, so it is worth not keeping one around even where it would still pass.
-   *
-   * Compiled here rather than checked in as a binary so the assertions below can be read against
-   * their source: `bg` is why the projection names a `ColorConstant`.
+   * A real Remote Compose document carried as `ir/<id>.rc`, since `GET /render/<id>.rc.json`
+   * inflates it. Compiled here so assertions read against the source (`bg` is why a `ColorConstant`
+   * appears).
    */
   private val rcDocBytes =
     RemoteComposeJson.compile(
@@ -290,13 +263,8 @@ class ServeHttpRoutingTest {
   private val notADocument = byteArrayOf(0x52, 0x43, 0x01, 0x02, 0x03)
 
   /**
-   * Past [PROJECTION_LIMIT], the bound this suite's server is configured with — not the production
-   * 8 MB one.
-   *
-   * That indirection is the whole point. JUnit builds this class once per test method, so an 8 MiB
-   * instance property is allocated 102 times and written into a temp bundle by every test that
-   * touches `server`: hundreds of megabytes of allocation and file I/O to prove one refusal. The
-   * limit is a constructor parameter precisely so the fixture can be a kilobyte.
+   * Past [PROJECTION_LIMIT], this suite's configured bound rather than the production 8 MB one, so
+   * the fixture is a kilobyte instead of megabytes allocated per test method.
    */
   private val oversizedDocument = ByteArray(PROJECTION_LIMIT + 1)
 
@@ -312,11 +280,7 @@ class ServeHttpRoutingTest {
     stagesRcCompare: Boolean = false,
     tagIndex: Boolean = false,
     spatial: Boolean = false,
-    /**
-     * False builds the shape `--bundles` and an upload produce: the same host type with no
-     * `catalog.json` behind it. Defaults true because every other fixture here stands in for a
-     * published catalog.
-     */
+    /** False builds the `--bundles` / upload shape: the same host type without `catalog.json`. */
     isCatalog: Boolean = true,
     catalogVersion: String? = null,
   ): ServeBundleHost {
@@ -365,11 +329,9 @@ class ServeHttpRoutingTest {
         )
     }
     if (tagIndex) {
-      // The published element index, exactly as
-      // `compose-ai-tools/scripts/design-artifacts/tag-index.mjs` writes it:
-      // one unique tag with a box, one unique tag whose every carrying node had a zero-area box,
-      // and one carried by two nodes. The last two are the interesting ones — a tag with no
-      // geometry is still an identity, and a tag with `count: 2` is not one at all.
+      // The published element index as `scripts/design-artifacts/tag-index.mjs` writes it: a unique
+      // tag with a box, a unique tag with only zero-area boxes (still an identity), and a tag on
+      // two nodes (not an identity).
       File(dir, ServeTagIndexStore.DIRECTORY).apply { mkdirs() }
       File(dir, "${ServeTagIndexStore.DIRECTORY}/${ServeTagIndexStore.INDEX_FILE}")
         .writeText(
@@ -486,10 +448,8 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * A baked catalog that also carries the published `figma/<slug>.svg` vector, so the `.svg` lane
-   * serves something instead of 404ing. The vector is as static as the PNG — it was exported at the
-   * preview's discovery-time axes — which is what makes an override on this lane a silent drop
-   * (#3449).
+   * A baked catalog with the published `figma/<slug>.svg`, so the `.svg` lane serves something. It
+   * is as static as the PNG, so an override on it is a silent drop.
    */
   private fun svgBundle(label: String): ServeBundleHost {
     val dir = Files.createTempDirectory("routing-$label").toFile().also { it.deleteOnExit() }
@@ -549,18 +509,16 @@ class ServeHttpRoutingTest {
       host = bundle("baked-only", degradations = listOf(ServeDegradation.catalogBakedOnly())),
       pinned = true,
     )
-    // A catalog whose background lane WILL stage a published player comparison, but has not yet —
-    // the only shape `rcComparePending()` is true for. Kept off `catalogSessions` like `baked-only`
-    // so the home-index test is unaffected.
+    // A catalog whose background lane will stage a player comparison but hasn't yet (the only shape
+    // where `rcComparePending()` is true). Kept off `catalogSessions`.
     registry.register(
       "staging-rc",
       host = bundle("staging-rc", rcDoc = rcDocBytes, stagesRcCompare = true),
       pinned = true,
     )
-    // A catalog whose `ir/<id>.rc` is NOT a document this server can inflate — what a bundle baked
-    // on a newer Remote Compose alpha than this server's `remote-core` looks like from here. The
-    // `.rc` lane still serves it (bytes are bytes; the browser player may well read it), and only
-    // the projection lane has to have an answer. Kept off `catalogSessions` like `baked-only`.
+    // A catalog whose `ir/<id>.rc` this server can't inflate (e.g. baked on a newer Remote Compose
+    // alpha). The `.rc` lane still serves the bytes; only the projection must answer. Kept off
+    // `catalogSessions`.
     registry.register(
       "broken-rc",
       host = bundle("broken-rc", rcDoc = notADocument),
@@ -573,9 +531,8 @@ class ServeHttpRoutingTest {
       host = bundle("huge-rc", rcDoc = oversizedDocument),
       pinned = true,
     )
-    // A PLAIN BUNDLE — the shape `--bundles` and an upload produce: the same `ServeBundleHost`
-    // type with no `catalog.json` behind it. Kept off `catalogSessions` like `baked-only` so the
-    // home-index test is unaffected.
+    // A plain bundle (`--bundles` / upload shape): a `ServeBundleHost` without `catalog.json`. Kept
+    // off `catalogSessions`.
     registry.register(
       "plain-bundle",
       host = bundle("plain-bundle", isCatalog = false),
@@ -670,12 +627,8 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * `GET /tags/{name}` — the published element tag index, which had no HTTP surface until the
-   * focused comparison's element selector became its first consumer.
-   *
-   * The three shapes in the fixture are the three a consumer has to tell apart, and every one of
-   * them has to survive the wire: a unique tag with a box, a unique tag with **no** box (still an
-   * identity — `count` is what makes one), and a tag two nodes carry (not an identity at all).
+   * `GET /tags/{name}`, the published element tag index. All three fixture shapes must survive the
+   * wire.
    */
   @Test
   fun `the tag index lane serves one preview's published index, on both session forms`() {
@@ -693,9 +646,7 @@ class ServeHttpRoutingTest {
       assertEquals(setOf("glyph", "plain-marker", "row"), tags.keys, path)
       val glyph = tags["glyph"]!!.jsonObject
       assertEquals(1, glyph["count"]?.jsonPrimitive?.content?.toInt(), path)
-      // The plane, named on every entry. A consumer that read an index declaring nothing as though
-      // it declared render pixels would compare bounds in a plane nobody stated — see D1 — so the
-      // discriminator has to actually reach the browser rather than merely exist in Kotlin.
+      // The plane must be named on every entry and reach the browser.
       assertEquals(
         ServeSemanticsTags.RENDER_PIXELS,
         glyph["space"]?.jsonPrimitive?.content,
@@ -714,9 +665,8 @@ class ServeHttpRoutingTest {
 
   @Test
   fun `a preview whose id ends in json keeps its own index rather than another preview's`() {
-    // A preview id is unrestricted path-segment data. Stripping `.json` unconditionally would
-    // answer such a preview with a 404 — or, where the stripped form is also a real preview, with
-    // somebody else's element index, which is a selector silently targeting the wrong elements.
+    // Preview ids are arbitrary path-segment data; stripping `.json` unconditionally could 404 or
+    // serve another preview's index.
     val host =
       object : ServeHost {
         override val previews =
@@ -761,9 +711,7 @@ class ServeHttpRoutingTest {
 
   @Test
   fun `a session that publishes no index answers an empty one, and an unknown preview 404s`() {
-    // "This preview carries no tags" and "this server cannot tell you" are different answers, and a
-    // consumer that cannot tell them apart has no way to choose between offering no tag targets and
-    // offering none YET.
+    // "No tags" and "cannot tell you" are different answers.
     val (code, body) = get("/default-mod/tags/$previewId")
     assertEquals(200, code, body)
     assertEquals(0, Json.parseToJsonElement(body).jsonObject["tags"]!!.jsonObject.size)
@@ -779,12 +727,8 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * The site icons, at the three well-known paths. `/favicon.ico` in particular is what a link
-   * unfurler probes when a page declares no icon it understands — it answered 404 with an HTML body
-   * before these routes existed, which is why an unfurled link showed a generic globe.
-   *
-   * Constant first segments, so like `/healthz` they have to outscore the `/{system}` catch-all:
-   * without that, `/favicon.ico` resolves as a request for a design system of that name.
+   * The site icons at the three well-known paths (link unfurlers probe `/favicon.ico`). Constant
+   * first segments must outscore the `/{system}` catch-all.
    */
   @Test
   fun `the site icon routes are served and outscore the system catch-all`() {
@@ -805,9 +749,8 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * The notification badge is served like the other icons — a day's public cache and a content ETag
-   * that answers a revalidation with 304 — because the push worker names it on every notification,
-   * and a phone that refetched it each time would pay for that on every push.
+   * The notification badge is cached like the other icons (a day, content ETag, 304), since the
+   * push worker names it on every notification.
    */
   @Test
   fun `the badge icon is served with the site icons' caching`() {
@@ -831,10 +774,7 @@ class ServeHttpRoutingTest {
     revalidated.use { assertEquals(304, it.code) }
   }
 
-  /**
-   * The unfurl card lane. A card is resolved purely by the content hash in its name, so a name this
-   * server never drew is a 404 rather than a lookup against anything a caller controls.
-   */
+  /** The unfurl card lane: resolved purely by content hash, so an unknown name is a 404. */
   @Test
   fun `the social card lane serves a drawn card and refuses an unknown one`() {
     val home = get("/")
@@ -858,11 +798,7 @@ class ServeHttpRoutingTest {
     assertEquals(404, get("/social/0000000000000000.png").first)
   }
 
-  /**
-   * …and the front door declares that card's real size, at the aspect a large-image unfurl is laid
-   * out at. Before this it advertised the featured catalog's own 1078×2399 phone render, which
-   * every consumer cropped to a horizontal band.
-   */
+  /** The front door declares the card's real size, at the large-image unfurl aspect. */
   @Test
   fun `the front door declares a card shaped like a large-image unfurl`() {
     val (code, body) = get("/")
@@ -891,12 +827,9 @@ class ServeHttpRoutingTest {
 
   @Test
   fun `forcing a refresh is refused on a public server with no admin token`() {
-    // This server is `--public` with no admin token, so the browse gate authorizes everyone. An
-    // ordinary refresh is safe to hand out — it short-circuits on an unchanged head — but forcing
-    // removes that short-circuit, so an anonymous caller could drive a full re-stage in a loop.
-    // A box that configured no admin credential cannot be forced at all, rather than being
-    // forceable
-    // by everyone.
+    // A `--public` server with no admin token authorizes everyone to browse. An ordinary refresh is
+    // safe (it short-circuits on an unchanged head), but forcing isn't, so with no admin credential
+    // `force` is unavailable entirely.
     assertEquals(404, post("/compose-m3/refresh?force=1").first)
     assertEquals(404, post("/refresh?session=compose-m3&force=1").first)
     assertTrue(refreshes.isEmpty(), "a refused force must do no remote work: $refreshes")
@@ -929,10 +862,8 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * #216: a PURE declared-theme render is a fixed answer to a fixed URL — the theme comes from the
-   * catalog's own `declaredThemes`, not from the caller — so the browser may keep it. Under
-   * `no-store` a visitor toggling the chip row paid a full round trip per toggle, including back to
-   * a theme they were looking at two seconds ago, against a serial daemon.
+   * A pure declared-theme render is a fixed answer to a fixed URL, so the browser may cache it
+   * rather than re-fetch on every chip toggle.
    */
   @Test
   fun `a pure declared-theme render is cacheable while a made-to-order one is not`() {
@@ -955,11 +886,8 @@ class ServeHttpRoutingTest {
 
   @Test
   fun `a theme render whose lease has gone falls back to the serial lane, it is not refused`() {
-    // A page holds several short-lived claims over its life — one for the on-screen batch, one per
-    // deferred batch as the visitor scrolls — and every one of them is handed back or expires. A
-    // render still carrying a reaped token used to be answered `429`, which no retry could ever
-    // satisfy, so the grid sat on the previous theme's pixels for good. It is the same request as
-    // one carrying no token at all: render it, serially.
+    // A render carrying a reaped claim token is treated like one with no token (rendered serially),
+    // rather than a `429` no retry could satisfy.
     val (renderCode, _) =
       get("/burst/render/$previewId.png" + "?themeProvider=com.example.Brand&_themeLease=reaped")
 
@@ -969,9 +897,8 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * #3449: a validated override that could not be applied must not come back as `200 image/png`
-   * carrying the un-overridden snapshot — those pixels are byte-identical to the override-free
-   * render, so the caller reads "this override changes nothing" for a render that never happened.
+   * A validated override that could not be applied must not return `200 image/png` with the
+   * un-overridden snapshot, which would read as "this override changes nothing".
    */
   @Test
   fun `an override a static session cannot apply is refused, not answered with baked pixels`() {
@@ -999,9 +926,8 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * The vector lane drops overrides exactly like the raster one — a `figma/<slug>.svg` read off the
-   * delivery branch was exported at the preview's discovery-time axes — so it must refuse too, and
-   * with the same shape.
+   * The vector lane drops overrides like the raster one (its SVG was exported at discovery-time
+   * axes), so it refuses the same way.
    */
   @Test
   fun `the svg lane refuses an override it cannot apply, and marks an accepted fallback`() {
@@ -1029,9 +955,8 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * `?exploded=1` is a *presentation* of the vector export, not a render override — so it must work
-   * on a fully static catalog serving a baked `figma/<slug>.svg` (no daemon anywhere), and it must
-   * not be reported as a dropped override the way `fontScale` above is.
+   * `?exploded=1` is a presentation of the vector export, not a render override: it works on a
+   * fully static catalog and is not reported as dropped.
    */
   @Test
   fun `the svg lane serves an exploded view of the baked vector`() {
@@ -1062,9 +987,7 @@ class ServeHttpRoutingTest {
     assertEquals(200, bogusCode)
     assertEquals(2, Regex("class=\"cp-exploded-plane\"").findAll(bogus).count())
 
-    // A hand-typed separation far past anything the slider offers is bounded, not obeyed: past
-    // ~2.1e6 the canvas numbers stop surviving formatting and the picture collapses instead of
-    // merely spreading out.
+    // An extreme separation is clamped: past ~2.1e6 the canvas numbers stop surviving formatting.
     val (hugeCode, huge, _) =
       getFull("/svg-catalog/render/$previewId.svg?exploded=1&explodeGap=3000000")
     assertEquals(200, hugeCode)
@@ -1083,9 +1006,8 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * The Storybook isolation pages are consumed by PNG-diffing visual tools — precisely the
-   * caller #3449 describes — and a story's args ride the same override params, so they refuse too.
-   * The page shape has no room for a signal of its own, hence the status.
+   * Storybook isolation pages feed PNG-diffing tools and story args use the same override params,
+   * so they refuse too; the page has no room for another signal, hence the status.
    */
   @Test
   fun `the storybook iframe lanes refuse a dropped override`() {
@@ -1108,9 +1030,8 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * Every rendered page carries the one policy [ServePagePolicy] writes; nothing that is not a page
-   * does. The Storybook story render is framed from other origins by design, so it is the one page
-   * here without `frame-ancestors`.
+   * Every rendered page carries the [ServePagePolicy] policy; non-pages don't. The Storybook story
+   * render omits `frame-ancestors` because it is framed cross-origin by design.
    */
   @Test
   fun `html pages carry the content policy and other responses do not`() {
@@ -1148,21 +1069,14 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * A replayed preview whose daemon is merely cold gets the same `503` a recomposing one does.
-   *
-   * `rcPlayer` is the sharpest case: it selects which player replays the captured document, so it
-   * is precisely what the replay path reads — never a recomposition-only axis. It used to answer
-   * `409` + "this preview is replayed … so the override can never apply", which is false about a
-   * lane that serves the identical URL as `200` once warm, and final to a viewer that reads `409`
-   * as "stop asking".
+   * A replayed preview whose daemon is merely cold gets the same `503` as a recomposing one,
+   * including `rcPlayer`, which the replay path reads. A `409` would tell the viewer to stop
+   * asking.
    */
   @Test
   fun `a cold replayed preview is 503, not a terminal refusal — the axis decides`() {
-    // `rcPlayer=androidx-embedded` is deliberately NOT in this list: the baked snapshot IS the
-    // embedded player's capture, so it answers that request outright rather than waiting on a
-    // daemon. The case below pins that, and it is a strictly better outcome than the retry this
-    // asserts. `rcPlayer=cmp-android` IS in it: that is the CMP player on Android now, a genuine
-    // re-render the snapshot cannot stand in for.
+    // `rcPlayer=androidx-embedded` is not here: the baked snapshot is that player's capture, so it
+    // is answered outright (pinned below). `rcPlayer=cmp-android` is a genuine re-render.
     for (query in
       listOf(
         "rcPlayer=androidx-view",
@@ -1184,12 +1098,8 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * …and the embedded player is answered from the snapshot even with the daemon down, because the
-   * snapshot is that player's own capture.
-   *
-   * This is what makes the parameter droppable from a default link: a bare browse and
-   * `?rcPlayer=androidx-embedded` now agree on every host, including one that can render nothing at
-   * all.
+   * ...the embedded player is answered from the snapshot even with the daemon down, so a bare
+   * browse and `?rcPlayer=androidx-embedded` agree on every host.
    */
   @Test
   fun `a cold daemon still answers the embedded player, from the baked capture`() {
@@ -1207,9 +1117,8 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * The other half: an axis a replay genuinely cannot honour stays a terminal `409`, whatever the
-   * daemon's state. `localeTag` resolved to a literal at capture and `RemoteContext` exposes no
-   * locale, so no amount of warming will apply it.
+   * An axis a replay can never honour stays a terminal `409`: `localeTag` resolved at capture and
+   * `RemoteContext` has no locale.
    */
   @Test
   fun `an axis no replay can honour stays a terminal 409 on the same host`() {
@@ -1221,10 +1130,8 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * Mixed: one terminal axis decides the status, because the request as written can never be
-   * satisfied in full and `Retry-After` would invite a loop that never converges. The *message*
-   * names only the hopeless axis, so the reason given is about the one that is actually hopeless,
-   * while the header keeps naming everything that went un-applied.
+   * Mixed: one terminal axis makes the response terminal (no `Retry-After` loop). The message names
+   * only the hopeless axis; the header names everything un-applied.
    */
   @Test
   fun `one terminal axis makes the whole refusal terminal, and names itself`() {
@@ -1247,15 +1154,10 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * The commonest Remote Compose page view — a viewer opening on its default player with nothing
-   * else selected — is answered from the catalog's published parity staging, with no renderer.
-   *
-   * This host's daemon never serves (every render falls back to baked), so a `200` carrying the
-   * published bytes can only have come from the staging. Before this lane existed the same request
-   * went to the daemon: ~0.75s warm on the public box, and on a cold one a baked fallback that then
-   * refused. The staged lane is still what answers it: the baked PNG is the catalog's own capture
-   * and this request names a player, so the two are only interchangeable when they happen to be the
-   * same player — a coincidence the routing must not depend on.
+   * A Remote Compose viewer on its default player is answered from the published parity staging,
+   * with no renderer (this daemon never serves, so a `200` can only come from staging). The baked
+   * PNG is only interchangeable when it happens to be the same player, which routing must not rely
+   * on.
    */
   @Test
   fun `a bare player selection is served from the published parity staging`() {
@@ -1272,9 +1174,8 @@ class ServeHttpRoutingTest {
         headers[ServeHttpServer.DROPPED_OVERRIDES_HEADER],
         "the player WAS applied, so nothing is reported dropped",
       )
-      // These are published bytes, so they cache like published bytes. `no-store` here was a real
-      // cost once the compare wall started pointing a cell at this lane per row: every one of them
-      // re-fetched on every page view and every lazy scroll back into view.
+      // Published bytes cache like published bytes; the compare wall points a cell per row at this
+      // lane.
       assertEquals(
         "public, max-age=300, stale-while-revalidate=3600",
         headers["Cache-Control"],
@@ -1284,17 +1185,9 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * The same replay on a **token-gated** box: cacheable, and `private`.
-   *
-   * It was `no-store`, on the reading that everything a non-`--public` server answers stays out of
-   * every cache. Half of that is right — these URLs carry `?token=`, so they must never reach a
-   * shared one — and half of it was costing a local `serve` the whole benefit above: the compare
-   * wall points a cell at this lane for every player a run did not stage, and `no-store` forbids
-   * even the browser's own memory cache, so each cell was re-fetched on every page view and every
-   * lazy scroll back into view. `private` is the distinction the header exists to draw.
-   *
-   * Only the bare replay moves. An ordinary browse of the same preview on the same box is still
-   * `no-store`, which is what keeps this a carve-out rather than a policy change.
+   * The same replay on a token-gated box is cacheable but `private`: the URLs carry `?token=` so
+   * they must not reach a shared cache, but `no-store` would defeat the browser's own cache for
+   * every wall cell. Only the bare replay is affected; an ordinary browse stays `no-store`.
    */
   @Test
   fun `a bare player selection is privately cacheable on a token-gated box`() {
@@ -1333,15 +1226,9 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * A bare browse and `?rcPlayer=androidx-embedded` are the SAME request, and must answer with the
-   * same bytes.
-   *
-   * They did not. The staged `embedded` column is the vendored player under this repo's Robolectric
-   * harness — a different render of the same player, drawn to be compared against baked rather than
-   * to stand in for it — so routing the parameter there while a bare browse went to baked gave two
-   * answers to one question. That is what made dropping the viewer's embedded-player stamp unsafe,
-   * and it traced back to a stale claim in `publishedRcPlayerRender` that baked was the view
-   * player's capture. It is the androidx-embedded capture.
+   * A bare browse and `?rcPlayer=androidx-embedded` are the same request and must return the same
+   * bytes. The staged `embedded` column is a different render (vendored player under Robolectric,
+   * for comparison), whereas baked is the androidx-embedded capture itself.
    */
   @Test
   fun `androidx-embedded is answered from baked, not from the staged embedded column`() {
@@ -1367,9 +1254,8 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * The safety condition. A request carrying anything beyond the player selection asks for pixels
-   * the parity run never drew, so it must route to the renderer exactly as before — and on this
-   * host that means the un-served daemon, hence the refusal rather than a wrong `200`.
+   * The safety condition: anything beyond the player selection asks for pixels the parity run never
+   * drew, so it routes to the renderer (here the un-served daemon, hence a refusal).
    */
   @Test
   fun `a player selection with any other override does not take the published lane`() {
@@ -1397,10 +1283,8 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * The published lane must be consulted **before** the baked snapshot, because `bakedRender` does
-   * not look at the overrides — it answers with the preview's published PNG whenever the file is
-   * local. Ordering it second made the whole lane dead code on any host that has baked pixels,
-   * which is every real bundle and catalog host.
+   * The published lane must be consulted before the baked snapshot, because `bakedRender` ignores
+   * overrides; ordered second, the lane was dead code on every real host.
    */
   @Test
   fun `the published lane wins over baked pixels, which ignore the overrides`() {
@@ -1408,9 +1292,8 @@ class ServeHttpRoutingTest {
     assertEquals(200, baked.first)
     assertEquals("baked", baked.third[ServeHttpServer.GENERATION_HEADER])
 
-    // Asked on cmp-jvm, not androidx-embedded. The ordering this pins matters exactly where baked
-    // is ANOTHER player's pixels, which for androidx-embedded it is not — see the test above, where
-    // the same question has the opposite answer for that one backend.
+    // Asked on cmp-jvm, where baked is another player's pixels; androidx-embedded has the opposite
+    // answer (see above).
     val (code, body, headers) = getFullBytes("/rc-published/render/$previewId.png?rcPlayer=cmp-jvm")
     assertEquals(200, code)
     assertEquals("rc-published", headers[ServeHttpServer.GENERATION_HEADER])
@@ -1422,9 +1305,8 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * cmp-jvm reaches the published lane too. Its short-circuit returns before the override parse the
-   * `cached` chain reads, so it needs catching there or a bare request spawns a one-shot desktop
-   * JVM (~4.3s) to redraw a document the parity run already drew.
+   * cmp-jvm reaches the published lane too; its short-circuit returns before the `cached` chain's
+   * override parse, so it is caught there, avoiding a one-shot desktop JVM.
    */
   @Test
   fun `a bare cmp-jvm selection is served from the staging, not the subprocess`() {
@@ -1433,9 +1315,7 @@ class ServeHttpRoutingTest {
     assertEquals("rc-published", headers[ServeHttpServer.GENERATION_HEADER])
     assertContentEquals(publishedPng(), body)
 
-    // This path returns before the cache decision the daemon-backed lanes reach, so it has to make
-    // the same one — and cmp-jvm is the player it matters most for, since redrawing it costs a
-    // one-shot desktop JVM rather than a daemon round-trip.
+    // This path returns before the daemon lanes' cache decision, so it makes the same one.
     assertEquals(
       "public, max-age=300, stale-while-revalidate=3600",
       headers["Cache-Control"],
@@ -1450,11 +1330,8 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * `scroll=` is not an override param, so neither "bare" test sees it in the override map — but a
-   * full-page capture is a different **product**, which a staged viewport raster cannot answer and
-   * which the daemon makes to order. Both bare-player lanes have to exclude it: the short-circuit
-   * so it does not serve the wrong product, and the cache branch so it does not hand a
-   * made-to-order render the published bytes' lifetime.
+   * `scroll=` is not an override, but a full-page capture is a different product the staged raster
+   * can't answer. Both bare-player lanes exclude it: the short-circuit, and the cache branch.
    */
   @Test
   fun `a scrolling capture is not a bare player selection, in either lane`() {
@@ -1476,11 +1353,8 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * A host that can answer a player from published bytes must also **offer** it. The capability
-   * list and the render lane disagreed: this host answers a bare `androidx-embedded` request
-   * perfectly well, but advertised only `js`, so the viewer greyed the option out and Catalog mode
-   * fell back to the JS canvas instead of its preferred embedded default — leaving a working lane
-   * reachable only by hand-typing a URL.
+   * A host that can answer a player from published bytes must also offer it in its capability list,
+   * or the viewer greys it out.
    */
   @Test
   fun `a staged player is advertised as enabled, not just answerable`() {
@@ -1501,10 +1375,8 @@ class ServeHttpRoutingTest {
       body.contains("data-rc-default=\"androidx-embedded\""),
       "embedded is the default lane",
     )
-    // The wire between the two halves of this change: the page reports which player the BAKED
-    // artifact carries, and the viewer drops `?rcPlayer=` for exactly that lane rather than
-    // assuming which one it is. Without this attribute the viewer names every lane, which is the
-    // stamped-parameter behaviour this PR exists to remove.
+    // The page reports which player the baked artifact carries, so the viewer drops `?rcPlayer=`
+    // for exactly that lane.
     assertTrue(
       body.contains("data-rc-baked-player=\"androidx-embedded\""),
       "the bare render names itself as androidx-embedded",
@@ -1560,10 +1432,9 @@ class ServeHttpRoutingTest {
 
   @Test
   fun `readyz goes green once the default session renders a preview`() {
-    // The first poll kicks off the server-owned readiness prober; the default session (default-mod)
-    // carries a baked preview, so that render succeeds OFF the request path and latches ready — the
-    // signal docker-rollout gates the swap on. Unlike /healthz (a static "ok"), this only flips
-    // because a real render succeeded. Poll until green, exactly like a real healthcheck does.
+    // The first poll starts the readiness prober; the default session's baked render succeeds off
+    // the request path and latches ready (what docker-rollout gates on). Poll until green like a
+    // real healthcheck.
     assertTrue(awaitReady(), "readyz should latch ready after the default session renders")
     // Latched: it stays green.
     assertEquals(200 to "ready", get("/readyz"))
@@ -1571,12 +1442,9 @@ class ServeHttpRoutingTest {
 
   @Test
   fun `a suspended catalog still serves its published captures`() {
-    // The motion lane read its host with `peekHost`, which answers "resident right now" and goes
-    // null for any session the idle timer has suspended — so on a long-running server every
-    // capture 404'd for every catalog nobody had touched recently, which is most of them most of
-    // the time. Nothing caught it because a fixture registers `pinned = true` and a pinned session
-    // is never suspended; the bug only exists once an idle clock does. Modelled here the way the
-    // registry models it: an entry that is known and resumable but has no live host.
+    // The motion lane used `peekHost`, which is null for idle-suspended sessions, so captures 404'd
+    // for any catalog not touched recently. Fixtures are pinned and never suspend; this models a
+    // known, resumable entry with no live host.
     val motionId = "switch-on__ideal__default__light"
     val dir =
       Files.createTempDirectory("routing-suspended-motion").toFile().also { it.deleteOnExit() }
@@ -1594,10 +1462,8 @@ class ServeHttpRoutingTest {
         },
         motionBranchPaths = mapOf(motionId to "motion/switch-on/ideal__default__light.apng"),
       )
-    // The production shape, and the reason a bare bundle host would not have exercised the bug: a
-    // trusted catalog resumes as a ServeCatalogLiveHost fronting its baked host, and the captures
-    // live on the baked half. A catalog served by a bundle host directly is pinned, so it is
-    // exactly the sessions that CAN suspend that reach the lane through this composite.
+    // The production shape: a trusted catalog resumes as a ServeCatalogLiveHost fronting its baked
+    // host, where the captures live.
     val resumed = ServeCatalogLiveHost(emptyMap(), bundle("suspended-live"), bakedHost)
     val suspendedRegistry = ServeSessionRegistry(open = { resumed })
     suspendedRegistry.register("default-mod", host = bundle("default-mod"), pinned = true)
@@ -1643,9 +1509,7 @@ class ServeHttpRoutingTest {
 
   @Test
   fun `a capture the branch is refusing is a 503, not a 404`() {
-    // The whole point of BranchFetch reaching this route. 404 says "the catalog never published
-    // this recording", which is what the reader was told for a throttle too — so a rate-limited
-    // capture looked exactly like one that does not exist, in the viewer and in any log.
+    // A rate-limited capture must not look like a missing one (404).
     val motionId = "switch-on__ideal__default__light"
     val dir = Files.createTempDirectory("routing-motion-503").toFile().also { it.deleteOnExit() }
     File(dir, "previews").apply { mkdirs() }
@@ -1702,14 +1566,8 @@ class ServeHttpRoutingTest {
       answer = BranchFetch.NotFound
       assertEquals(404 to null, fetchMotion())
 
-      // A capture past the transport's envelope is a third answer again: it exists, it is not
-      // coming, and asking again will not shrink it. It carries no bytes and is not transient, so
-      // without a case of its own it lands in the 404 branch — a file the branch is holding,
-      // reported as one that was never published. That is the absence-versus-refusal confusion this
-      // whole route exists to end, arriving through the outcome added to end it elsewhere.
-      //
-      // Not 503 either: `Retry-After` on something that will be exactly as oversized next time is a
-      // promise the server cannot keep.
+      // A capture past the transport's size envelope exists but won't come, and retrying won't
+      // help: not 404 (it exists) and not 503 (`Retry-After` would be a false promise).
       answer = BranchFetch.TooLarge(25L * 1024 * 1024)
       assertEquals(413 to null, fetchMotion())
 
@@ -1724,10 +1582,9 @@ class ServeHttpRoutingTest {
 
   @Test
   fun `the motion lane resumes a known session but never forks an unknown one`() {
-    // Leasing falls through to the session factory for an unknown id, which in project mode with
-    // `--revisions` checks out a ref and runs a Gradle build. A revision host publishes no
-    // captures, so such a request can only 404 — after paying for the build. The lane must resume
-    // what is already registered and refuse everything else.
+    // Leasing an unknown id in project mode with `--revisions` checks out a ref and runs a Gradle
+    // build, yet a revision host publishes no captures. The lane must resume only registered
+    // sessions.
     val forked = mutableListOf<String>()
     val factoryRegistry =
       ServeSessionRegistry(
@@ -1989,10 +1846,8 @@ class ServeHttpRoutingTest {
 
   @Test
   fun `readyz withholds ready when the default session cannot render`() {
-    // A server whose default session resolves to nothing (an empty registry) can't render a
-    // representative preview, so /readyz must report 503 "warming" — NOT a false green. This is the
-    // failure docker-rollout must catch: a replica up on the port but unable to serve. Its own
-    // server + registry so the class-level `server` fields are untouched.
+    // A server whose default session resolves to nothing can't render, so /readyz must report 503
+    // "warming", not a false green. Uses its own server + registry.
     val emptyRegistry = ServeSessionRegistry(open = { null })
     val brokenServer =
       ServeHttpServer(
@@ -2018,11 +1873,8 @@ class ServeHttpRoutingTest {
 
   @Test
   fun `the wasm route serves an app registered after the listener bound`() {
-    // #3127 made the listener bind BEFORE the catalogs load, so `wasmCatalogs` is empty at route-
-    // installation time and only fills in later. Gating the route's registration on the map being
-    // non-empty therefore dropped `/wasm/…` for the whole process lifetime, while the viewer —
-    // which reads the same live map on each request — still offered "Run in browser (Wasm)". The
-    // route must be installed unconditionally and consult the map per request.
+    // The listener binds before catalogs load, so `wasmCatalogs` is empty at route installation.
+    // The `/wasm/…` route must be installed unconditionally and consult the live map per request.
     val appDir = Files.createTempDirectory("serve-wasm-late").toFile().also { it.deleteOnExit() }
     val wasmCatalogs = mutableMapOf<String, File>()
     val lateRegistry = ServeSessionRegistry(open = { null })
@@ -2180,9 +2032,8 @@ class ServeHttpRoutingTest {
           assertEquals("/ui-builder/", response.header("Location"))
         }
       }
-      // …carrying the query with it. On a token-gated host the credential rides as `?token=…` and
-      // the Wasm client reads it from `location.search`, so a redirect that dropped it landed the
-      // editor on a page whose identity, design and WebSocket requests were unauthenticated.
+      // ...carrying the query: on a token-gated host the Wasm client reads `?token=` from
+      // `location.search`.
       fetch("/ui-builder?token=private-token", noRedirects).let { (code, response) ->
         response.use {
           assertEquals(302, code)
@@ -2198,11 +2049,8 @@ class ServeHttpRoutingTest {
             assertEquals("no-cache", response.header("Cache-Control"))
             val html = response.body.string()
             assertTrue(html.contains("Compose UI builder"))
-            // The reference the whole chain hangs off is absolute and versioned; nothing still
-            // points at the unversioned sibling, which is what would silently defeat the caching.
-            // This fixture writes the attribute unquoted, which the rewrite has to handle too:
-            // a shell that omits the quotes would otherwise keep every asset on the unversioned
-            // path, with the caching silently defeated and nothing failing to say so.
+            // The entry reference is absolute and versioned, including when the shell's attribute
+            // is unquoted; an unversioned reference would silently defeat caching.
             val match = Regex("""src="?(/ui-builder/v/[^"\s>]+/)builder\.mjs""").find(html)
             assertTrue(match != null, html)
             assertTrue(!html.contains("src=builder.mjs"), html)
@@ -2418,7 +2266,7 @@ class ServeHttpRoutingTest {
     // also carries no ?token — the route needs none.
     assertTrue(landing.contains("href=\"/compose-m3/p/$previewId\""), "path card link: $landing")
     assertTrue(!landing.contains("token="), "public path landing links are token-free: $landing")
-    // The tally is wrapped in the marker that keeps it out of the page's ETag (#217).
+    // The tally is wrapped in the marker that keeps it out of the page's ETag.
     assertTrue(
       landing.contains("1 preview · <span ${ServeWeb.VOLATILE_ATTR}>1 view</span>"),
       "catalog visit counted: $landing",
@@ -2505,20 +2353,10 @@ class ServeHttpRoutingTest {
 
   @Test
   fun `a plain module's landing offers no catalog tracker`() {
-    // `burst` is a plain `ServeHost`, not a `ServeBundleHost`, so `catalogBundleHost` is null and
-    // there is no catalog to file anything against. The page-scoped report was built
-    // unconditionally, and `repoFor` falls back to compose-ai-tools when a session names neither
-    // source nor provenance — so this module's visitor was offered a form naming the TOOL's own
-    // tracker as the repo that declares "this catalog", for a catalog that does not exist. Every
-    // caller's parameter documents the opposite: "Null (a plain module, or any caller that has
-    // nothing to file against) omits it entirely."
-    //
-    // `/burst` rather than `/`: this server registers several sessions, so `/` is the FRONT DOOR
-    // and carries no catalog report either way — an assertion there passes whatever the handler
-    // does, which is how the first version of this test managed to hold against the bug.
-    //
-    // Only the catalog half is asserted absent. The floating launcher's SERVER half legitimately
-    // points at this repository — a preview server bug is ours — and is not what this removes.
+    // `burst` is a plain `ServeHost` with no catalog, so it must not offer a catalog report (which
+    // would have fallen back to the tool's own repo). Asserted on `/burst` because `/` is the front
+    // door here and carries no catalog report regardless. Only the catalog half is absent; the
+    // launcher's server half legitimately points here.
     val (code, landing) = get("/burst")
     assertEquals(200, code, "the plain module's landing is served: $landing")
     assertTrue(
@@ -2533,11 +2371,8 @@ class ServeHttpRoutingTest {
 
   @Test
   fun `a plain bundle is not a catalog and offers no catalog tracker`() {
-    // `ServeBundleHost` backs three different things: a catalog published by `ServeCatalogStore`, a
-    // `--bundles` directory, and an uploaded portable bundle. Only the first has a `catalog.json`.
-    // Testing the host TYPE read all three as catalogs, so an upload was offered a report about
-    // "this catalog" against the fallback compose-ai-tools repo — the same defect as the plain
-    // module one door along, arriving through a host that IS a `ServeBundleHost`.
+    // `ServeBundleHost` backs a published catalog, a `--bundles` directory, and an uploaded bundle;
+    // only the first has `catalog.json`, so only it gets a catalog report.
     val (code, landing) = get("/plain-bundle")
     assertEquals(200, code, "the plain bundle's landing is served: $landing")
     assertTrue(
@@ -2552,11 +2387,8 @@ class ServeHttpRoutingTest {
 
   @Test
   fun `a page-scoped report pins the presentation mode it was filed from`() {
-    // The report link is read by a triager who does not have the reporter's cookie. Mode is
-    // deliberately a property of the visitor rather than of each URL, but `?chrome=` was kept
-    // precisely as a permalink — "a link may pin the presentation it was written for". Without it a
-    // Catalog-mode report opens the Dev surface for a Dev-mode triager, which is not the page that
-    // was reported.
+    // The report link is read by a triager without the reporter's cookie, so it pins `?chrome=` to
+    // the mode the page was served in.
     val (_, dev) = get("/compose-m3")
     assertTrue(dev.contains("chrome%3Ddev") || dev.contains("chrome=dev"), "Dev pins dev: $dev")
 
@@ -2571,10 +2403,7 @@ class ServeHttpRoutingTest {
       "the pin is not appended to a URL that already carries one: $catalog",
     )
 
-    // An UNRECOGNISED pin is replaced, not kept: `interfaceMode` accepts only `catalog`/`dev`, so
-    // the request fell back to the cookie or the server default and the raw value names a mode the
-    // page was never served in. Keeping it pins the wrong surface through the one value nobody
-    // validated; appending would leave two `chrome=` for the reader's parser to break.
+    // An unrecognised pin is replaced, not kept or duplicated.
     val (_, bogus) = get("/compose-m3?chrome=invalid")
     // Scoped to the report form: the raw query legitimately survives elsewhere on the page (the
     // canonical `og:url` is the URL as requested). What must not carry it is the report.
@@ -2592,12 +2421,9 @@ class ServeHttpRoutingTest {
 
   @Test
   fun `a percent-encoded chrome pin is replaced, not doubled`() {
-    // Ktor decodes a parameter NAME before it reaches `queryParameters`, so `?%63hrome=invalid` is
-    // `chrome` to every read in the server — including the check that decides this URL carries an
-    // unrecognised pin. Comparing the raw text when dropping it kept the pair and appended a second
-    // `chrome=`, and a reader taking the first value read the invalid one, ignored it and fell back
-    // to their own mode: the wrong-surface failure the pin exists to prevent, restored by the
-    // replacement meant to close it.
+    // Ktor decodes parameter names, so `?%63hrome=invalid` is `chrome` to the server. Dropping it
+    // must compare decoded names, or a second `chrome=` is appended and readers take the invalid
+    // first one.
     val (_, page) = get("/compose-m3?%63hrome=invalid")
     val report = page.substringAfter("id=\"cp-report\"", "").substringBefore("</form>")
     assertTrue(report.isNotEmpty(), "the catalog report row is present: $page")
@@ -2605,7 +2431,7 @@ class ServeHttpRoutingTest {
       report.contains("chrome%3Ddev") || report.contains("chrome=dev"),
       "the resolved mode is pinned: $report",
     )
-    // Neither spelling of the stale pin survives — the encoded pair is what used to.
+    // Neither spelling of the stale pin survives.
     assertTrue(
       !report.contains("%2563hrome") && !report.contains("%63hrome"),
       "the encoded pin is dropped rather than carried alongside the new one: $report",
@@ -2618,9 +2444,8 @@ class ServeHttpRoutingTest {
 
   @Test
   fun `a query name that is not this pin survives the replacement`() {
-    // The drop is scoped to what the server itself reads as the chrome pin. An unrelated parameter
-    // — encoded or not, and including one whose name is not valid percent-encoding — is carried
-    // through untouched, so replacing the pin never costs a report its other context.
+    // Only what the server reads as the chrome pin is dropped; unrelated (even malformed)
+    // parameters pass through.
     val (_, page) = get("/compose-m3?locale=en-US&%7Anote=keep&chrome=invalid")
     val report = page.substringAfter("id=\"cp-report\"", "").substringBefore("</form>")
     assertTrue(report.isNotEmpty(), "the catalog report row is present: $page")
@@ -2683,9 +2508,8 @@ class ServeHttpRoutingTest {
       }
     }
 
-    // Both the index and a catalog landing advertise a DRAWN card ([ServeSocialCard]) on the
-    // `/social/` lane, at the origin the proxy presents. Neither points at a render any more: those
-    // are portrait phone screenshots, and a large-image card crops one to a horizontal band.
+    // Both the index and a landing advertise a drawn card ([ServeSocialCard]) on `/social/` at the
+    // proxy's origin, not a portrait render.
     val cardImage =
       Regex(
         """<meta property="og:image" content="(https://preview\.coo\.ee/social/[a-f0-9]+\.png)">"""
@@ -2748,11 +2572,9 @@ class ServeHttpRoutingTest {
       )
     }
 
-    // compose-m3 carries an RC document and no published comparison manifest — but no background
-    // lane is going to bring it one either, and a host with nothing to wait for is fully baked.
-    // Dropping it to `no-store` is what `stagesRcCompare` was introduced to stop: gating on the
-    // absent file alone made `pending()` permanently true for every laneless session and kept its
-    // viewer pages out of the edge cache for the life of the host.
+    // compose-m3 has an RC document and no comparison manifest, but no lane will bring one, so it
+    // is fully baked and cacheable. Gating on the absent file alone kept laneless viewers out of
+    // the edge cache forever.
     val settledViewerReq =
       Request.Builder().url("http://127.0.0.1:${server.port}/compose-m3/p/$previewId").build()
     client.newCall(settledViewerReq).execute().use { response ->
@@ -2763,9 +2585,7 @@ class ServeHttpRoutingTest {
       )
     }
 
-    // …and the case that IS uncacheable: a catalog whose lane will stage a comparison and has not
-    // yet. The page's shape depends on a manifest that lands asynchronously, so a short edge cache
-    // would serve the pre-manifest shape for minutes after the lanes were ready.
+    // ...the uncacheable case: a lane will stage a manifest that changes the page's shape.
     val pendingViewerReq =
       Request.Builder().url("http://127.0.0.1:${server.port}/staging-rc/p/$previewId").build()
     client.newCall(pendingViewerReq).execute().use { response ->
@@ -2794,9 +2614,8 @@ class ServeHttpRoutingTest {
 
   @Test
   fun `variant render remains non cacheable`() {
-    // This fixture is a static bundle, so it can only return baked bytes. Since #3449 that is a
-    // refusal unless the caller opts into the snapshot — and the opted-in response, being a variant
-    // request, must still never poison the cache for another query.
+    // A static bundle returns baked bytes, so this is a refusal unless the caller opts into the
+    // snapshot, and the opted-in variant response must never be cached for another query.
     val req =
       Request.Builder()
         .url(
@@ -2828,18 +2647,15 @@ class ServeHttpRoutingTest {
 
   @Test
   fun `a static bundle 404s the slots render lane`() {
-    // The .slots lane is routed and dispatched, but a bundle host has no daemon to capture a
-    // semantics tree, so it resolves to NotFound (only a daemon-backed ServeRenderHost extracts
-    // slots).
+    // `.slots` is routed, but a bundle host has no daemon to capture a semantics tree, so it is
+    // NotFound.
     val (code, _) = get("/compose-m3/render/$previewId.slots")
     assertEquals(404, code)
   }
 
   @Test
   fun `the rc render lane serves the captured remote compose document bytes`() {
-    // compose-m3 carries an `ir/<id>.rc` sidecar, so `GET /render/<id>.rc` returns those
-    // bytes
-    // verbatim (octet-stream) for the in-browser player to replay client-side.
+    // compose-m3 carries an `ir/<id>.rc`, served verbatim (octet-stream) for the in-browser player.
     val req =
       Request.Builder()
         .url("http://127.0.0.1:${server.port}/compose-m3/render/$previewId.rc")
@@ -2861,22 +2677,18 @@ class ServeHttpRoutingTest {
     val (code, body) = get("/compose-m3/render/$previewId.rc.json")
 
     assertEquals(200, code)
-    // The document's DECLARED size, not a measured one — nothing here ran a layout pass, and
-    // `CoreDocument.getWidth()` would report 0 for a document that has not.
+    // The declared size: no layout pass ran, and `CoreDocument.getWidth()` would be 0.
     assertTrue(body.contains("\"width\": 100"), "declared header size: $body")
-    // The named colour resource survives compilation as a `ColorConstant` plus the `NamedVariable`
-    // that gave it its name. Asserting on that rather than on `bg` is the point: the projection is
-    // of the COMPILED document, not of the JSON that produced it.
+    // The named colour survives compilation as a `ColorConstant` plus its `NamedVariable`, proving
+    // the projection is of the compiled document.
     assertTrue(body.contains("ColorConstant"), "operations projected: $body")
     assertTrue(body.contains("RootLayoutComponent"), "layout tree projected: $body")
   }
 
   @Test
   fun `the rc json lane 422s a document it cannot inflate`() {
-    // A real state rather than a hypothetical: a bundle carries its own Remote Compose coordinates
-    // and can be baked on a newer alpha than the `remote-core` this server links. That is a
-    // statement about one document, not about the server's health, so it is a 422 and not a 500 —
-    // and the message names which document and why, so a catalog owner can act on it.
+    // A bundle baked on a newer Remote Compose alpha than this server links is a statement about
+    // one document, so 422 (not 500), naming the document and why.
     val (code, body) = get("/render/$previewId.rc.json?session=broken-rc")
 
     assertEquals(422, code)
@@ -2885,10 +2697,8 @@ class ServeHttpRoutingTest {
 
   @Test
   fun `the document lanes keep their bytes out of shared caches`() {
-    // The token can arrive in the `X-Compose-Preview-Token` header, which no cache keys on, so an
-    // uncached-but-cacheable document could be handed to a later caller or outlive a revoked
-    // grant. This fixture server is `isPublic = true`, so the published-content policy is the one
-    // asserted here; a token-gated deployment takes `no-store` down the same branch.
+    // The token can arrive in a header no cache keys on, so caching must follow the access policy.
+    // This fixture is public; a token-gated deployment takes `no-store` down the same branch.
     for (suffix in listOf(".rc", ".rc.json")) {
       val req =
         Request.Builder()
@@ -2907,10 +2717,8 @@ class ServeHttpRoutingTest {
 
   @Test
   fun `the rc json lane refuses a document too large to project`() {
-    // The projection holds the input, the parsed operation graph and the expanded JSON at once,
-    // each larger than the last, and an uploaded bundle may carry up to 100 MB of extracted
-    // content. Same 422 as an uninflatable document, because it is the same statement: this
-    // particular document is not one this lane will read.
+    // The projection holds input, operation graph and expanded JSON at once, and uploads may carry
+    // up to 100 MB, so oversized documents get the same 422.
     val (code, body) = get("/render/$previewId.rc.json?session=huge-rc")
 
     assertEquals(422, code)
@@ -2923,9 +2731,8 @@ class ServeHttpRoutingTest {
 
   @Test
   fun `api previews says which previews publish a remote compose document`() {
-    // The flag the UI builder's Remote Compose palette reads: without it a client has to fetch
-    // `.rc` for every preview and read 404 as "no". `modes` cannot answer this — both sessions
-    // below are snapshot-backed, and only one carries an `ir/<id>.rc`.
+    // The flag the UI builder's RC palette reads, so clients needn't probe `.rc` per preview.
+    // `modes` can't answer this (both sessions are snapshot-backed).
     val (code, api) = get("/compose-m3/api/previews")
     assertEquals(200, code)
     assertTrue(api.contains("\"remoteCompose\":true"), "rc document capability: $api")
@@ -3002,10 +2809,8 @@ class ServeHttpRoutingTest {
 
   @Test
   fun `the rc player bundle is served as javascript with a conditional-request etag`() {
-    // The vendored Remote Compose player rides in the CLI jar and is served over
-    // `/rc-player/bundle.js` (a constant segment, session-independent) so the viewer's client-side
-    // canvas lane can load the `RC` global. Served as JS (so the browser executes it) with a
-    // content-hash ETag for cheap conditional requests.
+    // The vendored Remote Compose player, served from the CLI jar at `/rc-player/bundle.js` as JS
+    // with a content-hash ETag, so the viewer's canvas lane can load the `RC` global.
     val etag: String
     val req = Request.Builder().url("http://127.0.0.1:${server.port}/rc-player/bundle.js").build()
     client.newCall(req).execute().use { r ->
@@ -3013,9 +2818,8 @@ class ServeHttpRoutingTest {
       assertEquals("text/javascript", r.body.contentType()?.let { "${it.type}/${it.subtype}" })
       val body = r.body.string()
       assertTrue(body.contains("RcdPlayer"), "the bundle exposes the RcdPlayer entry point")
-      // The published bundle wires a live custom host (camera, same-origin fetches) into every
-      // document; this server plays documents it did not write, so the inert-host shim must ride
-      // after it, once the bundle has defined the player class.
+      // The bundle wires a live custom host into every document; this server plays documents it
+      // didn't write, so the inert-host shim must come after the player class is defined.
       val shim = body.lastIndexOf("Object.defineProperty(Player.prototype, \"customHost\"")
       assertTrue(shim > body.indexOf("window.RC = {"), "the inert-host shim follows the bundle")
       etag = r.header("ETag") ?: ""
@@ -3033,10 +2837,8 @@ class ServeHttpRoutingTest {
 
   @Test
   fun `the rc typefaces are served as a stylesheet plus the faces it declares`() {
-    // Without these the client-side lane paints a document's generic families in whatever the
-    // *visitor's* machine calls `sans-serif` — different outlines, ~4% different line metrics, and
-    // no
-    // Medium weight — while the PNG beside it used the vendored files (issue #3480).
+    // Without the vendored fonts the client-side lane paints generic families in the visitor's own
+    // fonts, unlike the PNG beside it.
     val cssReq = Request.Builder().url("http://127.0.0.1:${server.port}/rc-fonts/fonts.css").build()
     val css =
       client.newCall(cssReq).execute().use { r ->
@@ -3197,26 +2999,21 @@ class ServeHttpRoutingTest {
     val (code, body) = get("/")
     assertEquals(200, code)
     assertTrue(body.contains("Design systems"), "root is the systems index: $body")
-    // A card links to the catalog's canonical path and shows a hero preview — from the PREBAKED
-    // `/hero/` lane, not the live `/render` one, so the front door costs the server nothing to
-    // paint.
+    // A card links to the catalog's canonical path and shows a hero from the prebaked `/hero/`
+    // lane, so the front door costs no renders.
     assertTrue(body.contains("href=\"/compose-m3/\""), "index card links to the system: $body")
     assertTrue(
       heroSrc(body)?.startsWith("/hero/compose-m3/") == true,
       "index card shows a prebaked hero: $body",
     )
-    // Nothing the BROWSER fetches may point at the render lane. Scoped to the attributes that
-    // actually issue a request (`src`, `href`) rather than the whole body, because the `og:image`
-    // below deliberately does name the render — a meta tag is inert until a link unfurler reads it,
-    // and one baked PNG per shared link is not the per-visitor render load this guards against.
+    // Nothing the browser fetches (`src`, `href`) may point at the render lane. The `og:image` meta
+    // tag is inert until an unfurler reads it.
     assertTrue(
       !Regex("""(src|href)="[^"]*/compose-m3/render/""").containsMatchIn(body),
       "the front door does not put a render request on the server: $body",
     )
-    // The unfurl image is a DRAWN card off the `/social/` lane — neither the downscaled `/hero/`
-    // thumbnail the page lays out (too small for a link-preview card) nor the full render behind it
-    // (a portrait phone screenshot, which every consumer crops to a horizontal band). See
-    // [ServeSocialCard].
+    // The unfurl image is a drawn card from `/social/`, not the small hero or a portrait render.
+    // See [ServeSocialCard].
     assertTrue(
       body.contains("""<meta property="og:image" content="http://"""),
       "the front door advertises an unfurl image: $body",
@@ -3277,9 +3074,8 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * The Catalog / Dev switch is a mode the visitor is in, carried by a cookie the browser sends
-   * with every request — so no URL has to mention it. `?chrome=` stays as a permalink that pins one
-   * request's presentation without changing what the visitor is in afterwards.
+   * Catalog / Dev is a visitor mode carried by cookie. `?chrome=` pins one request's presentation
+   * without changing the visitor's mode.
    */
   @Test
   fun `the interface mode comes from a cookie, and the chrome query outranks it`() {
@@ -3343,14 +3139,9 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * `uses:` is a Dev-mode affordance, and the route that answers it is gated by the same switch the
-   * page is — so a Catalog-mode request gets a 404 rather than a result, and the operator cannot be
-   * reached by typing its URL in a presentation that does not offer it.
-   *
-   * What matching actually returns is [PreviewUsageIndexTest]'s subject; this host has no source
-   * fetcher, which is the other case worth pinning here: it answers `available: false` rather than
-   * an empty list, because the filter must be able to tell "nothing calls that" from "nobody
-   * looked".
+   * `uses:` is Dev-only, and its route is gated by the same switch (404 in Catalog mode). Matching
+   * is [PreviewUsageIndexTest]'s subject; this host has no source fetcher, so it answers
+   * `available: false` rather than an empty list.
    */
   @Test
   fun `the uses index is Dev-mode only, and says so when it cannot answer`() {
@@ -3394,11 +3185,8 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * Every route answers HEAD, because that is the probe a link unfurler sends before it commits to
-   * downloading a page or its `og:image`. Before [io.ktor.server.plugins.autohead.AutoHeadResponse]
-   * was installed these were 405 where a constant segment matched (`/`, `/status`) and 404 where
-   * routing needed a `{system}` (every catalog page and every render), so the entire site read as
-   * dead to anything that probes before fetching.
+   * Every route answers HEAD, the probe link unfurlers send. Before
+   * [io.ktor.server.plugins.autohead.AutoHeadResponse] these were 405 or 404.
    */
   @Test
   fun `HEAD answers wherever GET does, with the same headers`() {
@@ -3434,11 +3222,8 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * `AutoHeadResponse` answers a HEAD by running the whole GET handler and discarding the body,
-   * which is right for a page or a baked PNG and badly wrong for the work lanes: `HEAD /bundle.zip`
-   * would render every preview and pack a zip only to throw it away, so an anonymous `curl -I` on a
-   * public host could burn a catalog's render capacity while downloading nothing. Those refuse the
-   * probe with `405` + `Allow: GET` instead.
+   * `AutoHeadResponse` runs the whole GET handler for a HEAD, which would let `curl -I` on
+   * `bundle.zip` burn render capacity. Work lanes refuse HEAD with `405` + `Allow: GET`.
    */
   @Test
   fun `HEAD is refused on the lanes whose GET does real work`() {
@@ -3454,9 +3239,7 @@ class ServeHttpRoutingTest {
       head("/compose-m3/render/$previewId.png?fontScale=1.5").first,
       "an override render must not be triggered by a bodyless probe",
     )
-    // The non-PNG products are made on demand whether or not a query is present, so the suffix
-    // alone has to refuse — an override-free `HEAD …/render/<id>.svg` would otherwise take the
-    // render semaphore just to have its body discarded.
+    // Non-PNG products are made on demand regardless of query, so the suffix alone refuses HEAD.
     for (suffix in listOf(".svg", ".slots", ".a11y", ".annotations", ".rc")) {
       assertEquals(
         405,
@@ -3470,10 +3253,8 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * The token gate has to run before the HEAD refusal. `rejectBadToken` answers 404 to conceal that
-   * a route exists at all, so refusing first with `405` + `Allow: GET` would tell an
-   * unauthenticated scanner the opposite — and `/history/render` is only registered when the
-   * repository-backed surface is enabled, making the difference a probe for optional configuration.
+   * The token gate runs before the HEAD refusal: `rejectBadToken` 404s to conceal routes, and a
+   * `405` would reveal optional ones like `/history/render`.
    */
   @Test
   fun `an unauthenticated HEAD on a gated lane is concealed, not refused`() {
@@ -3506,11 +3287,7 @@ class ServeHttpRoutingTest {
     }
   }
 
-  /**
-   * A HEAD is a probe, not a visit. `AutoHeadResponse` answers it by running the GET pipeline and
-   * dropping the body, so the view tallies would otherwise count the probe an unfurler sends *and*
-   * the fetch that follows it — double-counting every link shared into a chat.
-   */
+  /** A HEAD is a probe, not a visit: don't count it in view tallies. */
   @Test
   fun `a HEAD probe does not count as a view`() {
     val path = "/compose-m3/p/$previewId"
@@ -3539,10 +3316,8 @@ class ServeHttpRoutingTest {
       ?.toIntOrNull() ?: 0
 
   /**
-   * A viewer's `og:image` inherits the page's query suffix, so a link shared from an overridden
-   * view points at a re-render whose pixel size is not the baked one. Declaring the baked
-   * dimensions there would have the card lay out against a size the image doesn't have — omit them
-   * and let the fetcher measure.
+   * A viewer's `og:image` inherits the page query, so for an overridden view the baked dimensions
+   * would be wrong; omit them.
    */
   @Test
   fun `an overridden viewer link declares no image dimensions`() {
@@ -3564,10 +3339,8 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * `robots.txt` opens the browsing surface and closes the lanes that cost the box something. The
-   * assertions name the failure modes rather than the file's exact text: the browsing pages must
-   * stay crawlable (that is the whole point of publishing a sitemap), and the render-with-overrides
-   * lane must not be, since a crawler walking the grid's theme links would re-render every preview.
+   * `robots.txt` keeps browsing pages crawlable (the sitemap's purpose) and blocks the costly
+   * render-with-overrides lane.
    */
   @Test
   fun `robots txt opens the browse surface and closes the render and code lanes`() {
@@ -3578,10 +3351,8 @@ class ServeHttpRoutingTest {
     for (closed in listOf("/playground", "/bundle.zip", "/wasm/", "/*/render/*?", "/*/compare")) {
       assertTrue(body.contains("Disallow: $closed"), "closes $closed: $body")
     }
-    // The browsing surface is never disallowed — no rule may match a catalog landing, a viewer, or
-    // the baked PNG an unfurl card points at. Compared line-exactly, because the legitimate
-    // `/*/render/*?` rule has the open form as a prefix and a substring test would read it as a
-    // violation of itself.
+    // No rule may match a landing, viewer, or baked PNG. Compared line-exactly because
+    // `/*/render/*?` has the open form as a prefix.
     val rules = body.lines().map { it.trim() }
     for (open in
       listOf(
@@ -3601,8 +3372,8 @@ class ServeHttpRoutingTest {
   }
 
   /**
-   * The sitemap lists the pages worth landing on — catalog landings and viewers — built from the
-   * remembered catalog metadata rather than from live hosts, so a suspended catalog still appears.
+   * The sitemap lists landings and viewers from remembered catalog metadata, so suspended catalogs
+   * still appear.
    */
   @Test
   fun `sitemap lists catalog landings and their preview viewers`() {
@@ -3707,9 +3478,7 @@ class ServeHttpRoutingTest {
       pathBody.contains("data-rc-neutral=\"/compose-m3/render/$previewId.rc\""),
       "the path-mounted page keeps its RC document URL under the catalog path: $pathBody",
     )
-    // …and the page can be reported against the CATALOG. Without `#cp-report` here the floating
-    // launcher keeps its catalog half hidden, leaving the preview server's own tracker as the only
-    // route out of a page whose whole subject is a catalog's fidelity (issue #4289).
+    // ...and the page carries `#cp-report`, so the launcher's catalog half is shown.
     assertTrue(
       pathBody.contains("id=\"cp-report\"") &&
         pathBody.contains("data-cp-subject=\"these comparisons\""),
@@ -3727,9 +3496,7 @@ class ServeHttpRoutingTest {
       queryBody.contains("data-rc-neutral=\"/render/$previewId.rc?session=compose-m3\""),
       "the legacy page keeps its session query on the RC document URL: $queryBody",
     )
-    // The landing links each comparison it can actually offer, by name: this catalog carries RC
-    // documents and design references but no SVG export, so it gets the RC action and the
-    // design-tool one, and no "compare SVG" leading to a dead tab.
+    // The landing links only comparisons it can offer: RC and design-tool, no SVG.
     val landing = get("/compose-m3/").second
     assertTrue(
       landing.contains("href=\"/compose-m3/compare?format=rc\">Remote Compose players</a>") &&

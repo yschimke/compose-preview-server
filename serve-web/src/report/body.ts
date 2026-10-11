@@ -37,48 +37,28 @@ export interface ReportInputs {
     scores?: string | null;
     selection?: Selection;
     /**
-     * The classification sentence `<cp-report-classification>` last wrote, if any.
-     *
-     * A fourth producer, and here for the reason the other three are: this writer composes the body
-     * from the template every time any of them reports in, so a classification applied to the
-     * field directly would be silently undone by the next score or selection. Passing it through
-     * keeps the rule that exactly one thing writes the field.
+     * The sentence `<cp-report-classification>` last wrote. Routed through here because the body is
+     * recomposed from the template on every update, so a direct field write would be undone.
      */
     classification?: string;
     /** Whether the issue follows the whole component or only the preview variant on screen. */
     scope?: ReportScope;
     /**
-     * One `compose-parity-locator/v1` block per comparison the reader ticked on the wall.
-     *
-     * The fifth producer, and the only one that adds identity rather than detail: a page-scoped
-     * report names no preview until somebody picks some, and these are what turn it into an
-     * umbrella issue the catalog's index can join to rows. Empty — the state this starts in — fills
-     * the template's placeholder with nothing, reproducing the body the server wrote.
+     * One `compose-parity-locator/v1` block per comparison ticked on the wall; these turn a
+     * page-scoped report into an umbrella issue the index can join to rows. Empty reproduces the
+     * server's body.
      */
     locators?: string[];
     /**
-     * The render lane's whole normalised override map, as the controls stand right now.
-     *
-     * The sixth producer, and the only one that changes what the report's identity SAYS rather than
-     * adding to it: the viewer re-renders in place, so its locator's `overrides:` goes on
-     * describing the settings the page was served at until this replaces it. Handed in beside
-     * [render] on the same refresh, because the two describe one frame — a body carrying the new
-     * pixels and the old identity is the mismatch `compose-parity-locator/v1` exists to prevent.
-     * Undefined on every page whose server wrote the value for certain, whose template has no
-     * placeholder to fill anyway.
+     * The render lane's normalised override map as the controls stand now. Set alongside [render]
+     * because the viewer re-renders in place and the locator's `overrides:` must describe the same
+     * frame. Undefined where the server already wrote the value.
      */
     overrides?: Record<string, string>;
     /**
-     * Whether this page may name a comparison at all right now.
-     *
-     * The seventh producer, and the only one that can take identity AWAY. A viewer in an
-     * interactive lane paints its pixels into a canvas or an iframe that the landed-frame gate
-     * knows nothing about, so a block written from the controls would key the issue to a static
-     * frame the reporter stopped looking at. Withholding it leaves an ordinary report — filed,
-     * labelled, skipped by the index — which is what such a report was before the viewer emitted a
-     * locator at all.
-     *
-     * Defaults to false so a page that never sets it keeps the block its template carries.
+     * Whether the page may name a comparison right now. An interactive viewer paints into a canvas
+     * or iframe the landed-frame gate cannot see, so a locator would key the issue to a stale
+     * frame. Defaults to false.
      */
     omitLocator?: boolean;
 }
@@ -89,23 +69,16 @@ export class ReportBody {
     private state: ReportInputs = { scores: null, selection: {} };
 
     /**
-     * Take over [input], whose `data-report-template` carries the body with its placeholders.
-     *
-     * Returns false — and leaves the field entirely alone — when there is no template. A page
-     * without one is a page whose server wrote a complete body already; overwriting it from here
-     * with a half-filled one would be strictly worse than doing nothing.
-     *
-     * Attaching **resets** what has been learned. This is a singleton (one report form per page)
-     * and taking over a different field means a different comparison: carrying the previous one's
-     * scores or selection across would file a report describing the preview you just left.
+     * Take over [input], whose `data-report-template` carries the body's placeholders. Returns
+     * false and leaves the field alone when there is no template (the server's body is already
+     * complete). Attaching a different field resets learned state, since it is a different
+     * comparison.
      */
     attach(input: HTMLInputElement | null): boolean {
         const template = input?.getAttribute("data-report-template");
         if (!input || !template) return false;
-        // Re-attaching the SAME field is not a different comparison, so it keeps what has been
-        // learned. Two elements claim the field on the focused comparison now — the comparison
-        // itself and the classification control — and whichever ran second would otherwise reset
-        // the other's contribution the moment it arrived.
+        // Re-attaching the same field keeps state: both the comparison and the classification
+        // control claim it, and the second would otherwise reset the first.
         if (input === this.input) return true;
         this.input = input;
         this.template = template;
@@ -122,12 +95,9 @@ export class ReportBody {
     private write(preferredScope?: ReportScope): void {
         const { input, template } = this;
         if (!input || !template) return;
-        // No render URL yet means the page has not finished parsing its own panels. The server's
-        // body is already in the field and is correct; there is nothing to improve on — and the
-        // template's `{{render}}` would be filed verbatim, which is worse than waiting. Asked of
-        // the template rather than assumed, because the comparison wall's page-scoped report names
-        // no render at all and would otherwise never be composable — so a picked set of rows could
-        // never reach the body.
+        // No render URL yet: keep the server's correct body rather than filing `{{render}}`
+        // verbatim. Asked of the template because the wall's page-scoped report names no render at
+        // all.
         if (needsRender(template) && !this.state.render) return;
         const composed = withClassification(
             withScope(
@@ -145,19 +115,15 @@ export class ReportBody {
                     ),
                     this.state.locators ?? [],
                 ),
-                // Each browser entrypoint is built as its own IIFE, so its imported `reportBody`
-                // is a different singleton. The hidden field is the one piece of shared state
-                // between those bundles: preserve the scope another producer already wrote when
-                // this recomposition is about a score, render URL or selection. A scope control's
-                // own change wins explicitly through [preferredScope].
+                // Each entrypoint is its own IIFE with its own `reportBody`, so the hidden field is
+                // the shared state: keep the scope another bundle wrote unless a scope control
+                // passes [preferredScope].
                 preferredScope ??
                     scopeFromBody(input.value) ??
                     this.state.scope ??
                     "component",
             ),
-            // Read back for the reason the scope above is: the classification control lives in
-            // another bundle, so this store may never have been told the answer standing in the
-            // field. Its own `set` still wins — the state is consulted first.
+            // Read back from the field for the same reason; this store's own `set` still wins.
             this.state.classification || classificationFromBody(input.value),
         );
         input.value = this.state.omitLocator
@@ -167,7 +133,7 @@ export class ReportBody {
 }
 
 /**
- * The page's report field. A module singleton because there is exactly one report form per page and
- * the producers that feed it are separate custom elements with no parent to hold it for them.
+ * The page's report field: a module singleton because there is one report form per page and its
+ * producers are separate custom elements.
  */
 export const reportBody = new ReportBody();

@@ -25,36 +25,25 @@ data class CatalogBlobPoolSnapshot(
   /** Cached entries re-checked against the branch by the sampled audit. */
   val audited: Long = 0,
   /**
-   * Audited entries whose cached bytes did **not** match the branch.
-   *
-   * Expected to be zero forever: the audit exists to check the one thing content-addressing cannot
-   * — that a key is filed against the right content — and a non-zero value means something the
-   * design treats as impossible has happened. Worth an alert, not a dashboard.
+   * Audited entries whose cached bytes didn't match the branch. Should always be zero; non-zero
+   * means a key was filed against the wrong content. Worth an alert.
    */
   val mismatched: Long = 0,
   /**
-   * Whether an operator configured a directory (`--catalog-cache-dir`), rather than this being the
-   * temp-dir fallback discarded with the container.
-   *
-   * `false` on a deployed box means the bytes are certainly being paid for and thrown away. `true`
-   * means only that the decision was made: a configured path inside an image with no volume mounted
-   * there is just as ephemeral, and nothing here can tell those apart. [adopted] is the evidence
-   * that the storage actually persisted.
+   * Whether an operator configured `--catalog-cache-dir` rather than the temp-dir fallback. `true`
+   * only records the decision (an unmounted path is just as ephemeral); [adopted] is the evidence
+   * that storage persisted.
    */
   val persistenceConfigured: Boolean = false,
   /**
-   * Blobs already on disk when this process opened the pool.
-   *
-   * The only direct evidence that anything survived the last restart, and therefore the number to
-   * read after a roll: `0` on a pool with [persistenceConfigured] that should have found a warm
-   * volume is the failure, and it is invisible in every other field.
+   * Blobs already on disk when this process opened the pool: the only evidence anything survived a
+   * restart. `0` with [persistenceConfigured] after a roll is the failure.
    */
   val adopted: Int = 0,
   val lastFailure: String? = null,
   /**
-   * Pinned reads answered "not found" from a remembered miss instead of the branch — see
-   * [CatalogBlobPool.knownMissing]. A restart that re-reads the same revision should see this climb
-   * while the branch's own `notFound` stays flat.
+   * Pinned reads answered "not found" from a remembered miss ([CatalogBlobPool.knownMissing])
+   * instead of the branch.
    */
   val knownMissingHits: Long = 0,
 )
@@ -83,28 +72,19 @@ data class CatalogBlobPoolSnapshot(
 class CatalogBlobPool(
   private val root: File,
   /**
-   * Ceiling for the whole pool, enforced by [sweep] rather than at write time — a load must not
-   * block on a byte census, and a pool that refused to grow between sweeps would stop caching
-   * exactly when it was busiest.
+   * Ceiling for the whole pool, enforced by [sweep] rather than at write time, so loads never block
+   * on a byte census.
    */
   private val maxBytes: Long = DEFAULT_MAX_BYTES,
-  /** How recently a blob must have been touched to be spared by [sweep]. See **Concurrency**. */
+  /** How recently a blob must have been touched to be spared by [sweep] (a rolling update). */
   private val graceMillis: Long = DEFAULT_SWEEP_GRACE_MILLIS,
   /**
-   * Whether an operator named a directory for [root], rather than this being the temp-dir fallback.
-   *
-   * Deliberately **not** called durable. Nothing here can establish that the storage outlives the
-   * process — `--catalog-cache-dir /var/cache/x` in a container with no volume mounted there is
-   * configured and just as ephemeral, while the same path under a plain host `serve` persists fine,
-   * and no portable test tells those apart from in here. So this reports the decision that was
-   * made, and [adopted] reports what actually survived. Claiming the stronger thing would be the
-   * false reassurance it exists to remove.
+   * Whether an operator named a directory for [root]. Deliberately not called "durable": nothing
+   * here can tell whether the storage outlives the process; [adopted] reports what actually
+   * survived.
    */
   private val persistenceConfigured: Boolean = false,
-  /**
-   * How long a remembered "not found" for a pinned address is trusted; see [knownMissing]. Zero
-   * turns the lane off.
-   */
+  /** How long a remembered pinned "not found" is trusted ([knownMissing]); zero disables it. */
   private val missingTtlMillis: Long = DEFAULT_MISSING_TTL_MILLIS,
   private val clock: () -> Long = System::currentTimeMillis,
 ) {
@@ -118,14 +98,9 @@ class CatalogBlobPool(
   private val mismatched = AtomicLong()
   private val knownMissingHits = AtomicLong()
   /**
-   * Occupancy as of the last census, advanced by each write and reclaim in between.
-   *
-   * Published rather than measured, for the reason [maxBytes] is enforced by [sweep] rather than at
-   * write time: a census is a directory listing plus a `length()` per file, and `/status.json` is
-   * polled. Reading it there would put an O(blobs) filesystem walk on a monitoring request and make
-   * the cost grow with exactly the thing the cache is trying to grow. [ThemeCacheStore] publishes
-   * its own the same way. The cost is that these lag a write by at most one sweep interval, which
-   * is the right trade for a number nobody reads to the byte.
+   * Occupancy as of the last census, adjusted by each write and reclaim. Published rather than
+   * measured, so a polled `/status.json` never walks the directory (as [ThemeCacheStore] does);
+   * lags by at most one sweep.
    */
   private val knownBlobs = java.util.concurrent.atomic.AtomicInteger()
   private val knownBytes = AtomicLong()
@@ -137,9 +112,8 @@ class CatalogBlobPool(
     ProcessHandle.current().pid().toString(36) + "-" + System.identityHashCode(this).toString(36)
 
   /**
-   * Serialises production per key within this process, so a grid opening twenty per-preview daemons
-   * at once produces each blob once instead of once per caller. Cross-process races are left to the
-   * atomic move — they are rare, and the loser's work is simply discarded.
+   * Serialises production per key in-process so concurrent callers produce each blob once;
+   * cross-process races are settled by the atomic move.
    */
   private val keyLocks = ConcurrentHashMap<String, Any>()
 
@@ -148,26 +122,15 @@ class CatalogBlobPool(
   private val missingDir = File(root, MISSING_DIR)
 
   /**
-   * Blobs already present when this process opened the pool — the only direct evidence that
-   * anything survived the last restart.
-   *
-   * One census at construction, which is also what seeds the published occupancy so `/status.json`
-   * is right from the first poll rather than from the first sweep. `0` on a configured pool after a
-   * roll that should have found a warm volume is the failure this number exists to make visible;
-   * without it a cache that is quietly starting over every time looks exactly like one that is
-   * working, since both report climbing writes.
+   * Blobs present at open, from one census that also seeds published occupancy. `0` on a configured
+   * pool after a roll means the cache silently starts over each time.
    */
   private val adopted: Int = census().blobs
 
   /**
-   * The blob whose sha256 is [sha256], fetching it once when absent, or null when it cannot be had.
-   *
-   * The key is the digest, so a hit is trusted only after its bytes hash back to it: a same-length
-   * but corrupt entry (a partial write, a disk fault) is re-fetched rather than silently put on a
-   * classpath. [size] is checked first purely because it is free.
-   *
-   * Null rather than an exception throughout — the pool is an optimisation, and a box with a
-   * read-only or full disk must load catalogs exactly as it did before this existed.
+   * The blob with sha256 [sha256], fetched once when absent, or null. A hit is trusted only after
+   * its bytes hash back ([size] checked first because it's free). Null rather than exceptions: the
+   * pool is an optimisation, and a read-only or full disk must still load catalogs.
    */
   fun contentAddressed(sha256: String, size: Long, fetch: () -> ByteArray?): File? {
     val sha = sha256.takeIf(::isSha) ?: return null
@@ -178,9 +141,7 @@ class CatalogBlobPool(
     }
     misses.increment()
     return synchronized(keyLocks.computeIfAbsent(sha) { Any() }) {
-      // Double-checked: a caller that queued behind another's fetch reads what it just landed —
-      // and is counted as the hit it is, so contention does not quietly depress the hit rate these
-      // counters exist to report.
+      // Double-checked: a queued caller reads what the first landed, counted as a hit.
       readVerified(blob, sha, size)?.also { hits.increment() }
         ?: run {
           val bytes = runCatching(fetch).getOrNull() ?: return@run null
@@ -194,14 +155,9 @@ class CatalogBlobPool(
   }
 
   /**
-   * The blob [key] resolves to, producing it once with [produce] when absent, or null when it
-   * cannot be had.
-   *
-   * [key] must be an **immutable** address — see **The rule callers must keep**. [produce] is
-   * handed a scratch file to write and returns whether it wrote one; whatever it left there is
-   * hashed, stored under its digest, and the key repointed at it. So a producer that is not
-   * byte-reproducible (a repack that stamps a timestamp) costs at most a duplicate blob, never a
-   * wrong read.
+   * The blob [key] resolves to, produced once with [produce] when absent, or null. [key] must be an
+   * immutable address. [produce] writes a scratch file that is hashed and stored under its digest,
+   * so a non-reproducible producer costs at most a duplicate blob, never a wrong read.
    */
   fun keyed(key: String, produce: (dest: File) -> Boolean): File? {
     val pointer = File(keysDir, sha256Hex(key.toByteArray()))
@@ -235,24 +191,15 @@ class CatalogBlobPool(
   }
 
   /**
-   * Whether [key] already resolves to a blob that is present, **without** verifying its bytes.
-   *
-   * For an availability probe that must not download: the caller asking is deciding whether a lane
-   * exists at all, and hashing a multi-megabyte bundle to answer would defeat the point of asking
-   * cheaply. A `true` that a later [keyed] read then rejects as corrupt costs one re-produce, which
-   * is the same thing a `true` from a network probe costs.
+   * Whether [key] resolves to a present blob, without verifying its bytes, for cheap availability
+   * probes. A later corrupt read just costs one re-produce.
    */
   fun holds(key: String): Boolean =
     resolve(File(keysDir, sha256Hex(key.toByteArray())), verify = false) != null
 
   /**
-   * The bytes cached under [key], or null when there is no verified entry.
-   *
-   * The read half of the small-asset lane, split from [keyed] because that one is built around
-   * *producing* the blob under a lock — right for a 100 MB bundle a grid of daemons would otherwise
-   * fetch twenty times over, wrong for a baked PNG on the request path, where a miss should return
-   * immediately so the caller can go to the branch and report **why** it failed rather than have
-   * that answer collapsed into a null.
+   * The bytes cached under [key], or null. Separate from [keyed] (which produces under a lock) so a
+   * request-path miss returns immediately and the caller can report why the branch failed.
    */
   fun read(key: String): ByteArray? {
     val blob = resolve(File(keysDir, sha256Hex(key.toByteArray()))) ?: return null
@@ -260,22 +207,14 @@ class CatalogBlobPool(
     return runCatching { blob.readBytes() }.getOrNull()
   }
 
-  /**
-   * Cache [bytes] under [key]. Best-effort — a full or read-only disk simply leaves the next read a
-   * miss.
-   *
-   * [key] must be an immutable address; see **The rule callers must keep**.
-   */
+  /** Cache [bytes] under [key], best-effort. [key] must be an immutable address. */
   fun write(key: String, bytes: ByteArray) {
     misses.increment()
     val sha = sha256Hex(bytes)
     val blob = File(contentDir, sha)
     if (blob.isFile) {
-      // Already held under some other key — the overwhelmingly common case on a republish, where a
-      // regenerated catalog carries mostly byte-identical assets at a NEW commit, so every
-      // unchanged asset's fresh URL dedupes onto the blob that is already here. Stamping it is
-      // what makes that a refresh rather than a silent ageing: without it the blob keeps the time
-      // it was first written, and the next sweep can evict precisely the assets that are current.
+      // Already held under another key (a republish's unchanged assets at a new commit): re-stamp
+      // it so the next sweep doesn't evict current assets.
       stamp(blob)
     } else if (store(bytes, sha) == null) {
       return
@@ -284,25 +223,12 @@ class CatalogBlobPool(
   }
 
   /**
-   * Whether the branch recently answered "not found" for [key], so a caller can skip the request.
+   * Whether the branch recently answered "not found" for [key], so the caller can skip the request.
+   * Catalogs declare far more assets than they publish (thousands of figma-vector 404s per load),
+   * which otherwise compete for the branch host's rate limit.
    *
-   * ### Why misses are remembered at all
-   *
-   * A catalog declares far more assets than it publishes. The figma-vector fill alone asks for one
-   * vector per preview, and a catalog that ships none answers each with a 404 — about 3,900 of them
-   * for `m3-catalog`, on every load, because only [write] was cached and a restart re-asked every
-   * question whose answer had been "no". On a box loading forty catalogs that is most of its
-   * requests to the branch host, competing with the loads that matter for the same rate limit.
-   *
-   * ### Why with a TTL, when hits need none
-   *
-   * The same immutability argument holds — a file absent at a commit is absent forever — but the
-   * evidence is weaker. A hit is the bytes themselves; a miss is one response from a CDN, and a
-   * just-pushed commit can briefly 404 before it is everywhere. So a miss is trusted for
-   * [missingTtlMillis] rather than permanently: long enough that restarts and refreshes in the same
-   * day stop re-asking, short enough that a wrong answer heals on its own.
-   *
-   * [key] must be an immutable address, exactly as for [write].
+   * A TTL, unlike hits: a 404 is one CDN response and a just-pushed commit can briefly 404, so a
+   * miss is trusted for [missingTtlMillis] and then heals. [key] must be an immutable address.
    */
   fun knownMissing(key: String): Boolean {
     if (missingTtlMillis <= 0) return false
@@ -322,28 +248,18 @@ class CatalogBlobPool(
     if (missingTtlMillis <= 0) return
     val marker = File(missingDir, sha256Hex(key.toByteArray()))
     writeAtomically(marker, ByteArray(0))
-    // Stamped from [clock], not left at the scratch file's wall-clock time, so expiry is measured
-    // on the same clock [knownMissing] reads.
+    // Stamped from [clock] so expiry uses the same clock as [knownMissing].
     runCatching { marker.setLastModified(clock()) }
   }
 
   /**
-   * Check what this pool would serve for [key] against [fresh] — bytes just read from the branch —
-   * and drop the entry when they differ.
+   * Compare what this pool would serve for [key] against [fresh] branch bytes and drop the entry on
+   * mismatch.
    *
-   * ### The one thing nothing else here checks
-   *
-   * Every blob is verified against its **own** name on read, so a truncated or bit-rotted file can
-   * never be served. What that cannot catch is a wrong *mapping*: the pointer says "key K holds
-   * content sha S", and if K were ever filed against the wrong S — a mistaken `write` call site, a
-   * refactor that reuses a key, a race nobody predicted — the blob under S still hashes to S, every
-   * check passes, and the pool serves the wrong bytes for K indefinitely. Content-addressing makes
-   * corruption impossible and mis-filing invisible; this is the only thing that would notice.
-   *
-   * Deliberately a **report, not a gate**. It runs on a sample, behind the request path, and its
-   * effect on a mismatch is to drop the entry so the next read re-fetches. A mismatch means
-   * something is wrong that the design says cannot happen, so the point is that [mismatched] stops
-   * being zero and someone looks — not that a visitor waits for an audit.
+   * Blobs are verified against their own name on read, so corruption can't be served; but a key
+   * filed against the wrong content would pass every check. This is the only thing that would
+   * notice. A report, not a gate: sampled, off the request path, and a mismatch makes [mismatched]
+   * non-zero.
    */
   fun audit(key: String, fresh: ByteArray): AuditResult {
     val held = read(key) ?: return AuditResult.NOT_CACHED
@@ -366,22 +282,12 @@ class CatalogBlobPool(
   }
 
   /**
-   * Drop **everything** this pool holds, returning what is left (normally nothing).
-   *
-   * The operator's "I do not trust this; fetch it again" button. Whole-pool rather than per
-   * catalog, and that is not a shortcut: blobs are named by their own digest and shared across
-   * systems on purpose — a font fetched for one catalog is the same file the next one reads — so no
-   * blob has an owning system to delete it by. Partitioning by system to make a narrower button
-   * possible would give up the deduplication, which is worth more than the button.
-   *
-   * Safe at any moment for the same reason [sweep] is: everything here is re-fetchable, and a
-   * reader already holding an open file keeps reading it. The cost of being wrong about needing
-   * this is bandwidth, not correctness.
+   * Drop everything this pool holds, returning what is left. Whole-pool because blobs are
+   * deduplicated across systems and have no owner; per-system partitioning would lose that. Safe at
+   * any time: everything is re-fetchable and open readers keep their files.
    */
   fun clear(): CatalogBlobPoolSnapshot {
-    // Only the blobs count as evictions. A pointer is not a blob, and deduplication means many of
-    // them can name one — counting both would let a clear report far more reclaimed than existed,
-    // in the very metric an operator reads to check the clear did what they asked.
+    // Only blobs count as evictions; pointers may share a blob and would inflate the count.
     for (blob in contentDir.listFiles()?.filter { it.isFile }.orEmpty()) {
       if (runCatching { blob.delete() }.getOrDefault(false)) evicted.increment()
     }
@@ -391,10 +297,8 @@ class CatalogBlobPool(
     for (marker in missingDir.listFiles()?.filter { it.isFile }.orEmpty()) {
       runCatching { marker.delete() }
     }
-    // Scratch too. A process killed mid-produce leaves a bundle-sized file under `tmp/`, which no
-    // census counts and no read will ever want — so without this an operator could clear the cache,
-    // be told it holds nothing, and still find the volume full. A live writer losing its scratch
-    // file fails that one produce and returns null, which every caller already treats as a miss.
+    // Scratch too: a killed producer leaves bundle-sized files in `tmp/` that no census counts. A
+    // live writer losing its scratch just misses once.
     for (scratch in File(root, TEMP_DIR).listFiles()?.filter { it.isFile }.orEmpty()) {
       runCatching { scratch.delete() }
     }
@@ -402,12 +306,9 @@ class CatalogBlobPool(
   }
 
   /**
-   * Reclaim blobs until the pool is under [maxBytes], oldest-touched first, sparing anything
-   * younger than [graceMillis]; then drop pointers whose blob is gone.
-   *
-   * Eviction is always safe — the worst a reclaimed blob costs is the fetch that produces it again
-   * — which is what lets this run without knowing anything about which catalogs are live. Run it
-   * once the catalog pass has finished, where the byte census is worth paying for.
+   * Reclaim blobs oldest-touched first until under [maxBytes], sparing anything younger than
+   * [graceMillis], then drop dangling pointers. Always safe; run after the catalog pass, where the
+   * census is worth paying for.
    */
   fun sweep(): CatalogBlobPoolSnapshot {
     val now = clock()
@@ -431,9 +332,7 @@ class CatalogBlobPool(
     for (marker in missingDir.listFiles()?.filter { it.isFile }.orEmpty()) {
       if (now - marker.lastModified() >= missingTtlMillis) runCatching { marker.delete() }
     }
-    // Abandoned scratch, on the same reasoning as [clear] — but bounded by the grace window rather
-    // than unconditional, because this runs on a timer while writers are live and a scratch file
-    // younger than that may be one of theirs. Anything older belonged to a process that is gone.
+    // Abandoned scratch, but only past the grace window, since writers may be live.
     for (scratch in File(root, TEMP_DIR).listFiles()?.filter { it.isFile }.orEmpty()) {
       if (now - scratch.lastModified() >= graceMillis) runCatching { scratch.delete() }
     }
@@ -441,8 +340,8 @@ class CatalogBlobPool(
   }
 
   /**
-   * Re-measure occupancy from the filesystem and publish it. Only ever called from the paths that
-   * are already walking the directory — see [knownBlobs].
+   * Re-measure occupancy and publish it; only called from paths already walking the directory
+   * ([knownBlobs]).
    */
   private fun census(): CatalogBlobPoolSnapshot {
     val blobs = contentDir.listFiles()?.filter { it.isFile }.orEmpty()
@@ -511,25 +410,16 @@ class CatalogBlobPool(
   }
 
   /**
-   * Put a newly published blob on this pool's clock. Best-effort.
-   *
-   * Unconditional, unlike [touch]: a blob arrives carrying whatever mtime the filesystem gave the
-   * scratch file it was moved from, which is wall-clock time and therefore says nothing about when
-   * *this* pool saw it. Stamping on write is what makes every subsequent comparison — the sweeper's
-   * ordering, [touch]'s staleness check — read one clock instead of two.
+   * Put a newly published blob on this pool's clock: its mtime came from the scratch file, so
+   * stamping makes sweeps and [touch] compare one clock.
    */
   private fun stamp(blob: File) {
     runCatching { blob.setLastModified(clock()) }
   }
 
   /**
-   * Keeps a blob that is still being read out of the sweeper's reach. Best-effort.
-   *
-   * Skipped when the recorded time is already recent. Once the small-asset lane reads through this
-   * pool, a touch on every hit is a filesystem metadata write on the **request path** — one per
-   * baked PNG a visitor's grid paints — bought to refine an ordering the sweeper only consults
-   * against an hour-wide grace window. Re-stamping at most once per [TOUCH_INTERVAL_MILLIS] keeps
-   * "least recently used" meaningful at the resolution anything actually uses it.
+   * Keep a blob being read away from the sweeper, re-stamping at most once per
+   * [TOUCH_INTERVAL_MILLIS] so request-path hits don't each write metadata.
    */
   private fun touch(blob: File) {
     val now = clock()
@@ -646,9 +536,8 @@ class CatalogBlobPool(
     const val DEFAULT_MISSING_TTL_MILLIS: Long = 24L * 60 * 60 * 1000
 
     /**
-     * Ceiling for the whole pool. Sized for a box publishing a couple of dozen catalogs: the
-     * executable bundles are the bulk and run to ~100 MB each, and a catalog keeps its previous
-     * revision's bundle until the sweeper reclaims it.
+     * Ceiling for the whole pool, sized for a couple of dozen catalogs whose ~100 MB bundles (plus
+     * previous revisions until swept) dominate.
      */
     const val DEFAULT_MAX_BYTES: Long = 8L * 1024 * 1024 * 1024
 
@@ -656,8 +545,8 @@ class CatalogBlobPool(
     const val DEFAULT_SWEEP_GRACE_MILLIS: Long = 60L * 60 * 1000
 
     /**
-     * How stale a blob's recorded time must be before a hit re-stamps it — see [touch]. Well under
-     * the sweep grace window, so a blob being read regularly can never age into eviction.
+     * How stale a blob's time must be before a hit re-stamps it ([touch]); well under the grace
+     * window, so regularly read blobs never age into eviction.
      */
     const val TOUCH_INTERVAL_MILLIS: Long = 5L * 60 * 1000
 

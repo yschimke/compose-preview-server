@@ -8,10 +8,9 @@ import java.security.SecureRandom
 import java.util.Base64
 
 /**
- * Pure helpers for the `compose-preview serve` link surface: minting the session token, assembling
- * shareable URLs (with preview ids percent-encoded), constant-time token comparison, and LAN IPv4
- * discovery for the startup banner. Kept free of ktor / IO types so the URL + token logic is
- * unit-testable; the only environment touch is [siteLocalIpv4Addresses], isolated in its own fn.
+ * Pure helpers for the `compose-preview serve` link surface: session token minting, shareable URLs,
+ * constant-time token comparison and LAN IPv4 discovery for the banner. Free of ktor/IO types; the
+ * only environment touch is [siteLocalIpv4Addresses].
  */
 object ServeUrls {
 
@@ -36,19 +35,14 @@ object ServeUrls {
   fun isExposed(host: String): Boolean = host == ALL_INTERFACES || host == "::"
 
   /**
-   * Base origin (`http://host:port`) a browser uses. When [host] is the wildcard bind, callers
-   * substitute a concrete reachable address (loopback for the Local line, a
-   * [siteLocalIpv4Addresses] entry for the Network line) — the wildcard itself is not a usable URL
-   * host.
+   * Base origin (`http://host:port`). For a wildcard bind, callers substitute a reachable address
+   * (loopback, or a [siteLocalIpv4Addresses] entry).
    */
   fun origin(host: String, port: Int): String = "http://${urlHost(host)}:$port"
 
   /**
-   * [host] as a URL authority: an IPv6 literal in brackets, anything else unchanged.
-   *
-   * `--host ::1` is a supported bind, and without this it produces `http://::1:8080`, which is not
-   * a URL any client will parse. Idempotent, so a host that already carries its brackets keeps
-   * exactly one pair.
+   * [host] as a URL authority: an IPv6 literal (e.g. `--host ::1`) in brackets, anything else
+   * unchanged. Idempotent.
    */
   fun urlHost(host: String): String =
     if (host.contains(':') && !host.startsWith("[")) "[$host]" else host
@@ -70,14 +64,11 @@ object ServeUrls {
     "$origin/p/${WebEscaping.urlEncodeSegment(previewId)}?token=${WebEscaping.urlEncodeSegment(token)}"
 
   /**
-   * Relative src for the in-browser Wasm app backing a catalog [previewId] in [system]
-   * (`/wasm/<system>/?id=<component>[&uiMode=<theme>]`). The catalog preview id is
-   * `<component-slug>__<axis>…` and the Wasm app keys its component registry by the slug, so the
-   * variant is stripped for `id`. The variant's M3 theme **is** forwarded as `uiMode`, though: the
-   * app defaults to light, so without it a deep link to a `…__dark` snapshot would flip to light
-   * the moment the viewer hands the render to the in-browser tier (e.g. on a font-scale change).
-   * The theme axis surfaces as a `light`/`dark` segment; absent one, no `uiMode` is forced and the
-   * app uses its own default. The viewer's Theme control still overrides this when set.
+   * Relative src for the in-browser Wasm app backing [previewId] in [system]
+   * (`/wasm/<system>/?id=<component>[&uiMode=<theme>]`). The app keys components by slug, so the
+   * variant is stripped for `id`, but a `light`/`dark` theme axis is forwarded as `uiMode` so a
+   * `…__dark` deep link doesn't flip to light when handed to the in-browser tier. The viewer's
+   * Theme control still overrides it.
    */
   fun wasmAppSrc(system: String, previewId: String): String {
     return buildWasmAppSrc("/wasm/${WebEscaping.urlEncodeSegment(system)}/", previewId)
@@ -125,22 +116,14 @@ object ServeUrls {
   }
 
   /**
-   * GitHub blob URL for a preview's source file:
-   * `https://github.com/<repo>/blob/<ref>/<module>/<sourceFile>`. [repo] is `owner/name`; [ref] is
-   * the **source** branch/tag/sha the catalog was built from (its `catalog.json` `source.ref`, NOT
-   * the `design-artifacts/<system>` delivery branch, which carries generated assets rather than
-   * Kotlin); [module] is the source module's Gradle project path (`source.module`, e.g.
-   * `:samples:design-catalog-compose-m3`) or repository-relative subdirectory, joined ahead of the
-   * module-relative [sourceFile] that discovery recorded. Gradle project separators are converted
-   * to repository path separators, so `:previews` links under `previews/` rather than the literal
-   * (and invalid) `%3Apreviews/` directory.
+   * GitHub blob URL for a preview's source:
+   * `https://github.com/<repo>/blob/<ref>/<module>/<sourceFile>`. [ref] is the source ref the
+   * catalog was built from (`source.ref`), not the `design-artifacts/<system>` delivery branch.
+   * [module] is a Gradle project path (`:samples:foo`, converted to `samples/foo`) or subdirectory,
+   * and is optional.
    *
-   * Returns null when [repo], [ref], or [sourceFile] is missing/blank, so a caller can `?.let` the
-   * link into existence only when it resolves. [module] is optional (a source with no module
-   * subdirectory links `blob/<ref>/<sourceFile>` directly). The joined `<module>/<sourceFile>` path
-   * is percent-encoded per segment so `/` separators survive while spaces and other unsafe
-   * characters are escaped; [repo] and [ref] are passed through verbatim (a `/`-bearing ref is a
-   * valid blob path, matching the existing provenance links).
+   * Null when [repo], [ref] or [sourceFile] is blank. The path is percent-encoded per segment;
+   * [repo] and [ref] pass through verbatim.
    */
   fun githubBlobUrl(repo: String?, ref: String?, module: String?, sourceFile: String?): String? {
     val r = repo?.trim()?.takeIf { it.isNotEmpty() } ?: return null
@@ -158,14 +141,9 @@ object ServeUrls {
   }
 
   /**
-   * The **raw file** twin of [githubBlobUrl]: `https://raw.githubusercontent.com/<repo>/<ref>/…`,
-   * resolving the same `<module>/<sourceFile>` path by the same rules. Where the blob URL is for a
-   * human to click, this is what the server reads a preview's Kotlin from to seed the playground
-   * editor (`/playground?from=…`).
-   *
-   * Every input comes from the catalog's own trusted metadata — `catalog.json`'s `source.{repo,
-   * ref, module}` and the `sourceFile` recorded per preview — never from a request, so the host
-   * cannot be steered at an arbitrary URL by a visitor naming a preview.
+   * The raw-file twin of [githubBlobUrl] (`raw.githubusercontent.com`), used to seed the playground
+   * editor (`/playground?from=…`). Inputs come only from the catalog's trusted metadata, never a
+   * request, so a visitor can't steer the fetch.
    */
   fun githubRawUrl(repo: String?, ref: String?, module: String?, sourceFile: String?): String? {
     val blob = githubBlobUrl(repo, ref, module, sourceFile) ?: return null
@@ -175,9 +153,8 @@ object ServeUrls {
   }
 
   /**
-   * `history.json` on a delivery branch — the precomputed render timeline the viewer reads instead
-   * of walking git. Null when there is no delivery provenance (an uploaded bundle, a local
-   * project), which is also the signal for the viewer to leave the timeline out entirely.
+   * `history.json` on a delivery branch, the precomputed render timeline. Null without delivery
+   * provenance, which also tells the viewer to omit the timeline.
    */
   fun historyManifestUrl(repo: String?, branch: String?): String? {
     val r = repo?.trim()?.trim('/')?.takeIf { it.isNotEmpty() && it.count { c -> c == '/' } == 1 }
@@ -188,17 +165,9 @@ object ServeUrls {
   }
 
   /**
-   * A render as it existed at [commit] — `raw.githubusercontent.com/<repo>/<sha>/<path>`.
-   *
-   * This is what makes a timeline viewable at all. The delivery branch only carries the *current*
-   * bytes at its tip, but the raw host serves any commit, so pairing the manifest's per-version
-   * `commit` with its `path` addresses every historical render directly — no server round-trip and
-   * nothing to unpack. Verified against real published renders: two versions of the same preview
-   * fetch as different bytes.
-   *
-   * [commit] must be a full or abbreviated hex sha, not a ref: the manifest records shas, and
-   * refusing anything else keeps a malformed manifest from steering fetches at an attacker-chosen
-   * branch. [path] is likewise rejected unless it stays inside the renders tree.
+   * A render as it existed at [commit]: `raw.githubusercontent.com/<repo>/<sha>/<path>`, so every
+   * historical render is addressable without a server round-trip. [commit] must be a hex sha, not a
+   * ref, and [path] must stay inside the renders tree, so a malformed manifest can't steer fetches.
    */
   fun historicalRenderUrl(repo: String?, commit: String?, path: String?): String? {
     val r = repo?.trim()?.trim('/')?.takeIf { it.isNotEmpty() && it.count { c -> c == '/' } == 1 }
@@ -209,11 +178,7 @@ object ServeUrls {
     return "https://raw.githubusercontent.com/$r/$c/$encoded"
   }
 
-  /**
-   * Constant-time token comparison — avoids leaking how many leading characters matched via timing.
-   * Both sides are compared as UTF-8 bytes; length mismatches short-circuit safely inside
-   * [MessageDigest.isEqual] (which is itself constant-time for equal-length inputs).
-   */
+  /** Constant-time token comparison, as UTF-8 bytes via [MessageDigest.isEqual]. */
   fun tokensMatch(expected: String, provided: String?): Boolean {
     if (provided == null) return false
     return MessageDigest.isEqual(

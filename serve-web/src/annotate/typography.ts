@@ -1,13 +1,6 @@
-// Typography as STYLES rather than instances.
-//
-// The layout redline is instance-level: one box per element. Typography is not — a screen using
-// `bodyLarge` in nine places has one style, and nine numbered boxes saying so is noise. So usages
-// are grouped by their resolved metrics, each group gets one letter, and the readable settings live
-// once in the table under the panels.
-//
-// Everything here decides what counts as "the same style", which is the whole judgement of the
-// feature. Getting it wrong does not error — it reports two styles where there is one, or one where
-// there are two.
+// Typography as styles rather than instances: usages are grouped by resolved metrics, each group
+// gets one letter, and the settings are listed once in the table. What counts as "the same style"
+// is the whole judgement here; mistakes don't error, they mis-group.
 
 import type { AnnotationItem } from "./match.js";
 
@@ -30,11 +23,8 @@ export function annotationUnit(value: unknown): string | undefined {
 }
 
 /**
- * The Material token a style names, in camelCase.
- *
- * `"text"` is dropped deliberately: it is the default a tool emits when it knows nothing, so
- * treating it as a token would group every unmapped usage under one name and report them as
- * matching.
+ * The Material token a style names, in camelCase. `"text"` is dropped: it is a tool's know-nothing
+ * default and would group every unmapped usage together.
  */
 export function typographyToken(
     detail: Record<string, unknown> | undefined,
@@ -68,15 +58,9 @@ function normaliseTypographyToken(raw: string): string | undefined {
 }
 
 /**
- * A font file or family name reduced to its family: no path, no extension, no weight suffix.
- *
- * ONE weight suffix, and it must only ever be applied once. `typographySpec` used to call it again
- * on its own result, which is not idempotent: `Roboto-Medium-Bold.ttf` reduces to `Roboto-Medium`
- * and then to `Roboto`. The page displayed the first and compared on the second, so a table showing
- * `Roboto-Medium` beside `Roboto-Black` reported them as unchanged.
- *
- * Stripping one suffix IS right: weight is carried by `spec.weight` and compared there, so
- * `Roboto-Medium` and `Roboto-Bold` are one family with two weights, not two families.
+ * A font file or family name reduced to its family: no path, extension, or one weight suffix. Apply
+ * exactly once — it is not idempotent (`Roboto-Medium-Bold` → `Roboto-Medium` → `Roboto`). Weight
+ * is compared via `spec.weight`.
  */
 export function typographyFamily(value: unknown): string | undefined {
     const raw = String(value ?? "").trim();
@@ -132,11 +116,8 @@ export interface TypographySpec {
     token?: string;
     tokens: string[];
     /**
-     * The family, reduced once: no path, no extension, no weight suffix.
-     *
-     * What is DISPLAYED and what is COMPARED, deliberately the same field. They used to be two —
-     * `family` and a `familyKey` reduced a second time — and the second reduction meant the table
-     * could show two different families and report them as unchanged. See `typographyFamily`.
+     * The family, reduced once; used for both display and comparison so the two cannot disagree
+     * (see `typographyFamily`).
      */
     family?: string;
     size?: number;
@@ -218,12 +199,8 @@ export function typographySpec(item: AnnotationItem): TypographySpec {
 }
 
 /**
- * What makes two usages the same style.
- *
- * `label` participates ONLY for a label-only spec — that is the whole "style-level, not
- * instance-level" claim. Two usages with different words but identical metrics are one style;
- * including the label unconditionally would make every distinct string its own group and turn the
- * table back into the instance list this replaced.
+ * What makes two usages the same style. `label` participates only for a label-only spec; otherwise
+ * every distinct string would become its own group.
  */
 export function typographyGroupKey(spec: TypographySpec): string {
     return [
@@ -266,10 +243,8 @@ export function groupTypography(items: AnnotationItem[]): TypographyGroup[] {
 }
 
 /**
- * The most-used group per token — the "default" a local override is measured against.
- *
- * Most-used rather than first-seen: an override applied once should read as the exception, and
- * whichever usage happened to be captured first is not evidence of anything.
+ * The most-used group per token — the default an override is measured against (first-seen is not
+ * evidence of anything).
  */
 export function typographyDefaults(
     groups: TypographyGroup[],
@@ -286,15 +261,9 @@ export function typographyDefaults(
 }
 
 /**
- * How far apart two style groups are.
- *
- * The three negative biases are shortcuts, not measurements: an identical key, the same token, or
- * shared roles mean these are the same style however far their numbers have drifted — which is
- * exactly the case the page exists to show.
- *
- * One oddity worth knowing: an UNSPECIFIED size costs a flat 8, while a 3sp difference costs 9. So
- * "no size at all" is treated as closer than a small real difference. That is deliberate — a missing
- * value is missing information, not evidence of a different style.
+ * How far apart two style groups are. An identical key, same token, or shared roles are negative
+ * biases: same style however far the numbers drifted. An unspecified size costs a flat 8 (less than
+ * a 3sp difference) because missing information is not evidence of a different style.
  */
 export function typographyDistance(
     left: TypographyGroup,
@@ -351,14 +320,8 @@ export function typographyTokensOverlap(
 }
 
 /**
- * Pair the two sides' style groups, and letter them.
- *
- * MUTATES its inputs: each paired group gets `.marker` written onto it, because the cluster boxes
- * drawn over the panels read it back off the group they came from. Returning a map instead would
- * mean threading it through the drawing code for no gain.
- *
- * The 27th pair is `"27"`, not `"AA"` — past twenty-six the letters have stopped being mnemonic and
- * a number is at least unambiguous.
+ * Pair the two sides' style groups and letter them. Mutates its inputs: `.marker` is written onto
+ * each paired group because the cluster boxes read it back. Past 26 pairs, markers are numbers.
  */
 export function pairTypography(
     reference: TypographyGroup[],
@@ -416,11 +379,8 @@ export type Field =
     | "axes";
 
 /**
- * What a field READS as.
- *
- * Four different words for four absent fields, and each is load-bearing: an unmapped token is a
- * finding, an unspecified family is a gap, default tracking is normal, and a missing size is simply
- * unknown. Collapsing them to one dash would report all four as the same thing.
+ * What a field reads as. Four absent fields get four distinct words (unmapped token, unspecified
+ * family, default tracking, unknown size) because they mean different things.
  */
 export function typographyValue(
     spec: TypographySpec | undefined,

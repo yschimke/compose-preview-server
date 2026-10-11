@@ -34,25 +34,19 @@ import kotlinx.serialization.json.putJsonObject
 
 /**
  * Posts a design's comment activity (new thread, reply, resolve, reopen) to one operator-configured
- * webhook URL, plus the design-activity kinds named in `--ui-builder-webhook-events`.
+ * webhook, plus any design-activity kinds named in `--ui-builder-webhook-events`. Reactions,
+ * acknowledgements and deletes are silent to avoid noise. Only public designs carry title, excerpt
+ * and author; others get link-only events.
  *
- * Reactions, acknowledgements and deletes are deliberately silent: a channel that posts noise gets
- * muted. Only a public design is posted with its title, excerpt and author; every other design gets
- * a link-only event.
+ * Diffs [ServeUiBuilderCommentStore]'s own before/after boards ([diffCommentBoards]), so it can't
+ * announce anything the editor didn't show. Fire-and-forget through a bounded queue that drops the
+ * oldest on overflow.
  *
- * It subscribes to [ServeUiBuilderCommentStore]'s own feed and diffs the before/after boards
- * ([diffCommentBoards]), so it cannot announce something the editor never showed. Delivery is
- * fire-and-forget through a bounded queue that drops the **oldest** on overflow, so a slow receiver
- * never delays the write and the channel never lags further behind.
- *
- * There is one destination per host, not one per design: `links.thread` is writable by any design
- * writer, and POSTing to a collaborator-supplied URL would be an SSRF and an exfiltration path. The
- * thread is carried on every event ([DesignCommentWebhookDesignV1.thread]) for a relay to route on.
- *
- * The URL is a credential (Slack/Teams keep the secret in the path): it is never logged, only its
- * [fingerprint], and only `https` or loopback `http` is accepted. Two token buckets
- * ([CommentWebhookRateLimit]) cap volume per design and in total; over-limit events are dropped,
- * not delayed, and the first drop per window is reported on stderr.
+ * One destination per host: `links.thread` is writable by any design writer, so posting to it would
+ * be SSRF/exfiltration; it is carried on events ([DesignCommentWebhookDesignV1.thread]) for relays.
+ * The URL is a credential: never logged (only its [fingerprint]), `https` or loopback `http` only.
+ * Per-design and total token buckets ([CommentWebhookRateLimit]) drop excess events, reporting the
+ * first drop per window.
  */
 internal class ServeUiBuilderCommentWebhook(
   private val config: CommentWebhookConfig,
@@ -125,9 +119,8 @@ internal class ServeUiBuilderCommentWebhook(
     }
 
   /**
-   * Watch every design's review record on [store] — verdicts recorded, and the implementing pull
-   * request opened, merged or found to (mis)match — until the returned handle is closed. Only the
-   * [kinds] the operator opted into are posted; see [DesignActivityKind].
+   * Watch every design's review record on [store] (verdicts, implementing PR opened/merged/matched)
+   * until closed, posting only opted-in [kinds] ([DesignActivityKind]).
    */
   fun attachReviews(store: ServeUiBuilderReviewStore, kinds: Set<DesignActivityKind>): Closeable =
     store.subscribeToHost { previous, next ->
@@ -138,9 +131,8 @@ internal class ServeUiBuilderCommentWebhook(
     }
 
   /**
-   * Watch every fork recorded on [ancestry] — a proposed alternative to an existing design — until
-   * the returned handle is closed. The event is about the design that was forked from: that is the
-   * design whose channel cares that somebody proposed something else.
+   * Watch every fork recorded on [ancestry] until closed; the event is about the design forked
+   * from.
    */
   fun attachForks(ancestry: ServeUiBuilderAncestryStore): Closeable =
     ancestry.subscribeToForks { from, forkId ->
@@ -162,8 +154,8 @@ internal class ServeUiBuilderCommentWebhook(
   }
 
   /**
-   * Whether [change] fits under both buckets. The per-design bucket is asked first so a design that
-   * is over its own limit does not also spend the host's shared allowance.
+   * Whether [change] fits both buckets; per-design first so an over-limit design doesn't spend the
+   * host allowance.
    */
   private fun admit(designId: String, wire: String): Boolean {
     val admitted =
@@ -231,8 +223,8 @@ internal class ServeUiBuilderCommentWebhook(
   }
 
   /**
-   * Full content only for a design anybody may read ([CommentWebhookDesign.readableByAnyone]); any
-   * other design, including one the host could not name, gets a link-only event.
+   * Full content only for a design anyone may read ([CommentWebhookDesign.readableByAnyone]);
+   * otherwise link-only.
    */
   private fun describe(queued: QueuedCommentChange): DesignCommentWebhookEventV1 {
     val change = queued.change
@@ -286,8 +278,8 @@ internal class ServeUiBuilderCommentWebhook(
   }
 
   /**
-   * Stop watching, giving queued events a bounded chance to go out: nothing replays them after a
-   * restart, but shutdown must not be held hostage by a slow receiver either.
+   * Stop watching, giving queued events a bounded chance to go out without letting a slow receiver
+   * hold up shutdown.
    */
   override fun close() {
     queue.close()
@@ -325,8 +317,8 @@ internal class ServeUiBuilderCommentWebhook(
         .joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
 
     /**
-     * `<origin>/ui-builder/<designId>#thread=<threadId>`. A fragment, so an editor that does not
-     * understand the selector still opens the design; the catalog is the document's `catalogPin`.
+     * `<origin>/ui-builder/<designId>#thread=<threadId>`; a fragment, so editors that don't
+     * understand it still open the design.
      */
     fun threadUrl(origin: String, designId: String, threadId: String): String {
       val base = origin.trimEnd('/')
@@ -337,8 +329,8 @@ internal class ServeUiBuilderCommentWebhook(
 }
 
 /**
- * One change, with the design as it looked when the change happened. [design] is null when the host
- * could not name it, and the event is then link-only.
+ * One change with the design as it looked then; [design] null (unnameable) makes the event
+ * link-only.
  */
 internal data class QueuedCommentChange(
   val change: CommentBoardChange,
@@ -370,9 +362,8 @@ internal data class QueuedDesignActivity(
 }
 
 /**
- * How many events go out per minute: per design, and from the whole host. The defaults sit under
- * Slack's incoming-webhook limit of roughly one message a second with room for a burst, and well
- * above what a review conversation produces.
+ * Events per minute, per design and per host. Defaults sit under Slack's ~1 message/second webhook
+ * limit with room for bursts.
  */
 internal data class CommentWebhookRateLimit(
   val perDesignPerMinute: Int = 12,
@@ -389,8 +380,8 @@ internal data class CommentWebhookConfig(
   val format: CommentWebhookFormat = CommentWebhookFormat.PLAIN,
 ) {
   /**
-   * Why this URL is refused, as a sentence [ServeCommandOptions] prints, or null when it is fine.
-   * Only `https` or loopback `http`: the URL is a credential.
+   * Why this URL is refused, as a sentence [ServeCommandOptions] prints, or null. Only `https` or
+   * loopback `http`, since it is a credential.
    */
   fun rejection(): String? {
     val parsed = runCatching { URI(url) }.getOrNull() ?: return "is not a URL"
@@ -455,18 +446,16 @@ internal data class CommentWebhookDesign(
   /** The chat thread this design is discussed in, from its `links`. Null where none is set. */
   val chatThread: String? = null,
   /**
-   * Whether the design is public — readable by a signed-out visitor. Only then does an event carry
-   * the title, excerpt and author; see [ServeUiBuilderCommentWebhook.describe].
+   * Whether a signed-out visitor can read the design; only then does an event carry title, excerpt
+   * and author.
    */
   val readableByAnyone: Boolean = false,
 )
 
 /**
- * What the webhook needs to know about [designId], read with keyed local lookups on the thread
- * accepting the comment (see [ServeUiBuilderCommentWebhook.attach]).
- *
- * [CommentWebhookDesign.readableByAnyone] requires both a `--public` host and the design's ACL to
- * admit the anonymous actor; a failed lookup answers false, so the event is posted as a link.
+ * What the webhook needs about [designId], via keyed local lookups on the commenting thread.
+ * [CommentWebhookDesign.readableByAnyone] needs a `--public` host and an ACL admitting the
+ * anonymous actor; a failed lookup answers false (link-only).
  */
 internal fun commentWebhookDesign(
   admin: UiBuilderAdminPort,
@@ -513,9 +502,9 @@ internal data class CommentBoardChange(
 )
 
 /**
- * What changed between two boards: a new thread id, a new comment id in an existing thread (reply),
- * or a flipped [StoredCommentThread.resolved]. Reactions, acknowledgements and deleted threads
- * produce nothing.
+ * What changed between two boards: a new thread, a new comment in an existing thread (reply), or a
+ * flipped [StoredCommentThread.resolved]. Reactions, acknowledgements and deletions produce
+ * nothing.
  */
 internal fun diffCommentBoards(
   previous: StoredCommentBoard?,
@@ -565,7 +554,7 @@ internal fun diffCommentBoards(
 
 /**
  * Carries the authenticated `authorId` beside the client-supplied `displayName`, so a relay can
- * check a name a commenter chose rather than repeat it as fact.
+ * verify the name.
  */
 private fun StoredComment.asWebhookComment(): DesignCommentWebhookCommentV1 =
   DesignCommentWebhookCommentV1(
@@ -610,10 +599,7 @@ private fun StoredCommentAnchor?.summarize(): String? {
   return null
 }
 
-// ---------------------------------------------------------------------------------------------
-// Adapters. Each is `event in, body out`, with no IO and no clock, which is what makes them
-// testable without a channel to post into.
-// ---------------------------------------------------------------------------------------------
+// Adapters: event in, body out, no IO or clock, so they're testable without a channel.
 
 private fun slackBody(event: DesignCommentWebhookEventV1): JsonObject = buildJsonObject {
   put("text", event.chatText(::slackEscape) { url, label -> "<$url|${slackEscape(label)}>" })
@@ -666,17 +652,9 @@ private fun teamsBody(event: DesignCommentWebhookEventV1): JsonObject = buildJso
 }
 
 /**
- * One line of the card, as text and nothing else.
- *
- * A `TextBlock` renders its content as Adaptive Card Markdown, and everything on this card is
- * written by whoever left the comment: a body of `[Open the design](https://attacker.example)`
- * would arrive in the channel as a clickable link to somewhere nobody chose, sitting under a
- * headline that says a colleague wrote it. The builder shows that comment as the characters they
- * typed, and so must this.
- *
- * A `RichTextBlock` of `TextRun`s rather than escaping, because `TextRun` does not interpret markup
- * at all. Escaping would mean predicting one renderer's dialect and re-predicting it whenever that
- * renderer changes; this cannot be got wrong.
+ * One card line as plain text. `TextBlock` renders Markdown, so a commenter's
+ * `[link](https://attacker.example)` would appear as a clickable link under a colleague's name;
+ * `TextRun`s interpret no markup, which can't be got wrong the way escaping can.
  */
 internal fun textBlock(text: String, bold: Boolean, subtle: Boolean = false): JsonObject =
   buildJsonObject {
@@ -694,11 +672,8 @@ internal fun textBlock(text: String, bold: Boolean, subtle: Boolean = false): Js
   }
 
 /**
- * The one sentence, the quote under it, and the link — the shape both `{"text": …}` platforms use.
- *
- * The quote is never dropped, for the reason the agent notice gives about its own excerpt: a line
- * saying somebody commented is one more notification among many, and the sentence itself is what
- * tells a reader whether it is about them.
+ * The sentence, the quoted excerpt and the link, for both `{"text": …}` platforms. The quote is
+ * kept since it tells the reader whether it concerns them.
  */
 private fun DesignCommentWebhookEventV1.chatText(
   escape: (String) -> String,
@@ -708,9 +683,7 @@ private fun DesignCommentWebhookEventV1.chatText(
   // Blank only on a link-only event for a design that is not public, which has no quote to show.
   if (comment.excerpt.isNotBlank()) append("\n> ").append(escape(comment.excerpt))
   contextLine()?.let { append("\n").append(escape(it)) }
-  // Where the design is already being talked about, when that is somewhere other than here. A
-  // notification often lands in a team channel while the design's own conversation is elsewhere,
-  // and this is the line that joins the two.
+  // Link to wherever the design is already being discussed, joining the two conversations.
   design.thread?.let { append("\n").append(link(it, ServeChatThreadLinks.label(it))) }
 }
 
@@ -746,19 +719,16 @@ private fun DesignCommentWebhookEventV1.contextLine(): String? {
 }
 
 /**
- * Slack and Google Chat both read `&`, `<` and `>` as markup, and both want exactly these three
- * replaced and nothing else — escaping quotes or ampersand-entities as well is what turns a comment
- * containing `&amp;` into `&amp;amp;` in the channel.
+ * Slack and Google Chat treat exactly `&`, `<`, `>` as markup; escaping anything more would
+ * double-encode.
  */
 internal fun slackEscape(text: String): String =
   text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 /**
- * The default sender: `java.net.http`, which is already how this module talks outward
- * ([DesignHttpTransport]) and adds no dependency to a classpath `checkServeModuleBoundary` guards.
- *
- * Short timeouts on purpose. Nothing waits on this, so a generous one buys nothing and costs a
- * wedged host holding the queue's single worker for as long as it likes.
+ * Default sender on `java.net.http` (already used here, [DesignHttpTransport]), adding no
+ * dependency to the guarded classpath. Short timeouts so a wedged receiver can't hold the single
+ * worker.
  */
 internal class HttpCommentWebhookSender(
   private val config: CommentWebhookConfig,
@@ -769,12 +739,8 @@ internal class HttpCommentWebhookSender(
       .build(),
 ) {
   /**
-   * True when the far end took it, which means 2xx and nothing else.
-   *
-   * A redirect is a failure here rather than a success. Redirects are not followed — a webhook URL
-   * is a credential and the target of a 302 is chosen by whatever answered, not by the operator —
-   * so a 3xx means the body was never delivered anywhere. Counting it as delivered would retire the
-   * retry and swallow the log line for a hook that is quietly posting nothing.
+   * True only for 2xx. Redirects aren't followed (the URL is a credential and the target would be
+   * chosen by the responder), so a 3xx means nothing was delivered.
    */
   fun post(body: String): Boolean = runCatching {
     val request =

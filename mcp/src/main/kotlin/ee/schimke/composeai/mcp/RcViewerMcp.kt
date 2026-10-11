@@ -24,29 +24,18 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
 /**
- * The `.rc` Remote Compose file viewer (issue #1237): the `rc_open` tool and the
- * `ui://compose-preview/rc-viewer` MCP App that plays the document.
+ * The `.rc` Remote Compose file viewer: the `rc_open` tool and the `ui://compose-preview/rc-viewer`
+ * MCP App that plays the document. Two ways in:
+ * - **Host file entrypoint** (ChatGPT/Codex desktop): `rc_open` gets `FileInput`; the app reads and
+ *   subscribes to the host's opaque `host-resource://…` URI, and the server only acknowledges.
+ * - **Model call** elsewhere: `rc_open {path}`; the server returns the bytes in `_meta` plus a
+ *   `compose-preview-rc://document/<token>/<name>` URI, and a poller sends
+ *   `notifications/resources/updated` when the file changes.
  *
- * Two ways in, one viewer:
- * - **A host file entrypoint** (ChatGPT / Codex desktop, OpenAI MCP Extensions "File Extension
- *   Entrypoint"): `rc_open` gets `FileInput` `{file: {name, resourceUri}}`. The URI is the host's
- *   opaque `host-resource://…`; the app reads it with `resources/read` (asking for the `blob`
- *   representation) and subscribes to it, and the host answers both. The server only acknowledges.
- * - **A model call** in any other MCP Apps host (Claude Code, Antigravity): `rc_open {path}`. The
- *   server validates and reads the file and returns the bytes in `_meta` (for the app, not the
- *   model) plus a server-minted `compose-preview-rc://document/<token>/<name>` URI the app re-reads
- *   and subscribes to. A poller turns a change on disk into `notifications/resources/updated`, so
- *   the viewer reloads when an agent regenerates the file.
- *
- * **No filesystem path reaches the app.** Results name the file by its base name only, and the
- * server URI is a random token that resolves only to documents a tool call opened.
- *
- * The player is the vendored TypeScript Remote Compose player (`rc-player/bundle.js`, ~0.7 MB),
- * inlined into the HTML when the resource is served, so the app needs no CDN and no CSP
- * `resourceDomains` for itself. The Wasm Compose Multiplatform player
- * (`@yschimke/remote-compose-player-cmp`) was the alternative: identical pixels to Android/iOS, but
- * ~23 MB, narrower operation coverage today, and a remote load. RC_PLAYER_EMBED.md in rc-players
- * draws the same line.
+ * No filesystem path reaches the app: results use the base name and the URI is a random token. The
+ * vendored TS player (`rc-player/bundle.js`, ~0.7 MB) is inlined, so no CDN or CSP
+ * `resourceDomains` are needed; the Wasm CMP player was rejected for size (~23 MB), coverage and
+ * remote loading.
  */
 class RcViewerMcp(
   /** Sessions subscribed to a URI; [DaemonMcpServer] passes its `Subscriptions`. */
@@ -149,8 +138,7 @@ class RcViewerMcp(
     if (!baseName.lowercase().endsWith(EXTENSION)) {
       return error(UNSUPPORTED_EXTENSION, "rc_open: $baseName is not a $EXTENSION file.")
     }
-    // Inside a file entrypoint the host adds the real path to an app→server call. The server may
-    // use it (here: size, digest, and a server-side URI the viewer can fall back to), but it never
+    // The host injects the real path inside a file entrypoint; the server may use it, but it never
     // goes back to the app.
     val injected =
       OpenAiUi.currentResourcePath()?.let { raw ->
@@ -284,8 +272,8 @@ class RcViewerMcp(
   }
 
   /**
-   * One pass of the change poller: a subscribed document whose file changed on disk sends
-   * `notifications/resources/updated` to its subscribers. Unsubscribed documents are not stat'd.
+   * One poller pass: a subscribed document whose file changed sends
+   * `notifications/resources/updated`. Unsubscribed documents are not stat'd.
    */
   internal fun pollOnce() {
     for ((uri, document) in documents) {
@@ -299,8 +287,8 @@ class RcViewerMcp(
   }
 
   /**
-   * The file's stamp. mtime and length catch almost every rewrite; a small file is also hashed, so
-   * a same-second, same-size regeneration (coarse mtime filesystems) is still seen.
+   * mtime and length catch most rewrites; small files are also hashed for same-second, same-size
+   * regenerations.
    */
   private fun stampOf(file: File): Stamp {
     if (!file.isFile) return Stamp(0L, -1L, null)
@@ -330,8 +318,8 @@ class RcViewerMcp(
   }
 
   /**
-   * [OpenAiUi.FILE_INPUT_SCHEMA]'s `file`, plus `path` for a model call. Neither is required by the
-   * schema — a host sends one, the model the other — and the tool rejects a call with neither.
+   * [OpenAiUi.FILE_INPUT_SCHEMA]'s `file` plus `path` for model calls; neither is required by
+   * schema, but the tool rejects a call with neither.
    */
   private val inputSchema: JsonObject by lazy {
     val fileInput = OpenAiUi.FILE_INPUT_SCHEMA
@@ -420,9 +408,8 @@ class RcViewerMcp(
     }
 
     /**
-     * [html] with [bundle] in its player script element. The bundle goes inside a `<script>`, so it
-     * must not contain anything that closes or re-enters script data; checked, not assumed, because
-     * the bundle is regenerated from a vendored source.
+     * [html] with [bundle] in its player script element. The bundle is checked for anything that
+     * would close or re-enter script data, since it is regenerated from a vendored source.
      */
     internal fun assembleViewerHtml(html: String, bundle: String): String {
       check(html.split(PLAYER_PLACEHOLDER).size == 2) {

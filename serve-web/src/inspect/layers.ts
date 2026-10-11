@@ -17,11 +17,8 @@ export const LAYERS: LayerSpec[] = [
 ];
 
 /**
- * The endpoints a set of layers needs, deduplicated.
- *
- * Typography, Theme and Layout come from ONE payload, so ticking several must not fetch it once
- * each — and on an override-bearing frame every extra fetch is another daemon render, which can
- * come back describing different pixels than the first.
+ * The endpoints a set of layers needs, deduplicated: Typography, Theme and Layout share one
+ * payload, and on an override-bearing frame each extra fetch is another daemon render.
  */
 export function sourcesFor(kinds: string[]): string[] {
     const out: string[] = [];
@@ -38,14 +35,9 @@ export function activeLayers(kinds: string[]): LayerSpec[] {
 }
 
 /**
- * The data URL for one endpoint, derived from the frame ON SCREEN.
- *
- * Deriving it from the displayed frame's URL — rather than rebuilding the override query here — is
- * what guarantees the overlay describes the pixels the visitor is looking at, including every knob
- * and display axis, with no second copy of the viewer's query rules to keep in step.
- *
- * Only the format suffix changes. A `scroll=long` frame has no inspection product of its own, so it
- * falls back to the viewport-sized one rather than 500ing.
+ * The data URL for one endpoint, derived from the displayed frame's URL so the overlay describes
+ * those exact pixels without duplicating the viewer's query rules. Only the suffix changes; a
+ * `scroll=long` frame falls back to the viewport-sized product.
  */
 export function dataUrlFor(frameUrl: string, suffix: string): string | null {
     if (!frameUrl) return null;
@@ -59,37 +51,22 @@ export function dataUrlFor(frameUrl: string, suffix: string): string | null {
 }
 
 /**
- * The `layers=` value for one endpoint: the ticked layers that endpoint actually serves, in
- * declared order. Empty for an endpoint that carries no layer choice (`slots`, `a11y`) — those
- * are one product each, so naming layers on them would say nothing.
- *
- * This is what lets the server skip a daemon. `typography`, `theme` and `layout` share the
- * `annotations` endpoint but not the same producer: only typography is authored into a published
- * bundle, so a typography-only tick can be replayed from the catalog while anything naming the
- * other two still needs a live capture. Sending the set is how the server can tell the difference
- * instead of assuming the worst — which cost 16-22s on an idle catalog.
+ * The `layers=` value for one endpoint: the ticked layers it serves, in declared order (empty for
+ * single-product endpoints like `slots`, `a11y`). Lets the server replay typography-only requests
+ * from the published bundle instead of starting a daemon.
  */
 export function layersParamFor(source: string, kinds: string[]): string {
     const asked = LAYERS.filter(
         (spec) => spec.source === source && kinds.includes(spec.kind),
     ).map((spec) => spec.kind);
-    // Narrowed for exactly ONE combination: typography alone, the only layer a published bundle
-    // can answer without a daemon. Everything else asks unscoped.
-    //
-    // Deliberately not "send whatever is ticked". A URL per combination would key the cache per
-    // combination too, so ticking Theme and then Layout — one payload, by construction — would
-    // fetch twice, and on a frame the daemon has to render that is two renders which can disagree
-    // about the pixels. Two possible addresses per frame means the wide one is shared by every
-    // combination that needs it, and flipping back to typography alone is a cache hit.
+    // Narrowed only for typography alone; everything else asks unscoped. Keeping two addresses per
+    // frame means the wide payload is shared by every combination (one cache entry, one render).
     return asked.length === 1 && asked[0] === "typography" ? "typography" : "";
 }
 
 /**
- * Whether an annotations payload carries a layer beyond the ones [kinds] asked this endpoint for —
- * i.e. the server answered a narrowed request with the full capture, which is explicitly allowed.
- *
- * Read off the payload rather than assumed from the request, because which lane answered is the
- * server's decision (published replay vs daemon) and the client cannot predict it.
+ * Whether an annotations payload carries more layers than [kinds] asked for (the server may answer
+ * a narrowed request with the full capture). Read off the payload since the server picks the lane.
  */
 export function carriesBeyond(
     payload: unknown,
@@ -130,11 +107,9 @@ export function fallbackUrl(
 }
 
 /**
- * `/compose-m3/p/plain.Button` → `/compose-m3`, the prefix every render URL hangs off.
- *
- * Both surfaces that mount the layers are addressed the same way — the viewer at `/p/<id>`, the
- * focused comparison at `/compare/<id>` — so one rule serves both. This is only the *fallback*
- * address in either case: the frame on screen supplies the real one as soon as it has decoded.
+ * `/compose-m3/p/plain.Button` → `/compose-m3`, the render URL prefix for both the viewer
+ * (`/p/<id>`) and the focused comparison (`/compare/<id>`). Only a fallback until the frame on
+ * screen decodes.
  */
 export function baseFrom(pathname: string): string {
     return pathname.replace(/\/(?:p|compare)\/[^/]*\/?$/, "");

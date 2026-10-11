@@ -1,13 +1,7 @@
-// The two browser-side halves of "report a bug in the preview server".
-//
-// Both live in the page shell rather than a surface bundle because the affordance itself does: the
-// footer form is emitted by `ServeWeb.document`, so it is on the front door, `/status`, a 404 and
-// every catalog page alike, and none of those load `main.js`. Each half no-ops when its elements
-// are absent, so the cost on a page that has neither is two failed `querySelector` calls.
-//
-// Nothing here writes an `href` or navigates. Both functions only ever set INPUT VALUES on
-// server-rendered forms whose `action` is a literal the script never touches — the rule the serve
-// UI follows everywhere it puts page-derived state into a link (see `ServeIssueReport.action`).
+// Browser-side halves of "report a bug". They live in the page shell because the footer form is on
+// every page (front door, `/status`, 404s), none of which load `main.js`; each no-ops when its
+// elements are absent. Neither writes an `href` or navigates: they only set input values on
+// server-rendered forms with literal actions (see `ServeIssueReport.action`).
 
 import { whenReady } from "../dom/whenReady.js";
 
@@ -15,29 +9,17 @@ import { whenReady } from "../dom/whenReady.js";
 const CARRIED = ["token"];
 
 /**
- * Fill the footer form's hidden inputs so pressing "report a bug" arrives at `/report-bug` knowing
- * where the visitor came from.
- *
- * `from` is the page's own path + query. It is sent as a form field rather than being pre-baked
- * server-side because the URL a visitor is looking at is not the one the server rendered: the
- * viewer's controls rewrite the query as knobs change (`installUrlState`), so the served HTML knows
- * the *initial* overrides and the address bar knows the current ones. The address bar is the honest
- * answer to "what were you looking at".
- *
- * The token is copied across separately because `/report-bug` is gated like `/status`, and the
- * visitor's own token — already in their URL — is the capability that gets them in. It is *not*
- * left inside `from`: the server strips it there anyway (`ServeBugReport.sanitizeFrom`), since that
- * value is quoted into a public issue body while this one only ever reaches this server.
+ * Fill the footer form's hidden inputs so `/report-bug` knows where the visitor came from. `from`
+ * is the address bar's path + query, not a server-baked value, because `installUrlState` rewrites
+ * the query as knobs change. The token is copied separately because `/report-bug` is gated like
+ * `/status`; the server strips it from `from` (`ServeBugReport.sanitizeFrom`), which is quoted into
+ * a public issue.
  */
 export function installBugReportLink(): void {
     whenReady(() => {
         fillBugReportLink();
-        // …and again at SUBMIT, which is the only moment that actually matters. The fields describe
-        // the address bar, and `installUrlState` rewrites it with `pushState`/`replaceState` every
-        // time a knob, device, theme or history step changes the selection — so a value frozen at
-        // load describes the page as it was opened, not as it was when the visitor decided
-        // something was wrong. That would report and re-render the wrong overrides through the
-        // server's own override propagation, which is the whole point of carrying `from`.
+        // …and again at submit: `installUrlState` rewrites the address bar on every
+        // knob/device/theme change, so a value frozen at load would report the wrong overrides.
         document
             .querySelectorAll<HTMLFormElement>(".cp-report-bug")
             .forEach((form) =>
@@ -47,13 +29,8 @@ export function installBugReportLink(): void {
 }
 
 /**
- * The fill itself, separated from the scheduling so tests can drive it against a built DOM.
- *
- * Fills EVERY copy of the form on the page. There are two entry points to `/report-bug` — the
- * footer link and the floating launcher — and they are the same three hidden inputs twice.
- * `querySelector` filled whichever came first in the document, so the launcher submitted an empty
- * `from` (losing the page, and on a gated host the token with it) while the footer beside it worked
- * perfectly: a failure invisible from either end.
+ * The fill itself, separate from scheduling so tests can drive it. Fills every copy of the form
+ * (the footer link and the floating launcher), not just the first match.
  */
 export function fillBugReportLink(): void {
     document
@@ -75,20 +52,14 @@ function fillOne(form: HTMLFormElement): void {
     }
     if (token)
         token.value = new URLSearchParams(location.search).get("token") ?? "";
-    // Captured HERE, on the page being reported, because it cannot be recovered on `/report-bug`:
-    // a catalog that pinned dark chrome hands the report page a scheme of its own, and the OS
-    // preference alone mislabels "dark preview on a light OS" — the exact condition a visual bug
-    // needs to reproduce.
+    // Captured here because `/report-bug` cannot recover it: the OS preference alone mislabels
+    // "dark preview on a light OS".
     if (scheme) scheme.value = pageScheme();
 }
 
 /**
- * The scheme this page is actually PAINTED in, as opposed to the one the OS asks for.
- *
- * `serve.css` writes every mode-dependent value as a `light-dark()` pair and the page pins its
- * choice with `cp-scheme-light` / `cp-scheme-dark` on `<html>` (see `pageTheme`), so those classes —
- * not `prefers-color-scheme` — are what decided the pixels whenever a theme was selected. Falls
- * back to the media query only when the page pinned nothing, which is the case where the two agree.
+ * The scheme this page is actually painted in: the `cp-scheme-light`/`cp-scheme-dark` class on
+ * `<html>` (see `pageTheme`), falling back to `prefers-color-scheme` only when nothing is pinned.
  */
 export function pageScheme(): string {
     const root = document.documentElement;
@@ -105,29 +76,19 @@ function osScheme(): string {
 }
 
 /**
- * The carried `?scheme=`, accepted only as one of the two values this can legitimately be.
- *
- * It arrives in a URL anyone can hand a visitor, and it lands in a markdown table cell — so
- * `?scheme=dark|forged` would shear the Browser row and let arbitrary text pose as a diagnostic.
- * An allowlist is the right shape here rather than escaping: there are exactly two valid answers,
- * and anything else is not a mangled scheme but a value that was never a scheme at all. Unknown
- * input falls back to this page's own scheme, which is at least a real observation.
+ * The carried `?scheme=`, allowlisted to its two valid values: it comes from a URL and lands in a
+ * markdown table cell, so `dark|forged` would shear the row. Anything else falls back to this
+ * page's own scheme.
  */
 function knownScheme(value: string | null): string | undefined {
     return value === "light" || value === "dark" ? value : undefined;
 }
 
 /**
- * On `/report-bug`, splice the browser's own facts into the report.
- *
- * The server fills the form's hidden `body` for everything it knows, leaving `{{client}}` where the
- * browser section goes — so a visitor with JS off still files a complete server report, just
- * without this part. These four facts are the ones a "the page draws wrong" bug turns on and the
- * only ones the server cannot observe: a render that is correct at 1x and broken at 2x, or correct
- * in light and wrong in dark, is otherwise a report nobody can reproduce.
- *
- * The visible `<pre>` is rewritten from the same string, because the page's promise is that what is
- * shown is what gets filed; updating the hidden input alone would quietly break that.
+ * On `/report-bug`, splice the browser's own facts into the `{{client}}` slot of the server-filled
+ * body (so a JS-off visitor still files the server part). Pixel ratio and scheme are what the
+ * server cannot observe. The visible `<pre>` is rewritten from the same string so what is shown is
+ * what is filed.
  */
 export function installBugReportBody(): void {
     whenReady(fillBugReportBody);
@@ -139,15 +100,12 @@ export function fillBugReportBody(): void {
     if (!body) return;
     const template = body.getAttribute("data-report-template");
     if (!template) return;
-    // The scheme of the page being REPORTED, carried here by the footer form; absent when the
-    // visitor reached `/report-bug` directly, which is the one case the report page's own scheme
-    // is the honest answer.
+    // The reported page's scheme from the footer form; absent when `/report-bug` was opened
+    // directly.
     const reported = knownScheme(
         new URLSearchParams(location.search).get("scheme"),
     );
-    // `replace` with a STRING replacement honours `$&`, `$'`, `` $` `` and `$1` — so a value that
-    // reached the block could splice copies of the surrounding report into itself. A function
-    // replacement is taken literally, which is what a substitution of fixed text should be.
+    // A function replacement, because a string replacement honours `$&`, `$'` and `$1`.
     const filled = template.replace("{{client}}", () => clientBlock(reported));
     body.value = filled;
     const preview = document.querySelector<HTMLElement>("#cp-bug-preview");
@@ -155,10 +113,7 @@ export function fillBugReportBody(): void {
 }
 
 /**
- * The browser section, as the same two-column markdown table the server's sections use.
- *
- * [reportedScheme] is the scheme of the page the bug is about, carried from the footer form; when
- * absent this page's own scheme stands in.
+ * The browser section as a two-column markdown table. [reportedScheme] defaults to this page's own.
  */
 export function clientBlock(reportedScheme?: string): string {
     const rows = clientRows(reportedScheme);
@@ -171,11 +126,8 @@ export function clientBlock(reportedScheme?: string): string {
 }
 
 /**
- * Make free text safe inside a markdown table cell that is itself inside a code span.
- *
- * Three characters matter and the ORDER matters: the backslash must go first, or escaping the
- * others would double-escape the backslashes this pass just added. A `|` would shear the row; a
- * backtick would close the code span and let the rest of the string render as markdown.
+ * Make free text safe in a markdown table cell inside a code span. Backslash is escaped first so
+ * the later escapes are not double-escaped; `|` would shear the row and a backtick close the span.
  */
 function cell(text: string): string {
     return text
@@ -197,9 +149,8 @@ function clientRows(reportedScheme?: string): string[][] {
     if (window.devicePixelRatio) {
         rows.push(["Device pixel ratio", String(window.devicePixelRatio)]);
     }
-    // Both, and labelled apart: the page's scheme is what produced the pixels, the OS preference is
-    // what a triager would otherwise assume produced them. Reporting only one of a disagreeing pair
-    // is what made "dark preview on a light OS" unreproducible.
+    // Both, labelled apart: the page's scheme produced the pixels, the OS preference is what a
+    // triager would otherwise assume.
     rows.push(["Page colour scheme", reportedScheme || pageScheme()]);
     rows.push(["OS colour scheme", osScheme()]);
     return rows;

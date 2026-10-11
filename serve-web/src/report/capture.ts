@@ -1,23 +1,9 @@
-// Grabbing a picture of what the visitor is actually looking at.
-//
-// **Why this is a screen capture and not a DOM render.** Issue #4261: a report filed from the spec
-// lane's triptych arrived showing an ordinary single render, because `/render/<id>.png` is the only
-// picture of a preview the server can produce. The triptych, the wipe, the exploded stack, the
-// Remote Compose canvas, an overlay, a lane that failed with an error on the stage — every one of
-// those is composed in the BROWSER out of several artefacts, and none of them has a URL to embed.
-// Nor can the server re-derive them: it would have to run the page.
-//
-// Two families of answer exist client-side. Serialising the DOM into an SVG `foreignObject` and
-// rasterising that (what the dom-to-image libraries do) reproduces the markup, not the rendering —
-// it needs every stylesheet inlined and every image re-fetched as a data URL, it silently drops
-// canvas contents, cross-origin fonts and anything drawn by a shader, and what it produces is
-// therefore a *reconstruction* that can differ from the screen in exactly the ways a visual bug
-// report is about. `getDisplayMedia` asks the browser for the pixels it actually painted. For a
-// tool whose entire job is "show me what you saw", the second is the only honest one.
-//
-// The cost is a permission prompt, and that is the right trade for a deliberate, once-per-report
-// gesture. Where the API is missing or refused, the affordance stays hidden and the report page
-// keeps asking for an ordinary pasted screenshot, which is what it did before this existed.
+// Grabbing a picture of what the visitor is actually looking at. The triptych, wipe, exploded
+// stack, Remote Compose canvas and lane errors are composed in the browser and have no URL, so the
+// server cannot produce them (see #4261). DOM-to-SVG rasterising reconstructs markup and drops
+// canvases, cross-origin fonts and shaders; `getDisplayMedia` returns the painted pixels. The cost
+// is a permission prompt; where the API is missing or refused the affordance stays hidden and the
+// report asks for a pasted screenshot.
 
 import {
     Rect,
@@ -34,13 +20,8 @@ export interface Frame {
     width: number;
     height: number;
     /**
-     * What the browser says was shared: `browser` is a tab, `window`/`monitor` are not.
-     *
-     * The distinction decides whether a crop is even meaningful. Every rectangle this module is
-     * handed is in viewport coordinates, and the mapping onto the frame assumes the frame IS the
-     * viewport. Share a whole monitor instead — which some browsers offer regardless of what was
-     * asked for — and that assumption is false by an unknown offset, so cropping would silently cut
-     * out a piece of some other part of the screen. Unknown (`""`) is treated as not-a-tab.
+     * What was shared: `browser` is a tab, `window`/`monitor` are not (unknown `""` counts as
+     * not-a-tab). Crops assume the frame is the viewport, which only holds for a tab.
      */
     surface: string;
 }
@@ -59,16 +40,9 @@ export function captureSupported(): boolean {
 const MAX_SIDE = 1600;
 
 /**
- * One frame of the current tab.
- *
- * `preferCurrentTab` is a Chromium hint that reduces the prompt to "share this tab?" instead of a
- * picker; it is ignored elsewhere, where the visitor picks. `displaySurface: "browser"` states the
- * same preference in the standard vocabulary. Neither is a guarantee, which is why [Frame.surface]
- * is read back rather than assumed.
- *
- * The track is stopped before this returns, always. A live capture track leaves the browser's
- * "sharing your screen" indicator up, and a bug-report tool that leaves a screen share running
- * would deserve every bit of the alarm that causes.
+ * One frame of the current tab. `preferCurrentTab` (Chromium) and `displaySurface: "browser"` are
+ * hints only, hence [Frame.surface] is read back. The track is always stopped before returning so
+ * the "sharing your screen" indicator does not linger.
  */
 export async function grabFrame(): Promise<Frame> {
     const stream = await navigator.mediaDevices.getDisplayMedia({
@@ -115,12 +89,9 @@ export async function grabFrame(): Promise<Frame> {
 }
 
 /**
- * Wait until the element has a decoded frame with real dimensions.
- *
- * `play()` resolving is not enough: on the first frame after a share dialog closes, `videoWidth` is
- * routinely still 0, and drawing then yields a 1×1 transparent capture — which looks like a bug in
- * the cropping rather than a race. Resolves anyway after a bounded wait, so a stream that never
- * produces a frame fails as an empty capture the caller can report rather than as a hang.
+ * Wait for a decoded frame with real dimensions: after the share dialog `videoWidth` is often still
+ * 0, yielding a 1×1 capture. Gives up after a bounded wait so a dead stream yields an empty
+ * capture, not a hang.
  */
 function firstFrame(video: HTMLVideoElement): Promise<void> {
     return new Promise((resolve) => {
@@ -152,12 +123,8 @@ export function scaleOf(frame: Frame): Scale {
 }
 
 /**
- * Cut [rect] (CSS px, viewport-relative) out of [frame] and downscale it to something a
- * `sessionStorage` budget can hold.
- *
- * The two-step — crop at native resolution, then resize — is deliberate: cropping a pre-scaled
- * frame compounds the resampling, and on text-heavy captures (a table, an error) that is the
- * difference between readable and not.
+ * Cut [rect] (CSS px, viewport-relative) out of [frame] and downscale it for the `sessionStorage`
+ * budget. Cropping before resizing avoids compounded resampling on text-heavy captures.
  */
 export function crop(frame: Frame, rect: Rect): HTMLCanvasElement {
     const source = mapRect(rect, scaleOf(frame));
@@ -187,12 +154,8 @@ export function crop(frame: Frame, rect: Rect): HTMLCanvasElement {
 }
 
 /**
- * The whole frame, downscaled the same way — the "whole view" mode's crop.
- *
- * Expressed in FRAME coordinates rather than as a crop of the viewport rectangle, so it is right
- * whichever surface was shared: on a tab the frame already is the viewport, and on a window or a
- * monitor — where the viewport mapping is meaningless and the two selection modes refuse to
- * run — this still yields exactly what the visitor agreed to share.
+ * The whole frame, downscaled the same way, in frame coordinates so it is right for any shared
+ * surface.
  */
 export function whole(frame: Frame): HTMLCanvasElement {
     const fitted = fitWithin(
@@ -211,12 +174,8 @@ export function whole(frame: Frame): HTMLCanvasElement {
 }
 
 /**
- * The clipboard hand-off.
- *
- * The blob goes in as a PROMISE, and the `ClipboardItem` is constructed synchronously — the same
- * shape, for the same reason, as the viewer's existing "Copy PNG": Safari requires the item to
- * exist inside the click that authorised it, so awaiting the encode first loses the gesture and the
- * write is refused.
+ * The clipboard hand-off. The blob goes in as a promise and the `ClipboardItem` is built
+ * synchronously, because Safari refuses a write outside the authorising click.
  */
 export function copyPng(blob: Promise<Blob>): Promise<void> {
     if (typeof ClipboardItem === "undefined" || !navigator.clipboard?.write) {

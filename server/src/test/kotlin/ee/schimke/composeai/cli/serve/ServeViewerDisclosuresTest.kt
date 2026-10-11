@@ -8,18 +8,9 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 
 /**
- * The viewer's four **disclosures** — the component list, the state/variant axes, the theme chips
- * and the overrides drawer — and the one place they are operated from.
- *
- * The viewer used to spend most of the fold saying things it had already said: a component's whole
- * state axis as three wrapped rows of chips, eight ellipsised theme chips, and a 240px component
- * column nailed open on every desktop, all above a render that is what the page is *for*. Each of
- * those is now foldable, and the controls that fold them sit together on the title row rather than
- * scattered across the toolbar — so there is one answer to "what can I put away".
- *
- * The rule the tests below encode: a fold may never cost information. Every closed toggle names the
- * value its row was carrying (`State · M wide`, `Theme · Night`), which is why folding by default
- * is safe on the catalogs wide enough to need it.
+ * The viewer's four disclosures (component list, state/variant axes, theme chips, overrides
+ * drawer), operated together from the title row. Rule: a fold never costs information — every
+ * closed toggle names its row's value (`State · M wide`, `Theme · Night`).
  */
 class ServeViewerDisclosuresTest {
 
@@ -54,8 +45,7 @@ class ServeViewerDisclosuresTest {
       val at = html.indexOf("id=\"$id\"")
       assertTrue(at in 0 until primaryStart, "$id belongs on the title row")
     }
-    // …and nowhere else. The two drawer toggles used to live at either end of the viewer bar, which
-    // is what made the page's disclosures feel like four unrelated buttons.
+    // …and nowhere else.
     assertFalse(html.contains("class=\"cp-viewer-bar\""), "the secondary viewer bar is removed")
     for (id in listOf("cp-nav-toggle", "cp-controls-toggle")) {
       assertTrue(html.split("id=\"$id\"").size - 1 == 1, "$id is emitted once, not once per home")
@@ -93,10 +83,9 @@ class ServeViewerDisclosuresTest {
 
   @Test
   fun `a cross-product component can walk both axes from wherever it was entered`() {
-    // state × props baked as a full matrix. The canonical variant set the landing tree draws holds
-    // one axis at its default while walking the other, so from `pressed + RTL` it offers neither
-    // `default + RTL` nor `pressed`. Both axes are folded out of the grid, so a subtree built from
-    // that set alone would make the combination reachable from nowhere at all.
+    // State × props baked as a full matrix. The landing tree's canonical variant set walks one axis
+    // at a time, so a subtree built from it alone would leave combinations like `default + RTL`
+    // unreachable.
     val previews =
       listOf("default", "pressed", "disabled").flatMap { state ->
         listOf<String?>(null, "rtl").map { direction ->
@@ -127,10 +116,8 @@ class ServeViewerDisclosuresTest {
       tree.contains("/c/p/button__ideal__pressed__light__rtl?token=t\" aria-current=\"page\""),
       "the render on screen is marked: $tree",
     )
-    // With both axes in play a single-axis label is ambiguous, not terse: the row that resets the
-    // state (`default + RTL`) and the row that resets the props (`pressed + default`) would BOTH
-    // read "Default", and the current render would be labelled by whichever pass reached it first
-    // — "Pressed", for something that is Pressed and RTL.
+    // With both axes in play a single-axis label is ambiguous: both reset rows would read
+    // "Default".
     assertTrue(tree.contains(">Default · RTL</a>"), "the state-reset row names both axes: $tree")
     assertTrue(tree.contains(">Pressed · Default</a>"), "…and so does the props-reset row: $tree")
     assertTrue(tree.contains(">Pressed · RTL</a>"), "…and the render on screen: $tree")
@@ -196,9 +183,8 @@ class ServeViewerDisclosuresTest {
       light.contains("<span class=\"cp-toggle-value\" id=\"cp-theme-toggle-value\">Light</span>"),
       light,
     )
-    // The label has to agree with the SELECT, which is the axis's state holder: a preview with no
-    // uiMode and no light/dark id token opens on Day, so the toggle beside it must say Day rather
-    // than contradicting the selected option until the observer catches up.
+    // The label must agree with the select: a preview with no uiMode and no light/dark token opens
+    // on Day.
     val untagged = viewer(listOf(ServePreview("com.example.ButtonPreview", "Button")))
     assertTrue(
       untagged.contains("<option value=\"light\" selected>Light (Default)</option>"),
@@ -210,27 +196,22 @@ class ServeViewerDisclosuresTest {
       ),
       "an untagged preview opens on Day; the toggle must not say Night: $untagged",
     )
-    // The theme is picked without a page load, so the server-rendered label would go stale on the
-    // first click; `<cp-viewer-drawers>` mirrors whichever chip viewer.js marks pressed. That it
-    // does is asserted against the element in `cli/serve-web/test/viewerDrawers.test.ts`
-    // ("mirrors the pressed theme chip into the toggle's value"), which a substring match on a
-    // minified bundle could not do.
+    // The theme changes without a page load; `<cp-viewer-drawers>` mirroring the pressed chip is
+    // asserted in `cli/serve-web/test/viewerDrawers.test.ts`.
   }
 
   @Test
   fun `the component list is collapsible on a desktop too, and every fold is remembered`() {
     val css = ServeWebAssets.load("serve.css")!!.bytes.decodeToString()
-    // Three states, not two: no class (open on a desktop, closed below), `cp-nav-open` (open
-    // everywhere), `cp-nav-closed` (closed everywhere). Without the third the title bar's toggle
-    // would be inert at exactly the width where a 240px column costs the most.
+    // Three states: no class (open on desktop, closed below), `cp-nav-open`, `cp-nav-closed`;
+    // without the third the toggle is inert on desktop.
     assertTrue(
       css.contains(".cp-viewer:not(.cp-nav-open):not(.cp-nav-closed) .cp-nav { display: flex; }"),
       css.substringAfter("@media (min-width: 1100px)").take(400),
     )
-    // That closing the list says so out loud (`cp-nav-closed`), and that the fold keys are scoped
-    // per catalog, are asserted against the real element and the rule module in
-    // `cli/serve-web/test/viewerDrawers.test.ts` and `test/drawerState.test.ts`. What stays here
-    // is the half Kotlin owns: that the server names the catalog those folds belong to.
+    // `cp-nav-closed` and per-catalog fold keys are tested in
+    // `cli/serve-web/test/viewerDrawers.test.ts` and `test/drawerState.test.ts`; here, only that
+    // the server names the catalog.
     assertTrue(
       ServeWeb.viewerPage(
           ServePreview("button__ideal__default__light", "Button"),
@@ -243,17 +224,10 @@ class ServeViewerDisclosuresTest {
     )
   }
 
-  // `the phone's component sheet is transient, and the desktop default stays responsive` used to
-  // live here as six substring matches on `viewer-drawers.js` — `if (isMobile()) return;`,
-  // `setOpen("cp-nav-open", resolvedNavOpen());`, and so on. Every one of them proved a line
-  // existed in a file, none proved a drawer behaved, and none can survive a minified bundle. The
-  // rules are now a table in `cli/serve-web/test/drawerState.test.ts` (three viewport bands ×
-  // stored preference × server default) and the wiring is exercised against the real element in
-  // `test/viewerDrawers.test.ts`, including the resize this file could only assert as the presence
-  // of an `addEventListener` call:
-  //
-  //   - "stores nothing about the drawers on a phone"
-  //   - "is closed on a phone whatever a desktop visit stored"
-  //   - "restores a stored choice over the server default"
-  //   - "drops the nav when a wide window narrows to a phone"
+  // Drawer behaviour is tested in `cli/serve-web/test/drawerState.test.ts` (viewport band × stored
+  // preference × server default) and `test/viewerDrawers.test.ts`:
+  // - "stores nothing about the drawers on a phone"
+  // - "is closed on a phone whatever a desktop visit stored"
+  // - "restores a stored choice over the server default"
+  // - "drops the nav when a wide window narrows to a phone"
 }

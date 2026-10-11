@@ -39,15 +39,10 @@ class ServeBundleHostTest {
 
   @Test
   fun `the known-difference document a host serves is the one its generation was built on`() {
-    // A catalog refresh swaps the staged directory over `bundleDir` and finishes its post-swap work
-    // — the Wasm app, vectors, themes, live bundles — before it registers a rebuilt host. Every
-    // other thing this host serves (`previews`, `parityIssues`, the design references) was read
-    // when the host was built, so a per-call read of this one file would put a NEW document beside
-    // an OLD inventory for that whole window. The dashboard's walk joins the two, so an acceptance
-    // naming a preview the new catalog has and the old host does not would read as
-    // `orphaned-target` — a problem reported that does not exist. A false finding is worse than a
-    // late one, and nothing is lost: a refresh rebuilds the host, so a fresh document still lands
-    // within one tick.
+    // A refresh swaps the staged directory before registering a rebuilt host, while everything else
+    // this host serves was read at build time. Reading this file per call would pair a new document
+    // with an old inventory, producing false `orphaned-target` findings; a rebuild delivers the
+    // fresh document within one tick anyway.
     val dir = bundle("com.example.Red" to byteArrayOf(4, 2))
     val file =
       File(dir, "${ServeKnownDifferences.DIRECTORY}/${ServeKnownDifferences.DOCUMENT_FILE}")
@@ -77,9 +72,8 @@ class ServeBundleHostTest {
 
   @Test
   fun `published typography answers the annotations lane without a daemon`() {
-    // A static bundle has no semantics tree to capture — but a published catalog measured these
-    // facts over the very PNG this host serves, so the viewer's Typography layer has a source. The
-    // alternative shipped for a while: a checkbox that fetched a 404 and silently drew nothing.
+    // A published catalog measured typography over the PNG this host serves, so the Typography
+    // layer has a source without a semantics tree.
     val host = ServeBundleHost(annotatedBundle("button__light", typographyRecord), label = "b")
 
     assertTrue(host.hasPublishedTypographyFor("button__light"))
@@ -92,9 +86,8 @@ class ServeBundleHostTest {
 
   @Test
   fun `the annotations lane draws only the kinds the overlay has layers for`() {
-    // `layout` is published for the compare page, which reads the same manifest for a different
-    // surface. `<cp-inspect-layers>` groups by layer, and there is no layout layer — so a layout
-    // record would land in the legend under no heading at all.
+    // `layout` is published for the compare page; `<cp-inspect-layers>` has no layout layer, so it
+    // would land under no heading.
     val host =
       ServeBundleHost(
         annotatedBundle("button__light", typographyRecord, layoutRecord),
@@ -137,11 +130,8 @@ class ServeBundleHostTest {
 
   @Test
   fun `a session with no staging lane is never waiting for a published comparison`() {
-    // `pending` gates cacheability: the viewer and compare pages drop to `no-store` while the
-    // catalog's background lane might still land a manifest. A plain uploaded bundle has no such
-    // lane — nothing will ever write `rc-compare/index.json` for it — so reading the file's absence
-    // as "still pending" left every one of its fully-baked pages uncacheable for the life of the
-    // host, which is the opposite of what a baked session wants.
+    // `pending` gates cacheability. A plain uploaded bundle has no comparison lane, so a missing
+    // `rc-compare/index.json` must not mark it pending forever.
     val host = ServeBundleHost(bundle("com.example.Red" to byteArrayOf(4, 2)), label = "b")
     assertFalse(host.rcComparePending())
 
@@ -157,9 +147,8 @@ class ServeBundleHostTest {
 
   @Test
   fun `the no-admission fast path serves real local pixels`() {
-    // Against the REAL host, not a fake. The fast path is only worth anything if it actually finds
-    // the file: a fake that returns bytes regardless would pass while the production path silently
-    // fell through to the admitted render queue for every request.
+    // Against the real host: a fake returning bytes regardless would hide a fast path that never
+    // finds the file.
     val host = ServeBundleHost(bundle("com.example.Red" to byteArrayOf(4, 2)), label = "b")
 
     val ok = host.bakedRender("com.example.Red", PreviewOverrides())
@@ -182,14 +171,9 @@ class ServeBundleHostTest {
   }
 
   /**
-   * Which Remote Compose player drew the baked pixels is a fact about the manifest, not the id.
-   *
-   * Everything bakes through the embedded player — `RemoteOverridablePreview` defaults to it — so
-   * `?rcPlayer=androidx-embedded` on an ordinary preview is a request the snapshot answers exactly,
-   * and the routing predicates are allowed to treat it as a no-op. A preview that pins
-   * `RemoteViewPreviewWrapper` is the one exception, and the whole point of asking the host is that
-   * it does not get swept into the default: for that preview androidx-embedded is a genuine
-   * re-render.
+   * Which RC player drew the baked pixels comes from the manifest. Everything bakes through the
+   * embedded player (`RemoteOverridablePreview`'s default), except previews pinning
+   * `RemoteViewPreviewWrapper`, for which androidx-embedded is a genuine re-render.
    */
   @Test
   fun `the baked player is read from a preview's pinned wrapper`() {
@@ -219,21 +203,14 @@ class ServeBundleHostTest {
     val host = ServeBundleHost(dir, label = "compose-m3")
     assertEquals(RemoteComposePlayerKind.EMBEDDED, host.bakedRcPlayer("com.example.Card"))
     assertEquals(RemoteComposePlayerKind.VIEW, host.bakedRcPlayer("com.example.Pinned"))
-    // An id with no captured document had no player draw it, which is a different answer from
-    // "the embedded one did" — every `rcPlayer` request on it stays a genuine, refusable override
-    // rather than being cleared against an unrelated snapshot.
+    // An id with no captured document had no player, so `rcPlayer` requests on it stay genuine
+    // overrides.
     assertEquals(null, host.bakedRcPlayer("com.example.Absent"))
   }
 
   /**
-   * …and a session holding NO manifest says so, rather than inferring the common answer.
-   *
-   * A published catalog stages no `previews.json`, so nothing there records a `@PreviewWrapper`
-   * pin. Inferring the `RemoteOverridablePreview` default would be right for every catalog we
-   * publish today and silently wrong for a view-pinned preview — it would answer
-   * `?rcPlayer=androidx-embedded` with the view player's capture under a confident 200, and have
-   * the viewer drop the parameter and label those pixels AndroidX Embedded. Unknown costs a
-   * redundant query parameter instead, which is the behaviour that predates this seam.
+   * A session with no manifest (published catalogs stage no `previews.json`) answers unknown rather
+   * than inferring the default, which would be confidently wrong for a view-pinned preview.
    */
   @Test
   fun `a catalog that records no capture player is unknown, not assumed embedded`() {
@@ -265,11 +242,8 @@ class ServeBundleHostTest {
     assertEquals(RemoteComposePlayerKind.EMBEDDED, host.bakedRcPlayer("com.example.Card"))
     assertEquals(RemoteComposePlayerKind.VIEW, host.bakedRcPlayer("com.example.Pinned"))
 
-    // …and the picker offers that lane. A bare URL serves those pixels, so greying out the chip
-    // for the very player the snapshot came from would have the host disagree with itself — and
-    // `java` can never arrive any other way, because [RcPlayerBackend.ANDROIDX_VIEW] has no
-    // rc-compare
-    // column to be staged from.
+    // ...and the picker offers that lane: a bare URL serves those pixels, and `java` has no
+    // rc-compare column to be staged from.
     assertTrue(
       RcPlayerBackend.ANDROIDX_EMBEDDED in host.enabledRcPlayersFor("com.example.Card"),
       "the embedded lane is offered where baked is that player",
@@ -286,8 +260,8 @@ class ServeBundleHostTest {
   }
 
   /**
-   * Newer daemons record the players by their implementation names; older ones recorded the
-   * embedded player as `cmp-android` (the test above). Both read back as the same built-in.
+   * Newer daemons record players by implementation name; older ones used `cmp-android` for
+   * embedded. Both read back the same.
    */
   @Test
   fun `a capture player recorded by its implementation name is read back`() {
@@ -452,9 +426,8 @@ class ServeBundleHostTest {
 
   @Test
   fun `renderSvg prefers the per-variant vector over the light-preferred slug svg`() {
-    // The catalog ships BOTH shapes: the back-compat `figma/<slug>.svg` (one per component,
-    // light-preferred) and the per-variant `figma/<slug>/<variant>.svg`. Serving the slug vector
-    // for a `…__dark` id hands out the light theme — the exact "dark URL serves a light SVG" bug.
+    // The catalog ships both the slug `figma/<slug>.svg` (light-preferred) and per-variant
+    // `figma/<slug>/<variant>.svg`; a `…__dark` id must not get the light slug vector.
     val dir =
       bundle(
         "speakerdetails__ideal__default__dark__compact" to byteArrayOf(1),
@@ -572,11 +545,8 @@ class ServeBundleHostTest {
     val plain = ServeBundleHost(dir, label = "b")
     assertFalse(plain.hasSvgExportFor("button-filled__ideal__default__dark"))
 
-    // A figma dir carrying only `button-filled.svg`: the session-wide flag is true because a figma
-    // dir exists, but per preview only `button-filled` has a vector — `badge` (no svg) and an
-    // unknown
-    // id must report false so the viewer doesn't offer an SVG control that would render "failed"
-    // (issue #2352).
+    // The session-wide flag is true when a figma dir exists, but per preview only those with a
+    // vector report true, so the viewer doesn't offer a failing SVG control.
     val figma = File(dir, "figma").apply { mkdirs() }
     File(figma, "button-filled.svg").writeText("<svg/>")
     val host = ServeBundleHost(dir, label = "b", figmaDir = figma)
@@ -621,10 +591,8 @@ class ServeBundleHostTest {
 
   @Test
   fun `a throttled pinned read is not remembered as a missing file`() {
-    // `pinnedMisses` is deliberately permanent: `(commit, path)` is immutable, so "that revision
-    // has no such file" can never stop being true. That reasoning only holds for a real 404. A
-    // throttle says nothing about the revision, and memoising one turned a blip into a hole that
-    // outlived it — the accepted cost of a fetch layer that could not tell them apart.
+    // `pinnedMisses` is permanent only for real 404s (`(commit, path)` is immutable); a throttle
+    // says nothing about the revision and must not be memoised.
     val commit = "1".repeat(40)
     val previewId = "button-filled__ideal__default__dark"
     val dir = java.nio.file.Files.createTempDirectory("pinned-throttle").toFile()
@@ -694,10 +662,9 @@ class ServeBundleHostTest {
 
   @Test
   fun `a declared capture gutter is trimmed off a card's thumbnail`() {
-    // m3-catalog's `Button/Elevated`: a 249x126 button captured with `@CaptureGutter(all = 4,
-    // bottom = 5)` at 2.625, so its PNG is 271x150 and a sheet fitting whole canvases to a column
-    // drew it ~7% smaller than the four gutter-less siblings beside it (m3-catalog#179). The
-    // gutter is a fact the renderer recorded, so the crop is exact rather than inferred.
+    // A button captured with `@CaptureGutter(all = 4, bottom = 5)` at 2.625 (PNG 271x150): fitting
+    // whole canvases drew it smaller than its gutter-less siblings. The renderer recorded the
+    // gutter, so the crop is exact.
     val dir = bundle("button-elevated__ideal__default__light" to pngOf(271, 150))
     File(dir, "previews.json")
       .writeText(
@@ -720,8 +687,8 @@ class ServeBundleHostTest {
         render = RenderSize(271, 150),
         offset = CropOffset(-11, -11),
         clip = false,
-        // The native box and the capped axis (height, for a gutter crop) ride along, so the page
-        // can re-derive the window's width for a narrower viewport's cap (#4544).
+        // The native box and capped axis ride along so the page can re-derive the window width for
+        // a narrower viewport.
         nativeWindowW = 249,
         nativeCapAxis = 126,
       ),
@@ -750,9 +717,8 @@ class ServeBundleHostTest {
 
   @Test
   fun `an RTL capture's leading gutter is published as the right-hand margin`() {
-    // The renderer placed `start` against the layout direction it composed in, so on an Arabic
-    // capture the leading margin is on the right. The crop reads pixels, not a direction — it can
-    // only be told.
+    // The renderer placed `start` per layout direction, so an RTL capture's leading margin is on
+    // the right; the crop must be told.
     val dir = bundle("sticker__ideal__rtl" to pngOf(200, 100))
     File(dir, "previews.json")
       .writeText(
@@ -777,9 +743,7 @@ class ServeBundleHostTest {
 
   @Test
   fun `a gutter crop served while a vector is still landing is not memoised`() {
-    // The figma pass fills vectors in the background. Answering with the gutter meanwhile is right
-    // — a card that waits is a card drawn at the wrong size — but caching that answer would keep
-    // the vector from ever being reconsidered.
+    // Vectors fill in the background; answer with the gutter meanwhile, but don't cache it.
     val dir = bundle("sticker__ideal__default" to pngOf(200, 100))
     File(dir, "previews.json")
       .writeText(
@@ -802,9 +766,8 @@ class ServeBundleHostTest {
     File(figma, "sticker.svg")
       .writeText("""<svg viewBox="0 0 40 20"><g transform="translate(-80, -40)"></g></svg>""")
     val second = host.contentCrop("sticker__ideal__default")
-    // The vector's own box, NOT unioned with the render's drawn extent: on a guttered render that
-    // extent includes the shadow the gutter reserved room for, and unioning it would grow the
-    // window past the component and draw it smaller than its siblings. It bleeds instead.
+    // The vector's own box, not unioned with the render's drawn extent (which includes the gutter's
+    // shadow room and would shrink the component).
     assertEquals(40, second?.window?.w)
     assertEquals(20, second?.window?.h)
     assertEquals(false, second?.clip)
@@ -812,8 +775,8 @@ class ServeBundleHostTest {
 
   @Test
   fun `a rebuilt host reuses the crops computed over the same files`() {
-    // The registry rebuilds a catalog's host on every resume, and each rebuild used to decode every
-    // card's PNG again on the landing's request thread. The answer depends only on the files.
+    // Rebuilding a host on every resume used to decode every card's PNG again on the request
+    // thread; the answer depends only on the files.
     val dir = bundle("sticker__ideal__default" to pngOf(200, 100))
     File(dir, "previews.json")
       .writeText(

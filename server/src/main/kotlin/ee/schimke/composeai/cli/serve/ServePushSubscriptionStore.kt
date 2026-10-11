@@ -26,9 +26,8 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 
 /**
- * What a person can ask to be told about by push. Each is opted into separately, and each is a
- * moment where somebody is now waiting on the person being notified — the rule of thumb in
- * compose-preview-server#1299. Everything else stays in the product.
+ * What a person can opt into being pushed about, each separately: moments where someone is now
+ * waiting on them (see #1299). Everything else stays in the product.
  */
 internal enum class PushKind(val wire: String, val label: String) {
   /** Somebody replied on a comment thread I have taken part in. */
@@ -50,13 +49,10 @@ internal enum class PushKind(val wire: String, val label: String) {
 }
 
 /**
- * One browser's push subscription, owned by the signed-in GitHub identity that created it.
- *
- * [endpoint], [p256dh] and [auth] are **secrets**. Anybody holding the endpoint can address that
- * browser through its push service (VAPID stops them *sending*, not knowing), and the two keys are
- * what keep the payload private from the push service. So none of them is ever logged, returned by
- * a route, or reachable from MCP: the store hands them to the sender and nowhere else, and a log
- * line names a subscription by [ServeUiBuilderCommentWebhook.fingerprintOf] its endpoint.
+ * One browser's push subscription, owned by the GitHub identity that created it. [endpoint],
+ * [p256dh] and [auth] are secrets (the endpoint addresses the browser; the keys keep payloads
+ * private from the push service), so they are never logged, returned by a route or reachable from
+ * MCP. Logs use [ServeUiBuilderCommentWebhook.fingerprintOf] the endpoint.
  */
 @Serializable
 internal data class StoredPushSubscription(
@@ -84,22 +80,13 @@ internal sealed interface PushSubscribeResult {
 }
 
 /**
- * The Web Push subscriptions on this host: one small JSON file beside the UI-builder state.
+ * This host's Web Push subscriptions: one small JSON file beside the UI-builder state. Keyed by
+ * endpoint (the browser), so a re-subscribe replaces and a shared machine follows whoever signed in
+ * last. Bounded per actor and in total, refusing rather than evicting so lost devices don't go
+ * unexplained. Directory `0700`, file `0600` ([ServeOwnerOnlyFiles]).
  *
- * Keyed by endpoint, because the endpoint is the browser: a second subscribe from the same browser
- * replaces the first, and when a shared machine changes hands the subscription follows whoever
- * signed in last rather than continuing to deliver the previous person's replies to it.
- *
- * Bounded per actor and in total, refusing rather than evicting, for the reason the comment store
- * gives: a refusal is something somebody can act on, and silently dropping the oldest device is a
- * notification that stops arriving with nobody told why.
- *
- * The directory is `0700` and the file `0600` ([ServeOwnerOnlyFiles]); the file holds every
- * subscriber's endpoint and keys.
- *
- * More than one process may hold this store over the same directory — two replicas during a rolling
- * deployment — so every write is a read-modify-write under a file lock, and every read re-reads the
- * file when it has changed since this process last saw it ([exclusive], [load]).
+ * Two replicas may share the directory during a rolling deploy, so writes are read-modify-write
+ * under a file lock and reads reload when the file changed ([exclusive], [load]).
  */
 internal class ServePushSubscriptionStore(
   private val root: Path,
@@ -118,9 +105,8 @@ internal class ServePushSubscriptionStore(
   private val lockFile: Path = root.resolve(".$FILE_NAME.lock")
 
   /**
-   * Shared by every store over this directory in this process. A `FileChannel` lock belongs to the
-   * whole JVM, and asking for one the JVM already holds throws rather than waits, so two instances
-   * here (a test, or a host that opens the store twice) queue on this monitor before the file lock.
+   * Shared per directory within the process: a JVM-wide `FileChannel` lock throws rather than waits
+   * when already held, so in-process instances queue here first.
    */
   private val lock: Any =
     PROCESS_LOCKS.computeIfAbsent(lockFile.toAbsolutePath().normalize()) { Any() }
@@ -134,22 +120,13 @@ internal class ServePushSubscriptionStore(
 
   fun forActor(actor: String): List<StoredPushSubscription> = all().filter { it.actor == actor }
 
-  /**
-   * The kinds [actor] has chosen: those of their newest subscription, or every kind when they have
-   * none yet — which is what a first subscribe offers, before anybody has narrowed it.
-   */
+  /** The kinds [actor] chose (from their newest subscription), or every kind before any choice. */
   fun kinds(actor: String): Set<PushKind> = kindsOf(all(), actor)
 
   /**
-   * Bind [endpoint] to [actor], idempotently.
-   *
-   * The same browser posting the same subscription again — which the settings page does on every
-   * load, to confirm the endpoint is the signed-in person's — writes nothing. A different person
-   * posting it takes it over: the endpoint is the browser, and it follows whoever signed in last.
-   *
-   * Explicit [kinds] are the person's choice for every device, as [setKinds] is, so they are
-   * applied to each of [actor]'s subscriptions, not only this one. Null [kinds] keeps what the
-   * person already chose.
+   * Bind [endpoint] to [actor], idempotently: the settings page re-posts on every load, which
+   * writes nothing; another person posting it takes it over. Explicit [kinds] apply to all of
+   * [actor]'s subscriptions (as [setKinds]); null keeps the existing choice.
    */
   fun subscribe(
     actor: String,
@@ -214,9 +191,8 @@ internal class ServePushSubscriptionStore(
   }
 
   /**
-   * Remove [actor]'s subscription whose endpoint [deviceOf] answers [device]: what a sign-out
-   * drops, from the device cookie the subscribe response set in that browser. False when nothing of
-   * theirs matched.
+   * Remove [actor]'s subscription whose [deviceOf] matches [device] (the cookie a sign-out sends).
+   * False when none matched.
    */
   fun unsubscribeDevice(actor: String, device: String): Boolean = removeWhere {
     it.actor == actor && deviceOf(it.endpoint) == device
@@ -265,16 +241,10 @@ internal class ServePushSubscriptionStore(
       ?.toSet() ?: PushKind.ALL
 
   /**
-   * Read-modify-write under an exclusive lock on a sibling `.lock` file, so a second process over
-   * the same directory cannot interleave.
-   *
-   * That second process is real: `deploy/image` keeps this directory on the shared config volume,
-   * and a rolling deployment runs the retiring and the replacement replica side by side for a
-   * moment. Each holds its own [cached] list; without this, whichever wrote last would rewrite the
-   * file from its snapshot and silently drop the other's subscribe, unsubscribe or removal. [load]
-   * re-reads the file whenever it changed under us, which inside this lock is exactly "the other
-   * replica wrote". The same pattern as [ServeEngagementStore]. A filesystem that cannot lock still
-   * gets the in-process lock and a warning, never a failed request.
+   * Read-modify-write under an exclusive lock on a sibling `.lock` file, since replicas in a
+   * rolling deploy share this directory and would otherwise overwrite each other's changes from
+   * stale snapshots. [load] re-reads whenever the file changed. Same pattern as
+   * [ServeEngagementStore]; a filesystem that can't lock gets the in-process lock and a warning.
    */
   private fun <T> exclusive(block: () -> T): T =
     synchronized(lock) {
@@ -338,9 +308,8 @@ internal class ServePushSubscriptionStore(
   }
 
   /**
-   * Which file this is, and which version of it. Every save is a new file moved into place, so the
-   * file key (the inode, where the platform has one) changes on each write; the modified time and
-   * size cover a platform without one.
+   * Identifies a file version: every save is a new file moved into place, so the file key (inode)
+   * changes; mtime and size cover platforms without one.
    */
   private data class FileStamp(val key: Any?, val modified: FileTime, val size: Long)
 
@@ -367,8 +336,8 @@ internal class ServePushSubscriptionStore(
     private val PROCESS_LOCKS = ConcurrentHashMap<Path, Any>()
 
     /**
-     * The value of the device cookie for [endpoint]: a SHA-256 of it, so the cookie names this
-     * browser's subscription without carrying the endpoint, which is a secret.
+     * The device cookie value for [endpoint]: its SHA-256, so the cookie doesn't carry the secret
+     * endpoint.
      */
     fun deviceOf(endpoint: String): String =
       MessageDigest.getInstance("SHA-256")
@@ -376,8 +345,8 @@ internal class ServePushSubscriptionStore(
         .joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
 
     /**
-     * [text] into [target] via a temporary file that is created `0600`, then moved into place, so
-     * the file is never briefly readable by others and a crash never leaves half a file.
+     * Write [text] via a temp file created `0600` and moved into place, so it is never briefly
+     * world-readable or half-written.
      */
     fun writeOwnerOnly(target: Path, text: String) {
       val temp = Files.createTempFile(target.parent, ".${target.fileName}", ".tmp")
@@ -404,19 +373,10 @@ internal class ServePushSubscriptionStore(
 }
 
 /**
- * Where this server may be told to POST: the guard against turning a push subscription into a
- * server-side request forgery.
- *
- * A subscription's endpoint is a URL a signed-in browser hands us, and the sender will POST to it.
- * Accepted unchecked, that is a way to make this host send requests to its own loopback, to the
- * cloud metadata service, or to anything else on its private network. So an endpoint must be
- * `https`, on the default port, with a public DNS name or a public address — checked here when it
- * is stored, and its resolved addresses checked again by the sender before every delivery, so a
- * name that later re-points at `10.0.0.1` is caught then too.
- *
- * Deliberately not an allowlist of today's push services (FCM, Mozilla autopush, Apple, Windows):
- * the standard leaves the push service to the browser, and an allowlist would refuse the next one
- * silently. The address rules are what actually stop the forgery.
+ * Where this server may POST: guards against using a push subscription for SSRF. An endpoint must
+ * be `https` on the default port with a public name or address, checked when stored and re-checked
+ * by the sender before each delivery (so a re-pointed name is caught). Not an allowlist of push
+ * services, which browsers choose.
  */
 internal object ServePushEndpoints {
   const val MAX_ENDPOINT_CHARS = 2048
@@ -453,8 +413,8 @@ internal object ServePushEndpoints {
   }
 
   /**
-   * Whether every address [host] resolves to is public. The sender's second look, so a DNS answer
-   * that changed after the subscription was stored cannot point a delivery inward.
+   * Whether every address [host] resolves to is public; the sender's second look before each
+   * delivery.
    */
   fun resolvesPublic(
     host: String,
@@ -512,13 +472,9 @@ internal object ServePushEndpoints {
 }
 
 /**
- * This deployment's VAPID key pair, and the subject push services may contact about it.
- *
- * Generated once and kept beside the subscriptions, because every subscription a browser holds is
- * bound to the public key it was created with: a new key pair is every subscriber silently unable
- * to receive anything until they subscribe again. That is also why a hosted deployment can pin the
- * pair through `--vapid-public-key` / `--vapid-private-key` — a rebuilt volume must not cost
- * everybody their notifications.
+ * This deployment's VAPID key pair and contact subject. Generated once and kept beside the
+ * subscriptions, since a new pair silently breaks every existing subscription; hosted deployments
+ * can pin it via `--vapid-public-key` / `--vapid-private-key`.
  */
 internal class ServeVapidKeys(val keyPair: KeyPair, val subject: String) {
   val publicKey: String =
@@ -534,9 +490,8 @@ internal class ServeVapidKeys(val keyPair: KeyPair, val subject: String) {
     private val JSON = Json { ignoreUnknownKeys = true }
 
     /**
-     * The configured pair when both halves are given, else the one in [directory], else a new one
-     * written there. A configured pair whose halves do not belong together is refused: it would
-     * sign tokens no push service accepts for the key browsers subscribed with.
+     * The configured pair when both halves are given, else the one in [directory], else a newly
+     * written one. Mismatched configured halves are refused.
      */
     fun loadOrCreate(
       directory: Path,
@@ -605,9 +560,8 @@ internal class ServeVapidKeys(val keyPair: KeyPair, val subject: String) {
     }
 
     /**
-     * The `sub` claim: the operator's own, else this deployment's https origin, else the project's
-     * page. Apple refuses a token without a `mailto:` or `https:` subject, so the default is always
-     * one of those — never a bare host, and never `http://localhost`.
+     * The `sub` claim: configured, else the deployment's https origin, else the project page.
+     * Always `mailto:` or `https:`, which Apple requires.
      */
     fun subjectFor(configured: String?, origin: String?): String {
       configured

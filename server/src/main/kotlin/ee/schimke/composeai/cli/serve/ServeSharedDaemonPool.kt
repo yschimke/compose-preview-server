@@ -9,34 +9,24 @@ import kotlin.concurrent.withLock
 
 /**
  * A lazy pool of identical monolithic catalog daemons used only by leased theme-render batches.
- *
- * Slot zero is the catalog's ordinary shared daemon. It stays the sole lane for browsing, knob
- * edits, streams and unleased theme renders. Concurrent leased requests borrow it first, then
- * lazily open up to [capacity] - 1 replicas from the same launch descriptor. A sequential batch
- * therefore remains one warm process; only actual overlap creates replicas.
- *
- * The primary is owned by [ServeCatalogLiveHost]. This pool owns and closes replicas only.
+ * Slot zero is the catalog's shared daemon, still the sole lane for browsing, knobs, streams and
+ * unleased renders; overlapping leased requests borrow it first, then lazily open up to [capacity]
+ * - 1 replicas from the same launch descriptor. The primary is owned by [ServeCatalogLiveHost];
+ *   this pool owns only replicas.
  */
 class ServeSharedDaemonPool(
   private val primary: ServeHost,
   val capacity: Int = DEFAULT_CAPACITY,
   private val clock: () -> Long = System::currentTimeMillis,
   /**
-   * Whole-box daemon budget ([LiveSeatLimiter]). A replica holds [seatWeight] permits for as long
-   * as it is open, so burst width is bounded by what the box can actually afford and not only by
-   * [capacity], which is per catalog. Null keeps the historical unbudgeted behaviour.
+   * Box-wide daemon budget ([LiveSeatLimiter]): a replica holds [seatWeight] permits while open, so
+   * burst width is bounded by what the box can afford, not just per-catalog [capacity]. Null leaves
+   * it unbudgeted.
    *
-   * Charged as **foreground** ([LiveSeatLimiter.acquire]) for a visitor's burst: a replica opens
-   * when *leased* renders overlap — someone is sitting in front of the grid waiting for those
-   * pixels — so it is the same class of demand as a stream. It is also short-lived: the burst ends,
-   * the replica goes idle, and [reapIdle] returns the seat. Making it compete for the background
-   * remainder instead capped a visitor's burst at whatever the prefetcher had left over, which is
-   * backwards.
-   *
-   * The idle theme optimizer reaches this pool through the same leased path but satisfies neither
-   * premise — it is background residency and it does not end — so it passes `background = true` to
-   * [render] and its replicas take the background remainder instead. Never the per-preview slice:
-   * that is another lane's guarantee, not spare capacity.
+   * A visitor's burst is charged as foreground ([LiveSeatLimiter.acquire]): someone is waiting, and
+   * replicas are reaped once idle ([reapIdle]). The idle theme optimizer uses the same leased path
+   * but is background residency that doesn't end, so it passes `background = true` to [render] and
+   * takes the background remainder. Never the per-preview slice.
    */
   private val liveSeats: LiveSeatLimiter? = null,
   private val seatWeight: () -> Int = { 1 },
@@ -51,16 +41,12 @@ class ServeSharedDaemonPool(
   // Wall-clock of the last render each replica finished, for [reapIdle]. The primary isn't tracked:
   // it belongs to the catalog host and this pool never closes it.
   private val replicaLastUsed = mutableMapOf<ServeHost, Long>()
-  // Concurrent borrows in flight, and the high-water mark since it was last taken. A borrowed host
-  // is out of `available`, so concurrent borrows IS the number of daemons rendering at once — which
-  // is what a caller means by "how wide did that batch actually run", and is not the same as how
-  // many jobs it submitted. See [takePeakInFlight].
+  // Concurrent borrows and their high-water mark: the number of daemons actually rendering at once,
+  // not jobs submitted. See [takePeakInFlight].
   private val inFlight = AtomicInteger(0)
   private val peakInFlight = AtomicInteger(0)
-  // Replicas opened but not yet rendered, and the longest first-render seen since it was last
-  // taken. A replica is opened lazily and its daemon session does not start until that first
-  // render, so the render carries a 34-68s cold start on an Android lane. See
-  // [takeColdStartMillis].
+  // Replicas opened but not yet rendered, and the longest first render since last taken; a
+  // replica's first render carries its full cold start. See [takeColdStartMillis].
   private val coldReplicas = mutableSetOf<ServeHost>() // guarded by [lock]
   private val peakColdStartMillis = AtomicLong(0)
   // Replicas whose seat was taken on the FOREGROUND budget, i.e. opened by a visitor's burst. A
@@ -73,49 +59,25 @@ class ServeSharedDaemonPool(
   }
 
   /**
-   * Peak concurrent borrows since the last call, resetting the high-water mark.
-   *
-   * The measurement a batch needs: it submits N jobs, but when the seat budget affords no replica
-   * the pool queues them onto a host already in circulation rather than spawning one. N jobs can
-   * therefore be N threads taking turns on one daemon — indistinguishable from a genuinely N-wide
-   * batch if you count jobs. Read-and-reset rather than a plain gauge because the caller wants the
-   * peak *within its batch*, and sampling the instantaneous value almost never catches it.
-   *
-   * Pool-wide, not per-caller: a foreground leased render borrowing at the same time counts too. In
-   * the optimizer's case that is rare (it runs on an idle box, by construction) and errs toward
-   * reporting the batch as wider than it was — so a NARROW reading is trustworthy, which is the
-   * direction that matters here.
+   * Peak concurrent borrows since the last call, resetting the mark. Without a replica, N jobs can
+   * take turns on one daemon, which counting jobs can't reveal; read-and-reset catches the peak
+   * within a batch. Pool-wide, so it can only overstate width; a narrow reading is trustworthy.
    */
   fun takePeakInFlight(): Int = peakInFlight.getAndSet(inFlight.get())
 
   /**
-   * The longest replica cold start since the last call, resetting the mark.
-   *
-   * A replica is opened lazily and its daemon session does not start until its first render, so
-   * that render carries the full cold start — 34-68s on an Android/Robolectric lane. Without this
-   * the caller charges it to per-entry render cost, which is precisely the conflation the
-   * warm/batch split exists to remove: only the PRIMARY's warm is visible to the caller, and a
-   * five-wide batch can be opening four cold replicas underneath it.
-   *
-   * The **longest**, not the sum: the cold starts overlap inside one batch, whose wall-clock is
-   * bounded by its slowest lane. Summing them would exceed the interval being attributed.
-   *
-   * A replica stays cold until a render actually enters its session — a `NotFound` (answered from
-   * the id set first) or a throw leaves it cold, so the cold start is still reported when whichever
-   * later render does start the daemon pays it.
+   * Longest replica cold start since the last call, resetting the mark, so the caller can attribute
+   * it to warm-up rather than per-entry render cost. The longest, not the sum, since cold starts
+   * overlap within a batch. A replica stays cold until a render enters its session (a `NotFound` or
+   * throw doesn't).
    */
   fun takeColdStartMillis(): Long = peakColdStartMillis.getAndSet(0)
 
   /**
-   * [background] prices any replica this render has to open against the BACKGROUND remainder
+   * [background] prices any replica this render opens against the background remainder
    * ([LiveSeatLimiter.acquireBackground]), leaving [LiveSeatLimiter.STREAM_RESERVE] free.
-   *
-   * The default (foreground) is right for a leased browse burst: a visitor is sitting in front of
-   * the grid waiting for those pixels, so it is the same class of demand as a stream. It is wrong
-   * for the idle theme optimizer, which reaches this pool through the same *leased* path but is
-   * background residency by definition — and, unlike a burst, does not end. On the deployed box
-   * that combination held 6-8 of 8 seats for hours with `activeStreams: 0`, against a reserve whose
-   * entire job is to guarantee a visitor can always start a stream.
+   * Foreground suits a visitor's burst; the endless idle optimizer must use background, or it holds
+   * the stream reserve for hours.
    */
   fun render(
     previewId: String,
@@ -136,10 +98,8 @@ class ServeSharedDaemonPool(
         check(!closed) { "shared daemon pool is closed" }
         val host =
           if (background && !primary.daemonStarted && capacity > 1) {
-            // Do not turn an idle optimizer slice into another permanently-resident catalog
-            // primary. Replicas are owned here and reaped after the burst; the primary is owned by
-            // the catalog host and otherwise survives every optimizer rotation. Production reached
-            // 17 primaries with no traffic that way, and their RAM kept the pressure gate closed.
+            // Background work never borrows the primary, so optimizer slices don't keep every
+            // catalog's primary resident; replicas are reaped after the burst.
             available.firstOrNull { it !== primary }?.also { available.remove(it) }
               ?: if (replicas.size < capacity - 1) {
                 openSeatedReplica(background = true, avoidPrimaryFallback = replicas.isNotEmpty())
@@ -152,21 +112,16 @@ class ServeSharedDaemonPool(
         // Claimed under the lock so exactly one borrow times the cold start.
         cold = coldReplicas.remove(host)
         if (cold) coldStartFrom = clock()
-        // Reprice a replica a VISITOR opened but a prefetch is now reusing. Opening it background
-        // is only half the job: a foreground burst leaves a foreground-priced replica behind, and
-        // a continuously running optimizer would then keep it alive — refreshing `replicaLastUsed`
-        // every batch so the idle sweep never closes it — while it sits inside the stream reserve.
-        // That is the production state this whole change exists to end, reached by another road.
+        // Reprice a visitor-opened (foreground) replica that prefetch is now reusing; otherwise a
+        // continuously running optimizer keeps it alive inside the stream reserve.
         if (background && liveSeats != null && host in foregroundSeated) {
           val repriced = liveSeats.acquireBackground(seatWeight(), dedicatedSlice = false)
           if (repriced != null) {
             seatTickets.put(host, repriced)?.close()
             foregroundSeated -= host
           } else {
-            // No background headroom to move it to. Serve the render anyway — narrowing is this
-            // pool's contract and failing prefetch helps nobody — but do NOT extend its life, so
-            // the idle sweep can close it and hand the foreground seat back once the burst is
-            // over. The next batch reopens it priced correctly, or narrows.
+            // No background headroom: serve the render but don't refresh its last-used time, so the
+            // idle sweep returns the foreground seat after the burst.
             refreshLastUsed = false
           }
         }
@@ -174,10 +129,8 @@ class ServeSharedDaemonPool(
       }
       peakInFlight.accumulateAndGet(inFlight.incrementAndGet(), ::maxOf)
       return borrowed.render(previewId, overrides).also {
-        // `ServeRenderHost.render` answers NotFound from its id set BEFORE touching its lazy
-        // session, so an id this replica doesn't carry leaves the daemon just as cold as it was.
-        // Consuming the marker there would hand the real cold start — paid by whichever later
-        // render does start the session — straight to `batchMillis`. A throw is the same case.
+        // `ServeRenderHost.render` answers NotFound before starting its session, so the replica is
+        // still cold; only a real render consumes the marker.
         startedDaemon = it !is RenderOutcome.NotFound
       }
     } finally {
@@ -200,15 +153,10 @@ class ServeSharedDaemonPool(
   }
 
   /**
-   * Open one replica, charged to the seat budget. Caller holds [lock].
-   *
-   * When the budget is exhausted the pool does **not** spawn anyway and does not fail the render:
-   * it waits for one of its own in-flight borrows to come back. That wait is bounded by a render,
-   * and the primary is always in circulation, so there is always something to wait for — the batch
-   * simply narrows to the width the box can afford instead of adding a JVM it can't.
-   *
-   * [background] takes the seat from the background remainder instead, so prefetch residency can
-   * never occupy the stream reserve — see [render].
+   * Open one replica charged to the seat budget; caller holds [lock]. When the budget is exhausted
+   * the pool neither spawns nor fails: it waits for one of its in-flight borrows (the primary is
+   * always in circulation), narrowing the batch. [background] takes the background remainder; see
+   * [render].
    */
   private fun openSeatedReplica(
     background: Boolean,
@@ -216,12 +164,9 @@ class ServeSharedDaemonPool(
   ): ServeHost {
     var ticket: LiveSeatLimiter.Ticket? = null
     if (liveSeats != null) {
-      // countRefusal = false: a miss here does NOT refuse the render. The burst simply narrows
-      // onto a host already in circulation (below), so counting it would report throttled widening
-      // as visitors turned away — and `liveSeatRefusals` is the evidence any budget change rests
-      // on. (`acquireBackground` never counts a refusal for the same reason.)
-      // `dedicatedSlice = false`: this pool is background work but it is NOT per-preview work, and
-      // that slice is the one seat a supplement-only preview is guaranteed.
+      // `countRefusal = false`: a miss only narrows the burst, so counting it would misreport
+      // visitors as refused in the metric budget decisions rely on. `dedicatedSlice = false`: that
+      // slice belongs to supplement-only previews.
       ticket =
         if (background) liveSeats.acquireBackground(seatWeight(), dedicatedSlice = false)
         else liveSeats.acquire(seatWeight(), countRefusal = false)
@@ -232,10 +177,8 @@ class ServeSharedDaemonPool(
         return available.removeFirst()
       }
     }
-    // Hand the seat back if the launch throws (temp-dir setup, `openHost`, the daemon process
-    // itself). The ticket isn't in `seatTickets` yet, so nothing else would ever release it and the
-    // budget would shrink permanently — refusing later streams and replicas for a process that
-    // doesn't exist.
+    // Release the seat if the launch throws; the ticket isn't tracked yet, so it would otherwise
+    // leak permanently.
     val replica =
       try {
         openReplica()
@@ -259,24 +202,17 @@ class ServeSharedDaemonPool(
   }
 
   /**
-   * Width background prefetch may use without waking a cold primary. A visitor-warmed primary is
-   * already resident and can participate; otherwise reserve that slot and use reapable replicas.
+   * Width background prefetch may use without waking a cold primary; a visitor-warmed primary can
+   * take part.
    */
   fun backgroundCapacity(): Int =
     if (!primary.daemonStarted && capacity > 1) capacity - 1 else capacity
 
   /**
-   * Close every **replica** idle for [idleMillis], returning how many were closed. The primary is
-   * never touched — it is the catalog's own daemon and this pool doesn't own it.
-   *
-   * Replicas exist to widen one leased burst; without this they outlived the burst by the life of
-   * the server, since nothing else closes them ([close] runs only when the catalog host does, and a
-   * catalog session is `pinned` so [ServeSessionRegistry.suspendIdle] never reaps it). A replica is
-   * cheap to reopen from the same launch descriptor when the next burst needs it.
-   *
-   * Takes a permit per reaped replica so it can't close a host mid-render: [render] holds a permit
-   * for the whole borrow, so acquiring here proves the lane is free. Reaping is best-effort — if
-   * every permit is busy, the next sweep tries again.
+   * Close every replica idle for [idleMillis], returning the count; never the primary. Needed
+   * because catalog sessions are pinned, so nothing else closes replicas. Takes a permit per
+   * replica (renders hold one per borrow), so it never closes a host mid-render; busy permits just
+   * wait for the next sweep.
    */
   fun reapIdle(idleMillis: Long): Int {
     if (idleMillis <= 0) return 0
@@ -296,11 +232,8 @@ class ServeSharedDaemonPool(
         break
       }
       lock.withLock {
-        // Every per-host collection, or a closed host stays strongly reachable until the whole
-        // pool closes — and a pinned catalog repeats burst-to-idle indefinitely, so that is
-        // unbounded retention rather than a bounded wart. `coldReplicas` is on this list too: a
-        // replica reaped before its first render (opened, answered NotFound, went idle) never
-        // clears itself.
+        // Remove from every per-host collection, including `coldReplicas` (a replica reaped before
+        // its first render), or closed hosts stay reachable indefinitely.
         available.remove(victim)
         replicas.remove(victim)
         replicaLastUsed.remove(victim)

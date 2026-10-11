@@ -5,39 +5,33 @@ import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.daemon.protocol.RemoteComposePlayerKind
 
 /**
- * The Remote Compose player ids this server **speaks**: what the viewer's renderer combo offers,
- * what `data-rc-default` / `data-rc-baked-player` report, and what a link this server mints puts in
- * `?rcPlayer=`.
+ * The Remote Compose player ids this server speaks: what the viewer's renderer combo offers, what
+ * `data-rc-default` / `data-rc-baked-player` report, and what minted links put in `?rcPlayer=`.
  *
- * Each id names the implementation that draws the pixels:
- *
- * |id                 |implementation                                     |where                                     |
+ * |id                 |implementation                                     |where
+ * |
  * |-------------------|---------------------------------------------------|------------------------------------------|
- * |`androidx-view`    |AndroidX `remote-player-view` `RemoteComposePlayer`|daemon, [RemoteComposePlayerKind.VIEW]    |
- * |`androidx-embedded`|vendored AndroidX embedded player                  |daemon, [RemoteComposePlayerKind.EMBEDDED]|
- * |`cmp-android`      |the CMP player (`rc-player-compose`) on Android    |daemon, by `playerId`                     |
- * |`cmp-jvm`          |the CMP player on the desktop JVM                  |this server's `rc-render-jvm` subprocess  |
- * |`cmp-wasm`         |the CMP player compiled to Wasm                    |browser                                   |
- * |`camaelon-js`      |the vendored TypeScript player                     |browser                                   |
+ * |`androidx-view`    |AndroidX `remote-player-view` `RemoteComposePlayer`|daemon,
+ * [RemoteComposePlayerKind.VIEW]    |
+ * |`androidx-embedded`|vendored AndroidX embedded player                  |daemon,
+ * [RemoteComposePlayerKind.EMBEDDED]|
+ * |`cmp-android`      |the CMP player (`rc-player-compose`) on Android    |daemon, by `playerId`
+ * |
+ * |`cmp-jvm`          |the CMP player on the desktop JVM                  |this server's
+ * `rc-render-jvm` subprocess  |
+ * |`cmp-wasm`         |the CMP player compiled to Wasm                    |browser
+ * |
+ * |`camaelon-js`      |the vendored TypeScript player                     |browser
+ * |
  *
- * `cmp-android` used to mean the AndroidX embedded player; it now means the CMP player on Android,
- * and a request naming it reaches the daemon as a registered `playerId` rather than as the embedded
- * built-in. The bare `cmp` is retired.
+ * Two vocabularies are kept apart. A `?rcPlayer=` request ([normalizeRequest]) accepts unambiguous
+ * legacy spellings (`java`/`view`, `embedded`, `js`, `rcplayer-jvm`, `rcplayer-wasm`) and never
+ * reinterprets `cmp-android`. A capture record ([fromCaptureRecord]) was written by daemons that
+ * spelled the embedded player `cmp-android` and the view player `java`, so only there are those
+ * remapped.
  *
- * Two vocabularies are deliberately kept apart:
- * * A `?rcPlayer=` **request** ([normalizeRequest]) accepts the older spellings that are not
- *   ambiguous — `java` / `view`, `embedded`, `js`, `rcplayer-jvm`, `rcplayer-wasm` — and never
- *   reinterprets `cmp-android`: in a request it means what it says now.
- * * A **capture record** — a `capturePlayer` sidecar, an older server's baked-player report
- *   ([fromCaptureRecord]) — was written by daemons that spelled the embedded player `cmp-android`
- *   and the view player `java`, so there and only there those map to `androidx-embedded` and
- *   `androidx-view`.
- *
- * compose-ai-tools' [RcPlayerBackend] is the backend universe this server renders through. Since
- * compose-ai-tools 2.32 its [RcPlayerBackend.wire] ids are these canonical ones; up to 2.31 they
- * were the old spellings (`js`, `java`, `cmp-android` for the EMBEDDED backend). [of] maps a
- * backend onto its canonical id by what it draws (its daemon player kind) rather than by that
- * spelling, so the mapping does not depend on which side of that rename a build is on.
+ * [of] maps compose-ai-tools' [RcPlayerBackend] by daemon player kind rather than its
+ * [RcPlayerBackend.wire] spelling, which changed in 2.32.
  */
 internal object ServeRcPlayerIds {
   const val ANDROIDX_VIEW: String = "androidx-view"
@@ -51,8 +45,8 @@ internal object ServeRcPlayerIds {
   data class Player(val id: String, val label: String, val serverSide: Boolean)
 
   /**
-   * Every player the viewer lists, in display order — the browser players, then the daemon ones,
-   * then the desktop subprocess. A player the host does not report is still listed, disabled.
+   * Every player the viewer lists, in display order (browser, daemon, desktop subprocess);
+   * unreported ones are listed disabled.
    */
   val UNIVERSE: List<Player> =
     listOf(
@@ -67,9 +61,8 @@ internal object ServeRcPlayerIds {
   private val CANONICAL: Set<String> = UNIVERSE.mapTo(mutableSetOf()) { it.id }
 
   /**
-   * The canonical id of a `?rcPlayer=` value: a canonical id as itself, an unambiguous legacy
-   * spelling as the player it always named, anything else (a registered daemon player id, or
-   * nothing this server knows) lower-cased and otherwise untouched. Never remaps `cmp-android`.
+   * Canonical id of a `?rcPlayer=` value: canonical ids as-is, unambiguous legacy spellings mapped,
+   * anything else lower-cased. Never remaps `cmp-android`.
    */
   fun normalizeRequest(raw: String): String =
     when (val v = raw.trim().lowercase()) {
@@ -83,9 +76,8 @@ internal object ServeRcPlayerIds {
     }
 
   /**
-   * The canonical id of a capture record's player — a `capturePlayer` sidecar or an older server's
-   * baked-player report — or null when it names nothing this server knows. Older daemons wrote
-   * `cmp-android` for the embedded player and `java` for the view player.
+   * Canonical id of a capture record's player, or null when unknown. Older daemons wrote
+   * `cmp-android` for embedded and `java` for view.
    */
   fun fromCaptureRecord(raw: String?): String? {
     val v = raw?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: return null
@@ -111,44 +103,30 @@ internal object ServeRcPlayerIds {
     }
 
   /**
-   * The canonical id of a compose-ai-tools [RcPlayerBackend]. Keyed on the daemon player kind
-   * first, because compose-ai-tools up to 2.31 spelled the EMBEDDED backend `cmp-android`.
+   * Canonical id of an [RcPlayerBackend], keyed on daemon player kind first, since up to 2.31 the
+   * EMBEDDED backend was spelled `cmp-android`.
    */
   fun of(backend: RcPlayerBackend): String =
     backend.playerKind?.let(::ofKind) ?: normalizeRequest(backend.wire)
 
   /**
-   * The order the viewer opens a Remote Compose preview on when no preference is configured:
-   * `androidx-embedded`, else `androidx-view`, else the client `camaelon-js` canvas. Why embedded
-   * leads is written at [defaultPlayer].
+   * Default order without a configured preference: `androidx-embedded`, `androidx-view`, then
+   * `camaelon-js` (see [defaultPlayer]).
    */
   val DEFAULT_ORDER: List<String> = listOf(ANDROIDX_EMBEDDED, ANDROIDX_VIEW, CAMAELON_JS)
 
   /**
-   * The player the viewer opens a Remote Compose preview on (`data-rc-default`), out of the
-   * [enabled] players this preview offers.
+   * The player the viewer opens on (`data-rc-default`) among this preview's [enabled] players.
+   * [preferred] (`serve --rc-default-player`, normalised by [parsePreferredPlayer]) wins only when
+   * enabled for this preview; otherwise [DEFAULT_ORDER] applies, so a preference never opens a
+   * disabled option.
    *
-   * [preferred] is the operator's choice (`serve --rc-default-player`), already normalised by
-   * [parsePreferredPlayer]. It wins **only when this preview enables it**: a preferred player the
-   * preview cannot run — `cmp-android` on a catalog whose bundle does not carry the CMP player, or
-   * any daemon lane while the daemon is absent — falls back through [DEFAULT_ORDER] exactly as an
-   * unset preference does, so naming a player can never open a page on a disabled option.
-   *
-   * Why the unconfigured default is the server-side `androidx-embedded` player: the payoff is the
-   * data tier rather than the pixels (#3936). `androidx-view` is `AndroidView { RemoteComposePlayer
-   * }`, so a whole document reaches Compose as one interop leaf: `compose/figma-svg` exports it as
-   * a single raster wearing an `.svg` extension, and the semantics tree describes a black box. The
-   * embedded player emits real Compose nodes, so the same document exports editable geometry and
-   * describes the card. The two lanes were measured over all 164 documents of the homeassistant
-   * catalog before this moved (`renders/rc-embedded-lane-ab/`): 34 byte-identical, and the residual
-   * is overwhelmingly text rasterization — Skia and the Android canvas hint glyphs differently,
-   * which no amount of player work removes. `?rcPlayer=androidx-view` still selects the old lane
-   * for anything that needs it.
-   *
-   * `cmp-android` (the CMP player, `rc-player-compose`, run by the daemon) is the intended next
-   * default, and making it one is a configuration change rather than a code change: set the
-   * preference, and every preview whose catalog can run it ([carriesCmpAndroidPlayer]) opens on it
-   * while the rest keep this order.
+   * Embedded leads by default for the data tier (#3936): `androidx-view` reaches Compose as a
+   * single interop leaf (one raster in SVG export, an opaque semantics node), while embedded emits
+   * real Compose nodes. Pixel differences between the two are mostly text rasterization.
+   * `?rcPlayer=androidx-view` still selects the old lane. Making `cmp-android` the default is just
+   * a preference setting; previews whose catalog can't run it ([carriesCmpAndroidPlayer]) keep this
+   * order.
    */
   fun defaultPlayer(enabled: Collection<String>, preferred: String? = null): String {
     if (preferred != null && preferred in enabled) return preferred
@@ -156,9 +134,8 @@ internal object ServeRcPlayerIds {
   }
 
   /**
-   * The canonical id of a configured default player, or null for "no preference" — blank, or a
-   * value naming no player in [UNIVERSE] (reported through [onInvalid] rather than failing the
-   * server: an unknown preference costs only the configured default, never a page).
+   * Canonical id of a configured default player, or null for none: blank, or unknown (reported via
+   * [onInvalid] rather than failing the server).
    */
   fun parsePreferredPlayer(raw: String?, onInvalid: (String) -> Unit = {}): String? {
     val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
@@ -172,9 +149,8 @@ internal object ServeRcPlayerIds {
   const val CMP_PLAYER_GROUP: String = "ee.schimke.composeai"
 
   /**
-   * The CMP player's artifact. A Kotlin Multiplatform library, so an Android bundle's resolved
-   * classpath names its Android variant (`rc-player-compose-android`, as `material3-android` and
-   * every other KMP dependency appear there); the root coordinate is accepted too.
+   * The CMP player's artifact; as a KMP library an Android classpath names
+   * `rc-player-compose-android`, and the root coordinate is accepted too.
    */
   const val CMP_PLAYER_ARTIFACT: String = "rc-player-compose"
 
@@ -182,12 +158,9 @@ internal object ServeRcPlayerIds {
     setOf(CMP_PLAYER_ARTIFACT, "$CMP_PLAYER_ARTIFACT-android")
 
   /**
-   * Whether a bundle manifest's resolved [classpath] carries the CMP player, any version — the half
-   * of `cmp-android`'s capability the daemon cannot answer. The daemon registers the player id
-   * whatever it was launched with; whether the player's classes are actually loadable is a fact
-   * about the catalog's bundle, and without them a `cmp-android` render fails inside the daemon
-   * with a `RemoteComposeLinkageException` (`RcComposePlayerKt` class not found) rather than
-   * declining up front.
+   * Whether a bundle's resolved [classpath] carries the CMP player. The daemon always registers
+   * `cmp-android`, but without these classes a render fails with `RemoteComposeLinkageException`
+   * rather than declining.
    */
   fun carriesCmpAndroidPlayer(classpath: List<BundleReader.ClasspathEntry>): Boolean =
     classpath.any {
@@ -197,8 +170,8 @@ internal object ServeRcPlayerIds {
     }
 
   /**
-   * [carriesCmpAndroidPlayer] for a bundle on disk. An unreadable bundle — or no manifest at all —
-   * answers false: the lane is offered only on positive evidence, never guessed.
+   * [carriesCmpAndroidPlayer] for a bundle on disk; unreadable or manifest-less answers false
+   * (offered only on positive evidence).
    */
   fun bundleCarriesCmpAndroidPlayer(bundleFile: java.io.File): Boolean = runCatching {
     carriesCmpAndroidPlayer(BundleReader.readMetadata(bundleFile).manifest.classpath)
@@ -209,13 +182,9 @@ internal object ServeRcPlayerIds {
   fun isCmpJvm(raw: String?): Boolean = raw != null && normalizeRequest(raw) == CMP_JVM
 
   /**
-   * [ServeOverrides.parse], with `rcPlayer` read in this server's vocabulary.
-   *
-   * The value is normalised first ([normalizeRequest]), so a legacy `java` or `embedded` link still
-   * selects the player it always did. `cmp-android` is then forwarded to the daemon as a `playerId`
-   * — the CMP player on Android, registered by the daemon — rather than as the EMBEDDED built-in
-   * compose-ai-tools up to 2.31 mapped that spelling to. Since 2.32 its own parser forwards it the
-   * same way, so this rewrite is a no-op there and stays as the guarantee.
+   * [ServeOverrides.parse] with `rcPlayer` normalised first ([normalizeRequest]), so legacy links
+   * keep working, and `cmp-android` forwarded to the daemon as a `playerId` rather than the
+   * embedded built-in (a no-op from compose-ai-tools 2.32).
    */
   fun parseOverrides(
     params: Map<String, String>,

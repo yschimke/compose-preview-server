@@ -5,27 +5,13 @@ import ee.schimke.composeai.cli.serve.UsageRules.Companion.declaresCatalogScaffo
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * A served preview's Kotlin, staged as the playground editor's opening buffer — the "open this
- * preview in the playground" handoff (`/playground?from=<system>/<previewId>`).
+ * A served preview's Kotlin, staged as the playground editor's opening buffer
+ * (`/playground?from=<system>/<previewId>`), with its catalog preselected.
  *
- * The catalog pages can already say *where* a preview is declared (the viewer's `source` link to
- * GitHub). This carries the next step: read that file and hand it to the editor with the catalog it
- * came from already selected, so a visitor lands on something they can press Run on instead of on
- * the generic sample.
- *
- * **Ready to compile is a starting point, not a promise.** A preview file is ordinary module code:
- * it may reference siblings the catalog's bundle never exported, or internals the resolved
- * classpath doesn't carry. Those come back as ordinary compile diagnostics against the right
- * classpath, which is a far better place to start editing from than an empty buffer — so the seed
- * is never rewritten into something guaranteed to build, which would no longer be the preview's
- * source.
- *
- * **What it does narrow is scope.** A section file is one *group*, not one component: opening
- * `Button/Filled` used to hand over all 242 lines of `Buttons.kt` — five components, and forty-odd
- * `@OverrideVariant` lines belonging to the variant matrix rather than to anything a visitor wants
- * to read. When discovery recorded an anchor line inside the preview (`PreviewInfo.bodyLine`), the
- * seed is the file's header plus **that one declaration**, still verbatim, so the buffer opens on
- * the composable that was clicked. Without an anchor it stays the whole file, as it always was.
+ * Ready to compile is a starting point, not a promise: unresolvable references come back as
+ * ordinary diagnostics against the right classpath, so the seed is never rewritten into something
+ * that would no longer be the preview's source. With a recorded anchor (`PreviewInfo.bodyLine`) the
+ * seed is the file header plus that one declaration, verbatim; without one, the whole file.
  */
 data class PlaygroundSeed(
   /** The catalog to preselect — the system the preview belongs to. */
@@ -41,64 +27,38 @@ data class PlaygroundSeed(
   /** Where it was read from, so the note can link back to the human-readable blob. */
   val blobUrl: String?,
   /**
-   * True when [text] is one declaration rather than the whole file, so the editor's note can say
-   * which it is. A visitor told "this is the whole file" while looking at one function would go
-   * hunting for the rest.
+   * True when [text] is one declaration rather than the whole file, so the editor's note says
+   * which.
    */
   val sliced: Boolean = false,
   /**
-   * True when [text] has been rewritten into plain Compose by [PlaygroundSourceCleaner] — the
-   * catalog's annotations, sticker frame, click tally and knobs resolved away — rather than carried
-   * verbatim. This changes what the editor may claim: a verbatim seed is "the preview's source, and
-   * some of it will not resolve"; a cleaned one is "usage code, ready to Run".
+   * True when [text] was rewritten into plain Compose by [PlaygroundSourceCleaner] (usage code,
+   * ready to Run) rather than carried verbatim.
    */
   val cleaned: Boolean = false,
   /**
-   * Declared scaffolding that survived cleaning ([PlaygroundSourceCleaner.Result.residue]). Empty
-   * is the good case. Non-empty means the seed is *partly* cleaned — better than verbatim, but
-   * carrying names that will not resolve — and the note says so instead of over-promising.
+   * Declared scaffolding that survived cleaning ([PlaygroundSourceCleaner.Result.residue]);
+   * non-empty means partly cleaned, and the note says so.
    */
   val residue: List<String> = emptyList(),
   /**
-   * True when the catalog actually declared what its own helpers mean (a `compose-usage.json` with
-   * scaffold rules), as opposed to getting [UsageRules.GENERIC].
-   *
-   * The distinction has to reach the editor's note, because the two produce very different buffers
-   * from the same code path. With rules, `Sticker`/`counted`/the knobs are resolved away and "press
-   * Run" is true. Without them only the shared annotations come off — the catalog's own helpers
-   * stay exactly where they were, and they will not resolve against the published bundle. They are
-   * not [residue] either, since residue reports *declared* scaffolding that survived a rule and
-   * under generic rules nothing was declared. So without this flag the note claimed the frame and
-   * knobs were gone while they were still on screen.
+   * True when the catalog declared its helpers (a `compose-usage.json` with scaffold rules) rather
+   * than getting [UsageRules.GENERIC]. Under generic rules only shared annotations come off and
+   * catalog helpers remain (not [residue], since nothing was declared), so the note must not claim
+   * they are gone.
    */
   val scaffoldsDeclared: Boolean = false,
 )
 
 /**
- * Resolves `(system, previewId)` to a [PlaygroundSeed] by reading the preview's source file off
+ * Resolves `(system, previewId)` to a [PlaygroundSeed] by reading the preview's source file from
  * GitHub.
  *
- * Two properties make this safe to expose on a public host:
- *
- * **The URL is never client-derived.** A request names a system and a preview id; both are resolved
- * through this server's own session registry, and the repo/ref/module/path that build the fetch URL
- * all come from the catalog's trusted metadata. A visitor cannot point the host at a URL of their
- * choosing — the worst they can do is name a preview that doesn't exist, which resolves to null.
- *
- * **Results are cached, and the cache cannot go stale behind a catalog refresh.** A page load must
- * not cost a GitHub round-trip every time, but a catalog that is refreshed, retired, or republished
- * under the same system id would otherwise keep serving the source it had at first read — the
- * viewer showing the new catalog while the handoff opens the old file, indefinitely. Two things
- * prevent that. The entry is keyed by the **resolved location**, not just `(system, previewId)`, so
- * a catalog whose repo/ref/module/path moved misses the cache by construction; and every entry
- * carries a [ttlSeconds] deadline, because a `ref` that names a *branch* is stable while the file
- * under it is not. Both are needed: the first catches a republished catalog immediately, the second
- * catches new content on an unchanged branch.
- *
- * The cache is also bounded: past [maxEntries] it stops accepting new entries rather than evicting
- * — the entries are tiny and a served catalog has a fixed preview count, so a full cache means the
- * interesting ones are already in it. Expired entries are swept when the cache is full, so a
- * long-running host reclaims them rather than wedging at the cap.
+ * Safe on a public host: the fetch URL is built only from the catalog's trusted metadata via this
+ * server's registry, never from the client. Results are cached by resolved location (so a
+ * republished or moved catalog misses by construction) with a [ttlSeconds] deadline (a branch `ref`
+ * is stable while its files aren't). Bounded at [maxEntries]: new entries stop being accepted
+ * rather than evicting, and expired ones are swept when full.
  */
 class PlaygroundSeedResolver(
   /** Where a preview's source lives, or null when this server can't say. */
@@ -122,24 +82,16 @@ class PlaygroundSeedResolver(
     /** Module-relative path, as discovery recorded it. */
     val sourceFile: String,
     /**
-     * A 1-based line inside the preview function's body, as discovery recorded it — the anchor
-     * [sliceDeclaration] walks outwards from to find the whole declaration. Null on a manifest
-     * predating the field, or a classfile with no line numbers; the seed is then the whole file.
-     *
-     * Part of the cache key by construction (it is a [Location] field), which matters: a catalog
-     * republished from a file whose declarations moved must not keep slicing at the old offset.
+     * 1-based line inside the preview body from discovery, the anchor [sliceDeclaration] expands
+     * from; null means the whole file. Part of the cache key, so moved declarations don't reuse an
+     * old offset.
      */
     val bodyLine: Int? = null,
   )
 
   /**
-   * The cache key: the request's identity plus the *resolved* location it maps to.
-   *
-   * A data class rather than a joined string on purpose. Every field here is a repository path
-   * component, and paths may legitimately contain the separator you'd pick — `"a" + " " + "b c.kt"`
-   * and `"a b" + " " + "c.kt"` join to the same string, so a catalog whose location moved between
-   * those two would hit the cache it was supposed to miss. Structural equality has no such seam and
-   * needs no escaping rules to get right.
+   * The cache key: request identity plus resolved location. A data class rather than a joined
+   * string, since path components may contain any separator and joined strings could collide.
    */
   private data class CacheKey(val system: String, val previewId: String, val where: Location)
 
@@ -148,27 +100,15 @@ class PlaygroundSeedResolver(
   private val cache = ConcurrentHashMap<CacheKey, Entry>()
 
   /**
-   * One monitor per in-flight key, so a cold key is fetched **once** however many callers ask for
-   * it at the same moment.
-   *
-   * This mattered little while the only caller was the playground page, which one visitor opens
-   * deliberately. The viewer's Source panel changed that: it is one click on a page anyone browsing
-   * a catalog is already on, so a popular preview after a restart or a TTL expiry can have a dozen
-   * viewers arrive together. Without coalescing each one performs its own 10 s-connect / 10 s-read
-   * GitHub GET for the same file — a burst of duplicate work holding IO threads, for a result they
-   * will all share a moment later.
+   * One monitor per in-flight key, so a cold key is fetched once however many callers arrive
+   * together (the viewer's Source panel can bring a dozen at once after a restart).
    */
   private val inFlight = ConcurrentHashMap<CacheKey, Flight>()
 
   /**
-   * One resolution attempt, carrying its **outcome** and not merely acting as a monitor.
-   *
-   * Signalling completion through the cache alone was not enough, because two ordinary outcomes
-   * never reach it: a fetch that fails (a 404, a timeout, an oversized file) is deliberately not
-   * cached, and a successful one is dropped when the cache is at [maxEntries]. In both cases every
-   * waiter woke to another miss and repeated the same GitHub round trip — sequentially, each behind
-   * the previous one's 10 s connect and 10 s read, which is the exact pile-up the coalescing was
-   * added to prevent, in the two situations where it hurts most.
+   * One resolution attempt carrying its outcome. Failed fetches aren't cached and successes may be
+   * dropped at [maxEntries], so waiters signalled only through the cache would each repeat the
+   * GitHub round trip.
    */
   private class Flight {
     var done = false
@@ -176,9 +116,8 @@ class PlaygroundSeedResolver(
   }
 
   fun seed(system: String, previewId: String): PlaygroundSeed? {
-    // Resolve FIRST, then consult the cache. The location is an in-memory registry read, and keying
-    // on it is what makes a refreshed or republished catalog miss by construction instead of
-    // serving whatever the previous one pointed at.
+    // Resolve the location first (an in-memory read) and key on it, so a refreshed catalog misses
+    // by construction.
     val where =
       locate(system, previewId)
         ?: run {
@@ -189,9 +128,8 @@ class PlaygroundSeedResolver(
     cachedSeed(key)?.let {
       return it
     }
-    // Single-flight: the first caller for a key fetches, the rest wait on its monitor and then find
-    // the answer in the cache. Re-checked inside the lock because that is the whole point — every
-    // waiter arrives after the fetch it was waiting for has already stored its result.
+    // Single-flight: the first caller fetches, the rest wait on its monitor; re-checked inside the
+    // lock since waiters arrive after the result is stored.
     val flight = inFlight.computeIfAbsent(key) { Flight() }
     try {
       synchronized(flight) {
@@ -204,9 +142,8 @@ class PlaygroundSeedResolver(
         return seed
       }
     } finally {
-      // Removed by whoever leaves first; the waiters still behind it hold the same object and read
-      // its recorded outcome. A caller arriving after the removal starts a fresh flight, which is
-      // correct — that is a new request, not one this attempt was ever going to answer.
+      // Removed by whoever leaves first; remaining waiters read the recorded outcome, later
+      // arrivals start a fresh flight.
       inFlight.remove(key, flight)
     }
   }
@@ -251,14 +188,9 @@ class PlaygroundSeedResolver(
       onLog("$rawUrl is not valid UTF-8; playground seed unavailable")
       return null
     }
-    // Cleaning first, slicing as the fallback. The cleaner does its own slicing (it has to — it
-    // closes over the same-file helpers the cleaned body still calls, which a single-declaration
-    // slice would have cut away), so this is one choice between two whole strategies rather than
-    // two passes. Null means it found nothing it could safely do, and the verbatim slice stands.
-    //
-    // Gated on the anchor, which is also why the rules file is not fetched for a catalog whose
-    // manifest predates `bodyLine`: without an anchor the cleaner cannot say which declaration was
-    // clicked, so there is nothing to clean and no reason to ask GitHub for rules describing it.
+    // Cleaning first, slicing as fallback: the cleaner does its own slicing (it needs the same-file
+    // helpers a slice would cut). Gated on the anchor, so rules aren't fetched for catalogs
+    // predating `bodyLine`.
     val cleaned =
       try {
         if (where.bodyLine == null) null
@@ -293,10 +225,8 @@ class PlaygroundSeedResolver(
         residue = cleaned?.residue.orEmpty(),
         scaffoldsDeclared = cleaned != null && rulesFor(where).declaresCatalogScaffolds(),
       )
-    // Bounded, and deliberately not an LRU: entries are a few KB, a catalog has a fixed number of
-    // previews, and a full cache means the ones people actually open are already served from it. A
-    // full cache first drops what has expired, so a long-running host reclaims the space a moved
-    // catalog left behind rather than wedging at the cap forever.
+    // Bounded, not LRU: entries are small and a catalog's previews are finite. A full cache first
+    // drops expired entries.
     if (cache.size >= maxEntries) {
       cache.entries.removeIf { now - it.value.readAtMillis >= ttlSeconds * 1000 }
     }
@@ -305,14 +235,9 @@ class PlaygroundSeedResolver(
   }
 
   /**
-   * The catalog's own [UsageRules], read from `compose-usage.json` at the repo root, at the same
-   * `ref` the catalog was published from — so the rules and the source they describe can never be
-   * from different revisions.
-   *
-   * Cached per `(repo, ref)` rather than per preview: one catalog has one rules file, and every
-   * preview in it wants the same one. A catalog that ships no rules file caches the *absence* too
-   * (as [UsageRules.GENERIC]), so browsing a catalog without one does not re-ask GitHub for a file
-   * that isn't there on every card.
+   * The catalog's own [UsageRules] from `compose-usage.json` at the repo root, at the catalog's
+   * published `ref` so rules and source match. Cached per `(repo, ref)`, including absence (as
+   * [UsageRules.GENERIC]).
    */
   private val rulesCache = ConcurrentHashMap<Pair<String, String>, Pair<UsageRules, Long>>()
 
@@ -343,11 +268,8 @@ class PlaygroundSeedResolver(
         ?.takeIf { it.size <= maxBytes }
         ?.decodeToString()
         ?.let { UsageRules.parse(it, onLog) } ?: UsageRules.GENERIC
-    // Bounded and swept, like the seed cache beside it. A TTL alone only stops an expired value
-    // being *returned* — it never removes the key, so a long-running host seeing catalogs
-    // republished under changing refs would keep an entry per historical ref forever, each holding
-    // a
-    // parsed rules object and (below) up to the fetch cap of string data.
+    // Bounded and swept like the seed cache: a TTL alone never removes keys, so historical refs
+    // would accumulate.
     evictExpired(rulesCache, now)
     if (rulesCache.size < maxEntries) rulesCache[key] = rules to now
     // Cached by `(repo, ref)` because that is what was FETCHED; scoped by module on the way out,
@@ -356,12 +278,8 @@ class PlaygroundSeedResolver(
   }
 
   /**
-   * The catalog's English string resources, so `stringResource(Res.string.label_filled)` can be
-   * inlined as the label the sticker actually renders.
-   *
-   * Parsed with a deliberately narrow regex rather than an XML parser: this reads one known
-   * generated file shape, and a `<string name="x">y</string>` it does not recognise simply is not
-   * inlined, which leaves the lookup in place — the safe direction.
+   * The catalog's English string resources, so `stringResource(Res.string.x)` can be inlined. A
+   * narrow regex rather than an XML parser: unrecognised entries simply stay as lookups.
    */
   private fun stringsFor(where: Location, rules: UsageRules): Map<String, String> {
     val path = rules.stringsPath?.takeIf { it.isNotBlank() } ?: return emptyMap()
@@ -372,9 +290,8 @@ class PlaygroundSeedResolver(
       ?.let {
         return it.first
       }
-    // A leading `/` means the repo root rather than the catalog's own module — the resources a
-    // shared component module owns are not under the module the previews live in, and every
-    // existing (module-relative) rules file is unaffected because none of them starts with one.
+    // A leading `/` means repo root (for a shared component module's resources); existing
+    // module-relative paths are unaffected.
     val url =
       if (path.startsWith("/")) ServeUrls.githubRawUrl(where.repo, where.ref, null, path)
       else ServeUrls.githubRawUrl(where.repo, where.ref, where.module, path)
@@ -401,15 +318,8 @@ class PlaygroundSeedResolver(
   }
 
   /**
-   * The catalog's declared scaffold sources ([UsageRules.scaffoldSources]), read repo-root-relative
-   * at the same `ref` as the preview's own file, so a sticker and the shared component it delegates
-   * to are always from one revision.
-   *
-   * Cached per `(repo, ref)` beside the rules that named them: one catalog has one set, every
-   * preview in it wants the same set, and a browse of a catalog must not re-read a shared module on
-   * every card. Capped at [MAX_SCAFFOLD_SOURCES] files — the whole point is a handful of
-   * scaffolding files, and a rules file naming hundreds would turn one page load into a crawl of
-   * the repo.
+   * The catalog's scaffold sources ([UsageRules.scaffoldSources]), repo-root-relative at the
+   * preview's `ref`. Cached per `(repo, ref)` and capped at [MAX_SCAFFOLD_SOURCES].
    */
   private fun helperSourcesFor(where: Location, rules: UsageRules): List<String> {
     val paths = rules.scaffoldSources.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
@@ -454,16 +364,10 @@ class PlaygroundSeedResolver(
   private val followedCache = ConcurrentHashMap<Pair<String, String>, Pair<String?, Long>>()
 
   /**
-   * The files behind the imported functions the preview calls, one level down: the source panel's
-   * view of a preview that only delegates.
-   *
-   * A sample catalog's preview is often a one-line call into the sample it shows — `SampleScreen(…)
-   * { ChoicePickerSample(onPayloadUpdated = it) }` — and the interesting code is the function
-   * called, in another file. For each imported name the preview's declaration calls, this reads
-   * `<root>/<package path>/<Name>.kt` at the same `ref` (Kotlin's convention of naming a file after
-   * its main declaration), under the root the preview file's own package implies and any
-   * [UsageRules.sourceRoots]. A name that is not there (a library import, a function in a file
-   * named otherwise) is simply not followed, and its absence is cached like a hit.
+   * Files behind the imported functions the preview calls, one level down, for previews that only
+   * delegate (`SampleScreen { ChoicePickerSample(…) }`). Reads `<root>/<package path>/<Name>.kt` at
+   * the same `ref` under the file's implied root and [UsageRules.sourceRoots]. Misses (library
+   * imports, differently named files) are cached like hits.
    */
   private fun followedSourcesFor(where: Location, text: String, rules: UsageRules): List<String> {
     val candidates =
@@ -512,19 +416,13 @@ class PlaygroundSeedResolver(
   }
 
   companion object {
-    /**
-     * Where a catalog declares what its own scaffolding is. Repo root, beside `catalog.spec.json`.
-     */
+    /** Where a catalog declares its scaffolding: repo root, beside `catalog.spec.json`. */
     const val USAGE_RULES_FILE = "compose-usage.json"
 
     private val STRING_RESOURCE =
       Regex("""<string\s+name="([A-Za-z0-9_]+)"\s*>(.*?)</string>""", RegexOption.DOT_MATCHES_ALL)
 
-    /**
-     * The Android/CMP resource escapes a label can carry. Not a general XML unescape — an entity
-     * this does not know is left as written, which shows up in the snippet as itself rather than as
-     * a wrong character.
-     */
+    /** Android/CMP resource escapes a label can carry. Unknown entities are left as written. */
     internal fun unescapeAndroidString(raw: String): String =
       raw
         .replace("\\'", "'")
@@ -536,11 +434,7 @@ class PlaygroundSeedResolver(
         .replace("&amp;", "&")
         .trim()
 
-    /**
-     * How many [UsageRules.scaffoldSources] a catalog may have read. A catalog's scaffolding is a
-     * handful of files by construction (m3-catalog: 17 helpers across three); this is the bound
-     * that keeps a mistaken rules file from turning one Source panel into a repo crawl.
-     */
+    /** Scaffold sources one catalog may have read; bounds a mistaken rules file. */
     const val MAX_SCAFFOLD_SOURCES = 12
 
     /** Imported calls followed out of one preview: a delegating preview calls one or two. */
@@ -550,13 +444,9 @@ class PlaygroundSeedResolver(
     const val MAX_FOLLOWED_PATHS = 8
 
     /**
-     * `(importedName, modulePath)` candidates for the imported functions the declaration at
-     * [bodyLine] calls, in call order: `<root>/<package path>/<Name>.kt` for the root the file's
-     * own package implies, then each of [extraRoots].
-     *
-     * A call is a capitalised imported name followed by `(` or `{` — a composable's shape, and the
-     * only one a delegating preview has. A name the file declares itself is the same-file closure's
-     * business and is not followed. Aliased imports are skipped: the alias is not the file name.
+     * `(importedName, modulePath)` candidates for imported functions the declaration at [bodyLine]
+     * calls, in call order. A call is a capitalised imported name followed by `(` or `{`; same-file
+     * names and aliased imports are skipped.
      */
     internal fun followedCallPaths(
       text: String,
@@ -627,18 +517,14 @@ class PlaygroundSeedResolver(
     const val DEFAULT_MAX_ENTRIES = 256
 
     /**
-     * How long a cached seed is served before it is re-read. Sized against the catalog refresh
-     * interval (`--catalog-refresh-interval`, default 600 s): a `ref` that names a branch keeps the
-     * cache key stable while the file under it moves, so this is the bound on how long the handoff
-     * can lag the catalog the viewer is showing.
+     * How long a cached seed is served before re-reading; matched to the catalog refresh interval,
+     * bounding how far the handoff can lag a moved branch.
      */
     const val DEFAULT_TTL_SECONDS = 600L
 
     /**
-     * The editor tab name for a source path: its basename, `.kt`-suffixed, sanitised the same way
-     * [PlaygroundCompileService.safeKtName] sanitises a client-supplied name — the seed is staged
-     * into the same request shape a hand-typed file goes through, so it may as well be named by the
-     * same rules.
+     * Editor tab name for a source path, sanitised like [PlaygroundCompileService.safeKtName] since
+     * the seed goes through the same request shape as a typed file.
      */
     internal fun fileNameFor(sourceFile: String): String =
       PlaygroundCompileService.safeKtName(sourceFile.replace('\\', '/').substringAfterLast('/'))
@@ -709,20 +595,10 @@ class PlaygroundSeedResolver(
     }
 
     /**
-     * The **line range** of the top-level declaration containing [bodyLine], 0-based and inclusive,
-     * or null when the anchor cannot be trusted.
-     *
-     * The bounds rule is described at length on [sliceDeclaration], which is one of this function's
-     * two callers; the other is [PreviewUsageIndex], which needs the same declaration boundaries to
-     * say which calls in a file belong to which preview. Extracted rather than duplicated because a
-     * second copy of "where does this declaration end" is exactly the kind of near-miss that shows
-     * up as one preview quietly inheriting its neighbour's calls.
-     *
-     * Null means the anchor is unusable: absent, outside the text, pointing at a blank line (all
-     * three say the file moved under the `ref` since discovery ran), or sitting at or above the
-     * file header, where the outward scan has escaped past the imports. It does **not** mean "the
-     * whole file" — that is [sliceDeclaration]'s own extra guard, which belongs to seeding an
-     * editor buffer rather than to locating a declaration.
+     * 0-based inclusive line range of the top-level declaration containing [bodyLine], or null when
+     * the anchor is unusable (absent, out of range, on a blank line, or in the header). Shared by
+     * [sliceDeclaration] and [PreviewUsageIndex] so both agree where declarations end. Null never
+     * means "whole file"; that is [sliceDeclaration]'s own fallback.
      */
     internal fun declarationLines(lines: List<String>, bodyLine: Int?): IntRange? {
       if (bodyLine == null) return null
@@ -745,14 +621,9 @@ class PlaygroundSeedResolver(
     }
 
     /**
-     * Whether `lines[i]` begins a top-level declaration: non-blank, at **column 0**, and preceded
-     * by a **blank** line (or the start of the file).
-     *
-     * Both conditions matter. Column 0 alone would match a top-level closing brace, ending the
-     * declaration one line early. A preceding blank alone would match the first indented statement
-     * after a blank line inside a body — the case that broke the first version of the slice.
-     * Together they match what a reader would call the start of a declaration: its KDoc, its first
-     * annotation, or its `fun`/`val`/`class` line.
+     * Whether `lines[i]` starts a top-level declaration: non-blank at column 0 and preceded by a
+     * blank line (or file start). Column 0 alone matches a closing brace; a blank alone matches
+     * indented statements in a body.
      */
     private fun startsTopLevelDeclaration(lines: List<String>, i: Int): Boolean {
       val line = lines[i]
@@ -762,15 +633,9 @@ class PlaygroundSeedResolver(
     }
 
     /**
-     * Index of the first line that is part of a top-level declaration — everything before it is the
-     * file header (`package`, `@file:` annotations, imports, and the blank lines and comments among
-     * them).
-     *
-     * Anchored on the **last import**, then the `package` line, rather than on "the first line that
-     * looks like a declaration": a file can open with a licence comment or a block comment that
-     * mentions `fun`, and a header that swallowed the first declaration would be far worse than one
-     * that stopped a few lines early. A file with neither — a script-like snippet — has no header,
-     * which the caller handles.
+     * Index of the first non-header line, anchored on the last import, then `package`, rather than
+     * the first declaration-looking line (comments may mention `fun`). A file with neither has no
+     * header.
      */
     private fun headerEndExclusive(lines: List<String>): Int {
       val lastImport = lines.indexOfLast { it.trimStart().startsWith("import ") }
@@ -788,11 +653,7 @@ class PlaygroundSeedResolver(
         .build()
     }
 
-    /**
-     * The production fetcher: one capped GET. Kept here rather than in `ServeCommand` so the seed's
-     * network envelope (timeouts, size cap, fail-soft on anything non-2xx) lives with the thing it
-     * bounds.
-     */
+    /** The production fetcher: one capped GET, fail-soft on anything non-2xx. */
     fun httpFetch(url: String, maxBytes: Int = DEFAULT_MAX_BYTES): ByteArray? =
       try {
         httpClient.newCall(okhttp3.Request.Builder().url(url).build()).execute().use { response ->

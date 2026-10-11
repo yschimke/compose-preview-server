@@ -1,17 +1,11 @@
-// `<cp-reference-compare>` — the design-reference detail page: the design's own drawing, our render,
-// and the difference between them, with the annotation redline over both.
-// Replaces the `#cp-reference-compare` half of `assets/format-compare.js`.
+// `<cp-reference-compare>`: the design-reference detail page, showing the design's drawing, our
+// render, their difference, and the annotation redline over both. Layout annotations are
+// instance-level (one numbered box per element, ordinals shared across panels); typography is
+// style-level (usages grouped by resolved metrics, one letter per style, nearby usages clustered,
+// settings tabled below).
 //
-// Two surfaces in one page. The comparison itself is three panels and a result line, driven by the
-// scorer. The redline is the interesting half: layout annotations are instance-level (one numbered
-// box per element, sharing an ordinal across the two panels), typography is style-level (usages
-// grouped by resolved metrics, one letter per style, nearby usages under one cluster box, and the
-// readable settings once in a table below).
-//
-// Renders nothing of its own; `serve.css` hides the tag. The decisions live next door:
-// `annotate/match.ts` (which annotation on the left is which on the right), `annotate/typography.ts`
-// (what counts as the same style), `annotate/clusters.ts` (what counts as nearby) and
-// `annotate/fieldState.ts` (whether a field is a fidelity finding or a local override).
+// Renders nothing itself (`serve.css` hides the tag). Decisions live in `annotate/match.ts`,
+// `annotate/typography.ts`, `annotate/clusters.ts` and `annotate/fieldState.ts`.
 
 import { ControllerElement, customElement } from "../controllerElement.js";
 import { urlState } from "../urlState.js";
@@ -103,10 +97,8 @@ export class ReferenceCompare extends ControllerElement {
         this.wireOverlay();
         this.setUpAnnotations();
         this.setUpParityVerdict();
-        // After BOTH layers, because they share the panels and the placement: the redline a
-        // producer authored and the regions a parity finding points at are drawn into one layer per
-        // side, so one observer keeps them pinned together rather than two racing to reposition the
-        // same boxes.
+        // After both layers: they share panels and placement, so one observer keeps them pinned
+        // together.
         this.observePanels();
         return true;
     }
@@ -122,11 +114,9 @@ export class ReferenceCompare extends ControllerElement {
         const actualUrl = this.root.getAttribute("data-actual") ?? "";
         const canvas =
             this.root.querySelector<HTMLCanvasElement>(".cp-reference-diff");
-        // `format-compare.js` publishes the scorer from its own script tag, and a light-DOM element
-        // is upgraded the moment the parser reaches ITS tag. The served page happens to put the two
-        // in an order that works, which is correct-by-accident that any reordering breaks silently
-        // — the page would simply say "unavailable" with the scorer one tag away. So a missing
-        // handle waits for the document to finish parsing and asks once more before giving up.
+        // `format-compare.js` publishes the scorer from its own script tag; if it isn't there yet,
+        // wait for the document to finish parsing and ask again rather than reporting
+        // "unavailable".
         let compare = compareApi();
         if (!compare) {
             await whenParsed();
@@ -153,13 +143,8 @@ export class ReferenceCompare extends ControllerElement {
     }
 
     /**
-     * Hand the report field its render URL, before any scoring has happened.
-     *
-     * Early, deliberately. The field has one writer ([reportBody]) and three producers, and the
-     * element selector is one of them: a reporter who picks an element while the scorer is still
-     * running — or on a comparison the browser could not score at all — must still get their
-     * selection into the filed issue. Waiting for a score to compose the body is what used to make
-     * that impossible, silently.
+     * Give the report field its render URL before any scoring, so an element selection still
+     * reaches the issue if scoring is slow or fails.
      */
     private claimReport(): void {
         const body = document.getElementById(
@@ -252,8 +237,7 @@ export class ReferenceCompare extends ControllerElement {
         for (const toggle of this.toggles) {
             this.on(toggle, "change", () => {
                 this.syncKinds();
-                // A discrete choice — which redline layers are drawn over the pair — and one a
-                // refresh used to lose. Pushed so Back lifts the layer it turned on.
+                // A discrete choice of redline layers, pushed so Back lifts the layer it turned on.
                 urlState()?.push({ annotate: this.kindsParam() });
             });
         }
@@ -269,13 +253,8 @@ export class ReferenceCompare extends ControllerElement {
     }
 
     /**
-     * The panel over one side's image — created on first use and SHARED by both layers.
-     *
-     * One layer per side, not one per producer. The authored redline and a parity finding's regions
-     * are different claims about the same pixels, and giving each its own absolutely-positioned
-     * layer would mean two elements to keep sized against one image: they stay aligned only for as
-     * long as nobody adds a third caller, and the failure is a highlight that drifts off its box on
-     * a reflow rather than anything that throws.
+     * The panel over one side's image, created on first use and shared by both layers (redline and
+     * parity regions), so there is one element per side to keep sized.
      */
     private panelFor(side: ParitySide): Panel | null {
         const existing = this.panels.find((panel) => panel.side === side);
@@ -349,16 +328,12 @@ export class ReferenceCompare extends ControllerElement {
                 boxes.push(box);
             }
             if (!boxes.length) {
-                // Nothing on THIS page to point at — a payload keyed to a row the panels cannot
-                // place, or a side this comparison does not show. The row keeps its sentence and
-                // never becomes a control: the id goes too, so the stylesheet's `[role="button"]`
-                // rules and any later pass both read the same answer.
+                // Nothing on this page to point at (unplaceable row, or a side not shown): the row
+                // stays prose and loses its id, so CSS and later passes agree.
                 row.removeAttribute("data-cp-parity-finding");
                 continue;
             }
-            // The row becomes a control HERE and nowhere else. The server ships it as an ordinary
-            // list item, because with script off, blocked or failed there is no highlight to give
-            // and a tab stop that does nothing is worse than plain prose.
+            // The row becomes a control only here; with script off a tab stop would do nothing.
             row.setAttribute("tabindex", "0");
             row.setAttribute("role", "button");
             this.wireParityRow(row, boxes);
@@ -366,14 +341,8 @@ export class ReferenceCompare extends ControllerElement {
     }
 
     /**
-     * Hover, focus and a pin, OR'd.
-     *
-     * The same rule the typography table follows and for the same reason — a pointer leaving a row
-     * that still has focus must not clear the highlight a keyboard reader is relying on — plus a
-     * third state the redline does not need. A finding is read against the panels: the reader hovers
-     * it, looks up at the box, and by the time their eye is on the frame the pointer has left the
-     * row and taken the highlight with it. Clicking pins it. Rows pin independently, so two findings
-     * can be held up against each other.
+     * Hover, focus and a click-pin, OR'd: a reader hovers a finding then looks up at the panels, by
+     * which time the pointer has left. Rows pin independently so findings can be compared.
      */
     private wireParityRow(row: HTMLElement, boxes: HTMLElement[]): void {
         let hovered = false;
@@ -459,7 +428,7 @@ export class ReferenceCompare extends ControllerElement {
 
     /**
      * Typography is style-level: one lettered cluster box per run of nearby usages, plus an
-     * invisible hit box per usage so hovering any individual word still lights the style.
+     * invisible hit box per usage.
      */
     private drawTypography(panel: Panel, groups: TypographyGroup[]): void {
         for (const group of groups) {
@@ -636,10 +605,8 @@ export class ReferenceCompare extends ControllerElement {
     }
 
     /**
-     * Hovering or focusing a table row lights every box of that style, on BOTH panels.
-     *
-     * Hover and focus are tracked separately and OR'd: a pointer leaving a row that still has focus
-     * must not clear the highlight the keyboard reader is relying on.
+     * Hovering or focusing a table row lights every box of that style on both panels; hover and
+     * focus are OR'd.
      */
     private wireTypographyHighlight(): void {
         for (const row of this.root.querySelectorAll<HTMLElement>(
@@ -682,10 +649,8 @@ export class ReferenceCompare extends ControllerElement {
     }
 
     /**
-     * Keep every box pinned to the image it describes.
-     *
-     * Observed rather than only listening for `resize`: the panels are inside a responsive grid
-     * that can reflow without the window changing size at all.
+     * Keep every box pinned to its image; observed because the responsive grid can reflow without a
+     * window resize.
      */
     private observePanels(): void {
         if (!this.panels.length) return;
@@ -703,11 +668,8 @@ export class ReferenceCompare extends ControllerElement {
     }
 
     /**
-     * Place every box against its OWN panel.
-     *
-     * Annotation bounds are in each image's own pixel space and the two frames are routinely
-     * different sizes, so a shared coordinate space would put one panel's redline at the wrong
-     * scale. Each layer is scaled off its own image's rendered width.
+     * Place every box against its own panel: bounds are in each image's own pixel space and the
+     * frames differ in size.
      */
     private place(): void {
         for (const panel of this.panels) {
@@ -726,8 +688,8 @@ export class ReferenceCompare extends ControllerElement {
     }
 
     /**
-     * The layers that are on, comma-separated, or null when none is — every page opens with all of
-     * them off, so the resting state is the clean URL rather than `?annotate=`.
+     * The layers that are on, comma-separated, or null when none (the default, so the URL stays
+     * clean).
      */
     private kindsParam(): string | null {
         const on = this.toggles
@@ -737,11 +699,7 @@ export class ReferenceCompare extends ControllerElement {
         return on.length ? on.join(",") : null;
     }
 
-    /**
-     * Tick the toggles the URL names. A kind this pair carries no annotations for has no toggle to
-     * tick, so a link from a richer page degrades to whichever of its layers exist here rather than
-     * to nothing at all.
-     */
+    /** Tick the toggles the URL names; layers this pair lacks are skipped. */
     private hydrateKinds(): void {
         const url = urlState();
         if (!url) return;

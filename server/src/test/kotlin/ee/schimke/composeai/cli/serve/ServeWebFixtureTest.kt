@@ -34,39 +34,20 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 
 /**
- * Golden generator + drift guard for the `serve` web surfaces captured by the preview-harness.
- *
- * `ServeWeb`'s landing + viewer pages are a *visual* surface, so — per the repo rule about wiring
- * new visual surfaces into the preview workflow — they're rendered to committed HTML fixtures under
- * `preview-server/preview-harness/fixtures/pages/`. The harness's `pages-snapshot.spec.mjs`
- * screenshots those per theme into `out/<fixture>.<theme>.png`, which the existing generic
- * `serve-preview-diff.py` bot diffs + comments on every PR — no panel/`scenario.html` plumbing.
- *
- * This test re-renders the pages from the *current* `ServeWeb` and asserts the committed fixtures
- * match, so any change to the serve UI fails here until the fixtures are refreshed. Regenerate
- * with:
+ * Golden generator + drift guard for the `serve` web pages. `ServeWeb` pages are rendered to
+ * committed HTML fixtures under `preview-harness/fixtures/pages/`, which `pages-snapshot.spec.mjs`
+ * screenshots per theme for the visual-diff bot. This test asserts the committed fixtures match the
+ * current `ServeWeb`. Regenerate with:
  * ```
  * UPDATE_SERVE_WEB_FIXTURES=true ./gradlew :cli:test --tests '*ServeWebFixtureTest*'
  * ```
+ * (An env var because Gradle forwards the environment, not arbitrary system properties, to the test
+ * JVM.) The server [version] and asset-href hashes ([stableAssetHrefs]) are held constant so diffs
+ * only show markup.
  *
- * (An env var rather than a `-D` system property, since Gradle forwards the environment to the
- * forked test JVM but not arbitrary system properties.)
- *
- * Two fields are deliberately held constant in the goldens so that a diff only ever shows markup:
- * the server version ([version]) and the cache-busting hash in every asset href (see
- * [stableAssetHrefs]). Both are volatile, neither is a surface anyone reviews, and left alone they
- * made this test fail for reasons no reviewer could act on.
- *
- * **What these goldens do NOT prove.** Every page here is built by calling `ServeWeb` directly with
- * arguments this test chooses — which is what lets it capture states a live server can't easily be
- * put into (a pinned revision, published parity issues, a degraded session). The cost is that a
- * fixture says only "the renderer draws this when handed these arguments"; it says nothing about
- * whether the HTTP handler ever hands them over. That gap is not hypothetical: the viewer's
- * per-preview "report an issue" affordance was passed `reportIssue = null` by the real handler for
- * weeks while these goldens went on rendering it from this test's own `fixtureReportIssue`, so the
- * harness screenshotted an affordance nobody could click. Anything that must actually be *wired*
- * belongs in a route test against an embedded server — see [ServeViewerIssueReportRouteTest] and
- * [ServeBugReportRouteTest] — with the golden covering only how it looks.
+ * These goldens call `ServeWeb` directly, so they prove only how a page looks given these
+ * arguments, not that the HTTP handler passes them. Wiring belongs in route tests against an
+ * embedded server (see [ServeViewerIssueReportRouteTest], [ServeBugReportRouteTest]).
  */
 class ServeWebFixtureTest {
 
@@ -77,10 +58,8 @@ class ServeWebFixtureTest {
   private fun assetText(name: String): String = ServeWebAssets.load(name)!!.bytes.decodeToString()
 
   /**
-   * One node of the design-page fixture.
-   *
-   * No geometry: the SVG below is the geometry, and the viewer measures the `data-node-id` element
-   * rather than reading a rectangle out of the manifest.
+   * One node of the design-page fixture. No geometry: the viewer measures the `data-node-id`
+   * element in the SVG.
    */
   private fun pageNode(
     nodeId: String,
@@ -108,9 +87,7 @@ class ServeWebFixtureTest {
   private val token = "demo-token-fixture"
   private val moduleLabel = ":samples:cmp"
 
-  // A FIXED server version for the goldens: the footer surfaces the running build, but pinning a
-  // constant here (rather than the real SERVE_VERSION) keeps the committed HTML stable across
-  // releases — production passes SERVE_VERSION, the fixtures pass this.
+  // A fixed server version so the committed HTML is stable across releases.
   private val version = "0.0.0-fixture"
 
   // Catalog provenance for the public compose-m3 landing golden — captures the provenance strip
@@ -124,13 +101,8 @@ class ServeWebFixtureTest {
       designParityVersion = "0.1.25",
     )
 
-  // The viewer's prefilled "report an issue" link, built the way the server builds it: against the
-  // catalog's SOURCE repo, carrying the preview's facts and a token-free deep link, with the
-  // signed-in visitor's login named in the tooltip.
-  // The Figma node a preview is specified by, resolved the way the server resolves it — from a
-  // Figma-backed design reference the catalog published, not from a hand-written URL. Mirrors a
-  // real
-  // meshcore-mobile design-map entry (`figma:gYzowY4cQ7rNr2gYoco1M6/73:6`).
+  // The Figma node a preview is specified by, resolved from a Figma-backed design reference the
+  // catalog published (mirrors a real meshcore-mobile design-map entry).
   private val fixtureDesignReference =
     DesignReference(
       id = "contact-chat-figma",
@@ -142,16 +114,10 @@ class ServeWebFixtureTest {
 
   private val fixtureFigmaSpec = ServeFigmaSpec.of(fixtureDesignReference)
 
+  /** The comparison wall's page-scoped report: no preview, render or reference. */
   /**
-   * The comparison wall's **page-scoped** report — the launcher's catalog half on a page that shows
-   * every component and singles out none (issue #4289). No preview, no render, no reference: the
-   * golden pins the shape a report filed from the wall actually has.
-   */
-  /**
-   * The wall's own page report, which — unlike every other page-scoped one — is **pickable**: its
-   * template carries the `{{locators}}` line and the two page-level locator facts, which is what
-   * turns the row checkboxes on. The golden would otherwise show a wall whose pickers can never
-   * upgrade, which is not the page this server serves.
+   * The wall's page report, which is pickable: its template carries `{{locators}}` and the two
+   * page-level locator facts that enable the row checkboxes.
    */
   private fun fixtureWallReportIssue(): ServeWeb.ReportIssue =
     fixturePageReportIssue(
@@ -161,8 +127,8 @@ class ServeWebFixtureTest {
     )
 
   /**
-   * The page-scoped catalog report every catalog surface that names no single preview now carries
-   * (issue #4704) — the wall, the landing, the pages index, a design page, the motion browser.
+   * The page-scoped catalog report carried by surfaces that name no single preview (wall, landing,
+   * pages index, design page, motion browser).
    */
   private fun fixturePageReportIssue(
     pageUrl: String,
@@ -204,13 +170,9 @@ class ServeWebFixtureTest {
     variant: String = "",
     overrides: Map<String, String> = emptyMap(),
     /**
-     * Which of the two reporting pages this stands in for: the focused comparison, or the viewer.
-     *
-     * They differ in more than one place and every one of those follows from this, so it is one
-     * flag rather than four that can be set inconsistently. The comparison names the pair it is
-     * showing and fills a selection and a score after the page is served; the viewer names one
-     * render and fills the locator's overrides, because its controls re-render in place. Both name
-     * the design reference — that is the locator's identity, not a claim about pixels on screen.
+     * Which reporting page this stands in for: the focused comparison (names the pair, fills
+     * selection and score) or the viewer (names one render, fills the locator's overrides). Both
+     * name the design reference.
      */
     comparison: Boolean = false,
   ) =
@@ -244,9 +206,8 @@ class ServeWebFixtureTest {
               .joinToString("&", prefix = if (overrides.isEmpty()) "" else "?") { (key, value) ->
                 "${WebEscaping.urlEncodeSegment(key)}=${WebEscaping.urlEncodeSegment(value)}"
               },
-        // The comparison's other panel, exactly as `handleReferenceComparison` supplies it — a
-        // report from that page carries the pair (#4765), and a golden that carried only the
-        // render would show a report this server no longer serves.
+        // The comparison's other panel, as `handleReferenceComparison` supplies it; reports from
+        // that page carry the pair.
         referenceUrl =
           referenceId
             ?.takeIf { comparison }
@@ -272,10 +233,9 @@ class ServeWebFixtureTest {
         )
       }
 
-  // The colour half of two REAL published token files (`design-artifacts/<system>/tokens.dtcg.json`
-  // — the DTCG projection of the catalog's resolved MaterialTheme), trimmed to the roles the web
-  // projection reads. Kept verbatim so the themed fixtures below are the palettes a visitor to
-  // preview.coo.ee actually gets, not invented colours.
+  // The colour half of two real published token files
+  // (`design-artifacts/<system>/tokens.dtcg.json`), trimmed to the roles the web projection reads,
+  // so the themed fixtures use real palettes.
   private val wearM3Tokens =
     """
     {"color":{
@@ -323,9 +283,8 @@ class ServeWebFixtureTest {
       ServePreview("com.example.SettingsScreenPreview", "Settings screen"),
     )
 
-  // A design-catalog spread whose flattened ids carry a per-theme axis (`…__light` / `…__dark`),
-  // plus one theme-less component — so the captured landing exercises the sticky light/dark toggle
-  // and its card filtering (a component-preview module without theme variants shows no toggle).
+  // A design-catalog spread with a per-theme axis (`…__light` / `…__dark`) plus one theme-less
+  // component, exercising the sticky light/dark toggle and its filtering.
   private val themedPreviews =
     listOf(
       ServePreview("button-filled__ideal__default__light", "Button · Filled (light)"),
@@ -336,20 +295,15 @@ class ServeWebFixtureTest {
     )
 
   /**
-   * A published `rc-compare` manifest over [previews] — the shape [ServeCatalogStore] stages from a
-   * catalog's delivery branch, hand-built here so the golden pins the *page*, not a fetch.
-   *
-   * Deliberately uneven, because the uneven cases are what the wall exists to show: the JS player
-   * scores worse than the two Compose players (it is a separate implementation), and cmp-wasm
-   * refuses one document outright, so the fixture captures a rendered column, a scored column and a
-   * "player could not decode this" column side by side.
+   * A published `rc-compare` manifest over [previews], hand-built so the golden pins the page, not
+   * a fetch. Deliberately uneven: the JS player scores worse and cmp-wasm refuses one document, so
+   * the wall shows rendered, scored and "could not decode" columns.
    */
   private fun rcCompareFixture(
     previews: List<ServePreview>,
     /**
-     * Which lanes this catalog's run published. Defaults to all of them; narrowing it is how the
-     * partial-run wall is built, since [ServeRcCompare.plan] drops a lane the run never scored and
-     * the page has to say so rather than quietly showing fewer columns.
+     * Which lanes the run published (default all). Narrowing builds the partial-run wall, since
+     * [ServeRcCompare.plan] drops unscored lanes and the page must say so.
      */
     lanes: Set<String>? = null,
   ): RcCompareManifest {
@@ -409,20 +363,13 @@ class ServeWebFixtureTest {
     )
   }
 
-  // A catalog whose components carry baked non-default STATES (checkbox checked/unchecked, radio
-  // selected/unselected), each in light + dark, tagged via the `state`/`theme` metadata the
-  // `previews/variants.json` manifest carries. The landing folds each component to ONE (default)
-  // card; the viewer grows its `.cp-axes-tree` subtree reaching the component's other
-  // same-theme states. Captured so the visual-diff bot covers the state toggle end-to-end.
+  // A catalog whose components carry baked non-default states (checked/unchecked,
+  // selected/unselected) in light + dark. The landing folds each component to one card; the
+  // viewer's `.cp-axes-tree` reaches the other states.
   /**
-   * A Wear-shaped catalog that documents each component at the FIVE screen sizes its kit declares —
-   * the shape wear-m3-catalog publishes. Every render carries the breakpoint it was captured at
-   * (`ServePreview.size`), so the landing folds the non-primary sizes onto one card per component
-   * and the viewer offers them as a size switcher; without the fold this is 10 cards wearing 2
-   * names (wear-m3-catalog#41).
-   *
-   * `alertdialog` also varies its button arrangement, so the fixture pins the two axes *crossed*:
-   * the state rows have to keep holding the size fixed, and the size rows the state.
+   * A Wear-shaped catalog documenting each component at the five screen sizes its kit declares. The
+   * landing folds non-primary sizes onto one card and the viewer offers a size switcher.
+   * `alertdialog` also varies its button arrangement, so state and size axes are crossed.
    */
   private val breakpointPreviews =
     listOf("192dp", "204dp", "216dp", "225dp", "240dp").flatMapIndexed { index, size ->
@@ -436,9 +383,7 @@ class ServeWebFixtureTest {
           section = "Containment",
           group = "Dialogs",
           catalogOrder = index * 2,
-          // The authored one-liner every design catalog publishes and the browse surface now
-          // prints under the component's name. Captured here so the visual-diff bot covers the
-          // caption line on every future PR.
+          // The authored one-liner printed under the component's name.
           caption = "A decision the app needs before it can go on.",
         ),
         ServePreview(
@@ -517,14 +462,9 @@ class ServeWebFixtureTest {
     )
 
   /**
-   * A component with a WIDE state axis — the published m3-catalog's `iconbutton-outlined` bakes one
-   * render per size × width × shape, which is what pushed the switcher past the point where showing
-   * every chip was worth the fold it cost. Sized to that real shape (22 states) rather than a token
-   * few, so the capture shows what the OPEN subtree actually costs on the catalog that motivated
-   * this — the case a smaller fixture would have flattered. Past [ServeWeb]'s inline threshold the
-   * rows arrive folded behind the title bar's `State · …` toggle, so this is the fixture that
-   * captures the *collapsed* axes disclosure for the visual-diff bot; `serve-viewer-states.html`
-   * (two states) keeps the expanded case.
+   * A component with a wide state axis (22 states, like the published `iconbutton-outlined`). Past
+   * [ServeWeb]'s inline threshold the rows fold behind the `State · …` toggle, so this captures the
+   * collapsed disclosure; `serve-viewer-states.html` keeps the expanded case.
    */
   private val wideStatePreviews =
     listOf(
@@ -563,11 +503,8 @@ class ServeWebFixtureTest {
       }
 
   /**
-   * A component baking state × props as a full CROSS-PRODUCT — every state also rendered RTL. This
-   * is the shape whose subtree cannot be labelled one axis at a time: the row that resets the state
-   * and the row that resets the props are both "Default" unless each names both coordinates. No
-   * committed catalog had it, which is exactly why the ambiguity reached review unseen, so it gets
-   * a fixture of its own and the visual-diff bot carries it from here.
+   * A component baking state × props as a full cross-product (every state also RTL), so each
+   * subtree row must name both coordinates.
    */
   private val crossProductPreviews =
     listOf("default", "pressed", "disabled").flatMap { state ->
@@ -582,9 +519,8 @@ class ServeWebFixtureTest {
       }
     }
 
-  // A trusted-catalog preview that declares author knobs (a `label` string + an accent `color`) —
-  // the `compose/overrides` payload PR #2281 added across the M3 catalog. On a live catalog session
-  // (ServeCatalogLiveHost) these render as LIVE controls that re-render via `/render` on edit.
+  // A trusted-catalog preview declaring author knobs (a `label` string + an accent `color`). On a
+  // live catalog session these render as live controls that re-render via `/render`.
   private val knobPreview =
     ServePreview(
       "button-filled__ideal__default__light",
@@ -601,11 +537,9 @@ class ServeWebFixtureTest {
             type = PreviewOverrideType.COLOR,
             default = PreviewOverrideValue.ColorValue("#FF6750A4"),
           ),
-          // A font knob (`catalogOverrideFont` / `previewOverrideFont`): a string knob a viewer
-          // renders as an autocompleting combobox seeded with the declared `@TypographyCatalog`
-          // names. The real catalog knob sets `googleFonts = true` (splicing the full
-          // fonts.google.com list); the fixture keeps it off so the committed golden isn't ~1900
-          // `<option>` lines — the full-list splice is covered by a dedicated behavioural test.
+          // A font knob, rendered as a combobox seeded with the declared `@TypographyCatalog`
+          // names. `googleFonts` is off here to keep the golden small; the full-list splice has its
+          // own test.
           PreviewOverrideDeclaration(
             key = "theme.font",
             type = PreviewOverrideType.STRING,
@@ -613,11 +547,8 @@ class ServeWebFixtureTest {
             suggestions = listOf("Roboto Flex", "Google Sans Flex", "Lobster Two"),
           ),
         ),
-      // The Remote Compose named-value knobs this preview declared (the `compose/remotecompose`
-      // channel — the `rememberOverridableRemote*` wrappers). Rendered as a separate "Remote
-      // Compose"
-      // control group whose edits round-trip via `rc.<name>=<kind>:<value>`; captured alongside the
-      // plain-Compose overrides so the visual-diff bot covers both panels.
+      // Remote Compose named-value knobs, rendered as a separate group whose edits round-trip via
+      // `rc.<name>=<kind>:<value>`.
       remoteComposeKnobs =
         listOf(
           RemoteComposeKnobDeclaration("label", RemoteNamedValue.StringValue("Filled")),
@@ -625,14 +556,9 @@ class ServeWebFixtureTest {
         ),
     )
 
-  // An app catalog whose previews carry a `section` (the tab) + `group` (the sub-heading) + an
-  // authored `catalogOrder` — the tabbed-landing structure meshcore-mobile publishes. Three
-  // sections
-  // (Themes / Components / Screens) with sub-groups inside, and the group name "Device" reused
-  // across
-  // two sections (scoped per tab) so the fixture exercises that. Ordered by catalogOrder so the
-  // tabs
-  // read Themes → Components → Screens as authored, not id-sorted.
+  // An app catalog with `section` (tab) + `group` (sub-heading) + `catalogOrder`, like
+  // meshcore-mobile. Three sections with sub-groups, "Device" reused across two (scoped per tab),
+  // in authored order.
   private val sectionedPreviews =
     listOf(
       ServePreview(
@@ -700,13 +626,9 @@ class ServeWebFixtureTest {
       ),
     )
 
-  // A component (Button/Filled) whose default render carries baked PROPS-axis variants — an RTL
-  // render, an ar-XB pseudo-locale, and a 2× font-scale — each in light + dark, tagged via the
-  // `props` metadata the `previews/variants.json` manifest now carries (the i18n/a11y axes the
-  // compose-m3 catalog folds via `variants`). The landing folds each component to ONE (default)
-  // card; the viewer's `.cp-axes-tree` subtree reaches them, listing the props axis beside the
-  // state axis under one component row. Captured so the visual-diff bot covers the variant fold
-  // end-to-end (the fix for the "duplicate RTL/locale tiles" the imported M3 tabs showed).
+  // A component (Button/Filled) whose default render carries baked props-axis variants (RTL, ar-XB,
+  // 2× font scale) in light + dark. The landing folds to one card; the viewer's `.cp-axes-tree`
+  // lists the props axis beside the state axis.
   private val variantPreviews =
     listOf(
       ServePreview(
@@ -765,12 +687,8 @@ class ServeWebFixtureTest {
       ),
     )
 
-  // A section-LESS catalog whose components fall into families (button ×3, card ×2, plus singleton
-  // fab / badge). Authors no `section` metadata, so the landing can't tab it — instead ServeWeb
-  // *synthesizes* family sub-group dividers (Button / Card / FAB / Badge) so a large flat catalog
-  // reads as grouped clusters. Each component carries a light+dark pair, so the golden also
-  // exercises the sticky theme toggle inside the synthesized groups. Captured so the visual-diff
-  // bot covers the synthesized-grouping layout.
+  // A section-less catalog whose components fall into families; ServeWeb synthesizes family
+  // sub-group dividers. Light+dark pairs also exercise the theme toggle inside them.
   private val groupedPreviews =
     listOf("button-filled", "button-outlined", "button-tonal", "card-elevated", "card-filled")
       .flatMap { slug ->
@@ -837,9 +755,7 @@ class ServeWebFixtureTest {
           previewIds =
             listOf("com.example.ProfileScreenPreview", "button-filled__ideal__default__light"),
         ),
-        // Two more open reports on the same component, so the fixture row carries the case the
-        // collapsed line exists for: one issue proves the markup, a run of them proves the height.
-        // A row like this used to stand five lines tall.
+        // More open reports on the same component, to exercise the collapsed line's height.
         ParityIssue(
           repository = "yschimke/m3-catalog",
           number = 57,
@@ -886,10 +802,8 @@ class ServeWebFixtureTest {
         // "try in playground" on the summary line — the catalog-level half of the handoff, captured
         // so its placement in that run of actions is diffed like any other pixel.
         playgroundHref = "/playground?catalog=compose-m3",
-        // Published design pages on a catalog with NO navigation tree — the one shape that still
-        // offers them as a header chip, because there is no tree to list them in. Captured so that
-        // fallback keeps a baseline of its own, next to `landingGrouped`, which has a tree and so
-        // lists these by name instead.
+        // Design pages on a catalog with no navigation tree, the one shape that still offers them
+        // as a header chip (`landingGrouped` lists them in its tree).
         designPages =
           listOf(
             // Sections on one page and none on the other, on purpose: the pane has to render both
@@ -906,12 +820,11 @@ class ServeWebFixtureTest {
           ),
         parityIssues = parityIssues,
       )
-    // The public preview server's FRONT DOOR: an index of the published design systems, each a card
-    // with a meaningful hero preview, its title + library, trust badge, and a link to /<system>/.
-    // This is what `/` serves now (instead of an arbitrary default module's grid), so the harness
-    // captures it per theme.
-    // The front-page section the operator's `catalogs.json` publishes the built-in systems under —
-    // a claim honoured only for catalogs whose bytes really came from that repo.
+    // The front door: an index of published design systems, each a card with a hero preview, title,
+    // library, trust badge and link to /<system>/.
+    //
+    // The front-page section the operator's `catalogs.json` publishes the built-in systems under,
+    // honoured only for catalogs whose bytes came from that repo.
     val designSystemsGroup =
       ServeWeb.HomeGroup(
         heading = "Design Systems",
@@ -929,20 +842,16 @@ class ServeWebFixtureTest {
           trust = "branch:yschimke/compose-ai-tools@design-artifacts/compose-m3",
           sourceRepo = "yschimke/compose-ai-tools",
           heroPreviewId = "button-filled__ideal__default__light",
-          // The normal path: a prebaked, content-hashed hero on the immutable `/hero/` lane, the
-          // crop already in its pixels. Captured here so the golden pins the fast markup — eager
-          // load, explicit box, no CSS clip window.
+          // The normal path: a prebaked, content-hashed hero on the immutable `/hero/` lane (eager
+          // load, explicit box, no CSS clip).
           heroImage =
             ServeWeb.HeroImage(
               path = "/hero/compose-m3/1f0c9a4b7d2e6503.png",
               width = 168,
               height = 68,
             ),
-          // Publishes Figma-backed design references, so its card carries the "compare to Figma"
-          // action. The golden still holds a row where one card has an action and its neighbour has
-          // none — `meshcore-mobile` beside `homeassistant-remotecompose` in the app group below —
-          // which is the case the `.cp-sys-cell` grid template exists for: the tiles have to line
-          // their artwork and their footers up either way.
+          // Publishes Figma-backed references, so its card carries "compare to Figma"; its
+          // neighbour without an action exercises the `.cp-sys-cell` grid alignment.
           hasReferenceComparison = true,
           designToolLabel = "Figma",
         ),
@@ -978,12 +887,8 @@ class ServeWebFixtureTest {
           // Remote Compose draws the dark-first Wear scheme, so its catalog declares
           // `display.surface: "dark"` and the hero backs on the dark stage too.
           darkStage = true,
-          // The card with BOTH comparisons, exactly as the live box renders `remote-m3`: it
-          // publishes Figma-backed references AND declares `compareWith` against the Wear catalog.
-          // The two sit side by side because they are different questions — "does this match the
-          // design file" and "does this match the other implementation of it" — and until now only
-          // the first had a way onto the front door, so two catalogs of one design system sat as
-          // adjacent cards with nothing saying they were a pair.
+          // The card with both comparisons, like the live `remote-m3`: Figma-backed references and
+          // a `compareWith` against the Wear catalog.
           hasReferenceComparison = true,
           designToolLabel = "Figma",
           parallelComparison = ServeWeb.ParallelComparison("wear-m3", "Wear Compose Material 3"),
@@ -1008,11 +913,8 @@ class ServeWebFixtureTest {
             "branch:yschimke/homeassistant-remotecompose@design-artifacts/homeassistant-remotecompose",
           sourceRepo = "yschimke/homeassistant-remotecompose",
           heroPreviewId = null,
-          // Publishes design references whose provider names no design tool — checked-in PNGs. The
-          // route works, so the card still offers the comparison; it just takes the neutral
-          // wording. Captured here because gating the action on the vendor label rather than on
-          // availability silently dropped it from every catalog in this shape (#4349), and a
-          // golden is what stops that coming back.
+          // References from no named design tool (checked-in PNGs): the card still offers the
+          // comparison, with neutral wording, since availability, not vendor, gates it.
           hasReferenceComparison = true,
         ),
         // A Wear app (Confetti): dark-first stage, and its hero is a conference SCREEN — the most
@@ -1042,16 +944,9 @@ class ServeWebFixtureTest {
             logoutHref = "/auth/github/logout?return=%2F",
             login = "yschimke",
           ),
-        // Signed in AND permitted, on two of the three design systems: the golden then holds a card
-        // carrying both actions beside a card carrying only the comparison, which is the row the
-        // chip row's alignment exists for. The refused shape is a unit-test concern — it turns on
-        // the visitor, not on the page, so a second golden of the same grid would pin nothing new.
-        //
-        // `remote-m3` is the SECOND, and it is the widest card this grid can produce: the builder
-        // chip, the `Compare to` label and BOTH destinations, in a fixed grid track. Without it the
-        // golden held the two halves separately — a card with the builder and one comparison, and a
-        // card with two comparisons and no builder — and never the case where they meet, which is
-        // the one that decides whether the row still fits.
+        // Signed in and permitted on two of three systems, so the golden holds a card with both
+        // actions next to one with only the comparison. `remote-m3` is the widest card (builder
+        // chip plus both destinations).
         uiBuilder =
           ServeWeb.UiBuilderInvite(
             systems = setOf("compose-m3", "remote-m3"),
@@ -1059,10 +954,8 @@ class ServeWebFixtureTest {
             permitted = true,
           ),
       )
-    // The render-history timeline: a viewer served from a delivery branch, so it carries the
-    // history.json URL + repo that `<cp-history-menu>` needs. Registered as its own page fixture so
-    // the harness captures the strip on every future change, rather than only when someone
-    // remembers to screenshot it.
+    // The render-history timeline: a viewer served from a delivery branch, carrying the
+    // history.json URL + repo `<cp-history-menu>` needs.
     val viewerHistory =
       ServeWeb.viewerPage(
         previews.first { it.id.endsWith("ProfileScreenPreview") },
@@ -1070,9 +963,8 @@ class ServeWebFixtureTest {
         historyManifestUrl =
           ServeUrls.historyManifestUrl("yschimke/compose-ai-tools", "compose-preview/main"),
         historyRepo = "yschimke/compose-ai-tools",
-        // Inlined so the harness renders the strip offline. Shaped like the real manifest: three
-        // versions, one carried by several publishes, and flagged unstable so the capture covers
-        // the badge as well as the chips.
+        // Inlined so the harness renders offline. Three versions, one carried by several publishes,
+        // flagged unstable to cover the badge.
         historyInlineJson =
           """
           {"formatVersion":"compose-preview-history/v1","generatedFrom":"df4aa9c00fcc8b1747e159b71d3fbc75cdc27b80",
@@ -1085,11 +977,9 @@ class ServeWebFixtureTest {
           """
             .trimIndent(),
       )
-    // The same strip in PROJECT mode: no delivery branch to fetch from, so the timeline is computed
-    // from the local repo ([ServeProjectHistory]) and its entries link at this server's own
-    // content-addressed lane. Captured separately because it differs where it matters — the newest
-    // entry is not "current" (the stage is rendered from the working tree), and the head carries
-    // the "published baselines" scope label.
+    // The same strip in project mode: computed from the local repo ([ServeProjectHistory]), entries
+    // link to this server's content-addressed lane, the newest entry is not "current", and the head
+    // carries the "published baselines" label.
     val viewerHistoryLocal =
       ServeWeb.viewerPage(
         previews.first { it.id.endsWith("ProfileScreenPreview") },
@@ -1114,11 +1004,8 @@ class ServeWebFixtureTest {
           .copy(
             sourceFile = "src/main/kotlin/com/example/ProfileScreen.kt",
             section = "Screens",
-            // Published motion captures, so the golden carries the Motion chip and the harness
-            // diffs it on every future change to that row — the same reason every other affordance
-            // on the provenance/renderer rows is exercised from a fixture rather than screenshotted
-            // by hand. Two of them, so the per-capture picker's markup is covered too; it stays
-            // `hidden` at rest, which is exactly the state the page is captured in.
+            // Two published motion captures, covering the Motion chip and the (hidden at rest)
+            // per-capture picker.
             motion =
               listOf(
                 ServeMotion(
@@ -1141,9 +1028,7 @@ class ServeWebFixtureTest {
         // The full preview list feeds the left-hand component nav drawer (default closed) so the
         // harness captures its chrome alongside the default-open overrides drawer.
         siblings = previews,
-        // A resolved GitHub source link (catalog source repo/ref/module + the preview's
-        // sourceFile),
-        // so the golden captures the per-preview "source" link under the title.
+        // A resolved GitHub source link, captured under the title.
         sourceHref =
           ServeUrls.githubBlobUrl(
             "yschimke/compose-ai-tools",
@@ -1158,28 +1043,18 @@ class ServeWebFixtureTest {
             "com.example.ProfileScreenPreview",
             "Profile screen",
             "src/main/kotlin/com/example/ProfileScreen.kt",
-            // Named so this golden captures the viewer's report panel as the handler now serves it:
-            // a preview with a design reference gets a `compose-parity-locator/v1` block, and the
-            // block is what puts the "Show this issue on" scope control in the panel (#5000). A
-            // golden without one would go on showing the panel a preview outside a parity catalog
-            // gets, which is the smaller of the two shapes.
+            // With a design reference the viewer's report panel carries a
+            // `compose-parity-locator/v1` block and its "Show this issue on" scope control.
             componentId = "Profile/Screen",
             referenceId = "profile-screen-figma",
           ),
-        // …and the "open in playground" handoff, so the golden captures the full provenance row a
-        // host with the compile lane renders — the row is where every one of these affordances
-        // lands, so a change to its rhythm shows up here.
+        // The "open in playground" handoff, completing the provenance row.
         playgroundHref = "/playground?from=compose-m3/com.example.ProfileScreenPreview",
         parityIssues = parityIssues,
         parityIssuesGeneratedAt = "2026-09-05T20:08:06.488Z",
-        // The drawer subtree's DIRECTORIES, beside the variant rows: this component's recordings
-        // (folded out of the `motion` captures above) and the catalog that is about it. Carried by
-        // the golden for the same reason the Motion chip is — the harness then diffs the subtree on
-        // every future change to it, rather than someone remembering to screenshot a drawer.
-        //
-        // Two rows and a not-live one, because the three states are drawn differently: a resolved
-        // link, a second resolved link carrying the catalog's own wording as its tooltip, and a
-        // registered destination with no host yet, which is a row and not a link.
+        // The drawer subtree's directories beside the variant rows: this component's recordings and
+        // the catalog about it. Three rows for the three states: a resolved link, one with the
+        // catalog's own tooltip, and a registered destination with no host (a row, not a link).
         componentDirectories =
           listOf(
             ServeWeb.ComponentDirectory(
@@ -1228,11 +1103,9 @@ class ServeWebFixtureTest {
         wasmSrc = "/wasm/compose-m3/?id=card-filled",
         wasmSameOrigin = true,
       )
-    // A trusted catalog served LIVE (ServeCatalogLiveHost): static baked snapshots
-    // (canApplyOverrides=false) yet the "Live (stream)" toggle is enabled (hasLiveStream=true), and
-    // it also carries the in-browser Wasm tier. Captures the chrome where Live is on AND Wasm is
-    // available AND snapshots stay static — the case the `staticSnapshot` (not `live.disabled`)
-    // wasm auto-enable signal exists for.
+    // A trusted catalog served live (ServeCatalogLiveHost): baked snapshots
+    // (canApplyOverrides=false), Live enabled, plus the Wasm tier; the case the `staticSnapshot`
+    // auto-enable signal exists for.
     val wasmViewerLive =
       ServeWeb.viewerPage(
         previews.first { it.id.endsWith("CardPreview") },
@@ -1244,11 +1117,8 @@ class ServeWebFixtureTest {
         wasmSrc = "/wasm/compose-m3/?id=card-filled",
         wasmSameOrigin = true,
       )
-    // The signed-out view of a catalog whose live lane is behind GitHub auth — the state every
-    // anonymous visitor to a public box sees, and until now the only viewer state with no fixture
-    // at all. That gap is why a control that had been inert for its whole life (a `disabled` button
-    // beside a login URL no script ever read) could not be seen to be inert. Captured so the
-    // affordance is visually diffed on every future change to it.
+    // The signed-out view of a catalog whose live lane is behind GitHub auth, as anonymous visitors
+    // to a public box see it.
     val viewerSignIn =
       ServeWeb.viewerPage(
         previews.first { it.id.endsWith("CardPreview") },
@@ -1260,12 +1130,9 @@ class ServeWebFixtureTest {
         liveAuthPrompt =
           ServeWeb.LiveAuthPrompt(loginHref = "/auth/github/start?return=%2Fp%2FCardPreview"),
       )
-    // A trusted catalog served LIVE (ServeCatalogLiveHost) whose preview declares author knobs:
-    // snapshots stay baked (canApplyOverrides=false) but the carried daemon CAN re-render an
-    // override on demand (canRenderOverrides=true), so the declared knob controls render ENABLED
-    // and
-    // an edit re-renders via /render. This is the surface PR #2281's overrides feed into — captured
-    // so the visual-diff bot covers the knob panel.
+    // A trusted catalog served live whose preview declares knobs: snapshots stay baked but the
+    // carried daemon re-renders overrides on demand (canRenderOverrides=true), so the knob controls
+    // render enabled.
     val viewerCatalogKnobs =
       ServeWeb.viewerPage(
         knobPreview,
@@ -1279,19 +1146,15 @@ class ServeWebFixtureTest {
         trust = "branch:yschimke/compose-ai-tools@design-artifacts/compose-m3",
         wasmSrc = "/wasm/compose-m3/?id=button-filled",
         wasmSameOrigin = true,
-        // A trusted-catalog live session now also carries the app's declared @ThemeCatalog themes
-        // (read from the live bundle's previews.json), so the App theme selector renders enabled
-        // and
-        // re-renders via the carried daemon — the surface this PR wires up end-to-end.
+        // The app's declared @ThemeCatalog themes (from the live bundle's previews.json), so the
+        // App theme selector renders enabled and re-renders via the carried daemon.
         declaredThemes =
           listOf(
             ServeTheme("Brand Light", "com.example.BrandLightThemeCatalog", group = "Brand"),
             ServeTheme("Brand Dark", "com.example.BrandDarkThemeCatalog", group = "Brand"),
           ),
-        // The source + "report an issue" row. `serve-viewer` carries it too, but this is the viewer
-        // fixture captured with the REAL stylesheet routed in (see STYLED_FIXTURES in
-        // pages-snapshot.spec.mjs), so it is the shot where a change to how that row is *painted*
-        // moves a baseline for the visual-diff bot rather than only changing the HTML.
+        // The source + "report an issue" row, on the fixture captured with the real stylesheet (see
+        // STYLED_FIXTURES in pages-snapshot.spec.mjs), so painting changes move a baseline.
         sourceHref =
           ServeUrls.githubBlobUrl(
             "yschimke/compose-ai-tools",
@@ -1309,9 +1172,8 @@ class ServeWebFixtureTest {
         // catalog publishing Figma-backed references names.
         figmaSpec = fixtureFigmaSpec,
       )
-    // A catalog served under its canonical path (/meshcore-mobile/) rather than ?session=: same
-    // pages, but links stay on the path (basePath) and drop the &session= param. Captures the
-    // path-mounted landing + viewer the public server now serves these design systems at.
+    // A catalog served under its canonical path (/meshcore-mobile/) rather than ?session=: links
+    // stay on the path and drop &session=.
     val landingPath =
       ServeWeb.landingPage(
         "meshcore-mobile",
@@ -1323,24 +1185,17 @@ class ServeWebFixtureTest {
         hasHomeIndex = true,
         basePath = "/meshcore-mobile",
         version = version,
-        // meshcore-mobile is the catalog that really publishes Figma-backed design references, so
-        // it is the one whose landing offers both design actions — captured here so the visual-diff
-        // bot covers the reference comparison (named after the design tool the references came
-        // from) and the parity dashboard beside it.
+        // meshcore-mobile publishes Figma-backed references, so its landing offers both the
+        // reference comparison and the parity dashboard.
         hasReferenceComparison = true,
         hasParityView = true,
         designToolLabel = "Figma",
-        // The footer's Changelog entry — a published catalog has a change feed, so the path-mounted
-        // landing is where that entry is diffed. Its prefixed href is half the point: the site
-        // fixture below carries the rooted one.
+        // The footer's Changelog entry with a prefixed href (the site fixture below carries the
+        // rooted one).
         changelogHref = "/meshcore-mobile/feed.xml",
       )
-    // …and the SAME catalog as a **top-level site** ([ServeSites]): rooted on a hostname of its
-    // own, so it presents as the only thing on the server. Captured beside `landingPath` because
-    // the difference between the two IS the feature and it is entirely visual — no back button (no
-    // front door to return to on this hostname), and every link rooted rather than prefixed. One
-    // fixture keeps the site chrome under the visual-diff bot from here on, so a later change to
-    // the landing can't quietly regress the site presentation.
+    // The same catalog as a top-level site ([ServeSites]) rooted on its own hostname: no back
+    // button and every link rooted rather than prefixed.
     val landingSite =
       ServeWeb.landingPage(
         "meshcore-mobile",
@@ -1358,9 +1213,7 @@ class ServeWebFixtureTest {
         hasReferenceComparison = true,
         hasParityView = true,
         designToolLabel = "Figma",
-        // A site host's landing IS its front door, so it is the page that has to carry the sign-in
-        // — there is no home index above it. Captured here so the control is visually diffed on the
-        // one shape that depends on it (wear-m3-catalog#68).
+        // A site host's landing is its front door, so it carries the sign-in.
         githubAuth = ServeWeb.GitHubAuthStatus(loginHref = "/auth/github/start?return=%2F"),
         changelogHref = "/feed.xml",
       )
@@ -1372,9 +1225,8 @@ class ServeWebFixtureTest {
         trust = "branch:yschimke/meshcore-mobile@design-artifacts/meshcore-mobile",
         basePath = "/meshcore-mobile",
         siblings = previews,
-        // meshcore-mobile is the catalog that really publishes Figma-backed references, so its
-        // golden is where the affordance is captured in context — both the provenance link and the
-        // Spec lane chip that puts the imported reference on the stage beside the renderers.
+        // Captures the provenance link and the Spec lane chip for a catalog with Figma-backed
+        // references.
         figmaSpec = fixtureFigmaSpec,
         designReference = fixtureDesignReference,
         hasDesignAnnotations = true,
@@ -1415,17 +1267,10 @@ class ServeWebFixtureTest {
         // link is diffed on the page a visitor is most often on when they want to know what moved.
         changelogHref = "/meshcore-mobile/feed.xml",
       )
-    // The **default-value deep link** (#4218), captured because the bug it records is invisible
-    // in the markup and lives entirely in what the page does with its own query string.
-    //
-    // Same catalog and same imported reference as [viewerPath], on a preview whose id NAMES its
-    // theme (`…__light`) — which is what makes `?uiMode=light` a value that spells out the
-    // default rather than an override. `pages-snapshot` navigates it at exactly the reported URL
-    // (`?uiMode=light&mode=spec&specView=diff`), so the capture holds the state a visitor reaches
-    // by toggling to dark and back: the spec lane up, the diff drawn, and — the part that
-    // regressed — the live match on the chip and in the readout rather than the "baseline-only"
-    // fallback that a pinned theme correctly produces. [viewerPath] keeps the untokened case, so
-    // the pair covers both sides of the rule.
+    // The default-value deep link: same catalog and reference as [viewerPath], on a preview whose
+    // id names its theme (`…__light`), so `?uiMode=light` spells out the default rather than
+    // overriding. `pages-snapshot` navigates `?uiMode=light&mode=spec&specView=diff`; the chip and
+    // readout must show the live match, not the pinned-theme "baseline-only" fallback.
     val viewerSpecDefaultTheme =
       ServeWeb.viewerPage(
         ServePreview(
@@ -1441,10 +1286,8 @@ class ServeWebFixtureTest {
         siblings = previews,
         figmaSpec = fixtureFigmaSpec,
         designReference = fixtureDesignReference,
-        // The compare strip under the render: every variant of the component on the stage, against
-        // the same baseline (`docs/design/COMPARE_NAVIGATION.md`, §3.1). Shaped like the real
-        // thing — a scored variant, a worse one, and one the design file has nothing mapped to, so
-        // the golden pins all three states the strip can draw rather than a run of green rows.
+        // The compare strip under the render (`docs/design/COMPARE_NAVIGATION.md` §3.1): a scored
+        // variant, a worse one, and an unmapped one, covering all three strip states.
         componentVariants =
           listOf(
             ServeWeb.ComponentVariant(
@@ -1471,16 +1314,11 @@ class ServeWebFixtureTest {
             ),
           ),
       )
-    // A **Remote Compose** viewer, the shape preview.coo.ee serves for `remote-m3`: the same
-    // captured `.rc` document is drawable by five different players, so this is the page the
-    // renderer picker exists for. Captured because it is the ONLY fixture that carries the picker
-    // at full width — the chip naming the current player ("Java"), the combo holding the
-    // alternatives (with the unavailable `CMP JVM` listed as such), the "compare players →" step
-    // out to the player wall, and the SVG toggle for whatever the chip is showing. Every other
-    // viewer fixture has one or two lanes and so shoots a degenerate version of the row.
-    // The delivery branch's publish history, as the store reads it off the branch's commit feed.
-    // Shaped like the real thing: several regenerations a day, each stamping the source commit it
-    // was rendered from, newest first.
+    // A Remote Compose viewer like preview.coo.ee's `remote-m3`: one `.rc` document drawable by
+    // several players, the only fixture carrying the full renderer picker (chip, combo with an
+    // unavailable option, "compare players" link, SVG toggle).
+    //
+    // The delivery branch's publish history, newest first, each stamping its source commit.
     val catalogRevisions =
       listOf(
         ServeCatalogRevision.Revision(
@@ -1521,19 +1359,12 @@ class ServeWebFixtureTest {
         hasSvgExport = true,
         hasRemoteComposeDoc = true,
         // camaelon-js + cmp-wasm play in the browser, androidx-view + androidx-embedded render
-        // through the daemon; cmp-android (the CMP player on Android) and cmp-jvm are not
-        // reported by this host, so they are the "(unavailable)" options.
+        // through the daemon; cmp-android and cmp-jvm are unavailable.
         enabledRcPlayers = listOf("camaelon-js", "cmp-wasm", "androidx-view", "androidx-embedded"),
         trust = "branch:yschimke/compose-ai-tools@design-artifacts/remote-m3",
       )
-    // The SAME Remote Compose preview, behind GitHub auth — the one pair the renderer control has
-    // to keep apart, and the pair no other fixture holds. A Remote Compose preview has a renderer
-    // combo; an auth-gated live lane is independent of it; a box run with `--github-auth` serves
-    // both at once. But `serve-viewer-rc-players` has no auth prompt and `serve-viewer-signin` has
-    // no players, so the toolbar this combination lays out was captured nowhere, and #585 joined a
-    // DASHED sign-in anchor to a SOLID caret without moving a baseline. Here the chip's slot holds
-    // a link to another origin rather than a lane toggle, so the two controls must stand apart:
-    // that is what this shot pins.
+    // The same Remote Compose preview behind GitHub auth (as with `--github-auth`), the one fixture
+    // with both the renderer combo and the sign-in link, which must stand apart in the toolbar.
     val viewerRcSignIn =
       ServeWeb.viewerPage(
         ServePreview(
@@ -1558,14 +1389,11 @@ class ServeWebFixtureTest {
               "/auth/github/start?return=%2Fremote-m3%2Fp%2Fappcard__ideal__default__compact"
           ),
       )
-    // A Remote Compose preview whose design target and ordinary implementation both come through
-    // its paired Wear M3 catalog. This is the public remote-m3/Card shape: no duplicated local
-    // Figma reference, but a Figma source inherited from the paired Wear preview and the Wear
-    // render itself as the second comparison source.
-    // The compare strip on a catalog with NO baseline anywhere: no variant maps to a design
-    // reference and nothing is paired, which is every imported catalog (tunjid-heron's message list
-    // is the shape). The strip is the variants alone — render and name — rather than a column of
-    // empty reference frames and `not scored` under a heading claiming a comparison nobody made.
+    // A Remote Compose preview whose design target and implementation both come from its paired
+    // Wear M3 catalog (the public remote-m3/Card shape).
+    //
+    // The compare strip with no baseline at all (no mapped reference, nothing paired): variants
+    // alone, not empty reference frames.
     val viewerStripNoBaseline =
       ServeWeb.viewerPage(
         ServePreview(
@@ -1622,11 +1450,8 @@ class ServeWebFixtureTest {
             provenance = "Wear M3's own render under that catalog's theme and knobs.",
           ),
         parallelLayers = true,
-        // The compare strip's SECOND baseline, which only a paired catalog has: every row carries
-        // the design reference and the sibling's render of the same variant, and the lane's source
-        // picker chooses which is shown. This is the fixture that captures it — the unpaired
-        // viewers above render the single-baseline strip they always did, so without a paired page
-        // in the harness the switch would be a visual surface with no picture on any pull request.
+        // The compare strip's second baseline, which only a paired catalog has: each row carries
+        // the design reference and the sibling's render, and the source picker chooses.
         componentVariants =
           listOf(
             ServeWeb.ComponentVariant(
@@ -1643,9 +1468,8 @@ class ServeWebFixtureTest {
               matchPercent = 88.1,
               parallelRenderUrl = "/wear-m3-catalog/render/card__ideal__outlined.png",
             ),
-            // A variant the sibling does not draw, and one the design file does not map. Both
-            // frames are empty rather than filled with a stand-in, which is what the strip has to
-            // show for the pairing to stay honest about what it could not pair.
+            // A variant the sibling does not draw and one the design file does not map; both frames
+            // stay empty.
             ServeWeb.ComponentVariant(
               previewId = "card__ideal__long__compact",
               variant = "long text",
@@ -1653,10 +1477,8 @@ class ServeWebFixtureTest {
           ),
         trust = "branch:yschimke/wear-m3-catalog@design-artifacts/remote-m3",
       )
-    // The same rich viewer, PINNED. Captured as the twin of [viewerRcPlayers] because that is the
-    // page where the rule is visible: every lane above renders the catalog's current code, so a pin
-    // must leave none of them on the page — no Live toggle, no renderer combo, no SVG toggle or
-    // download, no inspection layers — while the stage keeps the publish the banner names.
+    // The same rich viewer, pinned: every lane renders current code, so the pin removes all of them
+    // (Live, combo, SVG, download, inspection layers) while the stage keeps the named publish.
     val viewerPinnedLanes =
       ServeWeb.viewerPage(
         ServePreview(
@@ -1684,10 +1506,7 @@ class ServeWebFixtureTest {
             repo = "yschimke/compose-ai-tools",
           ),
       )
-    // The Wear counterpart of [viewerPath]: a screen served under a Wear system path. Its Size
-    // panel must offer the watch shapes (not Pixel phones / a foldable / a tablet) and drop the
-    // Orientation control a watch can't honour — captured so the visual-diff bot covers the Wear
-    // control panel, which no other page fixture reaches.
+    // The Wear counterpart of [viewerPath]: Size offers watch shapes and Orientation is dropped.
     val viewerWearScreen =
       ServeWeb.viewerPage(
         ServePreview(
@@ -1702,10 +1521,8 @@ class ServeWebFixtureTest {
         basePath = "/home-assistant-wear",
         trust = "branch:yschimke/home-assistant-wear@design-artifacts/home-assistant-wear",
       )
-    // A daemon-backed viewer whose module declares `@ThemeCatalog` themes: the viewer adds an "App
-    // theme" selector (grouped by `@ThemeCatalog(group=…)`) so a preview can be re-rendered under a
-    // chosen theme via the `themeProvider` override. Captured so the visual-diff bot covers the
-    // selector.
+    // A daemon-backed viewer whose module declares `@ThemeCatalog` themes, adding an "App theme"
+    // selector grouped by `@ThemeCatalog(group=…)`.
     val viewerThemes =
       ServeWeb.viewerPage(
         previews.first { it.id.endsWith("ProfileScreenPreview") }.copy(uiMode = 0x20),
@@ -1719,12 +1536,8 @@ class ServeWebFixtureTest {
             ServeTheme("High Contrast", "com.example.HighContrastThemeCatalog"),
           ),
       )
-    // The crowded-toolbar case: a viewer whose catalog declares the full Material 3 baseline +
-    // contrast theme set, so the Theme axis alone offers eight chips beside the four fixed toolbar
-    // controls. This is what the published `compose-m3` catalog actually looks like, and it is the
-    // shape that used to wrap the viewer bar onto three lines and push the stage below the fold.
-    // Committed so the single-row bar (chips shrinking, then scrolling within their own group) is
-    // diffed by the visual-diff bot on every PR rather than only ever checked by hand.
+    // The crowded-toolbar case: the full M3 baseline + contrast theme set (eight theme chips), as
+    // published `compose-m3` has. Covers the single-row bar with shrinking, then scrolling, chips.
     val viewerThemeOverflow =
       ServeWeb.viewerPage(
         previews.first { it.id.endsWith("ProfileScreenPreview") }.copy(uiMode = 0x20),
@@ -1742,9 +1555,8 @@ class ServeWebFixtureTest {
             ServeTheme("Light Medium Contrast", "com.example.LightMediumContrastThemeCatalog"),
           ),
       )
-    // A daemon-backed viewer for a preview detected to support keyboard focus (`@FocusedPreview`):
-    // the "Detected features" group with the "Keyboard focus" control appears, gated to daemon
-    // sessions. Captured so the visual-diff bot covers the detected-feature control.
+    // A daemon-backed viewer for a `@FocusedPreview`, showing the "Keyboard focus" detected-feature
+    // control.
     val viewerFocus =
       ServeWeb.viewerPage(
         ServePreview("com.example.FocusRingPreview", "Focus ring", supportsFocus = true),
@@ -1752,12 +1564,9 @@ class ServeWebFixtureTest {
         sessionId = "compose-m3",
         canApplyOverrides = true,
       )
-    // A daemon-backed viewer whose session can produce every inspection layer: the accessibility
-    // focus map (`a11y/hierarchy` + ATF findings + touch targets) and the typography / theme
-    // attributes derived from the render's own semantics tree. The harness drives this fixture
-    // twice — once as served, once with the layers ticked (see `pages-snapshot.spec.mjs`'s
-    // `serve-viewer-inspect` states) — so the visual-diff bot covers both the controls and the
-    // drawn overlay + legend.
+    // A daemon-backed viewer with every inspection layer (a11y focus map, typography / theme
+    // attributes). The harness captures it as served and with layers ticked (see
+    // `serve-viewer-inspect` states).
     val viewerInspect =
       ServeWeb.viewerPage(
         ServePreview("com.example.ProfileCardPreview", "Profile card"),
@@ -1767,17 +1576,10 @@ class ServeWebFixtureTest {
         hasA11yOverlay = true,
         hasDesignAnnotations = true,
       )
-    // The **other lane behind the same Typography layer**: a published catalog with no daemon at
-    // all, whose `annotations/index.json` carries typography measured over the baked frame this
-    // page shows. `canApplyOverrides = false` and `hasDesignAnnotations = false` — so the Overrides
-    // drawer is the static one and there is no Theme attributes row (nothing authors theme
-    // attributes into a bundle; they are projected from a live semantics tree).
-    //
-    // Its own fixture rather than a flag on `serve-viewer-inspect`, because the claim is precisely
-    // that a page WITHOUT the daemon controls still offers a working layer — which is invisible on
-    // a fixture that has every control anyway. The harness ticks it in the
-    // `serve-viewer-published-typography` `layers` state, so the boxes and the legend are diffed
-    // per PR alongside the daemon lane's.
+    // The other lane behind the Typography layer: a published catalog with no daemon, whose
+    // `annotations/index.json` carries typography measured over the baked frame. Its own fixture to
+    // show a page without daemon controls still offers a working layer (ticked in the
+    // `serve-viewer-published-typography` `layers` state).
     val viewerPublishedTypography =
       ServeWeb.viewerPage(
         ServePreview("button-filled__ideal__default__light", "Filled button (light)"),
@@ -1786,12 +1588,9 @@ class ServeWebFixtureTest {
         canApplyOverrides = false,
         hasPublishedTypography = true,
       )
-    // An SVG-exporting viewer opened straight into the **exploded 3D** view: the `3D` chip pressed
-    // beside the SVG one, and the Exploded 3D group in the overrides drawer holding the camera
-    // axes. Its stage is stubbed by the harness with the committed
-    // `_render-placeholder-exploded.svg` — which `ExplodedSvgFixtureTest` generates from the
-    // layered placeholder through the production renderer — so the PNG the visual-diff bot posts
-    // shows the real projection, not a stand-in drawing.
+    // An SVG-exporting viewer opened in the exploded 3D view. The harness stubs its stage with the
+    // committed `_render-placeholder-exploded.svg` (generated by `ExplodedSvgFixtureTest`), so the
+    // capture shows the real projection.
     val viewerExploded =
       ServeWeb.viewerPage(
         ServePreview("com.example.ProfileCardPreview", "Profile card"),
@@ -1801,10 +1600,8 @@ class ServeWebFixtureTest {
         hasSvgExport = true,
         hasScrollExport = true,
       )
-    // A viewer offering the **Source** chip: the usage code behind the card, on the stage in place
-    // of the render. Its own fixture rather than a flag on `viewer` because the chip changes the
-    // control row, and the `source-panel` state below — which is where the panel is actually drawn
-    // — needs a page that carries the chip to press.
+    // A viewer offering the Source chip; its own fixture because the chip changes the control row
+    // and the `source-panel` state needs it.
     val viewerSource =
       ServeWeb.viewerPage(
         ServePreview("com.example.ProfileCardPreview", "Profile card"),
@@ -1813,17 +1610,10 @@ class ServeWebFixtureTest {
         canApplyOverrides = true,
         usageHref = "/usage/com.example.ProfileCardPreview",
       )
-    // The SAMPLES page role, as a PAIR of goldens built from one set of inputs.
-    //
-    // The pair is the point. A samples page is the ordinary component page with its comparison
-    // lanes gone and its source stood beside the render, and both halves of that are invisible in a
-    // single golden — `serve-viewer-samples-as-catalog.html` is the same preview, the same usage
-    // source and the same design reference rendered at [ServeWeb.PageRole.CATALOG], so the harness
-    // diffs exactly what the role does and nothing else. A regression that quietly widened or
-    // narrowed the role shows up as a change in the difference between the two.
-    //
-    // Deliberately carrying a design reference: it is the comparison the role has to drop, and a
-    // fixture with nothing to drop cannot show it dropped.
+    // The samples page role as a pair of goldens from one set of inputs:
+    // `serve-viewer-samples-as-catalog.html` is the same preview at [ServeWeb.PageRole.CATALOG], so
+    // the diff shows exactly what the role does. Carries a design reference because dropping
+    // comparisons is part of the role.
     val samplesPreview =
       ServePreview(
         "com.example.ButtonSample",
@@ -1853,31 +1643,22 @@ class ServeWebFixtureTest {
         usageHref = "/usage/com.example.ButtonSample",
         designReference = samplesReference,
         canApplyOverrides = true,
-        // A samples catalog is a catalog of many call sites, so the fixture carries a few: with one
-        // preview the drawer is omitted entirely and the goldens would show a page shape no real
-        // samples catalog has.
+        // Several call sites, since with one preview the drawer is omitted.
         siblings =
           listOf(
             samplesPreview,
             ServePreview("com.example.ButtonWithIconSample", "Button with icon sample"),
             ServePreview("com.example.TextButtonSample", "Text button sample"),
           ),
-        // The BACK-LINK, as the handler derives it: the kit component this sample explains. It is
-        // the inverse of that catalog's own `related` declaration
-        // ([ServeRelatedCatalogs.inverse]) and is declared nowhere in the samples catalog, which is
-        // the point — an imported catalog regenerated on every refresh cannot carry a mapping of
-        // its own and stay true.
-        //
-        // Carried on BOTH goldens, not only the samples one: the back-link follows from the
-        // declaration and not from the role, so a reader of the pair can see which differences the
-        // role is responsible for and which it is not.
+        // The back-link to the kit component this sample explains, derived from that catalog's
+        // `related` declaration ([ServeRelatedCatalogs.inverse]). On both goldens, because it
+        // follows from the declaration, not the role.
         componentDirectories =
           listOf(
             ServeWeb.ComponentDirectory(
               "about",
-              // The SOURCE catalog's own heading, not a fixed word: `related` is directed and this
-              // directory lands on whichever end did not declare it, so only the catalog's name is
-              // true in both directions.
+              // The source catalog's own heading: `related` is directed, so only the catalog's name
+              // reads true in both directions.
               "Compose Material 3",
               listOf(ServeWeb.ComponentDirectoryRow("Button", "/compose-m3/p/button-filled")),
             )
@@ -1885,21 +1666,9 @@ class ServeWebFixtureTest {
       )
     val samplesViewer = samplesFixture(ServeWeb.PageRole.SAMPLES)
     val samplesViewerAsCatalog = samplesFixture(ServeWeb.PageRole.CATALOG)
-    // A viewer whose preview published motion captures, on a fixture of its OWN rather than as a
-    // state of the main one. The harness's extra states run in order against the same page, and
-    // this one leaves a lane OPEN — the still taken out of flow, a capture on the stage — so run
-    // ahead of `serve-viewer`'s own `connecting` state it would have re-captured that baseline
-    // showing the recording instead of the render. The Source panel is isolated for exactly this
-    // reason, and this is the same shape of state.
-    //
-    // Two captures, because the per-capture menu only appears when there is a choice to make, and
-    // an interacted shot is the only place its markup is ever visible.
-    //
-    // Their captions are the shape catalogs actually publish — a line of instruction followed by a
-    // paragraph of what to watch for — rather than the two-word labels this fixture used to carry.
-    // Those made the picker look fine at every width and hid the reason it is a menu at all: on the
-    // old segmented group this pair is two paragraphs side by side, wider than the render they
-    // introduce. A fixture that cannot show the problem cannot show it fixed either.
+    // A viewer with motion captures, on its own fixture because its state leaves a lane open and
+    // would otherwise contaminate `serve-viewer`'s later states. Two captures so the per-capture
+    // menu appears, with realistic (long) captions.
     val viewerMotion =
       ServeWeb.viewerPage(
         ServePreview(
@@ -1926,10 +1695,8 @@ class ServeWebFixtureTest {
         token,
         sessionId = "compose-m3",
       )
-    // A daemon-backed viewer for a preview detected to support one-handed gesture hints
-    // (`@GestureHintPreview`) on an Android-backed session (`gesturesRenderable = true`): the
-    // "Detected features" group shows the "Show gesture hints" control. Captured so the visual-diff
-    // bot covers the Android-gated detected-feature control.
+    // A daemon-backed `@GestureHintPreview` on an Android session (`gesturesRenderable = true`),
+    // showing the "Show gesture hints" control.
     val viewerGestures =
       ServeWeb.viewerPage(
         ServePreview("com.example.OneHandedPreview", "One-handed", supportsGestures = true),
@@ -1938,11 +1705,8 @@ class ServeWebFixtureTest {
         canApplyOverrides = true,
         gesturesRenderable = true,
       )
-    // The SAME gesture-supporting preview on a desktop-backed session (`gesturesRenderable =
-    // false`,
-    // the default): the desktop daemon ignores the override, so the row is omitted rather than
-    // shown
-    // dead — no "Detected features" group at all.
+    // The same preview on a desktop session (`gesturesRenderable = false`): the override is
+    // ignored, so the "Detected features" group is omitted.
     val viewerGesturesDesktop =
       ServeWeb.viewerPage(
         ServePreview("com.example.OneHandedPreview", "One-handed", supportsGestures = true),
@@ -1967,13 +1731,9 @@ class ServeWebFixtureTest {
         hasRcComparison = true,
         version = version,
       )
-    // The catalog-theme sync: a served system's pages are framed in ITS colours, not the built-in
-    // indigo shell — the `:root` override `ServeThemeCss` projects from the delivery branch's
-    // `tokens.dtcg.json`. Two fixtures so the bot diffs both directions of the mode match: a
-    // dark-first catalog (wear-m3, cyan on near-black) on the landing, and a light-first one
-    // (jetnews, crimson) on the viewer. The harness shoots each in light AND dark, which is exactly
-    // where the "matching mode syncs surfaces, the other keeps built-in neutrals + the brand
-    // accent" rule shows up.
+    // Catalog-theme sync: pages framed in the system's own colours (the `:root` override
+    // `ServeThemeCss` projects from `tokens.dtcg.json`). A dark-first catalog on the landing and a
+    // light-first one on the viewer, each shot in light and dark.
     val landingCatalogPalette =
       ServeWeb.landingPage(
         "wear-m3",
@@ -1997,9 +1757,8 @@ class ServeWebFixtureTest {
         catalogTitle = "JetNews",
         themeCss = ServeThemeCss.fromDtcg(jetNewsTokens)!!,
       )
-    // The format-comparison surface introduced for issue #3158. Both targets are advertised so the
-    // visual fixture covers the format tabs; the light/dark pairs ensure the comparison theme
-    // control and strict same-theme URL wiring are captured too.
+    // The format-comparison surface. Both targets are advertised to cover the format tabs;
+    // light/dark pairs cover the theme control and same-theme URL wiring.
     val formatComparison =
       ServeWeb.comparisonPage(
         "compose-m3",
@@ -2021,10 +1780,8 @@ class ServeWebFixtureTest {
                 raster =
                   DesignReferenceRaster("references/design-$id.png", width = 320, height = 160),
                 source = DesignReferenceSource(provider = "figma", revision = "fixture-42"),
-                // The score the delivery branch bakes into `references/index.json`, which the wall
-                // seeds its rows and its order from before the browser has measured anything. The
-                // fixture carries one so the published-score marking is diffed like any other
-                // pixel.
+                // The score baked into `references/index.json`, which seeds the wall's rows and
+                // order before any browser measurement.
                 match =
                   DesignReferenceMatch(
                     percent = 82.4,
@@ -2051,9 +1808,8 @@ class ServeWebFixtureTest {
         // capture the line it collapses to AND the date under the panel, or neither is diffed.
         parityIssuesGeneratedAt = "2026-09-05T20:08:06.488Z",
       )
-    // The Remote Compose PLAYER WALL: the same compare page in `?format=rc`, backed by a catalog's
-    // published `rc-compare` manifest instead of by an in-browser render. Only the rc format is
-    // advertised, so the page opens straight onto the wall — which is what the fixture is for.
+    // The Remote Compose player wall: `?format=rc`, backed by a published `rc-compare` manifest.
+    // Only rc is advertised, so the page opens on the wall.
     val rcLanesComparison =
       ServeWeb.comparisonPage(
         "remote-m3",
@@ -2064,10 +1820,8 @@ class ServeWebFixtureTest {
         isPublic = true,
         rcCompare = rcCompareFixture(themedPreviews),
       )
-    // The same wall for a catalog whose run opted into only SOME of the players — the shape
-    // wear-m3-catalog publishes (baked + the JS player + CMP/Wasm), and the one that made a reader
-    // ask where the desktop and Android players went (#4998). The three absent lanes are named
-    // under the summary rather than left as a gap in the header row.
+    // The wall for a run that opted into only some players (like wear-m3-catalog); absent lanes are
+    // named under the summary.
     val rcLanesPartialComparison =
       ServeWeb.comparisonPage(
         "remote-m3",
@@ -2079,10 +1833,8 @@ class ServeWebFixtureTest {
         rcCompare = rcCompareFixture(themedPreviews, lanes = setOf("baked", "js", "cmp-wasm")),
       )
 
-    // The same partial run, served by a host that can draw the two server-side players itself —
-    // which is what a live daemon carrying the catalog's ir/*.rc actually is. The wall fills the
-    // columns that run never published rather than reporting them absent (#4998): the reader gets
-    // five players, two of them rendered on request and badged as such.
+    // The same partial run on a host that can draw the server-side players itself: those columns
+    // are filled on request and badged.
     val rcLanesLiveComparison =
       ServeWeb.comparisonPage(
         "remote-m3",
@@ -2092,10 +1844,9 @@ class ServeWebFixtureTest {
         trust = "branch:yschimke/compose-ai-tools@design-artifacts/remote-m3",
         isPublic = true,
         rcCompare = rcCompareFixture(themedPreviews, lanes = setOf("baked", "js", "cmp-wasm")),
-        // The host offers BOTH server-side players, and the wall must take only cmp-jvm: on an
-        // Android daemon `?rcPlayer=androidx-embedded` returns the baked capture itself, so that
-        // column would duplicate the one beside it. `badge` stands in for a preview the host
-        // carries no document for, so the wall also has to show a column its rows do not all fill.
+        // The host offers both server-side players but the wall takes only cmp-jvm: on an Android
+        // daemon `?rcPlayer=androidx-embedded` returns the baked capture, duplicating its
+        // neighbour. `badge` has no document, so one column is partly empty.
         liveRcPlayersFor = { previewId ->
           if (previewId.startsWith("badge")) emptyList()
           else
@@ -2129,10 +1880,9 @@ class ServeWebFixtureTest {
           source = DesignReferenceSource(provider = "penpot", revision = "fixture-43"),
         ),
       )
-    // The design-parity dashboard. Built through the real [ServeParityDashboard] rather than by
-    // hand-assembling a view model, so the golden also pins the *derivation* — coverage folding
-    // light/dark onto one component, the two lanes merging by time, and a comment on a component
-    // whose code didn't move landing in the "needs a look" band.
+    // The design-parity dashboard, built through the real [ServeParityDashboard] so the golden also
+    // pins the derivation (light/dark coverage folding, lane merge by time, the "needs a look"
+    // band).
     val parityDashboard =
       ServeParityDashboard.build(
         previews = themedPreviews,
@@ -2264,25 +2014,17 @@ class ServeWebFixtureTest {
             overrides = mapOf("fontScale" to "1.5", "knob.label" to "Send;now=x"),
             comparison = true,
           ),
-        // The DERIVED semantics layers, which this page could not show until the inspection
-        // machinery learned to mount over a host other than the viewer. They are what gives the
-        // element selector something to point at on the render side of the comparison — the
-        // authored redline below annotates the reference far more often than the render.
+        // The derived semantics layers, which give the element selector something to point at on
+        // the render side.
         derivedAnnotations = true,
         annotationsSelectable = true,
-        // …and the tag index, which is the OTHER half, and the half an annotation-box-only design
-        // misses: a uniquely tagged node carrying neither typography nor container tokens produces
-        // no annotation at all, so nothing on this page draws a box for it.
+        // ...and the tag index: a uniquely tagged node with no typography or container tokens
+        // produces no annotation box, so only the index exposes it.
         tagIndexAvailable = true,
-        // A catalog that has accepted something, so the acceptance band and its payload are in a
-        // golden. The band is filled by the engine at runtime — a fixture opened as a file has
-        // nothing to fetch, so the screenshot shows it collapsed — which is the honest split: this
-        // golden covers the markup and the payload the server writes, and the engine's own output
-        // is covered by `cli/serve-web/test/acceptance.test.ts` end to end.
-        //
-        // The tag index is non-empty here because `tagIndexAvailable` is: an element-scoped
-        // acceptance whose gate cannot run suppresses nothing, so the two must agree or the page
-        // would offer a tag picker while telling the engine there are no tags.
+        // A catalog with an accepted difference, so the acceptance band and its payload are in a
+        // golden. The engine fills the band at runtime (collapsed in a file-opened fixture); its
+        // output is covered by `serve-web/test/acceptance.test.ts`. The tag index is non-empty
+        // because `tagIndexAvailable` is; the two must agree.
         knownDifferences =
           KnownDifferenceScope(
             system = "compose-m3",
@@ -2302,9 +2044,7 @@ class ServeWebFixtureTest {
                   )
               ),
           ),
-        // Both panels annotated, so the fixture covers the case the layers exist for: reading the
-        // reference's spec against the actual's. The layout boxes agree here and the type styles
-        // don't, which is what the page is meant to make obvious.
+        // Both panels annotated: layout boxes agree, type styles don't.
         referenceAnnotations =
           listOf(
             DesignAnnotation(
@@ -2399,9 +2139,7 @@ class ServeWebFixtureTest {
                   "unit" to "sp",
                 ),
             ),
-            // The resolved-container layer. Before the THEME toggle existed this annotation loaded,
-            // got a box and a legend row built for it, and was then hidden by CSS with no control
-            // able to reveal it — so the fixture carries one to keep that reachable.
+            // The resolved-container layer, kept reachable via the THEME toggle.
             DesignAnnotation(
               kind = AnnotationKind.THEME,
               bounds = AnnotationBounds(x = 12, y = 12, width = 196, height = 48),
@@ -2416,11 +2154,8 @@ class ServeWebFixtureTest {
                 ),
             ),
           ),
-        // The parity run's own verdict for this pair — the half that is prose rather than pixels,
-        // and the reason this page can now say WHY two frames differ. One finding per category a
-        // reader acts on, and the anchors deliberately reuse the same boxes the redline above
-        // annotates: a golden in which the highlight and the spec box describe different regions
-        // would hide exactly the drift the shared placement exists to prevent.
+        // The parity run's own verdict for this pair: one finding per category, anchored to the
+        // same boxes the redline annotates.
         parityFindings =
           listOf(
             ParityFindingSet(
@@ -2496,10 +2231,8 @@ class ServeWebFixtureTest {
         parityIssues = parityIssues,
         parityIssuesGeneratedAt = "2026-09-05T20:08:06.488Z",
       )
-    // The same comparison, PINNED to an older publish (issue #3723) — the state a shared permalink
-    // opens in. Captured because it is where the feature is visible: the banner naming the
-    // revision and the way back to the live catalog, above a revision list opened on the publish
-    // being shown.
+    // The same comparison pinned to an older publish: the banner naming the revision, the way back,
+    // and the revision list.
     val referenceComparisonPinned =
       ServeWeb.referenceComparisonPage(
         moduleLabel = "compose-m3",
@@ -2527,23 +2260,15 @@ class ServeWebFixtureTest {
             variant = ServeIssueReport.variantFor(themedPreviews.first()),
             comparison = true,
           ),
-        // No `tagIndexUrl`, and the reason said out loud. The pinned page is where the frame gate
-        // is visible: the published index describes the CURRENT render, so a tag selection here
-        // would record bounds measured on different pixels. The drag is unaffected — it is read off
-        // the pixels on screen — so the page still offers a way to point at something.
+        // No `tagIndexUrl`, with the reason stated: the published index describes the current
+        // render, so a tag selection would use bounds from different pixels. The drag still works.
         tagSelectionNote =
           "Tag selection is off on a pinned revision: the tag index describes the current " +
             "render, not this one. Drag a region instead.",
       )
-    // The same page for a DARK-FIRST catalog, which is a materially different picture rather than a
-    // recolour of the one above — and the case yschimke/wear-m3-catalog#56 was raised against.
-    //
-    // A dark-first system renders its stickers transparent on purpose (`showBackground = false`, so
-    // one drops onto any Figma canvas), so the panels' ground is the *only* thing making its
-    // white-on-transparent content visible. That made this page's missing stage invisible to every
-    // existing fixture: the light-first twin above looks identical whether the stage resolves or
-    // falls through, because its content is dark either way. Without this fixture the regression
-    // could come back and no committed screenshot would move.
+    // The same page for a dark-first catalog (yschimke/wear-m3-catalog#56). Its stickers are
+    // transparent (`showBackground = false`), so white content is only visible if the stage ground
+    // resolves; the light-first twin looks identical either way.
     val referenceComparisonDarkFirst =
       ServeWeb.referenceComparisonPage(
         moduleLabel = "wear-m3",
@@ -2562,14 +2287,9 @@ class ServeWebFixtureTest {
       referenceComparisonDarkFirst.contains("data-bg-theme=\"dark\""),
       "the dark-first comparison fixture must actually carry the dark stage",
     )
-    // The same page for a ROUND device, which is the dark-first fixture's own blind spot. Giving
-    // this page a ground fixed invisible stickers and introduced a quieter version of the same
-    // fault: a Wear capture is a circle in a square PNG, so a ground painted across the panel draws
-    // the watch as a rectangle. It is not merely untidy — Wear previews declare
-    // `backgroundColor = 0xFF000000` against near-black screens, so on this repo's own
-    // `PageIndicatorScaffoldTemplate` renders the stage was pixel-identical to the screen and the
-    // device boundary disappeared. The dark-first fixture above cannot catch that: its preview
-    // names no device, so it has no bezel to lose.
+    // The same page for a round device: a Wear capture is a circle in a square PNG, so a ground
+    // painted across the panel draws the watch as a rectangle, and with Wear's near-black
+    // backgrounds the device boundary vanishes.
     val referenceComparisonRoundDevice =
       ServeWeb.referenceComparisonPage(
         moduleLabel = "wear-m3",
@@ -2577,8 +2297,8 @@ class ServeWebFixtureTest {
           themedPreviews
             .first()
             .copy(
-              // Exactly what `samples/design-catalog-wear-m3` states — including the explicit dp
-              // alongside the device id, which is the combination that used to resolve as square.
+              // Exactly what `samples/design-catalog-wear-m3` states, including the explicit dp
+              // alongside the device id.
               deviceFrame = ServeDeviceFrame.from("id:wearos_large_round", 227, 227),
               showBackground = true,
               backgroundColor = 0xFF000000L,
@@ -2608,11 +2328,8 @@ class ServeWebFixtureTest {
             repo = "yschimke/compose-ai-tools",
           ),
       )
-    // The same page with the revision menu popped open. The control is a `<details>` menu that
-    // ships closed, so a screenshot of the page above only ever captures its trigger — and the list
-    // of publishes, the part a change to this feature is most likely to break visually, would never
-    // be diffed. Forcing the disclosure open is the whole difference between the two fixtures; the
-    // markup inside it is the server's own.
+    // The same page with the revision `<details>` menu forced open, so the list of publishes is
+    // captured, not just its trigger.
     val viewerRevisionsOpen =
       viewerRevisions.replace(
         "<details class=\"cp-revisions\">",
@@ -2622,17 +2339,10 @@ class ServeWebFixtureTest {
       viewerRevisionsOpen == viewerRevisions,
       "the revision menu's <details> tag changed shape — update this fixture's open-state rewrite",
     )
-    // The same menu with `<cp-revision-runs>` answered: two distinct renders across the four
-    // publishes, so the first and third rows carry a thumbnail and the two under them are indented
-    // beneath the run they belong to.
-    //
-    // Registered as its own fixture because the markers are drawn CLIENT-SIDE from a lane the
-    // harness cannot reach, so without an inlined payload the open-menu capture above would be
-    // byte-identical whether the markers work or the feature is deleted. The four revisions split
-    // 2 + 2, which is the smallest arrangement that exercises every visual state the feature has: a
-    // first head (no rule above it), an indented follower, a second head (with the between-runs
-    // rule), and a `×N` badge. The second run is `open` so the "at least N" wording is captured
-    // too.
+    // The same menu with `<cp-revision-runs>` answered (markers are drawn client-side, so the
+    // payload is inlined). Four revisions split 2 + 2 exercise every state: first head, indented
+    // follower, second head with rule, and a `×N` badge; the second run is `open` to capture "at
+    // least N".
     val viewerRevisionRuns =
       ServeWeb.viewerPage(
           previews.first { it.id.endsWith("ProfileScreenPreview") },
@@ -2657,26 +2367,13 @@ class ServeWebFixtureTest {
         viewerRevisionRuns.contains("<cp-revision-runs "),
       "the runs fixture must carry both the element and the payload it draws from",
     )
-    // The design page's inlined export. Run through the real [SvgSanitizer] rather than pasted in
-    // whole, so the golden HTML is what the server would actually emit — including anything the
-    // sanitizer strips.
+    // The design page's inlined export, run through the real [SvgSanitizer] so the golden is what
+    // the server would emit.
     //
-    // NESTED, like a real one, and that is load-bearing rather than decoration. A Figma export is a
-    // tree — a page holds cards, a card holds slots, a slot holds the component — and
-    // `<cp-page-zoom>` reads that tree as the levels a double-click drills through (see its zoom
-    // section). While this fixture was FLAT, every node on it was a sibling of every other, so the
-    // whole nested-zoom gesture was unreachable from the harness and a regression in it would have
-    // moved no baseline. The two cards and their slots are also painted, for the same reason:
-    // drilling resolves against the browser's hit test, so a level with nothing drawn in it can
-    // only ever be found by the fallback bbox scan, which is not the path a reader takes.
-    //
-    // ONE NODE IS CLIPPED (`1:2`), and that is load-bearing too. A Figma export keeps an oversized
-    // shape inside a component with a `clip-path` — the Wear kit does it for a placeholder's
-    // shimmer sweep — and `getBoundingClientRect()` ignores clipping, so the node measured as the
-    // sweep and the render fitted into that slot painted a grey blob across the page (issue #4323).
-    // The sweep here is twice the square it is clipped to, so a regression to the unclipped
-    // measurement publishes a render at twice its size in every design-page capture, rather than
-    // nowhere at all.
+    // Nested like a real Figma export (page > cards > slots > component), because `<cp-page-zoom>`
+    // drills through that tree; cards and slots are painted since drilling uses the browser's hit
+    // test. Node `1:2` is clipped: `getBoundingClientRect()` ignores clipping, so its oversized
+    // sweep (twice the clip) would double the render size if the clipped measurement regressed.
     val designPageSvg =
       checkNotNull(
         SvgSanitizer.sanitize(
@@ -2730,24 +2427,12 @@ class ServeWebFixtureTest {
         )
       )
 
-    // A design page: one specimen sheet of the kit, inlined as SVG, with the node id of every
-    // component on it. The mix is the point: two `manifest` links whose previews this catalog
-    // publishes, one `convention` (low-confidence name match), one `manifest` link to a preview
-    // that ISN'T published (outline, no render), one node the manifest names that the export does
-    // not carry, and four `unlinked`: the component-set grid and BOTH spellings of the sheet header
-    // (all structure), plus a specific shape no code implements, which is the finding the surface
-    // exists to surface.
-    //
-    // Both spellings, because the kit uses both and only one of them used to be recognised. The
-    // Shape page this fixture is drawn from names its header `.Header`, which the leading-dot rule
-    // caught; every other page in the kit names it plain `Header`, which nothing caught — so the
-    // header sat on 27 sheets outlined in red and clickable, and in the denominator. `Header` is
-    // here so that regression has a golden of its own: neither header may appear in the markup.
-    //
-    // Each header gets a real box in the export above, one per column, so the capture is honest
-    // about WHERE the mark used to land. A node with no box in the SVG has nowhere to draw and a
-    // screenshot of the regression would show nothing — which is the one way this fixture could
-    // pass while the bug it exists for was visible on the real sheet.
+    // A design page: one specimen sheet with the node id of every component on it. Mix: two
+    // `manifest` links to published previews, one `convention` match, one `manifest` link to an
+    // unpublished preview (outline, no render), one manifest node missing from the export, and four
+    // `unlinked` nodes (the component-set grid, both `.Header` and `Header` spellings of the sheet
+    // header, and a shape no code implements). Neither header spelling may appear in the markup;
+    // each has a real box so a regression would be visible.
     val designPageFixture =
       DesignPage.Builder(
           id = "shape",
@@ -2820,13 +2505,9 @@ class ServeWebFixtureTest {
         // Everything except the pill, so the fixture covers a node the producer mapped but this
         // catalog cannot draw.
         renderablePreviewIds = setOf("com.example.ProfileCardPreview"),
-        // A `compareWith` sibling's rendition of the same cells. Deliberately NOT every node this
-        // catalog can draw: the sibling implements the circle and the square and does not implement
-        // the triangle, which is the state a parity sheet exists to make visible. On the sibling's
-        // lane that slot falls back to the design's own drawing exactly as a failed render does, so
-        // it carries `data-cp-unpaired` and a dotted outline — unmarked it would read as "the
-        // sibling draws it just like the design", which is the direction that makes two diverging
-        // catalogs look aligned.
+        // A `compareWith` sibling's rendition of the same cells, deliberately missing the triangle:
+        // that slot falls back to the design's drawing and must carry `data-cp-unpaired` and a
+        // dotted outline.
         parallelRenders =
           mapOf(
             "1:1" to "/wear-m3/render/com.example.WearProfileCardPreview.png",
@@ -2846,17 +2527,9 @@ class ServeWebFixtureTest {
           ),
       )
 
-    // A node with code behind it is an ANCHOR, not a button or a bare div. That is what makes
-    // clicking it navigate, a middle click open a tab, a modifier click do what the reader's
-    // platform says, and the status bar preview the destination — none of which a `<button>` with a
-    // click handler gives you, and all of which a screenshot passes without.
-    //
-    // Asserted here rather than in the harness because it is server-rendered markup: the capture
-    // that used to hold it had to hover a node, wait for a tooltip and evaluate in a browser to
-    // read two attributes off the emitted HTML.
-    // Matched on the manifest-linked node itself (`1:1`), not on "some /p/ anchor exists": the
-    // fixture carries several renderable nodes, so an existence check stays green while this
-    // particular overlay regresses to a span or points somewhere else.
+    // A node with code behind it is an anchor (so click, middle click, modifier click and
+    // status-bar preview all work), asserted here since it is server-rendered markup. Matched on
+    // the specific manifest-linked node (`1:1`), not any /p/ anchor.
     val manifestNode =
       assertNotNull(
         Regex("""<(\w+) class="cp-page-node" [^>]*data-cp-node="1:1"[^>]*>""").find(designPageHtml),
@@ -2867,21 +2540,16 @@ class ServeWebFixtureTest {
       manifestNode.groupValues[1],
       "a node with a renderable preview is emitted as an anchor",
     )
-    // The whole final segment, not a prefix: `/p/com.example.ProfileCardPreviewLegacy` contains
-    // the id we mean and navigates somewhere else.
-    // `\shref=` and not `href=`: the latter also matches the tail of `data-href`, so swapping a
-    // real
-    // anchor for scripted navigation — precisely the inert-destination regression this is here to
-    // catch — would keep it green.
+    // The whole final segment, not a prefix (`…PreviewLegacy` contains the id). `\shref=`, not
+    // `href=`, which would also match `data-href`.
     val hrefOf = { tag: String -> Regex("""\shref="([^"]*)"""").find(tag)?.groupValues?.get(1) }
     val manifestHref =
       assertNotNull(
         hrefOf(manifestNode.value),
         "the manifest node carries a real href attribute",
       )
-    // Matched through the route delimiter. `substringAfterLast` returns the WHOLE string when the
-    // delimiter is absent, so a bare `href="com.example.ProfileCardPreview"` — which resolves
-    // relative to the current page and navigates nowhere near the preview — would have passed.
+    // Matched through the route delimiter: `substringAfterLast` returns the whole string when it is
+    // absent, so a relative `href="com.example.ProfileCardPreview"` would pass.
     assertEquals(
       "com.example.ProfileCardPreview",
       // The capture must be the FINAL segment. Unanchored, `/p/<id>/other` still yields `<id>` —
@@ -2889,13 +2557,8 @@ class ServeWebFixtureTest {
       Regex("""/p/([^/?#]+)(?:[?#]|$)""").find(manifestHref)?.groupValues?.get(1),
       "…and its destination is THAT preview, on the preview route",
     )
-    // …and one WITHOUT code is still a link, to the design file — the only destination it has. The
-    // tag is the same; only the target differs, so a reader never meets a node that looks
-    // navigable and is not.
-    //
-    // Matched on THAT node (`1:6`, the fixture's unlinked shape) rather than on "some anchor
-    // exists and no span does": the renderable nodes satisfy a bare existence check on their own,
-    // so this one could regress to a div and go unnoticed.
+    // A node without code still links, to the design file. Matched on that node (`1:6`) since the
+    // renderable nodes satisfy a bare existence check.
     val unlinkedNode =
       assertNotNull(
         Regex("""<(\w+) class="cp-page-node" [^>]*data-cp-node="1:6"[^>]*>""").find(designPageHtml),
@@ -2906,33 +2569,18 @@ class ServeWebFixtureTest {
       unlinkedNode.groupValues[1],
       "an unlinked node stays an anchor rather than becoming inert",
     )
-    // The WHOLE href, compared as one string. Checking parts independently loses whatever part is
-    // not checked: a host check alone passes for the Figma homepage, and a key-plus-node check
-    // alone passes for a relative URL or a different host carrying the same query.
+    // The whole href as one string; partial checks pass for the Figma homepage or a relative URL.
     assertEquals(
       "https://www.figma.com/design/ocdacdEsnHipMJD3egzxKb?node-id=1-6",
       hrefOf(unlinkedNode.value),
       "…and its destination is THIS node in the catalog's design file",
     )
 
-    // The catalog-wide MOTION BROWSER: every recording this catalog publishes, on one page.
-    //
-    // Captured because the page is the only place a reader can compare one component's transition
-    // against its neighbour's, and because its resting state is load-bearing — every card opens on
-    // its component's still, and nothing animates until someone presses it. A baseline of that
-    // resting grid is what would catch the page starting to autoplay.
-    //
-    // Two sections and a component with TWO captures, deliberately: the section heads are the
-    // page's only structure, and a component whose recordings differ only in their caption's tail
-    // is exactly the case [MotionCaptureLabels] splits — one card per capture, distinguished in
-    // the title, explained underneath.
-    //
-    // The Switch and the Icon Button each publish their captures on SEVERAL renders, which is the
-    // production shape: a catalog hangs the same manifest entry off a component's default, its
-    // states and both themes, and listed per render that turned `compose-m3` into 320 cards over
-    // ten files. The fold is only visible in a baseline that carries the duplicate renders, so
-    // these do — and the Icon Button's two recordings share one caption, so its block is also the
-    // one that hoists that sentence above the cards instead of printing it under each.
+    // The catalog-wide motion browser: every recording, one page. Its resting state matters (each
+    // card shows a still until pressed), so a baseline would catch autoplay. Two sections, and a
+    // component with two captures (split by [MotionCaptureLabels]). The Switch and Icon Button
+    // publish captures on several renders, as production does, to exercise the de-duplicating fold;
+    // the Icon Button's two share a caption, which is hoisted above the cards.
     val switchCaptures =
       listOf(
         ServeMotion(
@@ -3037,17 +2685,13 @@ class ServeWebFixtureTest {
         trust = "branch:yschimke/compose-ai-tools@design-artifacts/compose-m3",
         isPublic = true,
         version = version,
-        // `handleMotionIndex` passes a page-scoped report, so a fixture without one captures a page
-        // shape production never serves — the committed HTML had no `#cp-report` at all, and the
-        // Playwright motion snapshots were diffing a row short. Same subject the handler uses.
+        // `handleMotionIndex` passes a page-scoped report, so the fixture does too.
         reportIssue =
           fixturePageReportIssue("https://preview.coo.ee/compose-m3/motion", "this motion browser"),
       )
 
-    // The cross-catalog LAYER diff (issue #4838): what two catalogs of one design system each
-    // resolved for the same cell. Captured because it is the surface a reader actually acts on —
-    // a font family that fell back on one runtime, a token that resolved to a different value, a
-    // node one side draws and the other does not — and none of it is visible in a pixel diff.
+    // The cross-catalog layer diff: what two catalogs of one design system resolved for the same
+    // cell (font fallback, token value, missing node), none of which shows in a pixel diff.
     val parallelLayers =
       ServeWeb.parallelLayersPage(
         moduleLabel = "remote-m3",
@@ -3134,11 +2778,9 @@ class ServeWebFixtureTest {
           fixturePageReportIssue("https://preview.coo.ee/compose-m3/pages", "these design pages"),
       )
 
-    // The same themed catalog served LIVE by a session whose app declares `@ThemeCatalog` themes:
-    // the header's Theme control lists every configured theme (issue #2881) — the baked Light/Dark
-    // pair plus each declared theme — instead of only Light/Dark. Picking a declared theme
-    // re-points each daemon-twinned card's thumbnail at a `?themeProvider=` render. Captured so the
-    // visual-diff bot covers the widened control.
+    // The same themed catalog served live with `@ThemeCatalog` themes: the Theme control lists the
+    // baked Light/Dark pair plus each declared theme, and picking one re-points daemon-twinned
+    // thumbnails at a `?themeProvider=` render.
     val landingDeclaredThemes =
       ServeWeb.landingPage(
         "compose-m3",
@@ -3149,9 +2791,8 @@ class ServeWebFixtureTest {
         isPublic = true,
         hasHomeIndex = true,
         version = version,
-        // The motion browser's entry point, in the `⋯` menu with the catalog's other
-        // destinations. This fixture is the one the harness OPENS that menu on (`actions-menu`),
-        // so it is the only place the chip's pixels are ever captured.
+        // The motion browser entry in the `⋯` menu; the harness opens that menu on this fixture
+        // (`actions-menu`).
         motionCaptureCount = 4,
         declaredThemes =
           listOf(
@@ -3161,18 +2802,13 @@ class ServeWebFixtureTest {
           ),
         canRenderThemeFor = { true },
         themeRenderBurstCapacity = 5,
-        // Carries the presence script, which is also what injects the render-server badge. Without
-        // a fixture that emits it, neither the badge nor the themed-render swap it sits beside has
-        // any visual-diff coverage — the harness shoots this page for both (see FIXTURE_STATES in
-        // pages-snapshot.spec.mjs).
+        // Carries the presence script, which also injects the render-server badge (see
+        // FIXTURE_STATES in pages-snapshot.spec.mjs).
         presenceUrl = "/compose-m3/api/presence",
       )
-    // The same catalog, IR-replayed: every card is redrawn by replaying a captured Remote Compose
-    // document instead of re-running its composable, so a `themeProvider` render is refused 409 and
-    // the declared chips must NOT be offered — picking one could only paint the grid with "This
-    // preview can't render live". Captured beside [landingDeclaredThemes] so the diff is exactly
-    // the widened control collapsing back to the baked Light/Dark pair, which is the claim: the
-    // per-preview axes a replay CAN honour stay, only the composition-only one goes.
+    // The same catalog, IR-replayed: a `themeProvider` render is refused 409, so declared theme
+    // chips must not be offered; only the baked Light/Dark pair remains. Pairs with
+    // [landingDeclaredThemes].
     val landingIrReplayThemes =
       ServeWeb.landingPage(
         "remote-m3",
@@ -3197,10 +2833,9 @@ class ServeWebFixtureTest {
         irReplayFor = { true },
         themeRenderBurstCapacity = 5,
       )
-    // A live catalog: every card can be long-pressed to open a daemon session inside it. The
-    // committed HTML holds the affordance's static half (the header note + the emitted config);
-    // the gesture's two runtime states — the hover hint and a card actually streaming — are
-    // captured as FIXTURE_STATES in pages-snapshot.spec.mjs, driven by the real script.
+    // A live catalog where every card can be long-pressed to stream a daemon session. The committed
+    // HTML holds the static half; the hover hint and streaming states are FIXTURE_STATES in
+    // pages-snapshot.spec.mjs.
     val landingLive =
       ServeWeb.landingPage(
         "compose-m3",
@@ -3252,9 +2887,8 @@ class ServeWebFixtureTest {
         siblings = breakpointPreviews,
         version = version,
       )
-    // An app catalog served under its path (/meshcore-mobile/) whose previews carry sections: the
-    // landing renders a TAB BAR (Themes / Components / Screens) over per-section panels, each with
-    // its `group` sub-headings. Captured so the visual-diff bot covers the tabbed structure.
+    // An app catalog served under its path whose previews carry sections: a tab bar over
+    // per-section panels with `group` sub-headings.
     val landingSections =
       ServeWeb.landingPage(
         "meshcore-mobile",
@@ -3267,12 +2901,10 @@ class ServeWebFixtureTest {
         basePath = "/meshcore-mobile",
         version = version,
       )
-    // A tabbed declared-theme catalog exercises initial queue priority before apply() has assigned
-    // each card's hidden state (for a returning visitor whose saved tab is not the first one).
-    //
-    // Big enough, and with a burst capacity, to be the page the deferred-render contract runs on:
-    // its cards outrun one viewport, so picking a theme leaves some of them held against the
-    // scroll — the lane where a claim released by the on-screen batch used to strand them.
+    // A tabbed declared-theme catalog exercising initial queue priority before apply() assigns
+    // hidden state (for a returning visitor whose saved tab is not the first). Large enough, with
+    // burst capacity, that picking a theme leaves cards held against the scroll for the
+    // deferred-render contract.
     val landingDeclaredTabbedThemes =
       ServeWeb.landingPage(
         "meshcore-mobile",
@@ -3293,10 +2925,8 @@ class ServeWebFixtureTest {
         trust = "branch:yschimke/compose-ai-tools@design-artifacts/compose-m3",
         siblings = statefulPreviews,
       )
-    // Every disclosure at once, on the shape that motivated them: a state axis and a theme set both
-    // wide enough to arrive FOLDED, plus sibling components so the nav toggle is there too. The
-    // chips sit behind the title bar's `State · Default` / `Theme · Day` toggles, and the render
-    // starts where three wrapped chip rows used to.
+    // Every disclosure at once: state axis and theme set wide enough to arrive folded, plus
+    // siblings for the nav toggle.
     val viewerAxesFolded =
       ServeWeb.viewerPage(
         wideStatePreviews.first(),
@@ -3311,10 +2941,8 @@ class ServeWebFixtureTest {
             ServeTheme("Brand Dark", "com.example.BrandDarkThemeCatalog"),
           ),
       )
-    // The cross-product viewer, entered on `pressed + RTL` — the render that has a non-default
-    // value on BOTH axes, and so the only one from which a single-axis label is ambiguous. Its
-    // subtree names both coordinates on every row and can walk either axis without leaving the
-    // other behind.
+    // The cross-product viewer entered on `pressed + RTL`, the render non-default on both axes, so
+    // every subtree row names both coordinates.
     val viewerCrossProduct =
       ServeWeb.viewerPage(
         crossProductPreviews.first { it.state == "pressed" && it.props != null },
@@ -3322,11 +2950,9 @@ class ServeWebFixtureTest {
         sessionId = "compose-m3",
         siblings = crossProductPreviews,
       )
-    // The tree at full depth. `synthesizeGroups` only divides a catalog with at least two families
-    // and one family holding more than one card, and the variant/state fixtures above are each a
-    // single component — so neither of them renders a tree at all, and the component and variant
-    // rows would go uncaptured. This mixes them: a Button family of two cards (one carrying the
-    // props axis), plus Checkbox and Radio button carrying the state axis.
+    // The tree at full depth. `synthesizeGroups` needs at least two families and one with more than
+    // one card, so this mixes a two-card Button family (one with the props axis) with Checkbox and
+    // Radio button carrying the state axis.
     val treeDepthPreviews =
       variantPreviews +
         listOf(
@@ -3355,9 +2981,8 @@ class ServeWebFixtureTest {
         hasHomeIndex = true,
         version = version,
       )
-    // A catalog whose component carries baked PROPS-axis variants (RTL / pseudo-locale / large
-    // font): the landing folds the eight renders to ONE (default) card, the variants reachable via
-    // the viewer's variant switcher.
+    // A catalog with baked props-axis variants (RTL / pseudo-locale / large font): the landing
+    // folds eight renders to one card.
     val landingVariants =
       ServeWeb.landingPage(
         "compose-m3",
@@ -3368,10 +2993,8 @@ class ServeWebFixtureTest {
         hasHomeIndex = true,
         version = version,
       )
-    // The default-render viewer for that catalog: renders the `<nav aria-label="Component
-    // variant">`
-    // switcher of links to the component's other same-theme variants, the current (Default) marked
-    // active.
+    // The default-render viewer for that catalog, with the `<nav aria-label="Component variant">`
+    // switcher.
     val viewerVariants =
       ServeWeb.viewerPage(
         variantPreviews.first(),
@@ -3380,9 +3003,7 @@ class ServeWebFixtureTest {
         trust = "branch:yschimke/compose-ai-tools@design-artifacts/compose-m3",
         siblings = variantPreviews,
       )
-    // A section-less catalog rendered with SYNTHESIZED family sub-groups (Button / Card / FAB /
-    // Badge dividers over the flat grid) — the fix for a large ungrouped catalog reading as one
-    // undivided wall. Captured so the visual-diff bot covers the synthesized-grouping layout.
+    // A section-less catalog rendered with synthesized family sub-groups.
     val landingGrouped =
       ServeWeb.landingPage(
         "compose-m3",
@@ -3392,9 +3013,8 @@ class ServeWebFixtureTest {
         isPublic = true,
         hasHomeIndex = true,
         version = version,
-        // The design file's own pages, listed by name at the foot of the outline tree — the shape
-        // m3-catalog is in, and the surface that replaced the header's "N pages" chip. Captured
-        // here so the branch has a visual baseline of its own.
+        // The design file's own pages, listed by name at the foot of the outline tree (as in
+        // m3-catalog).
         designPages =
           listOf(
             // Sections on one page and none on the other, on purpose: the pane has to render both
@@ -3410,10 +3030,8 @@ class ServeWebFixtureTest {
             ServeWeb.PageLink("type", "Typography"),
           ),
       )
-    // The streamlined Catalog mode, committed as first-class visual fixtures rather than only
-    // structural assertions. These are also the PR evidence images for the feature: the catalog
-    // inventory and a focused component page, rendered from the same production ServeWeb markup
-    // and stylesheet the browser receives.
+    // Catalog mode as first-class visual fixtures (also the feature's PR evidence): the inventory
+    // and a focused component page.
     val browserPreviews =
       listOf(
         ServePreview(
@@ -3494,8 +3112,8 @@ class ServeWebFixtureTest {
         declaredThemes = listOf(ServeTheme("Light", "com.example.LightThemeCatalog")),
         canRenderThemeFor = { true },
         componentBrowser = true,
-        // Catalog mode keeps the catalog tracker: this is the presentation a design reviewer is
-        // handed, and a reviewer is who a "this draws the wrong thing" report comes from (#4704).
+        // Catalog mode keeps the catalog tracker: design reviewers are who file "draws the wrong
+        // thing" reports.
         reportIssue = fixturePageReportIssue("https://preview.coo.ee/compose-m3/", "this catalog"),
       )
     val componentBrowserHome =
@@ -3521,11 +3139,9 @@ class ServeWebFixtureTest {
         usageHref = "/compose-m3/usage/button-filled-pressed",
         hasSvgExport = true,
         hasDesignAnnotations = true,
-        // Carries the presence heartbeat — and with it the render-server poller — because Catalog
-        // mode is where the badge has no header slot to land in. The Dev landing already captures
-        // the badge's connected/idle states (`serve-landing-declared-themes`); this is the page
-        // where the answer must be that NOTHING paints, and the harness can only hold that honest
-        // if the poller is actually on the page it shoots.
+        // Carries the presence heartbeat and render-server poller, because in Catalog mode the
+        // badge has no header slot: the harness must show nothing paints with the poller actually
+        // present.
         presenceUrl = "/compose-m3/api/presence",
         componentBrowser = true,
         // …and so does the component page, which is where a wrong render is actually noticed.
@@ -3536,19 +3152,10 @@ class ServeWebFixtureTest {
             "ui/buttons/FilledButton.kt",
           ),
       )
-    // Catalog mode on a **Remote Compose** preview — the one page where the browser players are
-    // still on offer there.
-    //
-    // Catalog mode used to strip the whole Remote Compose facet along with the rest of the dev
-    // surface, which left a shared `?rcPlayer=…` link inert: no canvas, no chips, no switcher, and
-    // no control owning the param, so it was quietly dropped from the URL and the page fell back to
-    // the baked PNG. `js` and `cmp-wasm` replay published bytes in the visitor's own browser, so
-    // none of the reasons the daemon-backed lanes are gated apply to them.
-    //
-    // Its own fixture because the plain Catalog viewer above carries no `.rc` document, so it
-    // cannot show any of this — and without a fixture the surface would go back to being changed
-    // without a picture. The claim it holds is a PAIR: the switcher is present and offers exactly
-    // the two browser players, and the server-side ones are absent rather than greyed.
+    // Catalog mode on a Remote Compose preview, the one page offering browser players there. `js`
+    // and `cmp-wasm` replay published bytes in the visitor's browser, so a shared `?rcPlayer=…`
+    // link must work. The switcher offers exactly those two; server-side players are absent, not
+    // greyed.
     val componentBrowserRemoteCompose =
       ServeWeb.viewerPage(
         browserPreviews.first { it.id == "button-filled-pressed" },
@@ -3565,10 +3172,8 @@ class ServeWebFixtureTest {
           listOf("camaelon-js", "androidx-view", "androidx-embedded", "cmp-jvm", "cmp-wasm"),
         componentBrowser = true,
       )
-    // A viewer whose sibling list spans several components each with many baked variants (a
-    // button-filled with RTL/locale/font variants, plus checkbox/radiobutton states). The component
-    // nav COLLAPSES to one entry per component (button-filled once, not ~8 times), mirroring the
-    // grid. Captured so the visual-diff bot covers the de-duplicated nav drawer.
+    // A viewer whose siblings span several components each with many variants: the nav collapses to
+    // one entry per component, mirroring the grid.
     val viewerNavCollapsed =
       ServeWeb.viewerPage(
         variantPreviews.first(),
@@ -3577,12 +3182,8 @@ class ServeWebFixtureTest {
         trust = "branch:yschimke/compose-ai-tools@design-artifacts/compose-m3",
         siblings = variantPreviews + statefulPreviews,
       )
-    // The same drawer over a catalog that HAS an outline: sections (Components / Screens) with
-    // named
-    // groups (Buttons / Cards / Navigation / Account) under them. The drawer publishes both levels
-    // as headings over its thumbnail rows, which is the catalog menu's structure on the page that
-    // has the pixels (#252) — captured so the visual-diff bot covers the headed list, and so the
-    // flat golden above still says what an outline-less catalog gets.
+    // The same drawer over a catalog with an outline: sections with named groups as headings over
+    // the thumbnail rows. The flat golden above covers outline-less catalogs.
     val viewerNavSections =
       ServeWeb.viewerPage(
         browserPreviews.first(),
@@ -3591,10 +3192,8 @@ class ServeWebFixtureTest {
         trust = "branch:yschimke/compose-ai-tools@design-artifacts/compose-m3",
         siblings = browserPreviews,
       )
-    // The document lane (`--accept-docs`): the upload surface, and the expiring permalink page for
-    // each known format. The permalink pages mount a vendored browser player, so the harness
-    // captures the chrome around it (title, expiry pill, facts, download row) rather than the
-    // played-back document itself.
+    // The document lane (`--accept-docs`): the upload page and each format's expiring permalink
+    // page. The harness captures the chrome, not the played-back document.
     val docUpload =
       ServeWeb.docUploadPage(
         token,
@@ -3603,15 +3202,13 @@ class ServeWebFixtureTest {
         urlUploadAllowed = true,
         version = version,
       )
-    // The UI-builder admin screen (`GET /admin/ui-builder`): the operator's list of every design
-    // with a delete per row. The rows are fetched by the page's script, so the fixture is the
-    // chrome around an empty table; the harness stubs the JSON route to fill it.
+    // The UI-builder admin screen (`GET /admin/ui-builder`). Rows are fetched by script; the
+    // harness stubs the JSON route.
     val uiBuilderAdmin = ServeWeb.uiBuilderAdminPage(adminToken = token, version = version)
     val uiBuilderAdminRead =
       ServeWeb.uiBuilderAdminPage(adminToken = token, readOnly = true, version = version)
-    // The actor-scoped counterpart: owned and shared rows together, including the exact failure a
-    // design that cannot open will show. Static rows make the page itself the fixture rather than
-    // replacing its service calls with a second implementation in the browser harness.
+    // The actor-scoped counterpart: owned and shared rows, including the failure an unopenable
+    // design shows. Static rows, so the page itself is the fixture.
     val uiBuilderDesigns =
       ServeWeb.uiBuilderDesignsPage(
         rows =
@@ -3684,12 +3281,9 @@ class ServeWebFixtureTest {
         navSuffix = "?token=fixture-token",
         version = version,
       )
-    // The playground Stage-1 editor (`GET /playground`): the code box, mode selector, and result
-    // pane. Always token-gated (the lane runs user code, refused under `--public`), so the fixture
-    // renders the non-public form the server actually serves.
-    // Rendered with the runtime catalog selector populated (`--playground`), because that is the
-    // shape with the most moving parts — a pinned host renders the same page minus the Catalog
-    // control, which the `playgroundPage omits the catalog control…` test pins separately.
+    // The playground editor (`GET /playground`). Always token-gated (it runs user code), so the
+    // fixture is the non-public form. Rendered with the catalog selector populated
+    // (`--playground`); the pinned form is covered by `playgroundPage omits the catalog control…`.
     val playground =
       ServeWeb.playgroundPage(
         token,
@@ -3720,12 +3314,9 @@ class ServeWebFixtureTest {
             ),
           ),
       )
-    // The handoff this host cannot honour: `/playground?from=horologist/…` on a server that browses
-    // Android and Wear catalogs but runs only the desktop render backend, so no Android catalog is
-    // a compile target. The link is withheld at the source now, so reaching this page means a
-    // bookmark or a shared URL — and the page has to say so rather than silently retargeting the
-    // buffer at whichever catalog happened to be first. Committed as its own golden because the
-    // notice is a page state the ordinary playground fixture can never hold.
+    // A handoff this host cannot honour: `/playground?from=horologist/…` on a desktop-only backend,
+    // so no Android catalog compiles. Reached only via bookmark or shared URL; the page says so
+    // rather than retargeting the buffer.
     val playgroundUncompilable =
       ServeWeb.playgroundPage(
         token,
@@ -3852,13 +3443,12 @@ class ServeWebFixtureTest {
           ),
       )
 
-    // The styled 404 a browser gets when it follows a dead link to a catalog or preview page —
-    // the site's own chrome with a "back to design systems" link, not a bare text/plain dead-end.
-    // The agent access-grant CONSENT page (GET /agent-access/{id}). The one page on this server
-    // whose job is to make a human suspicious of the link that brought them here, so the fixture
-    // pins the parts that do that work: the verification code as the page's loudest element, the
-    // agent-supplied purpose (escaped — the fixture's label carries markup on purpose), and one
-    // scope the approver is shown but may not grant.
+    // The styled 404 for a dead catalog or preview link: site chrome with a "back to design
+    // systems" link.
+    //
+    // The agent access-grant consent page (GET /agent-access/{id}), whose job is to make a human
+    // suspicious: the verification code as the loudest element, the agent-supplied purpose escaped
+    // (the label carries markup on purpose), and one scope the approver may not grant.
     val agentAccess =
       ServeWeb.agentGrantApprovalPage(
         requestId = "9c2Qk1pTf0Xb7hLm4nRzQA",
@@ -3879,10 +3469,9 @@ class ServeWebFixtureTest {
         withheldReason = "you do not hold it yourself on this server, so you cannot pass it on",
       )
 
-    // The same page for a request that came through the MCP OAuth façade, registered with a
-    // redirect to another host: the page leads with that host and labels it an external site,
-    // shows the client's self-chosen name as such, and has no "Asked from" line (that address would
-    // be the approver's own browser).
+    // The same page for a request via the MCP OAuth façade with an external redirect: leads with
+    // that host labelled external, shows the client's self-chosen name as such, and has no "Asked
+    // from" line.
     val agentAccessOAuth =
       ServeWeb.agentGrantApprovalPage(
         requestId = "9c2Qk1pTf0Xb7hLm4nRzQA",
@@ -3903,12 +3492,8 @@ class ServeWebFixtureTest {
           ServeMcpOAuth.describeRedirect("https://mcp-client.example.net/oauth/callback"),
       )
 
-    // The same page on a box that offers a CAPABILITY beside the scopes — the second fieldset, its
-    // checkboxes ticked (every row is an ask this approver may grant), and one capability the
-    // approver may not pass on. Its own fixture rather
-    // than a variant of the one above, because the control that matters here (an independent
-    // checkbox, where the scopes are a radio) only exists on a box whose operator opted in, and a
-    // golden that never renders it would let that control change unseen.
+    // The same page on a box offering a capability beside the scopes: a second fieldset of
+    // independent checkboxes (scopes are radios), one of which the approver may not pass on.
     val agentAccessCapabilities =
       ServeWeb.agentGrantApprovalPage(
         requestId = "9c2Qk1pTf0Xb7hLm4nRzQA",
@@ -3926,11 +3511,8 @@ class ServeWebFixtureTest {
         denyCsrf = "fixed-deny-seal",
         formAction = "/agent-access/9c2Qk1pTf0Xb7hLm4nRzQA",
         version = version,
-        // The ask can carry capabilities the BOX will not offer at all — different cause from an
-        // approver who does not hold one, different remedy (an operator flag, not a different
-        // approver), so its own note naming the flag. This is the shape the ui-builder papercut
-        // wore: the agent asked for the three ui-builder capabilities, a default box's ceiling
-        // excludes all of them, and the page used to say nothing.
+        // Capabilities the box will not offer at all: a different remedy (an operator flag), so its
+        // own note naming the flag.
         storeNarrowedCapabilities =
           listOf(
             AgentGrantCapability.UI_BUILDER_READ,
@@ -3961,12 +3543,9 @@ class ServeWebFixtureTest {
         version = version,
       )
 
-    // The server STATUS page (GET /status): a snapshot of the running host — published catalogs +
-    // their load/trust/liveness, the render daemons up now, the effective config, and recent daemon
-    // startup failures. A representative spread (a live+running catalog, a degraded baked one, an
-    // unlisted one, a running desktop daemon, and one recent failure so the amber "degraded" badge
-    // +
-    // failure table are captured) with fixed figures so the golden stays stable across runs.
+    // The status page (GET /status): published catalogs with load/trust/liveness, running daemons,
+    // effective config, and recent startup failures. Fixed figures, with one failure so the amber
+    // "degraded" badge and failure table are captured.
     val serveStatus =
       ServeWeb.statusPage(
         token = token,
@@ -3982,10 +3561,9 @@ class ServeWebFixtureTest {
             healthHref = "#recent-daemon-failures",
             summary =
               listOf(
-                // Both cards are derived from the catalog list by production
-                // `ServeStatusSnapshot.toView()`, so they have to move with it: the `wear-m3` entry
-                // below adds a fifth catalog and its 30 previews. A fixture whose summary disagrees
-                // with its own table is a golden screenshot of a state the server cannot produce.
+                // Derived from the catalog list by production `ServeStatusSnapshot.toView()`, so
+                // they must agree with the table (the `wear-m3` entry below adds a fifth catalog
+                // and 30 previews).
                 ServeWeb.Stat(
                   "Catalogs",
                   "5/5 loaded",
@@ -4008,20 +3586,15 @@ class ServeWebFixtureTest {
                 ),
                 ServeWeb.Stat("Live daemons running", "1"),
                 ServeWeb.Stat("Active streams", "2"),
-                // What those two streams are achieving, in the shape `liveFrameText` prints: the
-                // fps a viewer actually got, the median gap it came from, the painted/heartbeat
-                // split, and the per-frame wire cost. "Active streams: 2" is a population; this is
-                // the reading (#4281). Numbers taken from a real m3-catalog session so the row is
-                // as long as it gets in practice.
+                // Live-stream throughput in `liveFrameText`'s shape: achieved fps, median gap,
+                // painted/heartbeat split, per-frame wire cost. Numbers from a real m3-catalog
+                // session.
                 ServeWeb.Stat(
                   "Live frames",
                   "4.0 fps · p50 250ms · 1042 painted · 388 unchanged · 8 kB/frame",
                 ),
-                // Captured in the state that used to be invisible: a quiet gate held shut by a
-                // session lease, which stands the theme optimizer down indefinitely while every
-                // per-catalog row says only "paused". The fixture keeps the awkward case — the
-                // longest of the four wordings, with a holder named — so the row's wrapping is
-                // covered rather than the tidy "open · idle 90s" one.
+                // A quiet gate held shut by a session lease, the longest wording with a holder
+                // named, to cover wrapping.
                 ServeWeb.Stat(
                   "Theme optimiser gate",
                   "closed · session lease held by compose-m3 · needs 60s quiet",
@@ -4039,14 +3612,10 @@ class ServeWebFixtureTest {
                   ),
                 ),
                 ServeWeb.Stat("Known sessions", "4"),
-                // The subprocess census, in the state it exists to make visible: a reaping leak
-                // running against a bounded PID budget. Captured because the row is the page's
-                // longest single value — four clauses, one of them naming the leaking executable —
-                // and because its meter is the only one here whose warning segment dwarfs the rest,
-                // which is exactly the layout a golden has to hold still. Figures are the measured
-                // `preview.coo.ee` incident ([ServeProcessCensusSnapshot]) against a 4096 ceiling,
-                // rather than the unbounded budget that box actually had: an unbounded one draws no
-                // meter at all, so it would capture strictly less.
+                // The subprocess census showing a reaping leak against a bounded PID budget: the
+                // page's longest value, and the only meter dominated by its warning segment.
+                // Figures from a real incident ([ServeProcessCensusSnapshot]) against a 4096
+                // ceiling (an unbounded budget draws no meter).
                 ServeWeb.Stat(
                   "Processes",
                   "18 live JVMs · 2140 total · 2099 defunct (java) · 2140/4096 pids",
@@ -4120,11 +3689,8 @@ class ServeWebFixtureTest {
                       evictions = 0,
                     ),
                 ),
-                // A catalog part way through replacing another build's renders, with some of them
-                // refusing to re-render. Every other catalog here is converged, so without this
-                // entry the whole dirty/failed half of the optimization row — the wording, the
-                // failure count and the meter's tone — was rendered by no fixture and therefore
-                // diffed by nothing, which is how a status row can change unnoticed.
+                // A catalog partway through replacing another build's renders, some refusing to
+                // re-render, covering the dirty/failed optimization row.
                 ServeWeb.StatusCatalog(
                   id = "wear-m3",
                   title = "Wear Material 3",
@@ -4176,9 +3742,7 @@ class ServeWebFixtureTest {
                       generatedAt = "2026-07-15T08:05:00.000Z",
                     ),
                 ),
-                // A trusted catalog whose daemon has gone idle: its facts are the last-known
-                // snapshot, so the badge renders with a "last known" qualifier instead of the blank
-                // cell that used to read as untrusted.
+                // A trusted catalog whose daemon is idle: the badge shows a "last known" qualifier.
                 ServeWeb.StatusCatalog(
                   id = "confetti-wear",
                   title = "Confetti Wear",
@@ -4238,11 +3802,8 @@ class ServeWebFixtureTest {
           ),
       )
 
-    // The server's own bug-report page, captured from a *viewer* (the case that carries the most:
-    // a resolved catalog, a preview, a render thumbnail) on a box that is not entirely healthy (a
-    // catalog that failed to load and a render that timed out), because a report filed from a
-    // perfectly healthy server is the one nobody sends. The render points at the harness's
-    // placeholder lane, like every other fixture's stage.
+    // The server's bug-report page, captured from a viewer (catalog, preview, render thumbnail) on
+    // a partly unhealthy box (a failed catalog load and a render timeout).
     val bugReportServer =
       ServeBugReport.Server(
         version = version,
@@ -4329,11 +3890,8 @@ class ServeWebFixtureTest {
           ),
         version = version,
       )
-    // The same page as reached from a top-level SITE (issue #4319) — `wear.preview.coo.ee`, where
-    // the hostname is one catalog and the reporter arrived from a design page with no preview on
-    // it. Captured as its own golden because the paragraph that routes a *pixel* bug is different
-    // here: it names the catalog and links its tracker instead of saying "go back to the preview",
-    // and there is no render thumbnail to soften a page that is otherwise all prose.
+    // The same page reached from a top-level site with no preview in context: the pixel-bug
+    // paragraph names the catalog and links its tracker, and there is no thumbnail.
     val bugReportSitePageContext =
       ServeBugReport.Page(
         path = "/pages/buttons",
@@ -4400,10 +3958,8 @@ class ServeWebFixtureTest {
         siteName = "Wear Material 3",
       )
 
-    // The same page as reached from the **focused comparison** (#4765). Its own golden because the
-    // evidence half is a different surface there: the report carries the pair the page drew rather
-    // than one render, so the preview shows two panels side by side and the prose says what is
-    // still missing from them — the diff, which the browser composes and no URL can name.
+    // The same page reached from the focused comparison: the evidence is the pair, shown side by
+    // side, and the prose notes the diff is missing (the browser composes it).
     val bugReportComparePageContext =
       bugReportPageContext.copy(
         path = "/compose-m3/compare/button-filled?reference=button-figma",
@@ -4462,11 +4018,10 @@ class ServeWebFixtureTest {
         version = version,
       )
 
-    // The page goldens, named once: the same list backs both the `UPDATE_SERVE_WEB_FIXTURES=true`
-    // regeneration below and the sync assertion further down, so a fixture can never be written
-    // by one and forgotten by the other.
-    // The card rasters the fixture page below frames. Drawn once and reused by both the golden and
-    // the committed PNGs, so the two can't end up describing different pictures.
+    // The page goldens, named once, backing both regeneration and the sync assertion.
+    //
+    // The card rasters the fixture page below frames, drawn once for both the golden and committed
+    // PNGs.
     val unfurlCards = socialCardFixtures()
     val renderedGoldens =
       listOf(
@@ -4573,8 +4128,8 @@ class ServeWebFixtureTest {
         "serve-doc-lottie.html" to docLottie,
         "serve-doc-remotecompose.html" to docRemoteCompose,
         "serve-doc-remotecompose-players.html" to docRemoteComposePlayers,
-        // Not a served page: a frame around the drawn link-unfurl cards, so that raster surface is
-        // screenshotted and diffed on every PR like the pages are. See [socialCardPage].
+        // Not a served page: a frame around the drawn link-unfurl cards so they are diffed. See
+        // [socialCardPage].
         "serve-social-card.html" to socialCardPage(unfurlCards),
       )
 
@@ -4610,10 +4165,8 @@ class ServeWebFixtureTest {
       designPageHtml.contains("data-cp-gap data-cp-node=\"1:6\""),
       "a concrete unimplemented component remains a focused gap hotspot",
     )
-    // The parity page's load-bearing claims, asserted rather than left to the pixel diff. A
-    // comment on Switch (whose code never moved in this window) is one-sided design movement, so
-    // it must reach the "needs a look" band; Button moved on both sides and must NOT, because that
-    // band exists to be short.
+    // The parity page's load-bearing claims: a comment on Switch (code unchanged) is one-sided
+    // design movement and must reach "needs a look"; Button moved on both sides and must not.
     assertTrue(
       parity.contains("Out-of-sync activity") &&
         parity.contains("Switch on") &&
@@ -4623,9 +4176,8 @@ class ServeWebFixtureTest {
     assertFalse(
       parity
         .substringAfter("Out-of-sync activity")
-        // The band that follows is `<cp-parity-scores>`, which renders its own "Visual
-        // differences" heading client-side — so the tag, not the heading, is what bounds the drift
-        // band in the served markup.
+        // `<cp-parity-scores>` renders its own heading client-side, so the tag bounds the drift
+        // band.
         .substringBefore("<cp-parity-scores>")
         .contains("Button"),
       "a component that moved on both sides is not drift",
@@ -4659,12 +4211,9 @@ class ServeWebFixtureTest {
         viewer.contains("id=\"cp-controls-toggle\" aria-expanded=\"false\""),
       "the overrides drawer defaults closed",
     )
-    // …and the component nav drawer defaults CLOSED (present, but its toggle collapsed and the
-    // viewer element itself carries no `cp-nav-open` class), while still linking each sibling to
-    // its
-    // own viewer page. The absence check is scoped to the viewer element's class attribute — the
-    // bare token `cp-nav-open` also appears in the stylesheet (`:not(.cp-nav-open)`) and drawer
-    // script, so a whole-document `contains` would always match.
+    // The nav drawer defaults closed (toggle collapsed, no `cp-nav-open` on the viewer element)
+    // while still linking siblings. Scoped to the element's class attribute because the token also
+    // appears in CSS and script.
     assertTrue(
       viewer.contains("id=\"cp-nav\"") &&
         viewer.contains("id=\"cp-nav-toggle\" aria-expanded=\"false\"") &&
@@ -4676,10 +4225,8 @@ class ServeWebFixtureTest {
       viewer.contains("class=\"cp-nav-item\" href=\"/p/com.example.ButtonPreview?token="),
       "the nav drawer links each sibling to its viewer page",
     )
-    // A single-preview session shows neither the nav drawer nor its toggle — both when no siblings
-    // are passed AND when the caller passes the whole preview list whose only entry is the current
-    // preview (the `renderHost.previews` shape a one-preview module produces): there is nothing to
-    // navigate *to*, so `navDrawerHtml` suppresses the drawer rather than emitting a self-link.
+    // A single-preview session shows neither the drawer nor its toggle, whether siblings are empty
+    // or contain only the current preview.
     for (solo in
       listOf(
         ServeWeb.viewerPage(previews.first(), token),
@@ -4698,9 +4245,8 @@ class ServeWebFixtureTest {
         !viewerHistoryLocal.contains("data-history-repo="),
       "the project-mode timeline links at this server's own render lane",
     )
-    // The declared Remote Compose knobs render as their own "Remote Compose" control group, one
-    // `.cp-rc-knob` per knob carrying its name + wire kind (a `color` swatch value + a `string`),
-    // separate from the plain-Compose Overrides panel.
+    // Declared RC knobs render as their own "Remote Compose" group, one `.cp-rc-knob` per knob with
+    // name + wire kind.
     assertTrue(
       viewerCatalogKnobs.contains("data-cp-group=\"remotecompose\"") &&
         viewerCatalogKnobs.contains(">Remote Compose</summary>"),
@@ -4743,9 +4289,8 @@ class ServeWebFixtureTest {
       viewerGesturesDesktop.contains("id=\"cp-gestures\""),
       "a gesture-supporting preview shows no gesture control on a desktop session",
     )
-    // Firing the gesture, beside showing its hint (issue #5102). Labelled as the WEARER's gesture —
-    // someone reading a Wear catalog is looking up what a double pinch does, not what the API calls
-    // it — and carrying the wire kind the daemon invokes, so the two cannot drift apart.
+    // Firing the gesture, labelled as the wearer's gesture and carrying the wire kind the daemon
+    // invokes.
     assertTrue(
       viewerGestures.contains("cp-gesture-invoke\" data-gesture=\"primary\"") &&
         viewerGestures.contains(">Double pinch</button>"),
@@ -4783,9 +4328,7 @@ class ServeWebFixtureTest {
     )
     // A plain (non-catalog) session inlines nothing at all.
     assertFalse(landingThemed.contains("<style>"), "an unthemed page carries no inline palette")
-    // Every page a visitor can reach *inside* a catalog carries the palette — walking grid →
-    // compare formats → focused Reference/Diff/Actual must not drop back to the built-in chrome
-    // partway through.
+    // Every page inside a catalog carries the palette.
     val palette = ServeThemeCss.fromDtcg(jetNewsTokens)!!
     val inCatalogPages =
       mapOf(
@@ -4808,9 +4351,8 @@ class ServeWebFixtureTest {
         "the $name page carries the palette",
       )
     }
-    // One assist chip per BASELINE this catalog can compare against, under one group heading that
-    // carries the verb they all used to repeat — so a chip is the name of the thing on the other
-    // side of the comparison and nothing else. See `docs/design/COMPARE_NAVIGATION.md`, §3.3.
+    // One assist chip per baseline, under one heading carrying the shared verb. See
+    // `docs/design/COMPARE_NAVIGATION.md` §3.3.
     assertTrue(
       landingThemed.contains("<span class=\"cp-actions-group-label\">Compare against</span>") &&
         landingThemed.contains(
@@ -4822,9 +4364,8 @@ class ServeWebFixtureTest {
         ),
       "a catalog with alternate formats links each one separately: $landingThemed",
     )
-    // …and the reference comparison is one of them, named after the tool it compares against and
-    // deep-linking the same comparison page as its siblings. The parity index is NOT one of them:
-    // it is the list that says which comparisons are worth opening, so it sits under `Reports`.
+    // The reference comparison is one of them, named after its tool. The parity index is not; it
+    // sits under `Reports`.
     assertTrue(
       landingPath.contains(
         "<a class=\"cp-action-chip\" href=\"/meshcore-mobile/compare?format=reference\">Figma</a>"
@@ -4876,9 +4417,8 @@ class ServeWebFixtureTest {
         .toList(),
       "every column — including the baked reference — can itself be picked as the diff reference",
     )
-    // Worst-match first on the **worst-scoring player**, not on any one lane — which is the point:
-    // the second preview reorders ahead of the third on its cmp-wasm score even though its JS score
-    // is better, so a preview only one player gets wrong still surfaces.
+    // Worst-match first by the worst-scoring player, so a preview only one player gets wrong
+    // surfaces.
     assertEquals(
       listOf(
           "button-filled__ideal__default__light",
@@ -4899,8 +4439,7 @@ class ServeWebFixtureTest {
         rcLanesComparison.contains("cp-rc-missing\">Document is not renderable by the CMP player"),
       "a rendered lane shows its published PNG; a lane that refused the document shows its reason",
     )
-    // #4998: a catalog whose run covered every lane says nothing about absent players, because
-    // there are none — the note is a caveat, not furniture.
+    // A run covering every lane says nothing about absent players.
     assertFalse(
       rcLanesComparison.contains("cp-rc-absent"),
       "a wall showing every known player carries no absent-players note",
@@ -4961,9 +4500,8 @@ class ServeWebFixtureTest {
         .toList(),
       "only a player neither published nor drawable on demand is still reported absent",
     )
-    // …and the note says WHICH of the two reasons applies. `embedded` is one this host draws; it
-    // has no column because it would duplicate baked, and claiming the host cannot draw it would
-    // be a false capability statement (#200 review).
+    // The note says which reason applies: `embedded` is drawable here but omitted as a duplicate of
+    // baked.
     assertTrue(
       rcLanesLiveComparison.contains(
         "This host does draw AndroidX Embedded · vendored Android — but through the same embedded " +
@@ -4983,9 +4521,7 @@ class ServeWebFixtureTest {
         .toList(),
       "a live column can be picked as the diff reference like any other",
     )
-    // The point of the lane: the cell asks the server for that player's raster of THIS preview.
-    // `?rcPlayer=` is answered from published bytes where the run drew them, so the URL is right
-    // whether or not the lane was ever staged.
+    // Each cell asks the server for that player's raster of this preview via `?rcPlayer=`.
     assertTrue(
       rcLanesLiveComparison.contains(
         "/render/button-filled__ideal__default__light.png?session=remote-m3&amp;rcPlayer=cmp-jvm"
@@ -5005,10 +4541,8 @@ class ServeWebFixtureTest {
       ),
       "the wall-named androidx-view column renders through this host, not from staged bytes",
     )
-    // The inlined client model must carry the COLUMNS, not the published lanes: `RcLanes` reads its
-    // lane ids from here, so a live column absent from this list is one the client never diffs and
-    // a `?ref=` that cannot be shared. It was `manifest.lanes` from #199, which left cmp-jvm in
-    // exactly that state — a column you could see and not compare.
+    // The inlined client model must carry the columns, not the published lanes: `RcLanes` reads
+    // lane ids from here, so a missing live column could not be diffed or shared via `?ref=`.
     assertEquals(
       listOf("baked", "js", "cmp-jvm", "cmp-wasm", "androidx-view"),
       Regex("\"id\":\"([^\"]+)\"")
@@ -5094,34 +4628,28 @@ class ServeWebFixtureTest {
       referenceComparison.contains("<cp-element-selection>") &&
         referenceComparison.contains("class=\"cp-selection-tag\"") &&
         // Built through the page's own link rules, so it carries whatever credential the reader
-        // presented — a hand-rolled query builder read only the request's query parameters and
-        // dropped it entirely for a header- or bearer-authorized page, silently hiding the picker.
+        // presented (including header / bearer auth).
         referenceComparison.contains(
           "data-cp-tags=\"/tags/button-filled__ideal__default__light?session=compose-m3\""
         ) &&
         referenceComparison.contains("id=\"cp-selection-layer\""),
       "the focused comparison offers both a tag picker and a drag region",
     )
-    // The pinned twin is the gate, and it is the load-bearing half of this feature: the published
-    // index describes the CURRENT render, so offering a tag selection here would persist bounds
-    // measured on different pixels into the acceptance's baseline — and later report an element
-    // that never moved as moved. The drag stays, because it is read off the pixels on screen.
+    // The pinned twin withholds tag selection: the published index describes the current render, so
+    // bounds would be measured on different pixels. The drag stays.
     assertTrue(
       !referenceComparisonPinned.contains("data-cp-tags=") &&
         referenceComparisonPinned.contains("class=\"cp-selection-drag\""),
       "a pinned comparison withholds tag selection and keeps the drag",
     )
-    // …and withholds the OTHER separately-fetched source of bounds for the same reason. The layers
-    // may still draw (a reading aid costs nothing out of date); clicking one records an
-    // acceptance's
-    // authoring-time baseline, and `.annotations` is a separate request from the PNG on screen.
+    // ...and withholds selecting annotation layers for the same reason (`.annotations` is fetched
+    // separately from the PNG on screen). Layers still draw.
     assertTrue(
       !referenceComparisonPinned.contains("data-cp-selectable="),
       "a pinned comparison withholds annotation-box selection too",
     )
-    // A host whose PNG is baked but whose ANNOTATIONS come from a live daemon is the same mismatch
-    // by another route — both live catalog wrappers are exactly that — so the page must not read
-    // `annotationsSelectable` off the PNG lane's flags. The layers still draw; only the click goes.
+    // Baked PNG with live-daemon annotations is the same mismatch, so `annotationsSelectable` must
+    // not be read off the PNG lane's flags.
     val liveAnnotationsComparison =
       ServeWeb.referenceComparisonPage(
         moduleLabel = "compose-m3",
@@ -5156,13 +4684,9 @@ class ServeWebFixtureTest {
         liveAnnotationsComparison.contains("data-cp-inspect=\"layout\""),
       "the semantics lane carries all three layers",
     )
-    // The one host that CAN be selected is the static bundle: no daemon, so it answers
-    // `.annotations` from what the catalog published over the very PNG it serves. It therefore has
-    // no `hasDesignAnnotationsFor`, and gating the mount on that alone made the pick path
-    // unreachable everywhere — the only selectable host was the only one with no mount, and every
-    // host with a mount renders per request. The intersection was empty in production while both
-    // halves looked individually correct, which is why this asserts the COMBINATION rather than
-    // either flag.
+    // The static bundle is the one selectable host: it answers `.annotations` from what was
+    // published over the PNG it serves. It has no `hasDesignAnnotationsFor`, so the mount must not
+    // be gated on that alone; this asserts the combination.
     val publishedTypographyComparison =
       ServeWeb.referenceComparisonPage(
         moduleLabel = "compose-m3",
@@ -5192,9 +4716,7 @@ class ServeWebFixtureTest {
         publishedTypographyComparison.contains("data-cp-selectable=\"1\""),
       "a published-typography host mounts the layers AND may select them",
     )
-    // Typography only. Theme and Layout are projected from a semantics tree and nothing authors
-    // them into a bundle, so offering their checkboxes here would be two controls whose fetch can
-    // only come back with nothing to draw.
+    // Typography only: Theme and Layout come from a semantics tree a bundle doesn't carry.
     assertTrue(
       publishedTypographyComparison.contains("data-cp-inspect=\"typography\"") &&
         !publishedTypographyComparison.contains("data-cp-inspect=\"theme\"") &&
@@ -5231,16 +4753,10 @@ class ServeWebFixtureTest {
         noAnnotationsComparison.contains("class=\"cp-selection-drag\""),
       "no annotation lane means no mount, and the drag still stands alone",
     )
-    // The substitution moved into `<cp-reference-compare>` with the rest of this page, so the
-    // bundle is where it is now pinned. The property being held is the same one: the filled report
-    // reaches an INPUT's `value` and nothing else — never an href or any other navigation sink.
-    //
-    // Both placeholders are matched by the shape the WRITER above emits them in, not as bare text:
-    // the render one is a markdown link destination and the score one is a whole table row. A bare
-    // substring replace rewrote the first occurrence anywhere in the body, so catalog-authored text
-    // carrying either literal — a preview id, a variant derived from one — was edited instead while
-    // the real link or row kept its placeholder. These strings are therefore the contract between
-    // the two files, and a change on either side has to move both.
+    // The substitution lives in `<cp-reference-compare>`'s bundle; the filled report reaches only
+    // an input's `value`, never a navigation sink. Placeholders are matched in the exact shape the
+    // writer emits (a markdown link destination, a whole table row) so catalog text containing the
+    // literal is not rewritten; these strings are a contract between the two files.
     assertTrue(
       assetText("compare-components.js").contains(".value=") &&
         assetText("compare-components.js").contains("](" + "{{render}})") &&
@@ -5297,9 +4813,8 @@ class ServeWebFixtureTest {
         sessionId = "compose-m3",
         hasSvgFor = { true },
       )
-    // The fold is published in the page's ONE alias table now, not copied onto every row that
-    // stands for it — see `docs/design/COMPARE_NAVIGATION.md`, F2. The claim is unchanged: a
-    // deep link naming a folded-away variant still selects the row that stands for it.
+    // The fold is published once in the page's alias table (`docs/design/COMPARE_NAVIGATION.md`
+    // F2); a deep link naming a folded variant still selects the row standing for it.
     val variantAliases =
       variantComparison.substringAfter("id=\"cp-compare-aliases\">").substringBefore("</script>")
     assertTrue(
@@ -5344,10 +4859,8 @@ class ServeWebFixtureTest {
         .map { it.groupValues[1] }
         .toList()
     assertEquals(2, sizedComparisonIds.size)
-    // The claim is about the FOLD, which the page now publishes once in its alias table keyed by
-    // comparison card rather than copying onto each row (`docs/design/COMPARE_NAVIGATION.md`, F2).
-    // Read there: the compact card folds its own state and props variants and nothing from the
-    // expanded one — a breakpoint is a different comparison, not a variant of this one.
+    // Read the fold from the alias table keyed by comparison card: the compact card folds its own
+    // state and props variants and nothing from the expanded one.
     val sizedTable =
       sizedVariantComparison
         .substringAfter("id=\"cp-compare-aliases\">")
@@ -5378,17 +4891,16 @@ class ServeWebFixtureTest {
       "expanded aliases fold state and props without selecting the compact comparison row: " +
         sizedTable,
     )
-    // Long-press a card and its preview streams from the daemon in place. The page carries the
-    // gesture's configuration — each card's streamable ids, emitted in document order rather than
-    // read back off the DOM — plus the header note that says the lane exists at all.
+    // Long-press streams a card from the daemon in place. The page carries each card's streamable
+    // ids (in document order) and the header note.
     assertTrue(
       landingLive.contains("window.cpCatalogLive = {base:\"\",query:\"session=compose-m3\"") &&
         landingLive.contains("cards:[{l:\"button-filled__ideal__default__light\"") &&
         landingLive.contains("hold a card for a live session"),
       "the live catalog page wires the long-press lane",
     )
-    // Issue #2881: the header control lists every CONFIGURED theme, not just Light/Dark — the baked
-    // pair plus one chip per declared `@ThemeCatalog` theme, each carrying its provider FQN.
+    // The header lists every configured theme: the baked pair plus one chip per declared
+    // `@ThemeCatalog` theme with its provider FQN.
     assertTrue(
       landingDeclaredThemes.contains("data-theme-choice=\"light\"") &&
         landingDeclaredThemes.contains("data-theme-choice=\"dark\"") &&
@@ -5400,10 +4912,8 @@ class ServeWebFixtureTest {
         ),
       "the catalog Theme control offers the baked pair plus every declared theme",
     )
-    // …unless the cards are replayed from a captured document, which a theme provider has no
-    // composition to wrap: the declared chips go, the baked pair (which a replay CAN honour, via
-    // the player's own paint-time theme) stays. Both catalogs are equally live — the difference is
-    // only whether the render re-runs the composable.
+    // ...unless cards are replayed from a captured document: declared chips go, the baked pair
+    // stays.
     assertTrue(
       landingIrReplayThemes.contains("data-theme-choice=\"light\"") &&
         landingIrReplayThemes.contains("data-theme-choice=\"dark\""),
@@ -5417,9 +4927,8 @@ class ServeWebFixtureTest {
       landingIrReplayThemes.contains("var themeBase = ["),
       "…nor any themed-render URL for the script to fetch",
     )
-    // Picking a declared theme re-renders through `themeProvider`. The per-card base URLs are
-    // emitted by the SERVER (in the grid's document order) and never read back out of the DOM, so
-    // no `<img src>` the script assigns originates as DOM text (CodeQL js/xss-through-dom).
+    // Picking a declared theme re-renders through `themeProvider`. Per-card base URLs are emitted
+    // by the server, never read from the DOM (CodeQL js/xss-through-dom).
     assertTrue(
       landingDeclaredThemes.contains(
         "var themeBase = [\"/render/button-filled__ideal__default__light.png?session=compose-m3\""
@@ -5462,15 +4971,9 @@ class ServeWebFixtureTest {
         landingDeclaredThemes.contains("job.card.setAttribute(\"aria-busy\", \"true\")"),
       "themed cards expose a busy treatment until each replacement thumbnail settles",
     )
-    // Issue #3160: when the visitor is on a later tab, its visible cards must lead the serial
-    // daemon queue. Otherwise every hidden Theme/Component card renders before the selected tab's
-    // first image request, making the theme control appear to do nothing.
-    //
-    // The deferred half is no longer appended onto that queue once the visible cards are enqueued:
-    // a large catalog is 80+ cards through a one-at-a-time daemon, so draining it spends a minute
-    // rendering pixels nobody scrolled to. It now waits on the viewport instead — which serves
-    // #3160's intent more strictly than the concat did, since a hidden tab's cards are not rendered
-    // at all until that tab is opened, rather than merely rendered last.
+    // On a later tab, its visible cards must lead the serial daemon queue. Hidden tabs' cards then
+    // wait on the viewport rather than being appended, so they render only once their tab is
+    // opened.
     assertTrue(
       landingDeclaredTabbedThemes.contains("if (themeVisible) {") &&
         landingDeclaredTabbedThemes.contains("themeQueue.push(job)") &&
@@ -5511,9 +5014,8 @@ class ServeWebFixtureTest {
         .contains("data-theme-choice=\"theme:"),
       "a static bundle offers no declared-theme chips it could not render",
     )
-    // A theme-NEUTRAL module (no baked light/dark pair) whose session declares themes still gets
-    // the control — a leading "Default" chip to return to the catalog's own renders, plus the
-    // declared themes. Previously such a module showed no theme control at all.
+    // A theme-neutral module with declared themes still gets the control: a leading "Default" chip
+    // plus the declared themes.
     val neutralWithThemes =
       ServeWeb.landingPage(
         moduleLabel,
@@ -5530,10 +5032,8 @@ class ServeWebFixtureTest {
         ),
       "a theme-neutral module with declared themes gets a Default chip plus the declared themes",
     )
-    // The status page leads with the header health badge, links to the machine-readable JSON, and
-    // renders the catalog / running-daemon / failure tables. A recent failure ⇒ the amber
-    // "degraded" badge; a live+running catalog reads "live · running"; a baked one shows its
-    // reason.
+    // Header health badge, JSON link, and catalog / daemon / failure tables. A recent failure gives
+    // the amber "degraded" badge; live+running reads "live · running"; baked shows its reason.
     assertTrue(
       serveStatus.contains("Server status") && serveStatus.contains("href=\"/status.json\""),
       "status page headers the status and links its JSON form",
@@ -5611,16 +5111,13 @@ class ServeWebFixtureTest {
       variantNav.contains("__dark__direction-rtl"),
       "the subtree stays within the current theme",
     )
-    // A sectioned catalog renders a navigation TREE (role=tree) with one row per section, in
-    // authored order (Themes → Components → Screens), each carrying its card count; a flat catalog
-    // shows none.
+    // A sectioned catalog renders a navigation tree with one row per section in authored order,
+    // each with its card count; a flat catalog shows none.
     assertTrue(
       landingSections.contains("class=\"cp-tree\"") && landingSections.contains("role=\"tree\""),
       "a sectioned catalog renders the navigation tree",
     )
-    // Keyed on the row's OWN id rather than on `data-tab`, which the tree's group rows also carry
-    // (they name the section they jump into) — matching those would report each section once per
-    // group it holds.
+    // Keyed on the row's own id, not `data-tab` (group rows carry it too).
     val tabOrder =
       Regex("id=\"cp-tab-([a-z0-9-]+)\"")
         .findAll(landingSections)
@@ -5645,9 +5142,7 @@ class ServeWebFixtureTest {
       ),
       "a section row's anchor targets its own panel",
     )
-    // The catalog lands on ALL — every section's panel showing, one scroll through the lot, and a
-    // filter that spans the whole catalog because nothing is narrowing it. It counts the catalog,
-    // and it controls the grid rather than any one panel, since that is what it shows.
+    // The catalog lands on All: every panel showing, the filter spanning the whole catalog.
     assertTrue(
       landingSections.contains(
         "<a class=\"cp-tab\" role=\"treeitem\" id=\"cp-tab-all\" href=\"#cp-grid\"" +
@@ -5671,16 +5166,10 @@ class ServeWebFixtureTest {
           .containsMatchIn(landingSections),
       "All expands every section rather than leaving the tree closed over a full grid",
     )
-    // What All actually does to the grid, the tree and the headings, in the script that owns each:
-    // no card is filtered out by section; the per-section <h2>s that `cp-js` hides come back,
-    // because the selected row no longer names the one section on screen; and a jump to a group
-    // scrolls without narrowing the catalog down to that group's section.
-    // The leading conjunct is "is a filter running", and it is matched loosely on purpose: it was
-    // `q !== ""` alone until the Dev-mode `uses:` operator, and is `(q !== "" || usesActive())`
-    // since — because a query of only `uses:Foo` leaves `q` empty, and a filter has to span every
-    // section (see `ServeWeb.searchingExpr`). What this line is about is the rest of the
-    // expression, which that change does not touch: while All is the selected row, the section a
-    // card sits in must not hide it.
+    // What All does in each owning script: no card is filtered by section, per-section <h2>s come
+    // back, and a group jump scrolls without narrowing. The leading conjunct ("is a filter
+    // running") is matched loosely because it also covers `uses:` queries (see
+    // `ServeWeb.searchingExpr`).
     assertTrue(
       Regex("""var tabOk = .+ \|\| !sec \|\| current === "all"""").containsMatchIn(landingSections),
       "under All a card is in the current tab whatever section holds it",
@@ -5698,9 +5187,8 @@ class ServeWebFixtureTest {
         landingSections.contains("if (current === \"all\") return;"),
       "jumping to a group from All stays in All",
     )
-    // …and a reload of the URL that click wrote lands on the same page. The fragment names where
-    // to scroll, not which slice of the catalog to show, so neither the landing resolver nor the
-    // Back/Forward one may narrow to the section that happens to hold it while All is selected.
+    // Reloading that URL lands on the same page: the fragment is a scroll target, not a section
+    // filter, while All is selected.
     assertEquals(
       2,
       Regex("if \\(current === \"all\"\\) return;").findAll(landingSections).count(),
@@ -5710,9 +5198,8 @@ class ServeWebFixtureTest {
       landingSections.contains("if (popped.row) markGroup(popped.row);"),
       "Back/Forward within All marks the row it lands on instead of switching section",
     )
-    // The second level: each named group is a row under its section, pointing at the sub-group
-    // divider's anchor — including the same "Device" group name reused across the Components and
-    // Screens sections, which stays scoped per section (two distinct anchors, not one).
+    // Each named group is a row under its section pointing at the divider's anchor; "Device" in two
+    // sections gives two distinct anchors.
     assertTrue(
       landingSections.contains("data-group=\"cp-group-themes-foundation\"") &&
         landingSections.contains("data-group=\"cp-group-components-contacts\"") &&
@@ -5791,9 +5278,8 @@ class ServeWebFixtureTest {
       landingSections.contains("if (expanded !== \"true\") return;"),
       "Right does nothing on a tree leaf rather than acting as a second Down",
     )
-    // The fragment has to travel with the selection: `cpUrlState` preserves whatever hash is
-    // already on the URL, and the hash outranks `?tab=` on load, so a stale one silently sends the
-    // next visitor to the wrong section.
+    // The fragment travels with the selection: `cpUrlState` preserves the hash, which outranks
+    // `?tab=` on load.
     assertTrue(
       landingSections.contains("function setFragment(id)") &&
         landingSections.contains("setFragment(id);") &&
@@ -5809,9 +5295,8 @@ class ServeWebFixtureTest {
         ),
       "a section row owns its group of sub-group rows",
     )
-    // `role="tree"` (the nav) and `classList.add("cp-js")` (the section script) appear ONLY when
-    // sections are rendered — the shared stylesheet's `.cp-tree` / `html.cp-js` rules are on every
-    // page, so this checks the markup/script, not the CSS.
+    // `role="tree"` and `classList.add("cp-js")` appear only when sections render (the shared CSS
+    // rules are on every page).
     assertFalse(
       landingThemed.contains("role=\"tree\"") || landingThemed.contains("classList.add(\"cp-js\")"),
       "a flat (section-less) catalog renders no navigation tree and no section script",
@@ -5836,9 +5321,7 @@ class ServeWebFixtureTest {
         statesNav.contains("/p/checkbox__ideal__unchecked__light"),
       "the viewer subtree marks Default active and links the same-theme sibling",
     )
-    // A section-less catalog gains SYNTHESIZED family sub-group dividers (as <h2 cp-group-head>)
-    // over
-    // a flat grid — no tab bar — so a large ungrouped catalog reads as clustered families.
+    // A section-less catalog gains synthesized family dividers over a flat grid, no tab bar.
     assertTrue(
       landingGrouped.contains("class=\"cp-grid-groups\"") &&
         landingGrouped.contains("<h2 class=\"cp-group-head\">Button</h2>") &&
@@ -5846,21 +5329,16 @@ class ServeWebFixtureTest {
         landingGrouped.contains("<h2 class=\"cp-group-head\">FAB</h2>"),
       "a section-less catalog renders synthesized family sub-group dividers",
     )
-    // A section-less catalog now gets an OUTLINE tree over the same flat grid: its synthesized
-    // families are the top level, so the two levels of structure it does have (family, then
-    // component) are navigable instead of invisible. No sections means no panels to switch, so
-    // these rows carry no `data-tab` and the script emits none of the section machinery.
+    // A section-less catalog gets an outline tree with synthesized families at the top level; rows
+    // carry no `data-tab`.
     assertTrue(
       landingGrouped.contains("role=\"tree\"") &&
         landingGrouped.contains("aria-label=\"Catalog contents\"") &&
         landingGrouped.contains("<div class=\"cp-subgroup\" id=\"cp-group-button\""),
       "a section-less catalog renders an outline tree over its synthesized families",
     )
-    // Every sub-group carries its card count as `--cp-n`, which is what lets the sheet lay them
-    // out as CLUSTERS — a one-card family asking for one column instead of a whole five-column
-    // row with four of them painted blank (issue #4423). The count comes from the server because
-    // CSS has no way to ask how many cards a group holds; get it wrong and the layout silently
-    // reserves the wrong width, so it is pinned here rather than left to the pixel diff.
+    // Each sub-group carries its card count as `--cp-n` so CSS can size it as a cluster (CSS can't
+    // count children).
     assertTrue(
       landingGrouped.contains("id=\"cp-group-button\" style=\"--cp-n:3\"") &&
         landingGrouped.contains("id=\"cp-group-card\" style=\"--cp-n:2\"") &&
@@ -5868,9 +5346,8 @@ class ServeWebFixtureTest {
         landingGrouped.contains("id=\"cp-group-badge\" style=\"--cp-n:1\""),
       "each sub-group declares how many cards wide it is",
     )
-    // The id line is two spans so it can elide from the MIDDLE: clipped at the end, an id says
-    // nothing the label above it hasn't, because what distinguishes one render from its siblings
-    // is the suffix. Split at the last `__`, head shrinks, tail stays.
+    // The id line is two spans so it elides from the middle (split at the last `__`), keeping the
+    // distinguishing suffix.
     assertTrue(
       landingGrouped.contains(
         "<div class=\"cp-id cp-id-elide\">" +
@@ -5879,22 +5356,15 @@ class ServeWebFixtureTest {
       ),
       "a card's id elides from the middle, keeping the mode and the scheme",
     )
-    // The design file's pages are their own PANE beside Components, not a branch at the foot of the
-    // tree and not a chip in the header row. The branch put them below every family, component and
-    // variant the catalog has — past a hundred-odd rows on a real one — while answering a different
-    // question from the inventory above them. A segmented switch says which of the two peers the
-    // column is showing.
+    // The design file's pages are their own pane beside Components, selected by a segmented switch.
     assertTrue(
       landingGrouped.contains("<div class=\"cp-panes\" role=\"tablist\"") &&
         landingGrouped.contains("data-pane=\"components\" aria-controls=\"cp-pane-components\"") &&
         landingGrouped.contains("data-pane=\"pages\" aria-controls=\"cp-pane-pages\""),
       "a catalog with design pages switches its sidebar between Components and Pages",
     )
-    // Each page is one row, named, carrying `data-search` so the one filter below the switch can
-    // narrow them the way it narrows components — the pages used to be the only list in this
-    // column the filter could not reach.
-    // A page WITH sections is a branch — the row still leads to the whole sheet, and the sections
-    // it is divided into hang under it, each landing on that node's anchor in the page view.
+    // Each page is one row with `data-search` so the shared filter narrows it. A page with sections
+    // is a branch; each section lands on that node's anchor.
     assertTrue(
       landingGrouped.contains(
         "<a class=\"cp-tree-page cp-tree-link\" href=\"/pages/shape\" data-search=\"Shape\"" +
@@ -5916,11 +5386,8 @@ class ServeWebFixtureTest {
       ) && landingGrouped.contains("<a class=\"cp-pane-all\" href=\"/pages\">All pages</a>"),
       "a page with no sections stays a plain filterable row, and the index link survives",
     )
-    // THE JOIN, asserted rather than assumed: every fragment a section row links to must exist as
-    // an id on the page view it points at. These are two different goldens built by two different
-    // functions, and the first version of this shipped links to `#cp-node-<setId>` — anchors that
-    // the page never emits, because it draws one per COMPONENT and a component set is not one. The
-    // links resolved to nothing and no test noticed, since each golden was self-consistent.
+    // Every fragment a section row links to must exist as an id on the page view it points at (two
+    // goldens built by different functions).
     val sectionFragments =
       Regex("""href="[^"]*#(cp-node-[^"]*)"""").findAll(landingGrouped).map { it.groupValues[1] }
     val pageAnchors =
@@ -5931,11 +5398,8 @@ class ServeWebFixtureTest {
       pageAnchorSet.isNotEmpty() && dangling.isEmpty(),
       "every section link lands on an anchor the page view actually emits; dangling: $dangling",
     )
-    // Today that holds trivially, because a section links to the sheet and carries no fragment at
-    // all — a set has nothing on the page to land on, and inferring one from depth is what the
-    // `PageNode.container` contract forbids. Stated out loud so the guard above is not mistaken
-    // for proof that targeting works: it proves only that nothing dangles, which is the property
-    // that has to survive when the deep-link work adds real container anchors.
+    // Holds trivially today (sections carry no fragment); this proves nothing dangles, not that
+    // targeting works.
     assertTrue(
       sectionFragments.none(),
       "a section link carries no fragment until the page view anchors containers",
@@ -5956,28 +5420,21 @@ class ServeWebFixtureTest {
       !landingGrouped.contains("class=\"cp-action-chip\" href=\"/pages\""),
       "a catalog with a tree offers its pages there, not as a header chip as well",
     )
-    // …and the fallback: no tree to list them in (too few previews to synthesize families from)
-    // means the chip is the only route, so it stays.
-    //
-    // "design pages", not "pages": #553 gave the chip the same vocabulary the rest of the catalog
-    // uses for the surface it leads to, and this assertion kept the old label — which is why
-    // `main` has been red on this line since that merge. The chip's own emission is the authority
-    // (`actionChip("$basePath/pages$q", "N design page(s)")`).
+    // The fallback: with no tree to list them in, the chip is the only route, so it stays. Label
+    // matches the chip's own emission (`actionChip("$basePath/pages$q", "N design page(s)")`).
     assertTrue(
       !landingPublic.contains("cp-tree-pages") &&
         landingPublic.contains("class=\"cp-action-chip\" href=\"/pages\">2 design pages</a>"),
       "a catalog with no tree keeps the header chip, or its pages would be unreachable",
     )
-    // `reflectTree` walks every expandable row on every open/close; the Pages branch is expandable
-    // and names no target, so without this guard it would be collapsed by the first component
-    // click. Asserted on the emitted script because that is the only place it exists.
+    // `reflectTree` walks every expandable row on open/close; without this guard the Pages branch
+    // (no target) would collapse on the first component click.
     assertTrue(
       landingGrouped.contains("if (!id) return;"),
       "the tree script leaves an always-open branch alone",
     )
-    // The tree's two deepest levels. A component row jumps to its card (an in-page `data-group`);
-    // a variant row has nowhere on the page to go — the grid folds those renders out — so it is a
-    // plain link to the viewer, and carries no `data-group` at all.
+    // A component row jumps to its card (`data-group`); a variant row has no card in the grid, so
+    // it is a plain link to the viewer with no `data-group`.
     assertTrue(
       landingTreeDepth.contains(
         "<a class=\"cp-tree-component cp-tree-link\" role=\"treeitem\"" +
@@ -6055,9 +5512,8 @@ class ServeWebFixtureTest {
       Regex(">Button · Filled[^<]*<").findAll(collapsedNav).count(),
       "the multi-variant component appears exactly once in the nav",
     )
-    // Theme preservation: viewing a DARK preview, the collapsed nav links each OTHER component to
-    // its DARK render (not the light default) — the same theme-preserving behaviour the state and
-    // variant switchers already have, so navigating never snaps the visitor back to light.
+    // Viewing a dark preview, the nav links other components to their dark render, like the state
+    // and variant switchers.
     val darkNav =
       ServeWeb.viewerPage(
           statefulPreviews.first { it.id == "checkbox__ideal__default__dark" },
@@ -6088,9 +5544,8 @@ class ServeWebFixtureTest {
         playground.contains("res.documentUrl || res.previewUrl"),
       "the playground script POSTs to the compile route and follows the /pg or /d handoff",
     )
-    // A snippet is a list of files, not one buffer (#3017): the file strip is present, the run body
-    // posts the whole list, and the response's previewId is surfaced so a snippet with several
-    // @Previews says which one it drew.
+    // A snippet is a list of files: the file strip is present, the run posts the whole list, and
+    // the response's previewId says which @Preview was drawn.
     assertTrue(
       playground.contains("id=\"pg-files\"") &&
         playground.contains("id=\"pg-add-file\"") &&
@@ -6121,9 +5576,8 @@ class ServeWebFixtureTest {
         assetText("playground.css").contains(".cp-pg-inline-error"),
       "located compiler errors are shown inline and cleared through CodeMirror's moving line handle",
     )
-    // A compiler message is not one line — K2 reports an overload failure as a head, a block per
-    // candidate and a caret excerpt (yschimke/compose-preview-server#699). The summary keeps every
-    // line, the inline widget keeps only the head so the code stays on screen.
+    // A compiler message can span many lines (K2 overload failures). The summary keeps every line;
+    // the inline widget keeps only the head.
     assertTrue(
       assetText("playground.css").contains("white-space: pre-wrap"),
       "the diagnostic summary renders a multi-line compiler message as multiple lines",
@@ -6313,9 +5767,7 @@ class ServeWebFixtureTest {
           homeIndex.indexOf("href=\"/confetti-wear/\""),
       "cards are split between the design system, yschimke, and joreilly sections",
     )
-    // An UNLISTED catalog (cadence) is served at /<system>/ but kept OFF the front door: the home
-    // index carries no separate "Apps" section, so publishing it doesn't advertise it on the
-    // landing.
+    // An unlisted catalog is served at /<system>/ but not advertised on the front door.
     assertFalse(
       homeIndex.contains("<p class=\"cp-head\">Apps</p>"),
       "the front door has no Apps section — unlisted catalogs are not indexed",
@@ -6356,9 +5808,7 @@ class ServeWebFixtureTest {
       ),
       "the hero pick prefers a default-state, light, filled-button render",
     )
-    // When the catalog carries screens (an app, not a component library), a Screens-section preview
-    // is the hero — the most representative view — beating any single component, even a filled
-    // button.
+    // A catalog with screens uses a Screens-section preview as its hero, ahead of any component.
     assertEquals(
       "conference-screen__ideal__default__dark",
       ServeWeb.representativePreviewId(
@@ -6422,9 +5872,8 @@ class ServeWebFixtureTest {
       "normalizing drops only uiMode — every other override survives",
     )
 
-    // The sticky theme toggle appears only for a catalog with light/dark pairs, and each paired
-    // component collapses into ONE swap card carrying both themes' baked render; a plain component
-    // module shows no toggle.
+    // The theme toggle appears only for a catalog with light/dark pairs, each pair collapsing into
+    // one swap card.
     assertTrue(
       landingThemed.contains("id=\"cp-catalog-theme-bar\""),
       "themed catalog shows the theme toggle",
@@ -6435,8 +5884,7 @@ class ServeWebFixtureTest {
         landingThemed.contains("data-d-src="),
       "a paired component renders one swap card carrying both themes' baked render",
     )
-    // The swap collapses the two variants into one card: the button-filled light+dark pair is a
-    // single card, not two, so the dark variant's id no longer appears as its own card id line.
+    // The light+dark pair is a single card, so the dark id no longer appears as its own card.
     assertFalse(
       landingThemed.contains(">button-filled__ideal__default__dark</div>"),
       "the dark variant is folded into the swap card, not a separate card",
@@ -6451,10 +5899,9 @@ class ServeWebFixtureTest {
         ),
       "the toggle swaps the card's render and viewer link in place (not a filter)",
     )
-    // Dark-first system (Wear): a preview with no explicit __light/__dark token still tags the
-    // viewer stage dark (data-bg-theme, the background axis — separate from the data-card-theme
-    // filter axis), so a light-on-transparent Wear render stays readable — while a non-dark-first
-    // viewer with no theme token leaves the stage on its default (light).
+    // Dark-first system (Wear): a preview with no theme token still tags the viewer stage dark
+    // (data-bg-theme, separate from data-card-theme), keeping light-on-transparent renders
+    // readable; a non-dark-first viewer stays light.
     assertTrue(
       viewerGestures.contains("class=\"cp-viewer\" data-bg-theme=\"dark\""),
       "a Wear (dark-first) viewer tags the stage dark even without a __dark token",
@@ -6463,10 +5910,8 @@ class ServeWebFixtureTest {
       viewerFocus.contains("class=\"cp-viewer\" data-bg-theme="),
       "a non-dark-first viewer with no theme token leaves the stage default (light)",
     )
-    // The stage only follows the Theme choice when the control can actually re-render: on a static
-    // bundle the select is disabled (but may carry a seeded remembered value), so syncBg must
-    // gate
-    // on !el.disabled or it would tint the stage under an unchanged baked PNG.
+    // The stage follows the Theme choice only when the control can re-render: on a static bundle
+    // the select is disabled (but may carry a remembered value), so syncBg gates on !el.disabled.
     assertTrue(
       viewerGestures.contains("!el.disabled &&"),
       "syncBg only honors the Theme choice when the control is usable (not a disabled static select)",
@@ -6504,10 +5949,8 @@ class ServeWebFixtureTest {
         landingThemed.contains("getElementById(\"cp-search\")"),
       "the themed landing's filter script drives both the theme toggle and the search box",
     )
-    // The viewer seeds the unified Theme select from the catalog-scoped key and writes every
-    // choice back. The store is `sessionStorage`, so the memory is this TAB's: a second tab keeps
-    // its own theme, and a link opened in a fresh tab is reproducible because nothing is remembered
-    // there yet.
+    // The Theme select is seeded from, and written back to, a catalog-scoped `sessionStorage` key,
+    // so memory is per tab and a link opened in a fresh tab is reproducible.
     assertTrue(
       viewer.contains("sessionStorage.getItem(\"cp-theme:default\""),
       "viewer seeds its Theme select from the catalog-scoped theme key on load",
@@ -6536,11 +5979,9 @@ class ServeWebFixtureTest {
       "a disabled select is a page that cannot re-render, whatever its options say: a remembered " +
         "theme applied there marks a chip the stage will not honour",
     )
-    // The exclusivity rule itself moved to `cli/serve-web/src/viewer/themeChoice.ts`, where
-    // `viewerThemeChoice.test.ts` drives it over every value instead of grepping for one spelling
-    // of it. What is still worth holding HERE is the seam: `viewer.js` must ask the shared rules
-    // rather than grow a second copy, because a second copy is how the select's values and their
-    // consumption drift apart while both look right.
+    // The exclusivity rule lives in `serve-web/src/viewer/themeChoice.ts` (tested by
+    // `viewerThemeChoice.test.ts`); this pins that `viewer.js` uses the shared rules rather than a
+    // second copy.
     assertTrue(
       viewerSource().contains("rules.chosenUiMode(") &&
         viewerSource().contains("rules.chosenThemeProvider("),
@@ -6627,9 +6068,8 @@ class ServeWebFixtureTest {
       "the player is rendered but withheld until the lane is entered",
     )
     assertTrue(view.contains("id=\"cp-motion-canvas\""), "the frames have a canvas to land on")
-    // Hidden *separately* from the player, and that is load-bearing: the transport is revealed only
-    // once a decode has actually succeeded, so a browser that falls back to the looping <img> is
-    // never shown scrub and speed controls that cannot work.
+    // The transport is hidden separately from the player and revealed only after a successful
+    // decode, so the `<img>` fallback never shows unusable controls.
     assertTrue(
       Regex("<div class=\"cp-motion-transport\" id=\"cp-motion-transport\" hidden>")
         .containsMatchIn(view),
@@ -6699,9 +6139,8 @@ class ServeWebFixtureTest {
       viewerSource().contains("if (m !== \"motion\") closeMotion();"),
       "every transition out of motion closes the lane",
     )
-    // The captions catalogs actually write: a line of instruction, then a paragraph of what to
-    // watch for. On a button that was the whole paragraph across the control row; in the menu it is
-    // the opening clause, and the rest rides to the readout on the option.
+    // Realistic captions: an instruction line then a paragraph. The menu shows the opening clause;
+    // the rest goes to the readout.
     val prose =
       ServeWeb.viewerPage(
         plain.copy(
@@ -6731,9 +6170,8 @@ class ServeWebFixtureTest {
       "…and the words themselves are kept, on the option the readout prints from",
     )
 
-    // Two caption-less captures of the SAME kind — permitted by the manifest, and what the
-    // annotation defaults produce. Both entries used to read "Interaction", leaving no way by eye
-    // or by screen reader to tell which recording either one selects.
+    // Two caption-less captures of the same kind (allowed by the manifest) must still be
+    // distinguishable.
     val sameKind =
       ServeWeb.viewerPage(
         plain.copy(
@@ -6757,11 +6195,8 @@ class ServeWebFixtureTest {
       "a label that stands alone keeps its plain form",
     )
 
-    // A pinned page is a permalink, and the rule it holds to is that a pinned request is never
-    // answered with CURRENT bytes. `/motion/` reads the branch tip the session is holding and has
-    // no revision to resolve against, so the axis is withdrawn there rather than playing today's
-    // recording beside a render from another commit. Withdrawn whole — chip, stage image and mode
-    // radio — so there is no half-present control to click.
+    // A pinned page never serves current bytes, and `/motion/` reads the branch tip with no
+    // revision to resolve against, so the whole axis (chip, stage image, mode radio) is withdrawn.
     val pinnedView =
       ServeWeb.viewerPage(
         withMotion,
@@ -6777,9 +6212,8 @@ class ServeWebFixtureTest {
       "…and carries no mode radio a URL could still name",
     )
 
-    // The readout prints the caption in full for whichever capture is on the stage, and falls back
-    // to standing IN FOR the menu on a single-capture preview — where the menu is hidden and
-    // nothing else on the row names the recording.
+    // The readout prints the full caption for the capture on stage, and stands in for the hidden
+    // menu on a single-capture preview.
     assertTrue(
       viewerSourceFlat()
         .contains("detail || (motionOptions.length > 1 || !option ? \"\" : option.text)"),
@@ -6791,9 +6225,8 @@ class ServeWebFixtureTest {
   fun `viewer mounts the Wasm tier only when a wasm app backs the session`() {
     val card = previews.first { it.id.endsWith("CardPreview") }
     val withWasm = ServeWeb.viewerPage(card, token, wasmSrc = "/wasm/compose-m3/?id=card-filled")
-    // The visible mode control is now a single Static⇄Live toggle; the transport radios (png / live
-    // / wasm) live hidden behind it for the transition JS to drive. The wasm radio is present only
-    // when a wasm app backs the session.
+    // The visible mode control is a single Static/Live toggle; hidden transport radios (png / live
+    // / wasm) back it. The wasm radio exists only when a wasm app backs the session.
     assertTrue(
       withWasm.contains("id=\"cp-live-toggle\""),
       "expected the single Static⇄Live preview toggle",
@@ -6806,19 +6239,16 @@ class ServeWebFixtureTest {
     )
     assertTrue(withWasm.contains("id=\"cp-wasm\""), "expected the Wasm iframe")
     assertTrue(withWasm.contains("data-wasm-src=\"/wasm/compose-m3/?id=card-filled\""))
-    // Default (no wasmSameOrigin ⇒ untrusted / unknown): the iframe stays opaque-origin, so an
-    // unverified catalog's `/wasm/` app can't reach the parent viewer's tokened URLs / DOM.
-    // Match the exact attribute, not a bare "allow-same-origin" substring — the viewer-script
-    // comments mention the phrase, so a substring check would be polluted.
+    // Default (untrusted / unknown): the iframe stays opaque-origin so an unverified `/wasm/` app
+    // can't reach the viewer's tokened URLs or DOM. Match the exact attribute: script comments
+    // mention the phrase.
     assertTrue(
       withWasm.contains("sandbox=\"allow-scripts\"") &&
         !withWasm.contains("sandbox=\"allow-scripts allow-same-origin\""),
       "untrusted Wasm stays opaque-origin (allow-scripts only)",
     )
-    // A TRUSTED catalog's app (wasmSameOrigin=true) gets its real origin, so its storage/history
-    // APIs (window.caches via supportsCacheApi, history.pushState) stop throwing SecurityError in
-    // an
-    // opaque origin. Still no allow-forms / allow-popups / allow-top-navigation.
+    // A trusted catalog's app (wasmSameOrigin=true) gets its real origin so storage/history APIs
+    // work. Still no allow-forms / allow-popups / allow-top-navigation.
     val trustedWasm =
       ServeWeb.viewerPage(
         card,
@@ -6844,16 +6274,13 @@ class ServeWebFixtureTest {
       viewerSource().contains("loading Wasm…"),
       "load state keeps the snapshot with a status",
     )
-    // Guard against re-adding a page-side font preload: the real prefetch lives in the app's own
-    // index.html (in flight before the iframe navigates, and the app consumes the promises), so a
-    // page-side preload is redundant.
+    // No page-side font preload: the app's own index.html prefetches.
     assertFalse(
       withWasm.contains("preloadWasmFonts"),
       "no page-side font preload (the app's index.html owns the prefetch)",
     )
-    // The old "Component only (no background)" wasm checkbox was removed — it was confusing (it
-    // three-way-cycled the background), so the in-browser app now always renders its themed
-    // background.
+    // The "Component only (no background)" wasm checkbox was removed; the app always renders its
+    // themed background.
     assertFalse(withWasm.contains("id=\"cp-wasm-bg\""), "the Component-only toggle is gone")
     assertFalse(
       withWasm.contains("Component only"),
@@ -6887,9 +6314,8 @@ class ServeWebFixtureTest {
           ),
       )
 
-    // The lane is one click away, so offer the click. Previously this rendered a `disabled` button
-    // whose only explanation was a `title` — invisible on touch, and never announced, since a
-    // disabled button is not focusable.
+    // The lane is one click away, so offer a working sign-in link, not a disabled button with a
+    // title.
     assertTrue(
       protectedLive.contains("id=\"cp-live-signin\"") &&
         protectedLive.contains(
@@ -6901,17 +6327,13 @@ class ServeWebFixtureTest {
       protectedLive.contains("Live preview — sign in"),
       "the reason is in the visible label, not only in a hover tooltip",
     )
-    // The old markup put the login URL in `data-github-login` and no script ever read it, so the
-    // control did nothing when clicked. An anchor cannot regress that way — following it is the
-    // browser's job — but pin that the dead attribute is gone so it can't quietly come back.
+    // The dead `data-github-login` attribute must not come back.
     assertFalse(
       protectedLive.contains("data-github-login="),
       "the login URL is the anchor's href, not an attribute nothing reads",
     )
-    // The live stream gates on being signed in, full stop — the repo check is the PLAYGROUND's.
-    // Naming `--github-auth-repo` here told a visitor they needed access to a repo they have never
-    // heard of, which is how wear-m3-catalog#68 ended with an outside contributor concluding the
-    // preview was broken rather than that they were signed out.
+    // The live stream only requires sign-in; the repo check is the playground's, so
+    // `--github-auth-repo` must not be named here.
     assertFalse(
       protectedLive.contains("data-github-repo="),
       "the Live sign-in must not carry the playground's gating repo",
@@ -6922,9 +6344,8 @@ class ServeWebFixtureTest {
       ),
       "…and its tooltip states the real bar instead of naming that repo",
     )
-    // …unless the operator narrowed sign-in itself. `--github-auth-users` makes the verifier refuse
-    // every login outside the list, so "any GitHub account" would walk those visitors through OAuth
-    // to a 403. The repo check never restricted sign-in this way; the allowlist does.
+    // ...unless `--github-auth-users` narrows sign-in, in which case "any GitHub account" would be
+    // false.
     val allowlisted =
       ServeWeb.viewerPage(
         card,
@@ -6974,10 +6395,7 @@ class ServeWebFixtureTest {
       "live preview remains an ordinary toggle when no GitHub sign-in prompt is required",
     )
 
-    // The mode hint must not contradict the chip. The transport radio stays disabled while auth
-    // blocks the lane, so the old hint read "no live lane" directly beside an offer to sign in for
-    // one — the page asserting in the same breath that the thing is available and that it does not
-    // exist. Caught only once the fixture was captured WITH the stylesheet.
+    // The mode hint must not say "no live lane" beside an offer to sign in for one.
     assertTrue(
       viewerSource().contains("static snapshot — sign in for live"),
       "an auth-blocked lane is reported as needing sign-in, not as absent",
@@ -6987,9 +6405,8 @@ class ServeWebFixtureTest {
       "the hint keys off the sign-in link, which is the only marker of the auth-blocked state",
     )
 
-    // The sign-in case gets NEITHER half of the invitation. The stage's click handler enters the
-    // lane through `#cp-live-toggle`'s own state, which this page deliberately does not render — so
-    // a hint here would advertise a gesture that lands on a sign-in the visitor has not done yet.
+    // The sign-in case gets no stage invitation: the stage click enters via `#cp-live-toggle`,
+    // which this page doesn't render.
     assertFalse(
       protectedLive.contains("id=\"cp-stage-live-hint\""),
       "no click-for-live hint over a stage whose lane is still behind sign-in",
@@ -7004,10 +6421,8 @@ class ServeWebFixtureTest {
   fun `the viewer invites the live lane from the stage, not only from the toolbar chip`() {
     val card = previews.first { it.id.endsWith("CardPreview") }
 
-    // #4287. Before this the ONLY route into the live lane was a chip in the toolbar: the stage
-    // carried no click handler and said nothing about being interactive, so a visitor who never
-    // hovered the toolbar never learned the preview could be made live. Two affordances fix it —
-    // a hint badge ON the picture, and a click on the picture itself.
+    // Two ways into the live lane besides the toolbar chip: a hint badge on the picture and a click
+    // on the picture itself.
     val openLive = ServeWeb.viewerPage(card, token, canApplyOverrides = true)
     assertTrue(
       openLive.contains(
@@ -7068,9 +6483,8 @@ class ServeWebFixtureTest {
   @Test
   fun `the in-browser Wasm lane is reachable from the renderer combo whenever a wasm app backs the session`() {
     val card = previews.first { it.id.endsWith("CardPreview") }
-    // Case C — daemon live lane + wasm app: the chip's own toggle prefers the daemon
-    // (bestLiveMode), so without a second way in the Wasm tier would be registered and
-    // unreachable. It is an option in the renderer combo rather than a chip of its own.
+    // Case C: daemon live lane + wasm app. The chip prefers the daemon (bestLiveMode), so Wasm is
+    // reachable as a renderer-combo option.
     val both =
       ServeWeb.viewerPage(
         card,
@@ -7085,25 +6499,15 @@ class ServeWebFixtureTest {
       "with a wasm app the viewer offers the in-browser lane in the renderer combo",
     )
     assertTrue(both.contains("id=\"cp-live-toggle\""), "the live toggle stays alongside it")
-    // While the in-browser lane is active, the daemon-only controls (size/device/orientation/
-    // background + the app-theme selector) can't be honoured by the iframe, so syncServerControls
-    // disables them on the wasm lane rather than leaving dead-but-enabled knobs.
+    // On the wasm lane, syncServerControls disables daemon-only controls the iframe can't honour.
     assertTrue(
       viewerSource().contains("var onWasm = wasmActive();") &&
         viewerSourceFlat().contains("!onWasm && !onRc && !onFixedFrame &&"),
       "server-only controls are gated off while the Wasm lane is active",
     )
-    // `onFixedFrame` is ONE predicate covering both lanes that put a frame on the stage the server
-    // did not just render — the imported spec raster and a published capture. Asserted here because
-    // it was briefly half-propagated: `canServerRender` used it while the theme select and the
-    // Remote Compose knobs still gated on a spec-only flag, so overrides stayed live over a
-    // recording while the code read as though the lane were gated.
-    //
-    // #4088 lifted the expression into `onFixedFrameLane()` so `syncServerControls` and
-    // `activeThemeChoice` share one definition (and so it is callable during module init, before
-    // the lane's own elements exist). The property under test is unchanged — one predicate, both
-    // lanes, no spec-only flag beside it — so it is asserted against the helper and its use rather
-    // than the inline expression that used to spell it.
+    // `onFixedFrame` is one predicate covering both fixed-frame lanes (spec raster and published
+    // capture), defined in `onFixedFrameLane()` and shared by `syncServerControls` and
+    // `activeThemeChoice`. Asserted against the helper and its uses.
     assertTrue(
       viewerSourceFlat().contains("""return mode === "spec" || mode === "motion";"""),
       "the fixed-frame predicate still covers both the spec and the motion lane",
@@ -7127,9 +6531,8 @@ class ServeWebFixtureTest {
       "a wasm-only session names both of its lanes",
     )
 
-    // Case A — daemon lane but no wasm app: one lane, so no combo at all — the chip carries the
-    // whole row, and with nothing to disambiguate against it names the STATE the stage is in and
-    // lets its verb name the switch out of it.
+    // Case A: daemon lane, no wasm app. One lane, so no combo; the chip names the stage's state and
+    // its verb names the switch.
     val daemonOnly = ServeWeb.viewerPage(card, token, canApplyOverrides = true)
     assertFalse(
       daemonOnly.contains("id=\"cp-lane-select\""),
@@ -7157,10 +6560,8 @@ class ServeWebFixtureTest {
 
   @Test
   fun `live canvas fits the daemon frame aspect-preserved inside the snapshot box`() {
-    // The live lane is pinned to the baked snapshot's box (so a differently-sized frame doesn't
-    // resize the stage), but a <canvas> stretches its buffer to its CSS box — filling that box
-    // squished a frame whose aspect differed from the snapshot. The viewer fits the frame (contain)
-    // and centres it, letterboxing within the snapshot footprint instead.
+    // The live lane is pinned to the snapshot's box, but a <canvas> stretches its buffer; the
+    // viewer contain-fits and centres the frame instead.
     val liveView =
       ServeWeb.viewerPage(
         previews.first { it.id.endsWith("CardPreview") },
@@ -7180,9 +6581,8 @@ class ServeWebFixtureTest {
       viewerSource().contains("(boxW - w) / 2") && viewerSource().contains("(boxH - h) / 2"),
       "the fitted frame is centred within the snapshot box",
     )
-    // The painter caches the buffer dims and re-fits on every frame; a resize re-fits too. Reads
-    // the decoded bitmap rather than an <img>'s natural size since #4285 moved the lane onto
-    // `createImageBitmap` for the ordering guarantees.
+    // The painter caches buffer dims and re-fits each frame and on resize, reading the decoded
+    // bitmap (`createImageBitmap`).
     assertTrue(
       viewerSource().contains("liveW = bitmap.width;") &&
         viewerSource().contains("fitLiveCanvas();"),
@@ -7201,14 +6601,9 @@ class ServeWebFixtureTest {
 
   @Test
   fun `the snapshot image records the render URL its pixels came from`() {
-    // The visible <img> is painted from a fetched blob, so `src` is an opaque `blob:` UUID that
-    // says nothing about which render produced it. `data-cp-src` carries the originating /render
-    // URL — format, knobs and lane — and is the only handle on the *displayed* frame's identity.
-    // The `#cp-url-png` / `#cp-url-svg` copy fields are not a substitute: they mirror the current
-    // control state and update before (or without) any render landing.
-    //
-    // This is a unit-level guard for the serve-lanes e2e, which silently lost its teeth once the
-    // blob swap landed and `src` stopped matching the render URL it was asserting on.
+    // The visible <img> shows a `blob:` URL, so `data-cp-src` carries the originating /render URL
+    // as the displayed frame's identity (`#cp-url-png` / `#cp-url-svg` track controls, not landed
+    // frames). A unit-level guard for the serve-lanes e2e.
     val js = viewerSource()
     assertTrue(
       js.contains("img.setAttribute(\"data-cp-src\", url);"),
@@ -7262,9 +6657,8 @@ class ServeWebFixtureTest {
       head,
     )
 
-    // 3. The provenance links are hand-off affordances, so they sit with the other hand-off
-    //    affordances (the PNG / SVG export links) below the stage — not between the title and the
-    //    render.
+    // 3. Provenance links sit with the other hand-off affordances (PNG / SVG exports) below the
+    //    stage.
     assertTrue(
       view.indexOf("class=\"cp-preview-links\"") > view.indexOf("class=\"cp-viewer "),
       "the provenance row is below the stage",
@@ -7301,11 +6695,8 @@ class ServeWebFixtureTest {
       "the dropdown contains one theme choice group",
     )
     assertFalse(crowded.contains("class=\"cp-viewer-bar\""), "the old horizontal row is gone")
-    // Transparent and Fit width are no longer on this row. They present the stage rather than
-    // choosing what draws it, a reader sets them once if ever, and on the crowded shape this test
-    // builds they were the two chips paying for that on a bar already carrying eight theme choices.
-    // Asserted from both ends, because "not in the renderer row" on its own is also what a page
-    // that lost the controls entirely looks like.
+    // Transparent and Fit width moved off the renderer row (they present the stage, not choose its
+    // renderer). Asserted from both ends so a page that lost them entirely also fails.
     val rendererRow =
       crowded.substringAfter("<div class=\"cp-preview-primary\"").substringBefore("</div>")
     assertFalse(
@@ -7320,13 +6711,10 @@ class ServeWebFixtureTest {
   }
 
   /**
-   * The page carries the density the preview actually renders at, not a constant.
-   *
-   * `ServeBundleHost.renderDensityFor` resolves it and `ServeBakedCatalogPreviewParamsTest` pins
-   * that; this is the other half — that the resolved value reaches the attribute the viewer reads,
-   * and that a session which cannot answer still emits the documented fallback rather than nothing.
-   * The two halves are what make the dp→px conversion behind the Fixed / Max / Min / Within inputs
-   * agree with the renderer.
+   * The page carries the density the preview actually renders at.
+   * `ServeBakedCatalogPreviewParamsTest` pins the resolution; this pins that it reaches the
+   * viewer's attribute (with the documented fallback), so dp→px conversion for the size inputs
+   * matches the renderer.
    */
   @Test
   fun `the viewer page carries the preview's own render density`() {
@@ -7358,26 +6746,11 @@ class ServeWebFixtureTest {
   }
 
   /**
-   * The eyedropper's readout may not change the LANE'S WIDTH, which is issue #464: hovering the
-   * comparison moved the preview down the screen, and moving off it moved the preview back.
-   *
-   * `.cp-spec-lane` is `inline-flex`, so it is shrink-to-fit — its width is whatever its contents
-   * need. `.cp-spec-pick` is `flex-basis: 100%`, which contributes nothing while the row is empty
-   * and takes the whole available width the moment it holds a reading. Measured on the reported
-   * page, `/wear-m3-catalog/p/button-compact__ideal__filled-variant-icon-only?mode=spec`, at the
-   * reporter's own 1280x683: the lane sat at 1020px with the row reserved and empty, which left the
-   * SVG and 3D toggles beside it on the same line of `.cp-preview-primary` — itself `flex-wrap:
-   * wrap`. The first reading widened the lane to the full 1224px, those two toggles wrapped onto a
-   * line of their own, and the stage moved down 6px. On every hover, and back again on every leave.
-   *
-   * Reserving the row's HEIGHT — which the lane already did, and which is what
-   * `serve-web/renders/spec-lane-eyedropper` documents — never addressed this, because the shift
-   * came from the row's WIDTH. `width: 0` is the value the lane measures itself against, so a
-   * reading cannot move it; `min-width: 100%` resolves against the settled lane afterwards, so the
-   * row still spans it and `overflow-x` scrolls a reading too long for it.
-   *
-   * Held here rather than in a screenshot because the whole fault is a used width no capture
-   * states: both frames show a readout on its own row, 6px apart.
+   * The eyedropper readout must not change the spec lane's width. `.cp-spec-lane` is `inline-flex`
+   * (shrink-to-fit) and `.cp-spec-pick` is `flex-basis: 100%`, so a reading widened the lane,
+   * wrapped neighbouring toggles and moved the stage on every hover. `width: 0` keeps the readout
+   * out of the lane's measurement; `min-width: 100%` then spans the settled lane and `overflow-x`
+   * scrolls long readings. Pinned here because a screenshot can't show a used width.
    */
   @Test
   fun `the eyedropper's readout cannot resize the spec lane`() {
@@ -7398,25 +6771,11 @@ class ServeWebFixtureTest {
   }
 
   /**
-   * Every visually-hidden box is ANCHORED as well as clipped, or the report button leaves the phone
-   * — issue #801.
-   *
-   * Clipping hides the paint. It does not move the box, and an absolutely positioned box with no
-   * positioned ancestor takes its containing block from the initial one, so it is not clipped by
-   * the scroller it happens to sit in either. `.cp-spec-pick-live` is the last child of
-   * `.cp-spec-lane`, itself the last entry of `.cp-preview-primary` — a row that is `overflow-x:
-   * auto` and, on a preview page at 411px, about 1400px long. The span's static position was
-   * therefore x=762, outside that row's clip, and the document's scrollable width became 764.
-   *
-   * On a mobile browser the layout viewport grows to the document, so `innerWidth` became 764 on a
-   * 411px device. `.cp-fab { position: fixed; right: 16px }` resolves against that layout viewport,
-   * which put the report button at x=708..748 — entirely off the 411px screen, and unreachable,
-   * because `html { overflow-x: clip }` means the page cannot be scrolled sideways to it. Measured
-   * on `/remote-m3/p/appcard__ideal__default__compact` at the reporter's own 411x785; the shots are
-   * in `serve-web/renders/report-button-reach`.
-   *
-   * So the rule is the anchor, on every one of these, and it is pinned here because nothing in a
-   * capture of a working page shows why the button is where it is.
+   * Every visually-hidden box is anchored as well as clipped. Clipping doesn't move the box; an
+   * unanchored absolute span at the end of the long `overflow-x: auto` `.cp-preview-primary` row
+   * widened the document on a phone, growing the layout viewport and pushing the fixed `.cp-fab`
+   * report button off screen (and `html { overflow-x: clip }` made it unreachable). See
+   * `serve-web/renders/report-button-reach`.
    */
   @Test
   fun `a visually-hidden box cannot push the page wider than the device`() {
@@ -7436,24 +6795,11 @@ class ServeWebFixtureTest {
   }
 
   /**
-   * The triptych's frames FILL their columns, and `object-fit` is what keeps that honest.
-   *
-   * The base panel rule sizes a frame with `max-width`/`max-height` against `auto` dimensions,
-   * which only ever SHRINKS a replaced element. In the triptych the columns are stretched (`flex: 1
-   * 1 0`), so a small raster sat at its intrinsic size in a column nearly four times its width:
-   * `button-compact__ideal__filled-variant-icon-only` is 104x66 in a 387px column. Measured on that
-   * page, the picture was 19% of the stage it appeared to occupy, and a pointer sweep across the
-   * triptych read nothing for 73% of its travel — the other 81% of the stage being inert background
-   * with no pixel for the eyedropper to name. Filling the column takes the sweep to 4%.
-   *
-   * `object-fit: contain` is the load-bearing half. `width` is definite once the frame fills its
-   * column, so a raster taller than it is wide would be SQUASHED to `max-height` — and every Wear
-   * screen preview (192x192) is exactly that case. A distorted spec comparison is worse than a
-   * small one. With `contain` the frame letterboxes instead: measured at 1280x400, the same frame
-   * draws 327.8x208 inside a 386.7x208 box, and 327.8/208 is 104/66 to three decimals.
-   *
-   * `SpecCompare.drawnRect` maps the eyedropper through that drawn rectangle rather than the
-   * element's box, which is why the two must not drift apart; `specCompare.test.ts` pins that half.
+   * Triptych frames fill their columns, with `object-fit: contain`. The base rule's `max-width` /
+   * `max-height` only shrink, so small rasters sat tiny in stretched columns, leaving most of the
+   * stage inert for the eyedropper. Once the width is definite, `contain` letterboxes instead of
+   * squashing tall rasters (e.g. 192x192 Wear screens). `SpecCompare.drawnRect` maps through the
+   * drawn rectangle; `specCompare.test.ts` pins that half.
    */
   @Test
   fun `a triptych frame fills its column without being distorted`() {
@@ -7489,23 +6835,12 @@ class ServeWebFixtureTest {
   }
 
   /**
-   * The Theme dropdown's ROWS, which were unreadable on every dark page: on `/wear-m3/` — a
-   * dark-first catalog whose declared themes all carry `data-theme-mode="dark"`, so every row
-   * matched — the menu opened as six invisible labels on a near-black panel.
-   *
-   * Two independent faults, both of them cascade accidents rather than colour choices, so both are
-   * held here rather than left to a screenshot:
-   *
-   * 1. `color-scheme: normal` on a menu row. `normal` is not "whatever the page is" — it is the UA
-   *    default, light — so it re-resolved every `light-dark()` in the token layer for those rows
-   *    alone and painted `on-surface`'s LIGHT value (#1d1b20) on the dark surface the panel is
-   *    filled with. `inherit` is the value that means what the rule intended.
-   * 2. The rows are `.cp-theme-btn` inside `.cp-theme-bar`, and `.cp-theme-bar .cp-theme-btn` — the
-   *    horizontal scroller's rule, for the bar this menu REPLACED — is declared later in the sheet
-   *    at equal specificity. So `.cp-theme-menu-panel .cp-theme-btn` lost `display` to the
-   *    scroller's `inline-block`, and `width`/`height` do not apply to the inline box that leaves
-   *    the swatch pseudo-element in: the 16px circle drew as a 2px sliver of its own border. Every
-   *    menu-row rule therefore has to name `.cp-theme-bar` too, which is what this asserts.
+   * The Theme dropdown's rows were unreadable on dark pages, from two cascade faults:
+   * 1. `color-scheme: normal` on a row resets to the UA light scheme, re-resolving `light-dark()`
+   *    tokens to light text on a dark panel; `inherit` is correct.
+   * 2. `.cp-theme-bar .cp-theme-btn` (the old scroller rule) is declared later at equal
+   *    specificity, giving rows `inline-block` and collapsing the swatch pseudo-element. Every
+   *    menu-row rule must therefore also name `.cp-theme-bar`.
    */
   @Test
   fun `theme menu rows keep the page's colour scheme and the menu's own box`() {
@@ -7546,13 +6881,9 @@ class ServeWebFixtureTest {
         view.contains(">Fit width</button>"),
       "the viewer offers width fit as an unpressed toggle over the default screen fit",
     )
-    // The cap's arithmetic — the 320px floor, the slack under the stage, the rounding that keeps a
-    // re-measure from churning — moved to `cli/serve-web/src/viewer/fit.ts`, where
-    // `viewerFit.test.ts`
-    // drives each rule instead of grepping for one spelling of the expression. What this still
-    // holds
-    // is what the SERVED asset must do: measure the stage's real position rather than guess, hand
-    // that to the shared rule, and apply a cap before the first render.
+    // The cap arithmetic lives in `serve-web/src/viewer/fit.ts` (tested by `viewerFit.test.ts`).
+    // This pins that the served asset measures the stage's real position, uses the shared rule, and
+    // applies a cap before the first render.
     assertTrue(
       viewerSource().contains("stage.getBoundingClientRect().top") &&
         viewerSource().contains("rules.fitCap(top, window.innerHeight)") &&
@@ -7688,10 +7019,8 @@ class ServeWebFixtureTest {
   @Test
   fun `SVG is an on-screen format toggle and an export format when the session can export SVG`() {
     val card = previews.first { it.id.endsWith("CardPreview") }
-    // SVG isn't part of the awkward PNG/live radio group any more, but it's still an on-screen
-    // format: a dedicated toggle beside the Live toggle swaps the static snapshot between the
-    // raster
-    // PNG and the vector SVG. Offered only when the session can export SVG (hasSvgExport).
+    // An SVG toggle beside the Live toggle swaps the static snapshot between PNG and SVG, offered
+    // only with hasSvgExport.
     val svgView = ServeWeb.viewerPage(card, token, hasSvgExport = true, hasScrollExport = true)
     assertTrue(
       svgView.contains("id=\"cp-svg-toggle\"") && svgView.contains("class=\"cp-fmt-toggle\""),
@@ -7704,10 +7033,8 @@ class ServeWebFixtureTest {
         viewerSource().contains("? \".svg\" : \".png\""),
       "the snapshot lane flips its render extension between PNG and SVG",
     )
-    // That the badge then names the lane "▪ SVG" is asserted against the element itself, in
-    // `cli/serve-web/test/backendBadge.test.ts` ("names the SVG lane as static").
-    // The SVG export also surfaces as a copyable/downloadable URL row plus the "Full page (scroll)"
-    // toggle.
+    // The badge's "▪ SVG" label is asserted in `serve-web/test/backendBadge.test.ts`. The SVG
+    // export also gets a URL row and the "Full page (scroll)" toggle.
     assertTrue(
       svgView.contains("id=\"cp-url-svg\"") && svgView.contains("id=\"cp-scroll-long\""),
       "an SVG-exporting session offers the SVG download row and its Full-page toggle",
@@ -7733,13 +7060,9 @@ class ServeWebFixtureTest {
 
   @Test
   fun `a card answers the pointer as a tile, not as an underlined hyperlink`() {
-    // Every clickable tile on the site — a front-door catalog card and a catalog's preview cards
-    // alike — is one `<a class="cp-card">` wrapping an image and several lines of metadata. The
-    // sheet's global `a:hover { text-decoration: underline }` therefore underlined ALL of that
-    // metadata at once, which reads as four stacked links rather than one target. The card must
-    // suppress that and answer as an object instead — in Material 3 terms, by rising an elevation
-    // level and taking a `primary` state layer — and the same treatment must be reachable from the
-    // keyboard.
+    // Every clickable tile is one `<a class="cp-card">` wrapping image and metadata, so the global
+    // `a:hover` underline would underline all of it. The card must suppress that and respond as an
+    // object (M3: raise an elevation level, `primary` state layer), keyboard-reachable too.
     val css = assetText("serve.css")
     assertTrue(
       css.contains(".cp-card:hover, .cp-card:focus-visible {") &&
@@ -7778,11 +7101,9 @@ class ServeWebFixtureTest {
 
   @Test
   fun `pages are mobile-responsive with a viewport meta and a narrow breakpoint`() {
-    // Every page carries the viewport meta (so mobile browsers don't zoom out to a desktop width)
-    // and the shared stylesheet includes the narrow breakpoint that collapses the viewer's
-    // stage + overrides row into a single stacked column and drops the flex items' min-width so
-    // nothing overflows a ~320px screen.
-    // A representative viewer with siblings (so the component nav drawer is present too).
+    // Every page carries the viewport meta, and the stylesheet's narrow breakpoint stacks the
+    // viewer's stage + overrides and drops flex min-widths so nothing overflows ~320px. A viewer
+    // with siblings covers the nav drawer too.
     val viewer = ServeWeb.viewerPage(previews.first(), token, siblings = previews)
     assertTrue(
       viewer.contains(
@@ -7805,10 +7126,7 @@ class ServeWebFixtureTest {
         .contains(".cp-stage, .cp-controls, .cp-nav { flex: 1 1 100%; min-width: 0; }"),
       "stage/overrides/nav stack full-width and drop their min-width on a phone",
     )
-    // Usability: on mobile the two drawers become bottom sheets reachable from a sticky toggle row
-    // (so overrides + the component list are one tap away, not a long scroll below a tall preview),
-    // with a scrim behind the open sheet. The row that sticks is the title row, which is where all
-    // four disclosures now live.
+    // On mobile the drawers become bottom sheets toggled from the sticky title row, with a scrim.
     assertTrue(
       assetText("serve.css")
         .contains(
@@ -7826,10 +7144,8 @@ class ServeWebFixtureTest {
         assetText("serve.css").contains(".cp-scrim.cp-scrim-on"),
       "a dismiss scrim backs the open bottom sheet",
     )
-    // The overrides drawer collapses on load on a phone so the preview leads. That is
-    // `<cp-viewer-drawers>`'s job now, asserted against the element in
-    // `cli/serve-web/test/viewerDrawers.test.ts` ("is closed on a phone so the preview leads");
-    // what the page owes it is the tag.
+    // The overrides drawer starts closed on phones; that is `<cp-viewer-drawers>`'s job, tested in
+    // `serve-web/test/viewerDrawers.test.ts`. The page only needs the tag.
     assertTrue(viewer.contains("<cp-viewer-drawers>"), "the viewer wires its drawers")
     // The breakpoint ships on the landing pages too (shared stylesheet).
     val landing = ServeWeb.landingPage(moduleLabel, previews, token)
@@ -7843,8 +7159,7 @@ class ServeWebFixtureTest {
         assetText("serve.css").contains(".cp-syslist .cp-imgwrap { min-height: 0; height: 220px;"),
       "system cards reserve one consistent hero region so metadata aligns across aspect ratios",
     )
-    // Three invariants the hero break-out depends on, each of which turns into a silent regression
-    // rather than a failing render if it is dropped.
+    // Three invariants the hero break-out depends on; dropping one regresses silently.
     assertTrue(
       assetText("serve.css").contains(".cp-sys-actions") &&
         assetText("serve.css").contains("pointer-events: none; }") &&
@@ -7852,14 +7167,10 @@ class ServeWebFixtureTest {
           .contains(".cp-sys-actions > a, .cp-sys-actions > details { pointer-events: auto; }"),
       "the action row passes clicks through to the tile link; only its chips take them",
     )
-    // Both halves on one line, and both load-bearing: the rounding, because `overflow: visible`
-    // leaves nothing to clip the layer's square corners to the card's radius; and `z-index: -1`,
-    // which drops the tint UNDER the card's content so it stops washing `primary` across a design
-    // system's own screenshot. Lowering the layer rather than raising the hero is deliberate — a
-    // raised hero also outranks the stretched tile link and has to refuse pointer events, and then
-    // the part of it hanging outside the card stops hovering the card at all. The harness's
-    // "the front door's state layer stays under the hero, and the break-out keeps its hover"
-    // contract proves that end in a browser; this pins the declaration the Kotlin side ships.
+    // Both load-bearing: the rounding (with `overflow: visible`, nothing clips the layer's corners)
+    // and `z-index: -1` (the tint goes under the content, not over the screenshot). Lowering the
+    // layer rather than raising the hero keeps the overhanging hero hoverable; the harness proves
+    // that in a browser.
     assertTrue(
       assetText("serve.css")
         .contains(".cp-card.cp-sys::after { border-radius: inherit; z-index: -1; }"),
@@ -8094,10 +7405,8 @@ class ServeWebFixtureTest {
   }
 
   /**
-   * The two exits offered to a signed-in visitor, in the Settings menu beside the page's other
-   * standing per-visitor choices. Before they existed the only way out of a GitHub-gated box was
-   * DevTools, and re-authenticating — the actual remedy for a session whose cached access bits went
-   * stale — was the folklore of visiting `/auth/github/start` by hand.
+   * The two exits for a signed-in visitor, in the Settings menu: sign out, and re-authenticate (the
+   * remedy for stale cached access).
    */
   @Test
   fun `the settings menu offers a sign-out and a way to switch account`() {
@@ -8166,10 +7475,7 @@ class ServeWebFixtureTest {
   @Test
   fun `a catalog landing carries the same GitHub login control as the front door`() {
     val auth = ServeWeb.GitHubAuthStatus(loginHref = "/auth/github/start?return=%2F")
-    // A top-level site ([ServeSites]) roots one catalog on a hostname, so THIS page is its front
-    // door — no home index sits above it to carry the control. Without it the only sign-in on
-    // `wear.preview.coo.ee` was a long-press on a card, and a visitor had to be told to go and sign
-    // in on a different hostname before Live would work at all (wear-m3-catalog#68).
+    // A top-level site's landing is its front door, so it carries the sign-in control.
     val landing =
       ServeWeb.landingPage(moduleLabel, previews, token, isPublic = true, githubAuth = auth)
     assertTrue(
@@ -8413,9 +7719,7 @@ class ServeWebFixtureTest {
       staticView.contains("title=\"Static snapshot — this session has no live lane to switch to\""),
       "a chip with nothing to switch to does not promise a live preview",
     )
-    // The tooltip inverts with the chip's meaning, so it is re-derived on every lane transition
-    // from the same state that drives the dot — a fixed one would say "click for live" on a chip
-    // whose click now exits to the snapshot.
+    // The tooltip is re-derived on every lane transition, since the chip's meaning inverts.
     assertTrue(
       viewerSource().contains("\"Interactive — click to return to the static snapshot\""),
       "the chip's tooltip tracks the lane rather than being written once by the server",
@@ -8473,11 +7777,8 @@ class ServeWebFixtureTest {
     // running app (via postMessage / the initial `#…` fragment), not the iframe query.
     assertTrue(viewerSource().contains("\"fontScale=\""), "font scale forwarded to Wasm")
     assertTrue(viewerSource().contains("\"localeTag=\""), "locale forwarded to Wasm")
-    // On a static snapshot, a wasm-honoured control change auto-enables the Wasm tier (rather than
-    // firing a /render the published catalog can't serve), so the control actually takes effect.
-    // The
-    // signal is the explicit `staticSnapshot` flag, NOT `live.disabled` — a live catalog serves
-    // static snapshots yet leaves the Live toggle enabled.
+    // On a static snapshot, a wasm-honoured control change auto-enables Wasm. The signal is
+    // `staticSnapshot`, not `live.disabled` (a live catalog leaves Live enabled).
     assertTrue(
       wasmView.contains("data-static-snapshot=\"true\""),
       "static-snapshot flag on the viewer",
@@ -8487,10 +7788,8 @@ class ServeWebFixtureTest {
       "static-snapshot wasm controls auto-enable the in-browser tier",
     )
 
-    // Trusted catalog served LIVE + Wasm (ServeCatalogLiveHost): snapshots stay static (so the wasm
-    // auto-enable + note still apply) but the Live toggle is ENABLED — the exact case
-    // `live.disabled`
-    // could no longer stand in for `staticSnapshot`.
+    // Trusted catalog served live + Wasm: snapshots stay static but Live is enabled, the case
+    // `live.disabled` can't stand in for.
     val liveCatalogWasm =
       ServeWeb.viewerPage(
         previews.first { it.id.endsWith("CardPreview") },
@@ -8515,17 +7814,15 @@ class ServeWebFixtureTest {
       liveCatalogWasm.contains("id=\"cp-sizeMode\" disabled"),
       "server-render-only sizing stays disabled on a live catalog's static snapshot",
     )
-    // A live-stream session offers the daemon-composited overlay toggle ENABLED, even though the
-    // viewer opens on the static snapshot: ticking it switches into Live Compose (viewer.js'
-    // onOverlayChanged) rather than sitting dead until "Live preview" is clicked first.
+    // A live-stream session offers the overlay toggle enabled even on the static snapshot; ticking
+    // it switches into Live (onOverlayChanged).
     assertTrue(
       liveCatalogWasm.contains("cp-overlays") &&
         liveCatalogWasm.contains("id=\"cp-touchOverlay\" type=\"checkbox\">"),
       "live stream offers the overlay toggles enabled from the static lane",
     )
-    // The accessibility layer is NOT one of them: it is drawn client-side from the daemon's a11y
-    // data products, so it is gated on the host advertising them, not on the live stream. A
-    // catalog-live session that can't produce them offers no dead checkbox at all.
+    // The accessibility layer is drawn client-side from daemon a11y data, so it is gated on the
+    // host advertising that data, not the live stream.
     assertFalse(
       liveCatalogWasm.contains("cp-inspect"),
       "inspection layers are gated on the data products, not on the live stream",
@@ -8535,31 +7832,22 @@ class ServeWebFixtureTest {
         .contains("if (anyOverlayChecked() && live && !live.disabled) setMode(\"live\");"),
       "checking an overlay off the live lane enters Live Compose",
     )
-    // Overlays are URL-owned state, not live-socket-only state: collected by `overrides()` (the map
-    // `query()` serializes) and listed in URL_STATE_PARAMS, so a ticked box rides the page URL, the
-    // export links and the stream's connect query. Collected only in `liveOverrides()` it would
-    // reach the daemon and nowhere else — unshareable, unrestorable by Back, and applied a frame
-    // late via the onopen replay instead of arriving with `stream/start`.
-    // The list moved to `cli/serve-web/src/viewer/ownedParams.ts`, where
-    // `viewerOwnedParams.test.ts`
-    // asserts each family's membership by name — including what must NOT be owned, which a grep for
-    // one line of the list could never express. What the served asset must still do is ask.
+    // Overlays are URL-owned state: collected by `overrides()` and listed in the owned params, so a
+    // ticked box rides the page URL, export links and the stream's connect query. The list lives in
+    // `serve-web/src/viewer/ownedParams.ts` (`viewerOwnedParams.test.ts`).
     assertTrue(
       viewerSource().contains("rules.ownsUrlParam(name)"),
       "overlays are URL-owned params, decided by the shared list rather than a second copy",
     )
-    // The stream replays the full liveOverrides() on open so an overlay checked while the socket
-    // was
-    // still connecting (its change event dropped by the readyState guard) still reaches the daemon.
+    // The stream replays liveOverrides() on open so an overlay checked while connecting still
+    // arrives.
     assertTrue(
       viewerSource().contains("sock.onopen = function () {"),
       "the live stream seeds the daemon with the current overrides once the socket opens",
     )
 
-    // Trusted catalog served LIVE whose preview declares author knobs (ServeCatalogLiveHost with
-    // canRenderOverrides): snapshots stay baked, but the carried daemon re-renders a knob edit on
-    // demand, so the declared knob controls render ENABLED (not the disabled, informational form a
-    // plain static bundle shows) and route knob edits to /render.
+    // Trusted catalog served live with author knobs (canRenderOverrides): snapshots stay baked, but
+    // knob controls render enabled and route edits to /render.
     val catalogKnobs =
       ServeWeb.viewerPage(
         knobPreview,
@@ -8596,11 +7884,8 @@ class ServeWebFixtureTest {
       catalogKnobs.contains("edit a value to re-render"),
       "the knob note invites editing rather than saying values are baked in",
     )
-    // A knob edit has a dedicated handler (onKnobEdited) that drives whichever transport is live —
-    // here the carried daemon via /render (canRenderOverrides). The Wasm tier also honours named
-    // knobs now, so the handler picks the iframe when Wasm is active (see the wasm-only case
-    // below). Matched without the parameter list: the handler's *existence* is the contract here,
-    // and pinning its arity broke this when it grew one.
+    // A dedicated knob handler (onKnobEdited) drives whichever transport is live. Matched without
+    // its parameter list: existence is the contract.
     assertTrue(
       viewerSource().contains("function onKnobEdited(") &&
         viewerSource().contains("function knobRoute()"),
@@ -8619,10 +7904,8 @@ class ServeWebFixtureTest {
         ),
       "cancelling a snapshot render clears its stale rendering status",
     )
-    // During an active Live (stream), the override map sent over the WebSocket must carry the knob
-    // values too (as knob.<key> entries), not just the display fields — otherwise the daemon resets
-    // an edited knob to its default. The setOverrides sends use liveOverrides(), which folds them
-    // in.
+    // During Live, the WebSocket override map must carry knob values (liveOverrides()), or the
+    // daemon resets edited knobs.
     assertTrue(
       viewerSource().contains("function liveOverrides()") &&
         viewerSource().contains("o[\"knob.\" + key]"),
@@ -8632,11 +7915,8 @@ class ServeWebFixtureTest {
       viewerSource().contains("setOverrides\", overrides: overrides()"),
       "live-stream setOverrides sends liveOverrides() (knobs included), not the display-only map",
     )
-    // A live catalog's carried daemon re-renders an override on demand (canRenderOverrides), so the
-    // display controls (Size / Locale / Day-Night / …) render ENABLED right
-    // in the static snapshot — editing one re-points /render, which the daemon serves freshly. This
-    // is the fix for "most override modes disabled for CMP": they no longer sit greyed out until a
-    // live stream is opened.
+    // With canRenderOverrides, display controls render enabled in the static snapshot and edits
+    // re-point /render.
     assertTrue(
       viewerSource().contains("function syncServerControls()"),
       "the viewer has a syncServerControls() that keeps the display controls in sync",
@@ -8675,13 +7955,9 @@ class ServeWebFixtureTest {
       "a plain static bundle keeps the baked-in note",
     )
 
-    // A published static catalog whose ONLY interactive lane is the in-browser Wasm app (no daemon
-    // re-render: canApplyOverrides/canRenderOverrides both false, wasmSrc present). The wasm tier
-    // now
-    // seeds its `catalogOverride*` from the `knob.<key>` patch, so the declared knob controls
-    // render
-    // ENABLED and a knob edit drives the Wasm iframe — this is the preview.coo.ee case where
-    // `?knob.label=…` did nothing in Wasm mode before.
+    // A static catalog whose only interactive lane is Wasm (no daemon re-render, wasmSrc present).
+    // The wasm tier seeds `catalogOverride*` from `knob.<key>`, so knob controls are enabled and
+    // drive the iframe.
     val wasmKnobs =
       ServeWeb.viewerPage(
         knobPreview,
@@ -8704,17 +7980,13 @@ class ServeWebFixtureTest {
       wasmKnobs.contains("apply it in the browser (Wasm)"),
       "the knob note invites in-browser editing when only the Wasm lane is available",
     )
-    // The `.cp-knob` edit handler drives whichever transport is live — for a wasm-only session it
-    // posts the override patch (with the knob) to the iframe, or auto-enables Wasm from the
-    // snapshot.
+    // For a wasm-only session the knob handler posts the patch to the iframe, or auto-enables Wasm.
     assertTrue(
       viewerSource().contains("function onKnobEdited(") &&
         viewerSource().contains("wasmFrame!.contentWindow.postMessage(wasmOverridePatch()"),
       "a knob edit routes to the Wasm iframe when that tier is active",
     )
-    // wasmOverridePatch() carries the changed knob into the iframe fragment / postMessage,
-    // alongside
-    // the display axes — without this the app never sees the edit.
+    // wasmOverridePatch() carries changed knobs into the iframe fragment / postMessage.
     assertTrue(
       viewerSource().contains("function wasmOverridePatch()") &&
         viewerSourceFlat().contains("parts.push( \"knob.\" + encodeURIComponent(key)"),
@@ -8727,22 +7999,16 @@ class ServeWebFixtureTest {
         viewerScript.contains("(id === \"uiMode\" && onRcWasm)"),
       "the RC Wasm lane forwards Day/Night and keeps that control enabled while active",
     )
-    // Deep-link parity: the knob controls hydrate from the page URL's `knob.<key>` params on load,
-    // so opening `/p/…?knob.label=Hello` (or a copied direct link) renders the override immediately
-    // in every transport — including the Wasm iframe, whose patch is built purely from control
-    // state
-    // — rather than the author default until the user edits the control.
+    // Knob controls hydrate from `knob.<key>` URL params on load, so a deep link renders the
+    // override in every transport, including Wasm (whose patch is built from control state).
     assertTrue(
       viewerSource().contains("q.get(\"knob.\" + key)"),
       "the viewer hydrates declared knob controls from the URL's knob.<key> params",
     )
 
-    // Copyable direct links: every viewer offers a PNG URL row (copy + download); a session that
-    // can
-    // export SVG (a catalog / daemon) also offers an SVG row. The URLs are built client-side from
-    // location.origin with the current overrides so a copied link reproduces the on-screen render.
-    // …and the bar is a plain always-visible line, not a disclosure: the hand-off must not be one
-    // click deep.
+    // Every viewer offers a PNG URL row (copy + download); SVG-capable sessions add an SVG row.
+    // URLs are built client-side from location.origin with current overrides. The bar is always
+    // visible, not a disclosure.
     assertTrue(
       catalogKnobs.contains("<div class=\"cp-export\" aria-label=\"Export the current view\">") &&
         !catalogKnobs.contains("cp-export cp-disclosure"),
@@ -8769,17 +8035,15 @@ class ServeWebFixtureTest {
         viewerSource().contains("navigator.clipboard.writeText"),
       "the Copy PNG/SVG handler fetches the render and writes it to the clipboard as text",
     )
-    // Copy PNG puts REAL image/png bytes on the clipboard where the browser supports it, so one
-    // paste into a GitHub issue uploads the exact render — the base64 data: URI above is the
-    // fallback, not the primary path. The blob is passed as a promise (Safari builds the
-    // ClipboardItem synchronously inside the click).
+    // Copy PNG puts real image/png bytes on the clipboard where supported (data: URI is the
+    // fallback). The blob is a promise because Safari builds the ClipboardItem synchronously in the
+    // click.
     assertTrue(
       viewerSource().contains("new ClipboardItem({ \"image/png\": pngBlob })"),
       "Copy PNG writes image/png to the clipboard so it pastes as a picture",
     )
-    // The prefilled "report an issue" report follows the on-screen overrides — BOTH halves of it,
-    // the render URL it links and the identity its locator states — and never carries the session
-    // token into a body destined for a public issue.
+    // The prefilled report follows on-screen overrides (render URL and locator identity) and never
+    // carries the session token into a public issue.
     val refreshReportLinkSource =
       viewerSource()
         .substringAfter("function refreshReportLink()")
@@ -8790,23 +8054,16 @@ class ServeWebFixtureTest {
         refreshReportLinkSource.contains("overrides: renderOverrides()"),
       "the report body is re-substituted at the current render and the overrides that made it",
     )
-    // …by handing them to the shared body writer, which composes from the template and is the one
-    // thing that writes the field — a plain assignment here would undo whatever the classification
-    // and scope controls had contributed. And an INPUT VALUE either way, never an href: the
-    // affordance is a GET form whose action is a server-rendered literal, so no page-derived string
-    // can reach a navigation sink.
+    // ...via the shared body writer (a plain assignment would undo the classification and scope
+    // controls), always into an input value, never an href.
     assertTrue(
       refreshReportLinkSource.contains("reportBody.set({") &&
         !refreshReportLinkSource.contains("body.value =") &&
         !refreshReportLinkSource.contains(".href = "),
       "the report prefill goes into a form input, not a navigation sink",
     )
-    // …and only while the frame ON SCREEN is the one the controls asked for. The controls run ahead
-    // of the image by a fetch and a decode, so an ungated refresh lets a reporter who submits
-    // inside
-    // that window file a locator and a render link for a frame nobody saw — D4, and the one defect
-    // that makes every issue filed afterwards wrong in a way nobody notices. The decision itself is
-    // `viewer/reportFrame.ts`, with its own tests; what is pinned here is that the gate is applied.
+    // ...and only while the frame on screen is the one the controls asked for; the decision lives
+    // in `viewer/reportFrame.ts` (tested there). This pins that the gate is applied.
     assertTrue(
       viewerSourceFlat()
         .contains(
@@ -8815,11 +8072,8 @@ class ServeWebFixtureTest {
         ),
       "the report is only recomposed while the landed frame is the requested one",
     )
-    // …and the locator is withheld outright on a lane whose pixels the stage image is not. Live,
-    // Wasm and the Remote Compose players paint into a canvas or an iframe and apply overrides in
-    // place, so no frame gate can speak for what is on screen there; the workflow doc requires
-    // reporting to stay disabled in those lanes, and withholding the block is the half of that the
-    // index depends on.
+    // ...and the locator is withheld on lanes whose pixels are not the stage image (Live, Wasm, RC
+    // players).
     assertTrue(
       viewerSourceFlat()
         .contains(
@@ -8828,9 +8082,7 @@ class ServeWebFixtureTest {
         ) && viewerSourceFlat().contains("omitLocator: !mayName,"),
       "an interactive lane files a report with no locator in it",
     )
-    // The URL is copied by a plainly-named button rather than by clicking a field whose only clue
-    // was a `title`. The field itself stays in the DOM (refreshLinks writes it, both copy buttons
-    // read it) but off-screen — nobody reads a 200-character absolute /render URL.
+    // The URL is copied by a plainly named button; the field stays in the DOM, off-screen.
     assertTrue(
       catalogKnobs.contains("class=\"cp-copyurl\" data-copyurl-target=\"cp-url-png\"") &&
         catalogKnobs.contains(">Copy link</button>"),
@@ -8923,12 +8175,9 @@ class ServeWebFixtureTest {
       viewerSource().contains("if (tp) o.themeProvider = tp;"),
       "a chosen theme is appended to the /render URL as themeProvider",
     )
-    // …and every key is percent-encoded on the way into the query, not just every value. A
-    // `knob.<key>` / `rc.<name>` is an author-declared string, so a `&`, `=` or `%` in one would
-    // split this URL into parameters nobody wrote and the render would apply a different override
-    // from the one the report's locator names — identity and pixels describing two frames, which is
-    // what the block exists to prevent. Regressed once, when the per-family
-    // `"knob." + encodeURIComponent(key)` pushes were folded into one map (#5000 review).
+    // Every key is percent-encoded too: author-declared `knob.<key>` / `rc.<name>` strings
+    // containing `&`, `=` or `%` would otherwise split the URL and the render would differ from the
+    // locator.
     assertTrue(
       viewerSourceFlat()
         .contains("parts.push(encodeURIComponent(k) + \"=\" + encodeURIComponent(o[k]));"),
@@ -8979,9 +8228,8 @@ class ServeWebFixtureTest {
   fun `degrade banner explains why a session is snapshot-only and is absent when live`() {
     val degraded = listOf(ServeDegradation.catalogBakedOnly())
 
-    // The catalog-level reason renders as a banner under the header on BOTH the landing and viewer
-    // (checked on the rendered `class="cp-degrade"` section, since the CSS always defines the
-    // class).
+    // The catalog-level reason renders as a banner on both landing and viewer (checked on the
+    // `class="cp-degrade"` section, since the CSS always defines the class).
     val landing = ServeWeb.landingPage(moduleLabel, previews, token, degradations = degraded)
     assertTrue(landing.contains("class=\"cp-degrade\""), "expected a degradation banner")
     assertTrue(landing.contains("publishes no live bundle"), "expected the baked-only reason text")
@@ -9000,9 +8248,7 @@ class ServeWebFixtureTest {
 
   @Test
   fun `theme toggle shows only when the grid has light-dark pairs to swap`() {
-    // A theme-PAIRED catalog: each component is baked in both __light and __dark, so those two
-    // previews collapse into ONE swap card and the toggle re-points it between them — the toggle
-    // shows, and the grid has one card per component (not two).
+    // A theme-paired catalog: each light/dark pair collapses to one swap card and the toggle shows.
     val paired =
       listOf(
         ServePreview("button__ideal__default__light", "Button (light)"),
@@ -9026,11 +8272,8 @@ class ServeWebFixtureTest {
       "a swap card carries both the light and dark baked render",
     )
 
-    // An APP catalog (meshcore-mobile shape): theme-neutral app screens plus two theme-showcase
-    // previews that are DISTINCT components (theme-meshcore-light vs theme-meshcore-dark), so
-    // nothing
-    // pairs into a swap card. No pair → no toggle. This is the behaviour uniformly across every app
-    // catalog: it keys off whether any component is baked in both themes, never the system name.
+    // An app catalog whose theme showcases are distinct components: nothing pairs, so no toggle.
+    // Keyed off whether any component is baked in both themes, never the system name.
     val appCatalog =
       listOf(
         ServePreview("theme-meshcore-light__ideal__default__light__compact", "MeshCore light"),
@@ -9046,9 +8289,7 @@ class ServeWebFixtureTest {
       "an app catalog with no light/dark pairs shows no Light/Dark toggle",
     )
 
-    // A one-sided themed catalog (dark variants only, no light pair) also shows no toggle — there
-    // is
-    // nothing to swap to.
+    // A one-sided themed catalog (dark only) shows no toggle.
     val darkOnly =
       listOf(
         ServePreview("a__ideal__default__dark", "A"),
@@ -9062,11 +8303,9 @@ class ServeWebFixtureTest {
 
   @Test
   fun `grouping strips only the theme segment, keeping a non-theme light-dark state segment`() {
-    // A flattened id can carry a non-theme `light`/`dark` STATE segment before the theme segment
-    // (the `toggle__<state>__default__<theme>` shape the catalog routing already documents). Only
-    // the LAST light/dark (the theme, per cardTheme) may be stripped for the grouping key — else
-    // the
-    // dark-state and light-state toggles collapse onto one card and a state disappears.
+    // A flattened id can carry a `light`/`dark` state segment before the theme segment
+    // (`toggle__<state>__default__<theme>`). Only the last one (the theme) may be stripped for the
+    // grouping key.
     val stateful =
       listOf(
         ServePreview("toggle__dark__default__light", "Toggle · dark state (light)"),
@@ -9154,28 +8393,14 @@ class ServeWebFixtureTest {
   }
 
   /**
-   * Compare every page golden against what `ServeWeb` renders now, and report **all** of the drift
-   * in one failure rather than aborting on the first mismatch.
-   *
-   * Asserting per fixture (the previous shape) surfaced one file at a time and, in the console log
-   * CI prints, only a line number inside the helper — so a run that moved twenty pages looked
-   * identical to one that moved a single unrelated page, and the reported line pointed at whatever
-   * assertion happened to sit there. That is what makes this check easy to regenerate past instead
-   * of read (#3442): the output never says what actually moved.
-   *
-   * The message names each drifted fixture with the first line that differs, which distinguishes
-   * the two causes that look the same from the outside — a deliberate `ServeWeb` change whose
-   * goldens want regenerating (drift concentrated in the pages you touched) versus goldens
-   * regenerated on a branch *before* merging `main`, where `main` then changed the markup for
-   * everything (drift across unrelated pages, on a line nobody on the branch edited).
+   * Compare every page golden against what `ServeWeb` renders now, reporting all drift in one
+   * failure. The message names each drifted fixture with its first differing line, which
+   * distinguishes a deliberate `ServeWeb` change (drift in the touched pages) from goldens
+   * regenerated before merging `main` (drift across unrelated pages).
    */
   /**
-   * The committed unfurl-card rasters still match what [ServeSocialCard] draws today.
-   *
-   * Compared with a tolerance rather than by bytes — see [meanPixelDifference] for why an exact
-   * comparison would fail across JDK builds for a reason nobody could act on. The threshold is
-   * generous against antialiasing noise and nowhere near what a real change costs: moving the
-   * headline, changing a colour, or dropping a thumbnail all shift whole regions.
+   * The committed unfurl-card rasters still match what [ServeSocialCard] draws today, within a
+   * tolerance (see [meanPixelDifference]).
    */
   private fun assertUnfurlCardsInSync(
     pagesDir: File,
@@ -9203,9 +8428,7 @@ class ServeWebFixtureTest {
 
   private fun assertGoldensInSync(pagesDir: File, goldens: List<Pair<String, String>>) {
     // Every page loads at least one hashed asset, so a golden without the placeholder means
-    // `stableAssetHrefs` stopped matching what `ServeWeb` emits — the URL shape changed, or the
-    // digest format did. Say so directly instead of letting it surface as 36 files of "drift",
-    // which is the failure this normalisation exists to stop being noise.
+    // `stableAssetHrefs` no longer matches what `ServeWeb` emits; say so directly.
     val unnormalised =
       goldens
         .filterNot { (name, html) -> name in ASSETLESS_GOLDENS || STABLE_ASSET_PREFIX in html }
@@ -9245,28 +8468,11 @@ class ServeWebFixtureTest {
   }
 
   /**
-   * Replace the cache-busting content hash in every asset href with a constant.
-   *
-   * [ServeWebAssets.href] builds `/assets/serve/<size>-<sha256 prefix>/<file>`, so editing any one
-   * of the eleven CSS/JS assets changes a hash that up to **36** goldens embed. That drift is pure
-   * noise: the hash is not a surface anyone reviews, it cannot appear in a screenshot, and the
-   * preview-harness deliberately ignores it — both its static server and the Playwright routes
-   * match these URLs by basename precisely because "the hash is cache-busting and changes whenever
-   * the asset does". What it did instead was fail this test on every branch that touched
-   * `viewer.js`, and twice reach `main` red (#3446, #3456) when a merge landed the asset without
-   * the regeneration. Worse, it trained the reflex the failure message argues against: 36 files of
-   * drift you did not cause looks exactly like the "regenerated before merging main" case, so the
-   * honest response and the lazy one are the same command.
-   *
-   * Pinning it here is the same move this test already makes for the server version ([version] =
-   * `0.0.0-fixture`, so a release does not churn the goldens) and for the fixed provenance date —
-   * hold the volatile-but-uninteresting field constant so the diff only ever shows markup.
-   *
-   * This does not weaken the guard. The regex matches only the versioned form, so if `ServeWeb`
-   * ever stopped emitting one the rendered text would pass through unchanged and
-   * [assertGoldensInSync] would fail on the missing placeholder rather than silently accepting a
-   * broken URL. Production still serves the real hash: [ServeHttpServer] 404s a mismatched version,
-   * and nothing about that path changes here.
+   * Replace the cache-busting content hash in every asset href with a constant, like the fixed
+   * [version]: the hash is noise in the goldens (the harness matches assets by basename) and
+   * changes on every asset edit. The regex matches only the versioned form, so if `ServeWeb`
+   * stopped emitting it [assertGoldensInSync] fails on the missing placeholder. Production still
+   * serves and checks the real hash.
    */
   private fun stableAssetHrefs(html: String): String =
     ASSET_HREF_PATTERN.replace(html, STABLE_ASSET_PREFIX)
@@ -9283,29 +8489,16 @@ class ServeWebFixtureTest {
   }
 
   /**
-   * A fixed, phone-shaped placeholder the harness serves for the daemon's `/render/<id>.png`
-   * endpoint (which has no backend in CI). Gives every preview tile a realistic size so the
-   * captured layout doesn't collapse on broken images. Deterministic so it never churns the visual
-   * diff.
-   *
-   * Deliberately **font-free**: it used to draw the word "preview" with `Font("SansSerif", …)`,
-   * which resolves to whatever font files the host JDK/OS maps that logical family to, so the
-   * committed PNG was a function of the machine that last regenerated it and churned the diff for
-   * anyone else. The label is now a geometric stand-in for a rendered screen — the same shapes
-   * [renderPlaceholderSvg] uses for its vector counterpart — making the bytes a pure function of
-   * this code.
+   * A fixed, phone-shaped placeholder the harness serves for `/render/<id>.png` (no backend in CI),
+   * so tiles have a realistic size. Deterministic and font-free (font rendering varies by host),
+   * using the same shapes as [renderPlaceholderSvg].
    */
   // --- The link-unfurl card as a captured visual surface ----------------------------------------
 
   /**
-   * The two shapes of unfurl card ([ServeSocialCard]) this server draws, named for their fixture
-   * files: the front door's (a shelf of catalogs) and a single catalog landing's.
-   *
-   * Composed from the harness's own committed placeholder artwork rather than a real render, for
-   * the same reason every other fixture is: the picture has to be identical on every machine that
-   * regenerates it. [placeholderWatchPng] exists so the front door's card exercises the *two*-hero
-   * shelf with artwork of differing aspect — a phone beside a square face — which is the layout
-   * rule most likely to break silently.
+   * The two unfurl card shapes ([ServeSocialCard]): the front door's (a shelf of catalogs) and a
+   * single catalog landing's. Built from committed placeholder artwork for determinism;
+   * [placeholderWatchPng] gives the front door's shelf heroes of differing aspect.
    */
   private fun socialCardFixtures(): List<Pair<String, ServeSocialCard.Card>> {
     val cards = ServeSocialCard()
@@ -9353,15 +8546,9 @@ class ServeWebFixtureTest {
   }
 
   /**
-   * A page whose whole content is those cards at 1:1, so the harness screenshots them and the
-   * visual-diff bot comments on any change to the card's layout, palette or type — the same
-   * automatic coverage every other serve surface gets.
-   *
-   * Hand-written rather than rendered by [ServeWeb], because the card is not a page: it is a raster
-   * served off `/social/`, and the only way to put a raster in front of a DOM screenshotter is to
-   * frame it in one. The frame is deliberately plain and identical in both themes — the card itself
-   * is always dark (an unfurl raster has no `prefers-color-scheme`), so a themed frame would imply
-   * a variation that does not exist.
+   * A page showing those cards at 1:1 so the harness screenshots them. Hand-written because the
+   * card is a raster served off `/social/`, not a page. The frame is identical in both themes since
+   * the card is always dark.
    */
   private fun socialCardPage(cards: List<Pair<String, ServeSocialCard.Card>>): String {
     val figures =
@@ -9399,14 +8586,9 @@ $figures
   }
 
   /**
-   * Mean absolute per-channel difference between two images, or [Double.MAX_VALUE] when they aren't
-   * even the same size.
-   *
-   * The card goldens are compared with a tolerance rather than byte-for-byte, unlike the HTML ones.
-   * They are *rasterized text*, and font hinting and antialiasing differ slightly between JDK
-   * builds — an exact comparison would fail on a contributor's machine for a reason no one could
-   * act on. A layout, palette or copy change moves whole regions and clears this threshold by
-   * orders of magnitude, so the drift guard still does its job.
+   * Mean absolute per-channel difference, or [Double.MAX_VALUE] when sizes differ. Card goldens are
+   * rasterized text, and font hinting differs between JDK builds, so they are compared with a
+   * tolerance; real layout or palette changes exceed it by orders of magnitude.
    */
   private fun meanPixelDifference(a: BufferedImage, b: BufferedImage): Double {
     if (a.width != b.width || a.height != b.height) return Double.MAX_VALUE
@@ -9502,29 +8684,21 @@ $figures
     const val STABLE_ASSET_PREFIX = "/assets/serve/fixture/"
 
     /**
-     * Goldens that legitimately load none of the server's hashed assets, and so are exempt from the
-     * normalisation check above. An explicit list rather than a "no assets ⇒ fine" rule, because
-     * the whole point of that check is to notice when a *page* stops matching the URL shape
-     * [stableAssetHrefs] rewrites.
-     *
-     * Only the unfurl-card frame is here: it is not a served page at all, just a `<figure>` around
-     * the committed card rasters so the harness screenshots them (see [socialCardPage]).
+     * Goldens that legitimately load no hashed assets, exempt from the normalisation check.
+     * Explicit so that check still catches a page that stops matching. Only the unfurl-card frame
+     * (see [socialCardPage]).
      */
     val ASSETLESS_GOLDENS = setOf("serve-social-card.html")
 
     /**
-     * Mean per-channel difference (0..255) tolerated between a committed unfurl card and a freshly
-     * drawn one. Sized to absorb font-rasterization differences between JDK builds — those move a
-     * fraction of a level averaged over 756,000 pixels — while a layout or palette change moves
-     * whole regions and lands orders of magnitude above it.
+     * Mean per-channel difference (0..255) tolerated between a committed and freshly drawn unfurl
+     * card; absorbs JDK font-rasterization noise, far below a real change.
      */
     const val UNFURL_CARD_TOLERANCE = 1.5
 
     /**
-     * `/assets/serve/<size-hex>-<16 hex digits>/` — the exact shape [ServeWebAssets.href] builds
-     * from an asset's byte length and SHA-256 prefix. Deliberately narrow: a looser pattern
-     * (`[^/]+`) would keep matching if that scheme changed, and the goldens would go on looking
-     * normalised while pinning something else.
+     * The exact shape [ServeWebAssets.href] builds (`/assets/serve/<size-hex>-<16 hex>/`). Narrow
+     * on purpose so a scheme change is noticed rather than silently normalised.
      */
     val ASSET_HREF_PATTERN = Regex("""/assets/serve/[0-9a-f]+-[0-9a-f]{16}/""")
   }

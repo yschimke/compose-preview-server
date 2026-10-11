@@ -8,16 +8,11 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * Pins the sticker → usage-code rewrite.
- *
- * The fixture is **not** shaped like a section file; it is a verbatim extract of one, taken from
- * m3-catalog's `catalog/src/main/kotlin/ee/schimke/m3catalog/sections/Buttons.kt`. That matters:
- * the whole question this prototype answers is whether real catalog source — a matrix-driven
- * sticker with a click tally, three knobs, a private frame and a translated label — comes out as
- * something a visitor can press Run on. A hand-tidied fixture would answer a question nobody asked.
- *
- * The rules below are the subset of m3-catalog's own `compose-usage.json` these fixtures exercise.
- * That file declares seventeen scaffolding helpers in total, for a catalog of ~400 components.
+ * Pins the sticker → usage-code rewrite. The fixture is a verbatim extract of m3-catalog's
+ * `catalog/src/main/kotlin/ee/schimke/m3catalog/sections/Buttons.kt` (a matrix-driven sticker with
+ * a click tally, three knobs, a private frame and a translated label), since the question is
+ * whether real catalog source comes out runnable. The rules are the subset of m3-catalog's
+ * `compose-usage.json` these fixtures exercise.
  */
 class PlaygroundSourceCleanerTest {
 
@@ -143,8 +138,8 @@ class PlaygroundSourceCleanerTest {
     PlaygroundSourceCleaner.clean(buttonsKt, lineOf(needle), rules, strings)
 
   /**
-   * The headline case: the simple variant comes out as the four lines somebody would actually
-   * write, with nothing left of the catalog but the component call.
+   * The simple variant reduces to the few lines someone would write, leaving only the component
+   * call.
    */
   @Test
   fun `a variant sticker becomes plain compose`() {
@@ -174,8 +169,8 @@ class PlaygroundSourceCleanerTest {
   }
 
   /**
-   * The matrix-driven case — the one the whole design has to survive. Three knobs, a private frame,
-   * a click tally and a resource lookup all resolve away, leaving the default render's call.
+   * The matrix-driven case: knobs, private frame, click tally and resource lookup all resolve away,
+   * leaving the default render's call.
    */
   @Test
   fun `a matrix sticker loses its knobs, its frame and its tally`() {
@@ -459,9 +454,8 @@ class PlaygroundSourceCleanerTest {
   }
 
   /**
-   * The playground compiles a snippet and then looks for a `@Preview` in it. Stripping the
-   * catalog's own `@CatalogModes` (which is where the preview came from) without putting a real one
-   * back would produce a snippet that compiles and renders nothing.
+   * The playground compiles a snippet and looks for a `@Preview`, so stripping `@CatalogModes` must
+   * put a real one back.
    */
   @Test
   fun `a real Preview replaces the catalog's meta-annotation`() {
@@ -475,9 +469,8 @@ class PlaygroundSourceCleanerTest {
   }
 
   /**
-   * The package line is dropped: the snippet is plain Compose derived from the catalog, not the
-   * catalog's own code, and compiling it into that package would let it reach `internal` members a
-   * real consumer could not.
+   * The package line is dropped: in the catalog's package the snippet could reach `internal`
+   * members a consumer couldn't.
    */
   @Test
   fun `the catalog package is not carried over`() {
@@ -485,10 +478,7 @@ class PlaygroundSourceCleanerTest {
     assertFalse(text.contains("package ee.schimke.m3catalog"))
   }
 
-  /**
-   * A helper the entry point still calls after cleaning is pulled in with it. This is what turns
-   * the old seed note's "expect unresolved references to delete" into a buffer that builds.
-   */
+  /** A helper the entry point still calls after cleaning is pulled in, so the buffer builds. */
   @Test
   fun `same-file helpers the cleaned body still needs are carried along`() {
     val source =
@@ -519,9 +509,8 @@ class PlaygroundSourceCleanerTest {
   }
 
   /**
-   * The fail-safe. `Spacer(Modifier.width(size.iconSpacing))` has no argument name to reason about,
-   * so dropping the `size` knob here would leave `Spacer()`, which does not compile. The pass must
-   * abandon the rewrite and say so rather than emit clean-looking broken code.
+   * The fail-safe: dropping the `size` knob would leave `Spacer()`, which doesn't compile, so the
+   * pass abandons the rewrite and says so.
    */
   @Test
   fun `a drop that cannot complete is abandoned, not half-applied`() {
@@ -586,9 +575,7 @@ class PlaygroundSourceCleanerTest {
     assertTrue(text.contains("= MaterialTheme {"), text)
   }
 
-  /**
-   * Generic rules alone — a catalog that has declared nothing still loses this repo's annotations.
-   */
+  /** Generic rules alone: a catalog declaring nothing still loses this repo's annotations. */
   @Test
   fun `generic rules still strip the preview annotations`() {
     val text = assertNotNull(cleanAt("""caption = "Highest emphasis""")).let { it }
@@ -617,14 +604,9 @@ class PlaygroundSourceCleanerTest {
   }
 
   /**
-   * One rule this build cannot read must not cost a catalog every *other* rule in its file.
-   *
-   * A rules file is read at whatever ref the catalog was published from, so its vocabulary can be
-   * older than the server's. `ignoreUnknownKeys` covers an unknown key; an unknown enum *value*
-   * throws, and [UsageRules.parse] turns any throw into "no rules at all". Retiring the
-   * `DESTRUCTURE` kind (#3884) therefore meant a catalog pinned to a ref that still declared one
-   * silently lost `Sticker` and `catalogButtonSize` too and fell back to GENERIC — the scaffolding
-   * leak this whole file exists to prevent, arriving through the compatibility door.
+   * One unreadable rule must not cost a catalog every other rule. A rules file may be older or
+   * newer than the server; an unknown enum value throws and [UsageRules.parse] turns any throw into
+   * "no rules", so a retired kind would silently drop all rules back to GENERIC.
    */
   @Test
   fun `a rule kind this build does not know costs only that rule`() {
@@ -712,10 +694,9 @@ class PlaygroundSourceCleanerTest {
   }
 
   /**
-   * Forgiving about the *kind* vocabulary is not the same as forgiving about the rest of the
-   * document. A rules file this code cannot honour must still take the safe GENERIC fallback: an
-   * `INLINE` rule with a null member map would otherwise decode to an empty one, and `applyInline`
-   * would delete the binding while leaving its member references pointing at nothing.
+   * Being lenient about unknown kinds isn't leniency about the rest: an `INLINE` rule with a null
+   * member map must still take the GENERIC fallback, or `applyInline` would delete the binding and
+   * orphan its references.
    */
   @Test
   fun `tolerating an unknown kind does not make the rest of the document forgiving`() {
@@ -724,9 +705,8 @@ class PlaygroundSourceCleanerTest {
   }
 
   /**
-   * Unqualifying is setup for the kind passes, so a helper no pass will rewrite must not be put
-   * through it: stripping the qualifier off a call nothing then rewrites — and nothing imports —
-   * turns code that resolved into code that does not.
+   * A helper no pass will rewrite must not be unqualified: stripping the qualifier off an
+   * unimported call breaks code that resolved.
    */
   @Test
   fun `an unknown kind keeps the package qualifier that makes it resolve`() {
@@ -793,10 +773,8 @@ class PlaygroundSourceCleanerTest {
   }
 
   /**
-   * The preview-override knobs are this repo's API, not a catalog's, so a catalog that declares its
-   * own scaffolding must still get them — before this, declaring `compose-usage.json` *replaced*
-   * the generic rules, so the catalogs that had done the work were the only ones leaking
-   * `previewOverrideString(...)` into code a developer was invited to copy.
+   * Preview-override knobs are this repo's API, so a catalog declaring its own scaffolding still
+   * gets the generic rules (declaring `compose-usage.json` used to replace them).
    */
   @Test
   fun `declared rules inherit the generic ones`() {
@@ -807,9 +785,8 @@ class PlaygroundSourceCleanerTest {
   }
 
   /**
-   * A knob nothing declared is exactly what residue cannot see: `previewOverrideString` is not in a
-   * scaffold package, so the snippet was reported clean and did not compile. Found by the corpus
-   * (`scripts/usage-corpus.sh`); see `docs/design/USAGE_SNIPPET_CORPUS.md`.
+   * `previewOverrideString` isn't in a scaffold package, so residue can't see an undeclared knob;
+   * found by the corpus (`scripts/usage-corpus.sh`; see `docs/design/USAGE_SNIPPET_CORPUS.md`).
    */
   @Test
   fun `a preview override knob becomes the default the render was baked with`() {
@@ -835,9 +812,8 @@ class PlaygroundSourceCleanerTest {
   }
 
   /**
-   * The same knob written with named arguments. A positional reading emits `Text(default =
-   * "Shopping")`, which is Kotlin that looks right and does not compile — the worst outcome
-   * available, since it reaches the visitor as "plain Compose you can run".
+   * The same knob with named arguments; a positional reading emits non-compiling `Text(default =
+   * "Shopping")`.
    */
   @Test
   fun `a named-argument knob substitutes as its value, not as the argument label`() {
@@ -860,11 +836,7 @@ class PlaygroundSourceCleanerTest {
     assertTrue(cleaned.text.contains("""Text("Shopping")"""), cleaned.text)
   }
 
-  /**
-   * A package-qualified call is the same call. It was invisible in both directions before: no rule
-   * fired (an occurrence after `.` is rejected, correctly) and no residue was reported (the call
-   * needs no import), so the seed came out marked cleaned with a repo-internal call still in it.
-   */
+  /** A package-qualified call is the same call; it used to be neither rewritten nor reported. */
   @Test
   fun `a fully qualified knob call is rewritten like a bare one`() {
     val source =
@@ -888,10 +860,8 @@ class PlaygroundSourceCleanerTest {
   }
 
   /**
-   * A receiver chain is not a package, however much it looks like one. `state.metrics.counted { }`
-   * is two lowercase segments followed by a declared scaffold name — matching on that shape would
-   * strip the receiver and let the scaffold passes rewrite somebody's ordinary call. Only a package
-   * the rules actually name is stripped.
+   * A receiver chain (`state.metrics.counted { }`) is not a package; only packages the rules name
+   * are stripped.
    */
   @Test
   fun `a member call that shares a scaffold name is left alone`() {
@@ -919,12 +889,7 @@ class PlaygroundSourceCleanerTest {
     assertTrue(cleaned.text.contains("state.metrics.counted"), cleaned.text)
   }
 
-  /**
-   * A qualified call the rules cannot unqualify must still be *reported*. The allow-list only
-   * rewrites packages the rules name, so an undeclared one is left in place — and `mentionsWord`
-   * rejects a name preceded by `.`, so nothing else would have said so. That combination is how a
-   * seed gets marked cleaned with a catalog-internal call still in it.
-   */
+  /** A qualified call the rules can't unqualify must still be reported as residue. */
   @Test
   fun `an unlisted qualified scaffold call is reported as residue`() {
     val rules =
@@ -946,12 +911,8 @@ class PlaygroundSourceCleanerTest {
   }
 
   /**
-   * A matching callee *name* is not a matching call.
-   *
-   * The parsed substitution pass replaces the whole qualified expression, so selecting on the name
-   * alone would delete somebody's receiver along with their call — `state.previewOverrideString(…)`
-   * is an application's own member function that happens to share a name with a scaffold. Only a
-   * bare call, or one qualified by a package the rules name, is the scaffold.
+   * A matching callee name isn't a matching call: `state.previewOverrideString(…)` may be an
+   * application's own member. Only bare calls or ones qualified by a named package are scaffolds.
    */
   @Test
   fun `a member call sharing a substitute rule's name keeps its receiver`() {
@@ -982,13 +943,8 @@ class PlaygroundSourceCleanerTest {
   }
 
   /**
-   * `addImports` belongs to every kind that emits a replacement.
-   *
-   * m3-catalog's state helpers return a `MutableState`, so their rules are ordinary SUBSTITUTE —
-   * and the substitution emitted `var checked by remember { mutableStateOf(true) }` against a
-   * snippet with no `remember` import, because only one rewrite read the plural field.
-   * Perfect-looking Kotlin that does not compile, which the corpus gate caught and no unit test
-   * would have.
+   * `addImports` applies to every kind that emits a replacement, e.g. SUBSTITUTE emitting
+   * `remember` / `mutableStateOf` needs their imports. Caught by the corpus gate.
    */
   @Test
   fun `a substituted call contributes every import its rule declares`() {
@@ -1043,12 +999,7 @@ class PlaygroundSourceCleanerTest {
     assertEquals(emptyList(), result.residue)
   }
 
-  /**
-   * The other kind that emits a replacement, and the one nobody had exercised: INLINE's member
-   * templates are arbitrary Kotlin, so a rule can perfectly well inline a symbol that needs an
-   * import. `applyInline` was not even handed the import set — the same omission as the plural
-   * field, one layer up.
-   */
+  /** INLINE member templates are arbitrary Kotlin and can need imports too. */
   @Test
   fun `an inlined member contributes the imports its rule declares`() {
     val rules =
@@ -1114,8 +1065,8 @@ class PlaygroundSourceCleanerTest {
   }
 
   /**
-   * A rule that declares no `params` cannot know which parameter a named argument names, so it
-   * declines rather than guessing — and says so, as residue.
+   * A rule without `params` can't map a named argument, so it declines (reported as residue) rather
+   * than guessing.
    */
   @Test
   fun `a substitute rule without params declines a named-argument call`() {
@@ -1144,9 +1095,8 @@ class PlaygroundSourceCleanerTest {
   }
 
   /**
-   * `scaffoldsDeclared` drives a much stronger claim in the Source panel than annotation-stripping
-   * earns, so only a catalog can turn it on. It used to be `scaffolds.isNotEmpty()`, which stopped
-   * meaning that the moment GENERIC carried entries of its own.
+   * `scaffoldsDeclared` drives a strong claim in the Source panel, so only a catalog can turn it on
+   * (not GENERIC's own entries).
    */
   @Test
   fun `inheriting the generic rules is not declaring scaffolding`() {
@@ -1161,9 +1111,8 @@ class PlaygroundSourceCleanerTest {
   }
 
   /**
-   * A knob that has a plain reading is substituted rather than deleted. `catalogChoice` returns its
-   * default on the baked lane by construction, so the default is what the render on screen was made
-   * with — and it is the biggest single helper in m3-catalog after the frame and the tally.
+   * A knob with a plain reading is substituted with its default (what the baked render used), not
+   * deleted.
    */
   @Test
   fun `a choice knob becomes the value the render was baked with`() {
@@ -1198,8 +1147,8 @@ class PlaygroundSourceCleanerTest {
   }
 
   /**
-   * A template citing an argument the call does not carry must leave the call alone rather than
-   * emit a literal `$1` into somebody's editor.
+   * A template citing an argument the call doesn't carry leaves the call alone rather than emitting
+   * `$1`.
    */
   @Test
   fun `a substitution template that cannot be filled is declined`() {
@@ -1238,9 +1187,8 @@ class PlaygroundSourceCleanerTest {
   // -----------------------------------------------------------------------------------------
 
   /**
-   * Compose is built on imported extensions reached through receiver syntax, where every reference
-   * to the imported name follows a dot. Pruning imports on the strict word test deleted `padding`
-   * and `dp` out from under a body that still used them.
+   * Imported extensions are referenced after a dot (`padding`, `dp`), so import pruning must not
+   * use the strict word test.
    */
   @Test
   fun `imports used through receiver syntax survive the prune`() {
@@ -1321,10 +1269,7 @@ class PlaygroundSourceCleanerTest {
     assertEquals(emptyList(), result.residue)
   }
 
-  /**
-   * An UNWRAP helper as the preview's expression body must not take `fun Card() =` with it. The
-   * splice started at the line, not at the call.
-   */
+  /** An UNWRAP helper as the expression body must not take `fun Card() =` with it. */
   @Test
   fun `unwrapping an expression body keeps the declaration`() {
     val source =
@@ -1466,13 +1411,9 @@ class PlaygroundSourceCleanerTest {
     assertEquals(listOf("counted"), result.residue)
   }
 
-  // -----------------------------------------------------------------------------------------------
-  // Delegating catalogs: scaffold sources, EXPAND, and the string-keyed `when` dispatch (#4169).
-  // -----------------------------------------------------------------------------------------------
+  // Delegating catalogs: scaffold sources, EXPAND, and string-keyed `when` dispatch.
 
-  /**
-   * A sticker sheet whose previews are one-line delegations, as `:samples:design-catalog-m3` is.
-   */
+  /** A sticker sheet whose previews are one-line delegations, like `:samples:design-catalog-m3`. */
   private val delegatingPreviews =
     """
     package demo.catalog
@@ -1552,8 +1493,8 @@ class PlaygroundSourceCleanerTest {
     )
 
   /**
-   * The reported bug: a preview that is only a delegation has no component in it, so the whole
-   * reduction has to cross into the file the component actually lives in.
+   * A delegation-only preview has no component, so the reduction crosses into the file the
+   * component lives in.
    */
   @Test
   fun `a delegating preview expands to the component the shared set dispatches to`() {
@@ -1579,8 +1520,8 @@ class PlaygroundSourceCleanerTest {
   }
 
   /**
-   * A repo publishing several catalogs lists every catalog's scaffolding, so one name may be
-   * declared twice. Picking either would splice one catalog's helper into another's snippet.
+   * A repo publishing several catalogs may declare one name twice; picking either would mix
+   * catalogs.
    */
   @Test
   fun `a name two scaffold sources both declare is not expanded`() {
@@ -1615,10 +1556,7 @@ class PlaygroundSourceCleanerTest {
     assertFalse(result.text.contains("fun FilledButton() {"), result.text)
   }
 
-  /**
-   * A dispatch key the call does not pin to a literal cannot be resolved to one branch, and
-   * guessing would put a component in front of a reader that the render never composed.
-   */
+  /** A dispatch key not pinned to a literal can't select one branch; don't guess. */
   @Test
   fun `a dispatch whose key is not a literal is declined and reported`() {
     val computed =
@@ -1650,15 +1588,10 @@ class PlaygroundSourceCleanerTest {
   }
 
   /**
-   * The checked-in m3 catalog's shape, reduced: `CatalogStates.kt` declares `fun SegmentedToggle()
-   * = Sticker("segmentedbutton")`, and that slug's branch in `CatalogComponents.kt` calls
-   * `SegmentedToggle()` — a cross-file helper with the same name as the preview showing it.
-   *
-   * `skip` carries every name the preview file declares, on the reasoning that a local declaration
-   * satisfies the reference. The entry is the one name that fails for: after EXPAND, its body is
-   * the *sticker's* body, so the call is to the component, not to itself. Treating the entry as
-   * satisfying it emitted a preview whose body called itself — unbounded recursion, reported clean
-   * with no residue, and handed to the playground as a runnable snippet.
+   * A cross-file helper with the same name as the preview (`fun SegmentedToggle() =
+   * Sticker("segmentedbutton")`, whose branch calls `SegmentedToggle()`). The entry name must not
+   * satisfy the reference: after EXPAND its body is the sticker's, so the call targets the
+   * component, not itself (otherwise unbounded recursion reported clean).
    */
   @Test
   fun `a helper sharing the entry preview's name is renamed rather than skipped`() {
@@ -1720,9 +1653,7 @@ class PlaygroundSourceCleanerTest {
     assertEquals(emptyList(), result.residue, result.text)
   }
 
-  /**
-   * A preview merely SHARING a name with a shared-module declaration it never calls is untouched.
-   */
+  /** A preview merely sharing a name with an uncalled shared-module declaration is untouched. */
   @Test
   fun `a name shared with an uncalled helper is left alone`() {
     val previews =
@@ -1780,13 +1711,8 @@ class PlaygroundSourceCleanerTest {
   }
 
   /**
-   * A scaffold annotation sharing its physical line with the rest of the declaration.
-   *
-   * Legal Kotlin, and checked in: `CatalogText.kt:42` is `@CatalogModes @Composable fun
-   * TextBrandedSpecimen() = Sticker("text-branded")`. The stripper worked line-by-line, so
-   * recognising `@CatalogModes` discarded the whole line — `@Composable` and the function with it —
-   * leaving nothing to emit and falling back to the verbatim wrapper, which is the snippet this
-   * class exists to replace.
+   * A scaffold annotation on the same line as the declaration (`@CatalogModes @Composable fun
+   * TextBrandedSpecimen() = …`): the line-based stripper discarded the whole function.
    */
   @Test
   fun `a scaffold annotation sharing a line with the declaration takes only itself`() {
@@ -1884,15 +1810,9 @@ class PlaygroundSourceCleanerTest {
   }
 
   /**
-   * An extension helper in a scaffold source, called the only way an extension can be.
-   *
-   * `helperIndex` keys on `declaredName`, which took the first identifier after `fun` — so `private
-   * fun Morph.toComposePath(...)` was recorded under `Morph`, the RECEIVER. A body calling
-   * `morph.toComposePath(progress)` matched neither that key (wrong word) nor, once keyed properly,
-   * `mentionsWord` (which rejects a name preceded by `.`, correctly, for plain calls). The
-   * checked-in `shape-morph` component is exactly this shape: its snippet carried
-   * `ShapeMorphViewer` and left `toComposePath` behind — unresolved, and absent from residue too,
-   * because the residue check reads the same index.
+   * An extension helper in a scaffold source: `declaredName` took the receiver (`Morph` in `fun
+   * Morph.toComposePath`), and `mentionsWord` rejects names after `.`, so `toComposePath` was left
+   * unresolved and unreported.
    */
   @Test
   fun `an extension helper is indexed by its callable name and followed through a receiver call`() {
@@ -1952,7 +1872,7 @@ class PlaygroundSourceCleanerTest {
   }
 
   /**
-   * The receiver-aware check must not drag in a same-named helper that is only read, not called.
+   * The receiver-aware check must not pull in a same-named helper that is only read, not called.
    */
   @Test
   fun `a property read on a receiver does not pull in a same-named function`() {

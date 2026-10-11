@@ -26,32 +26,17 @@ import org.jetbrains.kotlin.psi.KtNamedFunction
 import org.jetbrains.kotlin.psi.psiUtil.collectDescendantsOfType
 
 /**
- * **Spike** for replacing [PlaygroundSourceCleaner]'s text passes with a real parse.
- *
- * ### What it is trying to find out
- *
- * The cleaner scans text because the Kotlin frontend is deliberately kept off the CLI's runtime
- * classpath (`cli/build.gradle.kts` — it is staged into `lib-bta/` and loaded in an isolated
- * classloader only for an actual compile). That decision has a measurable cost: nearly every defect
- * found by the snippet corpus's review rounds was *parser-shaped* — named-argument binding, a
- * receiver chain mistaken for a package qualifier, a trailing-lambda call with no parentheses, a
- * qualified call that no pass could see. A parse settles those outright — and, as the argument-
- * binding case below shows, *narrows* rather than removes the rules a catalog still has to declare.
- *
- * Three questions, and this answers all three before anything is committed to:
- * 1. Does **parse-only** PSI work with no analysis, no classpath, no resolution?
- * 2. What does it cost — environment setup once, and per file?
- * 3. Does the tree actually carry what the cleaner needs (call names, argument names, qualifiers)?
- *
- * ### Why a test-only dependency
- *
- * `testImplementation` here does not put the frontend on the CLI's runtime classpath, so the
- * constraint this spike is questioning stays intact while the spike runs. If the numbers say yes,
- * the real change loads the same jars through the **existing** `lib-bta/` classloader
- * ([PlaygroundBtaCompiler.installJars]) rather than adding a dependency.
- *
- * Reported via `println` rather than asserted: the timings are the product, and pinning a
- * millisecond budget in CI would be a flaky test about somebody's machine.
+ * Spike for replacing [PlaygroundSourceCleaner]'s text passes with a real parse. The cleaner scans
+ * text because the Kotlin frontend is kept off the CLI's runtime classpath (staged into `lib-bta/`
+ * and loaded in an isolated classloader only to compile), and most corpus-found defects were
+ * parser-shaped (named-argument binding, receiver chains vs package qualifiers, trailing lambdas,
+ * qualified calls). It asks:
+ * 1. Does parse-only PSI work with no analysis, classpath or resolution?
+ * 2. What does it cost (setup once, then per file)?
+ * 3. Does the tree carry what the cleaner needs (call names, argument names, qualifiers)?
+ *    `testImplementation` keeps the frontend off the runtime classpath; a real change would load it
+ *    via the existing `lib-bta/` classloader ([PlaygroundBtaCompiler.installJars]). Timings are
+ *    printed, not asserted, to avoid machine-dependent flakes.
  */
 @OptIn(
   CompilerConfiguration.Internals::class,
@@ -62,22 +47,16 @@ import org.jetbrains.kotlin.psi.psiUtil.collectDescendantsOfType
 class PsiParseSpikeTest {
 
   /**
-   * Kotlin 2.4.20 made `createForProduction` read `configuration.extensionsStorage` while wiring
-   * compiler-plugin extension points, and a bare `CompilerConfiguration()` does not carry one —
-   * every parse died on `IllegalStateException: Extensions storage is not registered`. Parsing
-   * needs no plugins, so an empty storage is the whole fix.
+   * Since Kotlin 2.4.20 `createForProduction` reads `configuration.extensionsStorage`, which a bare
+   * `CompilerConfiguration()` lacks; parsing needs no plugins, so an empty storage suffices.
    */
   private fun parseOnlyConfiguration(): CompilerConfiguration =
     CompilerConfiguration().apply { extensionsStorage = CompilerPluginRegistrar.ExtensionStorage() }
 
   /**
-   * Where `scripts/usage-corpus.sh` actually writes, which is **not** this project's `build/`.
-   *
-   * A Gradle test runs from the project directory, so a bare `build/usage-corpus` resolves to
-   * `cli/build/usage-corpus` while the script writes to `<repo>/build/usage-corpus`. Reading the
-   * wrong one is not a null result — it silently measures whatever else happens to be there. The
-   * first version of this spike did exactly that and reported "35 files" that were 20 real snippets
-   * plus 15 fixture files [UsageSnippetCorpusTest] had written next to them.
+   * Where `scripts/usage-corpus.sh` writes: `<repo>/build/usage-corpus`, not this project's
+   * `build/` (tests run from the project directory). Reading the wrong one silently measures other
+   * files.
    */
   private fun corpusDir(): File {
     System.getProperty("composeai.usageCorpus.out")
@@ -131,11 +110,8 @@ class PsiParseSpikeTest {
       var qualified = 0
       var bytes = 0L
 
-      // Warm up by parsing *and walking*, then measure. `createFileFromText` alone does not do it:
-      // PSI is lazy, so a discarded file never builds a tree and the first
-      // `collectDescendantsOfType`
-      // inside the timed block would still be paying for the parser's initialisation — exactly the
-      // cost this loop exists to move outside the measurement.
+      // Warm up by parsing and walking: PSI is lazy, so parsing alone wouldn't build a tree and the
+      // first timed walk would pay the parser's initialisation.
       for ((name, text) in sources) {
         (factory.createFileFromText(name, KotlinFileType.INSTANCE, text) as? KtFile)
           ?.collectDescendantsOfType<KtCallExpression>()
@@ -182,8 +158,8 @@ class PsiParseSpikeTest {
   }
 
   /**
-   * Every shape the corpus review rounds got wrong, in one file. A parse has to distinguish all of
-   * them without a rules file telling it how.
+   * Every shape the corpus review rounds got wrong, in one file; a parse must distinguish them
+   * without rules.
    */
   @Test
   fun `the tree distinguishes the shapes the text passes could not`() {
@@ -202,16 +178,10 @@ class PsiParseSpikeTest {
       val calls = ktFile.collectDescendantsOfType<KtCallExpression>()
       val byName = calls.groupBy { it.calleeExpression?.text }
 
-      // 1. What a parse gives is the argument's own **label**, and nothing more.
-      //
-      //    That is not the same as retiring `UsageRules.Scaffold.params`, which this spike claimed
-      //    twice before getting it right. Two separate reasons it survives:
-      //      - a *positional* call carries no label at all, so only the callee's signature says
-      //        which slot is `default` — parse-only PSI has no resolution to supply it;
-      //      - a *labelled* call still has to reach an indexed template (`plain = "$1"`), and the
-      //        label `default` does not say it is index 1. `params` is that name→index map.
-      //    A parse only retires `params` if the rule vocabulary also moves from `$1` to a named
-      //    placeholder like `${default}`. Worth knowing before anyone bets a redesign on it.
+      // 1. A parse gives the argument's label and nothing more, so `UsageRules.Scaffold.params`
+      //    survives: positional calls carry no label (only the signature knows the slot), and a
+      //    labelled call still needs a name→index map for templates like `plain = "$1"`. It would
+      //    only retire if templates used named placeholders like `${default}`.
       val overrides = byName["previewOverrideString"].orEmpty()
       val labelled = overrides.filter { call ->
         call.valueArguments.any { it.getArgumentName() != null }
@@ -237,9 +207,8 @@ class PsiParseSpikeTest {
         "a positional call must carry no argument names — that is the whole point",
       )
 
-      // 2. A trailing-lambda call is a call, parentheses or not. Each of the fixture's three forms
-      //    identified structurally rather than by counting, so the assertion cannot be satisfied by
-      //    two of one kind.
+      // 2. A trailing-lambda call is a call, with or without parentheses; each of the three forms
+      //    is identified structurally.
       val tally = byName["counted"].orEmpty()
       val trailingOnly = tally.filter {
         it.lambdaArguments.isNotEmpty() && it.valueArgumentList == null
@@ -259,12 +228,8 @@ class PsiParseSpikeTest {
       )
 
       // 3. A qualified call yields its receiver as a whole expression, so the package allow-list
-      //    becomes a lookup on an exact receiver rather than a regex over the surrounding text.
-      //
-      //    The classification is run here, not just the extraction: proving the receiver *text* is
-      //    reachable would pass even for a cleaner that went on to make the same wrong call, since
-      //    both forms are the same `KtDotQualifiedExpression` shape. What distinguishes them is the
-      //    allow-list, and the point is that PSI hands it a clean key to look up.
+      //    becomes an exact lookup. The classification runs here, since both forms are the same
+      //    `KtDotQualifiedExpression` shape and only the allow-list distinguishes them.
       val scaffoldPackages = setOf("ee.schimke.composeai.overrides")
       val qualifiers =
         ktFile.collectDescendantsOfType<KtDotQualifiedExpression>().mapNotNull { dq ->
@@ -283,10 +248,8 @@ class PsiParseSpikeTest {
         "allow-list wrongly classified a receiver chain: $receiverChains",
       )
 
-      // 4. Destructuring — the `toggleable` / `editable` gap the rules file still records as open.
-      //    Read off the tree, not off `ktFile.text`: the text is just the input echoed back, so a
-      //    `contains` check there passes even if PSI exposes nothing, which is how the first
-      //    version of this assertion could not fail.
+      // 4. Destructuring (the `toggleable` / `editable` gap), read off the tree, not `ktFile.text`
+      //    (which just echoes the input).
       val destructuring = ktFile.collectDescendantsOfType<KtDestructuringDeclaration>()
       val entries = destructuring.map { d -> d.entries.map { it.name } }
       val initialisers = destructuring.map { it.initializer?.text }
@@ -305,21 +268,15 @@ class PsiParseSpikeTest {
   }
 
   /**
-   * The deployment route, not the convenience one: load the parser from the CLI install's staged
-   * `lib-bta/` through an **isolated** classloader, exactly as `PlaygroundBtaCompiler` already
-   * loads the compiler. This is what makes the spike actionable — it shows the frontend never has
-   * to reach the CLI's own runtime classpath, which is the constraint the text passes exist to
-   * respect.
-   *
-   * The jars come from the `composePreviewBta` configuration, forwarded by the build, so this runs
-   * in an ordinary `:cli:test` rather than only after `:cli:installDist`.
+   * The deployment route: load the parser from `lib-bta/` through an isolated classloader, as
+   * `PlaygroundBtaCompiler` loads the compiler, proving the frontend never needs the CLI's runtime
+   * classpath. Jars come from the `composePreviewBta` configuration, so this runs in plain
+   * `:cli:test`.
    */
   @Test
   fun `the parser loads from the isolated lib-bta classloader`() {
-    // From the `composePreviewBta` configuration, forwarded by the build — the same artifacts the
-    // install stages into `lib-bta/`. Looking at the *installed* directory instead meant this test
-    // skipped on any checkout that had not run `:cli:installDist`, which is every clean CI run, so
-    // the only check of the proposed deployment route never actually ran.
+    // From `composePreviewBta`, the same artifacts staged into `lib-bta/`; the installed directory
+    // doesn't exist on clean CI checkouts.
     val jars =
       System.getProperty("composeai.libBtaJars")
         .orEmpty()
@@ -372,10 +329,8 @@ class PsiParseSpikeTest {
           .loadClass("org.jetbrains.kotlin.cli.jvm.compiler.EnvironmentConfigFiles")
           .getField("JVM_CONFIG_FILES")
           .get(null)
-      // By exact signature, never `methods.first { … }`: `Class.getMethods()` has no specified
-      // order, so a predicate can select a different overload from run to run. That is precisely
-      // how this spike first failed — intermittently, and while looking convincingly like JVM-state
-      // interference from a prior in-process compile.
+      // By exact signature: `Class.getMethods()` order is unspecified, so a predicate could pick a
+      // different overload per run.
       val create =
         companion.javaClass.getMethod(
           "createForProduction",
@@ -405,11 +360,8 @@ class PsiParseSpikeTest {
         )
       val psi = createFile.invoke(factory, "Shapes.kt", fileType, FIXTURE)
 
-      // Walk the tree, don't read `getText()`. PSI is lazy and `getText()` can hand back the
-      // original view-provider buffer without a tree ever being built — so a text assertion here
-      // would pass while proving nothing about structural PSI through this loader, and would not
-      // have measured a parse either. Exactly the vacuous-check shape this spike already had to
-      // fix once, in the destructuring assertion.
+      // Walk the tree rather than reading `getText()`, which can return the original buffer without
+      // building a tree.
       val treeUtil = loader.loadClass("org.jetbrains.kotlin.com.intellij.psi.util.PsiTreeUtil")
       val findChildren =
         treeUtil.getMethod(
