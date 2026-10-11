@@ -11457,6 +11457,26 @@ class ServeHttpServer(
               return@withLeasedSession
             }
           }
+          // An Android player this catalog preview does not offer (`cmp-android` on a bundle
+          // without the CMP player, `androidx-embedded` without the embedded one, as the picker
+          // shows) is refused with what is offered, rather than commissioned into a linkage
+          // failure whose 500 body was the daemon's stack trace. Catalog sessions only: a project
+          // host's daemon is asked anyway, since it cannot list the players it resolves by id.
+          if (cached == null && catalogBundleHost(renderHost) != null) {
+            val unoffered =
+              renderParams()["rcPlayer"]
+                ?.let { RcPlayerBackend.fromWire(ServeRcPlayerIds.normalizeRequest(it)) }
+                ?.takeIf {
+                  it in DOC_DAEMON_PLAYERS &&
+                    renderHost.hasRemoteComposeDoc(previewId) &&
+                    it !in renderHost.enabledRcPlayersFor(previewId) &&
+                    it !in donorBackedRcPlayers(renderHost, previewId)
+                }
+            if (unoffered != null) {
+              respondUnofferedRcPlayer(renderHost, previewId, unoffered)
+              return@withLeasedSession
+            }
+          }
           // A pure declared-theme render, the classification the burst lease admits on. Read from
           // the request, since the expanded provider is no longer in the parsed overrides.
           val pureThemeProvider =
@@ -11796,6 +11816,28 @@ class ServeHttpServer(
       return
     }
     refuseDroppedOverrides(renderHost, previewId, dropped, overrides)
+  }
+
+  /**
+   * `409` for a `?rcPlayer=` naming an Android player [previewId] is not offered with, listing the
+   * server-side players it is. Short and stack-free: a player its bundle cannot link is a fact
+   * about the catalog, not a render failure.
+   */
+  private suspend fun RoutingContext.respondUnofferedRcPlayer(
+    renderHost: ServeHost,
+    previewId: String,
+    player: RcPlayerBackend,
+  ) {
+    val offered =
+      (renderHost.enabledRcPlayersFor(previewId) + donorBackedRcPlayers(renderHost, previewId))
+        .map(ServeRcPlayerIds::of)
+        .distinct()
+    call.response.headers.append(HttpHeaders.CacheControl, DYNAMIC_RESOURCE_CACHE_CONTROL)
+    call.respondText(
+      "rcPlayer=${ServeRcPlayerIds.of(player)} is not available for this preview" +
+        if (offered.isEmpty()) "" else "; offered: ${offered.joinToString(", ")}",
+      status = HttpStatusCode.Conflict,
+    )
   }
 
   /**
