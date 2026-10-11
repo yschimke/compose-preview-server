@@ -19,6 +19,7 @@ import {
     installBugReportLink,
 } from "./chrome/bugReport.js";
 import { installReportLauncher } from "./chrome/reportLauncher.js";
+import { installSlashSearch } from "./chrome/slashSearch.js";
 import { installRecent } from "./chrome/recent.js";
 import "./components/ReportClassification.js";
 import "./components/ReportScope.js";
@@ -35,6 +36,9 @@ installBugReportBody();
 // every-page footing as the two above and wired from the same place. It only opens a `<details>`
 // and points at the two destinations; the capture bundle it can reach is fetched on first use.
 installReportLauncher();
+// `/` focuses whichever filter box the page has. Every-page for the same reason as the above: the
+// boxes live on several surfaces, and the shell is the script they all share.
+installSlashSearch();
 // Recently viewed rides the shell because the viewer records into it and the front door (plus a
 // catalog landing) shows it, and the shell is the only bundle the front door loads. Any other page
 // returns before touching storage or the DOM.
