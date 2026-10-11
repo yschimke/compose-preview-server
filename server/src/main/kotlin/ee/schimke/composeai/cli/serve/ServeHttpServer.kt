@@ -12181,7 +12181,8 @@ class ServeHttpServer(
    * [document] drawn by [player] via `overrides.remoteCompose.documentBase64` — the shared tail of
    * shared documents ([respondDocDaemonRender]) and donor-backed catalog previews
    * ([donorBackedRcPlayers]). The server's own player daemon draws it whenever it offers [player]
-   * ([ServeRcPlayerDaemon], started on demand); otherwise a resident catalog's daemon lends itself
+   * ([ServeRcPlayerDaemon], started on demand); otherwise, or while that daemon is unavailable (no
+   * live seat, or a failed start inside its backoff), a resident catalog's daemon lends itself
    * ([docRcDonor]). Only a fresh render answers; baked or published images are the donor's pixels,
    * so they are refused. [generation] and [cacheControl] mark the response once a daemon is found.
    */
@@ -12219,8 +12220,10 @@ class ServeHttpServer(
     // Preferred over borrowing even while a catalog daemon is resident: its players are the ones
     // this server pins, and a stranger's document never runs inside a catalog's daemon.
     val playerDaemon = rcPlayerDaemon?.takeIf { it.offers(player) }
+    // Why the player daemon declined (no live seat, or a start inside its failure backoff), kept
+    // for the refusal when no resident catalog daemon can lend itself instead.
+    var playerDaemonUnavailable: String? = null
     if (playerDaemon != null) {
-      markGeneration(generation, cacheControl)
       val outcome =
         withContext(Dispatchers.IO) {
           if (!renderSemaphore.tryAcquire(RENDER_QUEUE_WAIT_SECONDS, TimeUnit.SECONDS)) null
@@ -12231,29 +12234,33 @@ class ServeHttpServer(
               renderSemaphore.release()
             }
         }
-      when (outcome) {
-        is ServeRcPlayerDaemon.Outcome.Rendered ->
-          respondCarriedRcOutcome(outcome.outcome, player, stage)
-        ServeRcPlayerDaemon.Outcome.Warming -> {
-          call.response.headers.append(HttpHeaders.RetryAfter, "5")
-          call.respondText(
-            "the ${ServeRcPlayerIds.of(player)} daemon is starting; retry shortly",
-            status = HttpStatusCode.ServiceUnavailable,
-          )
+      // An unavailable player daemon is not the end of the lane: a resident catalog daemon that
+      // replays carried documents draws it as it would with no player daemon configured at all.
+      if (outcome is ServeRcPlayerDaemon.Outcome.Unavailable) {
+        playerDaemonUnavailable = outcome.reason
+      } else {
+        markGeneration(generation, cacheControl)
+        when (outcome) {
+          is ServeRcPlayerDaemon.Outcome.Rendered ->
+            respondCarriedRcOutcome(outcome.outcome, player, stage)
+          ServeRcPlayerDaemon.Outcome.Warming -> {
+            call.response.headers.append(HttpHeaders.RetryAfter, "5")
+            call.respondText(
+              "the ${ServeRcPlayerIds.of(player)} daemon is starting; retry shortly",
+              status = HttpStatusCode.ServiceUnavailable,
+            )
+          }
+          else -> respondCarriedRcOutcome(null, player, stage)
         }
-        is ServeRcPlayerDaemon.Outcome.Unavailable -> {
-          call.response.headers.append(HttpHeaders.RetryAfter, "30")
-          call.respondText(outcome.reason, status = HttpStatusCode.ServiceUnavailable)
-        }
-        null -> respondCarriedRcOutcome(null, player, stage)
+        return
       }
-      return
     }
     val donor = docRcDonor(player)
     if (donor == null) {
       call.response.headers.append(HttpHeaders.RetryAfter, "30")
       call.respondText(
-        "no running catalog here can draw ${ServeRcPlayerIds.of(player)}",
+        playerDaemonUnavailable
+          ?: "no running catalog here can draw ${ServeRcPlayerIds.of(player)}",
         status = HttpStatusCode.ServiceUnavailable,
       )
       return

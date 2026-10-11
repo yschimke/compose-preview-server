@@ -264,6 +264,65 @@ class ServeRcPlayerDaemonLaneTest {
     assertTrue(playerRenders.isNotEmpty())
   }
 
+  /**
+   * A live-seat budget whose background lane is refused, as on a box where 4 of 8 permits are free
+   * but one of them is the per-preview slice: a background Android acquire needs its weight plus
+   * the stream reserve from the general lane, which leaves it no seat.
+   */
+  private fun seatsRefusingBackground(): LiveSeatLimiter =
+    LiveSeatLimiter(totalPermits = 8).also {
+      assertTrue(it.acquire(4) != null)
+      assertEquals(4, it.availablePermits())
+      assertNull(
+        it.acquireBackground(ServeBundleDaemon.ANDROID_LIVE_SEAT_WEIGHT, dedicatedSlice = false)
+      )
+    }
+
+  @Test
+  fun `a player daemon with no live seat falls back to a resident catalog daemon`() {
+    registry.register("remote-catalog", host = donorCatalog, pinned = true)
+    val daemon = playerDaemon(liveSeats = seatsRefusingBackground())
+    serve(daemon)
+    get("/examples/render/$EXAMPLE_ID.png?rcPlayer=androidx-view").use { response ->
+      assertEquals(200, response.code)
+      assertEquals(bakedPng.toList(), response.body.bytes().toList())
+      assertEquals(
+        RenderOutcome.Generation.DAEMON.wire,
+        response.header(ServeHttpServer.GENERATION_HEADER),
+      )
+    }
+    assertEquals(0, opened.get(), "the seatless player daemon never started")
+    val rc = donorRenders.single().remoteCompose!!
+    assertEquals(Base64.getEncoder().encodeToString(catalogDoc), rc.documentBase64)
+    assertEquals(RcPlayerBackend.ANDROIDX_VIEW.playerKind, rc.player)
+  }
+
+  @Test
+  fun `a player daemon with no live seat and no donor says why`() {
+    val daemon = playerDaemon(liveSeats = seatsRefusingBackground())
+    serve(daemon)
+    get("/examples/render/$EXAMPLE_ID.png?rcPlayer=androidx-view").use { response ->
+      assertEquals(503, response.code)
+      assertEquals("30", response.header("Retry-After"))
+      assertTrue("no live seat" in response.body.string())
+    }
+    assertTrue(donorRenders.isEmpty())
+  }
+
+  @Test
+  fun `a shared document falls back to a resident catalog daemon when the player daemon has no seat`() {
+    registry.register("remote-catalog", host = donorCatalog, pinned = true)
+    serve(playerDaemon(liveSeats = seatsRefusingBackground()))
+    val bytes = ServeDocFixtures.remoteComposeDoc(width = 320, height = 200)
+    val path = upload(bytes)
+    get("$path/render.png?rcPlayer=androidx-embedded").use { assertEquals(200, it.code) }
+    assertEquals(
+      Base64.getEncoder().encodeToString(bytes),
+      donorRenders.single().remoteCompose!!.documentBase64,
+    )
+    assertEquals(0, opened.get())
+  }
+
   @Test
   fun `without a player daemon or a resident catalog the android players stay unavailable`() {
     serve(rcPlayerDaemon = null)
