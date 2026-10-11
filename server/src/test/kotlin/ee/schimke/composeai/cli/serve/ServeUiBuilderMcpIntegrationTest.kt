@@ -1299,8 +1299,13 @@ class ServeUiBuilderMcpIntegrationTest {
       "Discord client",
       restored["design"]!!.jsonObject["title"]!!.jsonPrimitive.content,
     )
-    assertIs<SnapshotResponseV1>(
-      response(envelope(server, ServeUiBuilderMcp.GET_DESIGN, """{"designId":"probe"}"""))
+    assertTrue(
+      assertIs<DesignsResponseV1>(
+          response(envelope(server, ServeUiBuilderMcp.LIST_DESIGNS, """{"limit":10}"""))
+        )
+        .designs
+        .any { it.designId == "probe" },
+      "listed again",
     )
   }
 

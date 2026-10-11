@@ -404,10 +404,13 @@ class ServeUiBuilderHistoryMcpTest {
         }
       assertEquals("no design `$DESIGN` this actor can read", strangerFork.message)
 
-      // Deleting the fork takes it off its parent's list.
+      // Deleting the fork takes it off its parent's list, since nobody can open it; its ancestry
+      // waits in the trash with it, and goes when the purge sweeps the design's records.
       call(mcp, ServeUiBuilderMcp.DELETE_DESIGN, """{"designId":"alt"}""", raw = true)
-      assertNull(links.ancestry.read("alt"))
       assertNull(linksOf(mcp, DESIGN)[FORKS_KEY])
+      assertNotNull(links.ancestry.read("alt"), "kept while the fork can be restored")
+      ServeUiBuilderSidecars(links = links, onLog = {}).sweep("alt")
+      assertNull(links.ancestry.read("alt"))
     }
 
   @Test
