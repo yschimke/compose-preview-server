@@ -1,5 +1,28 @@
 # Changelog
 
+## [3.123.0](https://github.com/yschimke/compose-preview-server/compare/v3.122.0...v3.123.0) (2026-10-11)
+
+
+### Features
+
+* **serve-web:** "On phone" QR code of the preview page on the viewer's export bar ([#1556](https://github.com/yschimke/compose-preview-server/issues/1556)) ([f6ffa89](https://github.com/yschimke/compose-preview-server/commit/f6ffa89a04b343073fb0c7e4a298d08279f03346))
+* **serve-web:** mark cards changed since your last visit ([#1551](https://github.com/yschimke/compose-preview-server/issues/1551)) ([842fa06](https://github.com/yschimke/compose-preview-server/commit/842fa067d3694e74be2b47db372ee87f16295219))
+* **serve-web:** S / M / L thumbnail size on catalog landings ([#1554](https://github.com/yschimke/compose-preview-server/issues/1554)) ([3eba202](https://github.com/yschimke/compose-preview-server/commit/3eba2022469ba058ed3d78fea5f8dc0b9abcef71))
+* **serve-web:** share the Starred row as a link ([#1553](https://github.com/yschimke/compose-preview-server/issues/1553)) ([905cacf](https://github.com/yschimke/compose-preview-server/commit/905cacf059f59ee01d9d893c49b783e1b25b338e))
+* **serve-web:** toggle an 8dp grid over the viewer's render ([#1552](https://github.com/yschimke/compose-preview-server/issues/1552)) ([c133d5a](https://github.com/yschimke/compose-preview-server/commit/c133d5af8002ad8a2bd8cc3414de2ae7a6667c6a))
+
+
+### Bug Fixes
+
+* Codex review findings from [#1461](https://github.com/yschimke/compose-preview-server/issues/1461), [#1486](https://github.com/yschimke/compose-preview-server/issues/1486), [#1488](https://github.com/yschimke/compose-preview-server/issues/1488), [#1516](https://github.com/yschimke/compose-preview-server/issues/1516), [#1521](https://github.com/yschimke/compose-preview-server/issues/1521) and [#1527](https://github.com/yschimke/compose-preview-server/issues/1527) ([#1538](https://github.com/yschimke/compose-preview-server/issues/1538)) ([7243984](https://github.com/yschimke/compose-preview-server/commit/7243984abf45632eb4a808d3ab30bfd52d9dc9f5))
+* **deploy:** restart the box that was written, after prune clears too, and only on a readable status ([#1559](https://github.com/yschimke/compose-preview-server/issues/1559)) ([9fbd1e4](https://github.com/yschimke/compose-preview-server/commit/9fbd1e4c476d008b913ab1952bbb99de29e19753))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-contracts-bom to v3.28.0 ([#1549](https://github.com/yschimke/compose-preview-server/issues/1549)) ([350a5ce](https://github.com/yschimke/compose-preview-server/commit/350a5ce03c34eff7108d407854334f49beabd98d))
+* **mcp:** retain rendered preview when resource refresh fails ([#1555](https://github.com/yschimke/compose-preview-server/issues/1555)) ([8c1c2e4](https://github.com/yschimke/compose-preview-server/commit/8c1c2e4f587767973f29419a2247da251e29d070))
+* **serve-web:** name the in-browser RC player on the stage badge, not Snapshot ([#1558](https://github.com/yschimke/compose-preview-server/issues/1558)) ([449e537](https://github.com/yschimke/compose-preview-server/commit/449e537471bba9055de2cdd0787976bf2b8dc829))
+* **serve:** fetch published RC documents off the request thread, and 503 a throttle ([#1550](https://github.com/yschimke/compose-preview-server/issues/1550)) ([2536998](https://github.com/yschimke/compose-preview-server/commit/2536998f316c7b32fd64cad84eff732965dbc329))
+* **serve:** pass a design's catalog to the UI-builder renderer ([#1547](https://github.com/yschimke/compose-preview-server/issues/1547)) ([02f32c3](https://github.com/yschimke/compose-preview-server/commit/02f32c3620e010207011a4c84e4203386811e3eb))
+* **ui-builder:** serve project workspace on rooted hosts ([#1543](https://github.com/yschimke/compose-preview-server/issues/1543)) ([1148d2d](https://github.com/yschimke/compose-preview-server/commit/1148d2da685d18ca63c0e88292de24b5945238b1))
+
 ## [3.122.0](https://github.com/yschimke/compose-preview-server/compare/v3.121.0...v3.122.0) (2026-10-11)
 
 
