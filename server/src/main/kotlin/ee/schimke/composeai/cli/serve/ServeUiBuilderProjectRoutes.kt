@@ -19,10 +19,6 @@ internal fun Route.installUiBuilderProjectRoutes(
   authorization: ServeUiBuilderAuthorization,
   grants: ServeUiBuilderGrantScope.Lookup? = null,
 ) {
-  get("/ui-builder/projects") {
-    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
-    call.respondText(uiBuilderProjectsPage(), ContentType.Text.Html)
-  }
   route("/api/ui-builder/v1/projects") {
     get {
       call.projectAction(authorization, UiBuilderRouteCapability.READ, grants) { actor ->
