@@ -130,6 +130,13 @@ class ServeBundleHost(
    * [ServeCatalogStore], which owns the SSRF gate, size cap and test seam; null for a plain bundle.
    */
   private val fetchBakedPng: ((String) -> ByteArray?)? = null,
+  /** Published RC documents offered by a trusted catalog, keyed by the baked preview id. */
+  declaredRcDocs: List<String> = emptyList(),
+  /**
+   * Fetches one published document on demand; the catalog store owns the branch URL and limits. A
+   * failure comes back as itself so the route can tell a throttle from an unpublished document.
+   */
+  private val fetchRcDoc: ((String) -> BranchFetch)? = null,
   /**
    * Ids this catalog publishes an animated capture for. Separate from [declaredBaked]: a capture
    * owns no card and is reachable only from its still.
@@ -1073,6 +1080,8 @@ class ServeBundleHost(
 
   private val fillLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
 
+  private val declaredRcDocIds = declaredRcDocs.toSet()
+
   /**
    * The staged file for one capture, fetched on first request. A near-copy of [bakedPngFile] rather
    * than a shared generic, so a capture can never be written under a still's name.
@@ -1164,22 +1173,48 @@ class ServeBundleHost(
     )
   }
 
-  override fun remoteComposeDoc(previewId: String): ByteArray? {
-    if (previewId !in previewIds) return null
+  override fun remoteComposeDoc(previewId: String): ByteArray? =
+    remoteComposeDocRead(previewId).bytesOrNull
+
+  /**
+   * [remoteComposeDoc] with the failure kept: a declared document the delivery branch is refusing
+   * right now is transient, not missing. Blocks on the network for a cold declared document, so
+   * call it off the request dispatcher.
+   */
+  fun remoteComposeDocRead(previewId: String): BranchFetch {
+    if (!hasRemoteComposeDoc(previewId)) return BranchFetch.NotFound
     val doc = File(irDir, "$previewId$RC_SUFFIX").toOkioPath()
-    if (!fileSystem.exists(doc)) return null
-    return try {
-      fileSystem.read(doc) { readByteArray() }
-    } catch (e: Exception) {
-      null
+    if (fileSystem.exists(doc)) return readStagedDoc(doc)
+    val fetch = fetchRcDoc ?: return BranchFetch.NotFound
+    synchronized(fillLocks.computeIfAbsent("rc:$previewId") { Any() }) {
+      if (fileSystem.exists(doc)) return readStagedDoc(doc)
+      val outcome = runCatching {
+        fetch(previewId)
+      }
+        .getOrElse { BranchFetch.Transport(it::class.simpleName ?: "error") }
+      val bytes = outcome.bytesOrNull ?: return outcome
+      // As for captures: the bytes are in hand, so a staging failure still serves them.
+      runCatching {
+        fileSystem.createDirectories(doc.parent!!)
+        val partial = doc.parent!!.resolve("${doc.name}.$instanceTag$PARTIAL_SUFFIX")
+        fileSystem.write(partial) { write(bytes) }
+        fileSystem.atomicMove(partial, doc)
+      }
+      return BranchFetch.Ok(bytes)
     }
   }
+
+  private fun readStagedDoc(path: okio.Path): BranchFetch = runCatching {
+    BranchFetch.Ok(fileSystem.read(path) { readByteArray() })
+  }
+    .getOrElse { BranchFetch.Transport(it::class.simpleName ?: "error") }
 
   // Cheap existence check (no read) so the per-preview page render can gate the client-side canvas
   // lane without pulling the whole document — the browser fetches the bytes over `/render/<id>.rc`.
   override fun hasRemoteComposeDoc(previewId: String): Boolean {
     if (previewId !in previewIds) return false
-    return fileSystem.exists(File(irDir, "$previewId$RC_SUFFIX").toOkioPath())
+    return previewId in declaredRcDocIds ||
+      fileSystem.exists(File(irDir, "$previewId$RC_SUFFIX").toOkioPath())
   }
 
   // The cmp-jvm render is sized to the baked PNG's pixels at the capture density; null without a
@@ -1593,9 +1628,9 @@ private data class BundleRenderError(
 )
 
 /**
- * A bundle's guideline results by bundle id. Bundles rename ids to path-safe form
- * (`[^A-Za-z0-9._-]` → `_`), and older reports carry raw ids, so an exact miss falls back to
- * safe-mapped ids; ambiguous ones are left out.
+ * A bundle's guideline results by bundle id. Bundles rename ids to path-safe form ([bundleSafeId]),
+ * and older reports carry raw ids, so an exact miss falls back to safe-mapped ids; ambiguous ones
+ * are left out.
  */
 internal class BundleGuidelineResults(private val results: ServeGuidelineResults?) {
   private val bySafeId:
@@ -1609,7 +1644,11 @@ internal class BundleGuidelineResults(private val results: ServeGuidelineResults
     results?.forPreview(previewId) ?: bySafeId[bundleSafeId(previewId)]
 }
 
-/** A preview id as a bundle stores it: anything outside `[A-Za-z0-9._-]` becomes `_`. */
-internal fun bundleSafeId(id: String): String = id.replace(BUNDLE_UNSAFE_ID_CHARS, "_")
-
-private val BUNDLE_UNSAFE_ID_CHARS = Regex("[^A-Za-z0-9._-]")
+/**
+ * A preview id as a bundle stores it: anything but a letter, a digit, `.`, `_` or `-` becomes `_`.
+ * Letters and digits are Unicode ones, as `bundle split`'s sanitiser (and the catalog store's copy
+ * of it) keeps them, so `Über:dark` and `Äber:dark` stay two ids.
+ */
+internal fun bundleSafeId(id: String): String = buildString {
+  for (c in id) append(if (c.isLetterOrDigit() || c == '.' || c == '_' || c == '-') c else '_')
+}

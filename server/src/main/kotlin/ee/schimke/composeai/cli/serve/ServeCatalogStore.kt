@@ -237,6 +237,12 @@ class ServeCatalogStore(
     path.endsWith(it)
   }
 
+  private fun isPublishedRcDocumentPath(path: String): Boolean =
+    path.startsWith("documents/") &&
+      path.endsWith(".rc") &&
+      path.split('/').all { it.isNotBlank() && it != "." && it != ".." } &&
+      path.none { it == '\\' || it == '?' || it == '#' || it == '%' }
+
   /**
    * One declared baked image resolved before any fetch: its route-safe [id], staged [target] (null
    * when the path escaped the previews dir, still counted as declared), and variant context.
@@ -247,6 +253,7 @@ class ServeCatalogStore(
     val id: String,
     val target: File?,
     val image: Image,
+    val rcDocument: String?,
     val componentId: String?,
     val section: String?,
     val group: String?,
@@ -482,6 +489,7 @@ class ServeCatalogStore(
             id,
             target,
             image,
+            component.rcDocument,
             componentId,
             section,
             group,
@@ -499,6 +507,7 @@ class ServeCatalogStore(
     // without waiting for pixels. Each id is handed to the host, which fetches its PNG on first use
     // ([ServeBundleHost.fetchBakedPng]).
     val bakedPathById = LinkedHashMap<String, String>()
+    val rcDocumentPathById = LinkedHashMap<String, String>()
     // Branch path per capture route id, fetched by the host on demand. Captures are not staged:
     // they are much heavier than stickers and rarely opened.
     val motionPathById = LinkedHashMap<String, String>()
@@ -516,6 +525,7 @@ class ServeCatalogStore(
         val id = planned.id
         val image = planned.image
         bakedPathById[id] = planned.path
+        planned.rcDocument?.takeIf(::isPublishedRcDocumentPath)?.let { rcDocumentPathById[id] = it }
         slugs.add(id.substringBefore(SLUG_SEPARATOR))
         planned.path
           .removePrefix("$IMAGES_DIR/")
@@ -758,6 +768,10 @@ class ServeCatalogStore(
       if (trust().trustsBranch(repo, branch))
         BundleVerifier.Verdict.Trusted(listOf(BundleVerifier.Basis.Branch(repo, branch)))
       else BundleVerifier.Verdict.Unverified("branch $repo@$branch is not trusted")
+    // A published RC document is executable input to the browser player. Only an explicitly
+    // trusted delivery branch may advertise that lane, and the bytes arrive only when requested.
+    val replayableRcDocs =
+      if (verdict is BundleVerifier.Verdict.Trusted) rcDocumentPathById.toMap() else emptyMap()
 
     // Baked editable vectors (figma/<slug>.svg + crops) are a server-side input nothing requests on
     // demand, so they can't be lazy; instead probe a handful of components synchronously (hero
@@ -891,6 +905,12 @@ class ServeCatalogStore(
           // host never builds a URL or applies a fetch policy, it just asks for an id it declared.
           fetchBakedPng = { id ->
             bakedPathById[id]?.let { path -> fetchCatalogAsset(base + path) }
+          },
+          declaredRcDocs = replayableRcDocs.keys.toList(),
+          fetchRcDoc = { id ->
+            replayableRcDocs[id]?.let { path ->
+              cachedBranchRead(base + path, MAX_PUBLISHED_RC_DOC_BYTES)
+            } ?: BranchFetch.NotFound
           },
           // Motion ids and their lazy fetch; captures are never staged (see [motionPathById]).
           declaredMotion = motionPathById.keys.toList(),
@@ -1188,6 +1208,10 @@ class ServeCatalogStore(
                 ((liveBundle != null || declaredLiveBundles.isNotEmpty()) ||
                   (src != null && src.module.isNotBlank())) ->
                 ServeDegradation.unverifiedNoRerender()
+              // Every baked card can also replay its published document in the browser. This is a
+              // live client-side lane even though the branch carries no server daemon bundle.
+              bakedPathById.isNotEmpty() && replayableRcDocs.keys.containsAll(bakedPathById.keys) ->
+                null
               else -> ServeDegradation.catalogBakedOnly()
             },
           deferredNote,
@@ -1625,6 +1649,12 @@ class ServeCatalogStore(
     val guidelines: ByteArray? = null,
     /** Where [guidelines] were read from. */
     val guidelinesUrl: String? = null,
+    /**
+     * The delivery commit [file] was read from, or null when the branch head could not be resolved.
+     * A record fetched to compose against it is read at this same commit (see
+     * [fetchComponentRecord]), so the policy and the record are one publication.
+     */
+    val deliveryCommit: String? = null,
   )
 
   internal fun fetchUiBuilderCatalog(
@@ -1676,6 +1706,7 @@ class ServeCatalogStore(
       templates = if (templates) fetchUiBuilderTemplates(system, base, bytes) else emptyMap(),
       guidelines = guidelines,
       guidelinesUrl = guidelinesUrl.takeIf { guidelines != null },
+      deliveryCommit = deliveryCommit,
     )
   }
 
@@ -1719,12 +1750,18 @@ class ServeCatalogStore(
     system: String,
     sourceRepo: String? = null,
     sourceBranchPrefix: String? = null,
+    /**
+     * Read at this delivery commit rather than the branch head: the commit a published builder
+     * catalog was read from ([PublishedUiBuilderCatalogAsset.deliveryCommit]), so a branch that
+     * moves between the two reads cannot pair one publication's policy with another's record.
+     */
+    atCommit: String? = null,
   ): File? {
     val safe = ServeBundleStore.sanitizeName(system) ?: return null
     val repo = sourceRepo?.takeIf { it.isNotBlank() } ?: this.repo
     val branchPrefix = sourceBranchPrefix?.takeIf { it.isNotBlank() } ?: this.branchPrefix
     val branch = "$branchPrefix$system"
-    val deliveryCommit = fetchRevisions(repo, branch).firstOrNull()?.commit
+    val deliveryCommit = atCommit ?: fetchRevisions(repo, branch).firstOrNull()?.commit
     val base =
       deliveryCommit?.let { "https://raw.githubusercontent.com/$repo/$it/" }
         ?: "https://raw.githubusercontent.com/$repo/$branch/"
@@ -2967,6 +3004,8 @@ class ServeCatalogStore(
   private data class Component(
     val componentId: String? = null,
     val images: List<Image> = emptyList(),
+    /** Branch-relative Remote Compose document shared by this component's baked variants. */
+    val rcDocument: String? = null,
     /** The counterpart's `componentId` in the [Catalog.compareWith] sibling, or null. */
     val parallel: String? = null,
     /**
@@ -3345,6 +3384,7 @@ class ServeCatalogStore(
     const val MAX_DESIGN_PAGES = 40
     private const val MAX_FETCH_BYTES = 25L * 1024 * 1024 // 25 MB per catalog asset
     private const val MAX_RUNTIME_ARCHIVE_FETCH_BYTES = 64L * 1024 * 1024
+    private const val MAX_PUBLISHED_RC_DOC_BYTES = 8L * 1024 * 1024
 
     /**
      * Live dirs are `<root>/<system>/g<generation>`, staged in `<root>/<system>/.staging`. Nested

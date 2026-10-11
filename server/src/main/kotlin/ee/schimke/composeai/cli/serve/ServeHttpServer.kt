@@ -8500,7 +8500,9 @@ class ServeHttpServer(
             imageBytesHeld = imageOccupancy?.totalBytes ?: 0,
             catalogRefreshSeconds = catalogRefreshSeconds,
             catalogRegistries = catalogRegistries(),
-            uiBuilderCatalogProblems = uiBuilderCatalogProblems(),
+            // Box-wide, so a top-level site's snapshot does not list its neighbours' problems.
+            uiBuilderCatalogProblems =
+              if (onlySystem == null) uiBuilderCatalogProblems() else emptyMap(),
             maxConcurrentRenders = renderSlots,
             liveSeats = liveSeats.totalPermits,
           ),
@@ -8874,8 +8876,10 @@ class ServeHttpServer(
           renderAgg.firstRenderMs?.let { add(ServeWeb.Stat("Worst first render", "${it}ms")) }
         }
       }
+      // Box-wide, so only on the box's own page, never a top-level site's.
+      val catalogProblems = if (onlySystem == null) uiBuilderCatalogProblems() else emptyMap()
       val config =
-        listOf(
+        listOfNotNull(
           ServeWeb.Stat("Access", if (isPublic) "public (open)" else "token-gated"),
           ServeWeb.Stat("Bind", "$host:$port"),
           ServeWeb.Stat("Trusted re-render", if (allowRenderTrusted) "on" else "off"),
@@ -8904,6 +8908,15 @@ class ServeHttpServer(
                 }
             },
           ),
+          // Why an owned UI-builder catalog is withheld or degraded, as `/status.json` says it.
+          catalogProblems
+            .takeIf { it.isNotEmpty() }
+            ?.let { problems ->
+              ServeWeb.Stat(
+                "UI-builder catalogs",
+                problems.entries.joinToString(" · ") { (id, why) -> "$id — $why" },
+              )
+            },
           ServeWeb.Stat(
             "Live seats",
             if (liveSeats.unbounded) "unbounded" else liveSeats.totalPermits.toString(),
@@ -11170,13 +11183,16 @@ class ServeHttpServer(
       // The `.rc` lane serves captured document bytes verbatim (the browser player applies knob
       // edits), so it short-circuits ahead of the override parse. No `ir/<id>.rc` sidecar → 404.
       if (wantRcDoc || wantRcJson) {
-        val bytes = renderHost.remoteComposeDoc(previewId)
+        val outcome = remoteComposeDocOutcome(renderHost, previewId)
+        val bytes = outcome.bytesOrNull
         // `no-store` on both lanes: the token can arrive in the `X-Compose-Preview-Token` header,
         // which no cache keys on, so a shared cache could otherwise serve one caller's document to
         // another or after revocation (see `DYNAMIC_RESOURCE_CACHE_CONTROL`).
         val documentCacheControl =
           if (isPublic) STATIC_RESOURCE_CACHE_CONTROL else DYNAMIC_RESOURCE_CACHE_CONTROL
-        if (bytes == null) {
+        if (bytes == null && outcome.isTransient) {
+          respondDocumentUnavailable(outcome)
+        } else if (bytes == null) {
           call.respondText("no such remote compose document", status = HttpStatusCode.NotFound)
         } else if (wantRcJson) {
           // Projected on demand (a pure function costing one inflate) rather than cached beside a
@@ -11772,7 +11788,12 @@ class ServeHttpServer(
     /** Lifetime for a successful render — see the call site for which requests earn one. */
     cacheControl: String,
   ) {
-    val doc = renderHost.remoteComposeDoc(previewId)
+    val docOutcome = remoteComposeDocOutcome(renderHost, previewId)
+    if (docOutcome.isTransient) {
+      respondDocumentUnavailable(docOutcome)
+      return
+    }
+    val doc = docOutcome.bytesOrNull
     val spec = renderHost.remoteComposeRenderSpec(previewId)
     if (doc == null || spec == null) {
       call.respondText("no cmp-jvm render for this preview", status = HttpStatusCode.NotFound)
@@ -12264,6 +12285,34 @@ class ServeHttpServer(
    * The `Retry-After` for a refused capture: the branch host's own value, else a short default,
    * clamped to the fetch policy's ceiling.
    */
+  /**
+   * A preview's Remote Compose document with the failure kept, read off the request dispatcher: a
+   * catalog's declared document is fetched from its delivery branch on first use. Unwraps only the
+   * hosts whose document reads delegate to a baked [ServeBundleHost]; any other host keeps its own
+   * [ServeHost.remoteComposeDoc], where a miss is simply [BranchFetch.NotFound].
+   */
+  private suspend fun remoteComposeDocOutcome(host: ServeHost, previewId: String): BranchFetch =
+    withContext(Dispatchers.IO) {
+      val bundle =
+        when (host) {
+          is ServeBundleHost -> host
+          is ServeCatalogLiveHost -> host.bakedHost as? ServeBundleHost
+          else -> null
+        }
+      bundle?.remoteComposeDocRead(previewId)
+        ?: host.remoteComposeDoc(previewId)?.let { BranchFetch.Ok(it) }
+        ?: BranchFetch.NotFound
+    }
+
+  /** A document the delivery branch is refusing right now: 503 + `Retry-After`, as for captures. */
+  private suspend fun RoutingContext.respondDocumentUnavailable(outcome: BranchFetch) {
+    call.response.headers.append(
+      HttpHeaders.RetryAfter,
+      motionRetryAfterSeconds(outcome).toString(),
+    )
+    call.respondText(outcome.summary, status = HttpStatusCode.ServiceUnavailable)
+  }
+
   private fun motionRetryAfterSeconds(outcome: BranchFetch): Long {
     val asked =
       when (outcome) {
