@@ -2175,6 +2175,10 @@ html:not(.cp-bg-transparent) .cp-viewer[data-bg-theme="light"] .cp-stage { backg
   font-size: var(--md-sys-typescale-body-small-size);
   letter-spacing: var(--md-sys-typescale-body-small-tracking);
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The viewer bundle makes the id a click-to-copy button (`viewer/copyId.ts`); say so on hover. */
+.cp-preview-id[role="button"] { cursor: pointer; }
+.cp-preview-id[role="button"]:hover { color: var(--md-sys-color-on-surface);
+  background: var(--md-sys-color-surface-container-highest); }
 /* The four disclosures — Components, State/Variant, Theme, Overrides — ride at the end of that
    same identity row, pushed to the trailing edge by the auto margin. They are the page's controls
    over what is *shown*, so grouping them buys one place to look; keeping them on the title row
