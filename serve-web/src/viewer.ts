@@ -3350,15 +3350,15 @@ function enterMode(m: string) {
         m !== "motion"
     )
         refreshSnapshot();
-    // Interactive lanes never reach refreshLinks, so sync here so every transition writes `?mode=`
-    // immediately. (For the snapshot branch this is a no-op replace.)
+    // The interactive lanes drive their own render and never reach refreshLinks, so sync here so
+    // every transition writes `?mode=` immediately. (For the snapshot branch this is a no-op replace.)
     else {
         syncUrl();
         syncSpecBaseline();
     }
 }
-// SVG toggle: swap the static snapshot between raster and vector. From a live lane it drops back to
-// the static vector render; in the static lane it swaps the extension in place.
+// SVG format toggle: swap the static snapshot between raster and vector. From a live lane it drops
+// back to the static vector render; in the static lane it swaps the extension in place.
 if (svgToggle) {
     svgToggle.addEventListener("click", function () {
         var turnOn = !svgOn();
