@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.124.0](https://github.com/yschimke/compose-preview-server/compare/v3.123.0...v3.124.0) (2026-10-11)
+
+
+### Features
+
+* **mcp:** check_preview_guidelines uses the stored key and OpenAI-compatible endpoints ([#1565](https://github.com/yschimke/compose-preview-server/issues/1565)) ([e2b70c9](https://github.com/yschimke/compose-preview-server/commit/e2b70c9957e40ae1dcb4772539f3f715da370a30))
+* **serve:** play doc-only catalogs' Remote Compose documents on a borrowed Android daemon ([#1574](https://github.com/yschimke/compose-preview-server/issues/1574)) ([110689c](https://github.com/yschimke/compose-preview-server/commit/110689c9d32a1e7269bfe3953b7372a3572ebe80))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.15.3 ([#1576](https://github.com/yschimke/compose-preview-server/issues/1576)) ([3ff660b](https://github.com/yschimke/compose-preview-server/commit/3ff660ba200b63e948bb34af17b7cd6702531cc8))
+* **serve:** stage the published RC comparison for catalogs of pure documents ([#1573](https://github.com/yschimke/compose-preview-server/issues/1573)) ([432cb0c](https://github.com/yschimke/compose-preview-server/commit/432cb0c16a45385f6e5949f267cf3adc62a8dc09))
+* **ui-builder:** fix five MCP problems found by the agent eval ([#1572](https://github.com/yschimke/compose-preview-server/issues/1572)) ([c27a539](https://github.com/yschimke/compose-preview-server/commit/c27a539213fb0ba4609b048e659d91c92bb83d7a))
+* **viewer:** show why the CMP Wasm player could not render a document ([#1571](https://github.com/yschimke/compose-preview-server/issues/1571)) ([25efb63](https://github.com/yschimke/compose-preview-server/commit/25efb638b4c23c6564ebb85832d3154ff2cb7722))
+
 ## [3.123.0](https://github.com/yschimke/compose-preview-server/compare/v3.122.0...v3.123.0) (2026-10-11)
 
 
