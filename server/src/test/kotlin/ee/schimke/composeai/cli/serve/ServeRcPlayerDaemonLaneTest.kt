@@ -383,6 +383,30 @@ class ServeRcPlayerDaemonLaneTest {
   }
 
   @Test
+  fun `a classpath linkage error fails the start and returns the seat`() {
+    val seats = LiveSeatLimiter(totalPermits = 8, perPreviewReserve = 0)
+    val daemon =
+      playerDaemon(
+          liveSeats = seats,
+          openHost = {
+            opened.incrementAndGet()
+            throw NoClassDefFoundError("androidx/compose/remote/player/view/RemoteComposePlayer")
+          },
+        )
+        .also { this.daemon = it }
+    assertIs<ServeRcPlayerDaemon.Outcome.Warming>(daemon.render(PreviewOverrides()))
+    val deadline = System.currentTimeMillis() + 10_000
+    while (daemon.snapshot().state != "failed") {
+      check(System.currentTimeMillis() < deadline) { "still ${daemon.snapshot().state}" }
+      Thread.sleep(10)
+    }
+    assertEquals(8, seats.availablePermits(), "the failed start returned its seat")
+    val refused =
+      assertIs<ServeRcPlayerDaemon.Outcome.Unavailable>(daemon.render(PreviewOverrides()))
+    assertTrue("RemoteComposePlayer" in refused.reason)
+  }
+
+  @Test
   fun `players are offered by the libraries the staged jars carry`() {
     val dir = Files.createTempDirectory("rc-players").toFile()
     fun jar(name: String, vararg entries: String) =

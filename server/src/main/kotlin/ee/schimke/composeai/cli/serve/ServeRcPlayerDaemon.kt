@@ -144,7 +144,10 @@ class ServeRcPlayerDaemon(
       val host =
         try {
           openHost()
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+          // Throwable, not Exception: an incomplete or mismatched staged classpath fails as a
+          // LinkageError (NoClassDefFoundError), and that must still back off and return the seat
+          // rather than leave the daemon "starting" forever. Only a VM error is rethrown.
           val reason = "the Android player daemon did not start: ${e.message ?: e.javaClass.name}"
           onLog(reason)
           seat?.close()
@@ -152,6 +155,7 @@ class ServeRcPlayerDaemon(
             lastError = reason
             state = State.Failed(reason, clock())
           }
+          if (e is VirtualMachineError) throw e
           return@execute
         }
       onLog("rc player daemon started (${players.joinToString { ServeRcPlayerIds.of(it) }})")
