@@ -33,11 +33,30 @@ import kotlinx.serialization.json.Json
  * are dropped on every write. A file that cannot be read or written fails the transition
  * ([Outcome.Unavailable]) — never silently read as empty, which would let a stale copy act.
  */
-internal class ServeAgentGrantRequestFile(file: Path, private val clock: () -> Long) {
+internal class ServeAgentGrantRequestFile(
+  file: Path,
+  private val clock: () -> Long,
+  /**
+   * The previous release's file ([LEGACY_NAME]), read once at start for its pending requests
+   * ([importLegacyPending]) and never written: that release rewrites it with its own row shape,
+   * which would strip this format's fields.
+   */
+  legacyFile: Path? = null,
+) {
   private val file: Path = file.toAbsolutePath().normalize()
+  private val legacyFile: Path? =
+    legacyFile?.toAbsolutePath()?.normalize()?.takeIf { it != this.file }
 
+  /**
+   * This format's file: [format] and [version] are written explicitly (no defaults), so a file of
+   * another shape — the previous release's, or a future one — is refused rather than half-read.
+   */
   @Serializable
-  internal data class Snapshot(val version: Int = 1, val requests: List<Record> = emptyList())
+  internal data class Snapshot(val format: String, val version: Int, val requests: List<Record>)
+
+  /** The previous release's file shape: `{"version":1,"requests":[…]}`. */
+  @Serializable
+  private data class LegacySnapshot(val version: Int = 1, val requests: List<Record> = emptyList())
 
   /** One request, as persisted. Every field but [deviceSecretSha256] is what the page shows. */
   @Serializable
@@ -241,8 +260,56 @@ internal class ServeAgentGrantRequestFile(file: Path, private val clock: () -> L
 
   /** Ids of live rows whose state is in [states] and that name [grantId]. */
   @Synchronized
-  fun idsForGrant(grantId: String, states: Set<String>): List<String> =
-    all().values.filter { it.grantId == grantId && it.state in states }.map { it.id }
+  fun idsForGrant(grantId: String, states: Set<String>): List<String>? =
+    try {
+      locked { read() }.values.filter { it.grantId == grantId && it.state in states }.map { it.id }
+    } catch (e: IOException) {
+      System.err.println("serve: agent-grant: could not read access requests from $file: $e")
+      null
+    }
+
+  /**
+   * Carry the previous release's still-pending requests into this file, at start: each one not
+   * already here (so a decision made here is never overwritten). Approved and denied rows are left
+   * to expire there — they were decided under the old release, which holds what they need. The old
+   * file is only read. A request the old release opens after this process started is not seen here
+   * until the agent asks again.
+   */
+  @Synchronized
+  fun importLegacyPending() {
+    val legacy = legacyFile ?: return
+    if (!Files.exists(legacy)) return
+    val rows =
+      try {
+        if (Files.size(legacy) > MAX_BYTES) throw IOException("too large")
+        JSON.decodeFromString<LegacySnapshot>(Files.readString(legacy)).requests
+      } catch (e: Exception) {
+        if (e !is IOException && e !is SerializationException && e !is IllegalArgumentException) {
+          throw e
+        }
+        System.err.println("serve: agent-grant: not carrying over requests from $legacy: $e")
+        return
+      }
+    val now = clock()
+    val pending = rows.filter {
+      it.state == PENDING && it.expiresAtMillis > now && it.id.isNotBlank()
+    }
+    if (pending.isEmpty()) return
+    try {
+      locked {
+        val current = read().toMutableMap()
+        val added = pending.filter { it.id !in current }
+        if (added.isNotEmpty()) {
+          added.forEach { current[it.id] = it.copy(approval = null, grantId = null) }
+          current.values.removeIf { it.keepUntilMillis <= now }
+          write(current.values.toList())
+        }
+      }
+      cachedStamp = null
+    } catch (e: IOException) {
+      System.err.println("serve: agent-grant: could not carry over requests from $legacy: $e")
+    }
+  }
 
   private fun <T> locked(action: () -> T): T =
     synchronized(locks.computeIfAbsent(file) { Any() }) {
@@ -275,12 +342,16 @@ internal class ServeAgentGrantRequestFile(file: Path, private val clock: () -> L
       } catch (e: IllegalArgumentException) {
         throw IOException("malformed access requests file", e)
       }
-    if (snapshot.version != 1) throw IOException("unsupported version ${snapshot.version}")
+    if (snapshot.format != FORMAT || snapshot.version != VERSION) {
+      throw IOException(
+        "not an access requests file of this format: ${snapshot.format} v${snapshot.version}"
+      )
+    }
     return snapshot.requests.filter { it.id.isNotBlank() }.associateBy { it.id }
   }
 
   private fun write(rows: List<Record>) {
-    val json = JSON.encodeToString(Snapshot(requests = rows))
+    val json = JSON.encodeToString(Snapshot(format = FORMAT, version = VERSION, requests = rows))
     if (json.toByteArray(Charsets.UTF_8).size > MAX_BYTES) {
       throw IOException("access requests too large")
     }
@@ -312,6 +383,13 @@ internal class ServeAgentGrantRequestFile(file: Path, private val clock: () -> L
     const val REVOKED = "revoked"
     /** An approval that ran out before anyone collected it. */
     const val EXPIRED = "expired"
+
+    /** This format's file name. The previous release never opens it. */
+    const val FILE_NAME = "agent-access-requests.v2.json"
+    /** The previous release's file, which it still reads and rewrites during the first rollout. */
+    const val LEGACY_NAME = "agent-access-requests.json"
+    const val FORMAT = "compose-preview/agent-access-requests"
+    const val VERSION = 2
 
     const val FORM_KEY_NAME = "agent-grant-csrf.key"
     private const val FORM_KEY_BYTES = 32

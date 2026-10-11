@@ -27,7 +27,9 @@ class ServeAgentGrantRequestPersistenceTest {
 
   private var now = 1_000_000L
   private val dir: Path = createTempDirectory("agent-grant-requests")
-  private val file: Path = dir.resolve("mcp-oauth/agent-access-requests.json")
+  private val file: Path = dir.resolve("mcp-oauth/agent-access-requests.v2.json")
+  /** The file the release before the v2 format reads and writes. */
+  private val legacy: Path = dir.resolve("mcp-oauth/agent-access-requests.json")
 
   @AfterTest
   fun cleanUp() {
@@ -307,7 +309,7 @@ class ServeAgentGrantRequestPersistenceTest {
   fun `the default file lives beside the catalogs file, and nowhere without one`() {
     val catalogs = dir.resolve("catalogs.json")
     assertEquals(
-      dir.resolve("mcp-oauth/agent-access-requests.json"),
+      dir.resolve("mcp-oauth/agent-access-requests.v2.json"),
       ServeAgentGrantStore.defaultRequestsFile(catalogs),
     )
     assertNull(ServeAgentGrantStore.defaultRequestsFile(null))
@@ -712,5 +714,97 @@ class ServeAgentGrantRequestPersistenceTest {
     val refused =
       assertIs<ServeAgentGrantStore.Poll.Denied>(lowered.poll(second.id, second.deviceSecret))
     assertNotNull(refused.reason)
+  }
+
+  // ---- the previous release's file -------------------------------------------------------------
+
+  /** A row as the previous release writes it: no grant id, no fingerprint, its own states. */
+  private fun legacyRow(id: String, state: String, secret: String, expiresAtMillis: Long) =
+    """{"id":"$id","deviceSecretSha256":"${ServeAgentGrantStore.secretHash(secret)}",""" +
+      """"userCode":"ACDE-FGHJ","label":"from the old release","client":"10.0.0.9",""" +
+      """"requestedScope":"live","requestedTtlSeconds":600,"createdAtMillis":$now,""" +
+      """"expiresAtMillis":$expiresAtMillis,"state":"$state"}"""
+
+  private fun writeLegacy(vararg rows: String) {
+    Files.createDirectories(legacy.parent)
+    legacy.writeText("""{"version":1,"requests":[${rows.joinToString(",")}]}""")
+  }
+
+  @Test
+  fun `the default file is one the previous release never opens, and says what format it is`() {
+    val catalogs = dir.resolve("catalogs.json")
+    val path = assertNotNull(ServeAgentGrantStore.defaultRequestsFile(catalogs))
+    assertTrue(path != legacy, "the previous release reads and rewrites $legacy")
+    val store = store(file = path)
+    store.ask()
+    assertTrue(path.readText().contains("\"format\""), path.readText())
+    assertFalse(legacy.exists(), "the old file is never written")
+  }
+
+  @Test
+  fun `an old-format writer on the previous file leaves this store's rows alone`() {
+    val store = store()
+    val request = store.ask()
+    store.approveOk(request.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "u")
+    val ours = file.readText()
+
+    // The outgoing release rewrites its own file, rows of its own and all.
+    writeLegacy(legacyRow(request.id, "pending", "whatever-secret", now + 600_000))
+
+    assertEquals(ours, file.readText())
+    val grant =
+      assertIs<ServeAgentGrantStore.Poll.Approved>(store.poll(request.id, request.deviceSecret))
+        .grant
+    assertTrue(file.readText().contains(grant.id), "the collected row keeps its grant id")
+    assertEquals(
+      "pending",
+      Regex("\"state\":\"(\\w+)\"").find(legacy.readText())?.groupValues?.get(1),
+      "and this store never wrote the old file",
+    )
+  }
+
+  @Test
+  fun `pending requests in the previous release's file are carried over at start, and nothing else`() {
+    val pendingId = "pendingRequestFromV1x"
+    val approvedId = "approvedRequestFromV1"
+    val expiredId = "expiredRequestFromV1x"
+    writeLegacy(
+      legacyRow(pendingId, "pending", "pending-secret", now + 600_000),
+      legacyRow(approvedId, "approved", "approved-secret", now + 600_000),
+      legacyRow(expiredId, "pending", "expired-secret", now - 1),
+    )
+    val before = legacy.readText()
+
+    val store = store()
+    assertIs<ServeAgentGrantStore.Poll.Pending>(store.poll(pendingId, "pending-secret"))
+    assertEquals("from the old release", assertNotNull(store.request(pendingId)).label)
+    assertEquals(ServeAgentGrantStore.Poll.Unknown, store.poll(approvedId, "approved-secret"))
+    assertEquals(ServeAgentGrantStore.Poll.Unknown, store.poll(expiredId, "expired-secret"))
+    assertEquals(before, legacy.readText(), "read, never written")
+
+    // A decision made here is not undone by carrying it over again on the next start.
+    store.approveOk(pendingId, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "u")
+    val restarted = store()
+    assertIs<ServeAgentGrantStore.Poll.Approved>(restarted.poll(pendingId, "pending-secret"))
+  }
+
+  @Test
+  fun `a revocation the file cannot record says so rather than claiming success`() {
+    val a = store()
+    val request = a.ask()
+    a.approveOk(request.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "u")
+    val b = store()
+    val grant =
+      assertIs<ServeAgentGrantStore.Poll.Approved>(b.poll(request.id, request.deviceSecret)).grant
+    a.grantsHeldElsewhere()
+    val good = file.readText()
+    file.writeText("{not json")
+
+    assertEquals(ServeAgentGrantStore.Revocation.UNAVAILABLE, a.revokeGrant(grant.id, "@yuri"))
+    file.writeText(good)
+    assertEquals(grant, b.grantForToken(grant.token), "nothing was revoked")
+    assertEquals(ServeAgentGrantStore.Revocation.REVOKED, a.revokeGrant(grant.id, "@yuri"))
+    assertNull(b.grantForToken(grant.token))
+    assertEquals(ServeAgentGrantStore.Revocation.UNKNOWN, a.revokeGrant("nobody-knows", "@yuri"))
   }
 }

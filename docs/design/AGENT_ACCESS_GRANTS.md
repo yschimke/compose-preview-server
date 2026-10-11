@@ -255,7 +255,7 @@ internet mint itself credentials.
   one that can.
 - **Requests survive a restart; no credential does.** A person slow to approve should not have to
   start over because the host was redeployed, so with a writable catalogs directory every request
-  lives in `mcp-oauth/agent-access-requests.json` beside the catalogs file (the OAuth client
+  lives in `mcp-oauth/agent-access-requests.v2.json` beside the catalogs file (the OAuth client
   registry's directory, same file lock and atomic replace). A row holds what the approval page shows
   — id, user code, label, client, the requested scope, TTL, capabilities and designs, the requester,
   created and expiry times — plus the device secret as a **SHA-256**, which is what a poll is
@@ -290,8 +290,24 @@ internet mint itself credentials.
   process keeps its own random key, as before.
 - **No fallback when the file fails.** A decision, claim or revocation that cannot read or write the
   file changes nothing: the approval page says to try again (for a denial as for an approval —
-  never "already decided"), and a poll answers `pending` — retry —
+  never "already decided"; for a revocation too, which then keeps the grant's refresh bindings
+  rather than reporting it gone), and a poll answers `pending` — retry —
   never a bearer. A corrupt file is reported and treated as unreadable, not as empty.
+- **The file's format, and the first rollout of it.** The file says what it is
+  (`"format": "compose-preview/agent-access-requests", "version": 2`), and anything else is refused
+  as unreadable rather than half-read. Its name is new because the release before it reads and
+  rewrites `mcp-oauth/agent-access-requests.json` with a row shape of its own, which would strip
+  this format's fields (the collected grant's id among them) on every write. A new process reads
+  that old file once, at start, and carries over its still-pending requests that are not already in
+  the new one; approved and denied rows there are left to expire, decided under the old release,
+  and the old file is never written. Two consequences last only for the overlap of that first
+  rollout, old release beside new:
+  - a request opened on the old replica after the new one started is not seen by the new one; the
+    agent asks again;
+  - a form drawn by one generation and posted to the other is rejected (404) — it fails closed,
+    nothing is granted or revoked; reload the page and submit again. The old release cannot be
+    taught the shared key. From the next rollout on, both replicas share the key file and the
+    requests file.
 - **A collected approval meets today's limits, not yesterday's.** An approval not yet collected, by
   any process, holds its grant's place: it counts towards `--agent-grant-max-active` and its
   approver's cap as if it were live, and so does a grant another process collected (its `collected`

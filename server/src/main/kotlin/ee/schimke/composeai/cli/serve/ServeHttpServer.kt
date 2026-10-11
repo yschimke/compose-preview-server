@@ -15528,7 +15528,18 @@ class ServeHttpServer(
         return
       }
     }
-    store.revoke(grantId, approver.name)
+    if (store.revokeGrant(grantId, approver.name) == ServeAgentGrantStore.Revocation.UNAVAILABLE) {
+      // Not recorded where the process holding it would see it: say so, and keep its refresh
+      // bindings, rather than redirect as if it were gone.
+      respondAgentGrantNotice(
+        heading = "Try again in a moment",
+        message =
+          "The server could not record the revocation, so the grant may still be live. Press " +
+            "Revoke again; if this keeps happening, tell the operator.",
+        status = HttpStatusCode.ServiceUnavailable,
+      )
+      return
+    }
     // Its refresh tokens go with it now rather than sitting in the bounded map until someone
     // presents one.
     mcpOAuth.forgetRefreshFor(grantId)

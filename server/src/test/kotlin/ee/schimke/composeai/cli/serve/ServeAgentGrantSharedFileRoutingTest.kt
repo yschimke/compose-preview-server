@@ -28,7 +28,7 @@ class ServeAgentGrantSharedFileRoutingTest {
 
   private val operatorToken = "operator-secret-token"
   private val dir: Path = Files.createTempDirectory("grants-shared")
-  private val requestsFile: Path = dir.resolve("mcp-oauth/agent-access-requests.json")
+  private val requestsFile: Path = dir.resolve("mcp-oauth/agent-access-requests.v2.json")
 
   private fun store() =
     ServeAgentGrantStore(
@@ -196,5 +196,23 @@ class ServeAgentGrantSharedFileRoutingTest {
     assertEquals(setOf("OWNER_READ", "OWNER_WRITE"), permissions)
     // Without a file there is no shared key: each process keeps its own random one.
     assertNull(ServeAgentGrantStore().sharedFormKey())
+  }
+
+  @Test
+  fun `a revoke the file cannot record answers try again and revokes nothing`() {
+    val token = grantedOn(serverA)
+    val (_, status) = call(serverB, "/status?token=$operatorToken")
+    val (path, csrf) = revokeForm(status)
+    val good = requestsFile.toFile().readText()
+    requestsFile.toFile().writeText("{not json")
+
+    val (code, body) = form(serverB, "$path?token=$operatorToken", "csrf=$csrf")
+    assertEquals(503, code)
+    assertTrue(body.contains("Try again in a moment"), body)
+
+    requestsFile.toFile().writeText(good)
+    assertNotNull(storeA.grantForToken(token), "still live")
+    assertEquals(302, form(serverB, "$path?token=$operatorToken", "csrf=$csrf").first)
+    assertNull(storeA.grantForToken(token))
   }
 }

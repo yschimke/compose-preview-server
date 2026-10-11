@@ -256,9 +256,16 @@ class ServeAgentGrantStore(
   /** Grant-specific path credential for opaque private-Wasm iframe subresources. */
   private val byWasmCredential = ConcurrentHashMap<String, String>()
 
-  private val disk = requestsFile?.let { ServeAgentGrantRequestFile(it, clock) }
+  private val disk = requestsFile?.let {
+    ServeAgentGrantRequestFile(
+      it,
+      clock,
+      legacyFile = it.resolveSibling(ServeAgentGrantRequestFile.LEGACY_NAME),
+    )
+  }
 
   init {
+    disk?.importLegacyPending()
     disk?.all()?.values?.forEach { adopt(it) }
   }
 
@@ -976,27 +983,48 @@ class ServeAgentGrantStore(
    * token check ([liveGrant]). True only when something was revoked: a grant held here, or a row
    * this call moved — never for an id nobody knows.
    */
-  fun revoke(id: String, by: String): Boolean {
+  fun revoke(id: String, by: String): Boolean = revokeGrant(id, by) == Revocation.REVOKED
+
+  /** What [revokeGrant] did. */
+  enum class Revocation {
+    REVOKED,
+    /** No grant here and no row naming it: nothing to revoke. */
+    UNKNOWN,
+    /**
+     * The requests file could not be read or written, so a grant another process may hold is not
+     * revoked. Retry; nothing should act as if it were gone.
+     */
+    UNAVAILABLE,
+  }
+
+  /** [revoke], telling a miss from a file it could not record the revocation in. */
+  fun revokeGrant(id: String, by: String): Revocation {
     val local = dropLocal(id)
+    if (local != null) {
+      audit("agent-grant: revoked ${local.fingerprint} by $by label=\"${local.label}\"")
+    }
+    val disk = disk ?: return if (local != null) Revocation.REVOKED else Revocation.UNKNOWN
     var shared = false
-    disk?.let { disk ->
-      for (requestId in disk.idsForGrant(id, setOf(ServeAgentGrantRequestFile.COLLECTED))) {
-        val outcome =
-          disk.transition(requestId, setOf(ServeAgentGrantRequestFile.COLLECTED)) {
-            it!!.copy(state = ServeAgentGrantRequestFile.REVOKED)
-          }
-        if (outcome is ServeAgentGrantRequestFile.Outcome.Done) {
+    val requestIds =
+      disk.idsForGrant(id, setOf(ServeAgentGrantRequestFile.COLLECTED))
+        ?: return Revocation.UNAVAILABLE
+    for (requestId in requestIds) {
+      when (
+        disk.transition(requestId, setOf(ServeAgentGrantRequestFile.COLLECTED)) {
+          it!!.copy(state = ServeAgentGrantRequestFile.REVOKED)
+        }
+      ) {
+        is ServeAgentGrantRequestFile.Outcome.Done -> {
           shared = true
           requests.remove(requestId)
         }
+        is ServeAgentGrantRequestFile.Outcome.Conflict -> Unit
+        ServeAgentGrantRequestFile.Outcome.Unavailable -> return Revocation.UNAVAILABLE
       }
     }
-    if (local == null && !shared) return false
-    audit(
-      "agent-grant: revoked ${local?.fingerprint ?: "grant $id (held by another process)"} by $by" +
-        (local?.let { " label=\"${it.label}\"" } ?: "")
-    )
-    return true
+    if (local == null && !shared) return Revocation.UNKNOWN
+    if (local == null) audit("agent-grant: revoked grant $id (held by another process) by $by")
+    return Revocation.REVOKED
   }
 
   /**
@@ -1435,14 +1463,14 @@ class ServeAgentGrantStore(
         )
 
     /**
-     * `mcp-oauth/agent-access-requests.json` beside the catalogs file, next to the OAuth client
+     * `mcp-oauth/agent-access-requests.v2.json` beside the catalogs file, next to the OAuth client
      * registry ([ServeMcpOAuthClients.defaultFile]) on the deploy's config volume. Null — requests
      * in memory only — without a catalogs file or when its directory is not writable; unlike the
      * client registry there is no home-directory fallback, so a local server writes nothing.
      */
     fun defaultRequestsFile(catalogsFile: Path?): Path? {
       val root = catalogsFile?.toAbsolutePath()?.normalize()?.parent ?: return null
-      val candidate = root.resolve("mcp-oauth/agent-access-requests.json")
+      val candidate = root.resolve("mcp-oauth/${ServeAgentGrantRequestFile.FILE_NAME}")
       val state = candidate.parent
       return candidate.takeIf {
         Files.isDirectory(root) &&
