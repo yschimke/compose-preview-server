@@ -29,6 +29,9 @@ const pages = {
         "known-differences.js",
     ],
     viewer: [runtime, "viewer-components.js", "format-compare.js", "viewer.js"],
+    // Not a page: what the viewer's "On phone" popover fetches on first open (`viewer/phoneQr.ts`).
+    // Lazy so the viewer above does not carry it; pinned so the encoder stays the small one it is.
+    "phone QR (lazy)": ["qr-code.js"],
     // Three.js is intentionally isolated: only a preview carrying a scene pays this additional
     // WebGL/WebXR runtime, while every ordinary viewer remains under the existing budget.
     "spatial viewer": [runtime, "viewer-components.js", "spatial-view.js"],
@@ -57,7 +60,13 @@ const limits = {
     // gzip bytes: +621 over the previous build, all of it that module, and it rides in the
     // viewer bundle rather than a lazy chunk because every entry here is a classic script. Raised
     // by the usual 2 kB step over the former ceiling.
-    viewer: 74_000,
+    //
+    // 74_000 until the stage learned an 8dp grid overlay (`viewer/gridOverlay.ts`, G). Measured at
+    // 74_143 gzip bytes: +800 over the previous build, all of it that module and its wiring — the
+    // overlay is painted by CSS gradients, and the bytes are the measuring: the snapshot or live
+    // canvas it lies over, the full-screen letterbox, and the density a picked Device (or a
+    // full-page scroll render) implies. Raised by the usual 2 kB step over the former ceiling.
+    viewer: 76_000,
     // 180_000 until the report form's body writer learned to fill a locator's `overrides:` from
     // live viewer state (#5000). That put `fillOverrides` and the classification read-back into
     // `viewer-components.js`, which this page carries for its report affordance: measured at
@@ -77,6 +86,7 @@ const limits = {
     // springs, in a page whose own bundle nobody touched. Raised by the usual 2 kB step so the
     // ceiling goes on meaning what it says.
     "spatial viewer": 188_000,
+    "phone QR (lazy)": 4_000,
 };
 
 const gzipBytes = new Map();

@@ -6152,6 +6152,12 @@ class ServeHttpServer(
     // A person's index over only the designs the service lets this actor read; no delete or
     // document replacement (unlike `/admin/ui-builder`).
     get("${base}/designs") { handleUiBuilderDesigns() }
+    if (uiBuilderProjectStore != null && designService != null && uiBuilderAuthorization != null) {
+      get("${base}/projects") {
+        call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+        call.respondText(uiBuilderProjectsPage(), ContentType.Text.Html)
+      }
+    }
     // Create is a POST answered with a `303` to the design's permalink, so the browser lands on a
     // URL safe to reload and share.
     post("${base}/designs") { handleUiBuilderCreate() }

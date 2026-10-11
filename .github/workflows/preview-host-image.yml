@@ -322,7 +322,9 @@ jobs:
           # So a config this roll did not boot on (written after its replica started) still ends up
           # serving: same restart path as publish-preview-config.yml.
           DEPLOY_HOOK_TOKEN: ${{ secrets.DEPLOY_HOOK_TOKEN }}
-          DEPLOY_HOOK_RESTART_URL: ${{ vars.DEPLOY_HOOK_RESTART_URL || 'https://preview.coo.ee/__hooks/restart' }}
+          # Empty unless the repository sets it: an empty value falls through to the script's
+          # ${BASE_URL}/__hooks/restart, so a box picked by DEPLOY_BASE_URL is the box restarted.
+          DEPLOY_HOOK_RESTART_URL: ${{ vars.DEPLOY_HOOK_RESTART_URL }}
         run: |
           if [[ -z "${ADMIN_TOKEN}" ]]; then
             echo "SERVE_ADMIN_TOKEN is unset; skipping deployment config publish"

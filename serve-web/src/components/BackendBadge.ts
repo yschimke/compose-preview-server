@@ -16,9 +16,17 @@ import { createTextVNode, type VNode } from "../vue.js";
 import { customElement } from "../controllerElement.js";
 import { VueElement } from "../vueElement.js";
 
-/** Lanes that are interactive rather than a still image. */
+/**
+ * Lanes that are interactive rather than a still image. Both Remote Compose replay lanes count: the
+ * document is played (and clicked, scrolled) in the browser, not shown as its baked capture.
+ */
 function isLive(mode: string | null): boolean {
-    return mode === "wasm" || mode === "live";
+    return (
+        mode === "wasm" ||
+        mode === "live" ||
+        mode === "rc" ||
+        mode === "rc-wasm"
+    );
 }
 
 @customElement("cp-backend-badge")
@@ -72,6 +80,10 @@ export class BackendBadge extends VueElement {
             return `▶ ${this.root?.getAttribute("data-live-backend") || "Live"}`;
         }
         if (mode === "svg") return "▪ SVG";
+        // The in-browser Remote Compose players replay the published document. Falling through to
+        // the snapshot label would claim the baked capture is on stage while the document plays.
+        if (mode === "rc") return "▶ Camaelon JS";
+        if (mode === "rc-wasm") return "▶ CMP Wasm";
         // A recording is not a render, and the badge is a provenance claim — so falling through
         // to the snapshot label would attribute animated pixels to the still renderer. Named
         // generically rather than from the picked capture: the badge re-renders on a MODE change,

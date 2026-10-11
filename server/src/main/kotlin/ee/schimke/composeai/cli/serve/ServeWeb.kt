@@ -16603,6 +16603,9 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
    *   lane e2e read it.
    *
    * "Full page (scroll)" lives in the drawer's Scroll group ([scrollGroupHtml]).
+   *
+   * `data-cp-qr-src` names the QR encoder bundle that `viewer/phoneQr.ts` fetches when its "On
+   * phone" popover, appended to this bar client-side, first opens.
    */
   private fun downloadLinksHtml(hasSvgExport: Boolean): String {
     fun group(kind: String, ext: String): String =
@@ -16623,7 +16626,7 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
     // "Full page (scroll)" toggle over in the overrides drawer's Scroll group.
     val svgGroup = if (hasSvgExport) "\n" + group("SVG", "svg") else ""
     return """
-      <div class="cp-export" aria-label="Export the current view">
+      <div class="cp-export" aria-label="Export the current view" data-cp-qr-src="${WebEscaping.htmlEscape(assetHref("qr-code.js"))}">
         <span class="cp-export-head" id="cp-export-head">Export</span>
         ${group("PNG", "png")}$svgGroup
       </div>
