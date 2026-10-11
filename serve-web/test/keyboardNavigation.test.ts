@@ -283,13 +283,27 @@ describe("power-user keyboard navigation", () => {
             target.dispatchEvent(
                 new KeyboardEvent("keydown", { key: k, bubbles: true }),
             );
+        // G presses the grid toggle beside it.
+        const grid = document.createElement("button");
+        grid.className = "cp-grid-toggle";
+        let grids = 0;
+        grid.addEventListener("click", () => grids++);
+        document.body.appendChild(grid);
         key("f");
         assert.equal(presses, 1, "F presents");
+        key("g");
+        assert.equal(grids, 1, "G toggles the grid");
         const liveCanvas = document.createElement("canvas");
         document.body.appendChild(liveCanvas);
         key("f", liveCanvas);
         assert.equal(presses, 1, "an F typed into the live stream stays there");
-        // While presenting, only F answers: a palette would open behind the full-screen stage.
+        key("g", liveCanvas);
+        assert.equal(grids, 1, "so does a G");
+        const field = document.createElement("input");
+        document.body.appendChild(field);
+        key("g", field);
+        assert.equal(grids, 1, "and a G typed into a field");
+        // While presenting, only F and G answer: a palette would open behind the full-screen stage.
         Object.defineProperty(document, "fullscreenElement", {
             configurable: true,
             get: () => present,
@@ -302,11 +316,17 @@ describe("power-user keyboard navigation", () => {
         );
         key("F");
         assert.equal(presses, 2, "F leaves present mode too");
+        key("G");
+        assert.equal(
+            grids,
+            2,
+            "and G still shows the grid on the presented stage",
+        );
         delete (document as { fullscreenElement?: unknown }).fullscreenElement;
         key("?");
         assert.match(
             document.querySelector("[role='dialog']")!.textContent!,
-            /F\s*Present the preview full screen/,
+            /F\s*Present the preview full screen\s*G\s*Toggle the 8dp grid/,
         );
         key("Escape");
 

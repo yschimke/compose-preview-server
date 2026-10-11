@@ -206,10 +206,11 @@ class KeyboardNavigation {
             return;
         }
         // Present mode (`viewer/present.ts`) puts only the stage in the top layer, so a palette or
-        // the guide would open behind it, invisibly. While it is up the one shortcut is the one that
-        // leaves it; Esc is the browser's own and needs nothing from here.
+        // the guide would open behind it, invisibly. While it is up the shortcuts are the one that
+        // leaves it and G, whose grid rides into full screen with the stage; Esc is the browser's
+        // own and needs nothing from here.
         const presenting = !!document.fullscreenElement;
-        if (presenting && event.key.toLowerCase() !== "f") return;
+        if (presenting && !/^[fg]$/i.test(event.key)) return;
         if (
             (event.metaKey || event.ctrlKey) &&
             event.key.toLowerCase() === "k"
@@ -248,18 +249,19 @@ class KeyboardNavigation {
             event.preventDefault();
             this.navigateRelative("variants", key === "]" ? 1 : -1);
         } else if (
-            key.toLowerCase() === "f" &&
+            /^[fg]$/i.test(key) &&
             // A focused live canvas is a typing surface: its keys go to the running composable,
             // and an F typed into one of its text fields must not take the page full screen.
             !(event.target instanceof HTMLCanvasElement)
         ) {
             // The same button a pointer presses, so the gesture cannot drift from it — and a page
-            // without one (no stage, or no Fullscreen API) leaves F alone.
-            const present =
-                document.querySelector<HTMLButtonElement>(".cp-present");
-            if (!present) return;
+            // without one (no stage, or no Fullscreen API for F) leaves the key alone.
+            const button = document.querySelector<HTMLButtonElement>(
+                key.toLowerCase() === "f" ? ".cp-present" : ".cp-grid-toggle",
+            );
+            if (!button) return;
             event.preventDefault();
-            present.click();
+            button.click();
         }
     }
 
@@ -745,7 +747,8 @@ class KeyboardNavigation {
           <kbd>C</kbd><span>Jump to a component</span><kbd>J / K</kbd><span>Next / previous component</span>
           <kbd>V</kbd><span>Choose a state or variant</span><kbd>[ / ]</kbd><span>Previous / next variant</span>
           <kbd>M</kbd><span>Choose renderer, theme, or display mode</span><kbd>O</kbd><span>Find and focus an override</span>
-          <kbd>F</kbd><span>Present the preview full screen</span><kbd>/</kbd><span>Focus the page filter</span>
+          <kbd>F</kbd><span>Present the preview full screen</span><kbd>G</kbd><span>Toggle the 8dp grid over the preview</span>
+          <kbd>/</kbd><span>Focus the page filter</span>
           <kbd>?</kbd><span>Show this guide</span><kbd>Esc</kbd><span>Close any keyboard panel</span></div>
           <p class="cp-keyboard-note">Shortcuts pause while you type in a field. Tab and arrow keys keep their native browser behavior.</p>`;
         dialog

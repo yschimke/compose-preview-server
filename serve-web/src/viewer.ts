@@ -38,6 +38,10 @@ import { withStage } from "./annotate/report.js";
 import { isTransparent } from "./backgroundChoice.js";
 import { installWebShare } from "./viewer/webShare.js";
 import { installPresent } from "./viewer/present.js";
+import {
+    densityFromDeviceLabel,
+    installGridOverlay,
+} from "./viewer/gridOverlay.js";
 import { wireCopyId } from "./viewer/copyId.js";
 import { pageWakeHold } from "./viewer/wakeLock.js";
 import { writeThemeMemory } from "./chrome/themeMemory.js";
@@ -1252,6 +1256,18 @@ installWebShare(function () {
 });
 // The stage alone, full screen: a corner button on it, and F with keyboard navigation on.
 installPresent(stage);
+// An 8dp grid over the render: a corner toggle beside Present, and G with keyboard navigation on.
+// The page's density is right for the preview as authored; a picked Device renders at that device's
+// density instead, which its option's dp size and the PNG's px size give exactly.
+var gridDevice = may<HTMLSelectElement>("cp-device");
+installGridOverlay(stage, img, function () {
+    return (
+        densityFromDeviceLabel(
+            gridDevice && gridDevice.selectedOptions[0],
+            img,
+        ) || renderDensity
+    );
+});
 // Live frame painting. Frames land on `frameQueue` and drain one per animation frame. Two
 // watermarks keep the stage moving forward: the queue drops frames at or below the last released,
 // and `paintedSeq` drops decodes that resolve out of order. See `live/framePainter.ts`.

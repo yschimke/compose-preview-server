@@ -2518,6 +2518,32 @@ cp-history-menu { display: contents; }
   transition: opacity var(--md-sys-motion-duration-short2) var(--md-sys-motion-easing-standard); }
 .cp-stage:hover > .cp-present, .cp-present:focus-visible { opacity: 1; }
 .cp-present:focus-visible { outline: 2px solid var(--cp-accent); outline-offset: 2px; }
+/* --- Grid (`viewer/gridOverlay.ts`): a faint 8dp grid with 16dp side keylines over the render.
+   The script pins the box to the image's pixels and sets one cell's size per axis; this paints it as
+   two repeating gradients (columns, then rows), 1px lines on transparent, so it adds nothing to the
+   bundle and repaints for free on resize. A translucent magenta reads on the white stage, the dark
+   one and the checkerboard alike, and is a colour a design seldom uses itself, so the grid never
+   passes for part of the render. Keylines are the same hue, stronger. It sits under the stage's
+   buttons and takes no pointer, so hovering, picking and the live stream's input pass through. */
+.cp-grid-overlay { position: absolute; z-index: 4; pointer-events: none;
+  --cp-grid-line: rgba(233, 30, 140, 0.18);
+  background-image:
+    repeating-linear-gradient(to right, var(--cp-grid-line) 0 1px, transparent 1px var(--cp-grid-x, 16px)),
+    repeating-linear-gradient(to bottom, var(--cp-grid-line) 0 1px, transparent 1px var(--cp-grid-y, 16px)); }
+.cp-viewer[data-bg-theme="dark"] .cp-grid-overlay { --cp-grid-line: rgba(255, 92, 180, 0.24); }
+.cp-grid-overlay::before { content: ""; position: absolute; top: 0; bottom: 0;
+  left: calc(2 * var(--cp-grid-x, 16px)); right: calc(2 * var(--cp-grid-x, 16px));
+  border: solid rgba(233, 30, 140, 0.55); border-width: 0 1px; }
+.cp-grid-overlay[hidden] { display: none; }
+.cp-grid-toggle { position: absolute; right: 48px; bottom: 8px; z-index: 5; width: 32px; height: 32px;
+  padding: 0; border: 0; border-radius: 999px; background: rgba(20,20,22,0.72); color: #fff;
+  font: 600 16px/1 ui-monospace, monospace; cursor: pointer; opacity: 0.5;
+  transition: opacity var(--md-sys-motion-duration-short2) var(--md-sys-motion-easing-standard); }
+.cp-stage:hover > .cp-grid-toggle, .cp-grid-toggle:focus-visible, .cp-grid-toggle[aria-pressed="true"] { opacity: 1; }
+.cp-grid-toggle[aria-pressed="true"] { background: rgba(233, 30, 140, 0.85); }
+.cp-grid-toggle:focus-visible { outline: 2px solid var(--cp-accent); outline-offset: 2px; }
+/* No Present button (no Fullscreen API, e.g. iPhone Safari): take its corner. */
+.cp-stage:not(:has(> .cp-present)) > .cp-grid-toggle { right: 8px; }
 /* Full screen, the stage becomes the screen: no card corners or shadow, and its OWN background —
    the theme-pinned #fff / #1d1d20, the checkerboard, or a chosen backdrop — fills it, so the render
    sits on exactly the field it sat on in the page. The snapshot is contain-fitted to the whole box,
