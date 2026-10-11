@@ -461,7 +461,7 @@ truth = "1.4.5"
 okhttp = "5.5.0"
 okio = "3.18.2"
 classgraph = "4.8.197"
-jmdns = "3.6.3"
+jmdns = "3.6.4"
 
 [libraries]
 composeai-common-web-escaping = { module = "ee.schimke.composeai:common-web-escaping" }
