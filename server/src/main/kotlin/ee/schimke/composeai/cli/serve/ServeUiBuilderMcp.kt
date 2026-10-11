@@ -354,6 +354,11 @@ class ServeUiBuilderMcp(
     /** Optional 2025 request-scoped interaction; every operation must retain a text fallback. */
     clientInteraction: ServeCatalogMcp.ClientInteraction =
       ServeCatalogMcp.ClientInteraction.Unsupported,
+    /**
+     * Whether the caller's credential also carries the export capability. Asked only by [VIEW] with
+     * no `renderer`, to choose the native frame when a selection has to be outlined.
+     */
+    mayExport: () -> Boolean = { false },
   ): String {
     // Only a design this actor may read can acquire presence. A failed or spoofed design id
     // must never reveal another actor's access or add a participant to someone else's room.
@@ -372,7 +377,7 @@ class ServeUiBuilderMcp(
         tool,
         args,
         actor,
-        withLinks(tool, args, run(tool, args, actor, callId, clientInteraction)),
+        withLinks(tool, args, run(tool, args, actor, callId, clientInteraction, mayExport)),
       )
     } finally {
       leave?.invoke()
@@ -385,6 +390,7 @@ class ServeUiBuilderMcp(
     actor: AuthenticatedUiBuilderActor,
     callId: String,
     clientInteraction: ServeCatalogMcp.ClientInteraction,
+    mayExport: () -> Boolean,
   ): String {
     val request =
       when (tool) {
@@ -461,7 +467,7 @@ class ServeUiBuilderMcp(
             format = args.exportFormat(),
           )
         RENDER_NATIVE -> return renderNative(args, actor)
-        VIEW -> return view(args, actor)
+        VIEW -> return view(args, actor, mayExport)
         PUT_ASSET -> return envelope(callId, putAsset(args, actor))
         AWAIT_DESIGN -> return awaitDesign(args, actor)
         LIST_COMMENTS,
@@ -1126,13 +1132,31 @@ class ServeUiBuilderMcp(
    * The editor canvas as a person sees it (selection, reference, comment pins, optional layout
    * bounds) plus the same facts as JSON (#1114). See [ServeUiBuilderView]. Read as this actor
    * first; the frame is one of the design's existing renders.
+   *
+   * With no `renderer`, a selection to outline picks the native frame where one can be had: the PNG
+   * export reports no node boxes, so a view drawn from it can never outline anything, and answering
+   * `selection` with an unmarked picture is the bug an agent reported. Where the native frame
+   * cannot be had — no lane, no export grant, or a render that failed — the export frame is drawn
+   * and [UiBuilderViewV1.notes] says why the outline is missing.
    */
-  private suspend fun view(args: JsonObject, actor: AuthenticatedUiBuilderActor): String {
+  private suspend fun view(
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+    mayExport: () -> Boolean = { false },
+  ): String {
     val designId = args.requiredText("designId")
     val include = args.viewIncludes()
     val selection = args.stringList(SELECTION_ARGUMENT)
     val viewport = args.viewport()
-    val renderer = args.text(RENDERER_ARGUMENT) ?: ServeUiBuilderView.RENDERER_EXPORT
+    val notes = mutableListOf<String>()
+    val asked = args.text(RENDERER_ARGUMENT)
+    val renderer =
+      asked
+        ?: defaultViewRenderer(
+          outline = ServeUiBuilderView.INCLUDE_SELECTION in include && selection.isNotEmpty(),
+          mayExport = mayExport,
+          notes = notes,
+        )
     if (
       renderer != ServeUiBuilderView.RENDERER_EXPORT &&
         renderer != ServeUiBuilderView.RENDERER_NATIVE
@@ -1147,10 +1171,23 @@ class ServeUiBuilderMcp(
         as? UiBuilderServiceResponse.Snapshot
         ?: throw McpRequestException("no design `$designId` this actor can read")
     val document = snapshot.snapshot.state.document
-    val notes = mutableListOf<String>()
     val frame =
-      if (renderer == ServeUiBuilderView.RENDERER_NATIVE) nativeViewFrame(designId, document)
-      else exportViewFrame(designId, document.revision, actor)
+      if (renderer != ServeUiBuilderView.RENDERER_NATIVE) {
+        exportViewFrame(designId, document.revision, actor)
+      } else if (asked != null) {
+        nativeViewFrame(designId, document)
+      } else {
+        // Chosen here rather than asked for, so a native render that fails falls back to the frame
+        // the caller would have had before, with the reason, instead of failing the view.
+        try {
+          nativeViewFrame(designId, document)
+        } catch (failed: McpRequestException) {
+          notes +=
+            "the native render, which reports the node boxes a selection is outlined with, " +
+              "failed (${failed.message}); this is the PNG export, which reports none"
+          exportViewFrame(designId, document.revision, actor)
+        }
+      }
     val board =
       if (ServeUiBuilderView.INCLUDE_COMMENTS !in include) null
       else if (comments == null) {
@@ -1180,6 +1217,31 @@ class ServeUiBuilderMcp(
         throw McpRequestException(refused.message ?: "the view could not be drawn")
       }
     return UI_BUILDER_JSON.encodeToString(UiBuilderViewV1.serializer(), view)
+  }
+
+  /**
+   * The frame [VIEW] draws when no `renderer` is named: native exactly when a selection is to be
+   * outlined and this host and caller can render one, else the PNG export. Why an outline cannot be
+   * drawn is added to [notes], since the picture alone cannot say it.
+   */
+  private fun defaultViewRenderer(
+    outline: Boolean,
+    mayExport: () -> Boolean,
+    notes: MutableList<String>,
+  ): String {
+    if (!outline) return ServeUiBuilderView.RENDERER_EXPORT
+    val why =
+      when {
+        nativePreview == null ->
+          "this host has no native render lane, and the PNG export reports no node boxes, so " +
+            "the selection cannot be outlined"
+        !mayExport() ->
+          "outlining the selection needs the native render, which needs the ui-builder-export " +
+            "capability this grant lacks; the PNG export reports no node boxes"
+        else -> return ServeUiBuilderView.RENDERER_NATIVE
+      }
+    notes += why
+    return ServeUiBuilderView.RENDERER_EXPORT
   }
 
   /** The render [COMPARE_REFERENCE] measures: as asked, else native exactly when layers are. */
@@ -4595,8 +4657,11 @@ class ServeUiBuilderMcp(
             "The frame is the PNG export (`$RENDERER_ARGUMENT: \"export\"`, the editor's own " +
             "renderer), which reports no node boxes; `$RENDERER_ARGUMENT: \"native\"` draws " +
             "real Compose on a host with a native render lane, reports every node's box so the " +
-            "selection can be outlined, and needs the ui-builder-export capability. A node with " +
-            "no box is reported, never drawn at a guessed position. Not an McpResponseEnvelopeV1.",
+            "selection can be outlined, and needs the ui-builder-export capability. With no " +
+            "`$RENDERER_ARGUMENT`, a non-empty `selection` is drawn on the native frame when the " +
+            "host has a lane and the caller the capability, and otherwise on the export with a " +
+            "note saying why it is not outlined. A node with no box is reported in `notes`, " +
+            "never drawn at a guessed position. Not an McpResponseEnvelopeV1.",
           """
           {"type":"object","properties":{
             "designId":{"type":"string"},
@@ -4604,7 +4669,7 @@ class ServeUiBuilderMcp(
             "$VIEWPORT_ARGUMENT":{"type":"object","properties":{"width":{"type":"integer","minimum":1,"maximum":${ServeUiBuilderView.MAX_VIEWPORT_PX}},"height":{"type":"integer","minimum":1,"maximum":${ServeUiBuilderView.MAX_VIEWPORT_PX}}},"required":["width","height"],"additionalProperties":false,"description":"Fit the picture inside this many pixels, keeping its aspect ratio. Omit for the render's own size."},
             "$INCLUDE_ARGUMENT":{"type":"array","items":{"type":"string","enum":[${ServeUiBuilderView.INCLUDES.joinToString(",") { "\"$it\"" }}]},"description":"Overlays to draw. Defaults to ${ServeUiBuilderView.DEFAULT_INCLUDES.sorted().joinToString(", ")}; [] draws the bare frame."},
             "$SELECTION_ARGUMENT":{"type":"array","items":{"type":"string"},"description":"Node ids to show as selected."},
-            "$RENDERER_ARGUMENT":{"type":"string","enum":["${ServeUiBuilderView.RENDERER_EXPORT}","${ServeUiBuilderView.RENDERER_NATIVE}"],"description":"Defaults to ${ServeUiBuilderView.RENDERER_EXPORT}."},
+            "$RENDERER_ARGUMENT":{"type":"string","enum":["${ServeUiBuilderView.RENDERER_EXPORT}","${ServeUiBuilderView.RENDERER_NATIVE}"],"description":"Defaults to ${ServeUiBuilderView.RENDERER_EXPORT}, or ${ServeUiBuilderView.RENDERER_NATIVE} when a selection is to be outlined and this host and grant can render it."},
             "$INLINE_ARGUMENT":{"type":"boolean","description":"Also return the PNG as an image block. Defaults to false; a host with no public origin always does."}
           },"required":["designId"],"additionalProperties":false}
           """,

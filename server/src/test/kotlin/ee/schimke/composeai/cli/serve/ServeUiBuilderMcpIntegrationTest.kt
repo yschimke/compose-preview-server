@@ -1828,6 +1828,106 @@ class ServeUiBuilderMcpIntegrationTest {
   }
 
   @Test
+  fun `ui_builder_view outlines a selection with no renderer named, on the native frame`() {
+    // The eval call: a node id in `selection` and nothing else. It used to draw the PNG export,
+    // which reports no boxes, so the picture came back identical to one with no selection.
+    val selected = ServeUiBuilderView.Box(16, 24, 200, 40)
+    val server =
+      start(
+        withPngExport = true,
+        nativePreview =
+          UiBuilderNativePreviewLane { _, _ ->
+            UiBuilderNativePreviewOutcome.Rendered(
+              response =
+                PlaygroundRunResponse(
+                  previewId = "generated",
+                  previewToken = "token",
+                  image = java.util.Base64.getEncoder().encodeToString(VIEW_FRAME),
+                ),
+              taggedNodeIds = listOf("session"),
+              nodeBounds =
+                mapOf(
+                  "session" to
+                    AnnotationBounds(
+                      x = selected.x,
+                      y = selected.y,
+                      width = selected.width,
+                      height = selected.height,
+                    )
+                ),
+            )
+          },
+      )
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}""",
+    )
+
+    val result =
+      call(
+        server,
+        ServeUiBuilderMcp.VIEW,
+        """{"designId":"agent-screen","selection":["session"],"inline":true}""",
+      )
+    assertEquals(null, result["isError"], result.toString())
+    val content = result["content"]!!.jsonArray.map { it.jsonObject }
+    val view = Json.parseToJsonElement(content.first()["text"]!!.jsonPrimitive.content).jsonObject
+    assertEquals("native", view["renderer"]!!.jsonPrimitive.content, view.toString())
+    val image = content.single { it["type"]!!.jsonPrimitive.content == "image" }
+    val picture =
+      javax.imageio.ImageIO.read(
+        java.util.Base64.getDecoder().decode(image["data"]!!.jsonPrimitive.content).inputStream()
+      )
+    val edge = java.awt.Color(picture.getRGB(selected.x, selected.y + selected.height / 2))
+    assertTrue(edge.blue > 200 && edge.red < 100, "selection outline at the node's edge: $edge")
+
+    // With no selection the view stays the cheap export frame.
+    val bare = call(server, ServeUiBuilderMcp.VIEW, """{"designId":"agent-screen"}""")
+    val bareView =
+      Json.parseToJsonElement(
+          bare["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
+        )
+        .jsonObject
+    assertEquals("export", bareView["renderer"]!!.jsonPrimitive.content, bareView.toString())
+  }
+
+  @Test
+  fun `ui_builder_view falls back to the export, saying why, when the chosen native render fails`() {
+    val server =
+      start(
+        withPngExport = true,
+        nativePreview =
+          UiBuilderNativePreviewLane { _, _ ->
+            UiBuilderNativePreviewOutcome.Refused("compile_failed", listOf("no such symbol"))
+          },
+      )
+    envelope(
+      server,
+      ServeUiBuilderMcp.CREATE_DESIGN,
+      """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), document())}}""",
+    )
+
+    val result =
+      call(
+        server,
+        ServeUiBuilderMcp.VIEW,
+        """{"designId":"agent-screen","selection":["session"]}""",
+      )
+    assertEquals(null, result["isError"], result.toString())
+    val view =
+      Json.parseToJsonElement(
+          result["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
+        )
+        .jsonObject
+    assertEquals("export", view["renderer"]!!.jsonPrimitive.content)
+    assertTrue(
+      view["notes"]!!.jsonArray.any { it.jsonPrimitive.content.contains("no such symbol") },
+      view.toString(),
+    )
+  }
+
+  @Test
   fun `ui_builder_view refuses a design the actor cannot read and an unknown overlay`() {
     val server = start(withPngExport = true)
     val missing = call(server, ServeUiBuilderMcp.VIEW, """{"designId":"nobody-made-this"}""")
