@@ -2309,8 +2309,8 @@ class ServeCatalogStore(
       // Post-publish and self-reporting, like the vector fills beside it.
       val incomplete = inFetchScope { scope ->
         runCatching {
-            fetchRcCompare(alias, bakedLaneLabel, base, dir) { generations[system] == generation }
-          }
+          fetchRcCompare(alias, bakedLaneLabel, base, dir) { generations[system] == generation }
+        }
           .onFailure { System.err.println("serve: catalog $system rc-compare: ${it.message}") }
         scope.sawTransientFailure
       }
