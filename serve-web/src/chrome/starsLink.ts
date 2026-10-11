@@ -23,8 +23,11 @@ export const MAX_SHARED_IDS = 50;
 /** Ids are path segments and preview ids, neither of which is anywhere near this long. */
 const MAX_ID_LENGTH = 200;
 
-/** A fragment longer than this is not one Share wrote, and is ignored without being parsed. */
-const MAX_FRAGMENT_LENGTH = 8_000;
+/**
+ * The longest `stars=` value either side accepts. The decoder ignores anything longer unparsed, so
+ * the encoder trims to fit it ({@link fitSharedStars}): every link Share writes must open.
+ */
+export const MAX_FRAGMENT_LENGTH = 8_000;
 
 /** What a link shares: catalog ids, and preview ids belonging to the page the link opens. */
 export interface SharedStars {
@@ -45,20 +48,43 @@ function validIds(list: readonly string[]): string[] {
     return out;
 }
 
+function join(stars: SharedStars): string {
+    const groups: string[] = [];
+    if (stars.catalogs.length)
+        groups.push(`c:${stars.catalogs.map(encodeURIComponent).join(",")}`);
+    if (stars.previews.length)
+        groups.push(`p:${stars.previews.map(encodeURIComponent).join(",")}`);
+    return groups.join(";");
+}
+
+/**
+ * What of [stars] a link can actually carry: valid ids, at most {@link MAX_SHARED_IDS} per list,
+ * and no more than fits in {@link MAX_FRAGMENT_LENGTH} once encoded. Lists are newest-first, so a
+ * trim drops the OLDEST stars — the link shares the N most recent — and never yields a value the
+ * decoder would throw away whole. (A percent-encoded non-ASCII id can be nine times its length, so
+ * the id caps alone do not bound the value.)
+ */
+export function fitSharedStars(stars: SharedStars): SharedStars {
+    const out: SharedStars = { catalogs: [], previews: [] };
+    for (const key of ["catalogs", "previews"] as const)
+        for (const id of validIds(stars[key])) {
+            out[key].push(id);
+            if (join(out).length > MAX_FRAGMENT_LENGTH) {
+                out[key].pop();
+                break;
+            }
+        }
+    return out;
+}
+
 /**
  * The fragment value for [stars], without the leading `#stars=`; `""` when there is nothing to
  * share. Each id is percent-encoded, so the `,` `:` `;` that structure the value never collide
- * with one, and the result stays readable for the ordinary ids catalogs actually use.
+ * with one, and the result stays readable for the ordinary ids catalogs actually use. Always
+ * within {@link MAX_FRAGMENT_LENGTH}: see {@link fitSharedStars}.
  */
 export function encodeSharedStars(stars: SharedStars): string {
-    const groups: string[] = [];
-    const catalogs = validIds(stars.catalogs);
-    const previews = validIds(stars.previews);
-    if (catalogs.length)
-        groups.push(`c:${catalogs.map(encodeURIComponent).join(",")}`);
-    if (previews.length)
-        groups.push(`p:${previews.map(encodeURIComponent).join(",")}`);
-    return groups.join(";");
+    return join(fitSharedStars(stars));
 }
 
 /**

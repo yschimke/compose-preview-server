@@ -24,6 +24,7 @@ import {
     type SharedStars,
     clearSharedStarsFragment,
     decodeSharedStars,
+    fitSharedStars,
     sharedStarsUrl,
     sharedStarsValue,
     showSharedStarsOffer,
@@ -279,11 +280,20 @@ function shareButton(what: string, shared: () => SharedStars): HTMLElement {
     live.setAttribute("aria-live", "polite");
     let timer: ReturnType<typeof setTimeout> | undefined;
     button.addEventListener("click", () => {
-        void copyText(sharedStarsUrl(shared())).then((ok) => {
+        const all = shared();
+        const fit = fitSharedStars(all);
+        // A row too long for one link shares its newest stars, and says so rather than implying
+        // the whole row went.
+        const sent = fit.catalogs.length + fit.previews.length;
+        const trimmed = sent < all.catalogs.length + all.previews.length;
+        const done = trimmed
+            ? `Link copied: the ${sent} most recent`
+            : "Link copied";
+        void copyText(sharedStarsUrl(fit)).then((ok) => {
             // Pin the width so the shorter/longer confirmation does not shove the heading about.
             if (!timer) button.style.minWidth = `${button.offsetWidth}px`;
-            button.textContent = ok ? "Link copied ✓" : "Copy failed";
-            live.textContent = ok ? "Link copied" : "Copy failed";
+            button.textContent = ok ? `${done} ✓` : "Copy failed";
+            live.textContent = ok ? done : "Copy failed";
             clearTimeout(timer);
             timer = setTimeout(() => {
                 button.textContent = "Share";

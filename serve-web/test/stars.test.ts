@@ -11,9 +11,11 @@ import {
     systemFromPath,
 } from "../src/chrome/stars.js";
 import {
+    MAX_FRAGMENT_LENGTH,
     MAX_SHARED_IDS,
     decodeSharedStars,
     encodeSharedStars,
+    fitSharedStars,
     sharedStarsUrl,
     sharedStarsValue,
 } from "../src/chrome/starsLink.js";
@@ -346,6 +348,37 @@ describe("shared stars", () => {
             decodeSharedStars(`p:${many.join(",")}`)!.previews.length,
             MAX_SHARED_IDS,
         );
+    });
+
+    it("trims a too-long shortlist to the newest stars, so every link it writes decodes", () => {
+        // 50 ids at the 200-char cap, each of them non-ASCII: far past the fragment limit encoded.
+        const long = (i: number) => `${i}`.padStart(4, "0") + "é".repeat(196);
+        const stars = {
+            catalogs: Array.from({ length: MAX_SHARED_IDS }, (_, i) => long(i)),
+            previews: Array.from({ length: MAX_SHARED_IDS }, (_, i) =>
+                long(100 + i),
+            ),
+        };
+        const value = encodeSharedStars(stars);
+        assert.ok(value.length <= MAX_FRAGMENT_LENGTH, `${value.length}`);
+        const fit = fitSharedStars(stars);
+        assert.ok(fit.catalogs.length > 0);
+        assert.ok(fit.catalogs.length < MAX_SHARED_IDS);
+        // Newest first, so the trim keeps a prefix.
+        assert.deepEqual(
+            fit.catalogs,
+            stars.catalogs.slice(0, fit.catalogs.length),
+        );
+        assert.deepEqual(decodeSharedStars(value), fit);
+
+        // At the plain-ASCII maximum everything fits and round-trips untouched.
+        const ascii = {
+            catalogs: Array.from({ length: MAX_SHARED_IDS }, (_, i) =>
+                `c${i}`.padEnd(150, "x"),
+            ),
+            previews: [],
+        };
+        assert.deepEqual(decodeSharedStars(encodeSharedStars(ascii)), ascii);
     });
 
     it("merges into the visitor's stars instead of replacing them", () => {
