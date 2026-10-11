@@ -8011,9 +8011,10 @@ class ServeWebFixtureTest {
     // URLs are built client-side from location.origin with current overrides. The bar is always
     // visible, not a disclosure.
     assertTrue(
-      catalogKnobs.contains("<div class=\"cp-export\" aria-label=\"Export the current view\">") &&
+      catalogKnobs.contains("<div class=\"cp-export\" aria-label=\"Export the current view\"") &&
+        catalogKnobs.contains("data-cp-qr-src=\"") &&
         !catalogKnobs.contains("cp-export cp-disclosure"),
-      "the export bar is shown open, not behind a summary",
+      "the export bar is shown open, not behind a summary, naming its lazy QR bundle",
     )
     assertTrue(
       catalogKnobs.contains("id=\"cp-url-png\"") && catalogKnobs.contains("id=\"cp-dl-png\""),

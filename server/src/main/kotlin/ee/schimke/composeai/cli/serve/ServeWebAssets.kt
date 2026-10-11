@@ -55,6 +55,10 @@ internal object ServeWebAssets {
       // prefix: a worker's scope is bounded by its own path.
       "push-sw.js" to "text/javascript; charset=utf-8",
       "viewer.js" to "text/javascript; charset=utf-8",
+      // The viewer export bar's "On phone" QR encoder, named by the bar's `data-cp-qr-src` and
+      // fetched only when that popover first opens: the viewer bundle is at its budget, and most
+      // visits never open it.
+      "qr-code.js" to "text/javascript; charset=utf-8",
       "uid-reference.js" to "text/javascript; charset=utf-8",
       "spatial-view.js" to "text/javascript; charset=utf-8",
       "format-compare.js" to "text/javascript; charset=utf-8",

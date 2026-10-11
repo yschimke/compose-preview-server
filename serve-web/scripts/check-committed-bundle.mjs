@@ -50,6 +50,7 @@ const tracked = [
     "compare-scorer.js",
     "known-differences.js",
     "viewer.js",
+    "qr-code.js",
     "spatial-view.js",
 ].map((name) => relative(repoRoot, resolve(assets, name)));
 
