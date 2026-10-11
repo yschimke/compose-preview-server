@@ -16,14 +16,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * The catalog's selectable **theme-override choices**, shared so every render tier resolves them
- * identically — the desktop `@Preview` sticker sheet ([com.example.designcatalogm3]
- * `CatalogSticker`) and the in-browser Wasm viewer ([com.example.cmpwasmcatalog] `CatalogApp`).
- * Both read the same `theme.font` / `theme.colors` knob and map the selected **name** here, so the
- * two tiers can never drift (the snapshot the desktop bakes and the live Wasm render agree).
- *
- * The names are exactly the declared `@TypographyCatalog` / `@ColorCatalog` labels the catalog
- * advertises, so the override registry stays in lockstep with what a viewer sees to pick.
+ * The catalog's theme-override choices, shared so every render tier resolves them identically: the
+ * desktop sticker sheet ([com.example.designcatalogm3] `CatalogSticker`) and the in-browser Wasm
+ * viewer ([com.example.cmpwasmcatalog] `CatalogApp`) both map the `theme.font` / `theme.colors`
+ * knob values here. The names are the declared `@TypographyCatalog` / `@ColorCatalog` labels.
  */
 
 /** Knob keys the theme wrappers read. */
@@ -43,22 +39,18 @@ const val CATALOG_PALETTE_CORAL = "Coral"
 const val CATALOG_PALETTE_TEAL = "Teal"
 
 /**
- * Prefix marking a `theme.colors` value as a **serialized app palette** rather than a named choice
- * — `scheme:l=<role>:<AARRGGBB>,…;d=<role>:<AARRGGBB>,…`. Lets any consumer (e.g. an app rendering
- * the M3 catalog under its own brand theme) feed a full M3 `ColorScheme` through the existing
- * string knob, so every sticker re-skins with **no per-preview change and no brand hardcoded here**
- * — the resolver just decodes whatever roles it's handed and leaves the rest at the stock M3 tone.
- * See [serializeCatalogColorScheme] / [parseCatalogColorScheme].
+ * Prefix marking a `theme.colors` value as a serialized app palette:
+ * `scheme:l=<role>:<AARRGGBB>,…;d=<role>:<AARRGGBB>,…`. Lets a consumer feed a full M3
+ * `ColorScheme` through the string knob, re-skinning every sticker with no brand hardcoded here;
+ * unsupplied roles keep the stock tone. See [serializeCatalogColorScheme] /
+ * [parseCatalogColorScheme].
  */
 const val CATALOG_COLORS_SCHEME_PREFIX = "scheme:"
 
 /**
- * Resolves a selected palette [name] to a [ColorScheme]. A value starting with
- * [CATALOG_COLORS_SCHEME_PREFIX] is a serialized app palette (decoded by
- * [parseCatalogColorScheme]); otherwise [CATALOG_PALETTE_M3] (and any unknown name) is the stock M3
- * light/dark scheme, honouring [dark], and the brand palettes are fixed-tone schemes. Shared by the
- * desktop and Wasm theme wrappers so a `theme.colors` override renders identically in both. An
- * unparseable serialized value falls through to the stock M3 scheme (never an error).
+ * Resolves palette [name] to a [ColorScheme]: a [CATALOG_COLORS_SCHEME_PREFIX] value is decoded by
+ * [parseCatalogColorScheme]; [CATALOG_PALETTE_M3] and unknown names are stock M3 honouring [dark];
+ * the brand palettes are fixed-tone. Unparseable values fall back to stock M3, never an error.
  */
 fun catalogColorScheme(name: String, dark: Boolean): ColorScheme {
   if (name.startsWith(CATALOG_COLORS_SCHEME_PREFIX)) {
@@ -93,22 +85,14 @@ enum class CatalogThemeMode {
 private val CATALOG_THEME_MODES_BOTH = setOf(CatalogThemeMode.LIGHT, CatalogThemeMode.DARK)
 
 /**
- * The display mode(s) the `theme.colors` value [name] is actually designed for. A theme baked or
- * shown in a mode it doesn't define renders an auto-derived variant its author never intended (a
- * light-only brand palette force-darkened to muddy greys), so a consumer that enumerates variants —
- * an exporter baking per-mode PNGs, the landing's Light/Dark selector — should offer only these
- * modes rather than a fixed both, or half the output is unusable.
- * - A **serialized app palette** ([CATALOG_COLORS_SCHEME_PREFIX] blob) is inferred from which mode
- *   segments actually carry usable roles: only `l=…` ⇒ light-only, only `d=…` ⇒ dark-only, both ⇒
- *   both. Inference reuses [parseCatalogColorScheme], so it can never disagree with what
- *   [catalogColorScheme] would render; a blob with no usable mode (malformed/empty) falls back to
- *   both, mirroring [catalogColorScheme]'s stock-M3 fallback for an unparseable value.
- * - A **named palette** is declared: [CATALOG_PALETTE_CORAL] is light-only and
- *   [CATALOG_PALETTE_TEAL] is dark-only (each a fixed-tone scheme [catalogColorScheme] returns
- *   regardless of the requested mode), while [CATALOG_PALETTE_M3] and any unknown name are the
- *   stock M3 scheme — both modes.
- *
- * Always non-empty. Documented per theme in `docs/design/m3-catalog-app-palette.md`.
+ * The display mode(s) the `theme.colors` value [name] is designed for, so variant enumerators (PNG
+ * bakers, the Light/Dark selector) offer only those rather than auto-derived variants.
+ * - A serialized palette ([CATALOG_COLORS_SCHEME_PREFIX]) is inferred from which mode segments
+ *   carry usable roles (via [parseCatalogColorScheme], so it agrees with [catalogColorScheme]);
+ *   none falls back to both.
+ * - Named palettes are declared: [CATALOG_PALETTE_CORAL] light-only, [CATALOG_PALETTE_TEAL]
+ *   dark-only, [CATALOG_PALETTE_M3] and unknown names both. Always non-empty. See
+ *   `docs/design/m3-catalog-app-palette.md`.
  */
 fun catalogThemeModes(name: String): Set<CatalogThemeMode> {
   if (name.startsWith(CATALOG_COLORS_SCHEME_PREFIX)) {
@@ -125,10 +109,8 @@ fun catalogThemeModes(name: String): Set<CatalogThemeMode> {
 }
 
 /**
- * The M3 [ColorScheme] roles carried in a serialized app palette, paired name→value. One list
- * drives both [serializeCatalogColorScheme] (emit) and the round-trip test; [applyColorRoles]
- * consumes the decoded map. Roles omitted from a blob keep their stock M3 tone, so a partial
- * palette still renders (only the supplied roles change).
+ * The M3 roles carried in a serialized palette, name→value; drives [serializeCatalogColorScheme]
+ * and the round-trip test. Omitted roles keep their stock tone.
  */
 private fun schemeRoles(s: ColorScheme): List<Pair<String, Color>> =
   listOf(
@@ -185,19 +167,15 @@ private fun schemeRoles(s: ColorScheme): List<Pair<String, Color>> =
   )
 
 /**
- * The recognized M3 role names a serialized palette may carry — the keys [applyColorRoles] reads
- * and [schemeRoles] emits. A blob key outside this set is a typo or a future role: it's skipped, so
- * it never counts as a "usable role" for [parseCatalogColorScheme] (nor a supported mode for
- * [catalogThemeModes]). Role names don't depend on the scheme's tones, so any instance seeds it.
+ * Recognized role names a serialized palette may carry. Unknown keys are skipped and don't count as
+ * usable roles.
  */
 private val CATALOG_SCHEME_ROLE_NAMES: Set<String> =
   schemeRoles(lightColorScheme()).mapTo(HashSet()) { it.first }
 
 /**
  * Serialize a [light] + [dark] [ColorScheme] pair into the `theme.colors` wire form
- * [catalogColorScheme] decodes: `scheme:l=<role>:<AARRGGBB>,…;d=<role>:<AARRGGBB>,…`. A consumer
- * (e.g. an app publishing the M3 catalog under its own theme) calls this on its brand schemes and
- * passes the result as the `theme.colors` knob — no dependency on this module's palette names.
+ * (`scheme:l=…;d=…`) that [catalogColorScheme] decodes.
  */
 fun serializeCatalogColorScheme(light: ColorScheme, dark: ColorScheme): String {
   fun mode(tag: String, s: ColorScheme) =
@@ -206,11 +184,9 @@ fun serializeCatalogColorScheme(light: ColorScheme, dark: ColorScheme): String {
 }
 
 /**
- * Decode a serialized app palette ([serializeCatalogColorScheme]) for the requested [dark] mode
- * into a [ColorScheme], starting from the stock M3 scheme and overriding only the roles the blob
- * carries. Returns null when [value] isn't a `scheme:` blob or carries no usable role for this mode
- * — the caller then falls back to the stock scheme. Tolerant: unknown role names and malformed hex
- * are skipped rather than failing the whole render.
+ * Decode a serialized palette for [dark] into a [ColorScheme], overriding only the carried roles on
+ * the stock M3 scheme. Null when [value] isn't a `scheme:` blob or has no usable role for this
+ * mode. Unknown roles and malformed hex are skipped.
  */
 fun parseCatalogColorScheme(value: String, dark: Boolean): ColorScheme? {
   if (!value.startsWith(CATALOG_COLORS_SCHEME_PREFIX)) return null
@@ -237,9 +213,7 @@ fun parseCatalogColorScheme(value: String, dark: Boolean): ColorScheme? {
   return applyColorRoles(if (dark) darkColorScheme() else lightColorScheme(), roles)
 }
 
-/**
- * Overlay the decoded [roles] onto [base], leaving any role the blob didn't carry at its base tone.
- */
+/** Overlay [roles] onto [base]; uncarried roles keep the base tone. */
 private fun applyColorRoles(base: ColorScheme, roles: Map<String, Color>): ColorScheme =
   base.copy(
     primary = roles["primary"] ?: base.primary,
@@ -322,19 +296,16 @@ private fun colorToHex(c: Color): String {
 const val CATALOG_SHAPES_KNOB = "theme.shapes"
 
 /**
- * Prefix marking a `theme.shapes` value as a **serialized app shape set** rather than a named
- * choice — `shapes:xs=<dp>,s=<dp>,m=<dp>,l=<dp>,xl=<dp>`. The five M3 size tokens as corner radii
- * in dp. See [serializeCatalogShapes] / [catalogShapes].
+ * Prefix for a serialized app shape set in `theme.shapes`:
+ * `shapes:xs=<dp>,s=<dp>,m=<dp>,l=<dp>,xl=<dp>` (the five M3 corner radii). See
+ * [serializeCatalogShapes] / [catalogShapes].
  */
 const val CATALOG_SHAPES_PREFIX = "shapes:"
 
 /**
- * Resolve a `theme.shapes` value to a [Shapes]. A `shapes:`-prefixed value overrides only the
- * corner sizes it carries (omitted tokens keep the stock M3 corner); any other / absent /
- * unparseable value yields the stock M3 [Shapes] — never throws. Only uniform [RoundedCornerShape]
- * dp corners are expressed here; an app's per-component shape overrides still apply where a
- * component sets its own. Shared by the desktop and Wasm theme wrappers so a `theme.shapes`
- * override renders identically.
+ * Resolve `theme.shapes` to [Shapes]: a `shapes:` value overrides only the sizes it carries;
+ * anything else yields stock M3 [Shapes]. Never throws. Only uniform [RoundedCornerShape] dp
+ * corners.
  */
 fun catalogShapes(value: String): Shapes {
   if (!value.startsWith(CATALOG_SHAPES_PREFIX)) return Shapes()
@@ -359,10 +330,8 @@ fun catalogShapes(value: String): Shapes {
 }
 
 /**
- * Serialize an app's five M3 corner sizes into the `theme.shapes` wire form [catalogShapes]
- * decodes. Takes the dp values directly — a built
- * [androidx.compose.foundation.shape.CornerBasedShape] doesn't expose its size portably, so a
- * consumer passes the sizes it built its `RoundedCornerShape`s from.
+ * Serialize five M3 corner sizes into the `theme.shapes` wire form. Takes dp values directly, since
+ * a built [androidx.compose.foundation.shape.CornerBasedShape] doesn't expose its size portably.
  */
 fun serializeCatalogShapes(
   extraSmall: Dp,
@@ -381,11 +350,9 @@ fun serializeCatalogShapes(
 const val CATALOG_TYPOGRAPHY_KNOB = "theme.typography"
 
 /**
- * Prefix marking a `theme.typography` value as **serialized app type metrics** —
- * `typo:<role>=<sizeSp>/<lineHeightSp>/<letterSpacingSp>/<weight>,…`, one entry per M3 type role.
- * Carries only the numeric scale (size / line-height / letter-spacing / weight); the **typeface**
- * still comes from the `theme.font` knob, because a font *file* can't ride a string knob. `-` in
- * any slot means "leave the base role's value". See [serializeCatalogTypography] /
+ * Prefix for serialized type metrics in `theme.typography`:
+ * `typo:<role>=<sizeSp>/<lineHeightSp>/<letterSpacingSp>/<weight>,…`. Metrics only; the typeface
+ * comes from `theme.font`. `-` means keep the base value. See [serializeCatalogTypography] /
  * [catalogApplyTypography].
  */
 const val CATALOG_TYPOGRAPHY_PREFIX = "typo:"
@@ -414,11 +381,7 @@ private val TYPE_ROLES: List<Pair<String, (Typography) -> TextStyle>> =
 private fun spOrDash(tu: TextUnit): String =
   if (tu.type == TextUnitType.Sp) tu.value.toString() else "-"
 
-/**
- * Serialize a [Typography]'s per-role **metrics** into the `theme.typography` wire form
- * [catalogApplyTypography] overlays. A consumer calls this on its brand `Typography`; the faces are
- * carried separately via `theme.font`, so only the scale travels here.
- */
+/** Serialize a [Typography]'s per-role metrics into the `theme.typography` wire form. */
 fun serializeCatalogTypography(typography: Typography): String =
   CATALOG_TYPOGRAPHY_PREFIX +
     TYPE_ROLES.joinToString(",") { (name, get) ->
@@ -428,10 +391,9 @@ fun serializeCatalogTypography(typography: Typography): String =
     }
 
 /**
- * Overlay serialized type metrics ([serializeCatalogTypography]) onto [base] — which already
- * carries the typeface from the `theme.font` knob — replacing only the slots a role supplies.
- * Returns [base] unchanged when [value] isn't a `typo:` blob or carries nothing usable. Tolerant:
- * an unparseable slot (`-` or garbage) keeps the base role's value.
+ * Overlay serialized metrics onto [base] (which already has the `theme.font` typeface), replacing
+ * only supplied slots. Returns [base] when [value] isn't a `typo:` blob. Unparseable slots keep the
+ * base.
  */
 fun catalogApplyTypography(base: Typography, value: String): Typography {
   if (!value.startsWith(CATALOG_TYPOGRAPHY_PREFIX)) return base
@@ -464,8 +426,8 @@ fun catalogApplyTypography(base: Typography, value: String): Typography {
 }
 
 /**
- * Overlay one role's `<sizeSp>/<lineHeightSp>/<letterSpacingSp>/<weight>` [spec] onto [style],
- * leaving any slot the spec didn't carry (`-` / missing / unparseable) at the base value.
+ * Overlay one role's metrics [spec] onto [style], keeping base values for missing or unparseable
+ * slots.
  */
 private fun applyRoleMetrics(style: TextStyle, spec: String?): TextStyle {
   if (spec.isNullOrEmpty()) return style
@@ -485,34 +447,25 @@ private fun applyRoleMetrics(style: TextStyle, spec: String?): TextStyle {
 // --- Typography (font families) -----------------------------------------------------------------
 
 /**
- * Knob key the theme wrappers read for the M3 [Typography] **font-family** override, keyed by role
- * group. Complements `theme.typography` (metrics only): a font *family* — unlike a size — is a name
- * the tier can resolve to a vendored face, so this carries the typeface the metrics knob cannot.
+ * Knob key for the per-role-group font-family override; complements `theme.typography` (metrics
+ * only).
  */
 const val CATALOG_FONTS_KNOB = "theme.fonts"
 
 /**
- * Prefix marking a `theme.fonts` value as a **serialized per-role-group family map** —
- * `families:<group>=<GoogleFont family>,…` where `<group>` ∈ [CATALOG_FONT_ROLE_GROUPS]. Each named
- * family is resolved via [namedFontFamily] against the tier's vendored faces, so an app can brand
- * the catalog's whole type scale (e.g. `display=Orbitron,body=Space Grotesk`) through the existing
- * string knob with **no per-preview change and no face hardcoded here** — exactly like
- * [CATALOG_COLORS_SCHEME_PREFIX] does for colours. A group the blob omits keeps the base typeface
- * (the `theme.font` face); an unvendored family degrades to that same base. See
- * [parseCatalogFontFamilies] / `catalogApplyFontFamilies`.
+ * Prefix for a serialized family map in `theme.fonts`: `families:<group>=<family>,…` with `<group>`
+ * in [CATALOG_FONT_ROLE_GROUPS]. Each family resolves via [namedFontFamily] against vendored faces;
+ * omitted or unvendored groups keep the `theme.font` face. See [parseCatalogFontFamilies] /
+ * `catalogApplyFontFamilies`.
  */
 const val CATALOG_FONTS_PREFIX = "families:"
 
-/**
- * The five M3 type-role groups a [CATALOG_FONTS_PREFIX] blob keys — each covers its three sizes.
- */
+/** The five M3 type-role groups a [CATALOG_FONTS_PREFIX] blob keys. */
 val CATALOG_FONT_ROLE_GROUPS: List<String> = listOf("display", "headline", "title", "body", "label")
 
 /**
- * Serialize a role-group→family map into the `theme.fonts` wire form (only the five known groups
- * with a non-blank family are emitted, in canonical order). Empty ⇒ empty string (no override). A
- * consumer calls this on its brand type scale's per-group faces; the metrics ride
- * `theme.typography` separately.
+ * Serialize a role-group→family map into the `theme.fonts` form (known groups with non-blank
+ * families, canonical order); empty yields "".
  */
 fun serializeCatalogFontFamilies(families: Map<String, String>): String {
   val kept = CATALOG_FONT_ROLE_GROUPS.mapNotNull { g ->
@@ -523,10 +476,8 @@ fun serializeCatalogFontFamilies(families: Map<String, String>): String {
 }
 
 /**
- * Parse a `families:` blob ([serializeCatalogFontFamilies]) into role-group→family. A value without
- * the [CATALOG_FONTS_PREFIX], or one carrying no recognised group, yields an empty map (⇒ no
- * override). Unknown groups and blank families are skipped, never thrown on — the knob is
- * query-driven, so a bad entry must degrade rather than sink the render.
+ * Parse a `families:` blob into role-group→family. No prefix or no recognised group yields an empty
+ * map; bad entries are skipped, never thrown on.
  */
 fun parseCatalogFontFamilies(value: String): Map<String, String> {
   if (!value.startsWith(CATALOG_FONTS_PREFIX)) return emptyMap()

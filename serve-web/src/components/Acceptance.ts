@@ -55,12 +55,8 @@ interface Payload {
 }
 
 /**
- * How each status reads, and whether it is something to act on.
- *
- * `refused` and the four invalidation causes are deliberately *not* collapsed into one "problem"
- * word. They are different problems with different fixes — a broken artifact, a moved element, a
- * changed reference — and a band that said only "not applied" would leave the reader to re-derive
- * which from the record.
+ * How each status reads. `refused` and the four invalidation causes stay distinct because each has
+ * a different fix.
  */
 const STATUS_LABELS: Record<string, string> = {
     valid: "accepted",
@@ -86,11 +82,8 @@ export class Acceptance extends ControllerElement {
     }
 
     /**
-     * Find the band and the payload, then evaluate.
-     *
-     * The band is server-rendered and starts `hidden`, like the result line beside it: the numbers
-     * are the browser's, and a band that appeared with "0 accepted" before the engine had run would
-     * be asserting something nobody had measured.
+     * Find the band and payload, then evaluate. The band starts `hidden` so it never shows numbers
+     * the engine has not measured.
      */
     private install(): boolean {
         if (!this.isConnected || this.installed) return true;
@@ -127,9 +120,8 @@ export class Acceptance extends ControllerElement {
                 payload.issues ?? [],
             );
         } catch {
-            // An engine that threw has said nothing about the catalog, so the band says nothing
-            // either — rather than reporting a clean comparison it never evaluated, which is the
-            // one failure mode a suppression model must not have.
+            // An engine that threw said nothing, so the band says nothing rather than reporting a
+            // clean result.
             this.failed = true;
         }
         if (evaluation !== this.evaluation || !this.isConnected) return;
@@ -178,9 +170,7 @@ export class Acceptance extends ControllerElement {
         }
         const report = this.report;
         if (!report) return null;
-        // **`unavailable` is not `absent`.** A document the page could not fetch is a page that
-        // measured nothing, and hiding the band there would read as "nothing is accepted here" — a
-        // clean bill of health for a comparison nobody evaluated.
+        // `unavailable` is not `absent`: hiding the band would read as a clean bill of health.
         if (report.state === "unavailable") {
             return h(
                 "span",
@@ -193,12 +183,9 @@ export class Acceptance extends ControllerElement {
         const rows = Object.entries(report.statuses).filter(
             ([, entry]) => entry.status !== "out-of-scope",
         );
-        // **A stalled comparison is not an empty one.** With no pair the engine runs its
-        // validation-only pass and every in-scope acceptance comes back `out-of-scope` — the same
-        // token a record authored elsewhere gets, and the one filtered out just above. So a
-        // transient 503 on the render lane, or a reference whose bytes no longer match the digest
-        // this page was built from, would otherwise hide the band exactly as if the catalog had
-        // nothing to say here. It has; it could not be asked.
+        // A stalled comparison is not an empty one: with no pair, every acceptance comes back
+        // `out-of-scope` (e.g. a transient 503 or a digest mismatch), which would otherwise hide
+        // the band as if there were nothing to say.
         const stalled =
             report.pair === "unavailable" &&
             Object.keys(report.statuses).length > 0;
@@ -224,20 +211,9 @@ export class Acceptance extends ControllerElement {
     }
 
     /**
-     * The failures that belong to the **document** rather than to any acceptance.
-     *
-     * A document that is malformed, carries a duplicated id, or is past its size ceiling is rejected
-     * wholesale: the engine returns no `statuses` at all and reports the reason only through
-     * `validationFailures`. Without this the band showed scores above an empty list, which reads as
-     * "this catalog accepts nothing here" rather than "this catalog's acceptance document was
-     * refused" — and those are the same picture with opposite meanings.
-     *
-     * **Which failures those are is the engine's own answer, not a guess from their shape.** A
-     * document-level rejection is the one that omits `statuses`, and `duplicate-id` — the loudest of
-     * them — is deliberately attributed to the first spelling seen, so it carries an `id` exactly
-     * like a per-record refusal does. Selecting on that `id` dropped it, and a duplicated document
-     * then showed scores over an empty list with nothing explaining that none of it had been
-     * applied.
+     * Failures that belong to the document rather than any acceptance (malformed, duplicate id,
+     * over the size ceiling). The engine marks these by omitting `statuses`; that, not the presence
+     * of an `id`, is the selector, since `duplicate-id` carries an id like a per-record refusal.
      */
     private documentFailures(report: AcceptanceReport): VNode | null {
         if (!report.documentRejected) return null;
@@ -261,9 +237,8 @@ export class Acceptance extends ControllerElement {
     private scores(report: AcceptanceReport): VNode | null {
         const scores = report.scores;
         if (!scores) {
-            // Said plainly, because the alternative reading is the dangerous one: no scores here
-            // means nothing on this comparison was measured against the catalog's known differences,
-            // not that there was nothing to measure.
+            // No scores means nothing was measured against the catalog's known differences, not
+            // that there was nothing to measure.
             return h(
                 "span",
                 { class: "cp-acceptance-note" },
@@ -272,16 +247,8 @@ export class Acceptance extends ControllerElement {
                     : "This pair could not be scored, so only the acceptance verdicts are shown.",
             );
         }
-        // `raw` first and always, because it is the number that must never be hidden.
-        //
-        // It used to carry a disclaimer, and no longer needs one. Acceptance has always been
-        // measured with the portable kernel — an area average both engines can reproduce — while
-        // the result line above came from the browser's own `drawImage` filter, which no offline
-        // engine can; the two differed slightly, and this band said so rather than leaving a reader
-        // to discover two numbers for one question. The rebaseline (D3) made the portable path the
-        // live scorer, so both numbers are now one pixel path: measured over the eleven committed
-        // `renders/lane-parity` pairs the two agree to 0.007pp, which is well inside the one decimal
-        // either of them prints.
+        // `raw` first and always: it must never be hidden. Acceptance and the result line now share
+        // the portable scoring path (D3), so the numbers agree.
         return h("span", { class: "cp-acceptance-scores" }, [
             h("strong", null, `${scores.raw.toFixed(1)}%`),
             " raw · ",
@@ -294,9 +261,7 @@ export class Acceptance extends ControllerElement {
 
     private row(id: string, entry: AcceptanceStatus): VNode {
         const label = STATUS_LABELS[entry.status] ?? entry.status;
-        // The causes and reasons are the engine's own tokens, shown rather than translated: they are
-        // what an author greps for, and a friendlier paraphrase would be a second vocabulary for the
-        // same set.
+        // The engine's own tokens, untranslated, because they are what an author greps for.
         const detail = [...(entry.causes ?? []), ...(entry.reasons ?? [])];
         const lifecycle = this.report?.lifecycles[id];
         const lifecycleLabel = lifecycle?.stale

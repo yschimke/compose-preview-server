@@ -1,15 +1,6 @@
-// The comparison metric, as a table.
-//
-// This is the number the whole design-parity surface is built on — the badge on a catalog chip, the
-// verdict in the spec lane, the ordering of the compare wall — and until now it had no test of any
-// kind, because it lived inside an IIFE behind a canvas. Everything here is arithmetic over
-// luminance planes; none of it needs a browser.
-//
-// The assertions are mostly relational on purpose. Exact percentages are a function of the tuning
-// constants and would have to be rewritten every time one is adjusted, which trains you to update
-// the number rather than ask whether the change was right. What must not change is the ORDERING:
-// a raster shift has to stay cheaper than a missing mark, or the metric has stopped answering the
-// question it exists for.
+// The comparison metric, as a table: pure arithmetic over luminance planes. Assertions are mostly
+// relational because exact percentages follow the tuning constants; what must not change is the
+// ordering (a raster shift stays cheaper than a missing mark).
 
 import assert from "node:assert/strict";
 import {
@@ -136,9 +127,8 @@ describe("contentMask", () => {
             left.width,
             left.height,
         );
-        // The mark, the ring of paper its step is visible from, and the widening — which on a 4x4
-        // reaches every pixel. A blank partner contributes nothing, which is the point: an empty
-        // frame is not evidence about anything.
+        // The mark, the ring of paper its step is visible from, and the widening (every pixel on a
+        // 4x4). A blank partner contributes nothing.
         assert.equal(
             mask.reduce((a: number, b: number) => a + b, 0),
             16,
@@ -202,10 +192,8 @@ describe("scorePlanes", () => {
     });
 
     it("charges a one-pixel raster shift far less than a missing mark", async () => {
-        // The reason this is not a pixel diff. Figma's browser SVG rasteriser and Skia cover the
-        // same vector edge with different sub-pixels, so a pair that is visually identical is
-        // displaced by a pixel everywhere. Charging that like an absent mark would report a finding
-        // on every component in the catalog, forever.
+        // Figma's SVG rasteriser and Skia cover the same edge with different sub-pixels, so a
+        // one-pixel shift must stay nearly free.
         const shifted = await score(MARK, SHIFTED);
         const absent = await score(MARK, ABSENT);
         assert.ok(shifted > absent, `${shifted} should beat ${absent}`);
@@ -258,13 +246,8 @@ describe("scorePlanes", () => {
     });
 
     it("does not let blank canvas dilute a missing mark — issue #4290", async () => {
-        // THE bug this metric was rebuilt for. The cost used to be averaged over every pixel of the
-        // canvas, so the same absent mark answered 85.7% on a 9x7 frame, 97.1% on 21x15 and 99.3%
-        // on 41x31 — the number described how much empty room the component was rendered into. Two
-        // watch screens that shared nothing but their black background scored 93%.
-        //
-        // Measured over content, the answer is the same one three times, because the finding is the
-        // same finding three times.
+        // The score is over content, not canvas area, so the same missing mark scores the same
+        // regardless of frame size.
         const sizes: Array<[number, number]> = [
             [9, 7],
             [21, 15],
@@ -292,21 +275,10 @@ describe("scorePlanes", () => {
     });
 
     it("answers 100 for two DIFFERENT frames that a ground flattened to blank", async () => {
-        // The hazard `COMPARISON_GROUNDS` exists to defuse, pinned here at the level where it is
-        // actually decided rather than described in a comment upstream.
-        //
-        // This function cannot tell "nothing was drawn" from "what was drawn is the same colour as
-        // the ground it was composited onto" — by the time a plane arrives, both look like a flat
-        // field. So a white-ink component and a white-ink reference that share nothing but their ink
-        // colour both flatten to blank on a white ground, and the honest-looking answer above
-        // becomes a confident lie: a perfect score for a pair that was never compared.
-        //
-        // Measured, not hypothetical: `TextMaxLinesTruncated` in `design-catalog-wear-m3` is 8%
-        // opaque with an ink luminance of 255. Composited onto white it IS this test.
-        //
-        // The fix cannot live here — a flat plane genuinely carries no evidence, and inventing some
-        // would be worse. It lives in `scoreOnEveryGround`, which scores the same pair again on
-        // black, where the same ink is fully present, and keeps the worse number.
+        // A plane cannot distinguish "nothing drawn" from ink matching the ground, so white ink on
+        // white scores as a perfect match (e.g. `TextMaxLinesTruncated` in
+        // `design-catalog-wear-m3`). The fix lives in `scoreOnEveryGround`, which also scores on
+        // black and keeps the worse number.
         const whiteInkOnWhite = new Array(6 * 6).fill(255);
         const differentWhiteInkOnWhite = new Array(6 * 6).fill(255);
         assert.equal(

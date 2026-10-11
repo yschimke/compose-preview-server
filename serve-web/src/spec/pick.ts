@@ -1,17 +1,7 @@
-// Reading the colour under the cursor, on both sides of the comparison at once.
-//
-// The lane can already say that two pictures differ and by how much. It cannot say what either
-// pixel IS, which is the question a state layer asks: Material's focus treatment is a 10% white
-// overlay, so a focused container differs from its resting one by about 17/255 on one channel —
-// real, and at the edge of what an eye reports reliably. "Is the overlay drawn, and does the
-// reference agree" is a question about two specific pixels, and nothing on this page answered it.
-//
-// The alignment that question needs is already done. `normaliseImageUrls` returns the pair as two
-// canvases of ONE size, cropped to their content boxes and drawn onto a shared origin, which is
-// also what makes the delta map meaningful. So a point in that space names the same feature in
-// both frames by construction — no per-side scale, no root-translate subtraction, no letterbox
-// offset, none of the registration arithmetic a picker over two independently-placed images needs.
-// Everything here is therefore index arithmetic over two RGBA buffers.
+// Reading the colour under the cursor on both sides of the comparison at once, e.g. to check
+// whether a 10% state-layer overlay is drawn and matches. `normaliseImageUrls` already returns both
+// frames on one same-sized, shared-origin canvas, so a point names the same feature in both and
+// this is plain index arithmetic over two RGBA buffers.
 
 /** One pixel, straight (unmultiplied) as the canvas hands it over. */
 export interface Sample {
@@ -22,10 +12,8 @@ export interface Sample {
 }
 
 /**
- * How far the candidate is read from the reference's own point, in normalised pixels.
- *
- * Null everywhere alignment is off or has nothing to say, which is not the same as `{0, 0}`: a
- * zero offset is a matched box that turned out not to have moved, and the readout says so.
+ * How far the candidate is read from the reference's point, in normalised pixels. Null when
+ * alignment is off or has nothing to say, which differs from `{0, 0}` (matched and unmoved).
  */
 export interface Offset {
     dx: number;
@@ -60,12 +48,7 @@ export function sampleAt(
     return { r: data[i], g: data[i + 1], b: data[i + 2], a: data[i + 3] };
 }
 
-/**
- * Alpha included in the delta, matching `deltaMap`'s own rule: a mark appearing over transparency
- * is a difference, and a picker that ignored alpha would call an opaque pixel and a transparent one
- * of the same RGB identical — which is exactly the case the reference lane produces when the export
- * is missing a layer the render draws.
- */
+/** Alpha is included, matching `deltaMap`: a mark over transparency is a difference. */
 export function deltaOf(reference: Sample, candidate: Sample): number {
     return Math.max(
         Math.abs(reference.r - candidate.r),
@@ -76,14 +59,9 @@ export function deltaOf(reference: Sample, candidate: Sample): number {
 }
 
 /**
- * Both sides at one point in the shared space — or, with an offset, at one point and its match.
- *
- * The offset is the whole of issue #830. Normalisation lines the two frames up by their content
- * boxes, which is the right registration for a delta map and the wrong one for a component whose
- * label sits three pixels lower on one side: read at the same coordinate, every pixel of that label
- * disagrees with the background beside it, and the picker reports two unrelated colours as a
- * difference of 200. Given the shift, it reports ink against ink. Where the shift comes from is
- * `spec/align.ts`'s problem; here it is two more terms in the index arithmetic.
+ * Both sides at one point, or with an offset at one point and its match (see #830). Content-box
+ * normalisation misregisters a label shifted a few pixels on one side; given the shift (from
+ * `spec/align.ts`) it compares ink against ink.
  */
 export function readingAt(
     reference: ArrayLike<number>,
@@ -120,12 +98,8 @@ export function hexOf(sample: Sample): string {
 }
 
 /**
- * What one side reads as, for the panel and for a screen reader.
- *
- * A transparent pixel is reported as transparent rather than as its meaningless RGB: a canvas hands
- * back whatever happens to sit in an unpainted buffer, and printing that as a colour invents a fact
- * about the picture. Partial alpha keeps the hex and names the alpha, because there the RGB is real
- * ink and the alpha is how much of it there is.
+ * What one side reads as, for the panel and screen readers. Fully transparent pixels say so instead
+ * of printing meaningless RGB; partial alpha keeps the hex and names the alpha.
  */
 export function describe(sample: Sample | null): string {
     if (!sample) return "outside this frame";
@@ -140,12 +114,8 @@ function signed(n: number): string {
 }
 
 /**
- * The whole reading as one line — the readout's text, and the announcement's.
- *
- * An applied offset is always stated, zero included. A reading taken under alignment and one taken
- * without it can name the same point and disagree about the colour, so the line has to say which
- * of the two it is; "aligned +0,+3" is also the answer to "did the label move, and by how much",
- * which is usually the next question after "do these pixels differ".
+ * The whole reading as one line (readout and announcement). An applied offset is always stated,
+ * zero included, since aligned and unaligned readings can disagree.
  */
 export function summarise(
     reading: Reading,

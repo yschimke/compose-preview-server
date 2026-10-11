@@ -1,45 +1,20 @@
 package ee.schimke.composeai.cli.serve
 
 /**
- * Builds the prefilled GitHub **new-issue** report for a bug in the **preview server itself** — the
- * running `compose-preview serve` process, its render lanes, and the web UI it draws — as opposed
- * to [ServeIssueReport], which files a bug about a *preview* against the repo whose Kotlin declares
- * it.
+ * Builds the prefilled GitHub new-issue report for a bug in the preview server itself (process,
+ * render lanes, web UI), as opposed to [ServeIssueReport], which files a preview bug against the
+ * repo declaring it.
  *
- * **Why the two are separate rather than one affordance with a repo switch.** They differ in every
- * dimension that matters. [ServeIssueReport] targets a repo it has to *derive* (the catalog's
- * source, else its delivery repo, else a fallback), and the facts it carries identify a preview —
- * component, variant, reference, overrides — because that is what a catalog maintainer needs to
- * reproduce a wrong-looking button. This one always targets [REPO], because there is exactly one
- * repo that ships the server, and the facts it carries describe a *deployment*: which build is
- * running, on which JVM and OS, in which posture, with which catalogs loaded or failed, and what
- * the render lanes have been doing. A visitor whose knob does nothing, whose render 500s, or whose
- * page draws wrong is looking at a server bug, and routing that into the catalog's issue tracker
- * sends it to people who cannot fix it. Making one report try to be both would mean a body that is
- * half-empty whichever bug it is.
- *
- * **Why the affordance is server-wide rather than per-preview.** The per-preview report hangs off a
- * preview because that is its subject. A server bug has no such anchor — the page that misbehaved
- * may be the front door, `/status`, or a catalog that failed to load and has no viewer at all — so
- * this one rides in the site footer on every page, beside the build number it is a bug in.
- *
- * **Why a prefilled link and not a server-side filing**, and **why a form rather than an anchor**:
- * both for the reasons written up on [ServeIssueReport] — the server holds no issue-write token by
- * design, and writing page state into an `href` is a navigation sink. The same [ServeIssueReport]
- * helpers are reused here rather than reimplemented, so a token can't leak into one report body
- * after being stripped from the other.
+ * Separate because they differ in target and facts: this one always targets [REPO] and describes
+ * the deployment (build, JVM, OS, posture, catalogs, render lanes). It lives in the site footer on
+ * every page, since a server bug has no preview to anchor to. Prefilled link and GET form for the
+ * same reasons as [ServeIssueReport], reusing its helpers so token stripping can't diverge.
  */
 internal object ServeBugReport {
 
   /**
-   * The repo that ships the preview server. Fixed, not derived: unlike a preview — which belongs to
-   * whichever project declared it — the server has exactly one home, and a bug in it filed anywhere
-   * else reaches people who cannot fix it.
-   *
-   * That home is `compose-preview-server`, not the `compose-ai-tools` this code was extracted from:
-   * the CLI stayed there and consumes the published library, so the running server, its render
-   * lanes and every web surface this report describes are maintained here. A server bug filed
-   * against the CLI's tracker lands on people who no longer hold the code.
+   * The repo that ships the preview server: fixed, since the server has one home. Not
+   * `compose-ai-tools`, where the CLI stayed.
    */
   const val REPO: String = "yschimke/compose-preview-server"
 
@@ -53,11 +28,9 @@ internal object ServeBugReport {
   const val FROM_PARAM: String = "from"
 
   /**
-   * Stand-in for the **browser** facts block inside [body]. Only the client knows its user agent,
-   * viewport and colour scheme, and those are exactly what a "the page draws wrong" report turns on
-   * — so the server leaves this marker in the form's hidden `body` and the page script swaps in a
-   * filled block. With JS off the marker is dropped rather than shipped, leaving a report that is
-   * simply missing its browser section instead of one carrying a literal `{{client}}`.
+   * Stand-in for the browser facts block (user agent, viewport, colour scheme), which only the
+   * client knows; the page script fills it. With JS off the marker is dropped rather than shipped
+   * literally.
    */
   const val CLIENT_PLACEHOLDER: String = "{{client}}"
 
@@ -80,10 +53,8 @@ internal object ServeBugReport {
   )
 
   /**
-   * What the visitor was looking at. Every field is optional: pressing the affordance on the front
-   * door yields a report with no page section at all, which is correct — there is no catalog, no
-   * preview and no render lane to name, and inventing rows for them would pad the report with
-   * "unknown" where "not applicable" is the truth.
+   * What the visitor was looking at. Every field is optional; the front door yields no page section
+   * rather than "unknown" rows.
    */
   data class Page(
     /** In-server path, token-stripped (`/m3/view/Button__filled`). */
@@ -103,19 +74,10 @@ internal object ServeBugReport {
     /** How this session renders: a live daemon, baked PNGs, … */
     val renderLane: String? = null,
     /**
-     * Which of the viewer's lanes and views the page was actually showing, as [viewLabel] reads it
-     * out of the reporter's own query — `design spec — triptych`, `motion`, `exploded layers`.
-     *
-     * Load-bearing for issue #4261. What this report can embed is what the server can *serve*: the
-     * plain `/render` PNG, and — where the page says which one was on the stage beside it — the
-     * `/reference` PNG ([referenceUrl]). The views themselves are composed in the browser out of
-     * several artefacts, so the spec lane's triptych, the wipe, the exploded stack and the Remote
-     * Compose canvas have no URL at all. A report filed from the triptych used to arrive showing a
-     * single ordinary render, with nothing anywhere in it admitting that the reporter had been
-     * looking at something else — the triager saw a picture that contradicted the complaint. This
-     * row is the honest half of the fix: it names the view, so the images below it read as the
-     * lanes they are rather than as "what they saw". The other half is the browser-side capture the
-     * report page offers, which is the only way to get the composed pixels.
+     * Which viewer lane/view the page showed ([viewLabel]), e.g. `design spec — triptych`.
+     * Browser-composed views have no URL, so the report can only embed the plain render (and
+     * reference); naming the view keeps the images from being mistaken for what the reporter saw
+     * (#4261).
      */
     val view: String? = null,
     /** Why the session is degraded, when it is — `<code> — <detail>` lines. */
@@ -123,21 +85,14 @@ internal object ServeBugReport {
     /** `/render/<id>.png` at the overrides in force, token-stripped. */
     val renderUrl: String? = null,
     /**
-     * `/reference/<id>.png` of the design reference that was **on the stage beside** the render,
-     * token-stripped — the other outer panel of a comparison.
-     *
-     * Set only where the reporter's own path and query settle which image that was: the focused
-     * comparison names its reference in the URL, and the viewer's spec lane is resolved by the
-     * caller only where the catalog offers a single source. Everywhere else this stays null and the
-     * report keeps the base render alone, because a reference the server *picked* would be the
-     * report asserting what the reporter saw — the failure [view] exists to avoid, arriving as a
-     * picture instead of a row (#4765).
+     * Token-stripped `/reference/<id>.png` that was on stage beside the render. Set only where the
+     * reporter's URL settles which reference it was; never server-picked, which would assert what
+     * the reporter saw (#4765).
      */
     val referenceUrl: String? = null,
     /**
-     * Whether the render lane answers **without a token** — i.e. the server is `--public`. Same
-     * rule as [ServeIssueReport.Context.publicRender]: a token-gated lane 404s the tokenless URL
-     * this body carries, so embedding it would put a broken image in every filed issue.
+     * Whether the render lane answers without a token (`--public`); see
+     * [ServeIssueReport.Context.publicRender].
      */
     val publicRender: Boolean = false,
   )
@@ -147,8 +102,8 @@ internal object ServeBugReport {
     "<!-- What were you doing, what did you expect, and what happened instead? -->"
 
   /**
-   * [body] with [shared] — text shared into the installed app ([ServeShareTarget]) — in place of
-   * the "What went wrong" prompt. Unchanged when nothing was shared.
+   * [body] with shared text ([ServeShareTarget]) replacing the "What went wrong" prompt; unchanged
+   * when nothing was shared.
    */
   fun withSharedText(body: String, shared: String?): String {
     val text = shared?.trim()?.takeIf { it.isNotEmpty() } ?: return body
@@ -159,11 +114,8 @@ internal object ServeBugReport {
   fun action(): String = "https://github.com/$REPO/issues/new"
 
   /**
-   * Issue body, in markdown.
-   *
-   * [clientPlaceholder] leaves [CLIENT_PLACEHOLDER] where the browser block goes, for the hidden
-   * form input the page script rewrites; the visible copy shown on the report page passes false so
-   * the reporter reads the same text that will be filed, minus the part their browser fills in.
+   * Issue body in markdown. [clientPlaceholder] leaves [CLIENT_PLACEHOLDER] for the page script in
+   * the hidden form input; the visible preview passes false.
    */
   fun body(server: Server, page: Page, clientPlaceholder: Boolean = false): String {
     val render = ServeIssueReport.withoutToken(page.renderUrl)?.takeIf { it.isNotBlank() }
@@ -185,17 +137,12 @@ internal object ServeBugReport {
       append(WHAT_WENT_WRONG_PROMPT).append("\n\n\n")
       append("### Screenshot\n\n")
       append("<!-- Paste your capture of the page here. -->\n\n\n")
-      // The base render goes BELOW the paste slot and says what it is, rather than standing in as
-      // "the screenshot" — see [Page.view] and issue #4261. It is the plain `/render` PNG at the
-      // overrides in force, which is the right evidence for "this button is the wrong colour" and
-      // the wrong evidence for "the triptych draws its middle panel twice": the server has no URL
-      // for a browser-composed view, so the only honest thing it can do is label what it does have
-      // and let the reporter paste the rest.
+      // The base render goes below the paste slot, labelled for what it is: good evidence for a
+      // wrong colour, not for a browser-composed view the server has no URL for (#4261).
       val onView = view(page)
       if (embedPair) {
-        // The two panels the reporter had on screen, where the page's own URL says which pair that
-        // was (#4765). Still below the paste slot and still labelled for what it is: the diff
-        // between them is composed in the browser, so the capture is what carries it.
+        // The reference/render pair the page URL identified (#4765), below the paste slot; their
+        // diff is browser-composed, so the capture carries it.
         append("### Reference and render").append(onView).append("\n\n")
         append("| Design reference | Render |\n| --- | --- |\n")
         append("| ![reference](").append(reference).append(") | ")
@@ -210,9 +157,7 @@ internal object ServeBugReport {
       } else if (embed) {
         append("### Base render").append(onView).append("\n\n")
         append("![render](").append(render).append(")\n\n")
-        // A reference the pair form refused (an unreachable half, a `|` in a URL) is still named,
-        // for the same reason the link form below names it: half a comparison embedded is not a
-        // reason to drop the other half entirely.
+        // A reference the pair form refused is still linked.
         reference?.let { append("[Design reference PNG](").append(it).append(")\n\n") }
         append(
           "<!-- That image is a LIVE render: it re-renders if the catalog changes, so it may " +
@@ -247,9 +192,8 @@ internal object ServeBugReport {
   }
 
   /**
-   * The parenthetical that keeps the "Base render" heading from over-claiming: on a page that was
-   * showing a browser-composed view, it says which one, so the single PNG under the heading is not
-   * mistaken for the thing the reporter is complaining about.
+   * Parenthetical keeping the "Base render" heading from over-claiming when a composed view was
+   * showing.
    */
   private fun view(page: Page): String =
     page.view?.trim()?.takeIf { it.isNotEmpty() }?.let { " — you were on the ${text(it)}" } ?: ""
@@ -262,11 +206,7 @@ internal object ServeBugReport {
     server.version?.takeIf { it.isNotBlank() }?.let { add("compose-preview" to code(it)) }
     add("Mode" to (if (server.public) "public (open)" else "token-gated"))
     server.uptimeSeconds?.takeIf { it >= 0 }?.let { add("Uptime" to duration(it)) }
-    // Labelled "Server JVM", not "Java", because that is all it is. A project whose
-    // `daemon-launch.json` names a `javaLauncher` renders on THAT JDK, not on the one running the
-    // HTTP server — so calling this "Java" would file a render failure under the wrong runtime and
-    // send a triager looking at the wrong toolchain. Naming the scope is honest and costs nothing;
-    // claiming the renderer's JDK without reading the daemon descriptor would not be.
+    // "Server JVM", not "Java": a project's `javaLauncher` may render on a different JDK.
     server.java?.takeIf { it.isNotBlank() }?.let { add("Server JVM" to code(it)) }
     server.os?.takeIf { it.isNotBlank() }?.let { add("Server OS" to code(it)) }
   }
@@ -299,9 +239,8 @@ internal object ServeBugReport {
   }
 
   /**
-   * The header is the same two-column shell the other report uses. Values arrive already composed
-   * (a code span, a link, plain text) with their *raw* parts escaped by [code] / [text] — escaping
-   * here instead would mangle the markdown those rows deliberately contain.
+   * Two-column table shell. Values arrive composed with raw parts already escaped by [code] /
+   * [text]; escaping here would mangle intended markdown.
    */
   private fun table(rows: List<Pair<String, String>>): String = buildString {
     append("| | |\n| --- | --- |\n")
@@ -311,16 +250,8 @@ internal object ServeBugReport {
   }
 
   /**
-   * Make arbitrary text safe inside a markdown table cell.
-   *
-   * Nearly every value in this report is text this server did not write: a degradation detail, a
-   * catalog's own provenance and trust strings, a load error. A `|` in any of them shears the row
-   * into extra columns, and a backtick closes the code span the value sits in and lets the rest
-   * render as markdown — so a report about a broken catalog arrives with its diagnostics visibly
-   * mangled, which is the worst moment for the table to stop being a table.
-   *
-   * Order matters: the backslash goes first, or it would double the escapes added after it. Same
-   * rule, and the same reason, as the browser block's own escaping in `bugReport.ts`.
+   * Make arbitrary text safe in a markdown table cell: `|` would shear the row and a backtick would
+   * close the code span. Backslash first, or it doubles later escapes (same as `bugReport.ts`).
    */
   private fun cell(value: String): String =
     value.replace("\\", "\\\\").replace("|", "\\|").replace("`", "\\`")
@@ -331,12 +262,7 @@ internal object ServeBugReport {
   /** A value shown as plain text, with its content escaped. */
   private fun text(value: String): String = cell(value)
 
-  /**
-   * Failure text is arbitrary — a stack frame, a classpath, a message with backticks in it — so it
-   * goes in a fence rather than a table cell, where a stray `|` would shear the row. Any fence
-   * marker inside the text is neutralised so it cannot close the block early and let the rest of
-   * the failure render as markdown.
-   */
+  /** Failure text goes in a fence, with inner fence markers neutralised so it can't close early. */
   private fun fence(lines: List<String>): String =
     "```\n" + lines.joinToString("\n") { it.replace("```", "'''") } + "\n```\n"
 
@@ -352,16 +278,14 @@ internal object ServeBugReport {
   }
 
   /**
-   * Route prefixes whose pages an anonymous visitor can never open: the UI builder (a signed-in
-   * session with access to the design) and the operator's admin screens. Mirrored by
+   * Route prefixes anonymous visitors can never open (UI builder, admin). Mirrored by
    * `serve-web/src/report/visibility.ts`.
    */
   private val PRIVATE_PREFIXES = listOf("/ui-builder", "/admin", "/api/ui-builder", "/agent-access")
 
   /**
-   * Whether [path] (a [sanitizeFrom] result, query allowed) is a page only a signed-in user can
-   * open. Captures taken there are not uploaded to the anonymous-read image lane unless the
-   * reporter opts in, because the issue that would link them is public.
+   * Whether [path] ([sanitizeFrom] result) is signed-in only; captures there aren't uploaded to the
+   * anonymous-read image lane without opt-in, since the issue is public.
    */
   fun isPrivatePath(path: String?): Boolean {
     val bare = path?.substringBefore('?')?.substringBefore('#') ?: return false
@@ -369,18 +293,10 @@ internal object ServeBugReport {
   }
 
   /**
-   * The visitor's own page, as a path this server can safely echo into a report and a link.
-   *
-   * The value arrives from the browser (the footer form's hidden `from` input, filled by the page
-   * script from `location`), so it is untrusted input that ends up in HTML, in a link, and in an
-   * issue body. Accepted only as a **same-origin absolute path**: it must start with a single `/`,
-   * must not start with `//` (a protocol-relative URL, which is a different origin wearing a path's
-   * shape), must carry no scheme, no fragment and no control characters, and must be short.
-   * Anything else yields null and the report simply has no page section — a report missing a row is
-   * a far better outcome than one carrying an attacker-chosen link.
-   *
-   * The token is stripped for the same reason it is stripped everywhere else in a report: the token
-   * is the capability to drive the server, and an issue body is public.
+   * The visitor's page as a path safe to echo into HTML, links and an issue body. Untrusted browser
+   * input, accepted only as a short same-origin absolute path: single leading `/` (not `//`), no
+   * scheme, fragment or control characters. Otherwise null and no page section. The token is
+   * stripped, since the issue is public.
    */
   fun sanitizeFrom(raw: String?): String? {
     val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
@@ -391,43 +307,28 @@ internal object ServeBugReport {
     return ServeIssueReport.withoutToken(value)
   }
 
-  /**
-   * A URL long enough for any real viewer link (every override the viewer offers, plus the preview
-   * id) and short enough that a hostile one cannot pad an issue body.
-   */
+  /** Long enough for any real viewer link, short enough that a hostile one can't pad the body. */
   private const val MAX_FROM_LENGTH = 2048
 
   /**
-   * What a served path says about itself: which system it belongs to, and which preview it shows.
-   *
-   * [previewSegment] is left **percent-encoded**, exactly as it appeared in the path. Decoding it
-   * here would repeat the bug the usage route documents — `URLDecoder` turns a legitimately escaped
-   * `%2B` in a preview id into a space and `%2F` into a separator, so an id that renders a viewer
-   * page perfectly stops resolving. The caller matches it against the session's own preview ids
-   * re-encoded the same way, which needs no decoder and cannot round-trip wrong.
+   * What a served path says about itself: system and preview. [previewSegment] stays
+   * percent-encoded; decoding would turn `%2B` into a space and `%2F` into a separator, so the
+   * caller compares against ids re-encoded the same way.
    */
   data class PageRef(
     val system: String? = null,
     val previewSegment: String? = null,
     /**
-     * Which of the two preview-shaped routes the path was — `p` or `compare`, null when it named no
-     * preview at all.
-     *
-     * The two draw different things from the same preview id: the viewer puts one render on a
-     * stage, the focused comparison puts a design reference beside it. A report from the second one
-     * embeds both panels ([Page.referenceUrl]), and only the route can say which page it was — the
-     * preview id alone is the same on both (#4765).
+     * Which preview route the path was (`p` or `compare`), or null. The comparison report embeds
+     * both panels ([Page.referenceUrl]), and only the route tells them apart (#4765).
      */
     val previewRoute: String? = null,
   )
 
   /**
-   * Split a sanitised in-server path ([sanitizeFrom]) into its system and preview.
-   *
-   * Mirrors the route table's two shapes — `/p/{name}` and `/compare/{name}` at the root, and the
-   * same pair under a `/{system}` prefix — and recognises a bare `/{system}/` landing. Anything
-   * else (the front door, `/status`, a design page) yields an empty ref, which is the honest
-   * answer: those pages belong to no preview, and the report simply omits the rows.
+   * Split a sanitised path into system and preview, mirroring the routes `/p/{name}` and
+   * `/compare/{name}` (optionally under `/{system}`) and a bare `/{system}/`. Anything else yields
+   * an empty ref.
    */
   fun parsePath(path: String?): PageRef {
     val clean = path?.substringBefore('?')?.trim()?.takeIf { it.isNotEmpty() } ?: return PageRef()
@@ -451,37 +352,17 @@ internal object ServeBugReport {
   }
 
   /**
-   * What the viewer was **showing** when the report was filed, read out of the reporter's own query
-   * — `design spec (triptych)`, `motion`, `exploded layers`, `Remote Compose (wasm player)`.
-   *
-   * The point of this, and of issue #4261: every one of those views is composed in the BROWSER out
-   * of artefacts the server serves separately — a render plus an imported reference plus a diff, a
-   * frame sequence, a stack of layers — so none of them has a URL, and the `/render` PNG the report
-   * embeds is not what the reporter was looking at. Naming the view is the one thing the server can
-   * do about that from the query alone, and it is worth doing on its own: "the triptych's middle
-   * panel is blank" filed against a picture of a perfectly good button is a report a triager cannot
-   * even parse.
-   *
-   * Strictly an **allowlist of values this server's own viewer writes**. The query arrives from the
-   * browser via `from` and lands in a public issue body, so an unrecognised `mode` is dropped
-   * rather than echoed — the same rule the browser block's `?scheme=` follows in `bugReport.ts`,
-   * and for the same reason: there are finitely many real answers, and anything else is not a
-   * mangled view but a value that was never a view at all.
-   *
-   * Null — the plain render lane, and every page that is not a viewer — adds no row at all, rather
-   * than a "View | default" that says nothing.
+   * What the viewer was showing (`design spec (triptych)`, `motion`, …), from the reporter's query;
+   * those views are browser-composed with no URL of their own (#4261). Strictly an allowlist of
+   * values the viewer writes, since the query is untrusted and lands in a public issue. Null for
+   * the plain lane and non-viewer pages.
    */
   fun viewLabel(from: String?): String? {
     val params = queryParams(from)
     val explode = params["exploded"]?.lowercase()?.let { it in EXPLODE_ON } == true
     val lane = LANES[params["mode"]?.lowercase()]
-    // The spec lane's four views are one lane with four presentations, and the difference between
-    // them is exactly what a spec-lane bug is usually about — so the view qualifies the lane rather
-    // than replacing it. A spec-lane URL that names NO view is not silent about which one was up:
-    // it is the lane's default ([ServeWeb.SPEC_DEFAULT_VIEW]), which the viewer leaves out of the
-    // query precisely because it needs no parameter. So resolve it rather than dropping the row's
-    // most useful half — before #4376 that default was the plain reference and naming it added
-    // nothing; now it is the triptych, and "design spec" alone would leave a triager guessing.
+    // The spec lane's view qualifies the lane. A spec URL naming no view is on the default
+    // ([ServeWeb.SPEC_DEFAULT_VIEW], now the triptych), so resolve it rather than drop it.
     val spec =
       if (params["mode"]?.lowercase() != "spec") null
       else
@@ -498,33 +379,19 @@ internal object ServeBugReport {
   }
 
   /**
-   * The design reference the reporter's own comparison URL named (`?reference=`), or null when it
-   * named none and the page therefore showed the preview's first.
-   *
-   * Left **percent-encoded**, like [PageRef.previewSegment] and for the same reason: the caller
-   * matches it against the session's own reference ids re-encoded the same way, which needs no
-   * decoder and cannot round-trip a `+` into a space.
+   * The design reference the comparison URL named (`?reference=`), or null for the first. Left
+   * percent-encoded like [PageRef.previewSegment].
    */
   fun referenceSegment(from: String?): String? =
     queryParams(from)["reference"]?.takeIf { it.isNotEmpty() }
 
-  /**
-   * Whether the reporter's query says the viewer's **design-spec lane** was on the stage — the one
-   * viewer lane that puts a design reference beside the render.
-   *
-   * Read from `?mode=` exactly as [viewLabel] reads it, so the "View" row and the images below it
-   * cannot disagree about which lane was up.
-   */
+  /** Whether `?mode=` says the design-spec lane was up, read exactly as [viewLabel] does. */
   fun onSpecLane(from: String?): Boolean = queryParams(from)["mode"]?.lowercase() == "spec"
 
   /**
-   * The reporter's query as a map, last value winning — which is what a browser's own
-   * `URLSearchParams.get` returns, and this string was written by one.
-   *
-   * Values are left percent-encoded on purpose. Every value this reads is matched against a fixed
-   * allowlist of ASCII tokens the viewer writes, so decoding could only ever turn a value that is
-   * not on the list into a different value that is not on the list — while `URLDecoder` would also
-   * turn a `+` into a space, which is the decoding bug [PageRef.previewSegment] documents.
+   * The reporter's query as a map, last value winning (like `URLSearchParams.get`). Values stay
+   * percent-encoded: they are matched against an ASCII allowlist, and decoding would only add the
+   * `+`-to-space bug.
    */
   private fun queryParams(from: String?): Map<String, String> {
     val query = from?.substringAfter('?', missingDelimiterValue = "").orEmpty()
@@ -551,9 +418,8 @@ internal object ServeBugReport {
     )
 
   /**
-   * The spec lane's presentations, as a report names them — mirrors `spec/views.ts`, whose default
-   * is `triptych`. Only `spec` is renamed: "design spec (spec)" reads as a stutter or a typo where
-   * what it means is the imported reference on the stage by itself.
+   * Spec-lane view labels; mirrors `spec/views.ts` (default `triptych`). Only `spec` is renamed, to
+   * avoid "design spec (spec)".
    */
   private val SPEC_VIEW_LABELS =
     mapOf(
@@ -576,10 +442,8 @@ internal object ServeBugReport {
   private val PREVIEW_SEGMENTS = setOf(VIEWER_ROUTE, COMPARE_ROUTE)
 
   /**
-   * Top-level paths that belong to the **server**, not to a design system, so a leading segment
-   * matching one of these never names a catalog. Deliberately a small list of the routes a visitor
-   * can actually be looking at when they press the affordance — a catalog whose system id collided
-   * with one of these could not be served at those URLs in the first place.
+   * Top-level paths belonging to the server rather than a design system, so they never name a
+   * catalog.
    */
   private val SERVER_SEGMENTS =
     setOf(
@@ -594,15 +458,10 @@ internal object ServeBugReport {
       "report-bug",
       "p",
       "compare",
-      // Query-mode routes: `/pages/foo?session=…`, `/parity?session=…`. These ARE catalog pages,
-      // but the catalog is named by `?session=`, not by the first segment — reading `pages` or
-      // `parity` as a system id would invent a design system that does not exist and file the
-      // report against it. Which catalog they belong to is recovered from the explicit session.
+      // Query-mode catalog pages: the catalog comes from `?session=`, not the first segment.
       "pages",
       "parity",
-      // `/motion?session=…` — the motion browser, and `/motion/<id>.apng` under it. Same reason
-      // as the two above: the catalog is named by `?session=`, so reading `motion` as a system id
-      // would file the report against a design system that does not exist.
+      // Same for the motion browser.
       "motion",
       "usage",
       "render",

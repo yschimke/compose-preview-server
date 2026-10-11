@@ -45,9 +45,8 @@ class ServeIssueReportTest {
 
   @Test
   fun `a preview's bug is filed against the catalog's source repo`() {
-    // The source repo owns the Kotlin that misrendered — even when it is a fork (Android's samples
-    // are rendered from preview branches in yschimke/compose-samples), that fork is where the
-    // preview code lives, so that is where the report belongs.
+    // The source repo owns the Kotlin that misrendered, even when it's a fork, so the report goes
+    // there.
     assertEquals(
       "yschimke/compose-samples",
       ServeIssueReport.repoFor(
@@ -127,10 +126,9 @@ class ServeIssueReportTest {
 
   @Test
   fun `the score placeholder is the scoring page's to ask for, not a consequence of a reference`() {
-    // It used to be inferred from `renderPlaceholder && referenceId != null`, which made naming a
-    // design reference and measuring a parity score one decision. They are not: the viewer names a
-    // reference so its report reaches the parity index (#5000) and measures nothing, so a template
-    // it never fills would file `{{rawScores}}` verbatim.
+    // Naming a design reference and measuring a parity score are separate decisions: the viewer
+    // names a reference (so its report reaches the parity index) but measures nothing, so its
+    // template must not carry `{{rawScores}}`.
     val template = ServeIssueReport.body(full, renderPlaceholder = true)
     assertFalse(template.contains("{{rawScores}}"), template)
     assertFalse(template.contains("Raw comparison"), template)
@@ -139,9 +137,8 @@ class ServeIssueReportTest {
 
   @Test
   fun `the overrides placeholder replaces the value alone, and only when asked`() {
-    // A page whose controls move after it is served hands the locator's `overrides:` to its own
-    // script. Only the VALUE: the key stays server-written so the filler can match the whole line
-    // rather than the first catalog-authored value carrying the literal.
+    // A page whose controls move after serving fills the locator's `overrides:` value itself; the
+    // key stays server-written so the filler matches the whole line.
     val overridden = full.copy(overrides = linkedMapOf("uiMode" to "dark"))
     val template =
       ServeIssueReport.body(overridden, renderPlaceholder = true, overridesPlaceholder = true)
@@ -154,9 +151,8 @@ class ServeIssueReportTest {
         .replace("overrides: {{overrides}}", "overrides: {\"uiMode\":\"dark\"}")
         .replace(
           "{{render}}",
-          // As `fillReport` fills it — through `withStage`, the TS mirror of [ServeIssueReport
-          // .withStage]. Substituting the bare URL here would assert an invariant the two paths do
-          // not actually share, and hide a drift between them rather than catch it.
+          // As `fillReport` fills it, through `withStage` (the TS mirror of
+          // [ServeIssueReport.withStage]), so a drift between the two paths is caught.
           "https://preview.coo.ee/jetnews/render/Article__dark.png?uiMode=dark&bg=auto",
         ),
     )
@@ -203,11 +199,8 @@ class ServeIssueReportTest {
   @Test
   fun `a public render is embedded as an image, not just linked`() {
     val body = ServeIssueReport.body(full)
-    // GitHub renders this inline (via its camo proxy), so the reporter's evidence is visible in the
-    // issue without anyone clicking through.
-    // …carrying `bg=auto`, so the picture is legible where it lands. A render is transparent by
-    // design and GitHub's page is white, so a dark-first catalog's sticker embeds as a blank
-    // rectangle without it — see [ServeRenderMatte].
+    // GitHub renders this inline via camo, and `bg=auto` keeps a transparent dark-first sticker
+    // legible on GitHub's white page (see [ServeRenderMatte]).
     assertTrue(
       body.contains(
         "![Article](https://preview.coo.ee/jetnews/render/Article__dark.png?uiMode=dark&bg=auto)"
@@ -225,9 +218,8 @@ class ServeIssueReportTest {
 
   @Test
   fun `a comparison report embeds both panels, not just the render`() {
-    // #4765: an issue about the reference and the render disagreeing arrived showing one of them,
-    // so the picture contradicted the complaint and a triager had to open the comparison to see
-    // what was being reported.
+    // An issue about the reference and render disagreeing shows both, so the picture matches the
+    // complaint.
     val body = ServeIssueReport.body(pair)
     assertTrue(body.contains("| Design reference | Render |"), body)
     assertTrue(
@@ -252,9 +244,8 @@ class ServeIssueReportTest {
 
   @Test
   fun `the pair leaves exactly one render placeholder for the page's script to fill`() {
-    // `fillReport` in `annotate/report.ts` substitutes the FIRST `]({{render}})` it finds. The
-    // reference cell is a literal URL and comes first in the row, so a second occurrence would
-    // send the swap to the wrong panel and file a body still carrying the placeholder.
+    // `fillReport` in `annotate/report.ts` substitutes the first `]({{render}})`; the reference
+    // cell comes first, so a second occurrence would hit the wrong panel.
     val tpl = ServeIssueReport.body(pair, renderPlaceholder = true)
     assertEquals(1, tpl.split("]({{render}})").size - 1, tpl)
     assertTrue(tpl.contains("![Article]({{render}})"), tpl)
@@ -263,9 +254,8 @@ class ServeIssueReportTest {
 
   @Test
   fun `half a comparison is never embedded, and both halves are still linked`() {
-    // One panel of a pair reads as "the render" and is worse evidence than the render admitting
-    // what it is — so an unreachable half takes the whole pair back to the link form, which still
-    // names both sides for a triager who can reach the box.
+    // If one half of the pair is unreachable, the whole pair falls back to links, which still name
+    // both sides.
     val local = pair.copy(referenceUrl = "http://127.0.0.1:8080/reference/article-card-figma.png")
     val body = ServeIssueReport.body(local)
     assertFalse(body.contains("| Design reference | Render |"), body)
@@ -298,8 +288,7 @@ class ServeIssueReportTest {
 
   @Test
   fun `a render GitHub cannot reach stays a link rather than a broken image`() {
-    // A developer's local `compose-preview serve`. Camo cannot fetch this, so an embed would put a
-    // broken-image icon in their issue where a working link belongs.
+    // A local `compose-preview serve` that camo can't fetch: link rather than embed a broken image.
     val local = full.copy(renderUrl = "http://127.0.0.1:8080/render/Article__dark.png")
     val body = ServeIssueReport.body(local)
     assertFalse(body.contains("!["), body)
@@ -308,9 +297,8 @@ class ServeIssueReportTest {
 
   @Test
   fun `a token-gated server keeps the link form even on a public hostname`() {
-    // withoutToken strips the session token from every URL in the body, and a non-public render
-    // lane 404s a tokenless request — so camo would fetch a 404 and every filed issue would show a
-    // broken screenshot. Reachability is not authorization.
+    // `withoutToken` strips the token and a non-public render lane 404s tokenless requests, so
+    // embedding would show a broken image.
     val gated = full.copy(publicRender = false)
     val body = ServeIssueReport.body(gated)
     assertFalse(body.contains("!["), body)
@@ -367,8 +355,7 @@ class ServeIssueReportTest {
 
   @Test
   fun `the form action is the target repo's issue form`() {
-    // A literal the viewer's JS never touches — see ServeIssueReport.action for why the affordance
-    // is a GET form rather than a link whose href gets rewritten.
+    // A literal the viewer's JS never touches; see ServeIssueReport.action for why it's a GET form.
     assertEquals(
       "https://github.com/yschimke/compose-samples/issues/new",
       ServeIssueReport.action(full.repo),
@@ -387,9 +374,8 @@ class ServeIssueReportTest {
 
   @Test
   fun `a page-scoped report names the page rather than inventing a preview`() {
-    // The comparison wall shows every comparable component and singles out none, so its report
-    // carries the page — with the lane its query names — and drops the preview-shaped rows the
-    // same way every other unknown fact is dropped (issue #4289).
+    // The comparison wall singles out no component, so its report carries the page and its lane and
+    // drops preview-specific rows.
     val wall =
       ServeIssueReport.Context(
         repo = "yschimke/wear-m3-catalog",
@@ -438,7 +424,7 @@ class ServeIssueReportTest {
 
   @Test
   fun `a session token never rides along into an issue body`() {
-    // The token IS the capability to drive a token-gated server; an issue is public.
+    // The token is the capability to drive a token-gated server; an issue is public.
     assertEquals(
       "https://host/p/x?uiMode=dark",
       ServeIssueReport.withoutToken("https://host/p/x?token=s3cret&uiMode=dark"),
@@ -460,12 +446,9 @@ class ServeIssueReportTest {
 
   @Test
   fun `the writer emits the shared locator fixture byte for byte`() {
-    // The other half of `compose-parity-locator/v1`. This side asserts the bytes the writer puts in
-    // an issue body; compose-ai-tools/scripts/design-artifacts/parity-issues.test.mjs asserts the
-    // producer parses
-    // those same bytes back. Without one file both read, each engine only ever tests itself — which
-    // is how the producer came to reject an omitted `revision`, an empty `variant`, and an override
-    // map ordered by code point, none of which the writer can be talked out of emitting.
+    // The writer's half of `compose-parity-locator/v1`: compose-ai-tools'
+    // `scripts/design-artifacts/parity-issues.test.mjs` asserts the producer parses the same bytes
+    // back. A shared fixture is what stops each engine only testing itself.
     val fixture =
       Json.parseToJsonElement(
           File(repoRoot(), "scripts/design-artifacts/fixtures/parity-locators.json").readText()
@@ -503,9 +486,8 @@ class ServeIssueReportTest {
 
   @Test
   fun `the writer emits one block per component of an umbrella report`() {
-    // The other half of the multi-component contract: `parity-issues.test.mjs` asserts the producer
-    // reads these bodies back as one row per block. An issue like m3-catalog#42 names three
-    // components; one block can name one, so the body is their concatenation, in order.
+    // The multi-component half: one block per component, concatenated in order (as when an issue
+    // names three).
     val fixture =
       Json.parseToJsonElement(
           File(repoRoot(), "scripts/design-artifacts/fixtures/parity-locators.json").readText()
@@ -544,9 +526,8 @@ class ServeIssueReportTest {
 
   @Test
   fun `a bounds rectangle is refused unless it names the plane v1 settled on`() {
-    // D1: both tag-index producers publish render pixels and the canonical-plane transform belongs
-    // to the comparison. A rectangle carrying any other space would be compared against a baseline
-    // measured somewhere else, which is how an element that never moved reports as `moved`.
+    // Both tag-index producers publish render pixels and the canonical-plane transform belongs to
+    // the comparison; bounds in any other space would report unmoved elements as moved.
     val bounds = ServeIssueReport.Bounds(x = 18, y = 18, width = 24, height = 24)
     assertEquals(
       """{"height":24,"space":"render-pixels","width":24,"x":18,"y":18}""",
@@ -586,11 +567,8 @@ class ServeIssueReportTest {
 
   @Test
   fun `a tag keeps its edge whitespace, and a field value is read the way both engines read it`() {
-    // A tag index keys on the exact string, so `" glyph "` and `"glyph"` are different elements and
-    // normalising one into the other would point an acceptance at the wrong one — or at none. The
-    // quoting is what makes keeping it safe: both parsers trim the *line* value, and the spaces
-    // live
-    // inside the quotes where that trim cannot reach them.
+    // Tag indexes key on the exact string, so `" glyph "` and `"glyph"` differ; quoting keeps the
+    // spaces safe from both parsers' line trimming.
     val locator =
       ServeIssueReport.locator(
         ServeIssueReport.Context(
@@ -614,10 +592,8 @@ class ServeIssueReportTest {
 
   @Test
   fun `a tag cannot become syntax, however it is spelled`() {
-    // A `testTag` is arbitrary text and the block is line-oriented, so a bare value carrying a
-    // newline would not stay one field: `row\nrevision: injected` would read back as an element
-    // plus a revision nobody wrote, and a fence delimiter inside a tag could end the block early
-    // and drop the whole issue from the index. JSON quoting is what makes the value inert.
+    // A `testTag` is arbitrary text and the block is line-oriented; JSON quoting stops newlines or
+    // fence delimiters from injecting fields or ending the block.
     val locator =
       ServeIssueReport.locator(
         ServeIssueReport.Context(
@@ -642,16 +618,14 @@ class ServeIssueReportTest {
 
   @Test
   fun `an invalid rectangle cannot be constructed, let alone written into a report`() {
-    // The writer must not be able to emit a rectangle its own producer refuses: the reporter would
-    // file a body that looks right and the whole issue would drop out of the index when the
-    // workflow next ran. Batch 03's drag selection starts in display pixels, so the missed
-    // conversion is a real path — and this is where it stops, at construction.
+    // The writer must not emit a rectangle its producer refuses (the issue would silently drop out
+    // of the index). Drag selections start in display pixels, so a missed conversion is a real
+    // path; it stops here, at construction.
     assertFailsWith<IllegalArgumentException> {
       ServeIssueReport.Bounds(x = 0, y = 0, width = 24, height = 24, space = "display-pixels")
     }
-    // A negative origin is NOT invalid: a tagged node can extend above or left of the render root,
-    // and both tag-index producers publish signed coordinates for exactly that. Refusing it would
-    // leave batch 03 unable to record the bounds the index handed it.
+    // A negative origin is valid: tagged nodes can extend beyond the render root, and producers
+    // publish signed coordinates.
     assertEquals(-4, ServeIssueReport.Bounds(x = -4, y = -2, width = 24, height = 24).x)
     assertFailsWith<IllegalArgumentException> {
       ServeIssueReport.Bounds(x = 0, y = 0, width = 0, height = 24)
@@ -660,10 +634,8 @@ class ServeIssueReportTest {
 
   @Test
   fun `the selection placeholder occupies a whole line and vanishes without a trace`() {
-    // The substitution has to reproduce the block this writer emits on its own when nothing was
-    // selected — otherwise every unselected report filed through the page differs from the format's
-    // own baseline, and a blank line left inside the fence makes the producer's line parser read a
-    // field short.
+    // With nothing selected, the substitution must reproduce the writer's own block exactly (no
+    // blank line inside the fence).
     val locator = fixtureLocator()
     val template = ServeIssueReport.locatorBlock(locator, selectionPlaceholder = true)
     assertTrue("${ServeIssueReport.SELECTION_PLACEHOLDER}\n" in template, template)
@@ -675,10 +647,8 @@ class ServeIssueReportTest {
 
   @Test
   fun `substituting the placeholder yields exactly what the writer would have emitted`() {
-    // The cross-engine contract, stated from this side. `cli/serve-web`'s `report/locator.ts`
-    // produces those two lines in the browser, and `reportLocator.test.ts` pins it to the same
-    // shared fixture — so what the page files and what this writer would have written are the same
-    // bytes, which is what makes a filed report and a server-composed one comparable.
+    // The cross-engine contract: `serve-web`'s `report/locator.ts` produces these lines in the
+    // browser, pinned to the same fixture by `reportLocator.test.ts`.
     val locator = fixtureLocator()
     val selected =
       locator.copy(

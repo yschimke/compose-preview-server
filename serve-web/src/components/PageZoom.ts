@@ -45,9 +45,8 @@ export class PageZoom extends VueElement {
     private view: View = rest();
 
     /**
-     * How deep the reader has walked, outermost first. The export's own
-     * `<g data-node-id>` tree supplies the levels; this only remembers which of
-     * them is framed. See `pickLevel`.
+     * How deep the reader has drilled, outermost first; the export's `<g data-node-id>` tree
+     * supplies the levels. See `pickLevel`.
      */
     private drilled: Element[] = [];
 
@@ -85,18 +84,15 @@ export class PageZoom extends VueElement {
     private readonly onPointerCancel = (event: PointerEvent) =>
         this.endPan(event, false);
     private readonly onDragStart = (event: Event) => {
-        // An overlay is an `<a>`, and a browser answers a drag on one by dragging
-        // the LINK — a ghost image follows the cursor and the pan never starts.
-        // Deliberately not `preventDefault()` on `pointerdown`, which would do the
-        // same job and also suppress the compatibility mouse events the
-        // double-click drill and a slot's own navigation are built on.
+        // An overlay is an `<a>`, and a drag on one drags the link instead of panning. Not
+        // prevented on `pointerdown`, which would also suppress the compatibility mouse events the
+        // double-click drill and slot navigation rely on.
         if (zoomed(this.view)) event.preventDefault();
     };
     private readonly onClickCapture = (event: MouseEvent) => {
-        // A keyboard activation (`detail === 0`) is never the click a drag produces, so
-        // it must never be the one the guard spends. Without this, a pan that ended in
-        // `pointercancel` — which produces no click at all — leaves the flag armed, and
-        // the next Enter or Space on a zoom button or a slot link silently does nothing.
+        // A keyboard activation (`detail === 0`) never spends the drag guard; otherwise a pan
+        // ending in `pointercancel` (no click) would leave it armed and swallow the next Enter or
+        // Space.
         if (event.detail === 0) return;
         if (!this.swallowClick) return;
         this.swallowClick = false;
@@ -108,9 +104,7 @@ export class PageZoom extends VueElement {
     };
     private readonly onKeyDown = (event: KeyboardEvent) => this.escape(event);
     private readonly onFocusOut = () => {
-        // Deferred a frame: `focusout` fires BEFORE the next element takes focus, so
-        // reading `activeElement` now would answer `<body>` even when focus is moving
-        // between two of these buttons.
+        // Deferred: `focusout` fires before the next element takes focus.
         setTimeout(() => {
             if (!zoomed(this.view) && !this.contains(document.activeElement)) {
                 this.hidden = true;
@@ -132,31 +126,21 @@ export class PageZoom extends VueElement {
 
     connectedCallback(): void {
         super.connectedCallback();
-        // The stage is no longer an ANCESTOR, so the wiring can lose the race the
-        // parser sets up: the bar is written into the control row ABOVE the sheet, and
-        // an element is upgraded the moment the parser reaches its tag. Same answer
-        // `<cp-design-page>` gives — try now, and once more when the document is
-        // whole. `install` is idempotent, so the second attempt costs nothing when the
-        // first one already succeeded.
+        // The bar sits in the control row above the sheet and is upgraded as soon as parsed,
+        // possibly before the stage exists. Try now and again once the document is parsed
+        // (`install` is idempotent).
         if (!this.install()) void whenParsed().then(() => this.install());
     }
 
     /**
-     * Bind to the sheet this bar drives, if it is in the document yet.
-     *
-     * Returns whether there is nothing left to wait for — true once bound, and true
-     * as well for a bar that has been disconnected in the meantime, which is not a
-     * retry either.
+     * Bind to the sheet this bar drives, if present. Returns true when there is nothing left to
+     * wait for (bound, or disconnected meanwhile).
      */
     private install(): boolean {
         if (!this.isConnected || this.installed) return true;
-        // The bar rides the page's sticky control row now, not the stage's bottom-right corner: the
-        // stage is sized to the sheet's own aspect and is routinely taller than the window, so a
-        // control parked in its corner was below the fold for most of the reading and the reader
-        // who had drilled in could not reach Reset (issue #4996). It is therefore no longer a
-        // DESCENDANT of what it drives — find the stage through the page root, keeping `closest`
-        // first so a bar nested in a stage (the unit fixture, and any caller that still writes it
-        // that way) resolves without a document-wide lookup.
+        // The bar lives in the page's sticky control row (the stage is often taller than the
+        // window, so a corner control was out of reach), so find the stage via the page root;
+        // `closest` first handles a bar nested in a stage.
         this.stage =
             this.closest<HTMLElement>(".cp-page-stage") ??
             this.closest<HTMLElement>(
@@ -167,9 +151,7 @@ export class PageZoom extends VueElement {
             this.stage?.querySelector<HTMLElement>("[data-cp-page-canvas]") ??
             null;
         this.svg = this.canvas?.querySelector("svg") ?? null;
-        // Nothing to transform means the gestures are inert rather than
-        // half-working: a readout climbing to 400% over a sheet that never moved
-        // would be worse than no zoom at all.
+        // Nothing to transform: leave the gestures inert rather than half-working.
         if (!this.stage || !this.canvas) return false;
         this.installed = true;
 
@@ -180,37 +162,25 @@ export class PageZoom extends VueElement {
         // Capture phase, so it runs before an overlay's own handler and before the
         // anchor's default.
         this.stage.addEventListener("click", this.onClickCapture, true);
-        // Also capture: `focus` does not bubble, and this has to land BEFORE the
-        // page's own focus handler parks its tooltip at the node — otherwise the
-        // tip is placed against the box the node had before the pan.
+        // Capture phase: `focus` doesn't bubble, and this must run before the page parks its
+        // tooltip at the node.
         this.stage.addEventListener("focus", this.onFocusCapture, true);
         window.addEventListener("pointermove", this.onPointerMove);
         window.addEventListener("pointerup", this.onPointerUp);
         window.addEventListener("pointercancel", this.onPointerCancel);
-        // On the DOCUMENT, and in the CAPTURE phase. Document, because a reader who
-        // zoomed with the mouse has focus on nothing in particular (the stage is not
-        // focusable) and a listener on this page's own subtree would never see the
-        // key. Capture, because `design-page.js` listens on `#cp-design-page` and a
-        // bubbling document listener would run AFTER it — by which point the
-        // selection it clears is already gone, and one press would unwind both the
-        // selection and the zoom. Capture runs before it and still sees the mark.
+        // On the document (a mouse-zoomed page may have nothing focused) and in the capture phase,
+        // so it runs before `design-page.js`'s listener and can see the selection mark; one press
+        // then clears only the selection.
         document.addEventListener("keydown", this.onKeyDown, true);
-        // A KEYBOARD WAY IN, and the only one there is. Every other gesture here needs a
-        // pointer — a double-click, a modified wheel, a drag — and the corner control is
-        // hidden at 1:1 by design, so without this a keyboard-only reader has no way to
-        // enlarge a sheet whose text is sub-pixel. `+` / `-` / `0`, on the page rather
-        // than the document so the keys are inert everywhere else, and reachable because
-        // every component overlay on the sheet is a real anchor in the tab order.
+        // The keyboard way in: every other gesture needs a pointer and the corner control is hidden
+        // at 1:1. `+` / `-` / `0` on the page, reachable because every overlay is an anchor in the
+        // tab order.
         this.page = this.closest<HTMLElement>("#cp-design-page") ?? this.stage;
         this.page.addEventListener("keydown", this.onPageKeyDown);
         this.addEventListener("focusout", this.onFocusOut);
-        // A resize moves the pan limits with the stage — a sheet panned to its right
-        // edge in a wide window is panned past it in a narrow one — and it moves the
-        // reader's place, which `rescale` is what preserves. Both signals are wired:
-        // the observer catches a stage that changes size on its own (a side panel, a
-        // container query), `resize` covers a browser without `ResizeObserver`. Firing
-        // twice is harmless: the second call sees no change from the size the first
-        // one recorded.
+        // A resize moves the pan limits and the reader's place (`rescale` preserves it). The
+        // observer catches stage-only size changes; `resize` covers browsers without
+        // `ResizeObserver`. Duplicate calls are no-ops.
         if (typeof ResizeObserver === "function") {
             this.observer = new ResizeObserver(this.onResize);
             this.observer.observe(this.stage);
@@ -285,18 +255,10 @@ export class PageZoom extends VueElement {
     }
 
     /**
-     * Put the canvas exactly where `this.view` says it is, right now.
-     *
-     * Every measurement here — a drill target, a focused node — is a
-     * `getBoundingClientRect`, and during the 170 ms travel that answers with the
-     * INTERPOLATED position while `this.view` already holds the destination.
-     * `frameRect` assumes the two describe the same view, so a second double-click
-     * landing mid-flight would frame the next level from a box measured in one view
-     * and a transform taken from another: a wild over-zoom, off centre.
-     *
-     * Cheapest correct fix: kill the transition, write the destination, and force the
-     * browser to lay it out before reading anything. The move that follows re-enables
-     * easing, so it still travels — from where the sheet had actually got to.
+     * Put the canvas exactly where `this.view` says, now. During the 170 ms transition
+     * `getBoundingClientRect` returns interpolated positions while `this.view` holds the
+     * destination, so a second drill mid-flight would over-zoom off centre. Kill the transition,
+     * write the destination and force layout; the next move re-enables easing.
      */
     private settle(): void {
         if (!this.canvas) return;
@@ -309,16 +271,9 @@ export class PageZoom extends VueElement {
     }
 
     /**
-     * The box the canvas actually fills — the stage's INNER box, not its border box.
-     *
-     * `.cp-page-canvas` is `inset: 0`, so it fills the padding box, and the stage draws
-     * a 1 px border outside that. Clamping against the border box therefore allows
-     * `2 × (scale - 1)` pixels of extra travel: at 24x the sheet can be dragged some
-     * 46 px past its own edge, exposing a blank strip where the drawing should be.
-     *
-     * `clientWidth`/`clientHeight` are exactly that inner box. They answer 0 for an
-     * element with no layout yet (a page opened in a background tab), so the measured
-     * rect stands in — a slightly loose clamp beats no clamp at all.
+     * The canvas's actual box: the stage's inner (padding) box, since `.cp-page-canvas` is `inset:
+     * 0` inside a 1 px border. Clamping to the border box let the sheet be dragged past its edge.
+     * `clientWidth`/`clientHeight` are 0 before layout, so the measured rect stands in.
      */
     private stageBox(): Box {
         const stage = this.stage;
@@ -343,31 +298,20 @@ export class PageZoom extends VueElement {
             width: box.width,
             height: box.height,
         };
-        // Back at 1:1 by ANY route — the minus button, a wheel out, a drill that
-        // bottomed out — and the walk down the tree is over with it. Leaving the stack
-        // populated presents a reset view whose next double-click resumes from a depth
-        // the reader can no longer see: it either skips straight to a nested level or
-        // reads as a dead end and backs out without zooming.
+        // Back at 1:1 by any route ends the drill, so the next double-click starts fresh.
         if (!zoomed(this.view)) this.drilled = [];
         const { scale, x, y } = this.view;
         if (this.canvas) {
-            // A continuous gesture drives the transform directly; a discrete one (a
-            // drill, a button) is eased, so it reads as travel into the sheet
-            // rather than as a cut to somewhere else.
+            // Continuous gestures drive the transform directly; discrete ones are eased so they
+            // read as travel.
             this.canvas.classList.toggle("cp-page-canvas-live", !eased);
             this.canvas.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
         }
-        // Read by the stylesheet to counter-scale everything drawn OVER the sheet —
-        // outline widths, score badges — so the instrumentation keeps its size in
-        // screen pixels while the drawing grows.
+        // Read by the stylesheet to counter-scale marks drawn over the sheet (outlines, badges).
         this.stage?.style.setProperty("--cp-page-zoom", String(scale));
         this.stage?.classList.toggle("cp-page-zoomed", zoomed(this.view));
-        // At 1:1 there is nothing to reset, and a permanent control would be chrome
-        // over the drawing — but NOT while the reader is standing on it. Pressing
-        // Reset (or `-` until the sheet is back at 1:1) with the button focused would
-        // otherwise delete the focused element from under them, and the browser drops
-        // focus to `<body>`: the reader loses the sheet entirely. The bar waits for
-        // focus to leave (see `onFocusOut`) and hides then.
+        // At 1:1 there is nothing to reset, so the bar hides, but not while focused: hiding the
+        // focused element drops focus to `<body>`. It waits for focus to leave (see `onFocusOut`).
         this.hidden =
             !zoomed(this.view) && !this.contains(document.activeElement);
         this.percent = Math.round(scale * 100);
@@ -405,21 +349,9 @@ export class PageZoom extends VueElement {
     }
 
     /**
-     * The addressable elements under a point, outermost first — the sheet's own
-     * tree at that spot.
-     *
-     * `elementsFromPoint` is the browser's real hit test, so it answers with what
-     * is PAINTED there and every ancestor of it, which is exactly the drill chain:
-     * the glyph, the label group, the column, the card. A bbox scan would instead
-     * hand back every box that merely CONTAINS the point, including a sibling the
-     * reader can see they did not click. The scan is still the fallback, for a
-     * point over unpainted ground — the gaps between specimens on a sheet with no
-     * background fill — where the hit test finds nothing and the honest answer is
-     * the enclosing frame.
-     *
-     * Sorted by area rather than trusted to arrive in tree order: overlapping
-     * siblings can both be hit, and "biggest first" is the only ordering that
-     * means "outermost first" for both sources.
+     * The addressable elements under a point, outermost first. `elementsFromPoint` is the real hit
+     * test, giving what is painted there and its ancestors (the drill chain). A bbox scan is the
+     * fallback for unpainted ground. Sorted by area so both sources come out outermost first.
      */
     private chainAt(clientX: number, clientY: number): Array<Level<Element>> {
         const svg = this.svg;
@@ -428,11 +360,9 @@ export class PageZoom extends VueElement {
             typeof document.elementsFromPoint === "function"
                 ? document.elementsFromPoint(clientX, clientY)
                 : [];
-        // The topmost thing PAINTED here, and then ITS OWN ancestors — a lineage, not a
-        // pile. `elementsFromPoint` also hands back overlapping SIBLINGS (a badge over a
-        // card, a shadow layer beside it), and ordering those by area invents a
-        // parent-child relationship the export does not have: the drill would frame one
-        // sibling and then "descend" into another that never contained it.
+        // The topmost painted element and its own ancestors, a lineage: `elementsFromPoint` also
+        // returns overlapping siblings, which area ordering would turn into a false parent-child
+        // chain.
         const top = hit.find((el) => el !== svg && svg.contains(el));
         if (top) {
             const lineage: Element[] = [];
@@ -445,11 +375,8 @@ export class PageZoom extends VueElement {
             }
             if (lineage.length) return lineage.map((node) => this.level(node));
         }
-        // Nothing painted here, or nothing addressable above what is: the gaps between
-        // specimens on a sheet with no background fill. There is no lineage to read, so
-        // fall back to every box that CONTAINS the point, outermost first — which for
-        // nested frames is the same answer, and for overlapping siblings is a guess the
-        // reader can see rather than a wrong tree.
+        // Nothing addressable painted here (gaps between specimens): fall back to every box
+        // containing the point, outermost first.
         return Array.from(svg.querySelectorAll("[data-node-id]"))
             .filter((el) => {
                 const box = el.getBoundingClientRect();
@@ -475,28 +402,13 @@ export class PageZoom extends VueElement {
     }
 
     /**
-     * WHAT A DOUBLE-CLICK OVER A COMPONENT SLOT DOES, AND WHY IT IS NOT THIS
-     *
-     * Nothing: the FIRST click of it has already navigated to that component's
-     * preview, because every overlay is a real `<a>` and that is the affordance
-     * the sheet is built around. Deferring the anchor behind a "was that a
-     * double-click?" timer was the alternative and it is worse — it puts a couple
-     * of hundred milliseconds on every navigation on the page, and reaches the
-     * destination by script rather than by the browser following a link, which is
-     * what makes the middle click, the modifier click and the status-bar preview
-     * work.
-     *
-     * So drilling is a gesture of the SHEET and going is a gesture of a SLOT. The
-     * two never contend for the same pixels in practice: a section's title, its
-     * ground and the space between its specimens are all sheet, and that is where
-     * a reader zooming into "Typography" clicks.
+     * A double-click over a component slot doesn't drill: its first click already navigated, since
+     * every overlay is a real `<a>`. Delaying navigation to detect double-clicks would slow every
+     * link and break middle/modifier clicks. Drilling is a sheet gesture; going is a slot gesture.
      */
     private drill(event: MouseEvent): void {
-        // The corner controls are ON the stage but are not the sheet. A quick pair of
-        // clicks on `+` arrives here as a double-click over the bar, and drilling from a
-        // button's coordinates either frames whatever the sheet paints beneath it or
-        // spends the gesture stepping back out — so two clicks on `+` would net one.
-        // Same guard, same reason, as the one `startPan` takes.
+        // The controls aren't the sheet: a quick double click on `+` must not drill (same guard as
+        // `startPan`).
         if (this.contains(event.target as Node)) return;
         // A second double-click can land inside the first one's travel; measure the
         // sheet where it is going, not where it currently is.
@@ -518,9 +430,8 @@ export class PageZoom extends VueElement {
     private drillIn(clientX: number, clientY: number): Level<Element> | null {
         const chain = this.chainAt(clientX, clientY);
         if (!chain.length || !this.svg) return null;
-        // The deepest level we have entered that this point is still inside.
-        // Double-clicking elsewhere therefore starts again from the outermost frame
-        // there, rather than trying to descend a branch the pointer isn't in.
+        // The deepest entered level still containing this point; elsewhere, the drill restarts from
+        // the outermost frame there.
         let start = -1;
         for (let i = this.drilled.length - 1; i >= 0; i--) {
             const at = chain.findIndex(
@@ -578,17 +489,12 @@ export class PageZoom extends VueElement {
     }
 
     private wheel(event: WheelEvent): void {
-        // The modifier is the whole contract: without it the wheel belongs to the
-        // document, so the reader can scroll past a sheet taller than their
-        // viewport. It is also what a trackpad pinch arrives as, which is why
-        // pinch-to-zoom works with no gesture handler.
+        // The modifier is the contract: without it the wheel scrolls the document. Trackpad pinch
+        // arrives as Ctrl+wheel, so pinch-to-zoom works too.
         if (!event.ctrlKey && !event.metaKey) return;
         event.preventDefault();
         const box = this.stageBox();
-        // `deltaMode` is not always pixels: DOM_DELTA_LINE counts lines and DOM_DELTA_PAGE
-        // counts PAGES, where a whole notch arrives as ±1. Taken at face value that is a
-        // factor of 1.002 — the readout stays at 100% and the gesture looks broken on the
-        // browsers that use those units.
+        // `deltaMode` may be lines or pages (±1 per notch); normalise, or the zoom barely moves.
         const unit =
             event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? box.height : 1;
         this.apply(
@@ -604,28 +510,15 @@ export class PageZoom extends VueElement {
     }
 
     /**
-     * POINTER CAPTURE IS TAKEN LATE, AND THAT IS THE SUBTLETY HERE
-     *
-     * Capturing on `pointerdown` is the obvious way to keep tracking a drag that
-     * leaves the stage, and it silently breaks two things: with a capture override
-     * in place the browser dispatches the following `click` to the CAPTURE element
-     * rather than to what was under the pointer, so while zoomed a click on a
-     * component slot stopped reaching that slot's anchor (no navigation) and a
-     * click on Reset stopped reaching the button (no way back out).
-     *
-     * So capture is taken only once the pointer has actually travelled — by which
-     * point this IS a drag, the click that follows is one we swallow anyway, and
-     * nothing is left for the retargeting to spoil.
+     * Pointer capture is taken late, only once the pointer has travelled. Capturing on
+     * `pointerdown` retargets the following `click` to the capture element, so slot links and Reset
+     * stopped working while zoomed.
      */
     private startPan(event: PointerEvent): void {
-        // A pan whose `pointerup` landed outside the window never produces a click
-        // for the guard to spend, so the flag is cleared here too — otherwise the
-        // NEXT deliberate click on a component would be the one swallowed.
+        // A pan released outside the window produces no click to spend the guard; clear it here.
         this.swallowClick = false;
         if (!zoomed(this.view) || event.button !== 0) return;
-        // These controls are ON the stage but are not the sheet: dragging from a
-        // button is a mis-click, and treating it as a pan makes the button feel
-        // broken.
+        // Dragging from a control is a mis-click, not a pan.
         if (this.contains(event.target as Node)) return;
         this.panning = {
             id: event.pointerId,
@@ -641,11 +534,8 @@ export class PageZoom extends VueElement {
     private movePan(event: PointerEvent): void {
         const pan = this.panning;
         if (!pan || event.pointerId !== pan.id) return;
-        // The button came up somewhere this page never heard about — released outside
-        // the window before the drag had travelled far enough to take capture, so
-        // neither `pointerup` nor `pointercancel` reached us. Without this the next
-        // move on the same pointer id drags the sheet around with no button held, and
-        // `setPointerCapture` can throw for a pointer that is no longer active.
+        // The button was released somewhere unseen (outside the window before capture), so stop;
+        // otherwise the next move pans with no button held.
         if (!(event.buttons & 1)) {
             this.panning = null;
             this.stage?.classList.remove("cp-page-panning");
@@ -655,12 +545,8 @@ export class PageZoom extends VueElement {
         const dy = event.clientY - pan.y;
         pan.x = event.clientX;
         pan.y = event.clientY;
-        // How far the pointer has got FROM WHERE IT STARTED, not how far it has
-        // travelled. A noisy finger or stylus emits a run of tiny oscillating moves
-        // without ever leaving the click radius; summing every delta turns that jitter
-        // into a "drag", which arms the guard below and eats the reader's tap on the
-        // component. The furthest it ever strayed is what decides — so a real drag that
-        // wanders out and comes back still counts as one, because the sheet did move.
+        // The furthest the pointer has strayed from its start, not total travel: jitter must not
+        // become a drag that swallows a tap.
         pan.moved = Math.max(
             pan.moved,
             Math.abs(event.clientX - pan.fromX) +
@@ -682,17 +568,14 @@ export class PageZoom extends VueElement {
     }
 
     /**
-     * `clicks` says whether this sequence can still produce one. A `pointercancel` —
-     * the browser taking the gesture over — never does, so arming the guard there would
-     * leave it primed for something else entirely to spend.
+     * `clicks` says whether this sequence can still produce a click; a `pointercancel` can't, so
+     * the guard isn't armed there.
      */
     private endPan(event: PointerEvent, clicks: boolean): void {
         const pan = this.panning;
         if (!pan || event.pointerId !== pan.id) return;
-        // A pan that MOVED must not also navigate: the pointer came up over an
-        // overlay, and that overlay links to a preview page. Under the threshold it
-        // was a click that wobbled, and swallowing that would break clicking a
-        // component while zoomed in.
+        // A pan that moved must not also navigate via the overlay under the pointer; under the
+        // threshold it was a wobbly click.
         if (clicks && pan.moved > DRAG_SLOP) this.swallowClick = true;
         if (pan.held && this.stage?.hasPointerCapture?.(event.pointerId)) {
             this.stage.releasePointerCapture(event.pointerId);
@@ -702,11 +585,8 @@ export class PageZoom extends VueElement {
     }
 
     /**
-     * Escape unwinds one thing at a time, innermost first: the selection, then the
-     * zoom. Doing both at once would throw away a reading position the reader spent
-     * three double-clicks arriving at, in answer to a key they pressed to dismiss a
-     * tooltip. The selection is `design-page.js`'s to clear, so this defers to it by
-     * looking for its mark.
+     * Escape unwinds one thing at a time: the selection (`design-page.js`'s, detected by its mark),
+     * then the zoom.
      */
     private escape(event: KeyboardEvent): void {
         if (event.key !== "Escape" || !zoomed(this.view)) return;
@@ -715,11 +595,8 @@ export class PageZoom extends VueElement {
     }
 
     /**
-     * `+` zooms in, `-` out, `0` back to 1:1 — the same three steps the corner buttons
-     * take, about the middle of the view.
-     *
-     * Ignored while a control has focus, so the keys still belong to a checkbox, a radio
-     * or anything with text in it rather than to the sheet.
+     * `+` / `-` / `0` mirror the corner buttons about the middle of the view. Ignored while a form
+     * control has focus.
      */
     private shortcut(event: KeyboardEvent): void {
         if (event.metaKey || event.ctrlKey || event.altKey) return;
@@ -736,18 +613,8 @@ export class PageZoom extends VueElement {
     }
 
     /**
-     * Tell the page to describe the focused node again, now that the sheet has moved
-     * under it.
-     *
-     * `design-page.js` parks its tooltip at the node's measured box when focus lands
-     * there, and a keyboard zoom moves that box without producing a new focus event —
-     * so the tip would be left behind, stranded over whatever the pan brought under
-     * it. Re-dispatching `focus` at the element it is already on makes that page
-     * re-measure and re-park, which is why the two keyboard steps above are applied
-     * UN-eased: the box has to be final before anything measures it.
-     *
-     * A one-way nudge through the DOM, like reading `.cp-page-selected` — the legacy
-     * file still knows nothing about this element.
+     * Re-dispatch `focus` on the focused node so `design-page.js` re-parks its tooltip after a
+     * keyboard zoom moved the node (hence those steps are un-eased).
      */
     private reparkTip(): void {
         const focused = document.activeElement;
@@ -759,20 +626,15 @@ export class PageZoom extends VueElement {
     private reveal(target: Element | null): void {
         if (!target || !zoomed(this.view)) return;
         this.settle();
-        // Only the sheet's own overlays: a row in the audit list below is not
-        // something the stage can bring into view, and asking it to would pan the
-        // sheet to nowhere in answer to a focus that never left the list.
+        // Only the sheet's overlays; a focused audit-list row isn't something to pan to.
         if (!this.canvas?.contains(target)) return;
         const delta = revealDelta(
             target.getBoundingClientRect(),
             this.stageBox(),
         );
         if (!delta) return;
-        // NOT eased, unlike every other discrete move. `design-page.js` handles the
-        // same focus event and parks its tooltip at the node's measured box; with a
-        // 170 ms transition in flight that box is wherever the animation currently is,
-        // so the tip lands short and the sheet then slides out from under it. Jumping
-        // puts the node where the tip is about to be told it is.
+        // Not eased: `design-page.js` measures the node on the same focus event, so the box must
+        // already be final.
         this.apply(
             {
                 ...this.view,

@@ -22,26 +22,11 @@ import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 
 /**
- * A design pinned to one catalog SOURCE still resolves after the server restarts on the other.
- *
- * This is the test #796 says nobody has, and the reason it matters is that nothing else would have
- * caught the failure. `--ui-builder-published-catalogs` is one variable, documented as per catalog
- * and reversible, and flipping it changes the catalog's `benchmark` and therefore its reference.
- * `ProductionUiBuilderRuntime.resolve` accepted only the exact current reference, so every design
- * persisted on `/config/ui-builder-state` against the other source became `CATALOG_UNAVAILABLE` on
- * the next restart, with no upgrade path in the runtime. Nothing fails at build time; the cost
- * lands on somebody's saved work, on a box, after a deploy.
- *
- * The blast radius was never knowable from the repository — how many stored designs a deployment
- * holds is deployment state — which is exactly why the fix is a property to assert rather than a
- * number to look up.
- *
- * ONE DIRECTION is fixed, and the other is asserted as the gap it still is. Synthesised-pinned
- * designs survive the flip to published -- the direction 3.27.0 took every catalog, and the one
- * stranding work on a box today. The reverse cannot work the same way: the alternate reference is
- * computed from a catalog already in the process, and a server that has flipped BACK has never
- * fetched the published file. The lever is documented reversible; the runtime is not yet, and
- * saying so here is cheaper than the next reader assuming it.
+ * A design pinned to one catalog source still resolves after the server restarts on the other.
+ * Flipping `--ui-builder-published-catalogs` changes the catalog's reference, and stored designs
+ * pinned to the other source used to become `CATALOG_UNAVAILABLE`. Only synthesised → published is
+ * fixed; the reverse is asserted as a known gap, because a server that flipped back never fetched
+ * the published file.
  */
 class CatalogSourceFlipTest {
 
@@ -84,11 +69,7 @@ class CatalogSourceFlipTest {
       "a served catalog must have a reference",
     )
 
-  /**
-   * The premise. If the two sources agreed on a reference there would be no bug to fix and these
-   * tests would pass against the unfixed runtime while checking nothing — the failure mode this
-   * repository has been bitten by twice today.
-   */
+  /** The premise: the two sources must disagree on a reference, or these tests check nothing. */
   @Test
   fun `the two sources really do produce different references`() {
     assertTrue(
@@ -115,24 +96,11 @@ class CatalogSourceFlipTest {
   }
 
   /**
-   * The direction this does NOT fix, asserted so the gap is visible rather than assumed away.
-   *
-   * The fix computes the alternate reference from a catalog that is already in the process, and
-   * that only works one way round. The synthesised catalog is generated in Kotlin and always
-   * resident, so a server on the published source can always compute the synthesised reference. The
-   * reverse is not true: `ServeRunner` fetches a catalog's published file only for the ids
-   * `--ui-builder-published-catalogs` names, so a server that has flipped BACK has never seen the
-   * published file and cannot know the reference a design was pinned to.
-   *
-   * Closing it would mean either fetching published files for catalogs deliberately withheld -- a
-   * startup network cost for a source nobody asked to serve -- or persisting a reference history,
-   * which is the state this fix exists to avoid needing. #818's re-pinning is the answer that makes
-   * the question moot, because a design re-pinned while the published source was serving carries a
-   * reference the synthesised server also refuses; the real fix there is re-pinning on every load,
-   * in whichever direction.
-   *
-   * If this test starts failing, the gap has been closed and the assertion should be inverted --
-   * not deleted.
+   * The unfixed direction, asserted so the gap is visible. The synthesised catalog is always
+   * resident, but a server flipped back to synthesised has never fetched the published file, so it
+   * cannot know the published reference. Closing it means fetching withheld catalogs or keeping a
+   * reference history; re-pinning on load is the real fix. If this starts failing, invert it —
+   * don't delete it.
    */
   @Test
   fun `flipping BACK to synthesised still strands a published-pinned design, for now`() {
@@ -147,11 +115,8 @@ class CatalogSourceFlipTest {
   }
 
   /**
-   * The half that makes the fix safe rather than merely permissive.
-   *
-   * `unusableReason` calls `resolve` and then `validate`. Accepting a pin in one and refusing it in
-   * the other would leave the design just as dead, reported as an INTERNAL "invalid stored design"
-   * that blames the document instead of the pin — a worse answer than the one being fixed.
+   * `unusableReason` calls `resolve` then `validate`; both must accept the pin, or the design is
+   * still dead and reported as an invalid document.
    */
   @Test
   fun `validate accepts the other source's pin too, not just resolve`() {
@@ -167,11 +132,8 @@ class CatalogSourceFlipTest {
   }
 
   /**
-   * The check is narrowed, not removed.
-   *
-   * Only the SAME catalog id as this build can produce it is accepted. A revision from neither
-   * source — a design carried from a different deployment, or a catalog that has genuinely moved on
-   * — is still refused, which is the drift this pin exists to catch.
+   * Narrowed, not removed: only the same catalog id as this build can produce it is accepted; a
+   * revision from neither source is still refused.
    */
   @Test
   fun `a reference from neither source is still refused`() {
@@ -192,14 +154,9 @@ class CatalogSourceFlipTest {
   }
 
   /**
-   * The smallest document the catalog accepts, so `validate` answers about the PIN and nothing
-   * else.
-   *
-   * `layout/box` is the root on purpose: it declares no required properties and one `children`
-   * slot, so there is no property value to get wrong and no second component in the picture. It is
-   * also one of the builder's OWN components, which m3-catalog deliberately publishes none of — so
-   * this document exercises the published catalog exactly where `withBuilderVocabulary` supplies
-   * it, which is the shape a real stored design has.
+   * The smallest accepted document, so `validate` answers only about the pin. `layout/box` has no
+   * required properties and is a builder component (m3-catalog publishes none), exercising
+   * `withBuilderVocabulary` as real stored designs do.
    */
   private fun boxScreen(pin: CatalogReferenceV1) =
     DesignDocumentV1(

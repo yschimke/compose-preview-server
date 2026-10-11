@@ -3,23 +3,14 @@ package ee.schimke.composeai.cli.serve
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Thread-safe source of truth for every catalog the operator configured and its latest load
- * outcome.
+ * Thread-safe source of truth for every configured catalog and its latest load outcome, so
+ * "configured but broken" stays distinct from "not configured" for readiness, `/status`, the home
+ * index and the refresher.
  *
- * A failed catalog used to disappear completely: startup logged one stderr line, while readiness,
- * `/status`, the home index, and the branch refresher only knew about successfully registered
- * sessions. That made "configured but broken" indistinguishable from "not configured". This tracker
- * preserves the configured set across startup and background refreshes so every consumer observes
- * the same state.
- *
- * [State.available] means a usable copy is currently registered. A refresh failure after an earlier
- * success keeps it true because [ServeCatalogStore] retains the last good staged copy; the
- * [State.error] still records that the latest refresh failed. An initial failure has
- * `available=false`, remains visible in status, and stays eligible for refresh retry. Catalog
- * availability deliberately does not require every catalog for server readiness: a usable server
- * with a partial external catalog set should still deploy. The exception is the design-systems
- * group ([Config.designSystem]), which the readiness gate does require — see
- * [ServeCatalogsConfig.DESIGN_SYSTEMS_GROUP] for why those and only those.
+ * [State.available] means a usable copy is registered; a refresh failure after a success keeps it
+ * true ([ServeCatalogStore] retains the last good copy) while [State.error] records the failure. An
+ * initial failure stays visible and retried. Readiness doesn't require every catalog, except the
+ * design-systems group ([Config.designSystem]; see [ServeCatalogsConfig.DESIGN_SYSTEMS_GROUP]).
  */
 class CatalogLoadTracker(
   configured: List<Config>,
@@ -32,35 +23,24 @@ class CatalogLoadTracker(
     val repo: String,
     val branch: String,
     /**
-     * The front-page section this catalog was published under ([ServeCatalogsConfig.Entry.group],
-     * resolved against the config's group table), or null when it declared none. Carried here
-     * because this tracker is the configured-catalog source of truth every consumer already reads —
-     * including the home index, which needs the grouping to be config rather than code.
+     * Front-page section ([ServeCatalogsConfig.Entry.group], resolved), or null; carried here
+     * because the home index reads this tracker.
      */
     val group: ServeWeb.HomeGroup? = null,
     /**
-     * Upstream project this catalog was rendered from, when it is not [repo] — see
-     * [ServeCatalogsConfig.Entry.importedFrom]. Carried here for the same reason [group] is: the
-     * home index reads this tracker, and attribution has to be config rather than code.
+     * Upstream project the catalog was rendered from when not [repo]
+     * ([ServeCatalogsConfig.Entry.importedFrom]).
      */
     val importedFrom: String? = null,
     /**
-     * Startup fetch order, highest first ([ServeCatalogsConfig.Entry.loadPriority]). Kept beside
-     * the rest of the configured entry because [loadOrder] is the one consumer, and it reads the
-     * same snapshot every other consumer does.
+     * Startup fetch order, highest first ([ServeCatalogsConfig.Entry.loadPriority]); read by
+     * [loadOrder].
      */
     val loadPriority: Int = 0,
     /**
-     * This catalog is published under [ServeCatalogsConfig.DESIGN_SYSTEMS_GROUP] — the group the
-     * box exists to serve.
-     *
-     * Carried as a resolved boolean rather than a group id because two unrelated consumers ask the
-     * same question and neither wants the group table: [loadOrder] fetches these first, and the
-     * readiness gate refuses to report ready until each of them has rendered.
-     *
-     * Not derivable from [group]: that is the resolved [ServeWeb.HomeGroup], which keeps the
-     * heading an operator chose to display and drops the id they keyed it by. Matching on the
-     * heading would make readiness depend on display text.
+     * Published under [ServeCatalogsConfig.DESIGN_SYSTEMS_GROUP]: fetched first by [loadOrder] and
+     * required by the readiness gate. A resolved boolean, since [group] keeps only the display
+     * heading and readiness must not depend on display text.
      */
     val designSystem: Boolean = false,
   )
@@ -85,10 +65,9 @@ class CatalogLoadTracker(
   }
 
   /**
-   * Configured order, mutable because the catalog set is now runtime config: the admin API
-   * ([ServeCatalogAdmin]) publishes and retires catalogs on a running server. Guarded by [lock] for
-   * ordering; [states] stays a concurrent map so the hot read paths (status, home index, refresh)
-   * never block on a registration.
+   * Configured order, mutable because the admin API ([ServeCatalogAdmin]) publishes and retires
+   * catalogs at runtime. [lock] guards ordering; [states] stays concurrent so hot read paths never
+   * block.
    */
   private val lock = Any()
   private val ordered =
@@ -99,9 +78,8 @@ class CatalogLoadTracker(
   private val states = ConcurrentHashMap(ordered.associate { it.system to State(it) })
 
   /**
-   * Publish a new catalog, appended after the already-configured ones. Returns false when
-   * [config]'s system is already tracked — re-publishing an existing id is the caller's conflict to
-   * report, not something to silently overwrite (it would drop the running catalog's load state).
+   * Publish a new catalog after the existing ones. False when the system is already tracked;
+   * overwriting would drop the running catalog's load state.
    */
   fun add(config: Config): Boolean =
     synchronized(lock) {
@@ -112,21 +90,10 @@ class CatalogLoadTracker(
     }
 
   /**
-   * Replace [system]'s **listing** metadata — where it appears and when it is fetched, not where it
-   * comes from — keeping its load state and its registered content untouched. Returns false when it
-   * isn't tracked.
-   *
-   * Needed because a catalog's front-page placement is resolved once, at registration, into a
-   * [ServeWeb.HomeGroup] snapshot. So a group defined *after* a catalog was published would never
-   * reach it: the group table would gain the entry while the already-registered catalog kept `group
-   * = null` and stayed under the owner fallback. [ServeCatalogAdmin] calls this to re-resolve every
-   * claim whenever the group table changes, which is what makes a group edit take effect without a
-   * restart or a re-fetch.
-   *
-   * Deliberately cannot change [Config.repo] or [Config.branch] — those decide what bytes get
-   * served, and changing them behind a live registration would leave the served content disagreeing
-   * with its own provenance (and its trust verdict). Re-pointing a catalog is a retire plus a
-   * publish.
+   * Replace [system]'s listing metadata (placement and fetch order), keeping load state and
+   * content. False when untracked. Placement is resolved once at registration, so
+   * [ServeCatalogAdmin] calls this whenever the group table changes. Cannot change [Config.repo] or
+   * [Config.branch], which decide what is served; see [repoint].
    */
   fun relist(
     system: String,
@@ -137,10 +104,8 @@ class CatalogLoadTracker(
     // Front-page attribution, and undefaulted for the same reason: a caller that forgot it would
     // silently strip an import's origin, which is the failure this parameter was added to close.
     importedFrom: String?,
-    // Undefaulted for the same reason again, and it is load-bearing twice over: a re-publish can
-    // move an entry INTO or OUT OF the design-systems group, and dropping that here would leave a
-    // catalog fetched in the wrong band and — worse — either gating readiness on a catalog that is
-    // no longer a design system, or not gating it on one that now is.
+    // Undefaulted: a re-publish may move an entry into or out of the design-systems group, which
+    // changes fetch band and readiness gating.
     designSystem: Boolean,
   ): Boolean =
     synchronized(lock) {
@@ -160,20 +125,10 @@ class CatalogLoadTracker(
     }
 
   /**
-   * Replace [system]'s **provenance** — the repository and branch its bytes come from — keeping its
-   * position and its load state. Returns false when it isn't tracked.
-   *
-   * The counterpart to [relist], and deliberately a separate call with a much narrower contract,
-   * because the two are safe at different moments. [relist] may run at any time: it moves a card on
-   * the front page and changes nothing about what is served. This one may run in exactly one
-   * situation — **after** the new source has already been loaded and registered under [system] —
-   * because until then the served content and this record would disagree about where the bytes came
-   * from, and that record is what the trust verdict and the permalinks are built from.
-   *
-   * [ServeCatalogAdmin.register] is the only caller, and it loads first for that reason: a failed
-   * load leaves the old catalog serving and never reaches here. Re-pointing by retiring and
-   * re-publishing instead — what the admin API used to require — has no such property: the retire
-   * succeeds, the publish fetches, and a fetch that fails leaves the system published nowhere.
+   * Replace [system]'s provenance (repository and branch), keeping position and load state. False
+   * when untracked. Only safe after the new source is loaded and registered, since trust and
+   * permalinks are built from this record; [ServeCatalogAdmin.register] loads first, so a failed
+   * load leaves the old catalog serving.
    */
   fun repoint(system: String, repo: String, branch: String): Boolean =
     synchronized(lock) {
@@ -199,28 +154,16 @@ class CatalogLoadTracker(
   fun configFor(system: String): Config? = states[system]?.config
 
   /**
-   * The full tracked state for [system] — configuration **and** whether anything is actually
-   * serving it — or null when it isn't served here.
-   *
-   * [configFor] answers only half the question, and a caller that reports on a catalog needs the
-   * other half: a pending entry and one whose initial load failed both have a configuration, and
-   * neither has a session behind it. Describing either as "still serving" is reassuring and wrong.
+   * The full tracked state for [system] (configuration and whether anything serves it), or null.
+   * [configFor] alone can't tell a pending or failed entry from a serving one.
    */
   fun stateFor(system: String): State? = states[system]
 
   /**
-   * Whether a background pass queued for [system] against [repo] is still about the catalog it was
-   * queued for.
-   *
-   * The branch refresher captures each entry's repo when it snapshots this tracker, and can then
-   * sit on the server's registration monitor for the whole of an admin re-point. "Does the system
-   * still exist" was the only test it made afterwards, and it is not enough: reloading the captured
-   * OLD repo puts the old repo's host back in front of the new registration, and the provenance and
-   * `catalogs.json` then both name a repository the served bytes did not come from.
-   *
-   * Asked of the tracker rather than compared at the call site because the tracker is where the
-   * answer lives and where [ServeCatalogAdmin] writes it — under the same monitor the caller is
-   * holding when it asks.
+   * Whether a background pass queued for [system] against [repo] is still about the same catalog:
+   * the refresher may wait through an admin re-point, and reloading the old repo would serve bytes
+   * from a repository the provenance no longer names. Asked under the same monitor
+   * [ServeCatalogAdmin] writes under.
    */
   fun stillPointsAt(system: String, repo: String): Boolean = configFor(system)?.repo == repo
 
@@ -228,12 +171,8 @@ class CatalogLoadTracker(
   fun firstAvailableSystem(): String? = snapshot().firstOrNull { it.available }?.config?.system
 
   /**
-   * Every configured design-system catalog ([Config.designSystem]), whether or not it has loaded —
-   * the set the readiness gate must see render before it reports ready.
-   *
-   * Configured, not available, and that is the point: a design system still fetching is exactly the
-   * state readiness has to keep waiting through, and one reported only when available would let the
-   * gate go green in the window before it appears.
+   * Every configured design-system catalog, loaded or not: the set readiness must see render.
+   * Configured rather than available, so the gate can't go green before one appears.
    */
   fun designSystemSystems(): List<String> =
     snapshot().filter { it.config.designSystem }.map { it.config.system }
@@ -266,29 +205,17 @@ class CatalogLoadTracker(
   }
 
   /**
-   * Stable configured-order snapshot, safe to iterate without holding a lock. Taken under [lock] so
-   * a concurrent [add]/[remove] can't tear the ordering; an entry retired between the two reads is
-   * dropped rather than throwing.
+   * Stable configured-order snapshot, safe to iterate unlocked. Taken under [lock]; entries retired
+   * mid-read are dropped.
    */
   fun snapshot(): List<State> =
     synchronized(lock) { ordered.toList() }.mapNotNull { states[it.system] }
 
   /**
-   * The same catalogs as [snapshot], in the order the **initial fetch** should walk them:
-   * [Config.designSystem] first, then highest [Config.loadPriority], ties keeping configured order
-   * (the sort is stable).
-   *
-   * Design systems lead unconditionally, ahead of any priority number, because they are what the
-   * readiness gate waits on: a replica is not ready until each of them renders, so fetching them
-   * last would hold the rollout open for the time it took to fetch everything else first. Explicit
-   * [Config.loadPriority] still orders within each of the two bands, so an operator can say which
-   * design system matters most without being able to accidentally demote the band.
-   *
-   * Separate from [snapshot] on purpose. Configured order is the front page's, and the two wants
-   * genuinely differ: the queue wants the box's load-bearing catalogs back first after a restart,
-   * while the index wants sections and cards where the operator put them. Sorting the tracker
-   * itself would have moved the cards — and moved [firstAvailableSystem], which is the session the
-   * readiness probe renders — as a side effect of a fetch-order preference (issue #4231).
+   * The [snapshot] catalogs in initial-fetch order: design systems first (readiness waits on them),
+   * then highest [Config.loadPriority], ties in configured order. Separate from [snapshot] so fetch
+   * preference never moves front-page cards or [firstAvailableSystem], which the readiness probe
+   * renders (#4231).
    */
   fun loadOrder(): List<State> =
     snapshot()
@@ -324,12 +251,9 @@ class CatalogLoadTracker(
 
   /** Catalogs with a usable registered copy; used to seed only successful branch heads. */
   /**
-   * Every catalog this server is **configured** to serve, whether or not it loaded.
-   *
-   * The distinction that matters to the theme cache's sweeper: a configured system that failed to
-   * load must keep its warmed renders (a fetch can fail transiently, and re-warming m3-catalog
-   * costs ~28 hours), while a system no longer configured at all has renders nothing can ever read
-   * again and must be reclaimed. Absence from [availableSystems] alone cannot tell those apart.
+   * Every configured catalog, loaded or not. The theme-cache sweeper must keep renders for a
+   * configured catalog that failed transiently (re-warming is expensive) and reclaim only
+   * unconfigured ones; [availableSystems] can't tell those apart.
    */
   fun configuredSystems(): Set<String> = states.keys.toSet()
 

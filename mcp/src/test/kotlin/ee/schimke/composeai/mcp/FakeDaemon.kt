@@ -30,17 +30,13 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
 /**
- * Test-only fake daemon. Speaks the daemon protocol (PROTOCOL.md) over piped streams so the MCP
- * server can talk to it without a real subprocess. Just enough behavior to exercise:
- *
- * - `initialize` → returns a stub [InitializeResult] with empty capabilities.
- * - `renderNow(previews)` → returns `queued = previews` and emits a [`renderFinished`][..]
- *   notification for every queued id with a synthetic png path.
- * - `setVisible` / `setFocus` → recorded so tests can assert watch propagation.
- * - `shutdown` → returns null result; subsequent `exit` causes the reader to drain.
- *
- * The fake also lets the test push a [`discoveryUpdated`][..] notification on demand to trigger the
- * MCP server's catalog update + resources/list_changed signal.
+ * Test-only fake daemon speaking the daemon protocol (PROTOCOL.md) over piped streams:
+ * - `initialize` → a stub [InitializeResult] with empty capabilities.
+ * - `renderNow(previews)` → `queued = previews` plus a [`renderFinished`][..] per id with a
+ *   synthetic png path.
+ * - `setVisible` / `setFocus` → recorded for watch-propagation assertions.
+ * - `shutdown` → null result; `exit` drains the reader. Tests can also push a
+ *   [`discoveryUpdated`][..] on demand.
  */
 class FakeDaemon : DaemonSpawn {
 
@@ -55,7 +51,7 @@ class FakeDaemon : DaemonSpawn {
     encodeDefaults = false
   }
 
-  /** Sent by the fake's reader when the MCP shim issues `setVisible`. Tests assert ordering. */
+  /** Recorded when the MCP shim issues `setVisible`; tests assert ordering. */
   val visibleSets = java.util.concurrent.LinkedBlockingQueue<List<String>>()
   /** Same for `setFocus`. */
   val focusSets = java.util.concurrent.LinkedBlockingQueue<List<String>>()
@@ -64,45 +60,34 @@ class FakeDaemon : DaemonSpawn {
   /** `fileChanged` notifications the fake observed. */
   val fileChanges = java.util.concurrent.LinkedBlockingQueue<JsonObject>()
   /**
-   * `renderNow.overrides` payloads the fake observed (in lockstep with [renderRequests]).
-   * `LinkedBlockingQueue` rejects null elements, so we use `CopyOnWriteArrayList` and tests poll by
-   * index rather than by [LinkedBlockingQueue.poll] timeout.
+   * `renderNow.overrides` payloads, in lockstep with [renderRequests]. A `CopyOnWriteArrayList`
+   * because `LinkedBlockingQueue` rejects nulls; tests poll by index.
    */
   val renderOverrides: MutableList<ee.schimke.composeai.daemon.protocol.PreviewOverrides?> =
     java.util.concurrent.CopyOnWriteArrayList()
 
-  /**
-   * D1 — kinds the fake advertises in `initialize.capabilities.dataProducts`. Tests assign before
-   * the spawn calls `initialize` (synchronous in [DaemonSupervisor.spawn], so assign-then-spawn is
-   * the natural order).
-   */
+  /** Kinds advertised in `initialize.capabilities.dataProducts`; assign before spawning. */
   @Volatile var advertisedDataProducts: List<DataProductCapability> = emptyList()
 
   /**
-   * `PreviewOverrides` field names the fake advertises in
-   * `initialize.capabilities.supportedOverrides`. Tests assign before the spawn calls `initialize`.
-   * Empty list (the default) keeps pre-feature behaviour — `DaemonMcpServer`'s validation falls
-   * open on an empty advertised set.
+   * `PreviewOverrides` field names advertised in `supportedOverrides`; assign before spawning.
+   * Empty keeps validation falling open.
    */
   @Volatile var advertisedSupportedOverrides: List<String> = emptyList()
 
-  /**
-   * Devices the fake advertises in `initialize.capabilities.knownDevices`. Tests assign before the
-   * spawn calls `initialize`. Empty list keeps pre-feature behaviour.
-   */
+  /** Devices advertised in `knownDevices`; assign before spawning. */
   @Volatile
   var advertisedKnownDevices: List<ee.schimke.composeai.daemon.protocol.KnownDevice> = emptyList()
 
   /**
-   * Recording formats the fake advertises in `initialize.capabilities.recordingFormats`. Tests
-   * assign before the spawn calls `initialize`. Empty list keeps pre-feature behaviour — the MCP
-   * `record_preview` format-validation falls open and the request goes through.
+   * Recording formats advertised in `recordingFormats`; assign before spawning. Empty makes
+   * `record_preview` format validation fall open.
    */
   @Volatile var advertisedRecordingFormats: List<String> = emptyList()
 
   /**
-   * Extensions `extensions/enable` can turn on, by id, with the data products each adds to
-   * [advertisedDataProducts] (PROTOCOL.md § 3a). Ids absent here are reported as `unknown`.
+   * Extensions `extensions/enable` can turn on, by id, with the data products each adds
+   * (PROTOCOL.md § 3a). Unlisted ids are `unknown`.
    */
   @Volatile var enableableExtensions: Map<String, List<DataProductCapability>> = emptyMap()
 
@@ -115,9 +100,8 @@ class FakeDaemon : DaemonSpawn {
     emptyList()
 
   /**
-   * D1 — fake handler for `data/fetch`. When set, the lambda receives `(previewId, kind, params,
-   * inline)` and returns either the [DataFetchOutcome] the daemon should respond with. Default
-   * returns [DataFetchOutcome.Unknown] so unconfigured tests see the wire-error path.
+   * Handler for `data/fetch`: `(previewId, kind, params, inline)` → [DataFetchOutcome]. Defaults to
+   * [DataFetchOutcome.Unknown].
    */
   @Volatile
   var dataFetchHandler:
@@ -131,12 +115,7 @@ class FakeDaemon : DaemonSpawn {
   /** Recorded `data/unsubscribe` calls — same shape. */
   val dataUnsubscribes = java.util.concurrent.LinkedBlockingQueue<Pair<String, String>>()
 
-  // ---------------------------------------------------------------------------
-  // Recording (RECORDING.md) — fake state for the four-call flow.
-  // Tests assign the handler before the spawn calls `initialize` (synchronous in
-  // [DaemonSupervisor.spawn]); the `record_preview` tool drives start/script/stop/encode in
-  // sequence and the fake records each call into the maps below + the corresponding queue.
-  // ---------------------------------------------------------------------------
+  // Recording (RECORDING.md) fake state for the four-call flow; each call is recorded below.
 
   /** Recorded `recording/start` calls in arrival order — `(previewId, fps, scale, overrides?)`. */
   data class RecordingStartCall(
@@ -168,23 +147,16 @@ class FakeDaemon : DaemonSpawn {
   val recordingEncodes = java.util.concurrent.LinkedBlockingQueue<RecordingEncodeCall>()
 
   /**
-   * Fake byte payload returned by the next `recording/encode` call. Tests preload this with the
-   * expected APNG bytes; the fake writes them to a temp file and responds with the path / size /
-   * mime so [DaemonClient.recordingEncode] can return the file the MCP server then reads back into
-   * a base64 image content block. Defaults to a tiny non-empty stub (the PNG signature) so tests
-   * that don't care about exact bytes still get a non-zero `sizeBytes`.
+   * Payload returned by the next `recording/encode`, written to a temp file whose path / size /
+   * mime are returned. Defaults to the PNG signature so `sizeBytes` is non-zero.
    */
   @Volatile var recordingEncodedBytes: ByteArray = byteArrayOf(-119, 80, 78, 71, 13, 10, 26, 10)
 
-  /**
-   * Optional override directory for the encoded video file. When null, the fake writes to a temp
-   * file under `java.io.tmpdir`. Tests pass an explicit folder when they want predictable paths.
-   */
+  /** Directory for the encoded file; null uses `java.io.tmpdir`. */
   @Volatile var recordingEncodeDir: java.io.File? = null
 
   /**
-   * Pre-canned response shape for `recording/stop`. Tests override per scenario; defaults match
-   * "30fps × 500ms script" — 16 frames at 120×60.
+   * Canned `recording/stop` response; defaults match a 30fps × 500ms script (16 frames at 120×60).
    */
   @Volatile
   var recordingStopResult: ee.schimke.composeai.daemon.protocol.RecordingStopResult =
@@ -198,26 +170,18 @@ class FakeDaemon : DaemonSpawn {
 
   private val nextRecordingId = java.util.concurrent.atomic.AtomicLong(1)
 
-  /**
-   * Optional capture hook for the params object the fake received on `initialize`. Tests use this
-   * to assert what the supervisor passes through (e.g. `options.attachDataProducts`). Default is a
-   * no-op.
-   */
+  /** Captures the `initialize` params, e.g. to assert `options.attachDataProducts`. */
   @Volatile var onInitializeReceived: (JsonObject) -> Unit = {}
 
-  /**
-   * Answers `compileSources` (stage-2 in-process compile). Null — the default — answers "method not
-   * found", like a daemon that predates it.
-   */
+  /** Answers `compileSources`; null answers "method not found" like an older daemon. */
   @Volatile
   var onCompileSources:
     ((List<String>) -> ee.schimke.composeai.daemon.protocol.CompileSourcesResult)? =
     null
 
   /**
-   * Outcome the fake's `data/fetch` handler returns. Mirrors the daemon's
-   * [`DataProductRegistry.Outcome`] but deliberately decouples — the fake doesn't depend on the
-   * registry interface.
+   * Outcome the fake's `data/fetch` returns; mirrors `DataProductRegistry.Outcome` without
+   * depending on it.
    */
   sealed interface DataFetchOutcome {
     /** Wire-success: the fake returns a `DataFetchResult` with the given fields. */
@@ -243,31 +207,23 @@ class FakeDaemon : DaemonSpawn {
   }
 
   /**
-   * When set, the fake auto-emits a `renderFinished` notification for every preview id in an
-   * incoming `renderNow` whose path the lambda returns non-null. Removes the
-   * spawn-a-thread-and-poll-renderRequests race in tests that just want "render → bytes back".
+   * When set, auto-emit `renderFinished` for each id in a `renderNow` whose path the lambda
+   * returns, avoiding a poll-and-emit thread in tests.
    */
   @Volatile var autoRenderPngPath: ((previewId: String) -> String?)? = null
 
   /**
-   * Optional companion to [autoRenderPngPath] — when set, the auto-emitted `renderFinished` carries
-   * an `unchanged: true|false` flag derived from this lambda. Returning `null` means "omit the
-   * field" (the wire's default), matching the daemon's "not deduplicated" path. Used by the
-   * freshness-sampling tests to drive deterministic vs non-deterministic outcomes.
+   * With [autoRenderPngPath], sets the auto-emitted `unchanged` flag; `null` omits it. Used by the
+   * freshness-sampling tests.
    */
   @Volatile var autoRenderUnchanged: ((previewId: String) -> Boolean?)? = null
 
-  /**
-   * Optional companion to [autoRenderPngPath] — when set, the auto-emitted `renderFinished` carries
-   * the returned element as `workTrace`, the per-render trace of what the daemon ran (#1181).
-   * Returning `null` omits the field, as every released daemon does today.
-   */
+  /** With [autoRenderPngPath], attaches the returned element as `workTrace`; `null` omits it. */
   @Volatile var autoRenderWorkTrace: ((previewId: String) -> JsonElement?)? = null
 
   /**
-   * Rejects a `renderNow` for a preview when it returns a reason, the way the real daemon answers
-   * `coalesced: override-bearing render already in flight for this previewId`: the preview goes in
-   * `rejected`, and no `renderFinished` or `renderFailed` ever follows for that request.
+   * Rejects a preview's `renderNow` when it returns a reason, like the daemon's `coalesced:`
+   * rejection: listed in `rejected`, with no `renderFinished`/`renderFailed` following.
    */
   @Volatile
   var rejectRenderNow:
@@ -278,10 +234,8 @@ class FakeDaemon : DaemonSpawn {
     null
 
   /**
-   * Path returned in `InitializeResult.manifest.path`. The MCP server's `DaemonSupervisor` caches
-   * it on `SupervisedDaemon.manifestPath` so the background poller can stat the file and re-read on
-   * change (issue #834). Tests that drive the manifest poller assign this before the spawn calls
-   * `initialize`.
+   * Path returned as `InitializeResult.manifest.path`, which the supervisor caches for the manifest
+   * poller.
    */
   @Volatile var advertisedManifestPath: String = ""
 
@@ -316,12 +270,8 @@ class FakeDaemon : DaemonSpawn {
   }
 
   /**
-   * Pushes a `discoveryUpdated` notification with one preview added. Test helper.
-   *
-   * [functionName] is the bare `@Composable` method name; it defaults to the last id segment but
-   * can be set independently so a test can model a named/variant preview whose id (e.g.
-   * `…Forecast_Light`) differs from its base function (`Forecast`). Emitted under the wire key
-   * `functionName` to match the real daemon's `PreviewInfoDto` `@SerialName("functionName")`.
+   * Pushes a `discoveryUpdated` adding one preview. [functionName] defaults to the last id segment
+   * but can differ to model a variant preview; sent under the wire key `functionName`.
    */
   fun emitDiscovery(
     previewId: String,
@@ -351,8 +301,8 @@ class FakeDaemon : DaemonSpawn {
   }
 
   /**
-   * Pushes a `discoveryUpdated` that removes [previewIds], as the real daemon's incremental
-   * discovery does after swapping onto a failed compile's output. Test helper.
+   * Pushes a `discoveryUpdated` removing [previewIds], as incremental discovery does after a failed
+   * compile.
    */
   fun emitRemoved(vararg previewIds: String) {
     val params = buildJsonObject {
@@ -365,8 +315,8 @@ class FakeDaemon : DaemonSpawn {
   }
 
   /**
-   * Pushes a `classpathDirty` notification. PROTOCOL.md § 6 says this fires at most once per
-   * lifetime; tests should treat the daemon as dying after this call.
+   * Pushes `classpathDirty` (at most once per lifetime, PROTOCOL.md § 6); treat the daemon as
+   * dying.
    */
   fun emitClasspathDirty(
     reason: String = "fingerprintMismatch",
@@ -406,11 +356,8 @@ class FakeDaemon : DaemonSpawn {
   }
 
   /**
-   * Pushes a `renderFinished` notification carrying the given [attachments] under the wire's
-   * `dataProducts` field. Each attachment is `(kind, schemaVersion, payload?, path?)` matching the
-   * D1 wire shape (DATA-PRODUCTS.md). Used by tests that exercise the supervisor's
-   * `dataProductCache` — the MCP server reads attachments off this notification, caches them, and
-   * `get_preview_data` cache-hits them.
+   * Pushes `renderFinished` with [attachments] under `dataProducts`, each `(kind, schemaVersion,
+   * payload?, path?)` (DATA-PRODUCTS.md), for `dataProductCache` tests.
    */
   fun emitRenderFinishedWithDataProducts(
     previewId: String,
@@ -427,9 +374,7 @@ class FakeDaemon : DaemonSpawn {
     return pngPath
   }
 
-  // -------------------------------------------------------------------------
-  // Daemon-side reader: read framed JSON-RPC from the MCP shim, respond.
-  // -------------------------------------------------------------------------
+  // Daemon-side reader: framed JSON-RPC from the MCP shim.
 
   private fun runDaemonReader() {
     try {
@@ -490,17 +435,12 @@ class FakeDaemon : DaemonSpawn {
                 it,
               )
             }
-        // Populate the overrides slot BEFORE offering on `renderRequests` — tests poll on
-        // `renderRequests` and immediately check `renderOverrides`; reverse order opens a race
-        // window between the offer (which wakes the polling thread) and the add to the
-        // overrides list.
+        // Record overrides before offering on `renderRequests`, since tests poll that queue then
+        // read `renderOverrides`.
         renderOverrides.add(overrides)
-        // Decide the auto-emitted outcome for each preview BEFORE offering on `renderRequests`,
-        // for the same reason as the overrides above: a test that polls `renderRequests` and then
-        // reassigns [autoRenderUnchanged] (the freshness-sampling test does, between its two
-        // probes) must see this request answered with the lambda that was set when it was made.
-        // Reading the lambda after the offer let the test's reassignment win the race on a loaded
-        // box, so the first probe carried the second probe's answer.
+        // Decide the auto-emitted outcome before offering on `renderRequests`, so a test that
+        // reassigns [autoRenderUnchanged] after polling sees this request answered with the lambda
+        // set when it was made.
         val rejected = previews.mapNotNull { pid ->
           rejectRenderNow?.invoke(pid, overrides)?.let {
             ee.schimke.composeai.daemon.protocol.RejectedRender(pid, it)
@@ -526,9 +466,7 @@ class FakeDaemon : DaemonSpawn {
         val result =
           RenderNowResult(queued = previews.filterNot { it in rejectedIds }, rejected = rejected)
         sendResponse(id, json.encodeToJsonElement(RenderNowResult.serializer(), result))
-        // Auto-emit renderFinished for any preview whose path the test pre-registered. The
-        // emission happens AFTER the response so the daemon-protocol ordering matches what a
-        // real backend produces (queued → started → finished).
+        // Auto-emit renderFinished after the response, matching a real backend's ordering.
         finished.forEach { (pid, path, unchanged, workTrace) ->
           emitRenderFinished(pid, path, unchanged, workTrace)
         }
@@ -537,9 +475,7 @@ class FakeDaemon : DaemonSpawn {
         sendResponse(id, kotlinx.serialization.json.JsonNull)
       }
       "history/list" -> {
-        // Tests preload `historyEntries` via `setHistory(...)`; we just echo them back wrapped
-        // in the wire shape. Filtering + cursor support are deliberately stubbed — the H6
-        // mapping forwards params verbatim, so unit tests don't need full filter coverage here.
+        // Echo `historyEntries` in the wire shape; filtering and cursors are stubbed.
         val payload = buildJsonObject {
           putJsonArray("entries") { historyEntries.forEach { add(it) } }
           put("totalCount", historyEntries.size)
@@ -623,9 +559,7 @@ class FakeDaemon : DaemonSpawn {
       "data/unsubscribe" -> {
         val previewId = params?.get("previewId")?.jsonPrimitive?.contentOrNull ?: ""
         val kind = params?.get("kind")?.jsonPrimitive?.contentOrNull ?: ""
-        // Validate the kind is in `advertisedDataProducts` and `attachable` — the daemon's real
-        // handler does this. Tests that need the failure path can advertise a non-attachable
-        // kind; tests that need success advertise an attachable one.
+        // Validate the kind is advertised and `attachable`, like the real handler.
         val capability = advertisedDataProducts.firstOrNull { it.kind == kind }
         if (capability == null || !capability.attachable) {
           sendError(
@@ -914,26 +848,21 @@ class FakeDaemonClientFactory : DaemonClientFactory {
   val daemons: MutableMap<Pair<WorkspaceId, String>, FakeDaemon> = mutableMapOf()
 
   /**
-   * Every fake ever spawned by this factory, in spawn order. Useful for respawn-shaped tests (e.g.
-   * `classpathDirty` recovery): the first spawn lands at index 0 and the supervisor's replacement
-   * after `classpathDirty` lands at index 1.
+   * Every fake spawned by this factory, in order (e.g. the `classpathDirty` replacement lands at
+   * index 1).
    */
   val spawnHistory: MutableList<FakeDaemon> = java.util.concurrent.CopyOnWriteArrayList()
 
   /**
-   * Descriptors handed to [spawn], parallel-indexed with [spawnHistory]. SANDBOX-POOL.md Layer 3:
-   * the supervisor mutates the descriptor's `systemProperties` to inject
-   * `composeai.daemon.sandboxCount`; tests assert against this list to verify the supervisor passed
-   * the right pool size to the daemon.
+   * Descriptors handed to [spawn], parallel to [spawnHistory], to assert the injected
+   * `composeai.daemon.sandboxCount` (SANDBOX-POOL.md).
    */
   val spawnDescriptors: MutableList<DaemonLaunchDescriptor> =
     java.util.concurrent.CopyOnWriteArrayList()
 
   /**
-   * Optional pre-`initialize` hook. Invoked synchronously inside [spawn], after the [FakeDaemon] is
-   * constructed but before the supervisor wires the client and sends `initialize`. Tests use this
-   * to configure per-spawn state (e.g. advertised data-product kinds) that needs to be in place
-   * before the initialize round-trip reaches the daemon's reader thread.
+   * Pre-`initialize` hook run inside [spawn], for per-spawn state that must exist before the
+   * handshake.
    */
   @Volatile var daemonConfigurer: (FakeDaemon) -> Unit = {}
 

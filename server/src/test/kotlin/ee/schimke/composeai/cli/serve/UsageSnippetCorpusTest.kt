@@ -5,45 +5,27 @@ import kotlin.test.Test
 import kotlin.test.assertTrue
 
 /**
- * Generates usage snippets from **real catalog checkouts** and writes them where a compiler can be
- * pointed at them.
- *
- * ### Why a corpus and not more fixtures
- *
- * Every other test of the cleaner feeds it source this repository controls. That is the wrong shape
- * for the question "does the Source panel work across the catalogs": a fixture proves the rules I
- * wrote match the source I wrote. This walks a checkout, samples previews the way a visitor
- * browsing would land on them, and emits whatever comes out — including the failures.
- *
- * ### Opt-in, and silent without checkouts
- *
- * Driven by `-Dcomposeai.usageCorpus.repos=<name>=<path>,…`, so it is a no-op in a normal build and
- * on any machine without the catalogs. `scripts/usage-corpus.sh` supplies the paths and then
- * compiles what this writes; see `docs/design/USAGE_SNIPPET_CORPUS.md` for the whole loop.
- *
- * The catalogs are deliberately unalike, which is the point of testing both, and which sampler runs
- * is decided by the checkout's *shape* rather than its name:
- * - **annotation-first** (m3-catalog): `@CatalogComponent` / `@CatalogVariant`, plus a
- *   `compose-usage.json`, so its snippets are expected to come out as usage code.
- * - **spec-driven** (meshcore-mobile): a `catalog.spec.json` naming plain `@Preview` functions, and
- *   no rules at all, so it exercises the generic path — annotation stripping only.
+ * Generates usage snippets from real catalog checkouts and writes them for a compiler, testing the
+ * cleaner on source this repository doesn't control. Opt-in via
+ * `-Dcomposeai.usageCorpus.repos=<name>=<path>,…` (a no-op otherwise); `scripts/usage-corpus.sh`
+ * supplies paths and compiles the output (see `docs/design/USAGE_SNIPPET_CORPUS.md`). The sampler
+ * is chosen by the checkout's shape:
+ * - annotation-first (m3-catalog): `@CatalogComponent` / `@CatalogVariant` plus
+ *   `compose-usage.json`, expected to yield usage code;
+ * - spec-driven (meshcore-mobile): a `catalog.spec.json` naming plain `@Preview`s and no rules, so
+ *   the generic path.
  */
 class UsageSnippetCorpusTest {
 
   private data class Sample(val system: String, val kind: String, val function: String)
 
   /**
-   * The checkouts to sample, as `name=path,name=path` in `composeai.usageCorpus.repos`.
-   *
-   * One property rather than one per catalog on purpose: a fixed set of forwarded keys silently
-   * ignores any checkout whose name is not in it, which would have produced an empty corpus and a
-   * passing run for a catalog nobody sampled.
+   * The checkouts to sample, as `name=path,…` in one property, so no checkout is silently ignored
+   * for lack of a forwarded key.
    */
   private fun repos(): List<Pair<String, File>> {
-    // Absent means "no checkouts wired", and is the normal build. *Present but malformed* is a typo
-    // in the documented property, and must not read as the same thing: silently dropping the entry
-    // turns a wrong invocation into a successful no-op, which is the failure this whole loop is
-    // built to stop reporting as a pass.
+    // Absent means no checkouts (normal build); present but malformed is an error, not a silent
+    // no-op.
     val spec = System.getProperty("composeai.usageCorpus.repos") ?: return emptyList()
     // `-Dcomposeai.usageCorpus.repos=` — present and empty — is a wrong invocation too, and
     // dropping through to the empty list would make it the same silent no-op as not setting it.
@@ -70,20 +52,10 @@ class UsageSnippetCorpusTest {
     }
 
   /**
-   * Every `.kt` under a checkout, excluding build output and test sources.
-   *
-   * The source-set names matter here: `/test/` alone misses every Kotlin Multiplatform layout —
-   * `src/commonTest`, `src/jvmTest`, `src/desktopTest`, `src/androidUnitTest` — and both catalogs
-   * sampled are multiplatform. A test fixture picked up as a production preview would quietly move
-   * the reported ratio.
-   *
-   * Matched at the source-set name's **boundary**, not as a substring: `src/latestMain` and
-   * `src/contestMain` contain `test` and are production, and excluding them would drop real
-   * previews just as quietly in the other direction. A test source set's name ends in `Test`
-   * (`commonTest`, `jvmTest`, `androidUnitTest`) or `TestFixtures` (`commonTestFixtures`,
-   * `androidTestFixtures`), or is `test` / `testFixtures` outright — optionally with an Android
-   * build-variant suffix (`testDebug`, `androidTestDebug`, `screenshotTestDebug`). The suffix must
-   * start with a capital, which is what keeps `latestMain` out of it.
+   * Every `.kt` under a checkout, excluding build output and test sources. Test source sets are
+   * matched at the name boundary (`test`, `testFixtures`, names ending `Test` / `TestFixtures`,
+   * optionally with a capitalised build-variant suffix like `testDebug`), so KMP test sets are
+   * excluded while `latestMain` / `contestMain` aren't.
    */
   private fun sources(root: File): List<File> {
     val testSourceSet =
@@ -94,19 +66,14 @@ class UsageSnippetCorpusTest {
       .walkTopDown()
       .onEnter { it.name !in setOf("build", ".git", ".gradle") }
       .filter { it.isFile && it.extension == "kt" }
-      // `invariantSeparatorsPath`, not `path`: on Windows the latter is backslash-separated, the
-      // regex below only knows `/src/…/`, and every fixture would then read as production — which
-      // would fail this class's own source-set test on a Windows checkout.
+      // `invariantSeparatorsPath`: Windows paths use backslashes, which the regex doesn't know.
       .filterNot { testSourceSet.containsMatchIn(it.invariantSeparatorsPath) }
       .toList()
   }
 
   /**
-   * A 1-based line inside [function]'s declaration — the anchor the cleaner walks outwards from.
-   *
-   * Discovery normally supplies this from the classfile line table. Reading it off the source is
-   * what lets the corpus run without building the catalog, and it lands in the same place: the
-   * cleaner only needs *a* line inside the declaration.
+   * A 1-based line inside [function]'s declaration for the cleaner to walk from, read off the
+   * source so the corpus needn't build the catalog.
    */
   private fun anchorOf(text: String, function: String): Int? {
     val lines = text.lines()
@@ -152,10 +119,8 @@ class UsageSnippetCorpusTest {
   }
 
   /**
-   * The catalog's declared scaffold sources, read repo-root-relative out of the checkout — what the
-   * server fetches from GitHub for the same rules file. Without them a delegating catalog's samples
-   * would be cleaned differently here than in production, which is the one thing this corpus must
-   * not do.
+   * The catalog's declared scaffold sources from the checkout (what the server fetches from
+   * GitHub), so delegating catalogs are cleaned as in production.
    */
   private fun helperSourcesFor(root: File, rules: UsageRules): List<String> =
     rules.scaffoldSources
@@ -225,18 +190,9 @@ class UsageSnippetCorpusTest {
   }
 
   /**
-   * Give each snippet its own package, so the corpus compiles as N independent pastes rather than
-   * as one source set.
-   *
-   * Without this the snippets share the default package, and the compile answers a different
-   * question than the one asked in both directions: two previews from the same file that each close
-   * over the same same-file helper collide as redeclarations (a failure the developer pasting *one*
-   * of them would never see), and a catalog symbol one snippet leaks can resolve against a
-   * declaration another snippet happened to copy (a pass the developer would never get). Distinct
-   * packages remove both — nothing here imports anything else here.
-   *
-   * The package goes after any file annotations and before the imports, which is where Kotlin wants
-   * it.
+   * Give each snippet its own package so the corpus compiles as independent pastes: a shared
+   * package causes false redeclaration failures and false passes via another snippet's copied
+   * declarations. The package goes after file annotations and before imports.
    */
   private fun inOwnPackage(text: String, system: String, name: String): String {
     fun part(raw: String) = raw.replace(Regex("[^A-Za-z0-9]"), "_").lowercase()
@@ -252,11 +208,8 @@ class UsageSnippetCorpusTest {
     System.getProperty("composeai.usageCorpus.samples")?.toIntOrNull()?.coerceAtLeast(1) ?: 5
 
   /**
-   * The source-set filter has now been wrong in both directions — leaking KMP test sources when it
-   * only looked for `/test/`, then excluding production `latestMain` when it matched `test` as a
-   * substring, then dropping `commonTestFixtures` when it was narrowed to boundaries. Each of those
-   * moves the reported ratio silently, which is the one thing this corpus must not do, so the rule
-   * gets pinned rather than re-derived.
+   * Pins the source-set filter, which has been wrong in both directions before and silently shifts
+   * the reported ratio.
    */
   @Test
   fun `test source sets are excluded and production ones are not`() {
@@ -296,16 +249,12 @@ class UsageSnippetCorpusTest {
       val (rules, declared) = rulesFor(root)
       val strings = stringsFor(root, rules)
       val helperSources = helperSourcesFor(root, rules)
-      // Which sampler by the catalog's *shape*, not its name — keying on the name would silently
-      // mis-sample the next catalog somebody points this at. Annotations first, spec as the
-      // fallback, rather than branching on the spec file's presence: m3-catalog ships **both**, so
-      // "has a spec ⇒ spec-driven" sampled it as the wrong shape and produced nothing.
+      // Pick the sampler by shape, annotations first then spec: m3-catalog ships both.
       val samples =
         annotationSamples(system, root, perKind).ifEmpty { specSamples(system, root, perKind) }
       report.appendLine(
-        // The catalog's *own* scaffolds, not the merged map — counting the inherited generic rules
-        // would credit every catalog with rules it never wrote. Compared by entry, so a catalog
-        // that declared only its own reading of a generic knob still counts.
+        // Count the catalog's own scaffolds, not the merged map, so inherited generic rules aren't
+        // credited.
         "## $system — ${samples.size} samples, rules: ${if (declared) "declared (${with(UsageRules.Companion) { rules.catalogScaffolds() }.size} scaffolds)" else "GENERIC (none declared)"}"
       )
       for (sample in samples) {
