@@ -180,9 +180,14 @@ internal fun Route.installUiBuilderGuidelineRoutes(
       call.authorizedGuidelinesDesign(service, authorization, UiBuilderRouteCapability.READ)
         ?: return@get
     val answer = access(actor)
+    // The check route is mounted only with a store (below), so without one a server check is not
+    // on offer, whatever the model and the actor allow.
+    val serverCheck = answer.serverCheck && store != null
+    val reason =
+      if (answer.serverCheck && store == null) GUIDELINES_NO_RESULT_STORE else answer.reason
     call.respondGuidelines(
       GuidelinesAccessV1.serializer(),
-      GuidelinesAccessV1(answer.serverCheck, answer.model, answer.reason),
+      GuidelinesAccessV1(serverCheck, answer.model, reason),
     )
   }
 
@@ -419,6 +424,11 @@ internal data class GuidelinesAccessV1(
 // Larger than the review routes' 16 KiB: a whole rule set's verdicts, each with a sentence of
 // reason, runs to 20 KB on the bigger platforms. The store caps the record again before it is kept.
 private const val MAX_GUIDELINES_BODY_BYTES = 64 * 1024
+
+/** Why the access route offers no server check on a host whose result store did not open. */
+internal const val GUIDELINES_NO_RESULT_STORE =
+  "this host could not open its guidelines result store, so it cannot run the check on its key; " +
+    "run it in the editor with your own OpenRouter key"
 
 private val GUIDELINES_ROUTE_JSON = Json {
   encodeDefaults = true

@@ -56,6 +56,17 @@ class BundleGuidelineResultsTest {
   }
 
   @Test
+  fun `raw ids that differ only by non-ASCII letters stay distinct, as the bundle keeps them`() {
+    val results =
+      BundleGuidelineResults(
+        ServeGuidelineResultsStore.parse(report("p.Über:dark", "p.Äber:dark", reason = "both"))
+      )
+    assertEquals("p.Über_dark", bundleSafeId("p.Über:dark"))
+    assertTrue(results.forPreview("p.Über_dark") != null)
+    assertTrue(results.forPreview("p.Äber_dark") != null)
+  }
+
+  @Test
   fun `a malformed or absent file is no results, not an error`() {
     assertNull(
       BundleGuidelineResults(ServeGuidelineResultsStore.parse("{not json")).forPreview("a")
