@@ -5,11 +5,12 @@
 // ECI, no Kanji. That slice is a few hundred lines; a general encoder is several times that. It
 // follows the shape of Project Nayuki's reference encoder (MIT), which is the clearest statement of
 // the algorithm, and `test/qrEncode.test.ts` pins its output, module for module, to matrices
-// produced independently by `segno`.
+// produced independently by python-qrcode.
 //
-// Mask choice runs the standard's four penalty rules. A decoder accepts any of the eight masks, so
-// the choice only affects how easily a camera locks on; the tests pin the mask explicitly when
-// they compare against a reference.
+// Mask choice runs the standard's four penalty rules over the finished symbol, format and version
+// information included. A decoder accepts any of the eight masks, so the choice only affects how
+// easily a camera locks on; the tests pin the mask explicitly when they compare against a
+// reference, plus one text whose chosen mask turns on rule N3 counting both sides of a run.
 
 /** The two error-correction levels offered: L recovers ~7% of codewords, M ~15%. */
 export type Ecl = "L" | "M";
@@ -300,16 +301,18 @@ class Grid {
         const n = this.size;
         let score = 0;
         let dark = 0;
+        // N3: a 1:1:3:1:1 dark-light run with four light modules beside it is +40 for EACH side
+        // that has them, so a run with light on both sides costs 80. Beyond the symbol's edge is
+        // the quiet zone, which is light.
         const finderLike = (line: boolean[], i: number) => {
-            // 1:1:3:1:1 dark-light pattern with four light modules on either side.
             const p = [true, false, true, true, true, false, true];
-            for (let k = 0; k < 7; k++) if (line[i + k] !== p[k]) return false;
+            for (let k = 0; k < 7; k++) if (line[i + k] !== p[k]) return 0;
             const light = (from: number) => {
                 for (let k = from; k < from + 4; k++)
-                    if (k >= 0 && k < n && line[k]) return false;
-                return true;
+                    if (k >= 0 && k < n && line[k]) return 0;
+                return 40;
             };
-            return light(i - 4) || light(i + 7);
+            return light(i - 4) + light(i + 7);
         };
         for (let pass = 0; pass < 2; pass++)
             for (let a = 0; a < n; a++) {
@@ -324,8 +327,7 @@ class Grid {
                         run = 1;
                     }
                 }
-                for (let b = 0; b + 7 <= n; b++)
-                    if (finderLike(line, b)) score += 40;
+                for (let b = 0; b + 7 <= n; b++) score += finderLike(line, b);
             }
         for (let y = 0; y < n; y++)
             for (let x = 0; x < n; x++) {
@@ -341,7 +343,8 @@ class Grid {
                     score += 3;
             }
         const total = n * n;
-        score += (Math.ceil(Math.abs(dark * 20 - total * 10) / total) - 1) * 10;
+        // N4: 10 for every full 5% the dark share departs from 50%.
+        score += Math.floor(Math.abs(dark * 20 - total * 10) / total) * 10;
         return score;
     }
 }

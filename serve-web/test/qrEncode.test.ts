@@ -91,6 +91,16 @@ describe("the QR encoder", () => {
         assert.equal(encodeQr("a".repeat(2954)), null);
     });
 
+    it("chooses the mask the full penalty picks, N3 counting both sides of a run", () => {
+        // Light on both sides of a 1:1:3:1:1 run is two N3 penalties, not one: counted once, this
+        // text chose mask 7. The symbol itself is the reference vector at 3-L, mask 5.
+        const text = "https://preview.coo.ee/preview/com.example.Card?x=0-";
+        const code = encodeQr(text)!;
+        assert.deepEqual([code.version, code.ecl, code.mask], [3, "L", 5]);
+        const ref = VECTORS.find((v) => v.text === text && v.mask === 5)!;
+        assert.deepEqual(rows(code), ref.rows);
+    });
+
     it("chooses a mask by penalty when none is forced", () => {
         const code = encodeQr("https://preview.coo.ee/")!;
         assert.ok(code.mask >= 0 && code.mask < 8);

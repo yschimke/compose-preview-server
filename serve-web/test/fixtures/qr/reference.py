@@ -25,6 +25,10 @@ CASES = [
     ("https://preview.coo.ee/preview/" + "com.example.ui.ButtonsKt.FilledButtonPreview?theme=dark&fontScale=1.3&locale=de", "M", 10, 5),
     ("https://preview.coo.ee/" + "x" * 300, "L", 14, 6),
     ("Größe 😀 " * 40, "M", 22, 7),
+    # The mask the encoder CHOOSES for this text (`qrEncode.test.ts` asserts the choice too): the
+    # full penalty picks 5. Counting a 1:1:3:1:1 run with light on both sides once instead of
+    # twice under rule N3 picked 7 (review of #1556).
+    ("https://preview.coo.ee/preview/com.example.Card?x=0-", "L", 3, 5),
 ]
 
 
