@@ -22,6 +22,7 @@ import { installReportLauncher } from "./chrome/reportLauncher.js";
 import { installSlashSearch } from "./chrome/slashSearch.js";
 import { installStars } from "./chrome/stars.js";
 import { installRecent } from "./chrome/recent.js";
+import { installChanged } from "./chrome/changed.js";
 import "./components/ReportClassification.js";
 import "./components/ReportScope.js";
 
@@ -48,3 +49,7 @@ installStars();
 // catalog landing) shows it, and the shell is the only bundle the front door loads. Any other page
 // returns before touching storage or the DOM.
 installRecent();
+// "Changed since your last visit" dots ride the shell for the same reason as Stars: the front door is
+// one of the two pages that shows them. After Stars, so the Starred row's copies already exist and
+// are marked alongside their originals; any other page returns before touching storage or the DOM.
+installChanged();

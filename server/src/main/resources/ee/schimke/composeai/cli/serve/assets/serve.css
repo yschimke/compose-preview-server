@@ -1459,6 +1459,55 @@ html.cp-js.cp-multi-section .cp-section-head { display: block; }
 .cp-cards > .cp-card { flex: 0 0 var(--cp-card-w, 212px); max-width: 100%;
   display: flex; flex-direction: column; }
 .cp-cards > .cp-card > .cp-imgwrap { flex: 1 1 auto; }
+/* --- Thumbnail size: the S / M / L track `components/GridDensity.ts` adds to a catalog landing's
+   toggle row, and the grids it resizes. M is no attribute at all — the rules above, untouched — so
+   S and L are the only additions, and only above the phone breakpoint: a phone's grid is already
+   its own two-column size (the narrow block below), and its single toolbar row has no room for a
+   fourth control, so the track is hidden there and the remembered size simply waits for a wider
+   window. On `html` rather than `#cp-grid` so the Starred row, a sibling of the grid, follows it.
+
+   The track is one outlined pill split three ways, the same 34px and full radius as the Theme pill
+   and `⋯` beside it, so the row still reads as one set of controls. A connected segmented track is
+   right here where it was wrong for Theme: three fixed, short options that can never wrap. The
+   radios themselves are visually hidden (native, for the keyboard model), so focus is drawn on the
+   segment that holds the focused one. */
+.cp-density { display: inline-flex; align-items: stretch; min-height: 34px; padding: 0;
+  border: 1px solid var(--md-sys-color-outline); border-radius: var(--md-sys-shape-corner-full);
+  overflow: hidden; }
+.cp-density-opt { position: relative; display: inline-flex; align-items: center;
+  justify-content: center; min-width: 34px; padding: 0 10px; cursor: pointer;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-label-large-size); font-weight: 500;
+  transition: background var(--md-sys-motion-duration-short2) var(--md-sys-motion-easing-standard); }
+.cp-density-opt + .cp-density-opt { border-left: 1px solid var(--md-sys-color-outline-variant); }
+.cp-density-opt:hover { color: var(--md-sys-color-on-surface);
+  background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent); }
+.cp-density-opt:has(input:checked) { background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container); }
+.cp-density-opt:has(input:focus-visible) { outline: 3px solid var(--md-sys-color-secondary);
+  outline-offset: -3px; }
+@media (max-width: 640px) { .cp-density { display: none; } }
+@media (min-width: 641px) {
+  /* S: the whole catalog on a screen. Cards about two thirds as wide and an image well half as
+     tall; the fully qualified id line goes, since at this size the label is what is scanned. */
+  html[data-cp-density="s"] .cp-grid:not(.cp-syslist) {
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 12px; }
+  html[data-cp-density="s"] .cp-section, html[data-cp-density="s"] .cp-grid-groups,
+  html[data-cp-density="s"] .cp-starred { --cp-card-w: 132px; --cp-card-gap: 12px; }
+  html[data-cp-density="s"] .cp-imgwrap { min-height: 56px; padding: 8px; }
+  html[data-cp-density="s"] .cp-imgwrap img { max-height: 112px; }
+  html[data-cp-density="s"] .cp-crop { --cp-thumb-cap: 112px; }
+  html[data-cp-density="s"] .cp-meta { padding: 8px 10px 10px; }
+  html[data-cp-density="s"] .cp-card .cp-id { display: none; }
+  /* L: detail you can read without opening the viewer — cards about 1.6x as wide and an image well
+     nearly twice as tall. */
+  html[data-cp-density="l"] .cp-grid:not(.cp-syslist) {
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 22px; }
+  html[data-cp-density="l"] .cp-section, html[data-cp-density="l"] .cp-grid-groups,
+  html[data-cp-density="l"] .cp-starred { --cp-card-w: 340px; --cp-card-gap: 22px; }
+  html[data-cp-density="l"] .cp-imgwrap img { max-height: 460px; }
+  html[data-cp-density="l"] .cp-crop { --cp-thumb-cap: 460px; }
+}
 /* The Theme picker carries one chip per configured theme (the baked light/dark pair plus any
    app-declared @ThemeCatalog theme), so it wraps rather than overflowing a narrow viewport.
    That is exactly why it is NOT an M3 segmented button: a segmented track is specified for a
@@ -2099,7 +2148,42 @@ cp-parity-scores { display: contents; }
 @media (hover: none) { .cp-card > .cp-star { opacity: 1; } }
 .cp-star--head { vertical-align: middle; align-self: center; }
 .cp-starred { margin: 0 0 28px; }
+/* The Starred row's Share action: the same quiet text button as Recent's "Clear", beside the
+   heading. On a landing the heading is a small caps label in its own row, so the pair gets one. */
+.cp-starred-head { display: flex; align-items: baseline; gap: 8px; margin: 0 0 12px; }
+.cp-starred-head .cp-group-head { margin: 0; }
+.cp-starred-share { padding: 2px 8px; border: 0; border-radius: var(--md-sys-shape-corner-full);
+  background: transparent; color: var(--md-sys-color-on-surface-variant); font: inherit;
+  font-size: var(--md-sys-typescale-label-medium-size); white-space: nowrap; cursor: pointer; }
+.cp-starred-share:hover { color: var(--md-sys-color-primary);
+  background: color-mix(in srgb, var(--md-sys-color-primary) 8%, transparent); }
+.cp-starred-share:focus-visible { outline: 3px solid var(--md-sys-color-secondary); outline-offset: 1px; }
+/* Opening a Share link: an M3 snackbar asking before anything is added. Bottom-centre, clear of the
+   report launcher in the corner, and lifted above the keyboard hint rail when that is on. */
+.cp-stars-offer { position: fixed; left: 50%; bottom: 24px; z-index: 45; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 4px; width: max-content;
+  max-width: min(560px, calc(100vw - 32px)); padding: 6px 8px 6px 16px;
+  border-radius: var(--md-sys-shape-corner-extra-small);
+  background: var(--md-sys-color-inverse-surface); color: var(--md-sys-color-inverse-on-surface);
+  box-shadow: var(--md-sys-elevation-level3); }
+body:has(.cp-keyboard-hints) .cp-stars-offer { bottom: 72px; }
+.cp-stars-offer-text { margin: 0 8px 0 0; flex: 1 1 auto;
+  font-size: var(--md-sys-typescale-body-medium-size); }
+.cp-stars-offer button { flex: none; padding: 8px 12px; border: 0;
+  border-radius: var(--md-sys-shape-corner-full); background: transparent; font: inherit;
+  font-weight: 500; color: var(--md-sys-color-inverse-primary); cursor: pointer; }
+.cp-stars-offer .cp-stars-offer-dismiss { color: var(--md-sys-color-inverse-on-surface); }
+.cp-stars-offer button:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
+.cp-stars-offer button:focus-visible { outline: 3px solid var(--md-sys-color-inverse-primary);
+  outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) { .cp-star { transition: none; } .cp-star:active { transform: none; } }
+/* "Changed since your last visit" (`chrome/changed.ts`): a small accent dot in the card's top-left
+   corner, opposite the star, on a card whose render's content hash moved since this browser last
+   showed it. A ring in the card's own surface keeps it legible over any artwork. Above the card's
+   state layer like the star, but it takes no pointer events: the whole card stays one target. */
+.cp-card > .cp-changed { position: absolute; z-index: 4; top: 10px; left: 10px; width: 10px;
+  height: 10px; border-radius: 50%; background: var(--md-sys-color-primary);
+  box-shadow: 0 0 0 2px var(--md-sys-color-surface-container-low); }
 .cp-image-error { position: absolute; z-index: 2; inset: 12px; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 8px; padding: 12px; text-align: center;
   color: var(--md-sys-color-on-error-container); background: var(--md-sys-color-error-container);
@@ -2518,6 +2602,32 @@ cp-history-menu { display: contents; }
   transition: opacity var(--md-sys-motion-duration-short2) var(--md-sys-motion-easing-standard); }
 .cp-stage:hover > .cp-present, .cp-present:focus-visible { opacity: 1; }
 .cp-present:focus-visible { outline: 2px solid var(--cp-accent); outline-offset: 2px; }
+/* --- Grid (`viewer/gridOverlay.ts`): a faint 8dp grid with 16dp side keylines over the render.
+   The script pins the box to the image's pixels and sets one cell's size per axis; this paints it as
+   two repeating gradients (columns, then rows), 1px lines on transparent, so it adds nothing to the
+   bundle and repaints for free on resize. A translucent magenta reads on the white stage, the dark
+   one and the checkerboard alike, and is a colour a design seldom uses itself, so the grid never
+   passes for part of the render. Keylines are the same hue, stronger. It sits under the stage's
+   buttons and takes no pointer, so hovering, picking and the live stream's input pass through. */
+.cp-grid-overlay { position: absolute; z-index: 4; pointer-events: none;
+  --grid-overlay-line: rgba(233, 30, 140, 0.18);
+  background-image:
+    repeating-linear-gradient(to right, var(--grid-overlay-line) 0 1px, transparent 1px var(--cp-grid-x, 16px)),
+    repeating-linear-gradient(to bottom, var(--grid-overlay-line) 0 1px, transparent 1px var(--cp-grid-y, 16px)); }
+.cp-viewer[data-bg-theme="dark"] .cp-grid-overlay { --grid-overlay-line: rgba(255, 92, 180, 0.24); }
+.cp-grid-overlay::before { content: ""; position: absolute; top: 0; bottom: 0;
+  left: calc(2 * var(--cp-grid-x, 16px)); right: calc(2 * var(--cp-grid-x, 16px));
+  border: solid rgba(233, 30, 140, 0.55); border-width: 0 1px; }
+.cp-grid-overlay[hidden] { display: none; }
+.cp-grid-toggle { position: absolute; right: 48px; bottom: 8px; z-index: 5; width: 32px; height: 32px;
+  padding: 0; border: 0; border-radius: 999px; background: rgba(20,20,22,0.72); color: #fff;
+  font: 600 16px/1 ui-monospace, monospace; cursor: pointer; opacity: 0.5;
+  transition: opacity var(--md-sys-motion-duration-short2) var(--md-sys-motion-easing-standard); }
+.cp-stage:hover > .cp-grid-toggle, .cp-grid-toggle:focus-visible, .cp-grid-toggle[aria-pressed="true"] { opacity: 1; }
+.cp-grid-toggle[aria-pressed="true"] { background: rgba(233, 30, 140, 0.85); }
+.cp-grid-toggle:focus-visible { outline: 2px solid var(--cp-accent); outline-offset: 2px; }
+/* No Present button (no Fullscreen API, e.g. iPhone Safari): take its corner. */
+.cp-stage:not(:has(> .cp-present)) > .cp-grid-toggle { right: 8px; }
 /* Full screen, the stage becomes the screen: no card corners or shadow, and its OWN background —
    the theme-pinned #fff / #1d1d20, the checkerboard, or a chosen backdrop — fills it, so the render
    sits on exactly the field it sat on in the page. The snapshot is contain-fitted to the whole box,

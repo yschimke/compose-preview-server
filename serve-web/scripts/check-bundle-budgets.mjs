@@ -57,7 +57,13 @@ const limits = {
     // gzip bytes: +621 over the previous build, all of it that module, and it rides in the
     // viewer bundle rather than a lazy chunk because every entry here is a classic script. Raised
     // by the usual 2 kB step over the former ceiling.
-    viewer: 74_000,
+    //
+    // 74_000 until the stage learned an 8dp grid overlay (`viewer/gridOverlay.ts`, G). Measured at
+    // 74_143 gzip bytes: +800 over the previous build, all of it that module and its wiring — the
+    // overlay is painted by CSS gradients, and the bytes are the measuring: the snapshot or live
+    // canvas it lies over, the full-screen letterbox, and the density a picked Device (or a
+    // full-page scroll render) implies. Raised by the usual 2 kB step over the former ceiling.
+    viewer: 76_000,
     // 180_000 until the report form's body writer learned to fill a locator's `overrides:` from
     // live viewer state (#5000). That put `fillOverrides` and the classification read-back into
     // `viewer-components.js`, which this page carries for its report affordance: measured at
