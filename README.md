@@ -181,6 +181,13 @@ module's `build/compose-previews/` copy unless `guidelines` names a file or URL)
   each preview's verdicts with the node ids and picture regions they point at, the model that
   answered and the cost.
 
+  With `base_url` (and `model`, the endpoint's own name) it asks an OpenAI-compatible endpoint
+  instead, like `compose-preview guidelines --backend openai`: a loopback server needs no key, and
+  any other only gets previews when the user stored a key for that origin with
+  `compose-preview guidelines key set --for <base_url>` and trusted the project. The server reads no
+  key from `COMPOSE_PREVIEW_MODEL_KEY` here, because the caller picks the endpoint. Endpoints report
+  no cost, so `max_cost` does not apply.
+
 ### `.uid` designs: `design_open`
 
 In ChatGPT or Codex desktop, opening a `.uid` UI Builder design opens it in the UI Builder editor

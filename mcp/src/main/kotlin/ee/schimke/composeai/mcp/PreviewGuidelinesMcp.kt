@@ -7,6 +7,7 @@ import ee.schimke.composeai.guidelines.GuidelineEngine
 import ee.schimke.composeai.guidelines.GuidelineModel
 import ee.schimke.composeai.guidelines.GuidelineRunOptions
 import ee.schimke.composeai.guidelines.GuidelineSurfaces
+import ee.schimke.composeai.guidelines.OpenAiCompatibleClient
 import ee.schimke.composeai.guidelines.OpenRouterClient
 import ee.schimke.composeai.guidelines.PreviewGuidelineRequests
 import ee.schimke.composeai.guidelines.PreviewGuidelineResult
@@ -123,6 +124,24 @@ object PreviewGuidelinesMcp {
     /** The model client for a key; a fake in tests. */
     fun model(key: String): GuidelineModel = OpenRouterClient(key)
 
+    /**
+     * The key stored for the OpenAI-compatible endpoint at [baseUrl] (`compose-preview guidelines
+     * key set --for`), from the credentials file only: [GuidelineCredentials.MODEL_ENV] is not
+     * read, since the caller names the endpoint and an environment key would go wherever it says.
+     */
+    fun endpointKey(baseUrl: String): GuidelineCredentials.Resolved? =
+      GuidelineCredentials.resolve(
+        GuidelineCredentials.endpointProvider(baseUrl),
+        GuidelineCredentials.MODEL_ENV,
+        env = { null },
+      ) {
+        System.err.println("compose-preview-mcp: $it")
+      }
+
+    /** The client for an OpenAI-compatible endpoint; a fake in tests. */
+    fun endpointModel(baseUrl: String, key: String?): GuidelineModel =
+      OpenAiCompatibleClient(baseUrl, key)
+
     /** Loads a guidelines file or URL. */
     fun loadGuidelines(location: String): CatalogGuidelinesLoader.Loaded =
       if (location.startsWith("http://") || location.startsWith("https://")) {
@@ -154,7 +173,10 @@ object PreviewGuidelinesMcp {
           "`compose-preview guidelines key set` for a project trusted with it). Batches the previews, " +
           "sends each render with its accessibility nodes and source, and returns per-preview " +
           "verdicts naming the nodes (and picture regions) they are about, the model that " +
-          "answered and the cost. `max_cost` (USD, default $DEFAULT_MAX_COST_USD) caps the run.",
+          "answered and the cost. `max_cost` (USD, default $DEFAULT_MAX_COST_USD) caps the run. " +
+          "`base_url` asks an OpenAI-compatible endpoint instead (with `model`): a loopback " +
+          "server, or one whose key the user stored with `compose-preview guidelines key set " +
+          "--for <base_url>`; it reports no cost.",
       inputSchema = inputSchema(withCost = true),
     )
 
@@ -198,7 +220,19 @@ object PreviewGuidelinesMcp {
         }
         putJsonObject("model") {
           put("type", "string")
-          put("description", "OpenRouter model id; default ${OpenRouterClient.DEFAULT_MODEL}.")
+          put(
+            "description",
+            "OpenRouter model id; default ${OpenRouterClient.DEFAULT_MODEL}. With `base_url`, " +
+              "the endpoint's own name for a model that reads pictures (required).",
+          )
+        }
+        putJsonObject("base_url") {
+          put("type", "string")
+          put(
+            "description",
+            "An OpenAI-compatible endpoint, before /chat/completions " +
+              "(http://localhost:11434/v1); default: OpenRouter.",
+          )
         }
       }
     }
@@ -242,6 +276,8 @@ object PreviewGuidelinesMcp {
   }
 
   fun check(args: JsonObject, host: Host): CallToolResult {
+    val baseUrl = (args["base_url"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+    if (baseUrl != null) return checkEndpoint(args, host, baseUrl)
     val resolvedKey =
       host.openRouterKey?.takeIf { it.key.isNotBlank() }
         ?: return error(
@@ -250,10 +286,9 @@ object PreviewGuidelinesMcp {
             "openrouter.ai, Settings, then Keys), or use $PROMPT_TOOL and judge the prompt with " +
             "your own model."
         )
-    val key = resolvedKey.key
     val prepared =
       prepare(CHECK_TOOL, args, host) { previews ->
-          if (resolvedKey.stored) requireTrusted(previews, resolvedKey, host)
+          if (resolvedKey.stored) requireTrusted(previews, resolvedKey, host, KEY_ENV)
         }
         .getOrElse {
           return error(it.message!!)
@@ -262,17 +297,71 @@ object PreviewGuidelinesMcp {
     val model =
       (args["model"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
         ?: OpenRouterClient.DEFAULT_MODEL
+    return run(host.model(resolvedKey.key), model, maxCost, judge = null, prepared)
+  }
+
+  /**
+   * [check] on the OpenAI-compatible endpoint at [baseUrl]. Only a key stored for that origin is
+   * sent, and only for a trusted project; without one, only a loopback server is asked, so a call
+   * cannot send previews and source to a host the user never set up.
+   */
+  private fun checkEndpoint(args: JsonObject, host: Host, baseUrl: String): CallToolResult {
+    val provider = runCatching {
+      GuidelineCredentials.endpointProvider(baseUrl)
+    }
+      .getOrElse {
+        return error("$CHECK_TOOL: `base_url` $baseUrl is not an http(s) URL")
+      }
+    val model =
+      (args["model"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+        ?: return error(
+          "$CHECK_TOOL: `base_url` needs `model`, the endpoint's own name for a model that reads " +
+            "pictures"
+        )
+    val resolvedKey = host.endpointKey(baseUrl)?.takeIf { it.key.isNotBlank() }
+    if (resolvedKey == null && !OpenAiCompatibleClient.isLoopback(baseUrl)) {
+      return error(
+        "$CHECK_TOOL: no key stored for $baseUrl. Ask the user to run `compose-preview " +
+          "guidelines key set --for $baseUrl` in a terminal; only a loopback server is asked " +
+          "without one."
+      )
+    }
+    val prepared =
+      prepare(CHECK_TOOL, args, host) { previews ->
+          resolvedKey?.let { requireTrusted(previews, it, host, envVar = null) }
+        }
+        .getOrElse {
+          return error(it.message!!)
+        }
+    // The endpoint reports no cost, so max_cost cannot stop the run; the batch is the caller's.
+    return run(
+      host.endpointModel(baseUrl, resolvedKey?.key),
+      model,
+      maxCost = DEFAULT_MAX_COST_USD,
+      judge = "openai:" + provider.removePrefix("endpoint:"),
+      prepared,
+    )
+  }
+
+  private fun run(
+    client: GuidelineModel,
+    model: String,
+    maxCost: Double,
+    judge: String?,
+    prepared: Prepared,
+  ): CallToolResult {
     val run =
       GuidelineEngine(
-          host.model(key),
+          client,
           options =
             GuidelineRunOptions(
-              model = model,
-              budget = GuidelineBudget(),
-              maxCostUsd = maxCost,
-              rulesSource = prepared.rulesSource,
-              ranBy = "mcp",
-            ),
+                model = model,
+                budget = GuidelineBudget(),
+                maxCostUsd = maxCost,
+                rulesSource = prepared.rulesSource,
+                ranBy = "mcp",
+              )
+              .withJudge(judge),
         )
         .run(prepared.guidelines, prepared.subjects)
     val structured = buildJsonObject {
@@ -321,18 +410,22 @@ object PreviewGuidelinesMcp {
     previews: List<Resolved>,
     key: GuidelineCredentials.Resolved,
     host: Host,
+    /** The variable that would supply this key instead, when the server reads one. */
+    envVar: String?,
   ) {
     val untrusted =
       previews.map { it.projectRoot }.distinct().filter { it == null || !host.trusted(key, it) }
     require(untrusted.isEmpty()) {
       val roots = untrusted.filterNotNull().map { it.absoluteFile.canonicalPath }
-      "$CHECK_TOOL: the OpenRouter key stored in ${key.source} is not trusted for " +
+      "$CHECK_TOOL: the key stored in ${key.source} is not trusted for " +
         (if (roots.isEmpty()) "a preview whose project is unknown" else roots.joinToString()) +
         ". Ask the user to run " +
         roots
           .joinToString(" and ") { "`compose-preview guidelines key trust $it`" }
           .ifEmpty { "`compose-preview guidelines key trust <project>`" } +
-        " in a terminal, or set $KEY_ENV for the server, or use $PROMPT_TOOL."
+        " in a terminal" +
+        (envVar?.let { ", or set $it for the server" } ?: "") +
+        ", or use $PROMPT_TOOL."
     }
   }
 

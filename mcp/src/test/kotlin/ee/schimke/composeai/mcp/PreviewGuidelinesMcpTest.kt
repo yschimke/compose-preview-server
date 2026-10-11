@@ -73,8 +73,22 @@ class PreviewGuidelinesMcpTest {
     /** Where the key came from: the environment unless a credentials file is named. */
     keySource: String = GuidelineCredentials.ENV,
     val trustedRoots: Set<File> = emptySet(),
+    /** Keys stored per endpoint origin, as `guidelines key set --for` would. */
+    val endpointKeys: Map<String, String> = emptyMap(),
   ) : PreviewGuidelinesMcp.Host {
     val model = FakeModel()
+
+    /** The (base URL, key) each endpoint client was made for. */
+    val endpoints = mutableListOf<Pair<String, String?>>()
+
+    override fun endpointKey(baseUrl: String) =
+      endpointKeys[GuidelineCredentials.endpointProvider(baseUrl)]?.let {
+        GuidelineCredentials.Resolved(it, "/home/u/.config/compose-preview/c.json")
+      }
+
+    override fun endpointModel(baseUrl: String, key: String?): GuidelineModel = model.also {
+      endpoints += baseUrl to key
+    }
 
     override val openRouterKey = key?.let { GuidelineCredentials.Resolved(it, keySource) }
 
@@ -128,6 +142,13 @@ class PreviewGuidelinesMcpTest {
     JsonObject(
       mapOf("previews" to JsonArray(previews.map { JsonPrimitive(it) })) +
         extra.mapValues { JsonPrimitive(it.value) }
+    )
+
+  private fun endpointArgs(baseUrl: String, model: String? = "llava:13b") =
+    JsonObject(
+      args("Stop") +
+        mapOf("base_url" to JsonPrimitive(baseUrl)) +
+        listOfNotNull(model?.let { "model" to JsonPrimitive(it) })
     )
 
   @Test
@@ -305,5 +326,54 @@ class PreviewGuidelinesMcpTest {
         trustedRoots = setOf(projectRoot),
       )
     assertThat(PreviewGuidelinesMcp.check(args("Stop"), host).isError).isNull()
+  }
+
+  @Test
+  fun `a loopback endpoint is asked without a key, and never with OpenRouter's`() {
+    val host = FakeHost(key = "sk-or-test")
+    val result = PreviewGuidelinesMcp.check(endpointArgs("http://localhost:11434/v1"), host)
+    assertThat(result.isError).isNull()
+    assertThat(host.endpoints).containsExactly("http://localhost:11434/v1" to null)
+  }
+
+  @Test
+  fun `a remote endpoint needs a key stored for it, so a call cannot pick where previews go`() {
+    val host = FakeHost(key = "sk-or-test")
+    val result = PreviewGuidelinesMcp.check(endpointArgs("https://evil.example/v1"), host)
+    assertThat(result.isError).isTrue()
+    val text = (result.content.single() as ContentBlock.Text).text
+    assertThat(text).contains("guidelines key set --for https://evil.example/v1")
+    assertThat(text).doesNotContain("sk-or-test")
+    assertThat(host.renders).isEqualTo(0)
+    assertThat(host.endpoints).isEmpty()
+  }
+
+  @Test
+  fun `an endpoint's stored key is sent only for a trusted project`() {
+    val keys = mapOf("endpoint:https://api.example.com" to "sk-ex-1234")
+    val untrusted = FakeHost(key = null, endpointKeys = keys)
+    val refused = PreviewGuidelinesMcp.check(endpointArgs("https://api.example.com/v1"), untrusted)
+    assertThat(refused.isError).isTrue()
+    assertThat((refused.content.single() as ContentBlock.Text).text)
+      .contains("compose-preview guidelines key trust ${projectRoot.canonicalPath}")
+    assertThat(untrusted.renders).isEqualTo(0)
+
+    val trusted = FakeHost(key = null, endpointKeys = keys, trustedRoots = setOf(projectRoot))
+    val result = PreviewGuidelinesMcp.check(endpointArgs("https://api.example.com/v1"), trusted)
+    assertThat(result.isError).isNull()
+    assertThat(trusted.endpoints).containsExactly("https://api.example.com/v1" to "sk-ex-1234")
+  }
+
+  @Test
+  fun `an endpoint needs a model and an http URL`() {
+    val host = FakeHost(key = null)
+    assertThat(
+        PreviewGuidelinesMcp.check(endpointArgs("http://localhost:1/v1", model = null), host)
+          .isError
+      )
+      .isTrue()
+    assertThat(PreviewGuidelinesMcp.check(endpointArgs("file:///etc/passwd"), host).isError)
+      .isTrue()
+    assertThat(host.renders).isEqualTo(0)
   }
 }
