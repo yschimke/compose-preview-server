@@ -15,7 +15,10 @@ bundles without a local Gradle project. Built once in CI and pushed to GHCR, so 
   instead of failing loudly (guarded by `test-desktop-daemon-sidecar.sh`). None of those sidecars
   carries a Skiko **native** — `:cli` staging filters every `skiko-awt-runtime-*` out and leaves a
   CLI-only provisioner to fetch the host's, which this image never installs — so the host's jar is
-  fetched into `/opt/lib-skiko` and named by `-Dcomposeai.cli.skikoDir`. Without it every
+  fetched into `/opt/lib-skiko` and named by `-Dcomposeai.cli.skikoDir`, and the native matching
+  `lib-rcjvm/`'s own `skiko-awt` (a different release, so possibly a different Skiko) into
+  `/opt/lib-rcjvm`; `check-skiko-pairing.sh` fails the build when either classpath would load a
+  native from another Skiko version (guarded by `test-skiko-pairing.sh`). Without it every
   Skiko-backed lane dies in `Library`'s static initialiser and `?rcPlayer=cmp-jvm` answers
   `500 … ExceptionInInitializerError: null` for every document. Lighting the Android live lane needs the catalog's stickers to
   carry the `previewId` daemon mapping **and** the bundle to carry the app's resource table under

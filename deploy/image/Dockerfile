@@ -202,12 +202,13 @@ RUN set -eu; \
 # which reaches the caller as a bare `ExceptionInInitializerError: null` — no cause, no stack —
 # so `?rcPlayer=cmp-jvm` answered `500 cmp-jvm render failed: ExceptionInInitializerError: null`
 # for every document in every catalog, and the compare wall's cmp-jvm column was a broken image.
-# Stage the ONE native this image's host arch needs into `lib-skiko/`, which
+# Stage the host arch's native into `lib-skiko/`, which
 # `locateBundleSidecarJars("lib-daemon-desktop")` prepends to the desktop classpath when
 # `-Dcomposeai.cli.skikoDir` names it (`configuredSkikoJars`) — the same directory the cmp-jvm
-# subprocess joins, so both the desktop daemon and that render lane get it.
+# subprocess joins — and a second native, for `lib-rcjvm/`'s own `skiko-awt`, into `lib-rcjvm/`
+# itself (see the RUN below for why one native cannot serve both).
 #
-# The version is READ OFF the staged `skiko-awt-<version>.jar` rather than pinned here: a
+# Each version is READ OFF the staged `skiko-awt-<version>.jar` rather than pinned here: a
 # mismatched pair is the split-Skiko `UnsatisfiedLinkError` `SkikoNativePairing` exists to warn
 # about, and a pin would drift the next time compose-ai-tools bumps Compose. A bundle built
 # against a NEWER Skiko still resolves its own pair through `CoordinateResolver` (the repair
@@ -261,22 +262,41 @@ RUN set -eu; \
     ls /opt/lib-bta/kotlin-compose-compiler-plugin-embeddable*.jar >/dev/null; \
     test "$(ls /opt/lib-bta/*.jar | grep -cv kotlin-compose-compiler-plugin-embeddable)" -gt 0
 
-# The host's Skiko native, paired by version with the `skiko-awt` the sidecars carry. See the
+# The host's Skiko native, paired by version with the `skiko-awt` each JVM actually loads. See the
 # stage header for why nothing else in this image supplies it.
+#
+# TWO natives, because there are two Skiko versions. `lib-daemon-desktop/` (compose-preview-daemon)
+# and `lib-rcjvm/` (compose-ai-tools) are built by different releases and need not agree — on
+# 3.125.0 they were 0.144.6 and 0.150.1. The cmp-jvm classpath is `lib-rcjvm/*` FIRST, then
+# `lib-skiko/`, then `lib-daemon-desktop/*`, so it binds lib-rcjvm's `skiko-awt` and, with only the
+# lib-skiko native staged, loaded the older `libskiko`: every call into a JNI symbol newer than that
+# (`ParagraphKt._nGetUnresolvedCodepointsCount`, i.e. any text) threw `UnsatisfiedLinkError`. So
+# lib-skiko/ keeps the desktop daemon's native and lib-rcjvm/ gets its own, which precedes it on
+# the cmp-jvm classpath. Each process loads the native for its own bindings, whatever the two
+# releases pin, and `check-skiko-pairing.sh` fails the build if a classpath ever pairs otherwise.
+# A directory with no `skiko-awt` gets no native here; the check is what decides whether that is
+# fine (lib-rcjvm then binds lib-daemon-desktop's pair) or fatal (the desktop daemon binds nothing).
+COPY check-skiko-pairing.sh /usr/local/bin/check-skiko-pairing.sh
 RUN set -eu; \
-    awt="$(ls /opt/lib-daemon-desktop/skiko-awt-*.jar | head -n 1)"; \
-    version="$(basename "$awt" .jar | sed 's/^skiko-awt-//')"; \
-    test -n "$version"; \
     case "$(dpkg --print-architecture)" in \
       amd64) platform=linux-x64 ;; \
       arm64) platform=linux-arm64 ;; \
       *) echo "no Skiko native for $(dpkg --print-architecture)" >&2; exit 1 ;; \
     esac; \
-    nativeJar="skiko-awt-runtime-${platform}-${version}.jar"; \
-    mkdir -p /opt/lib-skiko; \
-    curl -fsSL --retry 20 --retry-delay 15 --retry-all-errors -o "/opt/lib-skiko/${nativeJar}" \
-      "https://repo1.maven.org/maven2/org/jetbrains/skiko/skiko-awt-runtime-${platform}/${version}/${nativeJar}"; \
-    jar tf "/opt/lib-skiko/${nativeJar}" | grep -qx "libskiko-${platform}.so"
+    stage_native() { \
+      awt="$(ls "$1"/skiko-awt-*.jar 2>/dev/null | grep -v '/skiko-awt-runtime-' | head -n 1)"; \
+      version="$(basename "$awt" .jar | sed 's/^skiko-awt-//')"; \
+      test -n "$version" || return 0; \
+      nativeJar="skiko-awt-runtime-${platform}-${version}.jar"; \
+      mkdir -p "$2"; \
+      curl -fsSL --retry 20 --retry-delay 15 --retry-all-errors -o "$2/${nativeJar}" \
+        "https://repo1.maven.org/maven2/org/jetbrains/skiko/skiko-awt-runtime-${platform}/${version}/${nativeJar}"; \
+      jar tf "$2/${nativeJar}" | grep -qx "libskiko-${platform}.so"; \
+    }; \
+    stage_native /opt/lib-daemon-desktop /opt/lib-skiko; \
+    stage_native /opt/lib-rcjvm /opt/lib-rcjvm; \
+    chmod +x /usr/local/bin/check-skiko-pairing.sh; \
+    check-skiko-pairing.sh /opt "$platform"
 
 # ---------------------------------------------------------------------------
 # Stage 1b: prewarm the downloadable-font cache.
