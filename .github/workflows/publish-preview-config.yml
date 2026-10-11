@@ -44,7 +44,9 @@ jobs:
           # serves without anyone SSHing in. Unset ⇒ the config is written and applies at the next
           # image roll, with a warning.
           DEPLOY_HOOK_TOKEN: ${{ secrets.DEPLOY_HOOK_TOKEN }}
-          DEPLOY_HOOK_RESTART_URL: ${{ vars.DEPLOY_HOOK_RESTART_URL || 'https://preview.coo.ee/__hooks/restart' }}
+          # Empty unless the repository sets it: an empty value falls through to the script's
+          # ${BASE_URL}/__hooks/restart, so a box picked by DEPLOY_BASE_URL is the box restarted.
+          DEPLOY_HOOK_RESTART_URL: ${{ vars.DEPLOY_HOOK_RESTART_URL }}
         run: |
           test -n "${ADMIN_TOKEN}" || { echo "::error::SERVE_ADMIN_TOKEN is required"; exit 1; }
           # --prune: this file is the whole answer for this box, so a catalog dropped from it is
