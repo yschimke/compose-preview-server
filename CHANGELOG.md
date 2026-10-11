@@ -1,5 +1,25 @@
 # Changelog
 
+## [3.121.0](https://github.com/yschimke/compose-preview-server/compare/v3.120.0...v3.121.0) (2026-10-11)
+
+
+### Features
+
+* **catalog:** register Remote Compose examples on preview ([#1521](https://github.com/yschimke/compose-preview-server/issues/1521)) ([385946b](https://github.com/yschimke/compose-preview-server/commit/385946b82ad6e713c95e18ce46725ef4910efbf7))
+* **deploy:** ui.coo.ee serves the UI builder at its root ([#1525](https://github.com/yschimke/compose-preview-server/issues/1525)) ([f003451](https://github.com/yschimke/compose-preview-server/commit/f003451c8b2f9f2bb309f3896e12767815fa91fb))
+* **serve:** withhold a catalog-owned UI-builder catalog that does not compose, and say why, instead of falling back ([#1527](https://github.com/yschimke/compose-preview-server/issues/1527)) ([866ead1](https://github.com/yschimke/compose-preview-server/commit/866ead12c727f2a9e52d774666a755a14db999fe))
+
+
+### Bug Fixes
+
+* **ci:** keep owned catalog health documentation catalog-neutral ([#1532](https://github.com/yschimke/compose-preview-server/issues/1532)) ([93ddc31](https://github.com/yschimke/compose-preview-server/commit/93ddc31e0e052f26ae00dab582a0afbe52a6f121))
+* **deploy:** turn ui.coo.ee's host root back off ([#1529](https://github.com/yschimke/compose-preview-server/issues/1529)) ([ba8ff12](https://github.com/yschimke/compose-preview-server/commit/ba8ff121caf791badc1bc178d6a06043da67d6f1))
+* **deps:** compose-ui-builder 3.104.0, whose editor reads its base path from the page so ui.coo.ee can serve it at the root ([#1522](https://github.com/yschimke/compose-preview-server/issues/1522)) ([0a1aaba](https://github.com/yschimke/compose-preview-server/commit/0a1aabae2c5c5e0a65cf1f3d0c888bdc1353b3e6))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.43.0 ([#1523](https://github.com/yschimke/compose-preview-server/issues/1523)) ([8ce34fa](https://github.com/yschimke/compose-preview-server/commit/8ce34fa1d055cd7630943b8517565e2d7e70c518))
+* **serve:** a rooted UI-builder page carries its /ui-builder/ headers, and root mode needs an editor that reads its base path ([#1531](https://github.com/yschimke/compose-preview-server/issues/1531)) ([f28c72c](https://github.com/yschimke/compose-preview-server/commit/f28c72c0412581583cf3f3a6bf3dd83e86c033f3))
+* **serve:** read a Builder catalog's record by its delivery system, so owned wear-m3 keeps its templates ([#1526](https://github.com/yschimke/compose-preview-server/issues/1526)) ([03730bd](https://github.com/yschimke/compose-preview-server/commit/03730bde56d982ddd407abf442357f30928b327b))
+* **ui-builder:** honor project collaboration in listings and branches ([#1520](https://github.com/yschimke/compose-preview-server/issues/1520)) ([3e2d65a](https://github.com/yschimke/compose-preview-server/commit/3e2d65a623837e0d6428402dad65168764689b2a))
+
 ## [3.120.0](https://github.com/yschimke/compose-preview-server/compare/v3.119.0...v3.120.0) (2026-10-10)
 
 
