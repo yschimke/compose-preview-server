@@ -130,9 +130,10 @@ graphics-shapes = "1.1.0"
 # 2.39.1 is built on compose-preview-daemon 3.15.1 (compose-ai-tools#5755), the pair below.
 # 2.42.0 records a preview's guidelines surface and profile in `previews.json` and reads them
 # through `GuidelineSurfaces.of` (compose-ai-tools#5778), which the MCP guideline tools use.
-# 2.46.0 adds the engine's `GuidelineCredentials` (the key `guidelines key set` stores, and the
-# projects trusted with it) and `OpenAiCompatibleClient`, which `check_preview_guidelines` uses
-# (compose-ai-tools#5833, #5846).
+# 2.46.0 carries the export-projection API compose-ui-builder 3.106.0's export reads
+# (`ExportProjectionJson`, compose-ai-tools#5832, #5835); it moves with the UI builder below. It
+# also adds the engine's `GuidelineCredentials` and `OpenAiCompatibleClient`, which
+# `check_preview_guidelines` uses (compose-ai-tools#5833, #5846).
 composeai-tools = "2.46.0"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
@@ -417,9 +418,9 @@ composeai-contracts = "3.29.0"
 # `ComponentRecord.copy`, which 3.100.0's export called, so the two move together.
 # 3.102.0 is built on compose-ai-tools 2.39.1 and daemon 3.15.1 (compose-ui-builder#627), and lets
 # its runtime boundary admit the contracts' component record module (compose-ui-builder#622).
-# 3.106.0 keeps deleted designs in a 24-hour trash (compose-ui-builder#687): the
-# `UiBuilderTrashedDesign` / `adminListTrash` / `RestoreDesign` API the server's trash routes call
-# (#1564), which no earlier release carries.
+# 3.106.0 keeps deleted designs in a 24-hour trash (compose-ui-builder#687), the runtime API
+# `ServeUiBuilderTrash` and the admin and MCP trash routes (#1564) call; it is built on
+# compose-ai-tools 2.46.0 and androidx-window 1.5.1, so `composeai-tools` above moves with it.
 composeai-ui-builder = "3.106.0"
 # The CMP/Wasm Remote Compose player (yschimke/rc-players' `rc-player-wasm-dist`, a zip of its
 # static browser bundle). Shipped in the server tarball as `rc-player-wasm/`, which the image's
