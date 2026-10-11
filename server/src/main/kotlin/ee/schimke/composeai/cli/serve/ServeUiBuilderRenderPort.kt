@@ -57,10 +57,19 @@ private constructor(
       localeTag = localeTag,
       fontScale = fontScale,
       namedOverrides =
-        mapOf(
-          PackagedUiBuilderRenderBundle.DOCUMENT_OVERRIDE_KEY to
-            PreviewOverrideValue.StringValue(encodedDocument)
-        ),
+        buildMap {
+          put(
+            PackagedUiBuilderRenderBundle.DOCUMENT_OVERRIDE_KEY,
+            PreviewOverrideValue.StringValue(encodedDocument),
+          )
+          // A catalog the bundle does not package for the design's pin, such as an owned one.
+          encodedCatalog?.let {
+            put(
+              PackagedUiBuilderRenderBundle.CATALOG_OVERRIDE_KEY,
+              PreviewOverrideValue.StringValue(it),
+            )
+          }
+        },
     )
 
   companion object {
