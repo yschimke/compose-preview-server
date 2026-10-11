@@ -1,13 +1,6 @@
-// The URL arithmetic behind the viewer's render-history menu, as pure functions over strings.
-//
-// This is the half of `viewer-history.js` that was worth extracting: every link the strip draws is
-// built from DOM text (`data-history-repo`, `data-history-blob-url`) and lands in an `href`, which
-// is the flow CodeQL reports as `js/xss-through-dom`. Three earlier attempts got it wrong the same
-// way — a guard that inspects a string and hands the *same* string onward leaves the DOM value
-// reaching the href verbatim. What is safe is to match, then REBUILD from the captured segments,
-// encoding each one. Nothing is passed through.
-//
-// Held in the element those rules could only be checked by reading them. Here they are a table.
+// URL arithmetic behind the render-history menu, as pure functions. Links are built from DOM text
+// and land in an `href` (CodeQL's `js/xss-through-dom`), so inputs are matched and then rebuilt
+// from the captured segments, each encoded; nothing is passed through.
 
 /** One entry in a preview's timeline, as the manifest records it. */
 export interface HistoryVersion {
@@ -18,9 +11,8 @@ export interface HistoryVersion {
 }
 
 /**
- * How this page addresses old renders. Exactly one of the two is ever present: a delivery repo to
- * link into, or — running `serve` against a local checkout — the server's own content-addressed
- * lane, because there is no published repo to point at.
+ * How this page addresses old renders: a delivery repo to link into, or (for `serve` on a local
+ * checkout) the server's own content-addressed lane. Exactly one is present.
  */
 export interface HistorySource {
     /** `owner/name`, already validated and encoded, or null in project mode. */
@@ -30,9 +22,8 @@ export interface HistorySource {
     /** The template's query string, re-encoded, or `""`. */
     blobQuery: string;
     /**
-     * Whether the strip describes renders this page is NOT showing. In project mode the stage comes
-     * from the working tree while the timeline comes from published baselines, so the newest entry
-     * is the last publish rather than "what you are looking at".
+     * Whether the strip describes renders this page is not showing: in project mode the stage is
+     * the working tree while the timeline is published baselines.
      */
     local: boolean;
 }
@@ -48,11 +39,8 @@ export function reencode(word: string): string {
 }
 
 /**
- * Validate and rebuild an `owner/name`.
- *
- * The pattern admits only the shape a GitHub repo can take, and every character it admits is
- * URI-unreserved — so the encoding is a no-op on real values (identical bytes on the wire) and a
- * value that cannot be made safe by escaping simply yields null, and the strip is not drawn.
+ * Validate and rebuild an `owner/name`. Only URI-unreserved characters are admitted, so encoding is
+ * a no-op on real values; anything else yields null and no strip.
  */
 export function repoPathOf(repo: string | null): string | null {
     if (!repo) return null;
@@ -65,13 +53,9 @@ export function repoPathOf(repo: string | null): string | null {
 }
 
 /**
- * Validate and rebuild the project-mode blob template.
- *
- * Identical treatment for an identical flow. The `{blob}` placeholder is never substituted into the
- * passed-through string: it is dropped and the URL reassembled around the version's own sha. The
- * leading `\/(?!\/)` keeps the result site-relative — the character class has to admit `/` as a
- * separator, so the lookahead is what rejects a protocol-relative `//host/…` — and no `:` is
- * admitted anywhere, so no `javascript:` URL can match.
+ * Validate and rebuild the project-mode blob template, reassembling the URL around the version's
+ * sha rather than substituting `{blob}`. The leading `\/(?!\/)` keeps it site-relative (no
+ * `//host`), and no `:` is admitted, so no `javascript:` URL can match.
  */
 export function blobTemplateOf(
     blobUrl: string | null,
@@ -82,9 +66,8 @@ export function blobTemplateOf(
             blobUrl,
         );
     if (!parts) return null;
-    // Path segments and query words are re-encoded individually, leaving the `/`, `?`, `&` and `=`
-    // structure intact. Decoded first so a segment the server already encoded round-trips to the
-    // same bytes instead of double-encoding (`%3A` → `:` → `%3A`, not `%253A`).
+    // Segments and query words are re-encoded individually, keeping the URL structure. Decoded
+    // first so an already-encoded segment round-trips instead of double-encoding.
     return {
         base: parts[1].split("/").map(reencode).join("/"),
         query: (parts[3] || "").replace(/[^?&=]+/g, reencode),
@@ -112,16 +95,10 @@ export function historySourceOf(
 }
 
 /**
- * The URL of one historical render, or null when the manifest names something that cannot be
- * addressed.
- *
- * Mirrors `ServeUrls.historicalRenderUrl` and rejects the same inputs for the same reason: the
- * manifest records shas, so accepting a ref would let a malformed manifest point the viewer at an
- * arbitrary branch. In project mode the version's content sha addresses it directly instead — the
- * same rule, one identifier shorter, and the server refuses any sha its own timeline does not name.
- *
- * Keyed on `source.local` rather than on which field is set, so a page that somehow carried both
- * stays coherent: one flag decides how an entry is addressed and how it is labelled.
+ * The URL of one historical render, or null when the manifest names something unaddressable.
+ * Mirrors `ServeUrls.historicalRenderUrl`: shas only, so a malformed manifest cannot point at a
+ * branch; in project mode the content sha addresses it. Keyed on `source.local` so one flag decides
+ * addressing and labelling.
  */
 export function renderUrlAt(
     source: HistorySource,
@@ -143,18 +120,9 @@ export function renderUrlAt(
 }
 
 /**
- * The delivery-branch directories a manifest may name a render in.
- *
- * Two, because there are two kinds of delivery branch: a **baseline** branch
- * (`compose-preview/main`) writes `renders/<module>/<basename>`, while a **design catalog** branch
- * (`design-artifacts/<system>`) writes `images/<slug>/<variant>.png`. A manifest built over the
- * second was previously addressable by nothing at all — every entry failed this check and the menu
- * silently drew no timeline.
- *
- * Deliberately still a closed list rather than "any relative path". The path comes out of a fetched
- * manifest and is pasted into a raw.githubusercontent URL, so what it may name is part of this
- * file's job: an entry outside the two directories a publisher actually writes is a malformed
- * manifest, not a layout we have yet to hear about.
+ * Delivery-branch directories a manifest may name a render in: baseline branches write
+ * `renders/<module>/<basename>`, design catalog branches `images/<slug>/<variant>.png`. A closed
+ * list on purpose, since the path is pasted into a raw.githubusercontent URL.
  */
 const RENDER_DIRS = ["renders/", "images/"];
 

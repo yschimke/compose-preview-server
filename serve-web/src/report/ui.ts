@@ -1,10 +1,7 @@
-// The capture tool as the visitor meets it: three buttons, a status line, and the pile of what has
-// been captured so far — in the launcher panel on any page, and again on `/report-bug`, where the
-// pile has survived a navigation and is waiting to be pasted.
-//
-// The controls are server-rendered `hidden` (see `ServeWeb.captureControlsHtml`) and unhidden from
-// here, once. That order is the point: capability is a browser fact, and a button that offers a
-// screenshot and then explains that your browser cannot take one is worse than no button.
+// The capture tool: three buttons, a status line, and the pile of captures so far, in the launcher
+// panel on any page and again on `/report-bug`. The controls are server-rendered `hidden`
+// (`ServeWeb.captureControlsHtml`) and unhidden here once capability is known, so no button offers
+// a screenshot the browser can't take.
 
 import {
     Frame,
@@ -75,8 +72,8 @@ export function installCapture(): void {
 const SHARED_MAX_SIDE = 1600;
 
 /**
- * Pull a screenshot shared into the installed app (see `shared.ts`) into the capture pile, stamped
- * as a capture of the report being written here so the hand-off carries it into the issue.
+ * Pull a screenshot shared into the installed app (see `shared.ts`) into the pile, stamped as a
+ * capture of this report.
  */
 async function importSharedCapture(): Promise<void> {
     const id = sharedId(location.search);
@@ -125,28 +122,19 @@ async function importSharedCapture(): Promise<void> {
 }
 
 /**
- * Whether this page has established that it cannot host a capture.
- *
- * Set once discovery has actually answered, never assumed from the absence of the attribute: at
- * install time the answer is not in yet, and saying "this will have to be pasted" to someone whose
- * next capture is about to be embedded is the same class of lie in the other direction.
+ * Whether this page has established it cannot host a capture; set only once discovery has answered.
  */
 let hostingRuledOut = false;
 
 /**
- * Tell the reporter, BEFORE they press the button, that the picture will have to be pasted.
- *
- * The clipboard fallback has always worked; what it never did was announce itself anywhere the
- * reporter was still looking. Its one message was written at submit time, into a status line on a
- * page whose form opens GitHub in a new tab — so the reporter read it, at best, on the way back
- * from filing a screenshot-less report (issue #556). Said here instead, as soon as both facts are
- * known: this host does not host captures, and there is a capture for this report.
+ * Tell the reporter before they press the button that the picture will need pasting (this host
+ * doesn't host captures and there is a capture for this report), rather than only at submit time on
+ * a page they are leaving.
  */
 function noteClipboardFallback(): void {
     if (!hostingRuledOut) return;
-    // Only where something would actually have to be pasted. A pile that rode a navigation still
-    // carrying URLs this host minted earlier is embedded by the hand-off exactly as before, and
-    // telling its reporter to paste would be the same page lying in the other direction.
+    // Only where something would actually need pasting; captures already hosted earlier are
+    // embedded as before.
     if (
         !capturesForThisReport().some(
             (capture) => !hostedCaptureUrl(capture.uploadedUrl),
@@ -168,14 +156,9 @@ function capturesForThisReport(): Capture[] {
 }
 
 /**
- * Persist a capture the shutter just produced and start hosting it when this page has discovered
- * the image lane.
- *
- * Capability discovery normally finishes while the browser's screen-picker is still open. The
- * discovery-time upload therefore sees an empty store; the newly captured pixels must trigger a
- * second pass after they land, rather than relying on that earlier pass to somehow find them.
- *
- * @returns whether the new capture survived the store's quota/eviction rules.
+ * Persist a fresh capture and start hosting it if the image lane was discovered. Discovery usually
+ * finishes while the screen picker is open, so the new capture triggers its own upload pass.
+ * @returns whether the capture survived the store's quota/eviction rules.
  */
 export function storeCapture(capture: Capture): boolean {
     const kept = addCapture(sessionStore(), capture);
@@ -188,34 +171,18 @@ export function storeCapture(capture: Capture): boolean {
     return stored;
 }
 
-/** The two forms that open a prefilled issue: `/report-bug`'s, and a preview's own. */
+/** The two forms that open a prefilled issue: `/report-bug`'s and a preview's own. */
 const REPORT_FORMS = ".cp-report-bug-form, .cp-report-form";
 
 /**
- * Complete the image hand-off when the issue form is submitted.
- *
- * Hosted captures are already embedded in the prefilled Markdown. If hosting was unavailable, the
- * clipboard remains the reliable fallback: copying here uses the submit gesture for browser
- * permission and happens after the reporter has finished writing, so an intervening copy cannot
- * silently replace the screenshot.
- *
- * The NEWEST capture, because a clipboard holds one image and the newest is the one the pile's own
- * eviction rule already treats as the most wanted. When there are others the note says so, since
- * their Copy buttons are the only way to reach them and this page is where they still exist.
- *
- * Delegated from the document, for the same reason `chrome/reportLauncher.ts` delegates its own
- * dismissal: [installCapture] runs once per page, and `.cp-report-form` is not necessarily the one
- * that will be submitted. It is emitted by whichever surface bundle drew the preview, and the
- * comparison wall replaces its own as the wall re-renders — so a snapshot taken at install time
- * wires a form that is no longer in the document, and the failure is the silent one this whole
- * change exists to remove: the issue opens, the paste produces whatever was last copied, and
- * nothing anywhere says the hand-off did not happen.
+ * Complete the image hand-off on submit. Hosted captures are already in the prefilled Markdown;
+ * otherwise copy the newest capture to the clipboard using the submit gesture. Delegated from the
+ * document because the form submitted may not exist at install time (surfaces re-render their
+ * forms).
  */
 function wireHandOff(): void {
-    // Guarded on its OWN attribute rather than riding [installCapture]'s. Both bundles that reach
-    // this file can load it — the launcher fetches it when its panel opens, `/report-bug` on load —
-    // and a delegated listener cannot be de-duplicated by the element it is attached to the way a
-    // per-form one could. Two of these would copy twice and write the note twice for one submit.
+    // Guarded on its own attribute: both bundles can load this file, and a duplicate delegated
+    // listener would copy and note twice.
     const root = document.documentElement;
     if (root.hasAttribute("data-cp-handoff-wired")) return;
     root.setAttribute("data-cp-handoff-wired", "1");
@@ -228,14 +195,8 @@ function wireHandOff(): void {
 }
 
 /**
- * Which page the report being submitted is ABOUT — not necessarily the one it is submitted from.
- *
- * On a preview's own form the two are the same page. On `/report-bug` they are not: that page is
- * the report, and the page it reports is the `?from=` the footer form carried here. Reading it back
- * is what lets [handOff] tell a capture taken for this report from one still lying in the pile.
- *
- * `from` is a path this server wrote and this page received; it is parsed for its pathname rather
- * than string-compared, so a carried query cannot make it miss.
+ * Which page the report is about: the same page for a preview's form, the `?from=` path on
+ * `/report-bug`. Parsed for its pathname so a carried query can't break the match.
  */
 function reportedPage(): string | null {
     const from = new URLSearchParams(location.search).get("from");
@@ -250,21 +211,15 @@ function reportedPage(): string | null {
 function handOff(): void {
     const captures = readCaptures(sessionStore());
     if (!captures.length) return;
-    // The newest capture OF THE PAGE BEING REPORTED. `sessionStorage` lasts as long as the tab, so
-    // a reporter who files one report with a screenshot and a second one later, from elsewhere,
-    // without taking another still has the first picture in the pile — and handing that one over
-    // while telling them to paste it attaches a screenshot of an unrelated page to the new issue.
-    // Silence is the right answer there: they did not take a picture for this report, the pile is
-    // still on screen with its Copy buttons, and the issue's own Screenshot section still asks.
+    // The newest capture of the page being reported. `sessionStorage` outlives a report, so an
+    // older capture of another page must not be handed over; with none, say nothing.
     const page = reportedPage();
     const mine = captures.filter((c) => !!c.page && c.page === page);
     const latest = mine[mine.length - 1];
     if (!latest) return;
     const embedded = applyHostedCaptures(mine);
-    // `hostedCaptureUrl`, not `needsUpload`. By the time a submit reaches here the upload flow has
-    // already either confirmed each restored URL or replaced it, so re-deriving "unverified" would
-    // only mis-fire on the page that has no image lane at all — where nothing can be uploaded and
-    // the clipboard is already the path.
+    // `hostedCaptureUrl`, not `needsUpload`: by submit the upload flow has confirmed or replaced
+    // each URL.
     const carried = (capture: Capture) =>
         shareable(capture) && !!hostedCaptureUrl(capture.uploadedUrl);
     if (embedded && mine.every(carried)) {
@@ -275,22 +230,16 @@ function handOff(): void {
         );
         return;
     }
-    // The newest capture the report will NOT carry — not simply the newest. A
-    // capture is unhosted because its upload failed or because an edit cleared
-    // the URL, and neither is a reason to reach for it last: copying an already
-    // embedded `latest` sends the same picture twice and drops the edited one on
-    // the floor. When nothing was embedded at all, this is `latest` anyway.
+    // The newest capture the report will not carry: copying an already embedded one would duplicate
+    // it and drop the edited one.
     const unhosted = mine.filter((capture) => !embedded || !carried(capture));
     const copying = unhosted[unhosted.length - 1] ?? latest;
     const rest =
         mine.length > 1
             ? ` The other ${mine.length - 1} are still here — press Copy on one to send it too.`
             : "";
-    // Say so in the BODY as well, and synchronously: the note below lands on a page the reporter is
-    // about to leave (the issue form is `target="_blank"`), while this rides into GitHub's editor
-    // and sits at the exact spot the paste belongs. Written before the copy rather than in its
-    // `then`, because the form's entry list is built as this handler returns — a value set from a
-    // promise arrives after the report has already gone.
+    // Also note it in the body, synchronously (the form's entry list is built as the handler
+    // returns), right where the paste belongs.
     applyHostedCaptures(mine, { others: mine.length - 1 });
     copyPng(blobFromDataUrl(copying.dataUrl)).then(
         () =>
@@ -301,11 +250,8 @@ function handOff(): void {
             note(
                 "The clipboard refused the capture. Press Copy on it here, then paste it into the issue's Screenshot section.",
             );
-            // …and make sure that sentence is somewhere it can be read. On a preview page the note's
-            // only home is the capture block inside the launcher panel, which the capture flow
-            // closed to take the shot and the submit just closed again — so the one message that
-            // needs attention was being written into a drawer. A success needs no such rescue: the
-            // clipboard holds what it should and there is nothing to act on.
+            // ...and reveal the note: on a preview page it lives in the launcher panel, which the
+            // submit just closed.
             reveal();
         },
     );
@@ -322,12 +268,7 @@ function reveal(): void {
     });
 }
 
-/**
- * True while a markup editor is open anywhere on the page.
- *
- * The editor lives *inside* the row {@link fill} rebuilds wholesale, so a render
- * under it takes the canvas with it.
- */
+/** True while a markup editor is open anywhere ({@link fill} would rebuild its row). */
 function markupOpen(): boolean {
     return !!document.querySelector(".cp-markup");
 }
@@ -336,15 +277,9 @@ function markupOpen(): boolean {
 let renderPending = false;
 
 /**
- * Every list on the page, refreshed from the store.
- *
- * Deferred while a markup editor is open. `fill` replaces every row, and the
- * editor is a child of one — so rendering under it discards every box, arrow,
- * note and pen stroke the reporter has not saved yet. A background upload
- * completing is enough to trigger that, which means annotating a capture while
- * its own upload finished silently threw the annotation away. Nothing here is
- * urgent enough to cost someone that: the lists redraw the moment the editor
- * closes, via {@link markupClosed}.
+ * Refresh every list from the store, deferred while a markup editor is open: `fill` replaces rows
+ * and would discard unsaved annotations (a finishing upload could trigger it). Lists redraw on
+ * {@link markupClosed}.
  */
 function render(): void {
     if (markupOpen()) {
@@ -363,11 +298,9 @@ function render(): void {
 }
 
 /**
- * Whether the reporter ticked "upload and embed" for captures of a signed-in-only page.
- *
- * Off by default on every page load. Those captures are still taken, listed, marked up and put on
- * the clipboard exactly as before — only the automatic upload to an anonymous-read URL waits for
- * this, because the issue that URL is embedded in is public.
+ * Whether the reporter opted in to uploading captures of a signed-in-only page. Off on every load:
+ * those captures are still taken and copyable, but auto-upload to a public, anonymously readable
+ * URL waits for consent.
  */
 let shareOptIn = false;
 
@@ -377,8 +310,8 @@ function shareable(capture: Capture): boolean {
 }
 
 /**
- * Show the opt-in beside every capture list, but only where it means something: this host can
- * embed captures, and at least one capture for this report came from a page that needs consent.
+ * Show the opt-in only where it matters: the host can embed, and a capture for this report came
+ * from a page needing consent.
  */
 function syncShareConsent(): void {
     const wanted =
@@ -430,21 +363,15 @@ function markupClosed(): void {
 
 const originalBodies = new WeakMap<HTMLInputElement, string>();
 /**
- * The exact value this module last wrote to a body field.
- *
- * How {@link applyHostedCaptures} tells its own re-embed apart from someone
- * else's rewrite: equal means the cached base is still the right thing to build
- * on, different means the field moved underneath us and the base is stale.
+ * The exact value last written to each body field, so {@link applyHostedCaptures} can tell its own
+ * re-embed from someone else's rewrite.
  */
 const lastWritten = new WeakMap<HTMLInputElement, string>();
 let uploadGeneration = 0;
 
 /**
- * Ask the server whether this signed browser session may host report captures.
- *
- * `/report-bug` already carries the answer in `data-cp-image-upload`; catalog reports are filed
- * in place and need the same per-request authorization without plumbing it through every static
- * page builder. A failed/absent check leaves the existing clipboard hand-off unchanged.
+ * Ask whether this browser session may host report captures. `/report-bug` already carries
+ * `data-cp-image-upload`; other pages check per request. Failure keeps the clipboard hand-off.
  */
 async function discoverImageUpload(): Promise<void> {
     try {
@@ -459,18 +386,14 @@ async function discoverImageUpload(): Promise<void> {
             cache: "no-store",
         });
         if (!response.ok) {
-            // A 403 (this visitor is not admitted to the lane) and a 404 (no lane at all) are the
-            // same fact to a reporter: nothing they capture will be embedded, so say so rather
-            // than leaving the page silently promising otherwise.
+            // 403 and 404 mean the same to a reporter: nothing will be embedded.
             hostingRuledOut = true;
             noteClipboardFallback();
             return;
         }
         const mount = document.querySelector<HTMLElement>(".cp-fab, .cp-shots");
         mount?.setAttribute("data-cp-image-upload", "true");
-        // The server says whether an anonymous visitor could open this host's pages at all. A
-        // token-gated host answers "private", and its captures then wait for the reporter's opt-in
-        // like a UI-builder page's do.
+        // A token-gated host answers "private", so its captures wait for opt-in.
         if (
             response.headers?.get?.("X-Compose-Preview-Capture-Scope") ===
             PRIVATE_SCOPE
@@ -485,19 +408,9 @@ async function discoverImageUpload(): Promise<void> {
 }
 
 /**
- * Image URLs this page has seen resolve — minted by an upload here, or re-checked with a HEAD.
- *
- * A capture read back from `sessionStorage` can carry a `uploadedUrl` this page never obtained.
- * `hostedCaptureUrl` vouches for its *shape* — this origin, the `/i/` lane — which is a security
- * check, not an existence one: the pile outlives the server, so a restart of the image store or the
- * lane's retention TTL leaves a syntactically perfect URL behind whose bytes are gone. Trusting it
- * embeds a 404 in the filed issue AND skips the clipboard fallback, because {@link handOff} reads
- * "every capture hosted" as "every capture embedded". So the URL is checked once per page, and a
- * capture whose URL cannot be vouched for is treated as un-uploaded.
- *
- * Per page rather than per report: the bytes cannot vanish out from under a URL this page has
- * already confirmed within the life of that page, and re-checking on every knob change would spend
- * a request to learn nothing.
+ * Image URLs this page has confirmed exist (uploaded here, or HEAD-checked). `hostedCaptureUrl`
+ * checks a restored URL's shape, not existence; the store may have been restarted or expired it,
+ * and trusting it would embed a 404 and skip the clipboard fallback. Checked once per page.
  */
 const verifiedUrls = new Set<string>();
 
@@ -514,16 +427,14 @@ async function uploadReportCaptures(): Promise<void> {
     const mine = readCaptures(sessionStore()).filter(
         (capture) => !!capture.page && capture.page === page,
     );
-    // Includes a capture whose restored URL has not been re-checked yet, so Submit stays down
-    // while that check runs — the reporter must not be able to file a report whose evidence this
-    // page has not confirmed is there.
+    // Includes captures whose restored URL is still being checked, so Submit stays disabled
+    // meanwhile.
     const pending = mine.filter(
         (capture) => shareable(capture) && needsUpload(capture),
     );
     syncShareConsent();
-    // An edit clears `uploadedUrl`. Remove the old embed immediately, before the replacement
-    // upload begins; if that upload fails, falling back to the clipboard must not leave the issue
-    // body pointing at the unannotated pixels.
+    // An edit clears `uploadedUrl`; remove the old embed now so a failed re-upload can't leave the
+    // unannotated pixels in the body.
     applyHostedCaptures(mine);
     const submits = document.querySelectorAll<HTMLButtonElement>(
         ".cp-bug-submit, .cp-report-submit",
@@ -534,12 +445,8 @@ async function uploadReportCaptures(): Promise<void> {
                 "Captures from this page are not uploaded unless you tick the box above. " +
                     "Opening the issue puts your newest one on the clipboard instead.",
             );
-        // Nothing to wait for, so nothing may still be holding the button down.
-        // Removing the last capture mid-upload arrives exactly here: this call
-        // took the generation, so the in-flight one's `finally` sees a mismatch
-        // and declines to re-enable — and returning without doing it ourselves
-        // left Submit dead until a reload, on the tool someone reaches for when
-        // something is already broken.
+        // Nothing to wait for, so re-enable Submit (removing the last capture mid-upload lands
+        // here, and the in-flight upload's `finally` won't).
         submits.forEach((submit) => (submit.disabled = false));
         return;
     }
@@ -553,9 +460,7 @@ async function uploadReportCaptures(): Promise<void> {
         for (const capture of pending) {
             const restored = hostedCaptureUrl(capture.uploadedUrl);
             if (restored && (await stillHosted(restored))) {
-                // Still there — keep the URL and skip the upload. This is the common case for a
-                // pile that rode a navigation within one server's lifetime, and re-uploading it
-                // would spend a request, and a slice of the rate-limit budget, to learn nothing.
+                // Still there: keep the URL and skip the re-upload.
                 if (generation !== uploadGeneration) return;
                 verifiedUrls.add(restored);
                 continue;
@@ -607,14 +512,8 @@ function imageUploadEnabled(): boolean {
 }
 
 /**
- * The hidden body field of whichever report form this page carries.
- *
- * There are two, and {@link REPORT_FORMS} hands off for both: the dedicated bug
- * page (`#cp-bug-body`) and a preview page's own inline form
- * (`#cp-report-body`). Looking for only the first meant a hand-off from the
- * second embedded nothing — and, because `handOff` reads "every capture hosted"
- * as "every capture embedded", also skipped the clipboard fallback and told the
- * reporter their capture was in the report. It opened with no screenshot at all.
+ * The hidden body field of whichever report form this page has: `#cp-bug-body` or a preview's
+ * `#cp-report-body`.
  */
 function reportBodyInput(): HTMLInputElement | null {
     return document.querySelector<HTMLInputElement>(
@@ -623,10 +522,8 @@ function reportBodyInput(): HTMLInputElement | null {
 }
 
 /**
- * Write the hosted captures into the report body.
- *
- * @returns whether a body field existed to write into — the caller cannot treat
- *   "uploaded" as "embedded" without it.
+ * Write hosted captures into the report body.
+ * @returns whether a body field existed, so "uploaded" isn't mistaken for "embedded".
  */
 function applyHostedCaptures(
     captures: Capture[],
@@ -634,19 +531,14 @@ function applyHostedCaptures(
 ): boolean {
     const input = reportBodyInput();
     if (!input) return false;
-    // Re-read the base whenever anything but us has written to the field since we
-    // last did. The bug page's body is a server-rendered constant, so caching it
-    // once is right there — but a preview page's is live: `refreshReportLink`
-    // (viewer.ts) replaces it wholesale with the CURRENT render URL every time the
-    // knobs change. A base cached on the first submission would quietly rebuild
-    // every later one from the first render's settings, so the second report
-    // describes the first bug.
+    // Re-read the base when something else wrote the field: a preview page's body is rewritten by
+    // `refreshReportLink` (viewer.ts) on every knob change, so a cached base would describe the
+    // first render.
     if (!originalBodies.has(input) || lastWritten.get(input) !== input.value) {
         originalBodies.set(input, input.value);
     }
-    // Only captures that may be embedded, and those from a signed-in-only page under a neutral
-    // alt text: an element label is built from the page's own ids and classes, and the issue it
-    // lands in is public.
+    // Only embeddable captures, and those from signed-in-only pages under neutral alt text (labels
+    // come from page ids and classes; the issue is public).
     const embedded = withUploadedCaptures(
         originalBodies.get(input) ?? input.value,
         captures
@@ -673,13 +565,8 @@ function fill(list: HTMLElement, captures: Capture[]): void {
 }
 
 /**
- * One capture as a row.
- *
- * Built with `createElement` rather than an HTML string, and not out of caution about the data —
- * an element's own tag name and class are hardly hostile — but because half of these values are
- * DOM-derived text and the other half are attributes (`src`, `href`, `download`). Assembling that
- * by concatenation is how a label with a quote in it becomes an attribute injection, and there is
- * no version of this list worth that risk.
+ * One capture as a row, built with `createElement`: many values are DOM-derived text going into
+ * attributes, where string concatenation risks attribute injection.
  */
 function item(capture: Capture): HTMLElement {
     const li = document.createElement("li");
@@ -720,10 +607,8 @@ function item(capture: Capture): HTMLElement {
         const editor = markupEditor(
             capture,
             (updated) => {
-                // Close first: `render` defers while an editor is open, and a
-                // save that left it in the DOM would defer its own redraw and
-                // then never pay it back — the row would keep the pre-markup
-                // thumbnail until something else redrew the list.
+                // Close the editor first: `render` defers while one is open, so the saved thumbnail
+                // would never redraw.
                 li.querySelector(".cp-markup")?.remove();
                 replaceCapture(sessionStore(), updated);
                 render();
@@ -771,10 +656,8 @@ function item(capture: Capture): HTMLElement {
 }
 
 /**
- * A row action that reports its own outcome in place.
- *
- * The label flip is the only feedback a clipboard write can honestly give — there is no reading the
- * clipboard back — and it is the same pattern, and the same 1.4s, as the viewer's Copy buttons.
+ * A row action reporting its outcome in its label (the only feedback a clipboard write can give),
+ * like the viewer's Copy buttons.
  */
 function action(
     label: string,
@@ -816,13 +699,8 @@ function launcher(): HTMLDetailsElement | null {
 }
 
 /**
- * Two animation frames and a beat.
- *
- * The launcher panel is open when a capture starts and it covers a corner of the page, so it is
- * closed first — and `open = false` only schedules the repaint. Capturing in the same task
- * photographs the panel that was supposed to be out of the way. Two frames is the reliable "after
- * the next paint" in every engine; the timeout covers a background tab, where rAF does not fire at
- * all and the capture would otherwise hang before it started.
+ * Two animation frames and a beat: closing the launcher only schedules a repaint, so capturing
+ * immediately would photograph it. The timeout covers background tabs where rAF doesn't fire.
  */
 function settle(): Promise<void> {
     return new Promise((resolve) => {
@@ -854,9 +732,8 @@ async function run(mode: Mode): Promise<void> {
         return;
     }
     if (menu && wasOpen) menu.open = true;
-    // A crop is only meaningful when the frame IS this tab: every rectangle here is in viewport
-    // coordinates, and a shared window or monitor puts the page at an offset nothing can recover.
-    // Rather than crop the wrong pixels, take the whole shared surface and say so.
+    // A crop needs the frame to be this tab (viewport coordinates); for another window or monitor
+    // take the whole surface and say so.
     const tab = frame.surface === "browser";
     if (!tab && mode !== "view") {
         note("You shared a window rather than this tab — capturing all of it.");
@@ -897,21 +774,17 @@ async function run(mode: Mode): Promise<void> {
         width: canvas.width,
         height: canvas.height,
         markdown,
-        // Stamped here, on the page it is a picture of, because nowhere later can recover it — and
-        // it is what lets the hand-off on `/report-bug` tell this report's screenshot from one the
-        // tab has simply been carrying around. See [Capture.page].
+        // Stamped with the page it pictures, so the hand-off can match it to the report (see
+        // [Capture.page]).
         page: location.pathname,
     };
     if (!storeCapture(capture)) {
-        // Every eviction path failed, which in practice means storage is unavailable or full. The
-        // clipboard still works, so the capture is not lost — it just cannot ride to the report
-        // page, and saying which is the difference between a bug and a limitation.
+        // Every eviction path failed (storage unavailable or full): the clipboard still works, but
+        // it can't travel to the report page.
         note("Captured, but it can't be carried to the report — copy it now.");
         return;
     }
-    // Copied straight away, because the gesture that started this is still the one in hand and
-    // pasting is the only way a picture reaches a GitHub issue. The Copy button on the row is the
-    // reliable path when a browser declines this one.
+    // Copied immediately while the user gesture is in hand; the row's Copy button is the fallback.
     copyPng(blobFromDataUrl(capture.dataUrl)).then(
         () => note("Copied — paste it into the issue body on GitHub."),
         () => note("Captured. Press Copy, then paste it into the issue body."),

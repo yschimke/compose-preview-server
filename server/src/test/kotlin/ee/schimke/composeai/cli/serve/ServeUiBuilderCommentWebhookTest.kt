@@ -20,17 +20,10 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * What counts as news, and what each chat platform is handed.
- *
- * Both halves are pure by construction — [diffCommentBoards] is two boards in and a list out, and
- * every adapter is one event in and a string out — so the rules this feature is actually making are
- * checked here rather than against a channel somebody has to watch.
- *
- * The rule worth stating twice: **a reaction and an acknowledgement produce nothing.** They bump
- * the board's own sequence, so they wake the browser socket and the waiting agent exactly as they
- * should; what they must not do is post into somebody's chat window. That is the difference between
- * a notification people read and one they mute, and it is the case the store's own tests cannot
- * cover because the store is right to announce them.
+ * What counts as news, and what each chat platform is handed. Both halves are pure
+ * ([diffCommentBoards] and each adapter), so the rules are checked here. Reactions and
+ * acknowledgements produce nothing: they wake the socket and waiting agent via the board sequence,
+ * but must not post to chat.
  */
 class ServeUiBuilderCommentWebhookTest {
 
@@ -257,9 +250,8 @@ class ServeUiBuilderCommentWebhookTest {
 
   @Test
   fun `a teams card renders a comment as characters, not as markdown`() {
-    // Everything on this card was typed by whoever left the comment. A `TextBlock` would run it
-    // through Adaptive Card Markdown, so a comment body could put a clickable link to anywhere in
-    // a shared channel, under a headline naming a colleague as its author.
+    // Everything on this card is user-typed; a `TextBlock` would render it as Adaptive Card
+    // Markdown and allow arbitrary links under a colleague's name.
     val body =
       CommentWebhookFormat.TEAMS.body(
         event(excerpt = "[Open the design](https://attacker.example) **now**")
@@ -297,9 +289,8 @@ class ServeUiBuilderCommentWebhookTest {
 
   @Test
   fun `an excerpt never ends in half of an emoji`() {
-    // The cut is a fixed number of UTF-16 units, so it can land between the halves of a surrogate
-    // pair. A lone high surrogate is malformed UTF-16: a replacement character in the channel, or
-    // a receiver rejecting the body outright. Placed so the emoji straddles the boundary exactly.
+    // The cut is in UTF-16 units and must not split a surrogate pair; the emoji straddles the
+    // boundary.
     val excerpt = ("a".repeat(158) + "🎨" + " and more").commentExcerpt()
 
     assertTrue(excerpt.none { it.isSurrogate() }, "a half-emoji survived: $excerpt")
@@ -371,13 +362,9 @@ class ServeUiBuilderCommentWebhookTest {
 
   @Test
   fun `naming the design is one keyed read per event, on the thread that accepts it`() {
-    // Deliberately on the writing thread: it is the only place the design and the comment are the
-    // same moment (see `each event names the design as it was when that comment was written`).
-    // What must never happen there is per-event work that grows with the host, so this pins the
-    // count — one lookup per event, not one per design on the box.
-    //
-    // Delivery staying off this thread is a separate promise, and the integration test that posts
-    // against a receiver which never answers is what holds it.
+    // Lookup happens on the writing thread (the only moment design and comment coincide), so the
+    // per-event cost must not grow with the host: one lookup per event. Delivery staying off this
+    // thread is covered by the integration test.
     val root = Files.createTempDirectory("comment-webhook-lookups")
     try {
       val store = ServeUiBuilderCommentStore(root)
@@ -486,10 +473,8 @@ class ServeUiBuilderCommentWebhookTest {
 
   @Test
   fun `each event names the design as it was when that comment was written`() {
-    // A design id is not a stable name for a design: ids come from the client and are free again
-    // once one is deleted, so the id a comment was written under can mean something else by the
-    // time the notification goes out. Resolving per event, on the writing thread, is what keeps a
-    // comment paired with the design it was actually left on.
+    // Design ids are client-chosen and reusable after deletion, so the design is resolved per event
+    // on the writing thread.
     val root = Files.createTempDirectory("comment-webhook-per-event")
     try {
       val store = ServeUiBuilderCommentStore(root)
@@ -542,9 +527,8 @@ class ServeUiBuilderCommentWebhookTest {
 
   @Test
   fun `the event carries the authenticated actor, not only the name they typed`() {
-    // `displayName` arrives in the request body and `authorId` comes from the authorization layer,
-    // so a writer can put a colleague's name on a comment. The channel may show the label, but the
-    // payload has to carry the identity somebody can check it against.
+    // `displayName` is client-supplied while `authorId` comes from authorization, so the payload
+    // carries the checkable identity.
     val before = board()
     val after =
       board(
@@ -658,9 +642,8 @@ class ServeUiBuilderCommentWebhookTest {
 
   @Test
   fun `an event carries the design's own chat thread, and omits it when there is none`() {
-    // The design document asks for a per-design override in `links.thread`. This carries that
-    // value rather than posting to it: `links` is written by any actor with WRITE on the design,
-    // and a permalink is not an endpoint. See the class KDoc.
+    // Carries the design's `links.thread` override rather than posting to it: `links` is writable
+    // by any WRITE actor, and a permalink is not an endpoint.
     val withThread =
       CommentWebhookFormat.PLAIN.body(event(chatThread = "https://chat.example/c/123/p456"))
     val design = Json.parseToJsonElement(withThread).jsonObject.getValue("design").jsonObject

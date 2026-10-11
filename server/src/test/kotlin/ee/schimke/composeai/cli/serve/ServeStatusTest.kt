@@ -302,16 +302,14 @@ class ServeStatusTest {
     assertEquals(41, pressure.getValue("timedOutExports").jsonPrimitive.long)
     assertEquals(43, pressure.getValue("activeMutationBuckets").jsonPrimitive.int)
     assertEquals(47, pressure.getValue("persistenceMigrations").jsonPrimitive.long)
-    // How an operator sees that a catalog source flip has not converged on disk. The count alone
-    // is ambiguous — non-zero is normal on the first start after a flip — so the reason travels
-    // with it, and a write that cannot land is the case where it stays non-zero.
+    // The reason travels with the count: non-zero is normal right after a source flip, and only a
+    // write that cannot land keeps it there.
     assertEquals(53, pressure.getValue("rePinnedDesigns").jsonPrimitive.int)
     assertEquals(
       "UiBuilderPersistenceException",
       pressure.getValue("rePinPersistenceFailure").jsonPrimitive.content,
     )
-    // A storage that bounds nothing reports no ceiling, and the row stays null rather than
-    // claiming a measured 0% an alert would then never fire on.
+    // A storage with no bound reports a null ceiling rather than a measured 0%.
     assertTrue(pressure.getValue("storageMaximumBytes") is JsonNull, body)
     assertTrue(pressure.getValue("storageUsedPercent") is JsonNull, body)
     assertFalse(body.contains("actorId"), body)
@@ -688,13 +686,8 @@ class ServeStatusTest {
   }
 
   /**
-   * A catalog can be warm everywhere and finished nowhere.
-   *
-   * `cached` counts dirty renders and `fullyOptimized` is true for them, because they ARE served —
-   * that is the whole point of the dirty model. But they were written by a different build and the
-   * pass is still replacing them. Reporting "themes optimized 10440/10440" for a catalog whose
-   * every pixel came from a renderer that is no longer running is the one thing an operator reading
-   * this row must not be told.
+   * A catalog can be warm everywhere and finished nowhere: dirty renders count as `cached` and
+   * `fullyOptimized` because they are served, but the row must not report them as optimized.
    */
   @Test
   fun `a catalog holding another build's renders does not read as optimized`() {
@@ -756,9 +749,8 @@ class ServeStatusTest {
       inherited.contains("themes optimized 8/8 · 8 awaiting re-render"),
       "a fully warm but wholly unreplaced catalog must say so: $inherited",
     )
-    // Neutral about BOTH things the count cannot know. `regenerate` marks this build's own renders
-    // dirty, so the row must not call them inherited; and the pass may be paused or waiting on
-    // admission, so it must not claim to be re-rendering them right now.
+    // Neutral on what the count cannot know: `regenerate` dirties this build's own renders (so not
+    // "inherited"), and the pass may be paused (so not "re-rendering now").
     assertFalse(
       inherited.contains("inherited") || inherited.contains("re-rendering"),
       "the row must not claim provenance or activity the dirty count cannot establish: $inherited",
@@ -769,10 +761,8 @@ class ServeStatusTest {
     assertTrue(partial.contains("5/8 cached"), partial)
     assertTrue(partial.contains("3 awaiting re-render"), partial)
 
-    // Every target cached AND some of them failing to regenerate. This is the state the dirty
-    // failure count exists for — nothing else on the row moves, because `cached` is already at
-    // `total` — so the branch that renders a fully-warm catalog has to print the count too. It did
-    // not, and the meter's colour was the only signal.
+    // Fully cached and some failing to regenerate: the fully-warm branch must still print the
+    // failure count, since nothing else on the row moves.
     val warmAndFailing = rowFor(cached = 8, dirty = 8, failed = 2)
     assertTrue(
       warmAndFailing.contains("themes optimized 8/8 · 2 failed · 8 awaiting re-render"),
@@ -865,11 +855,9 @@ class ServeStatusTest {
   }
 
   /**
-   * A trusted catalog whose daemon has gone idle must still report its trust. `/status` reads
-   * metadata with the non-resuming [ServeSessionRegistry.peekHost], so a suspended catalog used to
-   * come back as an all-null row — blank trust cell, zero previews — which on the public server
-   * (preview.coo.ee) read as "untrusted" for five of eight correctly-trusted catalogs. The facts
-   * come from the delivery branch, not the daemon, so suspension must not erase them.
+   * A trusted catalog whose daemon is suspended must still report its trust: `/status` reads via
+   * the non-resuming [ServeSessionRegistry.peekHost], and the facts come from the delivery branch,
+   * not the daemon.
    */
   @Test
   fun `a suspended catalog still reports its last-known trust`() {
@@ -947,7 +935,7 @@ class ServeStatusTest {
       )
 
       val whileIdle = statusJson()
-      // The regression: trust, title, preview count and provenance all survive the suspension...
+      // Trust, title, preview count and provenance survive suspension...
       assertTrue(
         whileIdle.contains("\"trust\":\"branch:joreilly/Confetti@design-artifacts/confetti-wear\""),
         "a suspended catalog keeps its trust verdict: $whileIdle",
@@ -958,14 +946,8 @@ class ServeStatusTest {
       assertTrue(whileIdle.contains("\"metaStale\":true"), whileIdle)
       assertTrue(whileIdle.contains("\"trusted\":1"), "the summary counts it: $whileIdle")
 
-      // …and the HTML page marks the row "last known" rather than dropping the qualifier.
-      //
-      // Positive trust is deliberately SILENT since #3893 — a green tick beside every catalog is
-      // chrome nobody reads, and only the warning verdict carries information — so this used to
-      // assert `✓ trusted` and can't. What still has to hold, and is what the regression was
-      // actually about, is that suspending a catalog must not downgrade its verdict: the one
-      // catalog on this page is trusted, so the untrusted warning must be absent from the whole
-      // document even though its facts are now a snapshot rather than a live read.
+      // …and the HTML marks the row "last known". Positive trust renders nothing, so the check is
+      // that the untrusted warning is absent.
       val htmlUrl = "http://127.0.0.1:${srv.port}/status"
       val html =
         client.newCall(Request.Builder().url(htmlUrl).build()).execute().use { it.body.string() }
@@ -997,9 +979,8 @@ class ServeStatusTest {
 
   @Test
   fun `status reports delivery-branch read counters`() {
-    // The gap this closes: renders have had failure telemetry for a long time, and branch reads —
-    // the lane that actually talks to GitHub — had none. So "is GitHub rate-limiting us, or was
-    // that asset never published?" could only be answered by reproducing it by hand with curl.
+    // Branch reads get the same failure telemetry renders have, so throttling vs a missing asset is
+    // answerable without curl.
     val stats = BranchFetchStats(clock = { 1_700_000_000_000L })
     stats.record(BranchFetch.Ok(byteArrayOf(1)))
     stats.record(BranchFetch.NotFound)
@@ -1036,9 +1017,7 @@ class ServeStatusTest {
 
   @Test
   fun `a server that has read no branch advertises no counters`() {
-    // Null rather than a block of zeros, like the render roll-up: "nothing has been read" and
-    // "everything read succeeded" are different answers, and a monitor that saw `throttled: 0` from
-    // a server that has never read a branch would be reading reassurance into silence.
+    // Null rather than zeros: "nothing read" and "everything read succeeded" are different answers.
     server =
       ServeHttpServer(
           host = "127.0.0.1",
@@ -1058,9 +1037,8 @@ class ServeStatusTest {
 
   @Test
   fun `status reports optimizer admission so a slow box explains itself`() {
-    // The per-catalog themeOptimization rows cannot answer this: a box where 15 catalogs all report
-    // "running" and nothing progresses looks, catalog by catalog, exactly like a healthy one. What
-    // distinguishes them is how many passes are INSIDE the door versus parked at it.
+    // Per-catalog rows cannot tell a stalled box from a healthy one; how many passes hold a turn
+    // versus wait for one can.
     val bg =
       ServeBackgroundWork(
         maxConcurrentRenders = 8,
@@ -1094,12 +1072,8 @@ class ServeStatusTest {
   }
 
   /**
-   * The gate's input reaches the page, in both projections.
-   *
-   * `/status.json` had every counter describing what a pass did once it was granted a turn and none
-   * describing whether a turn was available at all — so a server whose quiet gate never opened
-   * published the same row as one with nothing left to do. The HTML page carried even less: 23
-   * catalogs each saying "theme optimization paused" and nothing saying why.
+   * The gate's input reaches both projections, so a server whose gate never opened is
+   * distinguishable from one with nothing left to do.
    */
   @Test
   fun `status explains a theme optimizer gate that is being held shut`() {
@@ -1149,13 +1123,8 @@ class ServeStatusTest {
   }
 
   /**
-   * The thresholds a pressure reading was judged against reach both projections.
-   *
-   * Every field beside them is a reading, and a reading alone cannot say whether the gate is
-   * behaving: `loadPerCpu 2.06` under `paused: load 2.06 per CPU` is either a gate doing its job or
-   * one tuned past the point of doing it. The values are set by `composeai.serve.optimizer*` system
-   * properties outside the image, so neither the source nor the deployed config answers it — only
-   * the running server can, which makes publishing them the only way to know.
+   * The thresholds a pressure reading was judged against reach both projections; they come from
+   * `composeai.serve.optimizer*` system properties, so only the running server can report them.
    */
   @Test
   fun `status publishes the optimizer thresholds a reading was judged against`() {
@@ -1167,9 +1136,8 @@ class ServeStatusTest {
         resumeCpuUtilization = 0.75,
         resumeQuietMillis = 30_000L,
       )
-    // A host over the CPU stop side, with the two memory ceilings deliberately far apart: the
-    // container is nearly full while the machine is not, which is the pair the collapsed
-    // `memoryAvailableFraction` cannot express.
+    // Over the CPU stop side, with container memory nearly full while the machine is not — the pair
+    // the collapsed `memoryAvailableFraction` cannot express.
     val gate =
       OptimizerPressureGate(
         sample = {

@@ -8,62 +8,41 @@ import okio.FileSystem
 import okio.Path
 
 /**
- * Stage-1 orchestrator for the playground (`docs/design/PLAYGROUND.md` §2). Turns a
- * [PlaygroundRunRequest] into a [PlaygroundRunResponse]: stage the snippet to a temp dir, compile
- * it against the mode's catalog classpath, and — on a clean compile — mint an expiring preview
- * token that Stage 2 redeems into a live session. Compile errors return diagnostics and **no**
+ * Stage-1 playground orchestrator (`docs/design/PLAYGROUND.md` §2): stage a [PlaygroundRunRequest]
+ * to a temp dir, compile it against the mode's catalog classpath, and on success mint an expiring
+ * preview token Stage 2 redeems into a live session. Compile errors return diagnostics and no
  * token.
  *
- * **Multi-file snippets** are a plain consequence of the staging step: every file in the request is
- * written into the same source dir and handed to **one** compile, so a snippet can split types
- * across files and reference them across file boundaries. Which `@Preview` then drives the render
- * is decided here rather than by the discoverer — sorted by id, so a snippet with several previews
- * renders the same one every time (see [compileAndMint]).
+ * All files in a request go to one compile, so multi-file snippets work; the rendered `@Preview` is
+ * chosen by sorted id for determinism ([compileAndMint]). [PlaygroundMode.REMOTE_COMPOSE] instead
+ * captures the `.rc` and publishes a `/d/<id>` permalink ([remoteComposeResult]) with no token or
+ * daemon (§3).
  *
- * [PlaygroundMode.REMOTE_COMPOSE] is the exception to the token model: instead of a live session it
- * captures the snippet's `.rc` document and publishes it as an expiring `/d/<id>` permalink
- * ([remoteComposeResult]), returning a [PlaygroundRunResponse.documentUrl] and no token — the
- * document plays client-side, so the server keeps no daemon for it (PLAYGROUND.md §3).
- *
- * Every collaborator that touches the daemon, the compiler, or the catalog is an **injected seam**,
- * so the orchestration (staging, gating, cleanup, token minting, response shaping) is unit-testable
- * without a real BTA classloader or a running daemon — the same split
- * `DefaultBtaCompileService.forSession` uses. The route handler (a follow-up) constructs this with
- * the real backends.
- *
- * The single knob with real design weight is [catalogClasspath]. Its production implementation is a
- * thin adapter over the **liveBundle** resolution the serve host already runs
- * ([ServeBundleDaemon.materialize]): the catalog's packed `.png`/zip bundle is extracted to its
- * `classes/app.jar` and its `manifest.classpath` Maven coordinates resolved to jars, yielding the
- * `userClassPath` the live daemon runs on. A snippet compiled against that classpath can `import`
- * both the resolved library (e.g. `androidx.compose.material3.*`, complete because it comes from
- * the unminimized library jar) and whatever of the catalog's own composables survived bundle
- * minimization. `compose-m3` is the clean first catalog precisely because its component surface
- * *is* the resolved library jar. See `docs/design/PLAYGROUND.md` §8.
+ * Every collaborator touching the daemon, compiler or catalog is injected, so orchestration is
+ * unit-testable. [catalogClasspath] is backed in production by the liveBundle resolution
+ * ([ServeBundleDaemon.materialize]): the bundle's `classes/app.jar` plus its resolved Maven
+ * classpath, so snippets can import the full library and whatever catalog composables survived
+ * minimization (§8).
  */
 class PlaygroundCompileService(
   /**
-   * Resolves the compile+render classpath for a mode against an optionally **named catalog**; null
-   * ⇒ that pair isn't available here. A null catalog means the host's pinned `--playground-bundle`
-   * default for the mode; a non-null one is the runtime selector's choice among the served catalogs
-   * ([PlaygroundCatalogTargets]).
+   * Compile+render classpath for a mode and optional named catalog, or null when unavailable. A
+   * null catalog means the pinned `--playground-bundle` default; a named one is a runtime selector
+   * choice ([PlaygroundCatalogTargets]).
    */
   private val catalogClasspath: (PlaygroundMode, String?) -> Classpath?,
   private val compiler: Compiler,
   private val discoverer: PreviewDiscoverer,
   private val tokenStore: PlaygroundTokenStore,
-  /**
-   * Mints a fresh, empty temp work dir per run — the token store deletes it when the token drops.
-   */
+  /** A fresh temp work dir per run; the token store deletes it when the token drops. */
   private val newWorkDir: () -> Path,
   private val fileSystem: FileSystem = FileSystem.SYSTEM,
   /** Optional first-frame render; returns PNG bytes or null. Defaults to no image (wired later). */
   private val renderFirstFrame: (PlaygroundTokenStore.PlaygroundSnippet) -> ByteArray? = { null },
   /**
-   * [renderFirstFrame], with the reason when it drew nothing. That reason is returned as
-   * [PlaygroundRunResponse.exception] beside the minted token, so "the renderer threw
-   * `UnsatisfiedLinkError`" reaches the caller instead of only the host log. Defaults to
-   * [renderFirstFrame] with no reason, which is the absence of a renderer rather than a failure.
+   * [renderFirstFrame] plus the reason it drew nothing, returned as
+   * [PlaygroundRunResponse.exception] beside the token so renderer errors reach the caller.
+   * Defaults to no reason (no renderer).
    */
   private val renderFirstFrameWithReason:
     (PlaygroundTokenStore.PlaygroundSnippet) -> PlaygroundFirstFrame =
@@ -71,42 +50,28 @@ class PlaygroundCompileService(
       PlaygroundFirstFrame(renderFirstFrame(it))
     },
   /**
-   * [PlaygroundMode.REMOTE_COMPOSE] capture: run the compiled snippet's `@Preview` under the
-   * RC-capable render and return the serialized `.rc` document bytes, or null when the snippet
-   * emitted none (a non-RC `@Preview`) or no capture engine is wired here. Like [renderFirstFrame],
-   * defaults to no capture — the production Robolectric capture subprocess is wired later.
+   * [PlaygroundMode.REMOTE_COMPOSE] capture: run the snippet's `@Preview` under an RC-capable
+   * render and return the `.rc` bytes, or null (no document or no engine). Defaults to no capture.
    */
   private val captureRemoteDocument: (PlaygroundTokenStore.PlaygroundSnippet) -> ByteArray? = {
     null
   },
   /**
-   * Publishes captured `.rc` bytes to a document store and returns the `/d/<id>` permalink, or null
-   * when no store is available (or it refused the bytes). The `Boolean` is the [isSecurityChecked]
-   * audit marker forwarded from [run], matching [ServeDocStore.add]. Defaults to no publisher.
+   * Publish captured `.rc` bytes and return the `/d/<id>` permalink, or null. The `Boolean` is the
+   * [isSecurityChecked] marker, as for [ServeDocStore.add]. Defaults to no publisher.
    */
   private val publishRemoteDocument: (String, ByteArray, Boolean) -> String? = { _, _, _ -> null },
   /**
-   * The served catalogs a request may name in [PlaygroundRunRequest.catalog]. Read fresh per call —
-   * catalogs load in the background after the lane is wired.
-   *
-   * **Null and "returns empty" are different states**, which is why this is nullable rather than
-   * defaulting to `{ emptyList() }`: null means this host pins its bundles and offers no runtime
-   * choice at all (the pre-selector behaviour), while a non-null seam returning nothing means
-   * `--playground` is on and no catalog has loaded *yet*. The editor renders a selector for the
-   * second and not the first, so collapsing them would leave a host that started before its
-   * catalogs permanently without the control it was configured to have.
+   * Served catalogs a request may name, read fresh per call (catalogs load after wiring). Null
+   * means pinned-only with no selector; non-null returning empty means `--playground` is on but
+   * nothing loaded yet. The editor shows a selector only for the latter, so the two must stay
+   * distinct.
    */
   private val catalogTargets: (() -> List<PlaygroundCatalogTarget>)? = null,
   /**
-   * The served-catalog system id a **pinned** mode compiles against, when its `--playground-bundle`
-   * named one (`--playground-bundle compose-m3`) rather than a local file. Null for a local path,
-   * an unconfigured mode, or a host that pins nothing.
-   *
-   * Exists so [compilesCatalog] can answer for the pinned entry too. The selector reports a pinned
-   * default under the id `""` ([catalogChoices]) — it deliberately has no system id on the wire,
-   * because a request names a mode rather than the pin — but "does this host compile `compose-m3`"
-   * is exactly the question the browsing surfaces have to answer before offering a handoff, and on
-   * a pin-only host the answer is yes for precisely this system and no for every other one.
+   * The served-catalog id a pinned mode compiles against when `--playground-bundle` named one; null
+   * for local paths or no pin. Lets [compilesCatalog] answer for the pin, which the selector
+   * reports under id `""`.
    */
   private val pinnedCatalogSystem: (PlaygroundMode) -> String? = { null },
   /** Explicitly opt in the one-host-wide authenticated stateful editing lease. */
@@ -154,37 +119,24 @@ class PlaygroundCompileService(
   )
 
   /**
-   * True when `--playground` put a runtime catalog selector on this host, whether or not any
-   * catalog has loaded into it yet. Drives whether the editor renders the Catalog control at all.
+   * True when `--playground` enabled a runtime catalog selector, loaded or not; drives whether the
+   * editor shows the Catalog control.
    */
   val catalogSelectorEnabled: Boolean
     get() = catalogTargets != null
 
   /**
-   * The modes this host can serve **on its pinned default** — the ones whose [catalogClasspath]
-   * resolved to a real classpath with no catalog named. Drives the editor's mode selector for the
-   * default entry so it never offers a mode that would immediately answer "mode … is not available"
-   * (e.g. an Android-only host must not default to CMP). A host started with `--playground` and no
-   * pinned bundle has none, and the editor's selector then starts on a served catalog instead.
-   *
-   * Computed per read, not captured once: a mode configured as a served catalog id
-   * (`--playground-bundle compose-m3`, issue #3212) resolves on first use, because the catalog it
-   * names is fetched in the background *after* the playground lane is wired. Reading this at
-   * construction time would find every such mode unavailable. [catalogClasspath] memoizes, so a
-   * read after the first resolve is a field access.
+   * Modes the pinned default can serve (classpath resolves with no catalog named), so the editor
+   * never offers an unavailable mode. Computed per read because a served-catalog pin resolves only
+   * after its catalog loads (#3212); [catalogClasspath] memoizes.
    */
   val availableModes: List<PlaygroundMode>
     get() = PlaygroundMode.entries.filter { catalogClasspath(it, null) != null }
 
   /**
-   * What the editor's catalog selector offers: the host's pinned default (when it has one) followed
-   * by every served catalog that can back a compile here.
-   *
-   * The **pinned** entry costs what [availableModes] costs — deciding whether a pinned bundle can
-   * serve a mode means resolving it, and the first caller pays the unpack. That is unchanged from
-   * how `GET /playground` has always rendered its mode list. The **served-catalog** entries are
-   * free: each reports its memoized resolution state rather than forcing a resolve, so listing
-   * twenty catalogs does not unpack twenty bundles.
+   * The editor's catalog choices: the pinned default (if any), then every served catalog that can
+   * back a compile. The pinned entry may pay a first resolve like [availableModes]; served entries
+   * report memoized state, so listing doesn't unpack bundles.
    */
   fun catalogChoices(): List<PlaygroundCatalogInfo> {
     val pinned = availableModes
@@ -215,30 +167,18 @@ class PlaygroundCompileService(
   }
 
   /**
-   * The served-catalog system ids this host's **pinned** default compiles against — one per mode
-   * whose pin named a catalog and resolved. Empty on a host that pins nothing (the runtime
-   * selector's own entries carry their system id in [catalogChoices]) or that pins local files.
+   * Served-catalog ids the pinned default compiles against; empty when nothing (or only local
+   * files) is pinned.
    */
   val pinnedCatalogSystems: Set<String>
     get() = availableModes.mapNotNull { pinnedCatalogSystem(it) }.toSet()
 
   /**
-   * Whether a snippet belonging to [system]'s catalog can actually be **compiled here** — as one of
-   * the runtime selector's entries, or because this host's pinned default *is* that catalog.
-   *
-   * This is what the browsing surfaces ask before offering a "open this preview in the playground"
-   * handoff, and getting it wrong is not cosmetic. Every catalog page can build a `?from=` link,
-   * but only the catalogs in this set have a classpath here — so on a host pinned to `compose-m3`,
-   * or one with no Robolectric sidecar and therefore no Android modes at all, the handoff from a
-   * Wear/Android catalog used to open the editor on that preview's Kotlin and silently retarget it
-   * at *someone else's* design system, where every reference in the buffer is unresolved. That
-   * reads as "the playground is broken", when what actually happened is that the link should never
-   * have been offered. Absent beats dead: [ServeHttpServer] omits the link when this is false, and
-   * [ServeWeb.playgroundPage] says so outright for a link that was built before the answer changed.
-   *
-   * Note the asymmetry with [PlaygroundCatalogTargets.classpath]: this asks only whether the
-   * pairing is *offerable*, never resolving a bundle to find out. A catalog that is offered and
-   * then fails to resolve still answers "not available" per request, as it always did.
+   * Whether a snippet from [system]'s catalog can be compiled here (a selector entry, or the pinned
+   * catalog itself). Browsing surfaces ask before offering a playground handoff, so a link is never
+   * offered that would open the snippet against another design system; [ServeHttpServer] omits it
+   * and [ServeWeb.playgroundPage] explains stale ones. Answers offerability without resolving a
+   * bundle.
    */
   fun compilesCatalog(system: String): Boolean {
     if (system.isBlank()) return false
@@ -247,9 +187,8 @@ class PlaygroundCompileService(
   }
 
   /**
-   * The resolved classpath a snippet compiles and renders against. Backed in production by a
-   * catalog's liveBundle `userClassPath` (see the class KDoc); [moduleName] matches the catalog's
-   * Kotlin module so the snippet's classes carry a consistent `kotlin.Metadata`.
+   * The resolved compile/render classpath (the liveBundle `userClassPath`); [moduleName] matches
+   * the catalog's Kotlin module so `kotlin.Metadata` stays consistent.
    */
   data class Classpath(val moduleName: String, val entries: List<Path>)
 
@@ -262,8 +201,8 @@ class PlaygroundCompileService(
     ): List<PlaygroundDiagnostic>
 
     /**
-     * Stateful variant. Implementations without BTA IC support retain correctness by doing a full
-     * compile; callers surface [IncrementalCompileResult.incremental] so trials can distinguish it.
+     * Stateful variant. Implementations without BTA IC do a full compile;
+     * [IncrementalCompileResult.incremental] says which.
      */
     fun compileIncremental(
       sources: List<Path>,
@@ -288,25 +227,21 @@ class PlaygroundCompileService(
   fun interface PreviewDiscoverer {
     fun discover(classesDir: Path, classpath: List<Path>): List<String>
 
-    /**
-     * The `@Preview` FQNs [discover] accepts, so the empty-result message can name them rather than
-     * leaving the author to guess which import this host reads.
-     */
+    /** The `@Preview` FQNs [discover] accepts, so the empty-result message can name them. */
     val recognisedAnnotationFqns: Set<String>
       get() = PlaygroundPreviewDiscoverer.DEFAULT_PREVIEW_ANNOTATION_FQNS
 
     /**
-     * Preview-shaped annotations present in [classesDir] that [discover] did not accept — the
-     * difference between "you declared nothing" and "you declared one this host cannot render".
-     * Consulted only when [discover] came back empty.
+     * Preview-shaped annotations in [classesDir] that [discover] rejected, distinguishing "declared
+     * none" from "declared one this host can't render". Only consulted when [discover] is empty.
      */
     fun unrecognisedPreviewAnnotations(classesDir: Path): List<String> = emptyList()
   }
 
   /**
-   * Compile [request] and, on success, mint a preview token. [isSecurityChecked] is the greppable
-   * audit marker forwarded to [PlaygroundTokenStore.add]: the route passes `true` only once the
-   * request has cleared the playground gate.
+   * Compile [request] and, on success, mint a preview token. [isSecurityChecked] is the audit
+   * marker forwarded to [PlaygroundTokenStore.add]; the route passes `true` only after the
+   * playground gate.
    */
   fun run(
     request: PlaygroundRunRequest,
@@ -337,10 +272,8 @@ class PlaygroundCompileService(
       workDir = newWorkDir()
       compileAndMint(request, files, mode, classpath, workDir, isSecurityChecked)
     } catch (t: Throwable) {
-      // Any failure — including newWorkDir() itself throwing on a full/unwritable temp volume —
-      // returns the JSON exception contract rather than escaping as a throwable. cleanup runs only
-      // once a path exists; the token store owns a dir only after it accepts one, so an aborted run
-      // clears its own.
+      // Any failure, including `newWorkDir()` throwing, returns the JSON exception contract. An
+      // aborted run cleans its own dir; the token store owns one only once it accepts it.
       workDir?.let { cleanup(it) }
       failure("playground compile failed: ${t.message ?: t.javaClass.simpleName}")
     }
@@ -592,9 +525,8 @@ class PlaygroundCompileService(
           refreshEditHealthLocked()
           throw t
         }
-      // Admission happens before the jailed compiler is launched. A busy response therefore did
-      // not compile or mutate IC state: report it without accepting the staged files/revision, so
-      // the complete dirty set is retried on the next Run.
+      // Admission precedes the jailed compile, so a busy response compiled nothing; don't accept
+      // the staged files, so the full dirty set retries next Run.
       if (compile.diagnostics.isCompileAdmissionFailure()) {
         restoreStagedFiles(srcDir, accepted = lease.files, staged = desired)
         editLastCompileMillis = (System.nanoTime() - compileStarted) / 1_000_000
@@ -710,11 +642,9 @@ class PlaygroundCompileService(
   }
 
   /**
-   * Why nothing rendered, in the snippet author's terms. The snippet compiled, so "declare a
-   *
-   * @Preview" alone is a dead end — it is read by someone looking straight at one. Name the imports
-   *   this host accepts, and, when the scan did find a preview-shaped annotation it does not read,
-   *   say which one that was: an unaccepted *import* is the usual cause, not a missing annotation.
+   * Why nothing rendered, in the author's terms: the snippet compiled, so name the preview imports
+   * this host accepts and any preview-shaped annotation it found but doesn't read (usually the
+   * wrong import).
    */
   private fun noPreviewFoundMessage(classesDir: Path): String {
     val accepted = discoverer.recognisedAnnotationFqns.joinToString(", ")
@@ -743,10 +673,8 @@ class PlaygroundCompileService(
     isSecurityChecked: Boolean,
   ): PlaygroundRunResponse {
     val renderClasspath = classpath.entries + classesDir
-    // Sorted, so the same snippet renders the same preview on every run: ClassGraph's scan order
-    // over the snippet's classes is not a guaranteed order, and a multi-file snippet routinely
-    // declares more than one @Preview. The full list rides the response, so the editor can say
-    // which of them it drew.
+    // Sorted, since ClassGraph's scan order isn't guaranteed and multi-file snippets often declare
+    // several previews; the full list rides the response.
     val previews = discoverer.discover(classesDir, renderClasspath).sorted()
     if (previews.isEmpty()) {
       val message = noPreviewFoundMessage(classesDir)
@@ -766,9 +694,8 @@ class PlaygroundCompileService(
         classpath = renderClasspath,
         moduleName = classpath.moduleName,
         previewId = previews.first(),
-        // Carry them ALL: the still frame draws the first, but the redeemed live session lists
-        // every one so the viewer can navigate between them (a multi-file snippet routinely
-        // declares several, and until now the rest were compiled and then unreachable).
+        // Carry all of them: the still draws the first, but the live session lists every one for
+        // navigation.
         previewIds = previews,
       )
 
@@ -795,12 +722,9 @@ class PlaygroundCompileService(
   }
 
   /**
-   * The [PlaygroundMode.REMOTE_COMPOSE] terminal: capture the snippet's `.rc` document and hand it
-   * to the document store as an expiring `/d/<id>` permalink. Unlike the live CMP/Android modes, RC
-   * needs no daemon session — the document, not a session, is the deliverable (PLAYGROUND.md §3).
-   * So the work dir is released as soon as the one-shot capture is done and **no** token is minted;
-   * a snippet that emits no document, or a store that refuses the bytes, is a clean failure with
-   * neither a token nor a permalink.
+   * [PlaygroundMode.REMOTE_COMPOSE] terminal: capture the `.rc` and publish it as an expiring
+   * `/d/<id>` permalink. No daemon session (the document is the deliverable), so the work dir is
+   * released immediately and no token is minted; no document or a refused store is a clean failure.
    */
   private fun remoteComposeResult(
     snippet: PlaygroundTokenStore.PlaygroundSnippet,
@@ -956,12 +880,9 @@ class PlaygroundCompileService(
     }
 
     /**
-     * Ensure the name is unique within a run, appending `_<n>` before `.kt` on collision. Collision
-     * keys are **case-folded**: a case-insensitive target FS (Windows, default macOS) maps `A.kt`
-     * and `a.kt` to the same file, so two case-only-distinct names must be disambiguated or the
-     * second write silently overwrites the first while both paths still reach the compiler. Folding
-     * is universally safe — on a case-sensitive FS it only ever renames a name that would otherwise
-     * have been kept, never causing an overwrite.
+     * Make the name unique within a run by appending `_<n>` before `.kt`. Case-folded so
+     * case-insensitive filesystems can't silently overwrite `A.kt` with `a.kt`; harmless on
+     * case-sensitive ones.
      */
     private fun uniqueName(name: String, usedLowercase: MutableSet<String>): String {
       if (usedLowercase.add(name.lowercase())) return name
@@ -978,16 +899,15 @@ class PlaygroundCompileService(
       "data:image/png;base64," + Base64.getEncoder().encodeToString(png)
 
     /**
-     * How [PlaygroundRunResponse.exception] opens when the snippet compiled and its first frame
-     * failed. The playground page keys on it to keep the live-preview link it would drop for a
-     * failure that minted no token.
+     * How [PlaygroundRunResponse.exception] begins when the snippet compiled but its first frame
+     * failed; the page keys on it to keep the live-preview link.
      */
     internal const val FIRST_FRAME_FAILED: String = "compiled, but the first frame failed: "
   }
 }
 
 /**
- * A first-frame render: the PNG, or why there is none. [failure] is null both on success and when
- * no renderer is wired for the mode, which is an absent still image rather than a fault.
+ * A first-frame render: the PNG, or why there is none. [failure] is null on success and when no
+ * renderer is wired.
  */
 class PlaygroundFirstFrame(val png: ByteArray?, val failure: String? = null)

@@ -16,12 +16,9 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 /**
- * Historical permalinks, end to end (issue #3723): a catalog loaded from a delivery branch, then
- * served both at its tip and pinned (`?at=<sha>`) to an older publish.
- *
- * The delivery branch is stubbed at the store's fetch seam, so the whole path is exercised — the
- * commit feed that supplies the revision list, the branch-path bookkeeping that lets an id be
- * resolved at another commit, and the HTTP lanes — without a network or a repository.
+ * Historical permalinks end to end: a catalog loaded from a delivery branch, served at its tip and
+ * pinned (`?at=<sha>`) to an older publish. The branch is stubbed at the store's fetch seam,
+ * exercising the commit feed, branch-path bookkeeping and HTTP lanes without a network.
  */
 class ServePinnedRevisionTest {
 
@@ -84,13 +81,9 @@ class ServePinnedRevisionTest {
       .trimIndent()
 
   /**
-   * The stubbed branch.
-   *
-   * `<newCommit>` — the feed's head — serves the current bytes, and the load reads it *by sha*:
-   * resolving the tip first and fetching everything through it is what makes a load atomic, so the
-   * branch-name base below is only the fallback for a feed that could not be read. `<oldCommit>`
-   * serves the older bytes, and every other commit serves nothing, which is what a pin naming a
-   * publish this branch never had looks like from here.
+   * The stubbed branch. `<newCommit>` (the feed's head) serves current bytes and is read by sha,
+   * which makes a load atomic (the branch-name base is only a fallback). `<oldCommit>` serves older
+   * bytes; any other commit serves nothing.
    */
   private val fetch: (String) -> ByteArray? = { url ->
     val tip = "https://raw.githubusercontent.com/$repo/$newCommit/"
@@ -222,14 +215,9 @@ class ServePinnedRevisionTest {
     page.lineSequence().first { it.contains("""data-knob-key="$key"""") }
 
   /**
-   * A deep link's knob values seed the viewer's controls — except where the image beside them is
-   * deliberately NOT the overridden render, which is both of this session's shapes.
-   *
-   * A pinned page answers with the historical baked artifact (`pinnedRenderQuerySuffix` strips
-   * every override from its URL), and a static catalog that accepted `?fallback=baked` answers with
-   * the published snapshot and names what it dropped. Seeding either would tick a box the pixels
-   * never saw — and on a session with no override lane the control is *disabled*, so the visitor
-   * cannot even correct it.
+   * A deep link's knob values seed the controls, except where the image isn't the overridden
+   * render: a pinned page (overrides stripped) or a static catalog with `?fallback=baked`. Seeding
+   * would tick a box the pixels never saw, possibly on a disabled control.
    */
   @Test
   fun `a page whose image ignores the override does not seed its controls`() {
@@ -237,8 +225,7 @@ class ServePinnedRevisionTest {
     val base = "http://127.0.0.1:$port/$system/p/$previewId"
 
     // The declaration is `true` and each link asks for `false`, so an unseeded control stays
-    // ticked.
-    // Pinned: the picture is the older publish, whatever the link asks for.
+    // ticked. Pinned: the picture is the older publish regardless.
     assertTrue(
       knobRow(text("$base?at=$oldCommit&knob.enabled=false"), "enabled").contains(" checked"),
       "a pinned page seeded its controls from the request",
@@ -291,9 +278,8 @@ class ServePinnedRevisionTest {
 
     val page = text("http://127.0.0.1:$port/$system/p/$previewId")
 
-    // A public server builds token-free links, so the page URL carries no query at all and the pin
-    // has to *open* one. `&at=` there would fold the sha into the path — the shape that made every
-    // revision in the menu a 404 rather than a permalink.
+    // A public server's links carry no query, so the pin must open one (`&at=` would end up in the
+    // path).
     assertTrue(page.contains("/p/$previewId?at=$oldCommit"), page)
     assertFalse(page.contains("/p/$previewId&at="), page)
     assertEquals(200, get("http://127.0.0.1:$port/$system/p/$previewId?at=$oldCommit").first)
@@ -303,10 +289,8 @@ class ServePinnedRevisionTest {
   fun `a daemon-produced lane is refused under a pin rather than answered from today`() {
     val port = start().port
 
-    // The branch publishes one product per revision: the baked PNG. Everything else on this route
-    // is made on demand from the catalog's current code, so a pin has nothing historical to serve —
-    // and answering with today's export under a URL naming an old publish is the failure the whole
-    // feature exists to prevent.
+    // The branch publishes only the baked PNG per revision; other products are made from current
+    // code, so a pin has nothing historical to serve.
     for (suffix in listOf(".svg", ".slots", ".a11y", ".annotations", ".rc")) {
       val (code, _) = get("http://127.0.0.1:$port/$system/render/$previewId$suffix?at=$oldCommit")
       assertEquals(404, code, suffix)
@@ -362,10 +346,8 @@ class ServePinnedRevisionTest {
 
   @Test
   fun `a preview the catalog has since dropped still resolves at the revision that had it`() {
-    // A preview id present at the older commit and gone from the tip — renamed, retired, or
-    // reorganised since. It is exactly the case a permalink exists for (the link was made while it
-    // existed) and exactly the one the tip's map cannot answer: that id is not in today's catalog
-    // at all, so resolving through it is an unconditional 404 on an asset the commit really has.
+    // An id present at the older commit but gone from the tip: exactly what a permalink exists for,
+    // and not resolvable through today's map.
     val retiredPath = "images/button-filled-legacy/ideal__default__dark.png"
     val retiredId = "button-filled-legacy__ideal__default__dark"
     val retiredCatalog =
@@ -392,9 +374,7 @@ class ServePinnedRevisionTest {
     // answering: without the pinned manifest the request above has nowhere to resolve.
     assertEquals(404, get("http://127.0.0.1:$port/$system/render/$retiredId.png").first)
 
-    // The PAGE is what a person actually opened, and it has to resolve too — the session's preview
-    // list is built from the tip, so a renamed-away id is not in it and the viewer used to 404 on
-    // a permalink whose pixels this server could serve perfectly well.
+    // The page must resolve too; the preview list is built from the tip, so the viewer used to 404.
     val page = text("http://127.0.0.1:$port/$system/p/$retiredId?at=$oldCommit")
     assertTrue(page.contains("data-preview-id=\"$retiredId\""), page)
     assertTrue(page.contains("Pinned to catalog revision"), page)
@@ -439,9 +419,8 @@ class ServePinnedRevisionTest {
   fun `a render asked for to order is refused under a pin, not answered with the baked one`() {
     val port = start().port
 
-    // These select a DIFFERENT product by query rather than by suffix: a full-page capture, another
-    // player's raster, an overridden render. Answering any of them with the plain baked PNG would
-    // be a 200 that silently ignores half the URL.
+    // These select a different product by query (full-page capture, another player, an override);
+    // answering with the plain baked PNG would silently ignore part of the URL.
     for (query in
       listOf(
         "scroll=long",
@@ -462,10 +441,8 @@ class ServePinnedRevisionTest {
 
   @Test
   fun `an id the pinned catalog does not list is not answered from the tip's paths`() {
-    // The old commit publishes a catalog that lists ONLY the legacy component, while the path the
-    // tip knows this preview by happens to resolve at that commit too. A readable manifest is the
-    // authority on its own revision: it does not list this id, so the answer is nothing — not the
-    // file sitting at today's path.
+    // A readable manifest is authoritative for its revision: if it doesn't list the id, the answer
+    // is nothing, even if today's path happens to exist at that commit.
     val oldCatalog =
       """
       {"schema":"design-parity-catalog/v1","system":"compose-m3","components":[
@@ -502,20 +479,17 @@ class ServePinnedRevisionTest {
 
   @Test
   fun `a load reads only immutable commits rather than a moving branch`() {
-    // CopyOnWriteArrayList, not a synchronized list: a catalog load keeps background threads
-    // fetching (vectors, rc-compare) after it returns, so they are still appending while the
-    // assertions below read. A synchronized list needs the caller to hold its monitor to iterate —
-    // `any {}` and even `toList()` do not — and the miss is a ConcurrentModificationException that
-    // shows up as a CI flake rather than on the run that wrote it.
+    // CopyOnWriteArrayList: background fetches keep appending after load returns, and a
+    // synchronized list needs its monitor held to iterate (otherwise a CI-flaky
+    // ConcurrentModificationException).
     val asked = java.util.concurrent.CopyOnWriteArrayList<String>()
     startWith { url ->
       asked += url
       fetch(url)
     }
 
-    // The feed is read first, and everything the load reads afterwards is addressed by one of the
-    // immutable shas it returned. The head builds the live generation while the bounded tail
-    // rebuilds historical runtime descriptors; neither may fall back to the moving branch.
+    // The feed is read first; everything after is addressed by an immutable sha it returned, never
+    // the moving branch.
     val reads = asked.toList()
     assertEquals(ServeCatalogRevision.commitsFeedUrl(repo, branch), reads.first())
     assertTrue(
@@ -529,11 +503,7 @@ class ServePinnedRevisionTest {
 
   @Test
   fun `a branch with no readable history still loads, by name`() {
-    // CopyOnWriteArrayList, not a synchronized list: a catalog load keeps background threads
-    // fetching (vectors, rc-compare) after it returns, so they are still appending while the
-    // assertions below read. A synchronized list needs the caller to hold its monitor to iterate —
-    // `any {}` and even `toList()` do not — and the miss is a ConcurrentModificationException that
-    // shows up as a CI flake rather than on the run that wrote it.
+    // CopyOnWriteArrayList, for the same reason as above.
     val asked = java.util.concurrent.CopyOnWriteArrayList<String>()
     val port = startWith { url ->
       asked += url
@@ -566,9 +536,8 @@ class ServePinnedRevisionTest {
       )
     }
 
-    // Two manifest reads for the commit (memoised by ServePinnedManifest) and one asset read that
-    // came back empty (remembered as a miss). Without the negative cache each of the four requests
-    // pays for the asset again — and a page of broken pinned images pays once per image.
+    // Two manifest reads (memoised by ServePinnedManifest) and one empty asset read (remembered as
+    // a miss); without the negative cache each request pays again.
     assertEquals(3, fetches.get())
   }
 
@@ -579,17 +548,15 @@ class ServePinnedRevisionTest {
 
     val head = client.newCall(Request.Builder().url(url).head().build()).execute().use { it.code }
 
-    // An unfurler probes an og:image before fetching it. Refusing dropped the preview card on
-    // exactly the historical links this feature exists to share; the lane is admission-bounded now,
-    // so the probe costs at most one permitted read and the GET behind it is served from cache.
+    // Unfurlers probe og:image with HEAD; the lane is admission-bounded, so the probe costs at most
+    // one read and the GET is cached.
     assertEquals(200, head)
   }
 
   @Test
   fun `a preview the pinned revision never had has no page either`() {
-    // The mirror image of the retired case: an id today's catalog lists but that revision did not
-    // publish — a preview ADDED since. Its render already 404s, so serving a page built from
-    // today's metadata would wrap a broken image in a banner claiming the pixels cannot change.
+    // An id added since that revision: its render 404s, so the page must not claim pixels from
+    // today's metadata.
     val olderCatalog =
       """
       {"schema":"design-parity-catalog/v1","system":"compose-m3","components":[
@@ -604,9 +571,8 @@ class ServePinnedRevisionTest {
     val unavailable = get("http://127.0.0.1:$port/$system/p/$previewId?at=$oldCommit")
     assertEquals(404, unavailable.first)
     val unavailablePage = unavailable.second.decodeToString()
-    // A catalog publish can predate one preview. That is still an honest 404, but it must not
-    // strand the visitor: the same revision control remains available to choose another publish,
-    // and current is a clean URL rather than today's pixels served under the historical pin.
+    // A publish predating a preview is an honest 404, but the revision control stays available, and
+    // "current" is a clean URL.
     assertTrue(unavailablePage.contains("Preview unavailable"), unavailablePage)
     assertTrue(unavailablePage.contains("was not published in catalog revision"), unavailablePage)
     assertTrue(unavailablePage.contains("class=\"cp-revisions\""), unavailablePage)
@@ -641,8 +607,8 @@ class ServePinnedRevisionTest {
     )
 
   /**
-   * That feed, overlaid on the default branch stub, naming [commits] as the publishes that touched
-   * the render.
+   * That feed overlaid on the default stub, naming [commits] as the publishes that touched the
+   * render.
    */
   private fun withRenderChanges(vararg commits: String): (String) -> ByteArray? = { url ->
     if (url == renderFeedUrl) {
@@ -666,9 +632,8 @@ class ServePinnedRevisionTest {
 
   @Test
   fun `a publish that moved no pixel joins the run above it`() {
-    // Only the OLDER publish changed the render, so the newer one republished identical bytes: one
-    // run covering both, headed by the newest. This is the case the whole feature exists for — the
-    // menu would otherwise offer two rows that open the same image.
+    // Only the older publish changed the render, so the newer one republished identical bytes: one
+    // run headed by the newest.
     val port = startServer(withRenderChanges(oldCommit)).port
 
     val body = text("http://127.0.0.1:$port/$system/api/render-runs/$previewId")
@@ -714,9 +679,8 @@ class ServePinnedRevisionTest {
 
   @Test
   fun `indexed image history survives a branch feed crowded by metadata commits`() {
-    // GitHub's branch Atom feed exposes only a small fixed window. Fill all of it with commits that
-    // did not regenerate the catalog, exactly as repeated parity issue-index refreshes did in
-    // production: none of the commits that changed this PNG remain discoverable branch-wide.
+    // GitHub's branch Atom feed is a small fixed window; fill it with commits that didn't
+    // regenerate the catalog, as repeated issue-index refreshes did.
     val metadataCommits = (3..21).map { value -> value.toString(16).padStart(40, '3') }
     val crowdedFeed =
       (listOf(newCommit) + metadataCommits)
@@ -790,10 +754,8 @@ class ServePinnedRevisionTest {
 
   @Test
   fun `a feed that parses to nothing is a failure, not proof the render never changed`() {
-    // A 200 carrying an HTML error page, a redirect, or a reshaped feed all parse down to zero
-    // entries. A published render necessarily has at least the commit that added it, so zero never
-    // describes a real one — and reporting it as an empty change set would tell the viewer, with
-    // confidence, that every listed publish is pixel-identical.
+    // An HTML error page, redirect or reshaped feed parses to zero entries; a published render has
+    // at least one commit, so zero means "unknown", not "unchanged".
     for (body in listOf("<feed></feed>", "<html>404</html>", "")) {
       val port = startServer { url ->
         if (url == renderFeedUrl) body.encodeToByteArray() else fetch(url)
@@ -811,9 +773,7 @@ class ServePinnedRevisionTest {
 
   @Test
   fun `a branch that cannot be asked 404s rather than claiming nothing changed`() {
-    // No path-scoped feed on the stub. An empty run list and "the branch did not answer" are
-    // opposite claims, and drawing the first when we mean the second would label a dozen genuinely
-    // different publishes as one unchanged stretch.
+    // No path-scoped feed: "no runs" and "the branch didn't answer" are opposite claims.
     val port = start().port
 
     assertEquals(
@@ -826,12 +786,8 @@ class ServePinnedRevisionTest {
 
   @Test
   fun `a window we cannot bound draws no runs at all`() {
-    // A branch that ships no `preview-index.json`. `availableRevisions` fails open there — right
-    // for the menu, where an extra link that 404s beats hiding real history — so the window can
-    // reach back past the preview's own creation. The path feed's creation commit then reads as a
-    // boundary, and every row below it becomes a trailing run headed by a publish that has no
-    // render: marked, counted as another distinct look, and asked for a thumbnail that cannot
-    // exist. Without the inventory there is nothing to bound the window with, so say nothing.
+    // Without `preview-index.json` the revision window can reach past the preview's creation, so
+    // run markers would be wrong; with no inventory to bound it, say nothing.
     val port = startServer { url ->
       if (url.endsWith("/preview-index.json")) null
       else withRenderChanges(newCommit, oldCommit)(url)
@@ -850,9 +806,8 @@ class ServePinnedRevisionTest {
 
     val page = text("http://127.0.0.1:$port/$system/p/$previewId")
 
-    // The join between the two halves. Without the stamp the client would have to parse `?at=` out
-    // of each href, which the *current* row deliberately does not carry — so the one row that is
-    // always a run head would be the one row that never got marked.
+    // The stamp joins the halves: the current row carries no `?at=`, so the client can't parse it
+    // from the href.
     assertTrue(page.contains("data-revision=\"$newCommit\""), page)
     assertTrue(page.contains("data-revision=\"$oldCommit\""), page)
     assertTrue(page.contains("<cp-revision-runs "), page)

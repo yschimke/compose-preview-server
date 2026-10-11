@@ -39,26 +39,15 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * What `m3-catalog` gains and what it loses if `--ui-builder-published-catalogs` names it.
- *
- * The sibling [PublishedM3CatalogEquivalenceTest] composes a **hand-built** published file and says
- * so in its KDoc: that is a real test of the composer and no test at all of the catalog. This pair
- * is **generated** — captured verbatim from `:catalog:composePreviewDiscover` in
- * yschimke/m3-catalog — which is the same way `remote-m3` got its gate, and the difference that
- * turned 14 green tests into 11 failures the first time it was tried.
- *
- * The comparison is not the one the name "equivalence" suggests, and
- * `UI_BUILDER_CATALOG_CONTRACT.md` says so outright: the frozen `m3-catalog` capability document is
- * a hand-transcribed *Jetcaster* catalog, unrelated to yschimke/m3-catalog, and "the two describe
- * different component sets on purpose … so here the reviewed difference list is the point and a
- * byte-equal result would be the surprising outcome". So this test does not ask for equality. It
- * asks three separable questions and pins each as an exact set:
- * - which of the frozen twenty-five the real catalog can offer (**twenty-four**, and the one it
- *   cannot is named with a reason);
- * - what each of those twenty-four offers, field by field, against the frozen vocabulary a saved
- *   design was authored against;
- * - what the real catalog adds (**eighty-six**), because a shelf growing by that much is a product
- *   change rather than a rounding error.
+ * What `m3-catalog` gains and loses if `--ui-builder-published-catalogs` names it. Unlike the
+ * hand-built [PublishedM3CatalogEquivalenceTest], this pair is generated (captured from
+ * `:catalog:composePreviewDiscover` in yschimke/m3-catalog). The frozen `m3-catalog` capability
+ * document is a hand-transcribed Jetcaster catalog (see `UI_BUILDER_CATALOG_CONTRACT.md`), so this
+ * doesn't ask for equality; it pins three exact sets:
+ * - which of the frozen twenty-five the real catalog can offer (twenty-four, the missing one named
+ *   with a reason);
+ * - what each of those offers, field by field, against the frozen vocabulary;
+ * - what the real catalog adds (eighty-six).
  */
 class PublishedGeneratedM3CatalogEquivalenceTest {
 
@@ -97,26 +86,15 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
     get() = result.catalog
 
   /**
-   * The record behind each published component, under the builder id a design names it with — the
-   * composition's own join, and the map `ServeRunner` hands the export executor.
+   * The record behind each published component, under the builder id a design names it with (the
+   * map `ServeRunner` hands the export executor).
    */
   private val composedRecords: Map<String, ComponentRecord>
     get() = result.records
 
   /**
-   * The one of the frozen twenty-five the published catalog cannot offer, and why.
-   *
-   * Asserted ABSENT rather than skipped: a gap nothing states is a gap that stops being noticed,
-   * and if it starts composing this test fails and says to move it out rather than passing quietly.
-   *
-   * Two left this list on the way here, and both were the same kind of thing — a callable the
-   * record could not REACH rather than one the catalog does not draw. `m3/time-picker` went when
-   * the scan classpath started resolving dependencies by coordinate rather than by cache path;
-   * `m3/date-picker` went when the walk learned to follow a singleton lambda held by another
-   * singleton lambda, which is how `DatePickerModalSticker` reaches `DatePicker` four frames in
-   * (both yschimke/compose-ai-tools#5354; the diagnosis is yschimke/m3-catalog#317).
-   *
-   * What is left is different in kind, which is why the reason and not just the id is in the map.
+   * The frozen component the published catalog can't offer, and why. Asserted absent rather than
+   * skipped, so if it starts composing this test says to move it.
    */
   private val knownAbsent =
     mapOf(
@@ -140,18 +118,8 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
   }
 
   /**
-   * What the real catalog ADDS, as an exact set.
-   *
-   * The contract document predicted this ("fifty-nine rendered components against twenty-five
-   * transcribed ones") and the measured number is eighty-six, so the prediction was the right shape
-   * and the wrong size — which is the argument for pinning it rather than bounding it. Every entry
-   * is a component a design could be built on, so the list growing or shrinking is a change to what
-   * the builder offers and belongs in a diff someone reads.
-   *
-   * Note what is NOT asserted here: that each is exportable. m3-catalog's lane writes Compose
-   * source through the record-driven generator rather than through `RemoteContentEmitter`'s
-   * hand-written cases, so the blocker that stops `remote-m3` does not apply — but "does every one
-   * of these eighty-six round-trip to compiling Kotlin" is a separate question and this is not it.
+   * What the real catalog adds, as an exact set: each is a component a design could use, so changes
+   * belong in a reviewed diff. Not asserted: that each exports (a separate question).
    */
   @Test
   fun `the components the real catalog adds are the reviewed set`() {
@@ -222,44 +190,19 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
 
   /** The same comparison [PublishedM3CatalogEquivalenceTest] makes, for the same reasons. */
   /**
-   * The two fields the comparison above leaves out: what the shelf CLAIMS about the canvas, and
-   * what an export calls.
+   * The two fields `compare()` leaves out: `wasm` (what the shelf claims about the canvas) and
+   * `code` (what an export calls).
    *
-   * `compare()` checked names, roles, traits, slots, modifiers and properties, and said nothing
-   * about `wasm` or `code`. Codex raised that on #673 and it was worth fixing — but the first
-   * version of this test drew the wrong conclusion from it, and the wrong conclusion is worth
-   * keeping written down because it is the more tempting reading.
+   * The canvas is drawn by `UiBuilderRenderer.RenderNode`, a `when (componentId)` over literal ids;
+   * it never reads `adapterStatus` / `platformSupported`. So a missing policy `canvas` doesn't
+   * blank the canvas, it makes the shelf misreport components as unsupported. m3-catalog#327
+   * declares `canvas` for the components the renderer handles, so this is now `emptyList()`. The
+   * real canvas gap is the added components with no renderer case (yschimke/m3-catalog#324), not
+   * measured here.
    *
-   * **Every component's `wasm` status goes UNSUPPORTED, and the canvas does not change.**
-   * `PublishedUiBuilderCatalog.wasm()` computes `drawn` from the policy's `canvas`, m3-catalog's
-   * policy declares none, so all twenty-five compose to `platformSupported = false` with the note
-   * "drawn on the canvas as a named placeholder: this catalog claims no adapter". That note is
-   * false, and so was this test's first KDoc, which called it a cutover blocker.
-   *
-   * What actually draws the canvas is `UiBuilderRenderer.RenderNode`, a `when (componentId)` over
-   * literal ids compiled into `:ui-builder` for Wasm. It never reads `adapterStatus` or
-   * `platformSupported` — nothing does, outside `CapabilityValidator`, whose two derived fields
-   * feed the harness diagnostic publisher and nothing else. The adapter id itself never leaves
-   * `wasm()`: it appears only inside that prose note. A registry keyed by adapter id is a planned
-   * future (`UI_BUILDER_CATALOG_CONTRACT.md` § item 17), not the present.
-   *
-   * So `m3/button` keeps drawing after the swap because it is still called `m3/button`. What breaks
-   * is the STATUS: a shelf that reports every component unsupported while drawing it. That is a
-   * real defect — a surface lying about another surface — and it is not the canvas going blank.
-   *
-   * Both halves of that were true when this test was written and the first is now fixed:
-   * m3-catalog#327 declares `canvas` for the twenty-four components the renderer has a case for, so
-   * the shelf reports what the builder actually draws and this assertion is `emptyList()` rather
-   * than the list of everything drawn.
-   *
-   * The canvas gap that IS real belongs to the components this pair ADDS, and this test does not
-   * measure it: 108 published `m3/` ids, 24 with a case in the renderer, **84 falling to the `else`
-   * branch** and drawing `UnsupportedComponentDiagnostic`. See yschimke/m3-catalog#324.
-   *
-   * The `code` differences are not losses and are asserted as such so they cannot quietly become
-   * some other difference: the composed symbol is the FQN whose simple name is the frozen one (the
-   * frozen file abbreviates), and the composed imports are the frozen ones minus the sibling
-   * variants a hand-transcribed entry merged into one component.
+   * The `code` differences are asserted as such: the composed symbol is the FQN of the frozen
+   * simple name, and composed imports are the frozen ones minus sibling variants the transcription
+   * merged.
    */
   @Test
   fun `the published shelf keeps a drawn component's canvas status, and spells its calls out`() {
@@ -272,9 +215,8 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
         .map { it.componentId }
         .filter { composedById.getValue(it).wasm.platformSupported == JsonPrimitive(false) }
         .sorted()
-    // The three compose-ui-builder#241 added are drawn, and m3-catalog's policy declares no
-    // `canvas` for them yet; the policy change that does (as m3-catalog#327 did for the rest)
-    // empties this list again.
+    // The three components compose-ui-builder#241 added have no `canvas` in m3-catalog's policy
+    // yet; that policy change empties this list.
     assertEquals(
       listOf(
         "m3/navigation-suite-item",
@@ -290,11 +232,8 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
       val got = composedById.getValue(component.componentId)
       val frozenSymbol = component.code?.symbol ?: continue
       val composedSymbol = got.code?.symbol
-      // One component is a member of an object rather than a top-level callable. The frozen file
-      // writes it the way it is called — symbol `SearchBarDefaults.InputField`, importing the
-      // object — and the record knows only the callable's own name, so the composed entry names
-      // `InputField` and imports a member. It is not a different component; it is the same one,
-      // uncallable, which the call-site test below reports for it by name.
+      // `m3/search-input-field` is an object member (`SearchBarDefaults.InputField`); the record
+      // knows only the callable's name. Same component, uncallable; the call-site test reports it.
       if (component.componentId == "m3/search-input-field") continue
       assertEquals(
         frozenSymbol,
@@ -309,12 +248,9 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
       )
     }
 
-    // Where the import LISTS differ, and they differ in both directions. The frozen file merged
-    // sibling variants into one entry and imported all of them (`Button`, `OutlinedButton`,
-    // `TextButton` under `m3/button`); the composed entry imports the one callable it names, plus
-    // whatever the recorded call site actually needs — `m3/text-field` gains
-    // `rememberTextFieldState`, which the hand-written entry never had and a compiling call does.
-    // Pinned so a new divergence is a review rather than a surprise.
+    // Import lists differ both ways: the frozen file merged sibling variants under one entry, while
+    // the composed entry imports its one callable plus what the recorded call needs (e.g.
+    // `rememberTextFieldState`).
     val importsDiffer =
       shared
         .filter {
@@ -358,11 +294,8 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
       expected.modifierCapabilities.sorted(),
       actual.modifierCapabilities.sorted(),
     )
-    // `wasm` and `code` are deliberately NOT compared here, and this comparison used to leave
-    // them out without saying so — which is the finding. They differ for every single component,
-    // systematically, and burying twenty-five identical entries in this list would hide the two
-    // fields rather than check them. They get their own test below, which states what the
-    // difference IS. Raised in review on #673.
+    // `wasm` and `code` differ for every component systematically, so they get their own test below
+    // rather than burying the fields here.
     val builderOwned = builderOwnedProperties[id].orEmpty()
     val want = expected.properties.filterNot { it.name in builderOwned }.associateBy { it.name }
     val got = actual.properties.associateBy { it.name }
@@ -377,22 +310,11 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
   }
 
   /**
-   * Properties the **builder** owns on `m3/icon`, which m3-catalog does not publish.
-   *
-   * The same shape of exemption as [generatedInventory] below, and for the same reason: the two
-   * shelves are pinned independently, so equality asks a question neither repository can answer
-   * from the other side. Material Symbols names an icon and positions it on four continuous axes,
-   * which is this repository's model of an icon and not something m3-catalog has a view on.
-   *
-   * The asymmetry is what makes it safe. A property the FROZEN shelf adds is one the builder offers
-   * and the published catalog has never heard of: a design authored here still validates, and the
-   * published shelf loses nothing. The reverse — the composed catalog offering a property the
-   * builder cannot handle — is the thing that would break a design, and it is still compared
-   * strictly, because `got` is never filtered.
-   *
-   * What it costs, stated rather than hidden: serving m3-catalog's shelf under
-   * `--ui-builder-published-catalogs` would offer none of these, so a design that names an icon
-   * rather than keying one could not be authored against it until m3-catalog publishes them too.
+   * Properties the builder owns on `m3/icon` that m3-catalog doesn't publish (Material Symbols
+   * naming and axes). Safe one way only: the frozen shelf may add properties (designs still
+   * validate), but the composed catalog offering one the builder can't handle is still compared
+   * strictly (`got` is never filtered). Cost: designs naming an icon can't be authored against
+   * m3-catalog's shelf until it publishes these.
    */
   private val builderOwnedProperties =
     mapOf(
@@ -409,28 +331,16 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
     )
 
   /**
-   * Properties whose allowed values are a GENERATED inventory rather than an authored enumeration.
+   * Properties whose allowed values are a generated inventory rather than an authored enumeration.
    * See [allowed].
    */
   private val generatedInventory = setOf("iconKey")
 
   /**
-   * The one property field where equality is the wrong question: an **inventory**, not a choice.
-   *
-   * Every other allowed-value list on this shelf is an enumeration somebody authored —
-   * `m3/text`.`style`'s fifteen typography roles — and equality is exactly right for those: a value
-   * appearing or disappearing is a design decision, and it belongs in a diff.
-   *
-   * `m3/icon`.`iconKey` is not that. It is the Material icon set, generated, and the two sides are
-   * pinned independently: the frozen catalog is packaged in THIS repository, and the composed one
-   * is whatever m3-catalog last published. #710 exposed the complete inventory here while
-   * m3-catalog still ships the forty-six-icon hand-picked list, and equality then made this
-   * comparison red on a fact neither repository can act on from the other side — printing all
-   * 11,431 names into the failure, which is also how nobody reads it.
-   *
-   * The question worth asking survives the growth: **does the published catalog offer an icon the
-   * builder cannot draw?** That is containment. It is stable while the inventory grows, it fails on
-   * the thing that would actually break a design, and it names only the offending values.
+   * The one field where equality is wrong: `m3/icon`.`iconKey` is the generated Material icon set,
+   * pinned independently in each repository. The meaningful question is containment: does the
+   * published catalog offer an icon the builder can't draw? Stable as the inventory grows, and
+   * names only the offending values.
    */
   private fun allowed(
     name: String,
@@ -449,13 +359,8 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
   }
 
   /**
-   * The builder's own vocabulary survives the swap.
-   *
-   * All seventeen of the frozen catalog's non-`m3/` entries are in a donor namespace, so unlike
-   * `remote-m3` — which borrows `m3/surface` and `m3/text` and loses both — m3 has no borrowed
-   * component to lose. That is worth an assertion rather than a sentence: the donor list is a
-   * constant in `ProductionUiBuilderRuntime` and a catalog gaining a borrowed component would make
-   * this the same blocker it is there.
+   * The builder's own vocabulary survives the swap: all of the frozen catalog's non-`m3/` entries
+   * are in a donor namespace, so (unlike `remote-m3`) nothing borrowed is lost.
    */
   @Test
   fun `a published m3 catalog is still served the builder's own vocabulary`() {
@@ -477,12 +382,8 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
   }
 
   /**
-   * Every shelf the components use has to be in the menu order, or the editor invents one.
-   *
-   * `UiBuilderEditorState` appends a group the order does not name after every group it does and
-   * sorts those alphabetically, so a catalog that states an order and then uses a group outside it
-   * has published an order the builder will not follow. The mirror of the `remote-m3` check, and
-   * the reason that one exists: four wear shelves were re-sorted silently.
+   * Every group the components use must be in the menu order, or `UiBuilderEditorState` appends it
+   * alphabetically after the named ones.
    */
   @Test
   fun `the menu order covers the groups the shelf actually uses`() {
@@ -514,18 +415,9 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
   }
 
   /**
-   * A component with no menu entry is a component the editor files under a role heading.
-   *
-   * The insert panel groups by `componentMenu`, and an entry it cannot find falls back to a generic
-   * "Container" / "Leaf" heading — so this is not a cosmetic gap: it is where a person looks for
-   * the component and does not find it. Twenty-eight of the hundred and eight were in that state
-   * until the generator learned to shelve a component by the catalog id it is published under
-   * (yschimke/compose-ai-tools#5354).
-   *
-   * The six left are the ones that fix cannot reach: nothing declares them, so they carry no
-   * catalog id and there is no shelf to inherit. Only `ui-builder.policy.json` can place them, and
-   * where an adaptive-layout scaffold belongs on a Material 3 shelf is a catalog decision rather
-   * than something this test can assert — m3-catalog#323.
+   * A component with no menu entry falls under a generic role heading in the insert panel, where
+   * nobody finds it. The remaining ones carry no catalog id, so only `ui-builder.policy.json` can
+   * place them (m3-catalog#323).
    */
   @Test
   fun `every component is on a shelf, or is one nothing declares`() {
@@ -541,24 +433,11 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
   }
 
   /**
-   * What the catalog decided about the four components whose shelf nobody had chosen — and the one
-   * place that decision has not landed yet.
-   *
-   * One component is one SYMBOL, and a symbol several stickers draw is filed under whichever
-   * catalog id sorts first. Four survived every earlier correction because the catalog had no
-   * section they belonged to, so placing them meant inventing a shelf. m3-catalog#327 made all four
-   * calls: `Icons` and `Surfaces` are new headings for `m3/icon` and `m3/surface`, and the other
-   * two are **not components** — `Sticker` is the frame every preview is drawn inside and
-   * `MaterialExpressiveTheme` is the theme scope wrapping them, so both are `excluded` with the
-   * reason published.
-   *
-   * The exclusions take effect where it matters — neither is served, so neither can be placed in a
-   * design. They are still on the MENU, which is the generator writing a shelf entry for a
-   * component the consumer refuses to serve: a palette item that disappears on insert. Fixed in
-   * yschimke/compose-ai-tools#5378 and not yet released, and m3-catalog pins the released plugin —
-   * so this fixture captures the bug, and this test says so rather than leaving it unremarked. When
-   * the catalog bumps its plugin and the fixture is re-captured, the last assertion here fails and
-   * is deleted.
+   * The four components whose shelf nobody had chosen: m3-catalog#327 gave `m3/icon` and
+   * `m3/surface` new headings and excluded `Sticker` and `MaterialExpressiveTheme` (frame and theme
+   * scope, not components). They aren't served, but still appear on the menu: fixed in
+   * yschimke/compose-ai-tools#5378, not yet released. When the fixture is re-captured, the last
+   * assertion fails and is deleted.
    */
   @Test
   fun `an excluded component is not served, though the menu still lists it`() {
@@ -594,40 +473,12 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
   }
 
   /**
-   * The question that stops `remote-m3`, asked of m3 — and the answer is not the one this test used
-   * to give.
-   *
-   * It asked `signatureKnown`, which every one of the 110 record components sets, and concluded
-   * that all 108 offered components were writable. That is the same mistake #690's review found on
-   * the Remote side, in the same words: **a recovered signature is not a callable**. A component
-   * can be a member of a `Defaults` object, need a receiver scope around it, declare type
-   * parameters, or require a parameter of a type no design value becomes — and its signature is
-   * recovered all the same.
-   *
-   * The record already states the stronger fact, because discovery computes it: `code.call` is the
-   * call site it could write, and `code.refusedReason` says why it could not. Asked that way,
-   * **twenty-five of the offered components have no call site**, and the reasons split in two:
-   * - *structural* — not public, a member of an object, a scope receiver, type parameters. These
-   *   are unconditional: no design can supply its way past them.
-   * - *a required parameter no value becomes* — `SearchBarState`, `CarouselState`,
-   *   `PaneScaffoldDirective`, `ImageVector`, `ToggleableState`, a `ClosedFloatingPointRange`.
-   *   Discovery is judging a standalone snippet, and a design authoring that parameter would be
-   *   judged by the generator instead — but none of these six is a type this builder's value
-   *   vocabulary has, so in practice they land the same way.
-   *
-   * Pinned as the reviewed set rather than as `isEmpty()`, so the day discovery learns one of them
-   * this test fails and says to shorten the list.
-   *
-   * What this still is not: the generator-driven measurement `remote-m3` has, where every offered
-   * component is put through the real exporter. Running the generator over this pair asks a
-   * question this fixture cannot answer honestly — the generated record's `componentIds` are the
-   * catalog's own taxonomy (`Dialog/Basic`), not the `m3/…` ids the published file names, so every
-   * component refuses to resolve before its call site is ever considered. Whether that is a real
-   * cutover blocker or the wrong record for the question is compose-preview-server#674.
-   *
-   * `m3/current-scheme` is pinned separately: it is a companion property rather than a callable
-   * taking arguments, so an empty parameter list is correct for it and suspicious for anything
-   * else.
+   * Which offered components have no call site. `signatureKnown` is set for all of them, but a
+   * recovered signature isn't a callable; the record's `code.call` / `code.refusedReason` says so
+   * directly. The reasons split into structural ones (not public, object member, scope receiver,
+   * type parameters) and a required parameter of a type no design value becomes. Pinned as a
+   * reviewed set, so discovery learning one shortens the list. `m3/current-scheme` is a companion
+   * property, pinned separately.
    */
   @Test
   fun `every component the catalog offers has a recorded call site, or a stated reason`() {
@@ -646,10 +497,8 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
     val unwritable =
       offered
         .mapNotNull { id ->
-          // Not `?: return@mapNotNull null`, which is how this read before: a published component
-          // whose `record` names a canonical id the record file does not carry was silently
-          // dropped from the measurement rather than reported. Nothing carries that shape today
-          // and this is what says so.
+          // Not silently skipped: a published component whose `record` names an id missing from the
+          // record file is reported.
           val component =
             requireNotNull(byCanonicalId[recordOf[id]]) {
               "published component `$id` names record `${recordOf[id]}`, which the component " +
@@ -684,18 +533,10 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
   }
 
   /**
-   * How much of the published m3 shelf the generator can actually write, component by component.
-   *
-   * The remote-m3 sibling has asked this of its exporter since #673. m3 could not be asked until
-   * now: `ScreenGenerator` resolves a node against the record's `componentIds`, the generated
-   * record carries the catalog's own taxonomy (`Dialog/Basic`), and the published file names `m3/…`
-   * — so every component refused to resolve before its call site was considered, and #691 said so
-   * rather than pinning a number that described the fixture pairing. Aliasing the record with the
-   * published ids (compose-preview-server#694) is what makes the question answerable.
-   *
-   * Asked the way an author would: a screen whose root IS the component, with a value authored for
-   * every required property the shelf declares. What refuses is pinned with the generator's own
-   * first reason, so teaching it one shortens this list and says so.
+   * How much of the published m3 shelf the generator can write, per component: a screen whose root
+   * is the component, with a value for every required property. Possible since the record is
+   * aliased with the published ids (compose-preview-server#694). Refusals are pinned with the
+   * generator's first reason.
    */
   @Test
   fun `what the published m3 shelf can export is the reviewed set`() {
@@ -734,19 +575,10 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
       "the set of published m3 components the generator cannot write has changed",
     )
 
-    // Every ALLOWED VALUE of every enumerated required property, not just the first.
-    //
-    // The loop above authors `authored(property)`, which takes `allowedValues.first()`. That is
-    // enough to ask whether a component exports at all and blind to the thing an enumeration is
-    // for: `m3/text-field` passed on `filled` while `outlined` refused, because the variant table
-    // spelled `TextFieldKt.OutlinedTextField` and Material declares that callable in
-    // `OutlinedTextFieldKt`. One wrong string, invisible to a measurement that only ever asked
-    // for the first value — the shelf advertised the variant as exportable and the server said
-    // `no component`. Raised by the review bot on #703 and true.
-    //
-    // Asserted as `emptyList()` rather than as a reviewed set: a component that exports on one
-    // value of a property and refuses on another is a defect every time, not a decision. It costs
-    // one more export per allowed value on the components that already export.
+    // Every allowed value of every enumerated required property, not just the first: e.g.
+    // `m3/text-field` passed on `filled` while `outlined` refused due to a wrong callable in the
+    // variant table. Asserted empty, since a component exporting on one value and refusing another
+    // is always a defect.
     val variantRefusals = sortedMapOf<String, String>()
     for (component in offered) {
       if (component.componentId in M3_EXPORT_REFUSALS) continue
@@ -768,10 +600,8 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
       "a component that exports on one allowed value refuses on another: $variantRefusals",
     )
 
-    // The one component on this shelf whose properties reach a *state factory* rather than its
-    // own parameters, and the reason `M3_EXPORT_REFUSALS` is shorter than it was. Pinned as the
-    // emitted call, because "it no longer refuses" is also what a `TimePicker` that silently
-    // dropped the authored hour would look like.
+    // `m3/time-picker`'s properties reach a state factory; pinned as the emitted call, since "no
+    // longer refuses" would also describe one that dropped the hour.
     val picker = offered.single { it.componentId == "m3/time-picker" }
     val emitted = executor.generate(screenAround(picker))
     assertIs<ScreenGeneratorComposeExportExecutor.Generated.Emitted>(emitted)
@@ -784,19 +614,10 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
   }
 
   /**
-   * The two things `BuilderTimePicker` does to a property before it reaches the state factory, and
-   * an export that skipped either would draw a different picture from the canvas that accepted it.
-   *
-   * `is24Hour` is OPTIONAL and the canvas defaults it to `true` (`UiBuilderRenderer`:
-   * `node.bool("is24Hour", true)`). Omitting the argument is not neutral — Material's own default
-   * is the device locale, so the same design is a 24-hour dial in the builder and a 12-hour one on
-   * a US phone. `hour` and `minute` are clamped there too (`coerceIn(0, 23)` / `coerceIn(0, 59)`),
-   * and the catalog validator only checks that a property is an integer, so 25 reaches here from an
-   * MCP client or an imported document and reaches Material as an hour it rejects at composition.
-   * Clamped rather than refused, because the builder already drew this design with the clamped
-   * value and the export that matches the picture is that one.
-   *
-   * Both raised by the review bot on #713 and both true.
+   * `BuilderTimePicker` transforms properties before the state factory, and the export must match:
+   * `is24Hour` defaults to `true` on the canvas (Material's default is the device locale, so
+   * omitting it isn't neutral), and `hour` / `minute` are clamped (the validator only checks
+   * integer type).
    */
   @Test
   fun `a time picker's state carries the canvas's default and its clamp`() {
@@ -859,27 +680,12 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
   }
 
   /**
-   * The **browser's** lane and the server's, asked about all 108 published components.
-   *
-   * Two exporters reach `ScreenGenerator`: this executor, and `ScreenExportGate` behind the
-   * editor's code pane and problems panel. They were never asked the same question — the gate's
-   * tests supply the build-time record directly, so both lanes only ever saw components both
-   * records carry — and under a published catalog they gave different answers for most of the
-   * shelf. The pane read `m3-catalog`'s authored 34-component record, embedded in `:ui-builder` at
-   * build time; the export reads the record the host fetched with the catalog. 78 of these 108
-   * components are not in the embedded file, so the pane said "no component `m3/…` in this catalog"
-   * about components whose Kotlin the export wrote (compose-preview-server#714).
-   *
-   * [ScreenGeneratorComposeExportExecutor.exportRecord] is the fix and this is its point: the
-   * browser is handed the record this executor generates from, so the question below has one answer
-   * rather than two. Asserted as the pair of verdicts per component rather than as a count — a
-   * disagreement in either direction is a defect, and the two are different defects. A pane that
-   * refuses what the export writes tells an author to undo work that was fine; a pane that emits
-   * what the export refuses hides the refusal until they press Export.
-   *
-   * It does not assert identical source. The gate names the screen `Screen` where the executor
-   * derives it from the design, and only the executor writes the provenance header — differences in
-   * what surrounds the call, not in whether there is one.
+   * The browser's export lane (`ScreenExportGate`) and the server's, asked about all 108 published
+   * components. The gate used the build-time embedded record, missing most of them, so the pane
+   * said "no component" for Kotlin the export wrote.
+   * [ScreenGeneratorComposeExportExecutor.exportRecord] gives the browser the executor's record;
+   * asserted as per-component verdict pairs (either mismatch direction is a defect). Source isn't
+   * compared (screen name and header differ).
    */
   @Test
   fun `the code pane and the export agree about every published component`() {
@@ -927,13 +733,9 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
   }
 
   /**
-   * The record the editor was built with, asked the same question — the measurement of the gap, and
-   * the reason serving one is worth a route.
-   *
-   * Pinned as an exact set for the reason [M3_EXPORT_REFUSALS] is: every id here is a component an
-   * author can insert from a published palette and read "no component in this catalog" about while
-   * the export writes it. Teaching the authored record one of these shortens the list and says so;
-   * a new entry is a component that just started lying to whoever cannot reach the route.
+   * The record the editor was built with, asked the same question: the gap that serving the record
+   * fixes. An exact set like [M3_EXPORT_REFUSALS]; each id is a component that reads as missing in
+   * the editor while the export writes it.
    */
   @Test
   fun `the embedded record cannot answer for most of the published shelf`() {
@@ -957,15 +759,14 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
       "how much of the published m3 shelf the record embedded in the editor cannot name has " +
         "changed: $unknown",
     )
-    // Not a sample: the 26 the export itself refuses are a different list, and these two barely
-    // overlap. `m3/badge` is the plainest case — one Material callable, no arguments, exported
-    // without complaint, and invisible to the editor.
+    // `m3/badge` is the plainest case: one callable, no arguments, exported fine, invisible to the
+    // editor.
     assertContains(unknown, "m3/badge")
   }
 
   /**
-   * A screen whose root IS [component], with every required property the shelf declares — and,
-   * where [choose] names one, a specific value rather than the first allowed one.
+   * A screen whose root is [component], with every required property, using [choose]'s value where
+   * given instead of the first allowed one.
    */
   private fun screenAround(
     component: ComponentCapabilityV1,
@@ -996,9 +797,8 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
           animations = AnimationStateV1.SETTLED,
           networkAccess = false,
         ),
-      // The subject IS the root. A `layout/column` wrapper reads naturally and is not in the
-      // catalog's record — it is one of the builder's own donor components, synthesised by the
-      // runtime — so every component would refuse for the wrapper rather than for itself.
+      // The subject is the root; a `layout/column` wrapper is a builder donor component not in the
+      // record, so everything would refuse for the wrapper.
       roots = listOf("subject"),
       nodes =
         linkedMapOf(
@@ -1035,26 +835,12 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
 
   private companion object {
     /**
-     * The twenty-five published m3 components the generator cannot write, each with its first
-     * reason. **Eighty-three of the hundred and eight export.** Teaching the generator one of these
-     * shortens the list, and the test above fails until it is shortened here.
-     *
-     * Twenty-four are discovery's own "no call site" judgement — a member of a `Defaults` object, a
-     * scope receiver, type parameters, not public, or a required parameter of a type no design
-     * value becomes. Those are upstream API shapes rather than gaps here.
-     *
-     * The last one is ours: a property that configures the component's remembered STATE rather than
-     * its call. `m3/date-picker` declares `selectedDate`, which reaches
-     * `rememberDatePickerState(initialSelectedDateMillis = …)` — a date string where the factory
-     * wants a `Long`, and this projection has no vocabulary for that conversion. Its `mode` is the
-     * first reason recorded, but teaching `mode` alone would leave the date behind.
-     *
-     * `m3/time-picker` was here on the same grounds until `STATE_BUNDLES` learned it, and it is the
-     * worked precedent: `hour` and `minute` are now `rememberTimePickerState(initialHour = …,
-     * initialMinute = …)`, pinned by the test above. `mode` was a separate refusal until the
-     * variant table learned it: `dial` and `input` are `TimePicker` and `TimeInput`, two callables
-     * of identical shape, which is the `m3/progress-indicator` precedent the catalog's own note
-     * names.
+     * The published m3 components the generator can't write, with each first reason; the test fails
+     * until this shrinks when the generator learns one. Most are discovery's "no call site"
+     * judgements (upstream API shapes). `m3/date-picker` is ours: `selectedDate` configures
+     * `rememberDatePickerState(initialSelectedDateMillis = …)` and needs a date-to-`Long`
+     * conversion this projection lacks. `m3/time-picker` was fixed the same way via `STATE_BUNDLES`
+     * and the variant table.
      */
     val M3_EXPORT_REFUSALS =
       mapOf(
@@ -1109,11 +895,7 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
           "no placeholder can be written for required parameter `state: ToggleableState`",
       )
 
-    /**
-     * The seven components whose composed import list is not the frozen one. See the test above:
-     * the frozen file merged sibling variants and the composed entry imports what the recorded call
-     * needs.
-     */
+    /** Components whose composed import list differs from the frozen one (see the test above). */
     val IMPORTS_DIFFER =
       listOf(
         "m3/button",
@@ -1126,8 +908,8 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
       )
 
     /**
-     * The twenty-five offered components discovery could not write a call site for, each with the
-     * reason it recorded. See the test above for what the two kinds of reason mean.
+     * Offered components discovery couldn't write a call site for, with its reason (see the test
+     * above).
      */
     val UNCALLABLE =
       mapOf(
@@ -1182,9 +964,7 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
           "no placeholder can be written for required parameter `state: ToggleableState`",
       )
 
-    /**
-     * The eighty-six components the real catalog adds; see the test above for why they are pinned.
-     */
+    /** The components the real catalog adds (see the test above). */
     val ADDED =
       listOf(
         "m3/adaptive-sticker",
@@ -1272,17 +1052,13 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
 
     /**
      * Reviewed differences between an offered component and the frozen vocabulary.
-     *
-     * `m3/search-input-field`'s query: compose-ui-builder#230 let the frozen record accept a
-     * literal string as well as bound state, so an inserted field has a query to show. m3-catalog's
-     * published policy still says `object`, which is narrower rather than wrong — a published
-     * design can bind state and nothing more — and it widens when that policy does.
+     * `m3/search-input-field`'s query: the frozen record also accepts a literal string;
+     * m3-catalog's policy still says `object` (narrower, not wrong).
      */
     val REVIEWED_DIFFERENCES =
       listOf(
-        // The three components compose-ui-builder#241 added to the frozen shelf. m3-catalog's
-        // policy does not describe them yet -- no slot roles, traits or cardinalities, no display
-        // name, no `selectedIndex` alias -- so each entry here is a line that policy removes.
+        // The three components compose-ui-builder#241 added; m3-catalog's policy doesn't describe
+        // them yet, so each line is removed when it does.
         "m3/navigation-suite-item.displayName: frozen=Navigation item composed=NavigationSuiteItem",
         "m3/navigation-suite-item.modifierCapabilities: frozen=[align, alignHorizontal, alignVertical, alpha, aspectRatio, height, heightIn, offset, padding, rotate, scale, testTag, weight, width, widthIn, zIndex] composed=[align, alignHorizontal, alignVertical, alpha, aspectRatio, background, border, fillMaxHeight, fillMaxSize, fillMaxWidth, height, heightIn, offset, padding, rotate, scale, shadow, size, testTag, verticalScroll, weight, width, widthIn, wrapContentSize, zIndex]",
         "m3/navigation-suite-item.properties[selected].jsonType: frozen=[\"boolean\",\"string\",\"object\"] composed=\"boolean\"",

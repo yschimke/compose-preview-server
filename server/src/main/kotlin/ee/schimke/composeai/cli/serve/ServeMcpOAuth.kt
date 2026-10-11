@@ -40,10 +40,9 @@ object ServeMcpOAuth {
   const val REGISTER_PATH = "$BASE_PATH/register"
 
   /**
-   * RFC 9728 §3. The suffixed form is the one a spec-following client builds for a resource at
-   * `/mcp`; the bare form is what a client that ignores the path component asks for. Both are
-   * served, because getting this wrong is invisible — the client simply gives up and reports a
-   * registration failure with no hint that discovery is what actually failed.
+   * RFC 9728 §3. The suffixed form is what a spec-following client builds for `/mcp`; the bare form
+   * is what a path-ignoring client asks for. Both are served because a discovery miss surfaces only
+   * as an unexplained registration failure.
    */
   const val PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource"
 
@@ -55,8 +54,8 @@ object ServeMcpOAuth {
   const val AUTHORIZATION_SERVER_METADATA_MCP_PATH = "/.well-known/oauth-authorization-server/mcp"
 
   /**
-   * OpenID Connect discovery. Not because anything here speaks OIDC, but because several clients
-   * probe it before the RFC 8414 path and treat a 404 as "no authorization server".
+   * Not OIDC: several clients probe this before the RFC 8414 path and treat a 404 as "no
+   * authorization server".
    */
   const val OPENID_CONFIGURATION_PATH = "/.well-known/openid-configuration"
 
@@ -66,18 +65,12 @@ object ServeMcpOAuth {
   /**
    * How long an authorization lives, from `/oauth/authorize` to the redeemed code.
    *
-   * One window covers both legs, and it has to: the code is minted at authorize time, before the
-   * human has decided, so its age includes however long they spent reading the approval page. A
-   * tighter bound measured from the same instant would expire codes for the only reason anyone is
-   * on that page — thinking about it.
-   *
-   * That is not the loose end it looks like. RFC 6749 §4.1.2 asks for a short-lived code because a
-   * code is a bearer of authorization; this one is not *disclosed* until the redirect that follows
-   * approval, so the window that actually matters — issue to redemption, on the client's own
-   * redirect handler — is a second or two regardless of how long the human took. So the window
-   * matches the approval page's own ([ServeAgentGrantStore.DEFAULT_REQUEST_TTL_SECONDS]) rather
-   * than §4.1.2's ten minutes, which expired sign-ins that included a GitHub 2FA round trip; single
-   * use is enforced in [Store.redeem], and PKCE means a stolen code is inert without its verifier.
+   * One window covers both legs because the code is minted before the human decides, so a tighter
+   * bound would expire on their deliberation. That is sound: RFC 6749 §4.1.2's short-lived code
+   * guards disclosure, and this code isn't disclosed until the post-approval redirect. Matches the
+   * approval page ([ServeAgentGrantStore.DEFAULT_REQUEST_TTL_SECONDS]) since ten minutes expired
+   * sign-ins with a GitHub 2FA round trip; single use is enforced in [Store.redeem] and PKCE makes
+   * a stolen code inert.
    */
   const val AUTHORIZATION_TTL_SECONDS = ServeAgentGrantStore.DEFAULT_REQUEST_TTL_SECONDS
 
@@ -127,22 +120,15 @@ object ServeMcpOAuth {
     val tokenEndpointAuthMethodsSupported: List<String> = listOf("none"),
     /**
      * RFC 8707. Advertised because the MCP authorization spec requires clients to bind a token to
-     * the resource they mean to call, and a client that sees this will send `resource=` on both
-     * legs.
+     * its resource; a client seeing this sends `resource=` on both legs.
      */
     @SerialName("resource_indicators_supported") val resourceIndicatorsSupported: Boolean = true,
   )
 
   /**
-   * RFC 7591 §2 registration request. Every field optional; unknown members are ignored.
-   *
-   * The annotation is what makes that last clause true, and it is load-bearing rather than
-   * defensive. RFC 7591 §2 says a server MUST ignore metadata it does not understand, and real
-   * clients lean on it: the first one to reach this endpoint sent `application_type: "native"`,
-   * which is registered in RFC 7591 itself and simply not a field this server has any use for.
-   * Without this, that request was refused with `invalid_client_metadata` — a client rejected for
-   * being *more* spec-compliant than the server, and rejected at the one step that has to work
-   * before anything else can.
+   * RFC 7591 §2 registration request. Every field optional; unknown members are ignored, as §2
+   * requires (real clients send e.g. `application_type: "native"`, which would otherwise be
+   * refused).
    */
   @OptIn(ExperimentalSerializationApi::class)
   @Serializable
@@ -176,16 +162,9 @@ object ServeMcpOAuth {
     @SerialName("expires_in") val expiresIn: Long,
     val scope: String,
     /**
-     * Session-scoped, and that is the whole design: this renews an access token **within** the
-     * lifetime the approver already chose, and can never reach past it. It dies exactly when the
-     * grant does — on its deadline, or the moment the grant is revoked — so refreshing is a way to
-     * recover a lost or rotated token during an approved session, not a way to extend one.
-     *
-     * That distinction is what makes it safe to add to a design built on "no credential outlives a
-     * human decision" ([docs/design/AGENT_ACCESS_GRANTS.md]). Nothing here lengthens a decision;
-     * without it, a client that lost its access token mid-session had to interrupt a person to get
-     * back something they had already granted — and a headless or cloud client, with no browser to
-     * be interrupted in, simply stopped.
+     * Session-scoped: renews an access token only within the lifetime the approver chose, and dies
+     * with the grant (deadline or revocation). It recovers a lost or rotated token without
+     * interrupting a person; it never extends a decision ([docs/design/AGENT_ACCESS_GRANTS.md]).
      */
     @SerialName("refresh_token") val refreshToken: String? = null,
   )
@@ -213,14 +192,9 @@ object ServeMcpOAuth {
   }
 
   /**
-   * An authorization waiting on a human, bound to the grant request whose approval page they were
-   * sent to.
-   *
-   * [code] is minted at [AUTHORIZE_PATH] time rather than at decision time, so the decision handler
-   * — which knows only a request id — can complete the redirect without reaching back in here for a
-   * mutation. It is worthless until the grant behind [requestId] exists, which is the property that
-   * makes issuing it early safe: the token endpoint resolves the grant, and an unapproved or denied
-   * request has none.
+   * An authorization waiting on a human, bound to its grant request. [code] is minted at
+   * [AUTHORIZE_PATH] time so the decision handler can redirect without mutating this store; it is
+   * worthless until the grant behind [requestId] exists.
    */
   data class PendingAuthorization(
     val code: String,
@@ -237,12 +211,8 @@ object ServeMcpOAuth {
   }
 
   /**
-   * A refresh token, bound to the grant it renews and the client it was issued to.
-   *
-   * There is no expiry field, and that is deliberate rather than an omission: the binding's
-   * lifetime *is* the grant's. [ServeAgentGrantStore] is asked whether the grant is still live on
-   * every use, so a revoked or lapsed grant takes its refresh tokens with it in the same instant,
-   * with nothing here to keep in step.
+   * A refresh token bound to its grant and client. No expiry: [ServeAgentGrantStore] is asked on
+   * every use whether the grant is live, so revocation takes refresh tokens with it.
    */
   data class RefreshBinding(val token: String, val grantId: String, val clientId: String)
 
@@ -306,18 +276,15 @@ object ServeMcpOAuth {
     }
 
     /**
-     * Redeem [code] once. Removal happens before any check so that a replay — the case RFC 6749
-     * §10.5 calls out — cannot find the entry a second time even if the first attempt is still in
-     * flight or failed its PKCE check.
+     * Redeem [code] once. Removal happens before any check so a replay (RFC 6749 §10.5) can't find
+     * the entry even if the first attempt failed PKCE.
      */
     fun redeem(code: String?): PendingAuthorization? {
       val key = code ?: return null
       val authorization = pending.remove(key) ?: return null
       byRequest.remove(authorization.requestId, key)
       val now = clock()
-      // One window, measured from authorize — not a shorter post-approval one. The code is minted
-      // before the human decides, so anything tighter would expire on their deliberation rather
-      // than on any real exposure; see AUTHORIZATION_TTL_SECONDS for why that is sound.
+      // One window from authorize; see AUTHORIZATION_TTL_SECONDS.
       return authorization.takeIf { !it.isExpired(now) }
     }
 
@@ -334,12 +301,8 @@ object ServeMcpOAuth {
     }
 
     /**
-     * Mint a refresh token for [grantId]. Called once per authorization-code exchange and again on
-     * every rotation.
-     *
-     * [isLive] answers whether a grant still exists. Bindings to grants that do not are dropped
-     * first, so tokens left behind by lapsed grants — whose clients never came back to be refused —
-     * do not hold places under [MAX_REFRESH_TOKENS] that live sessions need.
+     * Mint a refresh token for [grantId], on each code exchange and rotation. Bindings whose grant
+     * [isLive] denies are dropped first, so they don't hold [MAX_REFRESH_TOKENS] slots.
      */
     fun issueRefresh(
       grantId: String,
@@ -354,12 +317,9 @@ object ServeMcpOAuth {
     }
 
     /**
-     * Consume [token] and hand back what it was bound to.
-     *
-     * Rotated rather than reused — the presented token is removed whatever happens next, so a
-     * replay finds nothing even if this attempt goes on to fail its client check. That is
-     * [RFC 9700](https://datatracker.ietf.org/doc/html/rfc9700) §4.14.2 for public clients, which
-     * cannot authenticate themselves and so have nothing else standing behind a leaked token.
+     * Consume [token] and return its binding. Rotated: the token is removed whatever happens next,
+     * so a replay finds nothing ([RFC 9700](https://datatracker.ietf.org/doc/html/rfc9700) §4.14.2
+     * for public clients).
      */
     fun redeemRefresh(token: String?, clientId: String?): RefreshBinding? {
       val key = token ?: return null
@@ -398,9 +358,8 @@ object ServeMcpOAuth {
   /** What [AUTHORIZE_PATH] refuses before it has anywhere safe to redirect an error to. */
   sealed interface AuthorizeRejection {
     /**
-     * The redirect target itself is untrustworthy, so the error must be **rendered**, never
-     * redirected. RFC 6749 §4.1.2.1 is explicit about this: bouncing an error to an unvalidated URI
-     * is an open redirector.
+     * The redirect target is untrustworthy, so the error must be rendered, never redirected (RFC
+     * 6749 §4.1.2.1: otherwise an open redirector).
      */
     data class Unredirectable(val error: String, val description: String) : AuthorizeRejection
 
@@ -409,9 +368,8 @@ object ServeMcpOAuth {
   }
 
   /**
-   * Validate an `/oauth/authorize` query. Split out from the route so the precedence — which
-   * failures may be redirected and which may not — is testable without Ktor, because that
-   * precedence is the security-relevant part and it is easy to get subtly wrong.
+   * Validate an `/oauth/authorize` query. Split out so the security-relevant precedence (which
+   * failures may be redirected) is testable without Ktor.
    */
   fun validateAuthorize(
     client: RegisteredClient?,
@@ -465,13 +423,9 @@ object ServeMcpOAuth {
   }
 
   /**
-   * Exact string match against the registered set, which is what RFC 7591 registration is for.
-   *
-   * No prefix or wildcard matching, and none of the "same origin is close enough" shortcuts:
-   * loopback clients register the port they actually listen on, and an agent that re-registers per
-   * run pays nothing for it. The one concession RFC 8252 §7.3 asks for — a loopback redirect whose
-   * port is chosen at bind time — is handled by ignoring the port on `127.0.0.1` and `[::1]`
-   * **only**, never on a named host.
+   * Exact string match against the registered set: no prefix, wildcard or same-origin matching. The
+   * only concession, per RFC 8252 §7.3, ignores the port on `127.0.0.1` and `[::1]` only, never a
+   * named host.
    */
   fun isRegisteredRedirect(client: RegisteredClient, redirectUri: String): Boolean =
     client.redirectUris.any { registered ->
@@ -541,8 +495,8 @@ object ServeMcpOAuth {
     setOf("ftp", "ftps", "sftp", "ws", "wss", "file", "gopher", "telnet", "ldap", "ldaps", "smb")
 
   /**
-   * RFC 7636 §4.6: the challenge is the base64url-of-SHA256 of the verifier, unpadded. Compared in
-   * constant time — this is the only thing standing between a stolen code and a token.
+   * RFC 7636 §4.6: the challenge is unpadded base64url SHA-256 of the verifier. Compared in
+   * constant time; this is all that stands between a stolen code and a token.
    */
   fun verifyPkce(codeChallenge: String, codeVerifier: String?): Boolean {
     if (codeVerifier.isNullOrBlank()) return false
@@ -559,9 +513,8 @@ object ServeMcpOAuth {
   }
 
   /**
-   * Build the client's redirect. [state] is echoed verbatim when present and omitted when not — RFC
-   * 6749 §4.1.2 requires exactly that, and a client relying on `state` for its own CSRF check will
-   * reject a response that dropped it.
+   * Build the client's redirect. [state] is echoed verbatim when present and omitted when not (RFC
+   * 6749 §4.1.2); clients use it for CSRF checks.
    */
   fun redirectWithCode(redirectUri: String, code: String, state: String): String =
     appendQuery(
@@ -597,12 +550,10 @@ object ServeMcpOAuth {
     java.net.URLEncoder.encode(raw, Charsets.UTF_8.name())
 
   /**
-   * The `scope` an OAuth client asks for, mapped onto this server's ladder and capability set.
-   *
-   * One flat space, because OAuth has one: the ladder rungs keep their wire names (`preview`,
-   * `live`, `playground`) and each capability keeps its own (`ui-builder-write`, …). A client that
-   * sends no scope at all gets [AgentGrantScope.DEFAULT_REQUEST] and no capabilities, which is the
-   * same floor `POST /agent-access/request` with an empty body lands on.
+   * The OAuth `scope` mapped onto this server's ladder and capabilities, in one flat space: ladder
+   * rungs (`preview`, `live`, `playground`) and capability names (`ui-builder-write`, …). No scope
+   * yields [AgentGrantScope.DEFAULT_REQUEST] and no capabilities, like an empty `POST
+   * /agent-access/request`.
    */
   data class RequestedAccess(
     val scope: AgentGrantScope,
@@ -628,11 +579,8 @@ object ServeMcpOAuth {
     AgentGrantScope.upTo(maxScope).map { it.wire } + AgentGrantCapability.wireNames(maxCapabilities)
 
   /**
-   * The `WWW-Authenticate` value a `401` from the MCP resource carries.
-   *
-   * The `resource_metadata` parameter is the entire point of this file: it is the only thing in the
-   * whole exchange that tells a client where discovery starts. Without it a client guesses, and
-   * guessing is what produced the "Dynamic Client Registration rejected (HTTP 404)" this replaces.
+   * The `WWW-Authenticate` value on a `401` from the MCP resource. Its `resource_metadata`
+   * parameter is the only thing telling a client where discovery starts.
    */
   fun challenge(
     externalOrigin: String,

@@ -7,34 +7,18 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Golden generator + drift guard for the exploded 3D view's *picture*.
+ * Golden generator and drift guard for the exploded 3D view's rendering (`ExplodedSvgTest` covers
+ * structure):
+ * 1. [LAYERED] — a committed layered SVG shaped like a real `compose/figma-svg` export.
+ * 2. This test runs the production [ExplodedSvg] over it and commits [EXPLODED].
+ * 3. `pages-snapshot.spec.mjs` serves [EXPLODED] as the `?exploded=1` stub, so the
+ *    `serve-viewer-exploded` screenshot shows the real drawing.
  *
- * [ExplodedSvgTest][ee.schimke.composeai.data.layoutinspector] asserts the structure — which
- * element lands on which plane, which resources survive. This asserts the **rendering**, and does
- * it the way the repo covers every other visual surface: by committing an artefact the
- * preview-harness screenshots and the `serve-preview-diff` bot diffs on every PR.
- *
- * The chain is:
- * 1. [LAYERED] — a committed layered SVG shaped exactly like a real `compose/figma-svg` export (a
- *    `<g id="…">` per composable, nested as the composables nest, inside a device clip).
- * 2. This test — runs the **production** [ExplodedSvg] over it and commits the projection as
- *    [EXPLODED].
- * 3. `pages-snapshot.spec.mjs` — serves [EXPLODED] as the `?exploded=1` render lane's stub, so the
- *    `serve-viewer-exploded` fixture's screenshot contains the real exploded drawing rather than a
- *    hand-drawn stand-in.
- *
- * The point of step 2 being a *committed* file rather than something the harness computes: a change
- * to the camera, the sheet split, the plate outlines or the labels shows up here as a reviewable
- * text diff **and** downstream as moved pixels, and neither can happen without the other. Nobody
- * has to remember to capture the exploded view — it is captured because this file exists.
- *
- * Regenerate with:
+ * Committing step 2 means camera, split, outline or label changes show as a text diff and as moved
+ * pixels. Regenerate with (same env var as [ServeWebFixtureTest], same fixtures directory):
  * ```
  * UPDATE_SERVE_WEB_FIXTURES=true ./gradlew :cli:test --tests '*ExplodedSvgFixtureTest*'
  * ```
- *
- * (The same env var as [ServeWebFixtureTest], deliberately: both write into the same fixtures
- * directory, and a viewer change usually moves both.)
  */
 class ExplodedSvgFixtureTest {
 
@@ -73,16 +57,9 @@ class ExplodedSvgFixtureTest {
   }
 
   /**
-   * The second golden, and the one drawn from **real** data: `renders/material-icon-refs/`'s
-   * `compose-figma.svg` is a genuine export from a Robolectric render of `MaterialIconRowPreview`,
-   * committed as this repo's evidence for the Material-icon reference path. Exploding it here
-   * proves the split survives what a real export actually contains — a `<defs>` of hoisted icon
-   * geometry that every placement `<use>`s, `ReusableComposeNode` layer ids the labels have to see
-   * through, and a component row rather than a full screen.
-   *
-   * It is deliberately a *different shape* of input from the phone-screen placeholder: a 160×48
-   * strip, where the auto-derived separation and the label gutter are both proportioned off a wide,
-   * short drawing instead of a tall one.
+   * A second golden from real data: `renders/material-icon-refs/`'s `compose-figma.svg`, a genuine
+   * export with hoisted `<defs>` geometry, `ReusableComposeNode` layer ids, and a wide 160×48 strip
+   * rather than a tall screen.
    */
   @Test
   fun `the real material-icon export explodes, and its committed picture is in sync`() {
@@ -95,9 +72,7 @@ class ExplodedSvgFixtureTest {
     // `<use href="#material-icon-…">`, so losing the defs would silently blank every icon.
     assertTrue(rendered.contains("id=\"material-icon-materialicons-menu\""), "kept the icon defs")
     assertTrue(rendered.contains("href=\"#material-icon-materialicons-menu\""), "kept the uses")
-    // `ReusableComposeNode` names no composable; the icon annotation is what the label falls back
-    // to, so a real export's plane reads "menu icon · account_circle icon" rather than the same
-    // placeholder name four times.
+    // `ReusableComposeNode` names no composable, so the label falls back to the icon annotation.
     assertTrue(rendered.contains("menu icon"), "labels see through the fallback layer id")
 
     val update =
@@ -113,9 +88,8 @@ class ExplodedSvgFixtureTest {
   }
 
   /**
-   * The default the *server* hands [ExplodedSvg] for a bare `?exploded=1` must be the same one this
-   * golden is drawn with, or the committed picture stops describing what a visitor sees. Asserted
-   * rather than assumed, because the two live in different modules.
+   * The server's default for a bare `?exploded=1` must match this golden's; they live in different
+   * modules.
    */
   @Test
   fun `a bare exploded request uses the same options as the golden`() {
@@ -124,9 +98,8 @@ class ExplodedSvgFixtureTest {
   }
 
   /**
-   * The drawer's sliders start at `ExplodedSvg`'s own defaults — that is what lets the viewer JS
-   * omit an untouched axis from the URL and reset it on a Back that drops the param. They are
-   * hand-written HTML in one module and Kotlin defaults in another, so pin them together here.
+   * The drawer's slider defaults must equal `ExplodedSvg`'s, so the viewer can omit untouched axes;
+   * they are HTML in one module and Kotlin in another.
    */
   @Test
   fun `the drawer sliders default to the renderer's own camera`() {
