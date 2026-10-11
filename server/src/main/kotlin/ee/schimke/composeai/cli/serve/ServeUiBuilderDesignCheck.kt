@@ -32,37 +32,22 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.doubleOrNull
 
 /**
- * The accessibility half of `ui_builder_check_design` (compose-preview-server#1255).
+ * The accessibility half of `ui_builder_check_design`, read off the design document so an agent can
+ * fix problems with `ui_builder_apply` before a preview exists or a person sees it.
  *
- * ## Why a design-level check, and why here
+ * Driven by what the pinned catalog says each component is (traits `Action`, `SelectionControl`,
+ * `IconContent`, `TextContent`, and a declared `contentDescription`), never by Material names, so
+ * any catalog gets the same checks.
  *
- * An agent showing a person a screen that cannot be operated with TalkBack, or whose buttons are
- * 32dp, has spent that person's attention on something it could have caught itself. The preview
- * lane has the accessibility data products for a *rendered preview*; a design has no preview until
- * somebody writes its Kotlin, and the agent needs the answer before that — while the thing it is
- * about to show is still a document it can fix with one `ui_builder_apply`.
- *
- * So these are read off the document, driven by what the pinned catalog says each component is: its
- * traits (`Action`, `SelectionControl`, `IconContent`, `TextContent`) and whether it declares a
- * `contentDescription` property. Nothing here names a Material component, so a Wear or a pack
- * catalog gets the same checks for its own vocabulary, and a component the catalog does not declare
- * is checked only by what its id plainly says.
- *
- * ## What it is not
- *
- * Not a render. A size or a colour the document does not state is not guessed at, and a contrast
- * that depends on a theme role is resolved against the Material 3 baseline scheme and reported as a
- * warning rather than an error, because a dynamic or custom theme can resolve it differently. Where
- * the host has a native render lane and the caller asks for `rendered: true`, touch targets are
- * measured on the real frame instead ([Rendered]), and that measurement replaces the declared one.
+ * Not a render: unstated sizes and colours aren't guessed, and theme-role contrast is resolved
+ * against the Material 3 baseline as a warning. With a native lane and `rendered: true`, touch
+ * targets are measured on the real frame ([Rendered]) instead.
  */
 internal object UiBuilderAccessibilityCheck {
 
   /**
-   * Node boxes from a real render, and how many render pixels make one dp in it.
-   *
-   * [pxPerDp] is measured — the frame's width over the design's `widthDp` — rather than taken from
-   * the environment's density, because a lane is free to render at a scale of its own.
+   * Node boxes from a real render and the render pixels per dp, measured as frame width over the
+   * design's `widthDp` since a lane may render at its own scale.
    */
   class Rendered(val pxPerDp: Double, val boxes: Map<String, ServeUiBuilderView.Box>)
 
@@ -340,9 +325,8 @@ internal object UiBuilderAccessibilityCheck {
   }
 
   /**
-   * The Material 3 baseline scheme for the roles a catalog's `colorTokens` names — the closest
-   * thing to the truth a document carries no theme for. Anything resolved here is reported as
-   * approximate, never as an error.
+   * The Material 3 baseline scheme for the roles a catalog's `colorTokens` names; anything resolved
+   * here is reported as approximate, never an error.
    */
   private fun baselineScheme(dark: Boolean): Map<String, Resolved> =
     if (dark) DARK_SCHEME else LIGHT_SCHEME
@@ -406,10 +390,9 @@ internal object UiBuilderAccessibilityCheck {
   // ── Text scaling ──────────────────────────────────────────────────────────────────────────────
 
   /**
-   * Text inside a box whose height is fixed in dp clips when the person reading it has a larger
-   * font: the text grows in sp and the box does not. Checked at 200%, the largest scale Android
-   * offers, against the nearest fixed height on the node or the two levels above it — further up, a
-   * scrolling or wrapping container usually decides, and a warning there would be noise.
+   * Text in a fixed-dp-height box clips at larger font scales. Checked at 200% (Android's largest)
+   * against the nearest fixed height on the node or its two ancestors; further up, a scrolling or
+   * wrapping container usually decides.
    */
   private fun textScalingFindings(tree: Tree, node: DesignNodeV1): List<UiBuilderCheckFindingV1> {
     if (!tree.isText(node)) return emptyList()
@@ -655,8 +638,7 @@ internal val DESIGN_CHECKS = listOf(CHECK_SCHEMA, CHECK_CATALOG, CHECK_A11Y)
 
 /**
  * A model's reading of the design against the Android design guides ([ServeUiBuilderGuidelines]).
- * Never run unless asked for by name: it spends the operator's OpenRouter key and is open only to
- * the accounts the operator named.
+ * Runs only when named: it spends the operator's OpenRouter key and is limited to named accounts.
  */
 internal const val CHECK_GUIDELINES = "guidelines"
 
@@ -666,9 +648,8 @@ internal val ALL_DESIGN_CHECKS = DESIGN_CHECKS + CHECK_GUIDELINES
 internal const val UI_BUILDER_DESIGN_CHECK_SCHEMA = "compose-preview/ui-builder-design-check/v1"
 
 /**
- * `ui_builder_check_design`'s reply: a sentence to read first, the counts, then every finding with
- * the node it is about — so an agent can fix each one with a single `ui_builder_apply` before it
- * shows the design to anybody.
+ * `ui_builder_check_design`'s reply: a sentence, the counts, then every finding with its node, so
+ * each can be fixed with one `ui_builder_apply`.
  */
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
@@ -691,9 +672,9 @@ internal data class UiBuilderDesignCheckV1(
   /** Checks that were asked for and could not run here, with why. */
   val skipped: List<UiBuilderCheckSkippedV1> = emptyList(),
   /**
-   * The guidelines result this check recorded as the design's latest — what
-   * `ui_builder_get_guidelines` and the editor now show. Null when `guidelines` did not run, or ran
-   * on a dry run or a loose document, which are not recorded.
+   * The guidelines result recorded as the design's latest (what `ui_builder_get_guidelines` and the
+   * editor show). Null when `guidelines` didn't run, or ran on a dry run or loose document, which
+   * aren't recorded.
    */
   val guidelines: ee.schimke.composeai.uibuilder.guidelines.DesignGuidelineRecord? = null,
 )

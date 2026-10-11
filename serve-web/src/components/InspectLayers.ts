@@ -94,18 +94,10 @@ export class InspectLayers extends ControllerElement {
         this.on(window, "resize", () => this.place());
         this.on(host.frame, "load", () => this.place());
         if (host.specFrame) this.on(host.specFrame, "load", () => this.place());
-        // `load` alone is a race this element must not depend on winning. It fires only if the
-        // frame was still in flight when the tag upgraded — and when it has already decoded, the
-        // sole `place()` is the one at the end of `draw()`, whose measurements are whatever the
-        // stage happened to be mid-settle. The legend appearing beside the stage narrows it; so
-        // does a web font landing. Boxes measured against that transient width are permanently
-        // off, at a scale and origin that still LOOK deliberate — which is exactly how this
-        // shipped misplaced under a script-order change with no test noticing.
-        //
-        // Observing the image instead makes placement a consequence of its geometry rather than of
-        // arriving at the right moment: every reflow that moves or resizes the frame re-places, the
-        // first layout included. The stage is observed too, because a stage that grows around an
-        // already-capped frame changes `offsetLeft` without changing the image's own box.
+        // `load` alone races: if the frame already decoded, the only `place()` happens mid-settle,
+        // and boxes measured against a transient width stay subtly off. Observing the image (and
+        // the stage, whose growth moves `offsetLeft`) re-places on every reflow, the first layout
+        // included.
         if (typeof ResizeObserver === "function") {
             this.resizes = new ResizeObserver(() => this.place());
             this.resizes.observe(host.frame);
@@ -113,10 +105,8 @@ export class InspectLayers extends ControllerElement {
             if (host.frame.parentElement)
                 this.resizes.observe(host.frame.parentElement);
         }
-        // New pixels ⇒ new geometry and new facts. `viewer.js` stamps `data-cp-src` once the
-        // replacement frame has DECODED, so that attribute is the one honest "the render changed"
-        // signal available from here — cheaper and more accurate than re-deriving the override
-        // query on every control.
+        // `viewer.js` stamps `data-cp-src` once the replacement frame decodes: the honest "render
+        // changed" signal.
         if (typeof MutationObserver === "function") {
             this.observer = new MutationObserver(() => {
                 this.syncTarget();
@@ -134,13 +124,9 @@ export class InspectLayers extends ControllerElement {
         }
 
         this.hydrate();
-        // …and keep following the parameter, because this element is not the only thing that puts
-        // it in an entry. `inspect` is written with `replaceState` on purpose — ticking a layer is
-        // a reading aid over the same frame, not a different render — but a NEIGHBOUR that pushes
-        // captures whatever the URL holds at the time: `<cp-reference-compare>` pushing `annotate`
-        // on the focused comparison mints an entry carrying the `inspect` beside it. Stepping back
-        // over that entry restored a URL saying the layer is on, above a cleared checkbox and a
-        // bare frame — the address bar describing an overlay that is not drawn.
+        // Keep following the parameter on popstate: `inspect` is written with `replaceState`, but a
+        // neighbour that pushes (e.g. `<cp-reference-compare>` pushing `annotate`) captures it in
+        // an entry, and stepping back must not leave a checked layer undrawn.
         const offPop = urlState()?.onPop(() => {
             this.hydrate(true);
             void this.refresh();
@@ -191,16 +177,9 @@ export class InspectLayers extends ControllerElement {
     }
 
     /**
-     * Restore from a deep link: `?inspect=a11y,typography`.
-     *
-     * On INSTALL this only ever ticks boxes, because a parameter the URL does not carry is not the
-     * same as one it denies: the server can render a layer already checked, and a page opened
-     * without `?inspect=` must keep whatever it was served with.
-     *
-     * On a Back/Forward pass ([authoritative]) the entry is the whole truth and the absent
-     * parameter means "none of them" — otherwise stepping back over the press that turned a layer
-     * ON would leave it drawn, which is the half of the restore a listener alone would still get
-     * wrong.
+     * Restore from `?inspect=a11y,typography`. On install this only ticks boxes (an absent
+     * parameter doesn't deny a server-checked layer). On Back/Forward ([authoritative]) the entry
+     * is the whole truth, so absent means none.
      */
     private hydrate(authoritative = false): void {
         const wanted = kindsFromParam(
@@ -261,9 +240,8 @@ export class InspectLayers extends ControllerElement {
             this.cache = new Map();
             this.cacheKey = this.frameUrl();
         }
-        // Keyed by endpoint AND layer set: `layers=typography` and `layers=typography,layout` are
-        // different requests with different answers, so one entry per endpoint would serve the
-        // narrow payload to a later, wider tick.
+        // Keyed by endpoint and layer set, since narrower and wider requests have different
+        // answers.
         const key = `${source}|${layersParamFor(source, kinds)}`;
         const wideKey = `${source}|`;
         // A wide payload answers every narrower question about the same frame, so prefer it.
@@ -278,24 +256,15 @@ export class InspectLayers extends ControllerElement {
                 return response.json() as unknown;
             })
             .then((payload) => {
-                // A narrowed request may still be answered with every layer: the daemon projects
-                // all three off one capture, so the server returns the superset rather than
-                // rendering again to trim it (`ServeHost.renderAnnotations` says so explicitly).
-                // When that happens this IS the wide payload, so file it under the wide key too —
-                // otherwise ticking a second layer would fetch the same render a second time, and
-                // on an override-bearing frame those two renders can describe different pixels.
+                // A narrowed request may be answered with every layer (the daemon projects all
+                // three from one capture; see `ServeHost.renderAnnotations`), so file it under the
+                // wide key too, avoiding a second render that might describe different pixels.
                 if (key !== wideKey && carriesBeyond(payload, source, kinds))
                     this.cache.set(wideKey, pending);
                 return payload;
             })
-            // A host that cannot produce this product is not an error worth shouting about; the
-            // layer simply draws nothing.
-            //
-            // But it must not be remembered as this frame's answer. The cache exists so re-ticking
-            // a layer doesn't re-run a render of the SAME pixels — a failure ran no render worth
-            // reusing, and caching it made one transient 500 blank the layer for as long as the
-            // frame stayed on screen: every re-tick replayed the stored null, so the overlay looked
-            // permanently broken on a server that had already recovered.
+            // A host that can't produce this product just draws nothing. Don't cache the failure,
+            // or a transient 500 blanks the layer for the life of the frame.
             .catch(() => {
                 if (this.cache.get(key) === pending) this.cache.delete(key);
                 return null;
@@ -306,10 +275,8 @@ export class InspectLayers extends ControllerElement {
 
     private async refresh(): Promise<void> {
         const kinds = this.activeKinds();
-        // Every refresh supersedes the previous one, including transitions into a comparison view
-        // where this element deliberately paints nothing. Otherwise a request started on Compose
-        // can resolve after Diff/Triptych/Slider takes the stage and repaint a stale render-only
-        // legend over the comparison.
+        // Every refresh supersedes the previous, including into comparison views where this paints
+        // nothing, so a late response can't repaint a stale legend.
         const generation = ++this.generation;
         this.syncUrl(kinds);
         window.dispatchEvent(
@@ -343,10 +310,8 @@ export class InspectLayers extends ControllerElement {
     }
 
     /**
-     * Deep-link state, written with `replaceState`.
-     *
-     * Ticking a layer must not stack a history entry the way a knob edit does: it is a reading aid
-     * over the same frame, not a different render.
+     * Written with `replaceState`: ticking a layer is a reading aid over the same frame, not a new
+     * render.
      */
     private syncUrl(kinds: string[]): void {
         try {
@@ -360,12 +325,7 @@ export class InspectLayers extends ControllerElement {
         }
     }
 
-    /**
-     * Place every box against the image's CURRENT size.
-     *
-     * The stage centres the image, so the layer has to sit where the image sits rather than at the
-     * stage's own origin — otherwise every box drifts left by half the slack.
-     */
+    /** Place every box against the image's current size and position (the stage centres it). */
     private place(): void {
         const img = this.img;
         const layer = this.host?.layer;
@@ -483,12 +443,9 @@ export class InspectLayers extends ControllerElement {
         box.appendChild(badge);
         box.addEventListener("mouseenter", () => this.highlight(id));
         box.addEventListener("mouseleave", () => this.highlight(null));
-        // Only where the host says a click means something (see `InspectHost.selectable`). The
-        // viewer's boxes stay inert, so its behaviour and its markup are both unchanged.
-        //
-        // The bounds travel as they are: every source reports them in the RENDER's own pixel space,
-        // which is the plane `compose-parity-locator/v1` accepts, so a box click needs no conversion
-        // and cannot acquire the display-plane error a drag has to be converted out of.
+        // Only where the host says a click means something (`InspectHost.selectable`). Bounds are
+        // already in the render's pixel space, the plane `compose-parity-locator/v1` accepts, so no
+        // conversion.
         if (this.host?.selectable) {
             box.classList.add("cp-inspect-box--selectable");
             box.addEventListener("click", (event) => {
@@ -502,14 +459,8 @@ export class InspectLayers extends ControllerElement {
     }
 
     /**
-     * Tell the page which part of the render was picked.
-     *
-     * One method for the box and its legend row, because they name the same element and must record
-     * the same thing — a keyboard reader and a pointer reader filing different reports for the same
-     * click target is the kind of divergence nobody would notice until the two reports disagreed.
-     *
-     * The bounds travel unconverted: every annotation source reports in the RENDER's own pixel
-     * space, which is the plane `compose-parity-locator/v1` accepts.
+     * Announce the picked part of the render, from both the box and its legend row so pointer and
+     * keyboard picks record the same thing. Bounds are unconverted (render pixel space).
      */
     private announcePick(entry: Entry): void {
         window.dispatchEvent(
@@ -555,14 +506,8 @@ export class InspectLayers extends ControllerElement {
         row.addEventListener("mouseleave", () => this.highlight(null));
         row.addEventListener("focus", () => this.highlight(id));
         row.addEventListener("blur", () => this.highlight(null));
-        // …and, where a pick means something, a keyboard path into the SELECTION as well.
-        //
-        // The box cannot be that path: it is an unfocusable `div` positioned over the frame, and
-        // the layout layer's interior does not even take a pointer. The row is already focusable
-        // and already names the thing the box outlines, so it is the affordance a keyboard reader
-        // reaches anyway. Without this, a page whose tag picker is withheld — a catalog that
-        // publishes annotations but no tag index — offers a keyboard user no way to select at all,
-        // since the drag is pointer-only.
+        // Where picks mean something, the focusable legend row is also the keyboard path into
+        // selection (the box is an unfocusable overlay, and the drag is pointer-only).
         if (this.host?.selectable) {
             row.classList.add("cp-inspect-entry--selectable");
             row.setAttribute("role", "button");

@@ -82,9 +82,8 @@ public constructor(
   }
 
   /**
-   * Whether this feed has a document to serve for [system] — i.e. the session is a published
-   * catalog with a delivery branch, not a locally-served module. What decides whether a page may
-   * offer its Changelog entry at all.
+   * Whether a feed exists for [system] (a published catalog with a delivery branch, not a local
+   * module); decides whether a page offers its Changelog entry.
    */
   fun serves(system: String): Boolean = entries().any { it.system == system }
 
@@ -111,9 +110,8 @@ public constructor(
             }
           val wasActive = selected.activeUntil > at
           selected.activeUntil = at + idleTimeoutMillis
-          // Selection, renewal and cold activation are one atomic state-map operation. Otherwise a
-          // full map can evict an expired entry after this request selects it but before its lease
-          // is renewed, leaving a worker attached to a State that tick() can no longer see.
+          // Selection, renewal and cold activation are one atomic state-map operation, so eviction
+          // can't detach a worker from a state [tick] no longer sees.
           if (!wasActive) enqueue(key, config, selected)
           selected
         }
@@ -132,10 +130,9 @@ public constructor(
   }
 
   /**
-   * Bound request-derived origins and their durable XML documents. Expired entries normally stay
-   * warm, but become least-recently-used eviction candidates once the small address cap is full. If
-   * every entry is active, replace the oldest idle worker rather than returning a permanent empty
-   * feed: a burst of forged Host values must not lock the real feed origin out for a week.
+   * Bound request-derived origins and their XML. Expired entries stay warm but become LRU eviction
+   * candidates once the cap is full; if all are active, the oldest idle worker is replaced, so a
+   * burst of forged Host values can't lock the real origin out.
    */
   private fun makeRoomFor(key: Key, at: Long): Boolean {
     if (states.size < MAX_FEED_ADDRESSES) return true
@@ -414,9 +411,8 @@ public class GitCatalogFeedSource(
   private fun optionalBlob(dir: File, commit: String, path: String): String? {
     val result = git(dir, listOf("show", "$commit:$path"))
     if (result.ok) return result.stdout.takeIf { it.isNotBlank() }
-    // An older catalog may legitimately predate either manifest. Every other failure includes
-    // partial-clone network errors: treating those as an absent file would persist false deletions
-    // and then suppress the retry via knownHead.
+    // Older catalogs may lack either manifest; any other failure (including partial-clone network
+    // errors) must not be read as absence, or false deletions would persist and suppress the retry.
     val missing =
       result.stderr.contains("does not exist in") ||
         result.stderr.contains("exists on disk, but not in") ||
@@ -615,12 +611,8 @@ public data class SnapshotReference(
   val specFingerprint: String,
   val match: Double?,
   /**
-   * Which pixel path [match] was minted by — see `ServeDesignReferenceStore.SCORE_VERSION`.
-   *
-   * Carried because the feed's job is to say what *changed between two revisions*, and two numbers
-   * from two kernels are not a change in the design. The scorer moved once, deliberately; a feed
-   * that compared across that move would report every reference in the catalog as having shifted,
-   * in the one batch where none of them had.
+   * Which scorer version minted [match] (`ServeDesignReferenceStore.SCORE_VERSION`), so a scorer
+   * change isn't reported as every reference changing.
    */
   val matchVersion: Int?,
   val order: Int,
@@ -628,26 +620,15 @@ public data class SnapshotReference(
 
 public object CatalogFeedDiff {
   /**
-   * Whether the two revisions' scores are two readings of one instrument.
-   *
-   * Only when **both** sides actually published a score. An absent score is not a rival kernel: the
-   * publish-time scorer is optional (no Playwright, no Chromium, an undecodable pair ⇒ no `match`
-   * at all), so a score appearing or going away is an ordinary, observable catalog change and was
-   * reported as one long before versions existed. Reading a null version as a mismatched kernel
-   * would silence exactly that.
+   * Whether two revisions' scores come from the same scorer. Only when both published a score: a
+   * score appearing or disappearing (the scorer is optional) is an ordinary, reportable change.
    */
   private fun crossKernel(old: SnapshotReference?, new: SnapshotReference?): Boolean =
     old?.match != null && new?.match != null && old.matchVersion != new.matchVersion
 
   /**
-   * Whether the published score actually moved between two revisions of the same reference.
-   *
-   * Two numbers minted by different kernels are not a move. The scorer's pixel path changed once,
-   * deliberately, and every published number changed with it; a feed that compared across that
-   * boundary would report every reference in the catalog as having shifted, in the one batch where
-   * none of them had. What it still reports across it is everything it can actually see — a moved
-   * raster, a renamed label, a reference that appeared or went away, and a score that arrived or
-   * stopped being published.
+   * Whether the published score moved between revisions, ignoring cross-scorer comparisons. Moved
+   * rasters, renamed labels and appearing or disappearing references or scores are still reported.
    */
   private fun matchMoved(old: SnapshotReference, new: SnapshotReference): Boolean =
     !crossKernel(old, new) && old.match != new.match
@@ -685,10 +666,8 @@ public object CatalogFeedDiff {
                 id,
                 old.label,
                 beforeBlob = old.blob,
-                // Keep the live catalog's authored order primary; removals no longer have a live
-                // slot, so
-                // append them in their former authored order instead of interleaving them
-                // unpredictably.
+                // Live previews keep authored order; removals have no live slot, so they follow in
+                // their former order.
                 order = after.previews.size + old.order,
               )
             old != null &&
@@ -868,16 +847,10 @@ public object CatalogFeedXml {
   }
 
   /**
-   * One `<li>` per **component and change kind**, not per preview.
-   *
-   * A publication that moves a component moves every variant of it — `Media/PlayerScreen` is 4
-   * states × 5 screen sizes, so a single source fix produced twenty list entries and forty images
-   * in one item, and readers rendered that as a wall. So a group with more than one member shows
-   * one representative's images and names the rest as links: the item still accounts for every
-   * change, and the reader can open any of them pinned to this publication.
-   *
-   * Images lead with **after**. The interesting half of a change is what it looks like now; a feed
-   * reader that only shows the first image was showing the superseded render.
+   * One `<li>` per component and change kind, not per preview: a fix touching every variant would
+   * otherwise be a wall of entries. Multi-member groups show one representative's images and link
+   * the rest, pinned to this publication. Images lead with "after", since many readers show only
+   * the first.
    */
   private fun description(
     baseUrl: String,
@@ -920,10 +893,8 @@ public object CatalogFeedXml {
             CatalogPreviewChangeKind.METADATA -> false
           }
         if (group.size > 1) {
-          // A deleted preview is absent from the after revision by definition, and a pinned viewer
-          // takes that revision as authoritative — it answers "not published in this revision"
-          // rather than falling back to the tip. So a deleted group's links are pinned to the
-          // revision that still has the pixels.
+          // A deleted preview is absent from the after revision, so its links pin to the revision
+          // that still has it.
           val linkCommit =
             if (kind == CatalogPreviewChangeKind.DELETED) batch.before.commit
             else batch.after.commit
@@ -947,10 +918,8 @@ public object CatalogFeedXml {
     }
     if (references.isNotEmpty()) {
       append("<h3>Design references</h3><ul>")
-      // Keyed by the mapped preview's component as well as the label: a reference label is
-      // presentation text a producer may repeat across components ("Figma", "Default"), and
-      // collapsing two components under one entry would show one of them and silently speak for
-      // the other. The preview id's component slug is the identity that cannot collide.
+      // Grouped by component slug as well as label, since labels like "Figma" repeat across
+      // components.
       for ((key, group) in
         references.groupBy { Triple(componentOf(it.previewId), it.label, it.specChanged) }) {
         val (_, label, specChanged) = key
@@ -976,9 +945,8 @@ public object CatalogFeedXml {
         if (group.size > 1) {
           val names = variantNames(group.map { it.previewId })
           val links = group.mapIndexed { index, change ->
-            // A reference the publication REMOVED cannot be reached through the comparison page at
-            // all: that route resolves the reference from the catalog on disk, so a removed one has
-            // no page to pin. Its preview at the before revision is the closest thing that answers.
+            // A removed reference has no comparison page, so link its preview at the before
+            // revision.
             val href =
               if (change.afterPresent)
                 compareUrl(baseUrl, linkQuery, change.previewId, change.id, batch.after.commit)
@@ -1005,18 +973,16 @@ public object CatalogFeedXml {
   }
 
   /**
-   * Keep the RSS stream a visual changelog. Intermediate renderer-only publishes are not meaningful
-   * to a reader on their own, so carry them forward to the next visual publication as one footnote.
-   * The newest one remains an item: otherwise a quiet catalog has no way to announce its current
-   * renderer version.
+   * Keep the feed a visual changelog: renderer-only publishes fold into the next visual one as a
+   * footnote, except the newest, so a quiet catalog can still announce its renderer version.
    */
   private fun displayedBatches(
     batches: List<CatalogFeedBatch>
   ): List<Pair<CatalogFeedBatch, List<CatalogVersionChange>>> {
     val displayed = mutableListOf<Pair<CatalogFeedBatch, List<CatalogVersionChange>>>()
     val pendingVersions = mutableListOf<CatalogVersionChange>()
-    // Batches arrive newest first, while a version-only publication belongs to the visual event
-    // that follows it in time. Walk history forward, then restore RSS's newest-first order.
+    // Batches arrive newest first; walk forward in time so a version-only publish attaches to the
+    // following visual one, then restore RSS order.
     batches.asReversed().forEachIndexed { index, batch ->
       val visual = batch.hasVisualChange()
       val version = batch.versionChange
@@ -1078,13 +1044,9 @@ public object CatalogFeedXml {
     }
 
   /**
-   * What to call each member of a collapsed group.
-   *
-   * Every id in a group starts with the same component slug, so repeating it once per link buys
-   * nothing: `media-playerscreen__ideal__default__192dp, media-playerscreen__ideal__ambient__192dp,
-   * …` reads as `default__192dp, ambient__192dp, …` once the shared head is dropped. The cut is
-   * taken at a `__` boundary so a name never starts mid-word, and a group that shares no such
-   * boundary — or where dropping it would leave a name empty — keeps its full ids.
+   * Display names for a collapsed group's members: the shared component slug is dropped at a `__`
+   * boundary (`default__192dp, ambient__192dp, …`). Groups with no shared boundary, or where a name
+   * would become empty, keep full ids.
    */
   private fun variantNames(ids: List<String>): List<String> {
     if (ids.size < 2) return ids

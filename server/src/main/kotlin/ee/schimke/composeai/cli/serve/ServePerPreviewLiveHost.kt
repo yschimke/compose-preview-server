@@ -7,57 +7,31 @@ import ee.schimke.composeai.daemon.protocol.StreamFrameParams
 import ee.schimke.composeai.daemon.protocol.UiMode
 
 /**
- * A [ServeHost] that fronts a trusted design-system catalog's baked PNGs with an opt-in live daemon
- * that re-renders each preview from its **own per-preview bundle**
- * (`bundle/previews/<daemon-id>.png` on the `design-artifacts/<system>` branch), rather than from
- * one monolithic catalog `liveBundle` ([ServeCatalogLiveHost]).
+ * A [ServeHost] fronting a trusted catalog's baked PNGs with live daemons that re-render each
+ * preview from its own per-preview bundle (`bundle/previews/<daemon-id>.png`), rather than one
+ * monolithic `liveBundle` ([ServeCatalogLiveHost]).
  *
- * ## Browsing is baked
+ * Browsing is baked, as in [ServeCatalogLiveHost]: only an override the baked PNG can't satisfy
+ * ([CatalogLiveRouting.overridesAffectRender]) routes to [resolveLive], which yields a pooled
+ * single-preview daemon owned by the caller (null falls back to baked). Calls use the mapped daemon
+ * id.
  *
- * Exactly like [ServeCatalogLiveHost]: [previews], the grid, deep links, thumbnails, title, and
- * trust badge all resolve to [baked], and an override-free `/render` (or one replaying only the
- * variant's own sticky theme) replays the baked PNG — so browsing is instant and never wakes a
- * daemon. Only an override the baked PNG can't satisfy — a `?knob.<key>=…` edit, a font scale, a
- * differing theme, … ([CatalogLiveRouting.overridesAffectRender]) — routes to [resolveLive].
- *
- * ## Per-preview live lane
- *
- * [resolveLive] maps a daemon-preview id to a daemon-backed host that serves **exactly that one
- * preview**, materialised from that preview's own bundle and pooled (with idle eviction) by the
- * caller — this host never owns or closes those daemons. `null` ⇒ no per-preview daemon is
- * available (fetch/materialise failed, or the preview ships no live bundle), so the request falls
- * back to the baked PNG. Because the resolved daemon serves a single id, [render] / [renderSvg] /
- * [subscribeStream] all call it with the mapped **daemon** id, not the catalog id.
- *
- * ## Why per-preview
- *
- * Each per-preview bundle carries only its preview's closure over a **maven-coordinate** classpath
- * (re-resolved at materialise time), so the delivery branch ships small addressable re-renderable
- * stickers and the server holds daemons only for the previews actually being edited — the pool
- * reaps idle ones. Contrast [ServeCatalogLiveHost], which launches one daemon carrying the whole
- * catalog.
+ * Per-preview bundles carry only their preview's closure over a Maven-coordinate classpath, so the
+ * server holds daemons only for previews being edited and the pool reaps idle ones.
  */
 class ServePerPreviewLiveHost(
-  /**
-   * Catalog id (`button-elevated__ideal__default__light`) → daemon preview id
-   * (`…ElevatedButtonSticker_Light`). An unmapped id (an Android-only variant) has no per-preview
-   * live lane and always replays baked.
-   */
+  /** Catalog id → daemon preview id. Unmapped ids (Android-only variants) always replay baked. */
   private val alias: Map<String, String>,
   /** The static baked-PNG host — the browse + snapshot surface, keyed by catalog ids. */
   private val baked: ServeHost,
   /**
-   * Resolve a daemon-backed host that re-renders the given **daemon-preview id** from its own
-   * per-preview bundle, or null when none is available. Called only for an alias-mapped id carrying
-   * a pixel-changing override; the returned host is owned + pooled by the caller (this host never
-   * closes it), so repeated calls for the same id should return the pooled instance.
+   * Resolve a pooled daemon host for a daemon-preview id from its own bundle, or null. Only called
+   * for mapped ids with a pixel-changing override; the caller owns the host.
    */
   private val resolveLive: (daemonId: String) -> ServeHost?,
   /**
-   * The whole servable preview set — the baked catalog's previews with the author-declared knobs +
-   * detected-feature flags already grafted on (read from the per-preview bundles' `overrides.json`
-   * sidecars), so the viewer offers the editable controls. The caller assembles this; the host does
-   * not read bundles itself.
+   * The whole preview set: baked previews with knobs and feature flags grafted from the bundles'
+   * `overrides.json` sidecars, assembled by the caller.
    */
   override val previews: List<ServePreview>,
   /**
@@ -69,9 +43,8 @@ class ServePerPreviewLiveHost(
    */
   override val gesturesRenderable: Boolean = false,
   /**
-   * SVG is exportable when either lane can: the baked catalog carries `figma/<slug>.svg` vectors
-   * and a per-preview daemon exports a `compose/figma-svg`. Defaults to the baked host's
-   * capability.
+   * SVG is exportable when either lane can (baked `figma/<slug>.svg` or a daemon's
+   * `compose/figma-svg`); defaults to the baked host's capability.
    */
   override val hasSvgExport: Boolean = baked.hasSvgExport,
   /** Live upstream stream count across the pooled per-preview daemons (supplied by the pool). */
@@ -79,10 +52,8 @@ class ServePerPreviewLiveHost(
 ) : ServeHost {
 
   /**
-   * The underlying baked catalog host, so the HTTP layer's `catalogBundleHost()` can recover its
-   * title / subtitle / trust verdict (which only a [ServeBundleHost] carries) even though the
-   * session is fronted by this composite — otherwise `/api/previews`, the viewer badge, and the
-   * home card would lose the trust badge + card title. Mirrors [ServeCatalogLiveHost.bakedHost].
+   * The underlying baked host, so `catalogBundleHost()` can read its title, subtitle and trust
+   * verdict. Mirrors [ServeCatalogLiveHost.bakedHost].
    */
   internal val bakedHost: ServeHost = baked
 
@@ -130,9 +101,7 @@ class ServePerPreviewLiveHost(
   override fun parityFindingsFor(previewId: String, referenceId: String): List<ParityFindingSet> =
     baked.parityFindingsFor(previewId, referenceId)
 
-  // The known differences ride the baked staging dir, like the tag index and the two feeds above:
-  // they are catalog data, not render output, so a live lane has nothing different to say about
-  // them.
+  // Known differences are catalog data from the baked staging dir, not render output.
   override fun knownDifferences(): ServeKnownDifferences.Document? = baked.knownDifferences()
 
   override fun knownDifferenceArtifact(relativePath: String): ServeKnownDifferences.Artifact =
@@ -147,15 +116,13 @@ class ServePerPreviewLiveHost(
   override fun rcComparePending(): Boolean = baked.rcComparePending()
 
   /**
-   * The baked host's live-only (deferred) ids — listed previews with no PNG behind them, published
-   * for on-demand render. Their requests always route to a per-preview daemon: there is no baked
-   * sticker to replay. Mirrors [ServeCatalogLiveHost.liveOnlyPreviewIds].
+   * The baked host's live-only (deferred) ids, always routed to a daemon. Mirrors
+   * [ServeCatalogLiveHost.liveOnlyPreviewIds].
    */
   override val liveOnlyPreviewIds: Set<String> = baked.liveOnlyPreviewIds
 
-  // The sticker is the baked host's, so the mode it was drawn in is the baked host's answer — the
-  // routing below asks it rather than the id, so an untagged half of a folded light/dark pair
-  // replays instead of waking a daemon. See [ServeBakedTheme].
+  // The sticker is the baked host's, so it answers which mode it was drawn in. See
+  // [ServeBakedTheme].
   override fun bakedTheme(previewId: String): UiMode? = baked.bakedTheme(previewId)
 
   /** Delegated to the baked surface for the same reason [bakedTheme] is. */
@@ -179,11 +146,8 @@ class ServePerPreviewLiveHost(
   override fun canRenderOverridesFor(previewId: String): Boolean = previewId in alias
 
   /**
-   * Per-preview SVG availability (issue #2352): narrows [hasSvgExport] so the viewer doesn't offer
-   * the SVG control where the `.svg` lane would 404. A daemon-twinned id can export via its
-   * per-preview daemon; an unmapped id only when the baked catalog carried its slug vector. Guarded
-   * by [hasSvgExport] so it never advertises more broadly than the session already does. Mirrors
-   * [renderSvg]'s routing.
+   * Per-preview SVG availability (#2352): a daemon-twinned id via its daemon, an unmapped id only
+   * when the baked slug vector exists; never broader than [hasSvgExport]. Mirrors [renderSvg].
    */
   override fun hasSvgExportFor(previewId: String): Boolean =
     hasSvgExport && (previewId in alias || baked.hasSvgExportFor(previewId))
@@ -200,14 +164,9 @@ class ServePerPreviewLiveHost(
         ?.contains(ServeRenderHost.SCROLL_LONG_KIND) == true
 
   /**
-   * The inspection layers, advertised from [alias] membership — the same basis as
-   * [canRenderOverridesFor] and the live stream, and for the same reason: a per-preview daemon is a
-   * full [ServeRenderHost] once resolved, and asking it what it can produce would mean
-   * materialising one (a bundle fetch and a JVM) on every page render, for a checkbox nobody has
-   * ticked yet.
-   *
-   * An id that turns out not to resolve answers `NotFound` and the layer draws nothing, exactly as
-   * [renderScrollPng] and [subscribeStream] already behave for the same case.
+   * Inspection layers advertised from [alias] membership, like [canRenderOverridesFor]: asking a
+   * daemon would mean materialising one per page render. An id that doesn't resolve answers
+   * `NotFound`.
    */
   override val hasA11yOverlay: Boolean = alias.isNotEmpty()
 
@@ -222,9 +181,8 @@ class ServePerPreviewLiveHost(
     baked.hasPublishedTypographyFor(previewId)
 
   /**
-   * Accessibility inspection routes to this preview's own daemon, carrying the viewer's overrides —
-   * the layer has to describe the composition on screen, not the catalog's original pixels. There
-   * is no baked fallback: a static sticker carries no semantics tree.
+   * Accessibility inspection on this preview's own daemon with the viewer's overrides; no baked
+   * fallback, since a sticker has no semantics tree.
    */
   override fun renderA11y(previewId: String, overrides: PreviewOverrides): A11yOutcome {
     val daemonId = alias[previewId] ?: return A11yOutcome.NotFound
@@ -233,23 +191,18 @@ class ServePerPreviewLiveHost(
   }
 
   /**
-   * Typography + theme inspection follows [renderA11y] to the per-preview daemon, then falls back
-   * to the catalog's published annotations for anything the live lane can't answer — an unmapped
-   * id, a daemon that won't resolve, or one with no semantics lane.
-   *
-   * That fallback is gated on the request routing to baked pixels in the first place
-   * ([CatalogLiveRouting.overridesAffectRender], the predicate [render] uses): published bounds
-   * were measured over the baked frame, so under a font scale or a knob edit they would describe a
-   * frame the visitor is not being shown.
+   * Typography and theme inspection follow [renderA11y] to the daemon, falling back to published
+   * annotations when the live lane can't answer, but only when the request would be served baked
+   * pixels ([CatalogLiveRouting.overridesAffectRender]), since published bounds describe the baked
+   * frame.
    */
   override fun renderAnnotations(
     previewId: String,
     overrides: PreviewOverrides,
     layers: Set<String>?,
   ): AnnotationsOutcome {
-    // Published-first only when the request named layers a bundle can fully answer, and the
-    // overrides leave the baked frame standing. See [ServeCatalogLiveHost.renderAnnotations] for
-    // why the unscoped case must keep going live.
+    // Published-first only when the named layers suffice and overrides leave the baked frame; see
+    // [ServeCatalogLiveHost.renderAnnotations].
     if (
       AnnotationKind.publishedLayersSuffice(layers) &&
         !CatalogLiveRouting.overridesAffectRender(
@@ -280,9 +233,8 @@ class ServePerPreviewLiveHost(
   }
 
   /**
-   * Ordinary browsing serves the baked catalog PNG; an override the baked PNG can't represent
-   * routes to that preview's own daemon. An unmapped id, or one whose per-preview daemon can't be
-   * resolved, falls back to baked.
+   * Browsing serves baked PNGs; an override they can't represent routes to the preview's daemon.
+   * Unmapped or unresolvable ids fall back to baked.
    */
   override fun render(previewId: String, overrides: PreviewOverrides): RenderOutcome {
     val daemonId =
@@ -318,10 +270,9 @@ class ServePerPreviewLiveHost(
   }
 
   /**
-   * SVG mirrors [render]'s per-preview routing, with the same baked fallback as
-   * [ServeCatalogLiveHost]: an override-bearing mapped id renders on its daemon; otherwise the
-   * baked catalog's `figma/<slug>.svg` vector serves it, and only when the baked lane has none does
-   * a mapped id fall back to its daemon.
+   * SVG mirrors [render]'s routing with [ServeCatalogLiveHost]'s fallback: override-bearing mapped
+   * ids render on their daemon; otherwise the baked slug vector, and only without one does a mapped
+   * id fall back to its daemon.
    */
   override fun renderSvg(previewId: String, overrides: PreviewOverrides): SvgOutcome {
     CatalogLiveRouting.daemonIdForRender(
@@ -337,11 +288,8 @@ class ServePerPreviewLiveHost(
           return it.renderSvg(daemonId, overrides)
         }
       }
-    // No override — but the baked `figma/<slug>.svg` is slug-keyed + light-preferred, so a
-    // `…__dark`
-    // id would serve the LIGHT vector even though its PNG and live render are dark. Prefer the
-    // daemon's per-variant SVG (carries the variant's uiMode/theme) for any daemon-twinned id; the
-    // baked slug SVG stays the fallback for unmapped ids and if the daemon can't export.
+    // No override: prefer the daemon's per-variant SVG, since the baked slug vector is light-only
+    // and would be wrong for a `…__dark` id. Baked stays the fallback.
     alias[previewId]?.let { daemonId ->
       resolveLive(daemonId)?.renderSvg(daemonId, overrides)?.let { live ->
         if (live !is SvgOutcome.NotFound) return live
@@ -383,9 +331,7 @@ class ServePerPreviewLiveHost(
 
   override fun activeStreamCount(): Int = streamCount()
 
-  /**
-   * The per-preview daemons are owned by the pool; this host only closes the baked browse surface.
-   */
+  /** The pool owns the per-preview daemons; only the baked surface is closed here. */
   override fun close() {
     baked.close()
   }

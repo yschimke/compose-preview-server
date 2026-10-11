@@ -28,78 +28,31 @@ import kotlinx.serialization.json.jsonPrimitive
 /**
  * The authored join between the capability catalog and the component record.
  *
- * ## Why this file exists at all
+ * `ScreenGeneratorComposeExportExecutor` needs a `ComponentRecordFile` for the catalog it exports;
+ * `m3-catalog-components-v1.json` is that record. It is authored rather than generated because the
+ * capability catalog lacks what the generator needs: `jsonType` instead of a Kotlin `typeFqn`, one
+ * `code.symbol` for ids that pick a different callable by property (`m3/card` is `Card`,
+ * `ElevatedCard` or `OutlinedCard` by `variant`), and properties that aren't parameters
+ * (`scrollStateKey`, `stableKey`, `themeTypeScale`).
  *
- * `ScreenGeneratorComposeExportExecutor` needs a `ComponentRecordFile` for the catalog it exports,
- * and until now **no such record existed anywhere in this repository** — `--ui-builder-components`
- * was read by `ComponentRecordSource` and written by nothing, so a stock host refused every Compose
- * export with `NO_COMPONENT_RECORD`. `m3-catalog-components-v1.json` is that record.
+ * Components without an unambiguous Compose mapping are absent rather than guessed: the generator
+ * refuses unknown ids and undeclared properties by name, which is safe, whereas a wrong record
+ * yields Kotlin that doesn't compile. [uncovered] lists them explicitly.
  *
- * ## Why it is authored rather than generated
+ * `ElevatedCard` and `OutlinedCard` have empty `componentIds`: the catalog spells all three cards
+ * `m3/card` and selects by `variant`, so `ScreenDocumentProjection` reaches them by canonical id.
+ * Coverage counts catalog ids, so the tests still balance.
  *
- * It cannot be projected from the capability catalog. That file declares `jsonType` — `"string"`,
- * `"number"` — where the generator needs a Kotlin `typeFqn`; it names one `code.symbol` for ids
- * that select a **different callable** by property (`m3/card` is `Card`, `ElevatedCard` or
- * `OutlinedCard` depending on `variant`); and it carries properties that are not parameters of
- * anything (`scrollStateKey`, `stableKey`, `m3/surface`'s `themeTypeScale`). That missing knowledge
- * is exactly what `CapabilityComposeCodeExporter` encodes in 1,588 lines of `when`; this file is
- * the same knowledge as data, read by the real generator.
+ * `m3/icon`'s `code.call` is authored with `TODO()` for the `ImageVector` (discovery refuses
+ * because the placeholder table lacks one); `ScreenGenerator` treats `code.call` only as a licence
+ * and fills arguments from the document, which always supplies the vector via
+ * `ScreenDocumentProjection.ICON_MEMBERS`.
  *
- * ## What "not covered" means, and why it is safe
- *
- * The record covers the components whose Compose mapping is unambiguous. Everything else — the
- * variant-selecting ids, the Remote Compose embed §5 deliberately keeps out of the Compose exporter
- * — is **absent rather than guessed**. That is safe by the generator's own contract: an id it has
- * no record for refuses by name, and a property the record does not declare refuses by name. The
- * failure mode of an incomplete record is a refusal an operator can read; the failure mode of a
- * wrong one is Kotlin that does not compile in someone else's project.
- *
- * [uncovered] is therefore a checked-in list rather than an absence, so growing the record is a
- * deliberate edit here and a shrinking list, not something that drifts.
- *
- * ## Three records for one catalog id
- *
- * `ElevatedCard` and `OutlinedCard` carry an **empty** `componentIds`, which is not an oversight.
- * The catalog spells all three cards as `m3/card` and picks between them with a `variant` property
- * — its `code.imports` lists all three while its `code.symbol` names one — so there is no catalog
- * id for either to answer to. `ScreenDocumentProjection` selects them by canonical id, which
- * `ScreenNode.componentId` accepts precisely so a record can be reached without one.
- *
- * That is why the two coverage tests below still balance: coverage is counted in catalog ids, and
- * these claim none.
- *
- * ## `m3/icon`, and the one thing this record authors that discovery could not print
- *
- * `m3/icon` was on that list — "`iconKey` resolves to an `ImageVector` the record cannot name" —
- * and it is covered now that `ScreenDocumentProjection.ICON_MEMBERS` names one per catalog key. Its
- * `code.call` is the single entry here that a discovery run would not have produced: `callSite`
- * refuses a component whose required parameter has no placeholder, and `ImageVector` has none.
- *
- * That refusal is about the **placeholder table**, not about calling `Icon`, and the two are
- * conflated in one boolean. `ScreenGenerator` reads `code.call` only as a licence — it builds the
- * argument list from [ComponentRecordFile] parameters and the document's own values, and for an
- * `m3/icon` node the document always supplies the vector. So the call is authored with `TODO()` in
- * the position the record cannot fill: it compiles, it is what a person scaffolding by hand would
- * write, and it does not claim a value the record does not have.
- *
- * ## The lazy three, and the field that let them in
- *
- * `layout/lazy-column`, `layout/lazy-row` and `layout/lazy-grid` were on that list for one shared
- * reason — "`items` is a `LazyListScope` DSL, not a composable slot" — and it was true of the
- * **record shape**, not of the components. `LazyColumn`'s `content` is a plain `LazyListScope.() ->
- * Unit`: not `@Composable`, so `composableSlot` was false and the container refused before anything
- * was emitted, and satisfiable by a bare `{ … }` that does not compile, because `Text` is not a
- * member of `LazyListScope`.
- *
- * Two upstream additions closed it (compose-ai-tools#5216, released in 1.83.0), and the three
- * records use both: `TargetParameter.scopeDslReceiver` on the `content` parameter, which is what
- * makes the slot fillable at all, and `ScreenNode.slotItems` from
- * `ScreenDocumentProjection.SLOT_ITEMS`, which says each child is wrapped in `item { }`. The
- * generator checks the second against the first rather than trusting it.
- *
- * `LazyVerticalGrid` is the one whose `code.call` needs a `TODO()`, for the `m3/icon` reason above:
- * `columns` is required and `GridCells` has no placeholder. Every real document supplies it — the
- * catalog marks `columns` required too — and the projection turns it into `GridCells.Adaptive(…)`.
+ * The lazy containers (`layout/lazy-column`, `-row`, `-grid`) use
+ * `TargetParameter.scopeDslReceiver` on `content` (making the slot fillable) and
+ * `ScreenNode.slotItems` from `ScreenDocumentProjection.SLOT_ITEMS` (wrapping each child in `item {
+ * }`); the generator checks one against the other. `LazyVerticalGrid`'s call needs `TODO()` for
+ * `columns` (no `GridCells` placeholder); the projection supplies `GridCells.Adaptive(…)`.
  */
 class M3CatalogComponentRecordTest {
 
@@ -128,26 +81,18 @@ class M3CatalogComponentRecordTest {
   /** Capability ids the record deliberately does not cover yet, each with the reason. */
   private val uncovered =
     mapOf(
-      // Not "items is a CarouselScope DSL" — that was this list's own guess and it is wrong.
-      // `HorizontalUncontainedCarousel(state = rememberCarouselState { 5 }, …) { CarouselItem() }`
-      // is how m3-catalog calls it: the content is a trailing composable slot taking an item
-      // index, not a scope DSL, so `ScreenNode.slotItems` does not reach it. Two things block it,
-      // and both are lambdas — `rememberCarouselState { n }` is a factory whose argument is one,
-      // and the slot is called per index rather than per child.
+      // Not a scope DSL: the content is a trailing composable slot taking an item index, so
+      // `slotItems` doesn't reach it. Both blockers are lambdas: `rememberCarouselState { n }` and
+      // the per-index slot.
       "layout/horizontal-carousel" to
         "takes a CarouselState from rememberCarouselState { n }, whose argument is a lambda, and its content slot is called per item index rather than per child (compose-ai-tools#5218)",
-      // Not a component at all in the generated source: a loop over the design's own rows becomes
-      // a `forEach` around the template's call, which is the Compose exporter's to write and not
-      // a symbol discovery could find. The record covers components the generator calls by name.
+      // Not a component: a loop over the design's rows becomes a `forEach` the exporter writes, not
+      // a symbol discovery could find.
       "layout/for-each" to
         "a loop over the design's rows, generated as a forEach around its template rather than as a call to any component",
-      // Not the factory. `rememberDatePickerState` carries a `$default` bridge, so every parameter
-      // defaults and the no-arg call compiles — the same shape a dozen covered components use. What
-      // blocks it is one property: `selectedDate` is an ISO-8601 `YYYY-MM-DD` string and the
-      // factory
-      // takes `initialSelectedDateMillis: Long?`. Turning one into the other is a computation, and
-      // a
-      // wrong date that compiles is the failure this projection exists to refuse (#441).
+      // Not the factory (`rememberDatePickerState` has a `$default` bridge): `selectedDate` is an
+      // ISO-8601 string while the factory takes `initialSelectedDateMillis: Long?`, a conversion
+      // this projection refuses to guess.
       "m3/date-picker" to
         "selectedDate is an ISO-8601 YYYY-MM-DD string and rememberDatePickerState takes " +
           "initialSelectedDateMillis: Long?; converting between them is a computation this " +
@@ -155,18 +100,15 @@ class M3CatalogComponentRecordTest {
       "m3/dialog" to
         "AlertDialog is a window and needs an onDismissRequest a design cannot write; the builder draws and emits its surface inline instead",
       "m3/snackbar-host" to "takes a SnackbarHostState, which no ScreenValue expresses",
-      // Also not the factory, and unlike the date picker nothing about the component blocks it:
-      // `hour`, `minute` and `is24Hour` map straight onto `rememberTimePickerState`'s defaulted
-      // parameters, and `mode` picks between `TimePicker` and `TimeInput` exactly as `m3/card`'s
-      // `variant` picks between its three. What is missing is upstream of this file — the record
-      // carries neither callable, so a COMPONENT_VARIANTS entry would name an id that cannot
-      // resolve and the export would refuse with NO_COMPONENT_RECORD. Coverable as soon as the
-      // record carries them (#441).
+      // Nothing about the component blocks it (`hour`, `minute`, `is24Hour` map onto
+      // `rememberTimePickerState`, and `mode` picks `TimePicker` / `TimeInput` like `m3/card`'s
+      // variant), but the record carries neither callable yet, so a variant entry would resolve to
+      // nothing.
       "m3/time-picker" to
         "the record carries neither TimePicker nor TimeInput, so no variant entry could name a " +
           "callable that resolves",
-      // Declared from compose-ui-builder 3.95.0 (#581). The call is to a declaration flexpress
-      // generates at export, which the projection records itself (`VariableFontTextRecord`).
+      // The call is to a declaration flexpress generates at export, which the projection records
+      // itself (`VariableFontTextRecord`).
       "m3/variable-font-text" to
         "calls a declaration flexpress generates at export; the projection records it, no catalog record could name it",
       "remote-compose/document" to "typed embed, kept out of the Compose exporter by design",
@@ -225,23 +167,12 @@ class M3CatalogComponentRecordTest {
   }
 
   /**
-   * The authored record and real discovery name the same JVM facade for every symbol they share.
-   *
-   * A `canonicalId` is `<module>/<jvmOwner>.<name>`, so the facade is the record's IDENTITY, not a
-   * cosmetic field: `callableAliases()` derives the alias a published catalog resolves by from it,
-   * and `ScreenDocumentProjection`'s variant table names components by the same string. Three of
-   * the thirty-four entries here named a facade that **does not exist** in Material —
-   * `HorizontalDividerKt`, `FilterChipKt` and `TextFieldKt.OutlinedTextField`, where the classes
-   * are `DividerKt`, `ChipKt` and `OutlinedTextFieldKt` — and nothing noticed, because every
-   * exported call is written from `symbol.callable` and `code.call`, which were right.
-   *
-   * It surfaced when the variant table started matching on these ids and an authored **outlined**
-   * text field refused: the projection had been written to agree with this file, so the two were
-   * consistent with each other and wrong about Material. Two artefacts agreeing is not a check.
-   *
-   * This is the check. `m3-catalog-generated-record-v1.json` is produced by discovery reading the
-   * class files, so where the two records name the same symbol they must name the same owner, and a
-   * hand edit that invents a facade fails here rather than three lanes downstream.
+   * The authored record and real discovery must name the same JVM facade for shared symbols. A
+   * `canonicalId` is `<module>/<jvmOwner>.<name>`, so the facade is the record's identity: aliases
+   * and the projection's variant table derive from it. Hand-authored entries once named facades
+   * that don't exist (e.g. `HorizontalDividerKt` for `DividerKt`) unnoticed, since calls use
+   * `symbol.callable`; `m3-catalog-generated-record-v1.json` comes from discovery reading class
+   * files, so it is the check.
    */
   @Test
   fun `the authored record names the facade discovery found`() {
@@ -283,11 +214,9 @@ class M3CatalogComponentRecordTest {
 
   @Test
   fun `a screen built from covered ids generates against this record`() {
-    // The end-to-end claim: a design using the authored ids becomes Kotlin through
-    // `ScreenDocumentProjection` and the real `ScreenGenerator`, with no hand-written emitter
-    // anywhere on the path. `layout/column` is filled through its **catalog** slot name
-    // (`children`), which is the case the authored slot mapping exists for — a document that used
-    // `content` here would pass even with the mapping deleted.
+    // End to end: a design using the authored ids becomes Kotlin through `ScreenDocumentProjection`
+    // and the real `ScreenGenerator`. `layout/column` is filled through its catalog slot name
+    // (`children`), the case the slot mapping exists for.
     val document =
       ScreenGeneratorScreenFixture.document()
         .copy(
@@ -318,9 +247,8 @@ class M3CatalogComponentRecordTest {
                     ),
                 ),
               "divider" to DesignNodeV1(id = "divider", componentId = "m3/horizontal-divider"),
-              // A picture (#477's `asset/image` row). Its bytes live in the design's asset store
-              // and no generated Kotlin can carry them, so the record lane writes the real
-              // `Image(...)` with a placeholder painter and says so in a warning.
+              // A picture: its bytes live in the design's asset store, so the record lane writes
+              // `Image(...)` with a placeholder painter and a warning.
               "photo" to
                 DesignNodeV1(
                   id = "photo",
@@ -332,10 +260,8 @@ class M3CatalogComponentRecordTest {
                       "contentScale" to EnumValueV1("crop"),
                     ),
                 ),
-              // A selection control, which is the shape the record could not carry until now: its
-              // required `onCheckedChange` is nullable, so a call site can write `null` for it, and
-              // `checked` is an ordinary boolean the document supplies. Included here because a
-              // record nothing generates against is a table nobody has checked.
+              // A selection control: its required `onCheckedChange` is nullable (written as `null`)
+              // and `checked` is a boolean from the document.
               "agree" to
                 DesignNodeV1(
                   id = "agree",

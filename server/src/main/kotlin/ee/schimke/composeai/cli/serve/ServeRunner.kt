@@ -52,12 +52,9 @@ import kotlinx.serialization.json.jsonObject
 import okio.Path.Companion.toPath
 
 /**
- * The delivery-system id from which a Builder catalog's published policy and component record load.
- *
- * A native mapping is also the necessary source relationship: the mapped served catalog owns the
- * bundle whose library the Builder adapter represents, and therefore owns that adapter's published
- * policy. Most catalogs are their own source. Wear is deliberately not: a design names `wear-m3`,
- * while the `wear-m3-catalog` delivery branch owns its policy and Android bundle.
+ * The delivery-system id a Builder catalog's published policy and component record load from.
+ * Usually the catalog itself; Wear is not: designs name `wear-m3` while the `wear-m3-catalog`
+ * branch owns the policy and Android bundle.
  */
 internal fun uiBuilderPublishedSourceSystem(
   builderSystem: String,
@@ -65,17 +62,10 @@ internal fun uiBuilderPublishedSourceSystem(
 ): String = nativeCatalogs[builderSystem] ?: builderSystem
 
 /**
- * The component record a Builder catalog composes and exports against: the one its delivery
- * system's live catalog holds ([served], keyed by delivery system), else the one fetched for it at
- * startup ([startup], keyed by Builder id).
- *
- * Keyed by the delivery system, never the Builder id, because the two namespaces overlap. Wear is
- * where they collide: the Builder catalog `wear-m3` is delivered as `wear-m3-catalog`, while a
- * served catalog named `wear-m3` also exists (compose-ai-tools' own Wear harness, a different and
- * much smaller record). Asking the catalog store for `wear-m3` handed the owned Builder catalog the
- * harness's record once that catalog had loaded; its published `ui-builder.json` then would not
- * compose, the catalog fell back to its built-in definition, and — owned, so with no built-in seeds
- * — the New design chooser offered only `blank`.
+ * The component record a Builder catalog composes and exports against: its delivery system's live
+ * record ([served], keyed by delivery system), else the one fetched at startup ([startup], keyed by
+ * Builder id). Never keyed by Builder id against [served]: a separate served catalog named
+ * `wear-m3` (a small harness) would otherwise hand the owned Builder catalog the wrong record.
  */
 internal fun uiBuilderCatalogRecord(
   builderSystem: String,
@@ -86,31 +76,17 @@ internal fun uiBuilderCatalogRecord(
   served(uiBuilderPublishedSourceSystem(builderSystem, nativeCatalogs)) ?: startup(builderSystem)
 
 /**
- * `compose-preview serve`, from the first port bind to the last shutdown hook.
- *
- * This is the body that used to live in `:cli`'s `ServeCommand`. It reaches its configuration
- * through [ServeOptions] and its build through [ServeBuildHost] — `by options`, so every flag reads
- * exactly as it did when it was a private val on the command — and it never sees `args`, `--help`,
- * the usage text, or a Gradle type.
- *
- * The point is not tidiness. While this code sat in `:cli`, the module boundary #4599 drew was true
- * of every serve file *except* the one that starts the server, and the seam register carried 92
- * symbols for this file alone. A preview server you cannot start without the CLI is not separable,
- * whatever the build files say.
+ * `compose-preview serve`, from the first port bind to the last shutdown hook. Configuration comes
+ * through [ServeOptions] and builds through [ServeBuildHost]; it never sees argv, help text or a
+ * Gradle type, so the server is startable without the CLI.
  */
 public class ServeRunner(
   private val options: ServeOptions,
   private val build: ServeBuildHost,
   /**
-   * Called once with the discovery this run is serving, before anything is hosted from it.
-   *
-   * The seam the `ui` command needs and nothing else uses: `--ui-builder-components` names a
-   * component-record path when the options are parsed, which is before any Gradle has run and so
-   * before the module — and its build directory — is known. This is where that path gets filled in.
-   * Defaulted to a no-op, because a server that is merely hosting has nothing to do here.
-   *
-   * Deliberately not a general event hook. It fires on the discovery path only, exactly once, and a
-   * throwing callback fails the run: it is configuration the caller supplied, not an observer.
+   * Called once with the discovery this run serves, before anything is hosted. Exists for the `ui`
+   * command, whose `--ui-builder-components` path is only known after the build. Not a general
+   * event hook: it fires once on the discovery path, and a throw fails the run.
    */
   private val onDiscovered: (ServeDiscovery) -> Unit = {},
 ) : ServeOptions by options, ServeBuildHost by build {
@@ -140,20 +116,16 @@ public class ServeRunner(
         "serve: catalog blob cache is a temp dir — it will not survive a restart. " +
           "Set --catalog-cache-dir (SERVE_CATALOG_CACHE_DIR) to a mounted volume to keep it."
       )
-      // Not configured, and `/status.json` says so: a temp pool fills and serves within-process
-      // hits
-      // exactly like a real one, so without the flag a box that never configured a directory looks
-      // identical to a box whose cache is working.
+      // Flagged as not configured so `/status.json` can tell a temp pool from a working durable
+      // cache.
       CatalogBlobPool(temp, maxBytes = maxBytes, persistenceConfigured = false)
     }
   }
 
   private val themeCacheStore: ThemeCacheStore? by lazy {
     val requested = themeCacheDirFlag
-    // `none` disables persistence outright, matching --trust-store's convention in this command.
-    // A sentinel is needed because *unset* cannot mean "off": the derived default lands beside
-    // --catalogs-file, which on the prebuilt image is the durable `preview_config` volume — so an
-    // untouched deployment would quietly fill its configuration volume with an 8 GB render cache.
+    // `none` disables persistence. A sentinel is needed because unset derives a default beside
+    // `--catalogs-file`, which on the prebuilt image is the config volume.
     if (requested == "none") return@lazy null
     val explicit = requested?.let(::File)
     val preferred =
@@ -167,10 +139,8 @@ public class ServeRunner(
     val maxBytes = themeCacheMaxBytesFlag ?: ThemeCacheStore.DEFAULT_MAX_BYTES
     System.err.println("serve: theme cache at $preferred (cap ${maxBytes / (1024 * 1024)} MB)")
     ThemeCacheStore(preferred, maxBytes = maxBytes).also { store ->
-      // Before anything opens a generation, so eviction can never race a live write. Renders
-      // survive a release now (see [ThemeCacheFingerprint]) and the load-time sample is what
-      // catches a renderer that moved — this is the lever for the case where the operator already
-      // knows it moved and would rather not wait to be told.
+      // Before any generation opens, so eviction never races a live write. For when the operator
+      // already knows the renderer changed (see [ThemeCacheFingerprint]).
       if (themeCacheEvictRequested) {
         val evicted = store.evictAll()
         System.err.println("serve: theme cache evicted on request — $evicted generation(s) removed")
@@ -189,10 +159,8 @@ public class ServeRunner(
   private val agentGrantMaxTtlSeconds: Long =
     agentGrantMaxTtlFlag
       ?.let {
-        // A typo must not silently become the default. `--agent-grant-max-ttl 30m` mistyped is an
-        // operator asking for half an hour and getting eight — sixteen times the ceiling they
-        // meant, on the one setting that bounds how long a minted credential lives. The client's
-        // `--ttl` already fails loudly; so does this.
+        // A typo must fail loudly, not fall back to the default: this bounds how long a minted
+        // credential lives.
         AgentGrantProtocol.parseDurationSeconds(it)
           ?: throw IllegalArgumentException(
             "--agent-grant-max-ttl '$it' is not a duration — try 90m, 2h, or a number of seconds"
@@ -203,80 +171,63 @@ public class ServeRunner(
 
   private val agentGrantMaxScope: AgentGrantScope =
     agentGrantScopesFlag?.let {
-      // The worst of this family to default silently: `--agent-grant-scopes preivew` is an operator
-      // narrowing the box to read-only, and the default it would fall back to is `preview,live`. A
-      // typo would have *widened* what every grant on the host may do, which is the opposite of the
-      // intent that made them type the flag.
+      // A typo must fail: the fallback default (`preview,live`) would widen grants when the
+      // operator meant to narrow them.
       AgentGrantScope.parseHighest(it)
         ?: throw IllegalArgumentException(
           "--agent-grant-scopes '$it' is not a scope list — use preview, live, or playground"
         )
     } ?: AgentGrantScope.DEFAULT_MAX
 
-  // ---- flag values the server parses for itself ----
-  //
-  // Each of these arrived as a raw string from the CLI. Parsing them here rather than there is what
-  // keeps `AgentGrantCapability`, `AgentGrantScope`, `ServeStartupBundles.Spec` and the
-  // two cache stores off `:cli`'s classpath: the command reads flags, the server decides what they
-  // mean. The operator-facing error messages are unchanged and still fire during startup.
+  // Raw flag strings parsed server-side, keeping these types off `:cli`'s classpath; errors still
+  // fire at startup.
   private val agentGrantCapabilities: Set<AgentGrantCapability> =
     agentGrantCapabilitiesFlag?.let {
-      // Throws on an unknown name, same as `--agent-grant-scopes`: a typo here would silently
-      // withhold a capability the operator believes they turned on, and they would go looking for
-      // the bug in the agent.
+      // Throws on an unknown name, like `--agent-grant-scopes`, rather than silently withholding a
+      // capability.
       AgentGrantCapability.parseAll(it)
     } ?: emptySet()
 
   /**
-   * The one live-seat budget for this server, shared by the HTTP stream lane and by every catalog
-   * daemon pool. Built here rather than inside [ServeHttpServer] so the pools — which are
-   * constructed while catalogs load, before the server exists — charge the same budget. Two
-   * separate limiters would each believe it owned the whole box.
+   * The one live-seat budget, shared by the HTTP stream lane and every catalog daemon pool. Built
+   * here because pools are constructed before [ServeHttpServer] exists; two limiters would each
+   * think they owned the box.
    */
   private val liveSeatLimiter: LiveSeatLimiter = LiveSeatLimiter(liveSeats)
 
   /**
-   * The warm sandbox workers every Android catalog daemon on this server adopts from, when
-   * `--spare-sandboxes` asks for any ([ServeSpareSandboxes]). Built here, beside the seat budget,
-   * for the same reason: the catalog pools that spawn daemons exist before the server does, and
-   * they all draw on this one pool. Closed with the server's other closeables.
+   * Warm sandbox workers ([ServeSpareSandboxes]) every Android catalog daemon adopts from; built
+   * here beside the seat budget for the same reason.
    */
   private val spareSandboxPool: ServeSpareSandboxes? =
     ServeSpareSandboxes.forBudget(options.spareSandboxes)
 
   /**
-   * How every daemon-backed host this runner opens forks its daemon: through the spare pool when
-   * there is one, else `ServeRenderHost.open`'s own default. One value, so a session reopened on
-   * resume gets the same treatment as the one opened at startup.
+   * How every daemon-backed host forks its daemon (spare pool if any), so resumed sessions match
+   * startup ones.
    */
   private val renderSessions: RenderSessionFactory =
     spareSandboxPool?.sessions ?: SubprocessRenderSessions
 
   /**
-   * Why each catalog's live-lane launch failed, so `/status.json` and the viewer banner can name
-   * the cause instead of the one fixed "could not be started" sentence every cause collapsed into.
-   * Written by the bundle builders below (the daemon's own log lines), read by [ServeCatalogStore]
-   * when it composes the degradation. See [LiveLaneLaunchLog].
+   * Why each catalog's live-lane launch failed, written by the bundle builders and read by
+   * [ServeCatalogStore] so the degradation names the cause. See [LiveLaneLaunchLog].
    */
   private val liveLaneLaunchLog: LiveLaneLaunchLog = LiveLaneLaunchLog()
 
   /**
-   * Where each `--catalogs` system's fetched, trust-verified `liveBundle` landed on disk, filled in
-   * by [registerCatalogs] as catalogs load (and refreshed in place when a branch head moves). Read
-   * by the playground's `--playground-bundle <system>` form so a compile classpath can come from a
-   * catalog this box already serves instead of a hand-placed copy (issue #3212). Concurrent:
-   * written by catalog load / refresh threads, read from request threads.
+   * Where each `--catalogs` system's verified `liveBundle` landed, updated by [registerCatalogs] on
+   * load and refresh. Lets `--playground-bundle <system>` use a served catalog's bundle. Written by
+   * load threads, read by request threads.
    */
   private val catalogLiveBundles =
     java.util.concurrent.ConcurrentHashMap<String, List<CatalogLiveBundle>>()
 
   /**
-   * Which daemon-preview ids of a live catalog can run the `cmp-android` player, keyed by the
-   * session state's descriptor — the one key [openHost] has, since [ServeSessionState] is
-   * compose-ai-tools' and carries no field for it. Filled when a catalog's live bundle is
-   * materialised, from that bundle's manifest ([ServeRcPlayerIds.bundleCarriesCmpAndroidPlayer]); a
-   * state with no entry (a source build, a plain project) never offers the lane. Keyed by
-   * descriptor rather than by system so a suspended session resumes with the answer it had.
+   * Which daemon-preview ids of a live catalog can run the `cmp-android` player, keyed by session
+   * descriptor (the only key [openHost] has). Filled from the bundle manifest
+   * ([ServeRcPlayerIds.bundleCarriesCmpAndroidPlayer]); keyed by descriptor so a resumed session
+   * keeps its answer.
    */
   private val cmpAndroidPlayerByDescriptor =
     java.util.concurrent.ConcurrentHashMap<String, (String) -> Boolean>()
@@ -293,8 +244,8 @@ public class ServeRunner(
   }
 
   /**
-   * Retire the previous generation's entry only after this one published: until then the old
-   * session is the one serving, and it may still suspend and reopen from its own descriptor.
+   * Retire the previous generation's entry only after this one published, since the old session may
+   * still suspend and reopen.
    */
   private fun commitCmpAndroidPlayer(system: String, descriptor: File) {
     val key = descriptor.absolutePath
@@ -309,11 +260,9 @@ public class ServeRunner(
   }
 
   /**
-   * A served catalog's verified liveBundle, as the playground sees it: where the bytes landed and
-   * which renderer they declare. [backend] is read once at load time (it costs one bundle-metadata
-   * read, off the request path) because the runtime catalog selector needs it to decide which modes
-   * a catalog can offer *before* anyone pays for a full classpath resolve. Null when the bundle's
-   * metadata could not be read at all — such a catalog is simply not offered.
+   * A served catalog's verified liveBundle as the playground sees it. [backend] is read once at
+   * load so the runtime selector knows which modes a catalog offers before resolving a classpath;
+   * null means unreadable metadata, and the catalog is not offered.
    */
   private data class CatalogLiveBundle(
     val id: String,
@@ -326,9 +275,8 @@ public class ServeRunner(
     if (primary) system else "$system@$module"
 
   /**
-   * The parsed, validated sandbox policy — or a startup failure. Parse errors are fatal rather than
-   * fail-soft: an operator who asked for containment and got a typo must not silently be handed an
-   * unsandboxed playground.
+   * Parsed sandbox policy, or a startup failure: a typo must never silently yield an unsandboxed
+   * playground.
    */
   private val playgroundSandbox: Result<PlaygroundSandbox> =
     PlaygroundSandbox.parseProfile(playgroundSandboxSpec).mapCatching { parsed ->
@@ -345,19 +293,16 @@ public class ServeRunner(
     }
 
   /**
-   * The live producer-trust store, shared by the upload store, the catalog store, and the trust
-   * admin. Was a `by lazy` snapshot read once at startup, which meant an edit to producers.json —
-   * or an admin change — needed a restart to take effect; consumers now read through this holder on
-   * every verification instead.
+   * The live producer-trust store, shared by uploads, catalogs and the trust admin; consumers read
+   * through it on every verification so edits apply without a restart.
    */
   private val trustStore: MutableTrustStore by lazy {
     MutableTrustStore(loadTrustStore(), source = trustStoreFile)
   }
 
   /**
-   * The running branch poller, when there is one. Held so a trust revocation can invalidate the
-   * remembered branch heads of the catalogs it just retired ([retireNewlyUntrusted]); the refresher
-   * is built before the server and reaches it only as a closeable, so there's no other handle.
+   * The running branch poller, held so a trust revocation can invalidate retired catalogs' branch
+   * heads ([retireNewlyUntrusted]).
    */
   @Volatile private var activeRefresher: ServeCatalogRefresher? = null
 
@@ -367,24 +312,16 @@ public class ServeRunner(
   }
 
   /**
-   * Whether the image lane will actually come up: opted in **and** given a repository to gate on. A
-   * `--accept-images` that [openImageLane] is going to refuse is not a lane, so it must not be what
-   * keeps an otherwise empty server from saying it has nothing to serve.
+   * Whether the image lane will actually come up (opted in and given a gating repo), so a lane
+   * [openImageLane] will refuse doesn't keep an empty server alive.
    */
   private val imageLaneConfigured: Boolean
     get() = acceptImages && !imageUploadRepository.isNullOrBlank()
 
   /**
-   * Whether the UI builder is a lane in its own right on this host.
-   *
-   * It registers no session and hosts no preview, so the empty-server check used to conclude there
-   * was nothing to serve and exit — which made `ui --no-project`, a server whose entire job is the
-   * builder, refuse to start. It is the same case as `--accept-docs`: a real surface that simply
-   * has no sessions, ever.
-   *
-   * Both halves are required, for the reason [imageLaneConfigured] states about its own: assets
-   * that are not there serve nothing, and `--ui-builder-state-dir none` serves an editor that
-   * cannot save, so neither is a lane that should keep an otherwise empty server alive.
+   * Whether the UI builder is a lane in its own right: it hosts no session, so without this `ui
+   * --no-project` would exit as empty. Requires both assets and a state dir; otherwise it serves
+   * nothing usable.
    */
   private val uiBuilderLaneConfigured: Boolean
     // The bundled check only: resolving a pin fetches, and this is asked before startup has
@@ -394,31 +331,27 @@ public class ServeRunner(
         uiBuilderStateDirFlag != "none"
 
   /**
-   * Whether [openUiBuilderService] actually returned a lane, set once [bringUpServer] knows.
-   *
-   * The static shell is still served when it did not — `--ui-builder-state-dir none` deliberately
-   * offers an editor that cannot save — but a shell whose design API is absent is not somewhere to
-   * SEND anyone. Without this, a `ui` invocation whose builder failed while its project session
-   * survived still carried `--open-browser` and a `/ui-builder/…` open path, so the fail-soft host
-   * came up by opening the one surface that did not work instead of the previews that did.
+   * Whether [openUiBuilderService] actually returned a lane, set by [bringUpServer]. The static
+   * shell is served either way, but a broken builder must not be the page `--open-browser` sends
+   * the user to.
    */
   @Volatile private var uiBuilderLaneOpen: Boolean = false
 
   /**
-   * The UI-builder lane's catalog refresh, once the lane is open. The catalog refresher is built
-   * before the lane, so it reaches the lane through this rather than being handed it.
+   * The UI-builder lane's catalog refresh, reached through this because the refresher is built
+   * first.
    */
   @Volatile private var uiBuilderPublishedRefresh: ((String) -> Unit)? = null
 
   /**
-   * Each shadowed builder catalog's latest report ([ServeOptions.uiBuilderShadowCatalogs]), by
-   * catalog id: recomputed whenever the catalog composes, and read by `/admin/ui-builder/config`.
+   * Each shadowed builder catalog's latest report ([ServeOptions.uiBuilderShadowCatalogs]), read by
+   * `/admin/ui-builder/config`.
    */
   private val uiBuilderShadowReports = ConcurrentHashMap<String, ServeUiBuilderShadowReportDto>()
 
   /**
-   * What is wrong with each catalog-owned builder catalog ([UiBuilderOwnedCatalogHealth]); set when
-   * the UI-builder lane starts, read by `/status`, the designs page and `/admin/ui-builder/config`.
+   * Problems with each catalog-owned builder catalog ([UiBuilderOwnedCatalogHealth]); read by
+   * `/status`, the designs page and admin config.
    */
   @Volatile private var uiBuilderCatalogHealth: UiBuilderOwnedCatalogHealth? = null
 
@@ -426,13 +359,8 @@ public class ServeRunner(
     uiBuilderCatalogHealth?.problems().orEmpty()
 
   /**
-   * Whether `/` has anything to show, set alongside [uiBuilderLaneOpen].
-   *
-   * `handleLanding` answers the front-door index when this server publishes catalogs, and otherwise
-   * leases the default session — which on a host with neither is a blank id and a 404. The
-   * only-surface guard deliberately keeps a `--accept-docs` / `--accept-images` /
-   * `--accept-bundles` / `--admin-token` host alive with no session and no catalog, so `/` is
-   * exactly the wrong place to send that host's operator.
+   * Whether `/` has anything to show (catalogs or a default session), set with [uiBuilderLaneOpen].
+   * A docs/images/admin-only host has neither, so `/` would 404.
    */
   @Volatile private var landingServesSomething: Boolean = false
 
@@ -441,12 +369,9 @@ public class ServeRunner(
     path == "/ui-builder" || path.startsWith("/ui-builder/")
 
   /**
-   * The page to open and to print, which is [openBrowserPath] unless it names a builder that is not
-   * there — then the landing page, which lists whatever this host does serve.
-   *
-   * Normalised to the trailing slash as well. `/ui-builder` redirects to `/ui-builder/`, and until
-   * that redirect carried the query with it a printed token-bearing link arrived signed out; the
-   * redirect is fixed, and printing the canonical form means the URL does not depend on it.
+   * The page to open and print: [openBrowserPath], unless it names an absent builder (then `/` or
+   * `/status`). Normalised to the trailing slash so the printed link doesn't depend on the
+   * redirect.
    */
   private val effectiveOpenPath: String
     get() =
@@ -454,30 +379,16 @@ public class ServeRunner(
         !isUiBuilderPath(openBrowserPath) -> openBrowserPath
         uiBuilderLaneOpen ->
           if (openBrowserPath == "/ui-builder") "/ui-builder/" else openBrowserPath
-        // The builder is not there. `/` when it has something to show, and `/status` when it does
-        // not: the status page leases no session, so it is the one route a
-        // surviving-but-sessionless
-        // host can always answer, and it names the lanes that survived.
+        // `/status` leases no session, so a sessionless host can always answer it.
         landingServesSomething -> "/"
         else -> "/status"
       }
 
   /**
-   * Whether nothing but the builder could keep this server alive — the CONFIGURED half.
-   *
-   * [uiBuilderLaneConfigured] answers a question about configuration, and the empty-server check
-   * runs long before [openUiBuilderService] has tried anything — so a builder that is configured
-   * but cannot open (an unwritable state directory, corrupt saved state, a `--ui-builder-catalogs`
-   * naming a catalog with no packaged adapter) got past the check and left `ui --no-project`
-   * serving static assets whose design API was absent, instead of failing the command. This is what
-   * [bringUpServer] re-asks once the answer is known, so the failure is fatal exactly when there is
-   * nothing else to be.
-   *
-   * The **sessions** are the other half, and they are not a flag: a `--bundle`, a `--bundles` or a
-   * discovered project registers one, and a server holding any of them has previews to serve
-   * whatever the builder did. [bringUpServer] adds that condition from the registry, because it is
-   * the only place the answer exists — asking it here would make a builder failure kill a host that
-   * is serving perfectly well, which is the opposite of what this check is for.
+   * Whether nothing but the builder could keep this server alive (the configured half).
+   * [bringUpServer] re-asks once the builder has tried to open, so a builder that fails is fatal
+   * only when it was the sole surface. Registered sessions are the other half, checked there from
+   * the registry.
    */
   private val uiBuilderIsOnlyConfiguredSurface: Boolean
     get() =
@@ -488,9 +399,8 @@ public class ServeRunner(
         adminToken == null
 
   /**
-   * The parsed `--catalogs-file`, or the empty config when none is set / it can't be read. A
-   * malformed config is reported and treated as empty rather than fatal: a box whose config file
-   * got truncated should still come up on its flag-supplied catalogs.
+   * The parsed `--catalogs-file`, or empty. A malformed file is reported and treated as empty so
+   * the box still comes up on its flag-supplied catalogs.
    */
   private val catalogsConfig: ServeCatalogsConfig by lazy {
     val file = catalogsFile ?: return@lazy ServeCatalogsConfig.EMPTY
@@ -506,36 +416,25 @@ public class ServeRunner(
   }
 
   /**
-   * The **listed** catalog systems that actually registered (one can fail to fetch). Filled by
-   * [registerCatalogs]; surfaced on the landing page as nav links so the public front door lists
-   * the served design systems instead of hiding them behind the query. Unlisted catalogs register
-   * as sessions but never land here, so they stay off the nav.
+   * Listed catalog systems that registered, shown as landing-page nav links. Unlisted catalogs
+   * never land here.
    */
   private val registeredCatalogs = mutableListOf<String>()
 
-  /**
-   * The unlisted app catalogs (`--catalogs-unlisted`) that registered successfully. Served at
-   * `/<system>/` like [registeredCatalogs] but surfaced under the front page's separate "Apps"
-   * section instead of the "Design systems" nav.
-   */
+  /** Unlisted app catalogs that registered, shown under the front page's "Apps" section. */
   private val registeredUnlistedCatalogs = mutableListOf<String>()
 
   /**
-   * Recent daemon **startup failures** — the render/live daemon a session tried to (re)open but
-   * couldn't. [openHost] (the single choke point every registry-driven relaunch funnels through)
-   * records into this instead of silently dropping the exception, so `/status` + `/status.json` can
-   * surface what has been going wrong without scraping stderr.
+   * Recent daemon startup failures recorded by [openHost], surfaced on `/status` instead of only
+   * stderr.
    */
   private val daemonLog = DaemonStartupLog()
 
   /**
-   * Per-catalog per-preview daemon pools built by [buildTrustedCatalogBundle], keyed by system.
-   * Each backs a live catalog's default (per-preview) render lane and outlives suspend/resume, so
-   * it's owned here — torn down at server shutdown ([catalogPerPreviewPoolsCloseable] in the
-   * [bringUpServer] closeables) rather than by the session host's [close][ServeHost.close] (the
-   * pool is referenced by the state's closure, not the host). Keyed so a [ServeCatalogRefresher]
-   * re-load closes the **previous** pool for that system instead of leaking its per-preview
-   * daemons.
+   * Per-catalog per-preview daemon pools from [buildTrustedCatalogBundle], keyed by system. Owned
+   * here because they outlive suspend/resume; closed at shutdown
+   * ([catalogPerPreviewPoolsCloseable]), and a refresher re-load closes the previous pool for its
+   * system.
    */
   private val catalogPerPreviewPools =
     java.util.concurrent.ConcurrentHashMap<String, AutoCloseable>()
@@ -546,22 +445,15 @@ public class ServeRunner(
   }
 
   /**
-   * Serializes catalog session publication and retirement. The initial loader now runs after the
-   * listener binds, so admin trust/catalog routes can otherwise interleave with a load that has
-   * already computed trust but has not yet registered its host.
+   * Serializes catalog session publication and retirement, so admin trust/catalog routes can't
+   * interleave with a load that has computed trust but not yet registered.
    */
   private val catalogRegistrationLock = Any()
 
   /**
-   * Is the box out of memory right now?
-   *
-   * Reads the same gate `/status.json` publishes under `themeOptimizer.pressure`, so the session
-   * registry sheds against the threshold a deployment has already tuned rather than a second one
-   * drifting alongside it. `constrained` is the gate's own hysteretic answer -- it will not flap a
-   * shed on and off around the boundary the way a raw sample would.
-   *
-   * Lazily reached through [backgroundWork] because the gate lives there; touching it here would
-   * build the background machinery earlier than the paths that do not need it want.
+   * Whether the box is under memory pressure, using the same hysteretic gate `/status.json`
+   * publishes (`themeOptimizer.pressure`) so the registry sheds on the already-tuned threshold
+   * without flapping.
    */
   private fun underMemoryPressure(): Boolean = runCatching {
     backgroundWork.optimizerAdmissionSnapshot().pressure?.constrained == true
@@ -570,22 +462,10 @@ public class ServeRunner(
 
   private val backgroundWork by lazy {
     val pressureSampler = LinuxHostResourceSampler()
-    // One number, used three times deliberately.
-    //
-    // A pass holds ONE render permit for the whole of its batch —
-    // `withRenderPermit { renderOptimizerBatch(...) }` — so the number of passes admitted, not the
-    // width of a batch, is what bounds concurrent background renders. Leaving the lane count at its
-    // own default therefore left every permit past the second unreachable: the derived lane clamps
-    // at MAX_DERIVED_CONCURRENT_RENDERS (3) against DEFAULT_MAX_CONCURRENT_OPTIMIZERS (2), so even
-    // with no override the third permit was dead, and `--background-renders 5` — which this help
-    // text offers as the way past the derivation's ceiling — bought nothing at all.
-    //
-    // Matching them also removes permit contention rather than merely allowing it: every admitted
-    // pass holds a permit already, so no pass sits inside the door holding a warm daemon and a live
-    // seat while it waits for one. That waiting is what the lane cap was introduced to stop.
-    //
-    // The cross-replica coordinator takes the same number because it caps passes for the physical
-    // host; left at the old default it would re-impose the ceiling this removes.
+    // One number for the lane count, the render permits and the cross-replica coordinator. A pass
+    // holds one permit for its whole batch, so admitted passes bound concurrent renders; mismatched
+    // values left permits unreachable (making `--background-renders` useless) or had passes waiting
+    // for permits while holding warm daemons and seats.
     val renderLane = backgroundRenders ?: ServeBackgroundWork.renderLaneFor(liveSeatLimiter)
     ServeBackgroundWork(
       maxConcurrentRenders = renderLane,
@@ -603,19 +483,10 @@ public class ServeRunner(
   }
 
   /**
-   * Periodic enforcement of the catalog blob cache's ceiling.
-   *
-   * The publication-time sweeps below were sufficient while **every** writer sat on the load path:
-   * a blob only ever arrived as part of a load, and a load is a publication. Caching request-path
-   * reads ends that invariant — a lazily-fetched baked PNG or an `?at=<sha>` history read admits a
-   * blob with no publication anywhere near it — so a box whose catalogs are not currently being
-   * republished could admit indefinitely, with nothing enforcing `--catalog-cache-max-bytes` until
-   * its next restart. On a public server holding a couple of dozen catalogs across twenty
-   * addressable revisions each, that is a volume filling quietly.
-   *
-   * A plain daemon ticker rather than a check on the write path: enforcement is a directory census,
-   * and the request path is exactly where that must not happen. [sweepCatalogBlobs]'s own rate
-   * limit then makes a tick that lands soon after a publication's sweep free.
+   * Periodic enforcement of the blob cache ceiling. Request-path reads (lazy PNGs, `?at=<sha>`)
+   * admit blobs with no publication nearby, so publication-time sweeps alone would let an idle box
+   * fill its volume. A ticker rather than a write-path check, since enforcement is a directory
+   * census; [sweepCatalogBlobs]'s rate limit makes redundant ticks free.
    */
   private fun startCatalogBlobSweeper(): AutoCloseable {
     val exec =
@@ -631,25 +502,14 @@ public class ServeRunner(
     return AutoCloseable { exec.shutdownNow() }
   }
 
-  /**
-   * Rate limiter for [sweepCatalogBlobs] — see there for why it is not a per-call-site decision.
-   */
+  /** Rate limiter for [sweepCatalogBlobs]. */
   private val lastCatalogBlobSweep = java.util.concurrent.atomic.AtomicLong()
 
   /**
-   * Reclaim pooled blobs no longer worth their disk.
-   *
-   * Eviction is always safe here — the worst a reclaimed blob costs is the fetch that produces it
-   * again — so unlike [sweepThemeCache] this needs to know nothing about which catalogs are live.
-   * What it does need is to run after a **refresh** and not only after the startup pass: a box that
-   * regenerates several times a day would otherwise accumulate every superseded revision's bundles
-   * for the life of the process, which is exactly the disk this is supposed to bound.
-   *
-   * That makes it callable from every publication site, so the cost is bounded here rather than by
-   * each caller remembering to: a sweep is a directory census, the grace window means a sweep
-   * minutes after the last one is a near-certain no-op, and 23 catalogs publishing in sequence at
-   * boot would otherwise run 23 of them. [force] is for the end of the startup pass, which reports
-   * what the boot actually found — the one number that says whether the cache is working.
+   * Reclaim pooled blobs no longer worth their disk. Eviction is always safe (the cost is a
+   * refetch), so this needs no live-set knowledge, and runs after every publication, not just
+   * startup. Rate-limited here so callers need not coordinate; [force] is for the end of the
+   * startup pass, which reports what boot found.
    */
   private fun sweepCatalogBlobs(force: Boolean = false) {
     val now = System.currentTimeMillis()
@@ -668,12 +528,9 @@ public class ServeRunner(
   }
 
   /**
-   * Reclaim theme-cache generations nothing can read any more.
-   *
-   * Run once the catalog pass has finished, which is the only moment the live set is actually
-   * known: sweeping earlier would delete a generation a catalog three places down the list was
-   * about to adopt. On a box regenerating several times a day this is where the disk is won back —
-   * every superseded catalog revision and every previous server version leaves a generation behind.
+   * Reclaim theme-cache generations nothing can read. Runs once the catalog pass finishes, the only
+   * moment the live set is known; earlier would delete a generation a later catalog was about to
+   * adopt.
    */
   private fun sweepThemeCache() {
     val store = themeCacheStore ?: return
@@ -681,13 +538,9 @@ public class ServeRunner(
       liveThemeGenerations.entries
         .map { (system, fingerprint) -> ThemeCacheStore.GenerationId(system, fingerprint) }
         .toSet()
-    // Three populations, and only the middle one is left alone:
-    //  - loaded now: sweep it, so a refresh reclaims the fingerprint it just superseded;
-    //  - configured but NOT loaded this pass: skip it. A transient fetch error or a shutdown before
-    //    the loader reached it must not cost ~28 hours of re-warming;
-    //  - no longer configured at all: sweep it, with no live generation to protect anything, so an
-    //    operator removing a catalog actually gets the disk back. Passing null here — "sweep
-    //    everything" — would collapse the first two together.
+    // Three populations: loaded now (sweep, reclaiming the superseded fingerprint); configured but
+    // not loaded this pass (skip, so a transient failure doesn't cost a day of re-warming); no
+    // longer configured (sweep, so removing a catalog frees its disk).
     val configuredButUnloaded = themeCacheConfiguredSystems().orEmpty() - liveThemeGenerations.keys
     val sweepable = runCatching { store.systems() }.getOrNull().orEmpty() - configuredButUnloaded
     val result =
@@ -708,37 +561,29 @@ public class ServeRunner(
   }
 
   /**
-   * Systems this server is configured to serve, once the catalog tracker exists. Null before then,
-   * which makes the sweep conservative rather than destructive.
+   * Systems this server is configured to serve; null until the tracker exists, which keeps the
+   * sweep conservative.
    */
   @Volatile private var themeCacheConfiguredSystems: () -> Set<String>? = { null }
 
   /**
-   * The generation currently in use **per system**, so a sweep knows what it must not reclaim.
-   *
-   * A map rather than a growing set, because a catalog refresh supersedes its own previous
-   * fingerprint: an append-only set would keep protecting every generation the box had ever opened,
-   * so a delivery branch regenerating a few times a day would accumulate multi-gigabyte generations
-   * that the cap could never reclaim.
+   * Generation in use per system, so a sweep knows what to keep. A map, not an append-only set, so
+   * superseded fingerprints become reclaimable.
    */
   private val liveThemeGenerations = java.util.concurrent.ConcurrentHashMap<String, String>()
 
   /**
-   * Build the disk tier for one catalog generation, or null when it has no durable identity.
-   *
-   * The fingerprint is computed from the daemon's own launch descriptor — the classpath it will
-   * render with, and the variant it will render as — so nothing here has to be kept in step by hand
-   * with what the renderer actually loads.
+   * Build the disk tier for one catalog generation, or null when it has no durable identity. The
+   * fingerprint comes from the daemon's own launch descriptor, so it tracks what the renderer
+   * actually loads.
    */
   private fun themeCacheFor(
     system: String,
     alias: Map<String, String>,
     vararg descriptors: File,
   ): CatalogThemeCache {
-    // Every bailout below names itself. A catalog that silently falls back to memory-only looks
-    // exactly like one on a server with no cache directory, and the difference — the cache is
-    // configured and this catalog alone is not using it — is the one an operator needs, because it
-    // is permanent for the life of the host and nothing else reports it.
+    // Every bailout names itself: a catalog silently falling back to memory-only is
+    // indistinguishable from a server with no cache dir.
     val store = themeCacheStore ?: return CatalogThemeCache()
     val launches = descriptors.map {
       ServeBundleDaemon.readLaunchDescriptor(it)
@@ -746,10 +591,8 @@ public class ServeRunner(
     }
     if (launches.isEmpty())
       return CatalogThemeCache(persistenceOffReason = "catalog has no launch descriptor")
-    // The JVM the render runs in is part of what produced the pixels; the descriptor's system
-    // properties are deliberately NOT, because they are dominated by absolute paths that a fresh
-    // staging directory changes on every load — hashing those would make every load a new
-    // generation and buy nothing.
+    // The JVM is part of what produced the pixels; system properties are not hashed because they
+    // contain per-load staging paths.
     val renderConfig =
       launches.joinToString(" | ") {
         ThemeCacheFingerprint.renderConfig(it.systemProperties, it.jvmArgs)
@@ -793,12 +636,9 @@ public class ServeRunner(
         ?: return CatalogThemeCache(
           persistenceOffReason = "generation directory could not be opened"
         )
-    // The map is updated here, but the SWEEP is not run here. This is called while a replacement
-    // host is still being staged: `openHost` or publication can still fail and leave the previous
-    // host serving from the registry — and reclaiming its generation at this point would delete a
-    // warmed cache still in use, and leave its attached generation unable to write. Retirement
-    // waits
-    // for a successful publication (see [sweepThemeCache]'s callers).
+    // The sweep is not run here: the replacement host is still being staged and may fail, leaving
+    // the previous generation in use. Retirement waits for a successful publication
+    // ([sweepThemeCache]'s callers).
     liveThemeGenerations[system] = fingerprint
     if (generation.loadedEntries > 0) {
       System.err.println(
@@ -809,18 +649,17 @@ public class ServeRunner(
   }
 
   /**
-   * A parsed `--catalogs` / `--catalogs-unlisted` entry: the [system] id, the [repo] its
-   * `design-artifacts/<system>` branch lives in (the shared [catalogRepo] unless the entry gave an
-   * `@<owner>/<repo>` override), and whether it's [listed] on the front-page nav.
+   * A parsed `--catalogs` / `--catalogs-unlisted` entry: [system], the [repo] of its branch
+   * ([catalogRepo] unless overridden with `@<owner>/<repo>`), and whether it is [listed] on the
+   * nav.
    */
   private data class CatalogRef(
     val system: String,
     val repo: String,
     val listed: Boolean,
     /**
-     * The front-page section this catalog is published under, with the repos allowed to claim it.
-     * Only a `--catalogs-file` entry can carry one — a bare `--catalogs` flag entry declares no
-     * publisher, so its card is grouped by its source repo's owner.
+     * Front-page section and the repos allowed to claim it; only `--catalogs-file` entries carry
+     * one.
      */
     val group: ServeWeb.HomeGroup? = null,
     /**
@@ -829,15 +668,13 @@ public class ServeRunner(
      */
     val importedFrom: String? = null,
     /**
-     * Startup fetch order, highest first ([ServeCatalogsConfig.Entry.loadPriority]). Only a
-     * `--catalogs-file` entry can raise it; a bare flag entry takes the default, which is the order
-     * it was named in.
+     * Startup fetch order, highest first ([ServeCatalogsConfig.Entry.loadPriority]); flag entries
+     * keep their naming order.
      */
     val loadPriority: Int = 0,
     /**
-     * Published under [ServeCatalogsConfig.DESIGN_SYSTEMS_GROUP]: fetched first, and required to
-     * render before this server reports ready. Only a `--catalogs-file` entry can claim it — a bare
-     * `--catalogs` flag entry declares no group at all.
+     * In [ServeCatalogsConfig.DESIGN_SYSTEMS_GROUP]: fetched first and required before the server
+     * reports ready. Only `--catalogs-file` entries can claim it.
      */
     val designSystem: Boolean = false,
   )
@@ -878,41 +715,28 @@ public class ServeRunner(
         )
       }
 
-  /**
-   * The nominated catalog registry projects (`--catalog-registry`), validated. Empty ⇒ the feature
-   * is off and nothing is fetched.
-   */
+  /** Validated `--catalog-registry` nominations; empty ⇒ off. */
   private val catalogRegistryRepos: List<ServeCatalogRegistry.Nomination> by lazy {
     ServeCatalogRegistry.parseRepos(catalogRegistryRaw) { System.err.println("serve: $it") }
   }
 
   /**
-   * Each registry project's document, read **once** at startup.
-   *
-   * Fetched eagerly, on the boot thread, rather than left to [ServeCatalogRegistrySync]: the
-   * entries have to be in [catalogRefs] before the tracker is built, so a registry catalog loads
-   * through the ordinary startup path — fetch order, readiness, `/status`, the home index — and not
-   * as a runtime publish a second or two after the box says it is up. The sync is for what lands
-   * *after* boot.
-   *
-   * Best-effort per registry, like every other catalog read: an unreachable document costs its
-   * catalogs and nothing else. The next sync pass picks them up.
+   * Each registry project's document, read once at startup on the boot thread so its catalogs load
+   * through the ordinary startup path (order, readiness, `/status`) rather than as a late runtime
+   * publish. [ServeCatalogRegistrySync] handles later changes. Best-effort per registry.
    */
   private val catalogRegistryBoot: List<RegistryBoot> by lazy {
     catalogRegistryRepos.map { nomination ->
-      // The problem message is captured as well as printed. Printing alone put the one fact that
-      // explains a missing catalog somewhere only a shell on the host can reach; `/status` now
-      // carries it too. See [CatalogRegistryStatus].
+      // Captured as well as printed so `/status` shows why a catalog is missing
+      // ([CatalogRegistryStatus]).
       var problem: String? = null
       val contribution =
         ServeCatalogRegistry.fetch(nomination, ::fetchRegistryDocument) {
             problem = it
             System.err.println("serve: $it")
           }
-          // Say what each registry gave us, not only when it gives us nothing. The boot fold-in
-          // registered its catalogs without a word, so "the registry contributed two catalogs" and
-          // "the flag never reached the server" produced identical logs — and an operator reading
-          // them has no way to tell a working registry from an absent one until a catalog 404s.
+          // Log each registry's contribution, so a working registry is distinguishable from an
+          // absent flag.
           ?.also { contribution ->
             System.err.println(
               "serve: catalog registry ${nomination}: ${contribution.entries.size} catalog(s) — " +
@@ -934,9 +758,8 @@ public class ServeRunner(
     get() = catalogRegistryBoot.mapNotNull { it.contribution }
 
   /**
-   * The nominations as `/status` reports them: what each registry contributes NOW. The boot read
-   * until [sync] has read a nomination (or forever, when there is no sync), then the sync's latest
-   * read — see [catalogRegistryStatus] for why a boot snapshot was not enough.
+   * The nominations as `/status` reports them: the boot read until [sync] has read a nomination,
+   * then the sync's latest. See [catalogRegistryStatus].
    */
   private fun catalogRegistryStatuses(
     sync: ServeCatalogRegistrySync?
@@ -949,29 +772,18 @@ public class ServeRunner(
     )
   }
 
-  /**
-   * Read one registry document off the network. A seam so the sync and the boot fold-in share it.
-   */
+  /** Read one registry document; shared by the sync and the boot fold-in. */
   private fun fetchRegistryDocument(url: String, maxBytes: Long): ByteArray? =
     ServeCatalogStore.httpFetchOutcome(url, maxBytes).bytesOrNull
 
   /**
-   * Where to look for published designs: every catalog this host has configured, available or not.
-   *
-   * Configured rather than available on purpose — the same reason the home index is built from the
-   * configured set. A catalog that failed its last load still publishes the designs it publishes,
-   * and dropping it here would make the browse list flicker with the load state of catalogs whose
-   * branches are perfectly readable.
-   *
-   * `lastAttemptEpochMillis` is the generation marker: it moves when the refresher re-fetches a
-   * catalog, which is exactly when a project's design index may have changed.
+   * Where to look for published designs: every configured catalog, available or not, so the browse
+   * list doesn't flicker with load state. `lastAttemptEpochMillis` is the generation marker, moving
+   * when the refresher re-fetches.
    */
   /**
-   * The app's own checkouts, from `--ui-builder-designs`, ahead of any catalog's published set.
-   *
-   * First because it is the half of the loop a team is in while a screen is still being designed:
-   * when a local directory and a catalog both offer a design of the same name, the one on this
-   * machine is the one being worked on.
+   * The app's own checkouts from `--ui-builder-designs`, ahead of any catalog's published set: a
+   * local design of the same name is the one being worked on.
    */
   private fun uiBuilderDesignDirectories(): List<ServeUiBuilderDesignLibrary.Coordinate> =
     uiBuilderDesigns.map { (system, dir) ->
@@ -1012,19 +824,15 @@ public class ServeRunner(
     }
 
   /**
-   * Whether this server needs the catalog machinery (store + load tracker) even with **no**
-   * configured catalogs: an `--admin-token` server publishes its first catalog at runtime, so the
-   * store it fetches through and the tracker it registers into have to exist before any request
-   * arrives. Without this, a box started against an empty (or brand-new) `catalogs.json` couldn't
-   * bootstrap itself — the admin routes it explicitly enabled would never be registered.
+   * Whether the catalog machinery is needed even with no configured catalogs: an `--admin-token`
+   * server publishes its first catalog at runtime and needs the store and tracker ready.
    */
   private val needsCatalogMachinery: Boolean
     get() = catalogRefs.isNotEmpty() || adminToken != null
 
   /**
-   * All catalog refs to serve — the config file first (it carries the front-page grouping), then
-   * the `--catalogs` / `--catalogs-unlisted` flag entries; de-duplicated by system (first wins), so
-   * a flag can add a catalog the file doesn't name but never silently re-attributes one it does.
+   * All catalog refs: config file first (it carries grouping), then flag entries, de-duplicated by
+   * system with first winning, so a flag can add a catalog but never re-attribute one.
    */
   private val catalogRefs: List<CatalogRef> by lazy {
     (operatorCatalogRefs() +
@@ -1041,25 +849,14 @@ public class ServeRunner(
       parseCatalogRefs(catalogsUnlistedRaw, listed = false)
 
   public fun run() {
-    // Before anything can spawn a cmp-jvm render worker: the worker reads its fonts directory at
-    // spawn time, and a pooled worker started without one keeps drawing in the fallback face for
-    // its whole life. See [ServeRcJvmFonts].
+    // Before any cmp-jvm worker spawns: workers read their fonts dir at spawn and keep the fallback
+    // face otherwise. See [ServeRcJvmFonts].
     ServeRcJvmFonts.installPackaged()
 
-    // Default (opt-in Gradle): unless something explicitly asks for local Gradle work, run as
-    // a pure preview server — no discover/build, ever — hosting only the fetched sources
-    // (`--bundle(s)` / `--catalogs` / uploaded bundles). This holds even inside a Gradle
-    // checkout, so a stray `serve` at a repo root no longer kicks off a full multi-module
-    // build (which could hang). `runBundleServer` prints a clear "nothing to serve / pass
-    // --discover" error when there are no hosted sources.
-    //
-    // The opt-in signals are `--module` / `--discover` plus the modes that STRUCTURALLY need
-    // the Gradle path (runBundleServer can't do any of them): `--export` (build + write a
-    // bundle, consumed below after the build), `--catalog-source-root` (worktree-based trusted
-    // catalog source-build), and `--revisions` (per-revision worktree forking). Each is an
-    // explicit build request on its own, so it implies discovery — keeping existing callers
-    // (e.g. the deploy image's `serve --export …` and `--catalog-source-root …`) working
-    // without also having to pass `--discover`.
+    // Gradle is opt-in: without an explicit request this is a pure preview server over fetched
+    // sources, even inside a Gradle checkout (a stray `serve` must not start a possibly-hanging
+    // build). The opt-in signals are `--module` / `--discover` plus the modes that structurally
+    // need Gradle: `--export`, `--catalog-source-root` and `--revisions`, each implying discovery.
     val needsGradle =
       explicitModule != null ||
         discover ||
@@ -1067,10 +864,8 @@ public class ServeRunner(
         catalogSourceRoot != null ||
         revisions
     if (!needsGradle) {
-      // `--id` / `--filter` / `--preview` select from a *discovered module's* manifest, and this
-      // path never discovers one — the sessions come from bundles, catalogs and uploads. Ignoring
-      // them silently is the exact shape issue #3744 was filed about: the user believes they
-      // narrowed what is exposed and the server publishes everything. Say so instead.
+      // Selectors apply to a discovered module's manifest, which this path never has; warn instead
+      // of silently publishing everything (see #3744).
       val selectors =
         listOfNotNull(
           exactId?.let { "--id" },
@@ -1092,15 +887,10 @@ public class ServeRunner(
       return
     }
 
-    // Discover + build the module(s) so manifests exist and previews resolve. `--module` scopes it,
-    // and the spawn passes the module to the build host so the render task itself is narrowed —
-    // this is not a post-hoc filter of a full multi-module build.
+    // Discover and build; `--module` is passed to the build host so the render task itself is
+    // narrowed.
     val discovered = discoverAndBuild(silenceStdout = false)
-    // Applied again here, for the hosts that predate the spawn argument: a `--module` that the
-    // build host ignored would otherwise render every module and then fail with "N modules
-    // discovered; narrow with --module <path>" — naming the flag the caller already passed. With
-    // the selection made here the flag's promise holds either way; the difference the spawn makes
-    // is the work not done, not the module served.
+    // Applied again for build hosts that predate the spawn argument and report every module.
     val outcome =
       explicitModule?.let { requested ->
         selectRequestedModule(discovered, requested)
@@ -1125,13 +915,9 @@ public class ServeRunner(
       exitProcess(3)
     }
     onDiscovered(outcome)
-    // Expand each module's `@PreviewParameter` fan-out BEFORE deciding how many modules are in play
-    // (issue #3786 review follow-up). Module selection has to keep a parameterized preview whose
-    // rows *might* match — the row ids don't exist until the render above wrote the fan-out — so
-    // `--filter Crimson` can retain a module whose provider turns out to yield only Light/Dark.
-    // That
-    // module contributes nothing servable, and counting it here would abort a request that has
-    // exactly one real answer. Resolving first turns the speculative keep back into a fact.
+    // Expand `@PreviewParameter` fan-out before counting modules: selection kept modules whose rows
+    // might match, and one that yields nothing servable must not abort a request with exactly one
+    // real answer.
     val servable = modulesWithMatchingPreviews(outcome.manifests)
     if (servable.isEmpty()) {
       System.err.println("serve: no previews matched (--id/--filter excluded them all).")
@@ -1184,9 +970,8 @@ public class ServeRunner(
         exitProcess(2)
       }
 
-    // `--export` reuses the same render session to write a portable bundle (a WebEmbed gallery +
-    // the rendered PNGs) and exits — no server. The live link and the offline bundle are then the
-    // same render output.
+    // `--export` reuses the render session to write a portable bundle and exits, so the live link
+    // and the offline bundle are the same render output.
     val exportTo = exportPath
     if (exportTo != null) {
       exportBundle(renderHost, module.gradlePath, exportTo)
@@ -1195,35 +980,24 @@ public class ServeRunner(
     }
 
     val token = tokenOverride ?: ServeUrls.generateToken()
-    // One shared server fronts a session registry rather than a single host. The current checkout
-    // is
-    // the default session; the registry suspends idle daemons and resumes them on demand from their
-    // saved state, so a long-lived server doesn't keep daemons running forever.
+    // One server fronts a session registry: the current checkout is the default session, and idle
+    // daemons are suspended and resumed from saved state.
     val openHost: (ServeSessionState) -> ServeHost? = ::openHost
-    // Project mode forks a session per git revision behind the registry's factory; off by default
-    // the factory yields nothing, so only the pinned current checkout is served. These worktrees
-    // are
-    // rooted at the served module's own project (`?session=<rev>` builds that module).
+    // Project mode forks a session per git revision via the registry's factory, with worktrees
+    // rooted at the served module's project. Off by default.
     val worktrees: GitWorktrees? = if (revisions) openWorktrees(module) else null
-    // The trusted-catalog builder's worktrees. Rooted at --catalog-source-root when set (a separate
-    // checkout of the catalog's source repo — e.g. a prebuilt image serving a standalone module),
-    // else the served-project root (reusing [worktrees] when --revisions already opened one). Kept
-    // SEPARATE from [worktrees] so combining --revisions with --catalog-source-root still roots
-    // `?session=<rev>` at the served project rather than the catalog checkout. Both are gated by
-    // the
-    // same --revisions-allow ref allowlist.
+    // Worktrees for the trusted-catalog builder: rooted at `--catalog-source-root` when set, else
+    // the served project (reusing [worktrees]). Kept separate so `?session=<rev>` stays rooted at
+    // the served project. Both are gated by `--revisions-allow`.
     val catalogWorktrees: GitWorktrees? =
       when {
         !allowRenderTrusted -> null
         catalogSourceRoot != null -> openWorktrees(module, rootOverride = catalogSourceRoot)
         else -> worktrees ?: openWorktrees(module)
       }
-    // The `?session=<rev>` factory (project mode) is gated on --revisions ONLY — NOT merely on
-    // worktrees existing. Otherwise `--allow-render-trusted` (which also opens worktrees, but just
-    // to
-    // build a fixed catalog source) would silently let clients trigger Gradle builds for arbitrary
-    // revisions reachable from the allowlist. The catalog builder uses `worktrees` directly, so it
-    // doesn't need the factory.
+    // The `?session=<rev>` factory is gated on `--revisions` only, not on worktrees existing;
+    // otherwise `--allow-render-trusted` would let clients trigger builds of arbitrary allowlisted
+    // revisions.
     val factory =
       if (revisions && worktrees != null) revisionFactory(module, worktrees)
       else ServeSessionFactory { null }
@@ -1240,25 +1014,20 @@ public class ServeRunner(
         workspaceName = module.projectDir.name,
         previews = previews,
         label = module.gradlePath,
-        // Carry the declared themes on the session state too — the registry suspends idle daemons
-        // and reopens from this state, so without it the App theme selector would vanish after the
-        // first idle suspend/resume.
+        // Declared themes live on the session state so the theme selector survives suspend/resume.
         declaredThemes = declaredThemes,
       )
     registry.register(module.gradlePath, defaultState, host = renderHost)
-    // Shared mode: register any pre-rendered portable bundles under `--bundles <dir>` as read-only
-    // sessions (no daemon), reachable at ?session=<bundle-name>. Pinned — a bundle host is cheap
-    // and
-    // has nothing to reclaim, so it's never suspended.
+    // Shared mode: pre-rendered bundles under `--bundles <dir>` as read-only, pinned sessions
+    // (cheap, nothing to reclaim).
     registerBundles().forEach { (id, bundleHost) ->
       registry.register(id, host = bundleHost, pinned = true)
     }
     // Serve any operator-supplied `--bundle <url|path>` fetched bundles alongside the module — live
     // from a daemon when Trusted + --allow-render-trusted, else read-only baked PNGs.
     registerStartupBundles(registry)
-    // Serve our published design systems from their trusted `design-artifacts/<system>` branches.
-    // A catalog that carries a `web/wasm/` app yields a system→dir entry so the in-browser tier
-    // rides the same trusted branch (no local --wasm-dir build needed).
+    // Serve published design systems from their trusted branches; a catalog's `web/wasm/` app rides
+    // the same branch.
     val catalogReg =
       if (needsCatalogMachinery) registerCatalogs(registry, catalogWorktrees, openHost) else null
     // Keep the catalogs fresh against their (routinely-changing) branches without a restart.
@@ -1301,9 +1070,7 @@ public class ServeRunner(
         },
       localSourceRoots =
         if (componentBrowser) mapOf(module.gradlePath to module.projectDir) else emptyMap(),
-      // Project mode has the repository, so the viewer's history strip is computed from local git
-      // instead of a published history.json — the same timeline the hosted viewer shows, sourced
-      // the other way round. Only wired on this path: [runBundleServer] has no checkout to read.
+      // Project mode computes the history strip from local git instead of a published history.json.
       projectHistory =
         historyBranch?.let { ServeProjectHistory(repoRoot = projectRepoRoot(module), branch = it) },
       onStarted = {
@@ -1319,9 +1086,8 @@ public class ServeRunner(
   }
 
   /**
-   * Browse every preview-bearing module behind one component-browser front door. A failed daemon
-   * only removes that module; the other valid modules remain useful. This intentionally stays out
-   * of the full `serve` path, whose revision/export/catalog options still describe one module.
+   * Browse every preview-bearing module behind one component-browser front door; a failed daemon
+   * removes only its module. Kept out of the full `serve` path, whose options describe one module.
    */
   private fun runProjectBrowser(
     servable: List<Pair<PreviewModule, List<ServePreview>>>,
@@ -1416,16 +1182,10 @@ public class ServeRunner(
   }
 
   /**
-   * Module-less mode: run a **pure preview server** — no `--module`, no local project, no Gradle
-   * build. Reached from [run] when there's nothing to build locally but there are hosted sources
-   * (`--bundle` / `--bundles` / `--catalogs` / `--accept-bundles`). This is the "render any fetched
-   * bundle live from a trusted server" path: `serve --bundle <github-branch-url> --public
-   * --allow-render-trusted` stands up a server that fetches the bundle and, if it verifies Trusted,
-   * live-renders it from a daemon — without ever knowing the module upfront.
-   *
-   * Trusted-catalog *source* builds (the Gradle fallback) are unavailable here (no repo to worktree
-   * from), so a `--catalogs` system that can't be served from its carried `liveBundle` falls back
-   * to baked PNGs — fail-closed, exactly like the desktop-only public image.
+   * Module-less mode: a pure preview server with no local project or Gradle build, hosting
+   * `--bundle` / `--bundles` / `--catalogs` / `--accept-bundles` sources. A Trusted bundle can
+   * still be live-rendered from a daemon. Source builds are unavailable, so a catalog without a
+   * usable `liveBundle` falls back to baked PNGs.
    */
   private fun runBundleServer() {
     val token = tokenOverride ?: ServeUrls.generateToken()
@@ -1457,12 +1217,8 @@ public class ServeRunner(
       catalogRefs.firstOrNull { it.listed }?.system
         ?: registeredStartup.firstOrNull()
         ?: registry.anySessionId()
-    // An `--accept-bundles` server legitimately starts with no sessions — they arrive at runtime
-    // via
-    // POST /bundles — so only bail when there's genuinely nothing to serve and no way to add any.
-    // `--accept-docs` is the same case (a pure document drop-box has no sessions at all, ever), as
-    // is `--accept-images` (an image host renders nothing) and `--admin-token`: that server's
-    // catalogs arrive later via POST /admin/catalogs.
+    // Upload, document, image and admin hosts legitimately start with no sessions; bail only when
+    // there is nothing to serve and no way to add any.
     if (
       defaultSessionId == null &&
         catalogRefs.isEmpty() &&
@@ -1472,9 +1228,8 @@ public class ServeRunner(
         !uiBuilderLaneConfigured &&
         adminToken == null
     ) {
-      // An `--accept-images` that couldn't be configured is why we may be here at all, and the
-      // generic line below would tell the operator that flag wasn't set — which they know is false.
-      // Name the missing argument first, before the message that reads as if nothing was asked for.
+      // Name the missing `--image-upload-repo` first; the generic line below would otherwise read
+      // as if the flag was never set.
       if (acceptImages) System.err.println(ServeDefaults.IMAGE_LANE_NO_REPO)
       System.err.println(
         "serve: nothing to serve — no --bundle / --bundles / --catalogs registered a session, and " +
@@ -1531,12 +1286,10 @@ public class ServeRunner(
   }
 
   /**
-   * Reopen a session's daemon-backed host from its [ServeSessionState] — the registry's `open`
-   * callback, used by every serve mode. A trusted-catalog / live-bundle session carries a baked-PNG
-   * fallback + a catalog-id→daemon-id alias, so the daemon is fronted by [ServeCatalogLiveHost]
-   * (published deep links + thumbnails keep resolving, Android-only variants fall back to baked,
-   * mapped ids gain a live lane). Rebuilt on every resume, so suspend/resume works unchanged. Plain
-   * project / revision / plain-bundle sessions carry no fallback → the bare daemon.
+   * Reopen a session's host from its [ServeSessionState]: the registry's `open` callback for every
+   * mode. Trusted-catalog and live-bundle sessions carry a baked fallback and alias, so the daemon
+   * is fronted by [ServeCatalogLiveHost]; other sessions get the bare daemon. Rebuilt on every
+   * resume.
    */
   private fun openHost(state: ServeSessionState): ServeHost? = runCatching {
     fun openDaemon(systemPropertyOverrides: Map<String, String> = emptyMap()): ServeRenderHost =
@@ -1571,41 +1324,31 @@ public class ServeRunner(
               liveSeats = liveSeatLimiter,
               seatWeight = { state.liveSeatWeight },
             ) {
-              // Every daemon writes <outputBaseName>.png and its data products below the
-              // descriptor's output root. Replicas therefore need separate roots even though
-              // they share the catalog classpath; otherwise overlapping themes can overwrite
-              // one another between a completion notification and ServeRenderHost reading the
+              // Replicas need separate output roots: every daemon writes `<outputBaseName>.png`
+              // there, and overlapping themes could overwrite each other before the host reads the
               // file.
               openIsolatedSharedDaemonReplica(state.descriptor, ::openDaemon)
             },
           catalogThemeCache = state.catalogThemeCache ?: CatalogThemeCache(),
           serverIdleMillis = state.serverIdleMillis,
           backgroundWork = state.backgroundWork,
-          // The same budget the pools above charge, now charged for the catalog's OWN resident
-          // daemon too. That daemon is the largest single thing `--live-seats` was sized to bound
-          // (~1.2 GB apiece) and was the one holder that never asked for a permit.
+          // The catalog's own resident daemon (~1.2 GB) also charges the live-seat budget.
           liveSeats = liveSeatLimiter,
           residencySeatWeight = { state.liveSeatWeight },
           cmpAndroidPlayerFor =
             cmpAndroidPlayerByDescriptor[state.descriptor.absolutePath] ?: { false },
         )
-        // Warm the daemon off the request path so the first browse already gets the per-variant
-        // SVG lane instead of the baked fallback — critical for a slow-cold-starting Android
-        // daemon, where a lazy first render would otherwise take minutes.
+        // Prewarm off the request path so a slow-starting Android daemon is ready for the first
+        // browse.
         .also { it.prewarm() }
     else daemon
   }
-    // Previously the exception was swallowed to a silent null; record it so the reason survives
-    // on
-    // the /status page instead of only reaching stderr. The host still degrades to null as
-    // before.
+    // Record the failure for `/status`; the host still degrades to null.
     .onFailure { daemonLog.record(state.label, it.message ?: it.toString()) }
     .getOrNull()
 
   /**
-   * Build the `--accept-docs` document store, or null when the operator didn't opt in. In-memory
-   * and TTL-bounded — an ingested document is a short-lived share, not a session, so there is
-   * nothing to register with the session registry and nothing to clean up at shutdown.
+   * The `--accept-docs` store, or null. In-memory and TTL-bounded; nothing to register or clean up.
    */
   private fun openDocStore(): ServeDocStore? {
     if (!acceptDocs) return null
@@ -1628,13 +1371,9 @@ public class ServeRunner(
   }
 
   /**
-   * Build the `--accept-images` lane — the store and the identity gate in front of it — or null
-   * when the operator didn't opt in.
-   *
-   * **Fails closed on a missing repository.** The gate's whole content is "GitHub says this account
-   * has access to *that* repo", so without a repo there is nothing to check and the honest outcome
-   * is no lane, announced, rather than an open image host on someone's public box. Returns the pair
-   * so [ServeHttpServer] can only ever receive both.
+   * The `--accept-images` lane (store plus identity gate), or null. Fails closed without a
+   * repository, since the gate is "GitHub says this account can access that repo". Returned as a
+   * pair so [ServeHttpServer] gets both or neither.
    */
   private fun openImageLane(): ImageLane? {
     if (!acceptImages) return null
@@ -1676,8 +1415,8 @@ public class ServeRunner(
           ServeRateLimiter(
             permitsPerWindow = imageRateLimit,
             windowSeconds = 60,
-            // An agent uploads a PR's worth of renders back to back; serialising them per account
-            // costs nothing (each is a memory write) and keeps one caller off every other's heels.
+            // Serialising per account is free (memory writes) and keeps one agent's batch from
+            // crowding others.
             maxConcurrent = ServeDefaults.IMAGE_CALLER_CONCURRENCY,
           )
         } else null,
@@ -1691,17 +1430,13 @@ public class ServeRunner(
     val limiter: ServeRateLimiter?,
   )
 
-  /**
-   * The compile engine selects among served catalogs at runtime under either flag: `--playground`
-   * (engine + public surface) or `--compile-engine` (engine for the UI builder only).
-   */
+  /** Runtime catalog selection, under `--playground`, `--compile-engine` or the playground role. */
   private val engineRuntimeSelection: Boolean
     get() = playgroundRuntimeSelection || compileEngine || playgroundRole
 
   /**
-   * Whether the public playground surface is mounted over the engine. `--playground` always asks
-   * for it; a bare `--playground-bundle` / `--playground-android-bundle` pin still does, as it
-   * always has, unless `--compile-engine` says the engine is for the UI builder alone.
+   * Whether the public playground surface is mounted: always with `--playground`, and with a bare
+   * bundle pin unless `--compile-engine` restricts the engine to the UI builder.
    */
   private val publicPlayground: Boolean
     get() =
@@ -1710,21 +1445,16 @@ public class ServeRunner(
         ((playgroundBundlePath != null || playgroundAndroidBundlePath != null) && !compileEngine)
 
   /**
-   * Build the `--playground-bundle` compile service, or null when not opted in. Resolves the CMP
-   * compile classpath from the catalog liveBundle once at startup and wires the in-process BTA
-   * compiler from the CLI install's `lib-bta/`.
+   * Build the `--playground-bundle` compile service, or null. Resolves the CMP classpath from the
+   * liveBundle once at startup and wires the in-process BTA compiler from `lib-bta/`.
    *
-   * **Under `--public` the lane needs one of two admission postures** ([PlaygroundPublicGate]):
-   * either a verified per-session sandbox — the Phase-4 gate (docs/design/PLAYGROUND.md §6,
-   * issue #3016), where `--playground-sandbox` selects the jail every snippet JVM launches inside
-   * and a startup probe must come back showing that jail blocks egress, contains the filesystem,
-   * and isolates the process namespace — or [repoAccessGated], meaning GitHub auth is configured so
-   * the routes admit only users with access to `--github-auth-repo` (issue #3210). Anonymous *and*
-   * uncontained is still refused. Fail-soft everywhere else: any missing piece (bundle
-   * unresolvable, no `lib-bta/`) logs why and disables the lane rather than aborting serve.
+   * Under `--public` the lane needs one admission posture ([PlaygroundPublicGate]): a verified
+   * per-session sandbox (the startup probe must show egress blocked and filesystem/process
+   * contained) or [repoAccessGated]. Anonymous and uncontained is refused. Any other missing piece
+   * logs and disables the lane.
    *
-   * @param repoAccessGated GitHub auth is configured, so the playground routes' repo-access check
-   *   actually rejects a caller instead of falling through (see `rejectMissingGithubRepoAccess`).
+   * @param repoAccessGated GitHub auth is configured, so the routes' repo-access check actually
+   *   rejects callers.
    */
   private fun openPlaygroundService(
     docStore: ServeDocStore?,
@@ -1734,9 +1464,8 @@ public class ServeRunner(
     val cmpBundle = playgroundBundlePath
     val androidBundle = playgroundAndroidBundlePath
     if (cmpBundle == null && androidBundle == null && !engineRuntimeSelection) return null
-    // `--playground` / `--compile-engine` on their own mean "select from what this host serves" —
-    // with nothing served there is nothing to select, and a lane whose selector is permanently
-    // empty is worse than a clear refusal at startup.
+    // With nothing served there is nothing to select; refuse at startup rather than serve a
+    // permanently empty selector.
     if (cmpBundle == null && androidBundle == null && catalogRefs.isEmpty()) {
       System.err.println(
         "serve: --playground / --compile-engine select a catalog at runtime but no --catalogs " +
@@ -1752,15 +1481,10 @@ public class ServeRunner(
     }
     val workRoot = java.nio.file.Files.createTempDirectory("compose-playground").toFile()
 
-    // Phase 4 (docs/design/PLAYGROUND.md §6, issue #3016): under --public the playground serves
-    // only behind a sandbox that has *demonstrated* containment — the preflight runs a throwaway
-    // JVM inside the configured jail and reports whether it can still reach the network, the host
-    // filesystem, or host processes. A profile's claims are never enough on their own.
-    //
-    // Run for ANY active sandbox, not just a public one. Its containment verdict only *gates* the
-    // anonymous-public posture, but its can-this-jail-even-launch answer matters everywhere: a
-    // token-gated host whose `unshare` is forbidden by the kernel is just as silently broken, and
-    // that is what the fallback below repairs. One throwaway JVM at startup buys it.
+    // Under `--public` the playground serves only behind a sandbox that has demonstrated
+    // containment: the preflight runs a throwaway JVM in the jail and checks network, filesystem
+    // and process isolation. Run for any active sandbox, since whether the jail can launch at all
+    // matters on token-gated hosts too.
     val probe =
       if (configuredSandbox.isActive) {
         System.err.println("serve: playground sandbox preflight (${configuredSandbox.describe()})…")
@@ -1776,9 +1500,7 @@ public class ServeRunner(
           )
           .also { System.err.println("serve: ${it.summary()}") }
       } else null
-    // Kept, not just logged: `/status.json` reports which posture admitted the lane, so an
-    // operator reading it later doesn't have to find the startup log to tell "admitted because
-    // collaborators only" from "admitted because contained".
+    // Kept so `/status.json` reports which posture admitted the lane.
     val admittedBy: String
     when (
       val decision = PlaygroundPublicGate.decide(public, repoAccessGated, configuredSandbox, probe)
@@ -1793,21 +1515,12 @@ public class ServeRunner(
         admittedBy = decision.detail
       }
     }
-    // A configured jail that CANNOT LAUNCH here would otherwise break the lane silently: the gate
-    // already admitted it (on repo access, or because the host is token-gated), `/playground`
-    // answers normally, and then every snippet JVM and every jailed compile fails to spawn behind
-    // an argv that returns EPERM. Drop the jail and keep the caps — `-Xmx`, the CPU cap,
-    // ExitOnOutOfMemoryError, the temp-dir confinement and the hard TTL all still apply, which is
-    // the half that actually protects the box's memory (see PlaygroundSandbox.droppingJail).
-    //
-    // Safe by construction for the contained posture: an anonymous --public host whose probe never
-    // ran is refused above, so this line is unreachable in the one case where the jail is what
-    // admitted the lane.
-    // …but NOT for a profile whose caps live in the argv being dropped. `systemd` and `strict`
-    // enforce MemoryMax/CPUQuota/TasksMax through the `systemd-run` prefix, so dropping it leaves
-    // only `-Xmx` (heap, not native memory) and `-XX:ActiveProcessorCount` (pool sizing, not a CPU
-    // quota) — and no pid cap at all. Running an operator who asked for enforceable caps under
-    // caps they cannot enforce is worse than not running: refuse, and say which knob to change.
+    // A configured jail that can't launch here would silently break every snippet; drop the jail
+    // and keep the caps (`-Xmx`, CPU cap, temp-dir confinement, TTL), see
+    // PlaygroundSandbox.droppingJail. Unreachable for the contained posture, which is refused above
+    // without a probe.
+    // Not for `systemd`/`strict`, whose resource caps live in the dropped `systemd-run` prefix:
+    // refuse rather than run without the caps the operator asked for.
     if (probe != null && !probe.ran && configuredSandbox.profile.declaresResourceCaps) {
       System.err.println(
         "serve: playground sandbox '${configuredSandbox.profile.id}' could not launch on this " +
@@ -1831,9 +1544,8 @@ public class ServeRunner(
         )
         configuredSandbox.droppingJail()
       } else configuredSandbox
-    // A repo-access-gated lane is admitted without consulting the probe, so a broken jail would
-    // otherwise pass unremarked — the operator asked for defence in depth and isn't getting it.
-    // Say so; the lane still serves, because admission never rested on the jail here.
+    // A repo-access-gated lane ignores the probe, so warn when the defence-in-depth jail is broken;
+    // the lane still serves.
     if (repoAccessGated && probe != null && (!probe.ran || probe.failedChecks().isNotEmpty())) {
       System.err.println(
         "serve: WARNING playground sandbox '${sandbox.profile.id}' is configured but did not " +
@@ -1843,10 +1555,9 @@ public class ServeRunner(
       )
     }
 
-    // Each mode's classpath resolves on FIRST USE, not here (issue #3212): a `--playground-bundle
-    // compose-m3` names a catalog that `InitialCatalogLoader` fetches in the background *after* the
-    // server is up, so resolving at this point would find nothing and disable the mode forever. A
-    // local path is deferred the same way, for one code path and one set of log lines.
+    // Classpaths resolve on first use: a served-catalog bundle loads in the background after
+    // startup, so resolving now would disable the mode forever (#3212). Local paths are deferred
+    // the same way.
     val cmpSupplier = cmpBundle?.let { playgroundClasspathSupplier(it, workRoot, "cmp") }
     val androidSupplier = androidBundle?.let {
       playgroundClasspathSupplier(it, workRoot, "android")
@@ -1860,9 +1571,8 @@ public class ServeRunner(
 
     val inProcessCompiler =
       PlaygroundBtaCompiler.fromInstall(java.io.File(workRoot, "bta-ic").toPath())
-    // Phase 4's residual (issue #3090): with a sandbox configured, the *compile* runs in the jail
-    // too, so a pathological snippet burns a disposable child's CPU/heap budget instead of the
-    // serve JVM's. Falls back to the in-process compiler (loudly) when it can't be jailed.
+    // With a sandbox configured the compile also runs jailed, so a pathological snippet burns a
+    // disposable child's budget. Falls back to in-process (loudly) when it can't be jailed.
     val compiler = inProcessCompiler?.let {
       val (implJars, pluginJars) =
         PlaygroundBtaCompiler.installJars()
@@ -1883,17 +1593,10 @@ public class ServeRunner(
       return null
     }
 
-    // The Android compile classpath plus the Robolectric daemon sidecar back both the live
-    // first-frame render (ANDROID mode) and the remote-compose capture (REMOTE_COMPOSE mode). Build
-    // the shared daemon opener once; absent the sidecar, both Android lanes stay unavailable while
-    // CMP is unaffected. Remote-compose additionally needs the `/d/` document store to publish
-    // into.
-    //
-    // Built for the runtime selector too, not just a pinned Android bundle: with `--playground` any
-    // served catalog whose bundle declares `backend=android` is selectable, and whether this host
-    // can honour that choice is exactly "did the Robolectric sidecar come up". Cheap to ask (it
-    // locates jars and returns a lambda), and asking at startup is what lets the selector omit the
-    // Android catalogs instead of offering them and refusing every run.
+    // The shared Android daemon opener backs both the ANDROID first-frame render and REMOTE_COMPOSE
+    // capture (which also needs the `/d/` store); without the sidecar both are unavailable and CMP
+    // is unaffected. Built for the runtime selector too, so it can omit Android catalogs this host
+    // can't render.
     val androidDaemonOpener =
       if (androidSupplier != null || engineRuntimeSelection)
         buildPlaygroundAndroidDaemonOpener(sandbox)
@@ -1905,10 +1608,8 @@ public class ServeRunner(
       buildPlaygroundRcCaptureService(workRoot, docStore, opener)
     }
 
-    // CMP mode's still first frame renders on the desktop (Skiko) daemon — the backend-agnostic
-    // render service (same as Android) over a desktop opener. Absent the desktop sidecar, CMP
-    // simply
-    // carries no still image; its live `/pg/` redemption still renders on demand.
+    // CMP's still first frame renders on the desktop (Skiko) daemon; without that sidecar CMP has
+    // no still, but `/pg/` still renders live.
     val cmpDaemonOpener =
       if (cmpSupplier != null || engineRuntimeSelection) buildPlaygroundDesktopDaemonOpener(sandbox)
       else null
@@ -1916,21 +1617,16 @@ public class ServeRunner(
       buildPlaygroundAndroidRenderService(workRoot, opener)
     }
 
-    // The UI-builder's node-bounds capture, per backend: a second short session over the same
-    // compiled snippet that reads the render's `compose/semantics` tree so the native pane can
-    // outline and hit-test the nodes it drew. Absent where the backend is, exactly like the still
-    // frame — a design then shows its picture with no overlay rather than not showing it.
+    // UI-builder node-bounds capture per backend: a second short session reading
+    // `compose/semantics` so the native pane can outline nodes. Absent with its backend, leaving
+    // the picture without an overlay.
     val androidNodeBounds = androidDaemonOpener?.let {
       buildPlaygroundNodeBoundsService(workRoot, it)
     }
     val cmpNodeBounds = cmpDaemonOpener?.let { buildPlaygroundNodeBoundsService(workRoot, it) }
 
-    // The runtime selector (issue #3215 follow-up). A catalog is offerable once it has published a
-    // verified liveBundle whose manifest declares a backend this host can render; the mode set
-    // falls
-    // straight out of that backend, intersected with the render backends that actually came up
-    // above. Everything downstream of the choice — the classpath, the dependencies, the renderer —
-    // is the catalog's own, so picking a catalog picks the whole compile target.
+    // The runtime selector: a catalog is offerable once it publishes a verified liveBundle whose
+    // backend this host can render; picking a catalog picks the whole compile target.
     val catalogTargets =
       if (!engineRuntimeSelection) null
       else
@@ -1968,9 +1664,8 @@ public class ServeRunner(
           onLog = { System.err.println("serve: playground: $it") },
         )
 
-    // Says which modes are WIRED, not which have already resolved a classpath — a served-catalog
-    // source resolves on first use, well after this line. A mode whose bundle never materializes
-    // answers "mode … is not available" per request and logs why there.
+    // Reports which modes are wired, not resolved; a mode whose bundle never materializes says so
+    // per request.
     System.err.println(
       (if (publicPlayground) "serve: playground enabled (POST /api/1/compiler/run) — "
       else "serve: compile engine enabled for the UI builder (public playground off) — ") +
@@ -1986,17 +1681,13 @@ public class ServeRunner(
     )
 
     val snippetCounter = java.util.concurrent.atomic.AtomicLong()
-    // Stage 1 (mint) and Stage 2 (redeem) share ONE token store, so a dropped token both deletes
-    // its
-    // work dir and releases any live session it stood up. onRemove closes over the redeem service —
-    // which needs the store — so it's wired through a holder set once both exist below.
+    // Mint and redeem share one token store, so dropping a token deletes its work dir and releases
+    // its live session. onRemove needs the redeem service, so it goes through a holder.
     val redeemRef = java.util.concurrent.atomic.AtomicReference<PlaygroundRedeemService?>()
     val tokenStore =
       PlaygroundTokenStore(onRemove = { token -> redeemRef.get()?.release(token.id) })
-    // Keyed off the response's own token, because that is the only handle a caller of the compile
-    // lane holds on the snippet it just compiled — the token store owns the classes and the work
-    // dir until it expires. A token already dropped, or a snippet whose backend has no bounds
-    // capture, is an empty map: the frame stands on its own.
+    // Keyed off the response's token, the caller's only handle on the compiled snippet. An expired
+    // token or a backend without bounds capture yields an empty map.
     val captureNodeBounds: (PlaygroundRunResponse) -> Map<String, AnnotationBounds> = { response ->
       val snippet = response.previewToken?.let { tokenStore.get(it) }?.snippet
       val capture =
@@ -2010,20 +1701,14 @@ public class ServeRunner(
     val service =
       PlaygroundCompileService(
         catalogClasspath = { mode, catalog ->
-          // A named catalog NEVER falls back to the pinned default: quietly compiling against a
-          // different design system than the one the request asked for would report success for the
-          // wrong thing. Unknown/unloaded/over-budget all route to "not available".
+          // A named catalog never falls back to the pinned default, which would report success
+          // against the wrong design system.
           if (catalog != null) catalogTargets?.classpath(catalog, mode)
           else
             when (mode) {
               PlaygroundMode.CMP -> cmpSupplier?.classpath()
-              // Only advertise the Android modes when their daemon backend actually came up —
-              // absent the sidecar/android.jar the host would otherwise accept the mode, run a full
-              // Android compile, then mint a dead token with no image (ANDROID) / report the
-              // preview
-              // drew no document (REMOTE_COMPOSE), contradicting the "Android modes disabled"
-              // startup log. A null classpath routes to the existing "mode … is not available"
-              // response.
+              // Advertise Android modes only when their daemon came up; otherwise the host would
+              // compile and then mint a dead token.
               PlaygroundMode.ANDROID ->
                 androidSupplier?.classpath()?.takeIf { androidRender != null }
               PlaygroundMode.REMOTE_COMPOSE ->
@@ -2042,10 +1727,8 @@ public class ServeRunner(
             .absolutePath
             .toPath()
         },
-        // The still first frame renders on the mode's daemon: CMP on desktop (Skiko), Android on
-        // Robolectric. REMOTE_COMPOSE never reaches this seam (it returns a documentUrl). A null
-        // (no
-        // sidecar for that mode) just omits the still image; it's never fatal to the run.
+        // CMP renders on desktop, Android on Robolectric; REMOTE_COMPOSE never reaches here. A null
+        // just omits the still.
         renderFirstFrameWithReason = { snippet ->
           when (snippet.mode) {
             PlaygroundMode.CMP -> cmpRender?.renderFrame(snippet)
@@ -2053,11 +1736,8 @@ public class ServeRunner(
             PlaygroundMode.REMOTE_COMPOSE -> null
           } ?: PlaygroundFirstFrame(null)
         },
-        // Which served catalog each pinned mode compiles against, so the browsing surfaces can ask
-        // "does this host compile <system>?" and get a true answer on a pin-only host — where the
-        // selector reports the pin under the anonymous id `""`. A `--playground-bundle` naming a
-        // local file has no system id and answers null, which is correct: nothing on the site can
-        // claim to be that bundle's catalog.
+        // Which served catalog each pinned mode compiles against, so browsing surfaces get a true
+        // answer on a pin-only host. A local-file pin has no system id and answers null.
         pinnedCatalogSystem = { mode ->
           val supplier =
             when (mode) {
@@ -2088,25 +1768,17 @@ public class ServeRunner(
           "${playgroundEditLeaseTtlSeconds}s idle TTL"
       )
     }
-    // No mode survived gating (e.g. an Android-only host whose daemon sidecar / android.jar is
-    // absent, so every classpath gated to null): don't enable a lane that would render an empty
-    // mode selector and mint dead tokens on Run. Disable it, like the no-source case above.
-    //
-    // Asks whether any mode is *wired*, mirroring the `catalogClasspath` gating above minus the
-    // classpath itself — reading `service.availableModes` here would resolve every supplier at
-    // startup, which is exactly what a served-catalog source cannot do yet (its catalog loads
-    // later). A wired mode whose bundle never materializes answers "not available" per request.
+    // No mode is wired (e.g. Android-only with no sidecar): disable the lane rather than offer an
+    // empty selector. Checks wiring, not `availableModes`, which would force resolution before
+    // catalogs load.
     val wiredModes =
       listOfNotNull(
         cmpSupplier?.let { PlaygroundMode.CMP },
         androidSupplier?.takeIf { androidRender != null }?.let { PlaygroundMode.ANDROID },
         androidSupplier?.takeIf { rcCapture != null }?.let { PlaygroundMode.REMOTE_COMPOSE },
       )
-    // A host running the runtime selector legitimately has no *pinned* mode — its modes come from
-    // whichever catalog a request names, and no catalog has loaded yet at this point in startup. So
-    // this guard only applies to the pinned configuration; the selector's own "nothing offerable"
-    // case is a runtime condition (a catalog that never publishes a bundle, an Android-only catalog
-    // set on a host with no Robolectric sidecar) and is reported on the page, not here.
+    // Only for the pinned configuration; a runtime-selector host has no modes until catalogs load
+    // and reports that on the page.
     if (wiredModes.isEmpty() && catalogTargets == null) {
       System.err.println(
         "serve: playground resolved no runnable mode (a bundle source is configured but its " +
@@ -2114,10 +1786,8 @@ public class ServeRunner(
       )
       return null
     }
-    // Stage-2 redemption: stand the snippet's compiled classes up as a live daemon session via the
-    // registry, reusing the whole live/stream/input lane. materializePlaygroundSnippet self-gates —
-    // it returns null (→ "live preview unavailable") when the mode's daemon backend is absent — so
-    // this is always safe to enable alongside the compile lane.
+    // Stage-2 redemption stands compiled classes up as a live registry session.
+    // materializePlaygroundSnippet self-gates on the backend, so this is always safe to enable.
     val redeem =
       PlaygroundRedeemService(
         tokenStore = tokenStore,
@@ -2126,12 +1796,8 @@ public class ServeRunner(
       )
     redeemRef.set(redeem)
 
-    // A redeemed /pg session lives in ServeSessionRegistry and is reached only via the viewer + WS
-    // lanes, which never touch the token store — so the store's lazy purge (driven from mint / get
-    // /
-    // snapshot) would never fire onRemove for it, and the session (plus its work dir) would outlive
-    // the token's TTL indefinitely. Sweep expired tokens on a timer so a redeemed session is torn
-    // down at (roughly) its deadline even with no further playground requests.
+    // A redeemed `/pg` session never touches the token store, so its lazy purge would never fire;
+    // sweep expired tokens on a timer so sessions die near their deadline.
     val purgePeriod = tokenStore.ttlSeconds.coerceIn(15L, 60L)
     java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "playground-token-purge").apply { isDaemon = true }
@@ -2143,11 +1809,9 @@ public class ServeRunner(
         java.util.concurrent.TimeUnit.SECONDS,
       )
 
-    // Everything an operator needs to diagnose a half-up playground from `/status.json` — the
-    // admission posture, whether the configured jail actually contains anything HERE, and each
-    // mode's lazy-resolution state. Captured as a lambda so the mode rows are read fresh (a
-    // deferred classpath resolves minutes after this point) while staying side-effect free:
-    // `isResolved` reports the memo without forcing a resolve onto the status request path.
+    // What `/status.json` needs to diagnose a half-up playground: admission posture, jail
+    // containment and each mode's resolution state. A lambda so rows are fresh; `isResolved` never
+    // forces a resolve.
     val health = {
       PlaygroundHealth(
         admittedBy = admittedBy,
@@ -2212,12 +1876,8 @@ public class ServeRunner(
   }
 
   /**
-   * The per-caller compile budget, or null when `--playground-rate-limit 0` turned it off.
-   *
-   * Only the **compile** lane is metered, not `/pg/` redemption: a redemption is only reachable
-   * with a token a compile just minted, so limiting compiles transitively limits it — and
-   * redemption already answers to the live-seat budget, the token store's cap, and the token TTL.
-   * Metering it twice would refuse a caller the preview they already paid for.
+   * Per-caller compile budget, or null when disabled. Only compiles are metered: redemption needs a
+   * freshly minted token and is already bounded by seats, the token cap and TTL.
    */
   private fun buildPlaygroundRateLimiter(): ServeRateLimiter? {
     if (playgroundRateLimit <= 0) {
@@ -2240,14 +1900,9 @@ public class ServeRunner(
   }
 
   /**
-   * The agent-grant store, or null when the lane is off or cannot safely come up.
-   *
-   * The refusal in the middle is the important part. Approving a grant has to be an act by an
-   * identifiable operator, and there are exactly two ways to be one here: a signed-in GitHub
-   * visitor or the holder of `--token`. A `--public` box with no GitHub auth has neither — every
-   * visitor is anonymous and equal, so "who approved this?" would have no answer and the approval
-   * page would be a button the internet could press. That configuration is refused loudly rather
-   * than started with a lane that hands out credentials to whoever asks.
+   * The agent-grant store, or null when off or unsafe. Approval needs an identifiable operator (a
+   * GitHub sign-in or the `--token` holder); a `--public` box without GitHub auth has neither, so
+   * it is refused loudly rather than letting anyone approve credentials.
    */
   private fun buildAgentGrantStore(githubAuth: ServeGithubAuth?): ServeAgentGrantStore? {
     if (!agentGrants) return null
@@ -2266,14 +1921,8 @@ public class ServeRunner(
           "and run Kotlin on this host."
       )
     }
-    // A capability for a lane this box does not run is a promise it cannot keep: the approval page
-    // would offer `images`, a human would tick it, and the upload would 404 on a route that was
-    // never registered. Refused at startup, where the operator can fix it, rather than discovered
-    // by an agent twenty minutes into a task.
-    //
-    // [imageLaneConfigured], not `acceptImages`: the flag alone is not a lane. Without a repository
-    // to gate on, [openImageLane] declines to build one and says so — and a box that keeps starting
-    // for some other reason would then have offered a capability whose every upload 404s.
+    // An `images` capability without a configured image lane ([imageLaneConfigured], not just the
+    // flag) would be approved and then 404; refuse at startup.
     if (AgentGrantCapability.IMAGES in agentGrantCapabilities && !imageLaneConfigured) {
       System.err.println(
         "serve: --agent-grant-capabilities images refused — this server does not run the image " +
@@ -2283,15 +1932,10 @@ public class ServeRunner(
       )
       throw IllegalArgumentException("--agent-grant-capabilities images needs the image lane")
     }
-    // **The approver must hold what they are passing on**, and for `images` that question is about
-    // the repository the image lane gates on — which need not be the sign-in one. This combination
-    // used to be refused at startup: the session carried a single access bit computed against
-    // `--github-auth-repo`, so on a box whose lanes gated on different repositories there was
-    // nothing to answer with, and approximating it would have let someone with access to the OAuth
-    // repo alone mint a grant publishing where they have no rights. The bit is now computed for
-    // BOTH repositories at sign-in, while the visitor's token is still in hand, and carried in the
-    // session — see [ServeGithubAuthConfig.imageRepository] and `Approver.github`. So the two may
-    // now differ, and the check that matters happens at approval time against the right repository.
+    // The approver must hold what they pass on: for `images` that is access to the image lane's
+    // repository, computed at sign-in alongside the OAuth repo bit
+    // ([ServeGithubAuthConfig.imageRepository], `Approver.github`), so the two repositories may
+    // differ.
     if (agentGrantCapabilities.isNotEmpty()) {
       System.err.println(
         "serve: agent grants may carry " +
@@ -2304,9 +1948,7 @@ public class ServeRunner(
       maxScope = agentGrantMaxScope,
       maxCapabilities = agentGrantCapabilities,
       maxActiveGrants = agentGrantMaxActive,
-      // The audit trail. A grant is a credential this box minted on someone's say-so, so the say-so
-      // belongs in the operator's log where a mint, an eviction and a revoke are all visible — the
-      // token itself never is, only its fingerprint.
+      // Audit trail for minted credentials; only token fingerprints are logged.
       audit = { line -> System.err.println("serve: $line") },
     )
   }
@@ -2322,9 +1964,8 @@ public class ServeRunner(
     return ServeRateLimiter(
       permitsPerWindow = agentGrantRateLimit,
       windowSeconds = 60,
-      // Several in flight is normal and cheap here: an agent polls while its human reads the page.
-      // The rate bucket is what actually bounds this lane; concurrency just stops a single caller
-      // pinning threads.
+      // An agent polls while its human reads the page; the rate bucket bounds the lane, concurrency
+      // only stops thread pinning.
       maxConcurrent = ServeDefaults.AGENT_GRANT_CALLER_CONCURRENCY,
     )
   }
@@ -2343,41 +1984,23 @@ public class ServeRunner(
       emptyMap()
     },
     /**
-     * A served catalog's bundle backend (`desktop` / `android`), or null when it is not offerable.
-     *
-     * Read fresh per call rather than snapshotted, for the reason [PlaygroundCatalogTargets] reads
-     * its own list fresh: catalogs are fetched in the background *after* this lane is wired, so a
-     * map captured here would be empty for the life of the process.
+     * A served catalog's bundle backend (`desktop`/`android`), or null. Read per call because
+     * catalogs load after the lane is wired.
      */
     val catalogBackend: (String) -> String? = { null },
     /**
-     * A served catalog this host can compile a `@RemoteComposable` body against, or null.
-     *
-     * The first target the selector offers `remote-compose` on, which is already the intersection
-     * of "the bundle is an Android one" with "this host wired the capture and the document store"
-     * ([PlaygroundCatalogTargets]). Any of them is correct: an inline body is written in the Remote
-     * Compose vocabulary rather than in a catalog's own components, so what it needs from a bundle
-     * is the creation library, not a particular design system. Read fresh for the reason
-     * [catalogBackend] is.
-     *
-     * Null on a host running only `--playground-bundle` pins, which offer no selectable catalog id
-     * to name — and a UI-builder capture must name one, because the compile lane deliberately never
-     * falls back from a named catalog to a pinned default.
+     * A served catalog this host can compile a `@RemoteComposable` body against (any selector
+     * target offering `remote-compose`), or null. Any works, since inline bodies use the Remote
+     * Compose vocabulary. Null on pin-only hosts, because a capture must name a catalog and the
+     * lane never falls back to a pin.
      */
     val remoteComposeCatalog: () -> String? = { null },
   )
 
   /**
-   * Build the lazy classpath supplier for one playground mode from its `--playground-bundle` /
-   * `--playground-android-bundle` value, or null (having said why) when the value can't name a
-   * bundle at all.
-   *
-   * The only failure decided *here* is an unknown served-catalog id: naming a system this box
-   * doesn't serve is a config error the operator should hear about at startup, with the list of
-   * what is configured, rather than as a mode that quietly never works. Everything else — a path
-   * that doesn't exist, a bundle that won't resolve, a catalog that hasn't loaded yet — is deferred
-   * to [PlaygroundClasspathSupplier], because at this point in startup the catalogs have not been
-   * fetched (issue #3212).
+   * Lazy classpath supplier for one mode's bundle flag, or null (logged) when it can't name a
+   * bundle. Only an unknown served-catalog id fails at startup; everything else is deferred to
+   * [PlaygroundClasspathSupplier] because catalogs aren't fetched yet (#3212).
    */
   private fun playgroundClasspathSupplier(
     raw: String,
@@ -2409,14 +2032,8 @@ public class ServeRunner(
 
   /**
    * Unpack [bundleFile] into `<workRoot>/catalog-<label>` and resolve its compile classpath,
-   * logging either outcome. Shared by the pinned `--playground-bundle` suppliers (where [label] is
-   * the mode, `cmp`/`android`) and the runtime selector's per-catalog suppliers (where it is the
-   * system id), so both pay the same resolve and report it the same way.
-   *
-   * `--extra-maven-repos` is honoured here as it is on the live-daemon path: the resolver fails
-   * **closed** on an unresolved coordinate, so a catalog whose module pulls a dependency from a
-   * non-default repo would otherwise be unusable in the playground while rendering fine live — and
-   * the runtime selector puts exactly those catalogs one click away.
+   * logging the outcome. Shared by pinned and per-catalog suppliers. Honours `--extra-maven-repos`,
+   * since the resolver fails closed on unresolved coordinates.
    */
   private fun resolvePlaygroundClasspath(
     bundleFile: java.io.File,
@@ -2444,10 +2061,8 @@ public class ServeRunner(
       }
 
   /**
-   * The playground's Android/Robolectric daemon opener — [PlaygroundDaemonOpeners.android], with
-   * this host's wording on the way out. Returns null (logging why) when the sidecar or
-   * `android.jar` is missing; both Android lanes then report unavailable rather than compiling to a
-   * dead end.
+   * The Android/Robolectric daemon opener ([PlaygroundDaemonOpeners.android]), or null (logged)
+   * when the sidecar or `android.jar` is missing.
    */
   private fun buildPlaygroundAndroidDaemonOpener(
     sandbox: PlaygroundSandbox
@@ -2457,10 +2072,8 @@ public class ServeRunner(
     }
 
   /**
-   * The desktop (CMP/Skiko) daemon opener for the playground's CMP first-frame render —
-   * [PlaygroundDaemonOpeners.desktop]. Null (logging why) when the sidecar jars are absent: CMP
-   * then simply carries no still first frame while its live `/pg/` redemption keeps rendering on
-   * demand.
+   * The desktop daemon opener ([PlaygroundDaemonOpeners.desktop]) for CMP's first frame, or null
+   * (logged) when its jars are absent.
    */
   private fun buildPlaygroundDesktopDaemonOpener(
     sandbox: PlaygroundSandbox
@@ -2470,9 +2083,8 @@ public class ServeRunner(
     }
 
   /**
-   * The playground's first-frame render backend: renders a compiled snippet on the shared [opener]
-   * and returns the still PNG the Stage-1 response surfaces as its `image`. Backend-agnostic — the
-   * [opener] selects desktop (CMP) or Robolectric (Android); this wires it for both modes.
+   * First-frame render backend: renders a compiled snippet on [opener] (desktop or Robolectric) and
+   * returns the still PNG.
    */
   private fun buildPlaygroundAndroidRenderService(
     workRoot: java.io.File,
@@ -2486,10 +2098,8 @@ public class ServeRunner(
   }
 
   /**
-   * The UI-builder's node-bounds capture backend: renders a compiled snippet on the [opener] with
-   * `compose/semantics` enabled and projects the tree into `testTag → box in render pixels`.
-   * Backend-agnostic in the same way as the first-frame render — the [opener] picks desktop or
-   * Robolectric.
+   * Node-bounds capture: renders a snippet with `compose/semantics` and projects `testTag → box in
+   * render pixels`.
    */
   private fun buildPlaygroundNodeBoundsService(
     workRoot: java.io.File,
@@ -2503,10 +2113,8 @@ public class ServeRunner(
   }
 
   /**
-   * The playground's remote-compose capture backend (REMOTE_COMPOSE mode): renders a compiled
-   * snippet on the shared [opener] and captures its `.rc` document. Returns null (logging why) when
-   * the `/d/` document store is missing — remote-compose then reports unavailable rather than
-   * compiling to a dead end.
+   * REMOTE_COMPOSE capture: renders a snippet on [opener] and captures its `.rc`. Null (logged)
+   * without the `/d/` store.
    */
   private fun buildPlaygroundRcCaptureService(
     workRoot: java.io.File,
@@ -2546,14 +2154,8 @@ public class ServeRunner(
   }
 
   /**
-   * The in-browser Wasm apps this server exposes: the ones carried by the served catalogs, plus the
-   * explicit `--wasm-dir` overrides (which win, so an operator can serve a local build in place of
-   * a catalog's published app).
-   *
-   * Returns the registration's **live** map rather than a merged copy, so the set tracks runtime
-   * catalog changes: publish a Wasm-carrying catalog through the admin API and its
-   * `/wasm/<system>/` route works immediately; retire one and its assets stop being served. A
-   * snapshot here was the bug — the server would have been stuck with the boot-time set.
+   * In-browser Wasm apps: those carried by served catalogs plus `--wasm-dir` overrides (which win).
+   * Returns the live map, so runtime catalog publishes and retirements apply immediately.
    */
   private fun mergedWasmCatalogs(reg: CatalogRegistration?): MutableMap<String, File> {
     val live = reg?.wasm ?: java.util.concurrent.ConcurrentHashMap()
@@ -2562,9 +2164,7 @@ public class ServeRunner(
   }
 
   /**
-   * The usable `--wasm-dir` overrides, resolved once: they're the operator's explicit choice, so
-   * they win over a catalog's published app and must not be re-checked (or re-warned about) on
-   * every catalog refresh.
+   * `--wasm-dir` overrides resolved once; they win over catalogs and need no re-check on refresh.
    */
   private val localWasm: Map<String, File> by lazy { filterLocalWasm() }
 
@@ -2599,9 +2199,8 @@ public class ServeRunner(
   }
 
   /**
-   * Where pinned editors are cached: beside `catalogs.json`, which on the prebuilt image is the
-   * durable `/config` volume, so a restart that re-applies a pin does not re-download it. Null ⇒ no
-   * catalogs file, which is also no pin to apply.
+   * Where pinned editors are cached: beside `catalogs.json` (the durable volume on the image), so
+   * restarts don't re-download. Null without a catalogs file.
    */
   private val uiBuilderEditorStore: ServeUiBuilderEditorStore? by lazy {
     catalogsFilePath?.let(::File)?.absoluteFile?.parentFile?.resolve("ui-builder-editors")?.let {
@@ -2614,10 +2213,8 @@ public class ServeRunner(
     ServeUiBuilderEditorState(bundledVersion = null, servingPin = null, servingVersion = null)
 
   /**
-   * The editor directory to serve: the `editor` pinned in `catalogs.json` when it fetches and
-   * verifies, else the bundled one (#1035). A pin that fails never takes the builder down — the
-   * bundled editor is the first-boot and offline fallback, and the failure is logged with its
-   * reason.
+   * The editor directory: the `catalogs.json` pin when it fetches and verifies, else the bundled
+   * one. A failed pin is logged and never takes the builder down.
    */
   private fun usableUiBuilderDir(): File? {
     val bundled = usableBundledUiBuilderDir()
@@ -2649,36 +2246,25 @@ public class ServeRunner(
   }
 
   /**
-   * Open the authoritative design service only alongside the independently packaged builder app.
-   * The service owns no sockets; [ServeHttpServer] is the sole transport boundary. An explicit
-   * unwritable directory is a startup error rather than a silent in-memory downgrade because this
-   * surface promises restart persistence and multiple clients may already hold design ids.
+   * The authoritative design service, opened only alongside the packaged builder app;
+   * [ServeHttpServer] is the transport. An unwritable explicit directory is a startup error, not an
+   * in-memory downgrade, since clients rely on persistence.
    */
   private data class UiBuilderLane(
     val service: PersistentUiBuilderService,
     val renderer: AutoCloseable?,
     /**
-     * Reference overlays, in their own directory beside the design state.
-     *
-     * Beside rather than inside: the state file is one blob rewritten on every accepted operation,
-     * and a design's reference is megabytes that change when a person picks a new mock. Folding
-     * them together would rewrite every reference on this host on every keystroke.
+     * Reference overlays, beside (not inside) the state file, which is rewritten on every operation
+     * while references are megabytes.
      */
     val references: ServeUiBuilderReferenceStore?,
     /**
-     * Comment threads, in their own directory beside the design state and the references.
-     *
-     * Its own directory for the reason the references have one: a reply is a few hundred bytes
-     * written when somebody types, and the state file is a blob rewritten on every accepted
-     * operation. Neither should be able to rewrite the other.
+     * Comment threads, in their own directory so replies and state writes never rewrite each other.
      */
     val comments: ServeUiBuilderCommentStore?,
     /**
-     * The back-links that say what each design is for, in their own directory beside the state.
-     *
-     * Beside rather than inside for the third time, and for the third reason: a link is a fact
-     * *about* a design rather than content of it, and recording one must not advance the revision
-     * every open client is holding.
+     * Design back-links, beside the state: recording one must not advance the revision open clients
+     * hold.
      */
     val links: ServeUiBuilderLinksStore?,
     /** Review verdicts and implementing pull requests, beside the state for the links' reasons. */
@@ -2691,39 +2277,32 @@ public class ServeRunner(
     val folders: ServeUiBuilderFolderStore?,
     val projects: ServeUiBuilderProjectStore? = null,
     /**
-     * The components this host's editors publish, beside the state for the reason designs live here
-     * while they move: a project's own `ui-builder/components/` is its repository's to change.
+     * Components this host's editors publish; a project's own `ui-builder/components/` belongs to
+     * its repository.
      */
     val components: ServeUiBuilderComponentStore? = null,
     /** The design listing's card pictures, drawn ahead of the reader and kept across restarts. */
     val thumbnails: ServeUiBuilderThumbnails?,
     /**
-     * Compose again every builder catalog a delivery system supplies, and swap the service onto the
-     * result: what the catalog refresher calls when that system's branch moves.
+     * Recompose every builder catalog a delivery system supplies and swap the service onto the
+     * result; called when that branch moves.
      */
     val refreshPublished: (sourceSystem: String) -> Unit,
     /** What a new design starts as: built in, or the published templates of a catalog-owned one. */
     val seeds: UiBuilderCatalogSeeds = UiBuilderCatalogSeeds.BUILT_IN,
     /**
-     * The Compose half of the export, kept so the native render lane can ask it the same question
-     * with node tagging on. Not reached through [service]: the service's exporter may be the
-     * production wrapper around several formats, and the native lane wants exactly this one.
+     * The Compose exporter, kept so the native lane can call it with node tagging (the service's
+     * exporter may wrap several formats).
      */
     val compose: ScreenGeneratorComposeExportExecutor,
     /**
-     * Which daemon each enabled catalog's designs are rendered on, from the catalog's own
-     * declaration ([UiBuilderPreviewSurfaces]).
-     *
-     * A catalog knows this and the host does not: `wear-m3` is Wear Compose, Wear Compose is an
-     * Android AAR, so a Wear design is a Robolectric render — true of the catalog wherever it is
-     * served and whatever the operator called the bundle. Deriving it from the served bundle's
-     * manifest instead would make it true only once the bundle had loaded, which is after this lane
-     * is wired and after the first design can be opened.
+     * Which daemon each catalog's designs render on, from the catalog's own declaration
+     * ([UiBuilderPreviewSurfaces]), so it is known before any bundle loads.
      */
     val nativeBackends: Map<String, String>,
     /**
-     * `ui_builder_validate`: a scratch service over [service]'s own catalogs and exporter, so a
-     * check answers with exactly the refusal the real call would, and writes nothing.
+     * `ui_builder_validate`: a scratch service over [service]'s catalogs and exporter, answering
+     * with the real refusal and writing nothing.
      */
     val validator: UiBuilderDraftValidator,
     /** The state directory itself, for the stores that live beside the builder's (Web Push). */
@@ -2736,14 +2315,9 @@ public class ServeRunner(
   }
 
   /**
-   * The UI-builder lane, or null when it could not be opened.
-   *
-   * Nothing about the builder may stop `serve` binding its port. The one exception kept fatal is
-   * the argument check below: `--ui-builder-migrate-state` is a flag the operator passed on this
-   * invocation asking for durable work, and silently skipping it would be worse than refusing.
-   * Every failure after that — an unwritable state directory, a corrupt or oversize state file, a
-   * checksum mismatch, a migration that could not complete — disables the lane and prints
-   * [uiBuilderDisabledWarning]. See yschimke/compose-preview-server#568 for the deploy this cost.
+   * The UI-builder lane, or null when it could not be opened. Nothing about the builder may stop
+   * `serve` binding its port, except a bad `--ui-builder-migrate-state` argument. Every later
+   * failure disables the lane and prints [uiBuilderDisabledWarning].
    */
   /** For [ServeGoogleFonts]' fetches on the renderer's behalf: the font route's own timeouts. */
   private val googleFontsHttpClient: okhttp3.OkHttpClient by lazy {
@@ -2809,22 +2383,10 @@ public class ServeRunner(
     // accounts on the host; see [ServeOwnerOnlyFiles].
     ServeOwnerOnlyFiles.restrictDirectory(directory.toPath())
     System.err.println("serve: UI-builder design API persisting to ${directory.absolutePath}")
-    // Whether a Compose export survives the renderer failing is the same question the capability
-    // below answers, so it is asked once, here, and both read it. The handler used to promise
-    // "Compose export remains enabled" unconditionally — which in the packaged deployment, where
-    // catalogs are enabled and no record is passed, told an operator diagnosing a renderer failure
-    // that a fallback existed while the next expression was disabling every export format.
-    // Named, not counted. `composeCode` is all-or-none across enabled catalogs, so one missing
-    // record disables the export for every catalog — and a message saying "no catalog has a
-    // record" then sends an operator who configured `m3-catalog` looking for the record that is
-    // already there. What they need is the name of the one that is not.
-    // A catalog whose designs generate without a component record — `remote-m3`, `wear-m3` — is
-    // not missing anything, so it is neither reported below nor gated on a record it will never
-    // read. Before this it was counted as unconfigured, which made the renderer-failure message
-    // name `remote-m3` as the reason this host offered no export while its designs generated
-    // source perfectly well through `WearWidgetCodeExporter`.
-    // The packaged A2UI catalog is record-free too: its Kotlin is the app-side program that sends
-    // the design's A2UI payload, written by `A2uiComposeExporter` from the design alone.
+    // Whether Compose export survives a renderer failure is the same question the capability below
+    // answers, so it is asked once here. Missing catalogs are named, not counted, because
+    // `composeCode` is all-or-none. Record-free catalogs (`remote-m3`, `wear-m3`, the packaged A2UI
+    // catalog) generate without a record and are neither reported nor gated.
     val catalogsWithoutRecords = uiBuilderCatalogs.filterNot {
       it in uiBuilderComponents.keys ||
         it in RecordFreeExport.CATALOG_SYSTEM_IDS ||
@@ -2847,15 +2409,11 @@ public class ServeRunner(
       }
       .getOrNull()
     registerCloseable(renderer)
-    // The Compose half of the export is generated from the discovered component record, so it is
-    // constructed here rather than defaulted inside the runtime: `checkUiBuilderRuntimeBoundary`
-    // forbids any compose-ai-tools module but the protocol on that module's classpath, and
-    // `preview-discovery` is a compose-ai-tools module. `:server` is the first layer allowed to
-    // hold both the record reader and the port.
-    // A served catalog's own record, for a pack derived at startup: fetched from its delivery
-    // branch now, because the catalog itself loads later in the background and a pack is a startup
-    // fact. Kept for the life of the process as the export's fallback until that catalog has
-    // published a generation of its own to read from.
+    // The Compose exporter is constructed here, not inside the runtime, because
+    // `checkUiBuilderRuntimeBoundary` keeps `preview-discovery` off that module's classpath;
+    // `:server` may hold both.
+    // [startupRecords]: served catalogs' records fetched at startup for packs (the catalogs
+    // themselves load later), kept as the export fallback until a generation is published.
     val startupRecords = ConcurrentHashMap<String, File>()
     // The catalogs whose published file composed against their own delivery-branch record; that
     // record, not a configured one, is then the catalog's (see `composePublished`).
@@ -2886,16 +2444,9 @@ public class ServeRunner(
           if (fetched != null) startupRecords[packId] = fetched
         }
     }
-    // A pack is projected from its catalog's record once, at startup. Not on every request the way
-    // the export re-reads a record, because the projection is what the builder lists as the
-    // catalog's components and every open design validates against — a shelf that changed shape
-    // under an author because a file on disk did would be a catalog that floats, which is the one
-    // thing the pin exists to rule out.
-    //
-    // A record the operator named and cannot be read is a startup failure: the typo is theirs to
-    // fix and nothing else will fix it. A served catalog that supplies none is a warning and an
-    // absent shelf: the catalog may not have republished since records existed, and a host that
-    // refused to start over it would be down until another repository's CI ran.
+    // A pack is projected once at startup, since every open design validates against it and the
+    // shelf must not change underneath. A named but unreadable record is a startup failure
+    // (operator typo); a served catalog with no record is a warning and an absent shelf.
     val packs = uiBuilderPacks.mapNotNull { (packId, platform) ->
       val record =
         when (val lookup = records.record(packId)) {
@@ -2939,12 +2490,9 @@ public class ServeRunner(
       )
       derived.source
     }
-    // Uploaded asset bytes, content-addressed, in their own directory beside the design state for
-    // the reason the references and the comments have one: the state file is rewritten on every
-    // accepted operation, and a photograph must not ride along with every keystroke. The export
-    // executor reads the same store so a daemon render draws what the canvas draws — and so a Wear
-    // widget's background picture can be inlined into its generated source, which is the only
-    // place a system-hosted widget can carry one.
+    // Uploaded asset bytes, content-addressed, beside (not inside) the state file. The export
+    // executor reads the same store so daemon renders match the canvas and Wear widgets can inline
+    // background pictures.
     val assetStore = runCatching {
       FileUiBuilderAssetStore(directory.resolve("assets").toPath())
     }
@@ -2955,13 +2503,8 @@ public class ServeRunner(
         )
       }
       .getOrNull()
-    // What each published catalog composed, by catalog system id, for the record-free emitters.
-    //
-    // Filled below, when the published files are read, and read by the executor constructed here —
-    // which is why it is a map handed over as an accessor rather than a value. The two cannot be
-    // reordered: the executor is what `ProductionUiBuilderExportExecutor` wraps, and
-    // `uiBuilderExports` is computed FROM that wrapper and then handed to the composition, so
-    // composing first would need the capabilities the wrapper has not been built to state yet.
+    // What each published catalog composed, for the record-free emitters. An accessor because the
+    // executor must be built before composition (its capabilities feed it).
     val publishedRecords = ConcurrentHashMap<String, Map<String, ComponentRecord>>()
     val catalogPlatforms = ConcurrentHashMap<String, UiBuilderCatalogPlatform>()
     val compose =
@@ -2977,18 +2520,11 @@ public class ServeRunner(
     val pictureExporter =
       renderer?.let { ProductionUiBuilderExportExecutor(it, compose, assets = assetStore) }
         ?: compose
-    // The published half of the catalog contract: an enabled catalog that publishes its own
-    // `ui-builder.json` is served from that file rather than from a catalog written here.
-    //
-    // Read at startup, from the delivery branch, for the same reason a pack's record is: which
-    // catalogs exist and what shape each has is a startup fact, and catalogs themselves load in the
-    // background for minutes. Per catalog and reversible — anything that will not compose leaves
-    // the synthesised catalog in place and says why, because a host that refused to start over
-    // another repository's bad publish would be down until that repository's CI ran again.
-    // One export-capability value, computed once. The published catalogs below and the executor
-    // must be handed the SAME one: a published catalog does not go through the executor's
-    // `baseCatalog` copy, so a hardcoded value here would have made every published catalog
-    // advertise no SVG or PNG export on a host whose renderer supports both.
+    // Enabled catalogs that publish `ui-builder.json` are served from it. Read at startup from the
+    // delivery branch; per catalog and reversible, so anything that won't compose keeps the
+    // synthesised catalog and logs why.
+    // One export-capability value, shared by published catalogs and the executor, so published
+    // catalogs advertise exactly what the renderer supports.
     val documentExporter =
       if (UiBuilderBuildFeatures.remoteCompose) RemoteDocumentExportExecutor(pictureExporter)
       else null
@@ -3010,10 +2546,8 @@ public class ServeRunner(
         .newBuilder()
         .also { it.composeCode = composeExportConfigured }
         .build()
-    // `remoteJson` is the host saying its executor writes JSON, which [A2uiJsonExportExecutor] now
-    // does in every build. The runtime narrows it per catalog: an A2UI catalog offers it as its
-    // messages, a Remote Compose one only in a `-PuiBuilderRemoteCompose=true` build, and nothing
-    // else offers it at all.
+    // `remoteJson`: the executor writes JSON in every build; the runtime narrows it per catalog
+    // (A2UI always, Remote Compose only with `-PuiBuilderRemoteCompose=true`).
     val uiBuilderExports =
       RemoteDocumentExportSupport.capabilities(
           pictureExports,
@@ -3025,10 +2559,8 @@ public class ServeRunner(
         .build()
     val publishedCatalogs = ConcurrentHashMap<String, CatalogCapabilityV1>()
     val publishedRuntimeIds = ConcurrentHashMap<String, String>()
-    // The catalog-owned cutover (compose-ui-builder's UI_BUILDER_CATALOG_CUTOVER.md): which
-    // catalogs
-    // seed, route their export and are defined from nothing but what they publish. `none` by
-    // default, and every read of it below is a no-op at `none`.
+    // The catalog-owned cutover (compose-ui-builder's UI_BUILDER_CATALOG_CUTOVER.md); every read
+    // below is a no-op at `none`.
     val ownership = options.uiBuilderCatalogOwnership
     if (!ownership.isNone) {
       System.err.println(
@@ -3039,14 +2571,12 @@ public class ServeRunner(
       )
     }
     val publishedTemplates = ConcurrentHashMap<String, CatalogSeedTemplates>()
-    // Which catalogs the operator lets read their own published file. Null is "every enabled one",
-    // which is the behaviour the loader shipped with; an empty set turns the whole path off without
-    // a release, and a named set opts in one catalog at a time.
+    // Null allows every enabled catalog, empty turns the path off, a named set opts in one at a
+    // time.
     val publishedAllowed = options.uiBuilderPublishedCatalogs
     if (publishedAllowed != null) {
-      // Said once, at startup, because the difference between "this catalog has no published file"
-      // and "this host was told not to read it" is invisible in the per-catalog lines below and is
-      // exactly what somebody debugging a shelf needs to know.
+      // Logged once, since "no published file" and "told not to read it" are otherwise
+      // indistinguishable.
       val withheld = uiBuilderCatalogs.filterNot(publishedAllowed::contains).sorted()
       System.err.println(
         if (publishedAllowed.isEmpty())
@@ -3057,9 +2587,8 @@ public class ServeRunner(
             "ui-builder.json; ${withheld.joinToString()} keep their built-in definition"
       )
     }
-    // The shadow step before ownership (compose-ui-builder's UI_BUILDER_CATALOG_CUTOVER.md): a
-    // shadowed catalog is served exactly as before, and each time it composes the box also asks
-    // what owning it would refuse and what an editor would see change, and says so.
+    // Shadow step before ownership: served unchanged, but each composition reports what ownership
+    // would refuse or change.
     val shadowed =
       options.uiBuilderShadowCatalogs.filterTo(mutableSetOf()) {
         it in uiBuilderCatalogs && !ownership.owns(it)
@@ -3129,12 +2658,8 @@ public class ServeRunner(
         System.err.println("serve:   ${if (it in losses) "[loss] " else ""}$it")
       }
     }
-    // One catalog's published definition, fetched from its delivery branch and composed into the
-    // maps below. A function rather than a startup loop because the catalog refresher calls it
-    // again
-    // when that branch moves (yschimke/compose-preview-server#1054): a republished runtime or
-    // policy
-    // reaches the builder without a restart. True when it composed.
+    // Compose one catalog's published definition into the maps below; a function because the
+    // refresher calls it again when the branch moves. True when it composed.
     val catalogGuidelines = ServeCatalogGuidelines()
     // An owned catalog that cannot be composed is withheld, never quietly replaced.
     val health = UiBuilderOwnedCatalogHealth(ownership::owns).also { uiBuilderCatalogHealth = it }
@@ -3150,12 +2675,8 @@ public class ServeRunner(
       // A catalog served under another name (`wear-m3` from `wear-m3-catalog`) keeps its record
       // under the builder id, where the delivery branch's reload never replaces it: fetch it again.
       if (refresh) startupRecords.remove(systemId)
-      // A Builder catalog's public identity and the catalog whose delivery branch supplies it
-      // are normally the same. Wear is deliberately not: designs name `wear-m3`, while the
-      // Android bundle and delivery branch are served as `wear-m3-catalog`. The native mapping
-      // already states that one-to-one relationship for the compile lane; use the same source
-      // here so a published policy is composed under the identity its own `catalog.id`
-      // declares.
+      // Compose under the delivery system that supplies the Builder catalog (they differ for Wear);
+      // see [uiBuilderPublishedSourceSystem].
       val sourceSystem = uiBuilderPublishedSourceSystem(systemId, uiBuilderNativeCatalogs)
       val config = catalogLoads?.stateFor(sourceSystem)?.config
       val published =
@@ -3183,22 +2704,10 @@ public class ServeRunner(
       } else {
         catalogGuidelines.remove(systemId)
       }
-      // The catalog's own record, fetched now if this host has never loaded it.
-      //
-      // Without this a cold start composes the published policy against NOTHING — the store
-      // only
-      // has a record once a load generation exists — and a policy with no inventory composes to
-      // its builtins alone. That would not fail; it would quietly serve a near-empty shelf in
-      // place of the synthesised catalog, which is the one outcome worse than not reading the
-      // published file at all. Fetched by the same route a pack's record is, for the same
-      // reason.
-      //
-      // Fetched even when the operator configured a record for the catalog: a published file joins
-      // on the record published beside it, and a configured one (the image's authored m3-catalog
-      // fixture) predates the catalog publishing any. It is tried first and wins only if the
-      // published file composes against it; otherwise the configured record stays the catalog's.
-      // By the delivery system, as the fetch below is: a served catalog sharing the Builder id (the
-      // Wear harness `wear-m3`) is not this catalog's record. See [uiBuilderCatalogRecord].
+      // Fetch the catalog's own record now if it has never loaded; otherwise a cold start composes
+      // the policy against nothing and quietly serves a near-empty shelf. Fetched even when a
+      // record is configured: the published one is tried first and wins only if it composes. Keyed
+      // by delivery system ([uiBuilderCatalogRecord]).
       if (catalogStore.componentRecord(sourceSystem) == null && startupRecords[systemId] == null) {
         catalogStore
           .fetchComponentRecord(
@@ -3218,18 +2727,12 @@ public class ServeRunner(
       ) {
         is PublishedUiBuilderCatalog.Result.Composed -> {
           publishedCatalogs[systemId] = composed.catalog
-          // The runtime is the executable half of this catalog's exact document pin. Do not
-          // substitute a host default when the delivery catalog declares none: `candidate`
-          // must continue to mean the built-in renderer, while a published runtime must be
-          // named precisely so the browser and native export cannot drift apart.
-          // A republish that drops its runtime returns the catalog to the built-in renderer.
+          // The runtime is the executable half of the document pin; never substitute a host
+          // default. A republish that drops its runtime returns to the built-in renderer.
           published.runtimeId?.let { publishedRuntimeIds[systemId] = it }
             ?: publishedRuntimeIds.remove(systemId)
-          // The join only this composition can make: a design node names a builder id, and
-          // which record component that id was derived from is stated by the published file.
-          // Without it the Remote emitter's record fallback is unreachable in production —
-          // the only component map the export executor could build is a *pack*'s, and a
-          // catalog is not a pack of itself.
+          // The published file maps builder ids to record components; without it the Remote
+          // emitter's record fallback is unreachable.
           publishedRecords[systemId] = composed.records
           if (systemId in shadowed) {
             reportShadow(systemId, composed, published.templates, published.runtimeId)
@@ -3290,48 +2793,15 @@ public class ServeRunner(
           it.published = publishedCatalogs
           it.nativeRuntimeIds = publishedRuntimeIds
           it.catalogOwnership = ownership
-          // `composeCode` answers a **configuration** question — is this host set up to export
-          // Compose? — and deliberately not a filesystem one.
-          //
-          // It has to, because this value is computed once and baked into every catalog by
-          // `CurrentM3UiBuilderCatalogExecutor`, and `PersistentUiBuilderService` then gates each
-          // request on it. Anything read from disk here is a cache of a mutable fact with no
-          // invalidation: a record repaired after startup could never lift the flag, which would
-          // defeat `ComponentRecordSource`'s hot reload outright — the source would re-read a file
-          // the service has already refused to ask it about.
-          //
-          // So the question is whether a catalog has a record **configured**, which is fixed for
-          // the
-          // process. It is asked per catalog: `exportCapabilities` is a field of each
-          // `CatalogCapabilityV1`, and collapsing it to one boolean meant a deployment serving
-          // `m3-catalog` beside `remote-m3` — which deliberately has no record, Remote Compose
-          // being
-          // outside the Compose exporter — advertised no export anywhere, withdrawing the action
-          // from the catalog that could have used it.
-          //
-          // The cost, stated: a configured record that is missing, malformed, or on a schema this
-          // generator will not read is still advertised, and every export of it refuses. That is
-          // the
-          // better failure. The refusal names the catalog, the file and the reason, an operator who
-          // repairs the file is served on the next request, and nothing needs a restart. The
-          // alternative trades a precise per-request diagnostic for a silent permanent one.
+          // `composeCode` answers a configuration question (is a record configured for this
+          // catalog?), not a filesystem one: the value is baked in once, so a disk read would block
+          // hot reload of a repaired record. Asked per catalog so a record-less catalog doesn't
+          // withdraw export everywhere. A broken configured record is still advertised and each
+          // export refuses with a precise reason.
           it.exportCapabilities = uiBuilderExports
-          // A record, **or** a catalog whose designs are written by an emitter that needs none. The
-          // second half is what makes the Compose-export action appear for a Wear widget design:
-          // the
-          // source has existed since `WearWidgetCodeExporter` landed, and only the editor's Code
-          // pane
-          // could read it.
-          //
-          // The flag it sets is still `composeCode`, which now means "this catalog exports Kotlin
-          // source" rather than "…exports Jetpack Compose Material 3". Reused rather than given a
-          // format of its own because `ExportFormatV1` is published from compose-preview-contracts:
-          // a new member is a wire change across two repositories, and it is not one this
-          // repository
-          // can make. The artifact says what it is — a widget export declares `@RemoteComposable`
-          // and
-          // imports `androidx.compose.remote.creation.compose` in its first ten lines — and the MCP
-          // tool description says so too.
+          // A record, or a catalog whose designs are written by a record-free emitter (e.g. Wear
+          // widgets via `WearWidgetCodeExporter`). `composeCode` now means "exports Kotlin source";
+          // a new `ExportFormatV1` member would be a cross-repo wire change.
           it.composeExportFor = { systemId ->
             val owned = publishedCatalogs[systemId]?.takeIf { ownership.owns(systemId) }
             // A catalog that owns its export states it, and is answered by that declaration
@@ -3362,10 +2832,9 @@ public class ServeRunner(
         }
         .build()
     val catalogs = SwappableUiBuilderCatalogExecutor(buildCatalogExecutor())
-    // What the catalog refresher calls when a delivery branch moves: every builder catalog that
-    // system supplies is composed again and the service's catalogs are swapped in one step.
-    // Kept current by [refreshPublished] too: a republished policy can change a catalog's platform,
-    // and with it the Compose generator and the native preview backend.
+    // Called when a delivery branch moves: recompose every builder catalog that system supplies and
+    // swap them in one step. Native backends are kept current too, since a policy can change a
+    // catalog's platform.
     val nativeBackends = ConcurrentHashMap<String, String>()
     fun deriveRouting() {
       catalogs.listCatalogs().forEach { catalog ->
@@ -3426,16 +2895,12 @@ public class ServeRunner(
     recovery = ServeUiBuilderCatalogRecovery(service, service, catalogs)
     runCatching { runBlocking { recovery?.recoverStranded() } }
       .onFailure { System.err.println("serve: UI-builder catalog recovery failed: ${it.message}") }
-    // An unusable design is the one startup condition that is invisible by construction: the host
-    // comes up healthy and serves everything else, so without this line the only evidence is a
-    // diagnostics counter nobody reads until a design is reported missing. Named, not counted — the
-    // id and the reason are what an operator needs to decide between repairing the catalog and
-    // retiring the design, and a bare count sends them looking for which one.
+    // Unusable designs are otherwise invisible at startup; name each id and reason so the operator
+    // can repair or retire it.
     val unreadable = service.adminUnreadableDesigns()
     service.adminUnusableDesigns().forEach { (designId, reason) ->
-      // Two kinds of unusable, two remedies, and offering the wrong one costs an operator the worst
-      // minutes to spend looking for a download that cannot exist: a design the catalog outgrew has
-      // a document to take out and put back, and a design whose files would not decode has none.
+      // Two remedies: a design the catalog outgrew can be exported and re-imported; one whose files
+      // won't decode has no document to take out.
       val remedy =
         if (designId in unreadable) {
           "the stored files are what failed, so there is nothing to download or repair — restore " +
@@ -3454,19 +2919,14 @@ public class ServeRunner(
           "panel to drop each property or map it to a catalog replacement"
       )
     }
-    // The other startup condition nothing announced: a state file near the ceiling every save is
-    // bounded by. Printed here rather than only carried on /status.json because the operator who
-    // needs it is the one reading a deploy's output, and never allowed to fail — a gauge that can
-    // abort startup is the shape #568 exists about.
+    // Warn about a state file near its size ceiling in the deploy output. Never allowed to fail
+    // startup.
     runCatching { service.diagnostics() }
       .getOrNull()
       ?.let { uiBuilderStorageWarning(it.storageBytes, it.storageMaximumBytes) }
       ?.let(System.err::println)
     if (uiBuilderMigrateState) {
-      // Deliberately not caught here any more. A migration that cannot complete used to close the
-      // renderer and rethrow, which is exactly the path that took the host down; the guard in
-      // [openUiBuilderService] closes the renderer and disables the lane instead, and the operator
-      // still learns what happened and how to recover.
+      // Not caught here: [openUiBuilderService]'s guard closes the renderer and disables the lane.
       val migration = service.migratePersistenceToLatest()
       System.err.println(
         "serve: UI-builder persistence ${migration.fromFormat} -> ${migration.toFormat} " +
@@ -3578,10 +3038,9 @@ public class ServeRunner(
 
   /**
    * Find conventional executable CMP/Wasm browser projects and associate them with the preview
-   * modules they depend on. This covers the usual split (`:shared:ui` plus `:webApp`) while also
-   * supporting a preview module that owns its own Wasm executable. Missing distributions are built
-   * with the standard Kotlin task; failure is deliberately non-fatal because snapshots remain a
-   * complete degraded browser.
+   * modules they depend on (the `:shared:ui` + `:webApp` split, or a module owning its own Wasm
+   * app). Missing distributions are built; failure is non-fatal since snapshots remain a complete
+   * fallback.
    */
   private fun automaticWasmCatalogs(modules: List<PreviewModule>): Map<String, File> {
     val root = gradleProjectRoot() ?: return emptyMap()
@@ -3591,9 +3050,8 @@ public class ServeRunner(
 
     val assignments = modules.mapNotNull { module ->
       val directMatches = projects.filter { it.supports(module) }
-      // Convention plugins can hide the dependency declaration from this project's build script.
-      // A one-preview-module / one-Wasm-app build is still unambiguous, so keep that common shape
-      // zero-config too.
+      // Convention plugins can hide the dependency declaration; one preview module and one Wasm app
+      // is still unambiguous.
       val matches =
         if (directMatches.isEmpty() && modules.size == 1 && projects.size == 1) projects
         else directMatches
@@ -3670,13 +3128,9 @@ public class ServeRunner(
     val configuredApps =
       catalogLoads?.snapshot()?.filter { !it.config.listed }?.map { it.config.system }
         ?: registeredUnlistedCatalogs.toList()
-    // Top-level sites: `catalogs.json`'s `sites` first (the operator config that lives beside the
-    // catalog set), then any `--sites` flag entries for a host the file didn't already claim — the
-    // same compose-don't-replace rule `--catalogs` follows. A site naming a system this server does
-    // not serve is dropped with a startup warning rather than 404ing a whole hostname silently.
-    //
-    // Held in a [ServeSiteRegistry] rather than as a value, because `/admin/sites` publishes onto
-    // the running server: the startup map below is the seed, not the whole story.
+    // Top-level sites: `catalogs.json`'s `sites` first, then `--sites` entries for unclaimed hosts.
+    // A site naming an unserved system is dropped with a warning. A [ServeSiteRegistry] because
+    // `/admin/sites` publishes onto the running server.
     val sites =
       ServeSiteRegistry(
         ServeSites.of(
@@ -3689,42 +3143,32 @@ public class ServeRunner(
           onProblem = { System.err.println("serve: $it") },
         )
       )
-    // Runtime catalog administration: only when the operator supplied an admin token AND there's a
-    // catalog store to fetch through. Both halves are opt-in, so a plain `serve` has no admin
-    // surface at all.
+    // Runtime catalog administration needs both an admin token and a catalog store; a plain `serve`
+    // has no admin surface.
     val catalogAdmin =
       if (adminToken != null && catalogStore != null && catalogLoads != null) {
         buildCatalogAdmin(registry, catalogStore, catalogLoads, wasmCatalogs, sites)
       } else {
         null
       }
-    // Keep the catalog set in step with the nominated registry projects, so a catalog listed
-    // after boot is imported without a restart ([ServeCatalogRegistrySync]). Independent of the
-    // admin token: nominating a registry is the operator's opt-in, and a box that serves registry
-    // catalogs but can only pick up new ones by restarting is the gap this closes.
+    // Keep the catalog set in step with nominated registry projects ([ServeCatalogRegistrySync]) so
+    // later listings import without a restart. Independent of the admin token.
     val catalogRegistrySync =
       if (catalogStore != null && catalogLoads != null) {
         buildCatalogRegistrySync(registry, catalogStore, catalogLoads, wasmCatalogs, sites)
       } else {
         null
       }
-    // One-step project onboarding, on exactly the same terms as the administrator it publishes
-    // through: it exists when that does, because everything it can do is a `catalogAdmin.register`
-    // whose arguments were read off the repository's refs instead of typed by the caller.
+    // Project onboarding exists exactly when the administrator does: everything it does is a
+    // `catalogAdmin.register` read off the repository's refs.
     val onboarding = catalogAdmin?.let {
       ServeOnboarding(admin = it, branchPrefix = catalogBranchPrefix)
     }
-    // Onboarding a project that has published nothing at all (#12) — a separate component because
-    // it answers a different question with a different risk. It needs no catalog store (there is no
-    // branch to fetch) and no administrator (nothing is written to catalogs.json), only the admin
-    // token that makes the route exist and, for the build half, this box's opt-in to executing
-    // foreign build scripts.
+    // Onboarding a project that has published nothing: needs only the admin token, no store or
+    // administrator.
     val sourceOnboarding = if (adminToken != null) buildSourceOnboarding() else null
-    // Runtime site administration. Needs only the admin token and the live map: publishing a
-    // hostname adds no catalog and fetches nothing, it re-points an existing one. What it does need
-    // is the CURRENT served set, read through the tracker rather than captured here, so a site may
-    // name a catalog that was itself published at runtime a moment earlier — which is exactly the
-    // order a config reconcile applies them in.
+    // Runtime site administration: needs only the admin token and the live map. Reads the current
+    // served set through the tracker, so a site may name a catalog published moments earlier.
     val siteAdmin =
       if (adminToken != null) {
         ServeSiteAdmin(
@@ -3738,9 +3182,8 @@ public class ServeRunner(
       } else {
         null
       }
-    // Runtime editor-pin administration (#1035). Needs the admin token, somewhere to cache the
-    // archive it verifies, and the file the pin is written to — a pin that would not survive the
-    // restart that applies it is not one worth accepting.
+    // Runtime editor-pin administration: needs the admin token, an archive cache, and a file to
+    // persist the pin to.
     val editorAdmin =
       if (adminToken != null && uiBuilderEditorStore != null) {
         ServeUiBuilderEditorAdmin(
@@ -3751,9 +3194,8 @@ public class ServeRunner(
       } else {
         null
       }
-    // The UI builder's catalog settings, maintained in catalogs.json instead of the box's .env.
-    // Resolved against the environment's own values, never the block being replaced, so a PUT
-    // describes what the next start serves rather than a diff of a diff.
+    // UI builder catalog settings maintained in catalogs.json, resolved against the environment's
+    // values so a PUT describes what the next start serves.
     val uiBuilderSettingsAdmin =
       if (adminToken != null) {
         ServeUiBuilderSettingsAdmin(
@@ -3767,25 +3209,18 @@ public class ServeRunner(
       } else {
         null
       }
-    // Runtime producer-trust administration. Needs only the admin token: unlike the catalog admin
-    // there's nothing to fetch, and a box with no trust store yet is exactly the one that most
-    // needs
-    // to be able to add its first producer without an image rebuild.
+    // Producer-trust administration needs only the admin token, so a box with no trust store can
+    // add its first producer without a rebuild.
     val trustAdmin =
       if (adminToken != null) {
         ServeTrustAdmin(
           store = trustStore,
           file = trustStoreFile,
-          // Revoking trust must retire what that trust was already buying. Each affected catalog's
-          // session (and its live daemon, via unregister) is dropped and its tracker row marked
-          // failed, so the branch refresher re-fetches it and it comes back re-verified — as
-          // `unverified`, serving baked data tiers only, instead of keeping a stale Trusted
-          // verdict.
+          // Revoking trust retires what it bought: affected sessions are dropped and rows marked
+          // failed, so the refresher re-fetches them as `unverified`.
           onRevoke = { updated -> retireNewlyUntrusted(updated, catalogLoads, registry) },
-          // And the mirror: granting trust must re-verify what that trust now buys. A catalog
-          // that loaded as `unverified` keeps that verdict otherwise, because the refresher
-          // short-circuits on an unchanged branch SHA — so the catalog a registry contributed
-          // stays under-trusted through a successful trust reconcile.
+          // Granting trust re-verifies affected catalogs; otherwise the refresher's unchanged-SHA
+          // short-circuit keeps them `unverified`.
           onGrant = { before, updated -> reverifyNewlyTrusted(before, updated, catalogLoads) },
         )
       } else {
@@ -3795,9 +3230,8 @@ public class ServeRunner(
     // route serves from — otherwise a minted `/d/<id>` link wouldn't resolve.
     val docStore = openDocStore()
     val imageLane = openImageLane()
-    // Built BEFORE the playground lane: whether GitHub auth is configured is one of the two bases
-    // the `--public` admission gate decides on (issue #3210), because it is what makes the routes'
-    // repo-access check a real check instead of a no-op.
+    // Built before the playground: configured GitHub auth is one of the two bases of the `--public`
+    // admission gate.
     val githubAuth = buildGithubAuth()
     val uiBuilderGuidelines = buildUiBuilderGuidelines()
     val guidelinesPictureBudget =
@@ -3837,9 +3271,8 @@ public class ServeRunner(
           entries = { catalogLoads.snapshot().map { it.config } },
           cacheRoot = catalogFeedCacheDir,
           idleTimeoutMillis = catalogFeedIdleSeconds * 1000,
-          // Feed polling is demand-gated, but while active it follows the same operational cadence
-          // as catalog refresh. If ordinary refresh is disabled, retain the normal ten-minute feed
-          // cadence: a subscribed feed is itself an explicit request to watch this branch.
+          // While a feed is subscribed it follows the catalog refresh cadence, or ten minutes when
+          // refresh is disabled.
           pollIntervalMillis =
             (catalogRefreshSeconds.takeIf { it > 0 }
               ?: ServeDefaults.DEFAULT_CATALOG_REFRESH_SECONDS) * 1000,
@@ -3863,11 +3296,8 @@ public class ServeRunner(
     }
     uiBuilderLaneOpen = uiBuilderLane != null
     uiBuilderPublishedRefresh = uiBuilderLane?.refreshPublished
-    // Named at startup because the failure it prevents surfaces far from its cause: an agent
-    // requests the ui-builder capabilities, every approval page offers none of them, and the
-    // first tool call refuses with a message about the grant — three steps downstream of the
-    // operator decision that actually capped it. One line here closes that distance. (The
-    // approval page also says it per request; this is for the operator reading the boot log.)
+    // Logged at startup because a capability cap otherwise surfaces three steps downstream, as a
+    // refused tool call.
     if (agentGrantStore != null && uiBuilderLane != null) {
       val builderCapabilities =
         listOf(
@@ -3886,9 +3316,8 @@ public class ServeRunner(
     }
     landingServesSomething =
       defaultSessionId.isNotEmpty() || registry.anySessionId() != null || catalogRefs.isNotEmpty()
-    // Fail-soft everywhere else — a host with previews to serve keeps serving them and simply has
-    // no builder — but fatal when the builder was the whole server, which is `ui --no-project`.
-    // Serving its assets over an absent design API is a builder that opens and cannot save.
+    // Fail-soft unless the builder was the whole server (`ui --no-project`), where serving assets
+    // over an absent design API would be a builder that cannot save.
     if (
       uiBuilderLane == null &&
         uiBuilderLaneConfigured &&
@@ -3903,11 +3332,9 @@ public class ServeRunner(
       exitProcess(1)
     }
     val uiBuilderAdministrators = ServeUiBuilderAdministrators(uiBuilderAdminActors)
-    // Runtime UI-builder administration. Needs an operator credential or configured UI-builder
-    // administrator and a builder lane: it reads and removes designs through the service the
-    // routes already hold, so a host with no builder has no such page. The operator token and a
-    // configured administrator enable every action; the diagnostic token constructs the same read
-    // port but its HTTP gate exposes only the summary page and list.
+    // Runtime UI-builder administration: needs a builder lane plus an operator credential or
+    // configured administrator. The diagnostic token gets the same read port, but its HTTP gate
+    // exposes only the summary.
     val uiBuilderAdmin =
       if (
         (adminToken != null || adminReadToken != null || uiBuilderAdministrators.configured) &&
@@ -3926,9 +3353,8 @@ public class ServeRunner(
       } else {
         null
       }
-    // The designs the served catalogs publish. Same two conditions as the admin above — it writes
-    // through the builder lane and is gated by the admin token — plus the fetcher every other
-    // branch read already goes through, so a library read is counted and throttled like the rest.
+    // Designs the served catalogs publish; same gates as the admin above, fetched through the
+    // shared counted fetcher.
     val uiBuilderDesignLibrary =
       if (uiBuilderAdmin != null) {
         ServeUiBuilderDesignLibrary(
@@ -3938,38 +3364,23 @@ public class ServeRunner(
       } else {
         null
       }
-    // The components those same projects share between their designs, read from the same
-    // coordinates and through the same counted fetcher. Its own instance rather than a mode of the
-    // design library, because the two cache separately: a project republishes a design far more
-    // often than it changes a component, and one invalidating the other would throw away a warm
-    // index for no reason.
-    //
-    // Gated on the builder being served at all, **not** on the admin surface. It first shipped
-    // beside the admin routes and inherited their `uiBuilderAdmin != null`, which needs an
-    // `--admin-token`; the palette reads this through the builder's own credential, so on an
-    // ordinary host without an admin token the endpoint it needs would never have registered.
-    // Nothing here writes, so serving the builder is the whole requirement.
-    // Written as the same `uiBuilderLane?.let` the authorization below uses, on purpose: the routes
-    // register only when *both* are present, so the two have to be keyed on one thing. Spelled two
-    // different ways is how they came to disagree in the first place.
+    // Components shared across those projects' designs, cached separately from the design library
+    // (designs change far more often). Gated on the builder being served, not on the admin surface:
+    // the palette uses the builder's own credential. Keyed on `uiBuilderLane` like the
+    // authorization below, so the two can't disagree.
     val uiBuilderComponentLibrary = uiBuilderLane?.let {
       ServeUiBuilderComponentLibrary(
         fetch = ::fetchRegistryDocument,
         onLog = { System.err.println(it) },
       )
     }
-    // Telling the room: comment activity, posted out to one URL. Off unless an operator named one.
-    //
-    // Constructed here and attached in the same breath, so it subscribes before the routes that
-    // accept comments are serving: a hook that attached after the first request could miss the
-    // comment that arrived while it was starting.
+    // Comment activity webhook, off unless configured. Attached before comment routes serve so no
+    // early comment is missed.
     var startedServer: ServeHttpServer? = null
     val commentWebhook = uiBuilderCommentWebhook?.let { url ->
       val comments = uiBuilderLane?.comments
       if (comments == null) {
-        // Named, and nothing to watch. Said out loud rather than ignored: an operator who
-        // configured a hook and hears nothing for a week should learn why on the day they
-        // deployed it, and the reason is always one of these two.
+        // Logged so an operator who configured a hook learns on deploy day why it will never fire.
         System.err.println(
           "serve: --ui-builder-comment-webhook is set and there is no comment store to watch " +
             "(the UI builder is off, or its state directory could not be opened); nothing " +
@@ -3980,10 +3391,8 @@ public class ServeRunner(
       val format =
         uiBuilderCommentWebhookFormat?.let { CommentWebhookFormat.parse(it) }
           ?: CommentWebhookFormat.PLAIN
-      // The origin a reader's browser reaches this box at. `--github-auth-callback-base-url` is
-      // the operator's own statement of it and is authoritative where it is set — a deployment
-      // behind a reverse proxy knows its public name and this process does not. Everything else
-      // falls back to the bind address, which is right for the local case the fallback serves.
+      // The origin browsers reach this box at: `--github-auth-callback-base-url` when set (a
+      // proxied deployment knows its public name), else the bind address.
       val configuredOrigin =
         githubAuthCallbackBaseUrl?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() }
       val linkHost = if (ServeUrls.isExposed(host)) ServeUrls.LOOPBACK else host
@@ -4013,15 +3422,10 @@ public class ServeRunner(
         "serve: UI-builder activity posts to a ${format.wire} webhook " +
           "(${webhook.fingerprint}): ${posted.joinToString(", ").ifEmpty { "nothing selected" }}"
       )
-      // A permalink is only useful to somebody who can open it, and on a token-gated host without
-      // sign-in nobody receiving one can: the browse token travels as a header or `?token=`, never
-      // a cookie, so the link opens the shell and the design behind it stays refused.
-      //
-      // Said, not fixed by putting the token in the link. The server token is a far stronger
-      // credential than the hook URL this file refuses to log, and a chat channel is long-lived and
-      // widely readable — pasting it into every notification would hand browse access to everyone
-      // who can scroll back. Said rather than refused, too: a local `serve` posting to a loopback
-      // receiver is a legitimate setup, and so is a proxy that authenticates in front of this box.
+      // On a token-gated host without sign-in, permalinks in notifications can't be opened by
+      // recipients. Warned, not fixed: putting the server token into a chat channel would hand out
+      // browse access. Not refused either, since loopback receivers and authenticating proxies are
+      // legitimate.
       if (token.isNotBlank() && githubAuth == null) {
         System.err.println(
           "serve: note - this host is gated by a browse token and has no GitHub sign-in, so a " +
@@ -4132,9 +3536,8 @@ public class ServeRunner(
         },
         uiBuilderComponentLibrary = uiBuilderComponentLibrary,
         uiBuilderComponentStore = uiBuilderLane?.components,
-        // The same executor the export runs, asked for the record rather than for Kotlin: the
-        // editor's code pane generates from it in the browser, so the two lanes cannot be reading
-        // different records. Null lane ⇒ no record, which is also no builder to serve it to.
+        // The same executor the export runs, so the editor's code pane and the export read the same
+        // record.
         uiBuilderCatalogRecord = { systemId -> uiBuilderLane?.compose?.exportRecord(systemId) },
         trustAdmin = trustAdmin,
         adminToken = adminToken,
@@ -4144,9 +3547,8 @@ public class ServeRunner(
         imageStore = imageLane?.store,
         imageUploadAuth = imageLane?.auth,
         imageUploadLimiter = imageLane?.limiter,
-        // The public surface's handle on the engine. Null on a `--compile-engine` host, which is
-        // what keeps `/playground`, the run route, `/pg/` and every editor link unmounted there,
-        // while the UI-builder lanes below still compile through `playgroundLane` directly.
+        // Null on a `--compile-engine` host, which keeps the public playground surface unmounted
+        // while UI-builder lanes still compile via `playgroundLane`.
         playgroundService = playgroundLane?.compile?.takeIf { publicPlayground },
         // A sibling `--role playground` process serves the editor; this host's engine only decides
         // which catalogs get a link to it.
@@ -4156,9 +3558,8 @@ public class ServeRunner(
         branchFetchStats = catalogStore?.let { store -> { store.branchFetchStats.snapshot() } },
         themeOptimizerStats = { backgroundWork.optimizerAdmissionSnapshot() },
         themeCacheStats = { themeCacheStore?.snapshot() },
-        // Null on a server publishing no catalogs: its pool is not merely empty, nothing will ever
-        // read or write it, and a row of zeroes reads as a cache that is failing rather than one
-        // that was never asked for.
+        // Null when no catalogs are published, so `/status` doesn't show a never-used cache as
+        // failing.
         catalogCacheStats =
           if (needsCatalogMachinery) {
             { runCatching { catalogBlobPool.snapshot() }.getOrNull() }
@@ -4176,11 +3577,8 @@ public class ServeRunner(
         imageBrowserLogin =
           githubAuth?.let { auth ->
             { call, repository ->
-              // The IMAGE bit, against the IMAGE repository. This asked the sign-in question until
-              // the two gates were allowed to differ, and on a box where they do it can only ever
-              // answer false — so the approver who may hand an agent `images` would themselves be
-              // refused an upload from the bug-report page. Case-insensitive like every other
-              // comparison of a `owner/repo` pair here.
+              // The image bit against the image repository (which may differ from sign-in's).
+              // Case-insensitive, like every `owner/repo` comparison here.
               auth.currentLogin(call)?.takeIf {
                 auth.hasImageRepositoryAccess(call) &&
                   auth.imageAccessRepository().equals(repository, ignoreCase = true)
@@ -4228,42 +3626,28 @@ public class ServeRunner(
           uiBuilderLane?.let {
             ServeUiBuilderAuthorization.fromMachineAuthorization(machineAuthorization)
           },
-        // Both halves or nothing: a native render needs the generator (to write the Kotlin) and
-        // the playground lane (to compile and run it). A host with a builder and no compiler
-        // simply has no such route, which is what a client discovers rather than being told after
-        // a failed call.
+        // Needs both the generator and the playground lane; otherwise the route is simply absent.
         uiBuilderNativePreview =
           uiBuilderLane?.let { lane ->
             playgroundLane?.let { playground ->
               val adapter = UiBuilderGeneratedPreviewAdapter(playground.compile)
               ServeUiBuilderNativePreview(
                 executor = lane.compose,
-                // A builder catalog id is not a served catalog id, and the daemon comes from the
-                // bundle rather than from either. `wear-m3` is where that stopped being a
-                // distinction without a difference: its bundle lives in another repository (served
-                // under whatever `--catalogs` id it was given) and, because Wear Compose is an
-                // Android AAR, it is a Robolectric bundle. Unmapped catalogs keep compiling against
-                // a served catalog of their own name on the desktop daemon, which is what every
-                // host did before this.
+                // A builder catalog id is not a served catalog id, and the daemon follows the
+                // bundle (e.g. `wear-m3` is a Robolectric bundle served from another repository).
+                // Unmapped catalogs compile against a served catalog of the same name on desktop.
                 nativeTarget = { builderCatalog ->
                   val served = uiBuilderNativeCatalogs[builderCatalog] ?: builderCatalog
-                  // A pack is asked for by its own id and declares no backend of its own — its
-                  // bundle is a served catalog's, and that bundle's manifest says which daemon it
-                  // runs on. So a pack takes the served backend where a catalog would take its
-                  // declaration, and an unmapped pack on a desktop bundle compiles on Skiko.
+                  // A pack declares no backend; it takes its served bundle's.
                   val backend =
                     lane.nativeBackends[builderCatalog]
                       ?: playground.catalogBackend(served)?.takeIf {
                         builderCatalog in uiBuilderPacks
                       }
-                  // A catalog that declares the Android daemon, mapped at a bundle this host serves
-                  // as a desktop one, is refused rather than sent to Skiko. That combination is a
-                  // real deployment mistake — the operator mapped `wear-m3` at the wrong catalog,
-                  // or has not served the Wear bundle at all — and the compile it would produce
-                  // fails on every `androidx.wear.compose` import, which reads like the design is
-                  // broken. Only checked where the host can answer: a pinned `--playground-bundle`
-                  // host reports no backend, and pinning is itself the operator saying which bundle
-                  // each mode uses.
+                  // A catalog declaring the Android daemon but mapped to a desktop bundle is
+                  // refused rather than compiled on Skiko, where every `androidx.wear.compose`
+                  // import would fail. Only checked where the host reports a backend (not on pinned
+                  // hosts).
                   val servedBackend = playground.catalogBackend(served)
                   when {
                     backend == UiBuilderPreviewSurfaces.BACKEND_ANDROID &&
@@ -4285,28 +3669,24 @@ public class ServeRunner(
                     ?.let(ServeRcPlayerIds::bundleCarriesCmpAndroidPlayer) ?: false
                 },
                 compile = { generated ->
-                  // `true` here, and only here: this call site is downstream of the route's
-                  // `ui-builder-export` capability check, and the source it submits came from
-                  // `ScreenGenerator` against the component record rather than from the caller.
+                  // `true` only here: downstream of the route's `ui-builder-export` check, and the
+                  // source comes from `ScreenGenerator`, not the caller.
                   adapter.compile(generated, isSecurityChecked = true)
                 },
                 captureNodeBounds = playground.captureNodeBounds,
               )
             }
           },
-        // The same two halves as the native lane and the same guard: a capture needs the generator
-        // (to write the body) and the playground (to compile and run it). It needs no catalog
-        // mapping of its own — an inline body is Remote Compose rather than a design system, so the
-        // bundle it compiles against is whichever one this host offers `remote-compose` on.
+        // Needs the generator and the playground, but no catalog mapping: an inline body compiles
+        // against whichever catalog offers `remote-compose`.
         uiBuilderInlineCapture =
           uiBuilderLane?.let {
             playgroundLane?.let { playground ->
               val captureAdapter = UiBuilderGeneratedPreviewAdapter(playground.compile)
               ServeUiBuilderInlineCapture(
                 compile = { generated ->
-                  // `true` for the reason the native lane's is: downstream of the route's
-                  // `ui-builder-export` check, and the source is the emitter's rather than the
-                  // caller's.
+                  // `true` for the same reason as the native lane: checked upstream,
+                  // emitter-generated source.
                   captureAdapter.compile(generated, isSecurityChecked = true)
                 },
                 captureCatalog = playground.remoteComposeCatalog,
@@ -4317,15 +3697,9 @@ public class ServeRunner(
         // export capability instead.
         playgroundRateLimiter =
           playgroundLane?.takeIf { publicPlayground }?.let { buildPlaygroundRateLimiter() },
-        // Reads a served preview's Kotlin, for two consumers with different requirements:
-        // `/playground?from=<system>/<previewId>` (needs a playground to open it in) and the
-        // viewer's Source panel (does not — it only shows the code).
-        //
-        // So this is wired unconditionally. It used to hang off `playgroundLane`, which was right
-        // while the playground was the only consumer and became wrong the moment the Source panel
-        // arrived: on a host with no playground the fetcher was null, the resolver with it, and
-        // every viewer silently dropped the Source chip. Whether a *link* to the editor is offered
-        // is decided separately, by `playgroundLinkFor`.
+        // Reads a served preview's Kotlin for `/playground?from=…` and the viewer's Source panel.
+        // Wired unconditionally since the Source panel needs no playground; whether an editor link
+        // is offered is decided by `playgroundLinkFor`.
         playgroundSourceFetch = { url: String -> PlaygroundSeedResolver.httpFetch(url) },
         trustForwardedFor = trustForwardedFor,
         engagementStore = ServeEngagementStore(engagementFile),
@@ -4390,9 +3764,8 @@ public class ServeRunner(
       )
     }
 
-    // Advertise on the LAN over mDNS when bound to a reachable interface (`--lan`), so the mobile /
-    // wear session-viewer clients can discover this server without a typed URL. Best-effort: a null
-    // advertiser (no multicast / sandbox) just means discovery stays dark — the server is fine.
+    // Advertise over mDNS when bound to a reachable interface (`--lan`) so session-viewer clients
+    // can discover the server. Best-effort.
     val advertiser =
       if (mdnsModuleLabel != null && mdnsPreviewIds != null && ServeUrls.isExposed(host)) {
         ServeMdnsAdvertiser.start(
@@ -4451,10 +3824,8 @@ public class ServeRunner(
   }
 
   /**
-   * Web Push, where it can work: a UI builder to say something about, and GitHub sign-in to say who
-   * is listening. Anywhere else there is nobody a push could be addressed to, so the lane is simply
-   * absent and its routes 404. A failure to open it (an unreadable key file, a pinned key pair that
-   * is not a pair) costs the notifications and never the server.
+   * Web Push, only where there is a UI builder and GitHub sign-in (someone to address); otherwise
+   * its routes 404. Failing to open it never fails the server.
    */
   private fun openWebPush(
     lane: UiBuilderLane?,
@@ -4526,9 +3897,8 @@ public class ServeRunner(
     }
       .getOrDefault(false)
     if (!opened) {
-      // The URL itself rather than "the Local URL above": that one is the root landing page, which
-      // is not where this server was asked to open, and on a projectless builder is a 404.
-      // A supplied token stays out of the log here too, as it does in [ServeBanner].
+      // Print the actual open URL, not the root landing (which may 404 on a projectless builder). A
+      // supplied token stays out of the log, as in [ServeBanner].
       val shown =
         if (public || tokenOverride == null) url
         else
@@ -4547,9 +3917,8 @@ public class ServeRunner(
   }
 
   /**
-   * Poll the registry's server-level idle time; when it crosses [idleExitSeconds] with no open
-   * connections, release [done] so [run] returns and the process exits (the shutdown hook tears the
-   * server + daemons down). Returns the scheduler so the caller can stop it.
+   * Poll registry idle time; past [idleExitSeconds] with no open connections, release [done] so
+   * [run] returns. Returns the scheduler.
    */
   private fun startIdleWatchdog(
     registry: ServeSessionRegistry,
@@ -4562,9 +3931,7 @@ public class ServeRunner(
     }
     exec.scheduleWithFixedDelay(
       {
-        // The STRICT clock, not the one the theme optimizer reads: an open socket keeps the process
-        // up however quiet its holder has gone. Standing a background pass down under an idle tab
-        // costs that tab one render when it comes back; exiting under it drops their connection.
+        // The strict clock: an open socket keeps the process up however quiet it is.
         val idle = registry.connectionIdleMillis()
         if (idle != null && idle >= timeoutMillis) {
           System.err.println(
@@ -4581,10 +3948,8 @@ public class ServeRunner(
   }
 
   /**
-   * The repository the served module lives in — the root every project-mode git surface works from
-   * (worktrees, the revision factory, the render-history timeline). Falls back to the module's
-   * parent directory when the project root can't be identified, which is what the git calls
-   * themselves will then fail against, harmlessly.
+   * Repository root for project-mode git surfaces (worktrees, revisions, history); falls back to
+   * the module's parent, where git calls fail harmlessly.
    */
   private fun projectRepoRoot(module: PreviewModule): File =
     gradleProjectRoot() ?: module.projectDir.absoluteFile.parentFile ?: module.projectDir
@@ -4607,12 +3972,9 @@ public class ServeRunner(
   }
 
   /**
-   * The URL-scan lane ([ServeSourceOnboarding]): read a pasted repository, never run it.
-   *
-   * There is no build half by design. Building an imported project happens on a GitHub Actions
-   * runner in the import staging repository, which publishes an ordinary `design-artifacts/<slug>`
-   * branch that this box picks up through [ServeOnboarding] like any other catalog — so the preview
-   * server keeps no path from a pasted URL to executing that repository's build scripts.
+   * The URL-scan lane ([ServeSourceOnboarding]): reads a pasted repository, never runs it. Imported
+   * projects build on a GitHub Actions runner and arrive as ordinary catalog branches via
+   * [ServeOnboarding].
    */
   private fun buildSourceOnboarding(): ServeSourceOnboarding =
     ServeSourceOnboarding(
@@ -4632,9 +3994,8 @@ public class ServeRunner(
     val repoRoot = projectRepoRoot(module)
     val relativePath =
       module.projectDir.absoluteFile.relativeToOrNull(repoRoot.absoluteFile)?.path ?: ""
-    // Match the bootstrap args the normal build path (runGradleTasks) applies, so a worktree
-    // build sees the auto-injected plugin and the right variant — otherwise composePreviewDiscover
-    // can run without the plugin/tasks or against the wrong variant and every ?session=<rev> fails.
+    // Same bootstrap args as the normal build path, so worktree builds see the injected plugin and
+    // right variant.
     val bootstrapArgs =
       autoInjectInitScriptArgs(projectRoot = repoRoot) + gradleVariantArgs() + gradleBuildArgs()
     return ServeRevisionFactory(
@@ -4679,15 +4040,10 @@ public class ServeRunner(
   }
 
   /**
-   * Register every `--bundle <url|path>` bundle as its own session. Each is fetched (URL) or read
-   * (local path), then served **live** from a render daemon when it verifies `Trusted` (signature
-   * or trusted branch origin) AND `--allow-render-trusted` is set AND it's a desktop bundle
-   * [ServeBundleDaemon.materialize] can stand up — otherwise served read-only as its baked PNGs
-   * ([ServeBundleStore.add]). Returns the ids that registered, so the module-less landing can pick
-   * a default session. Best-effort per bundle — one failing doesn't sink the others or the server.
-   *
-   * The live gate is the same fail-closed model as a catalog's `liveBundle`: an `Unverified` bundle
-   * is never re-rendered server-side (no RCE lever), it just serves its baked images.
+   * Register every `--bundle <url|path>` as its own session. Served live from a daemon only when it
+   * verifies `Trusted`, `--allow-render-trusted` is set and [ServeBundleDaemon.materialize] can
+   * stand it up; otherwise read-only baked PNGs ([ServeBundleStore.add]). An `Unverified` bundle is
+   * never re-rendered server-side. Best-effort per bundle; returns the ids that registered.
    */
   private fun registerStartupBundles(registry: ServeSessionRegistry): List<String> {
     if (bundleSpecs.isEmpty()) return emptyList()
@@ -4704,11 +4060,9 @@ public class ServeRunner(
     val registered = mutableListOf<String>()
     for (spec in bundleSpecs) {
       val bytes = obtainBundleBytes(spec) ?: continue
-      // Branch-origin trust for a raw.githubusercontent.com URL (a bundle pulled from a trusted
-      // branch); null for any other URL / a local path (then only a signature can make it Trusted).
-      // A raw URL's ref can span slashes (`design-artifacts/compose-m3`), so try each candidate
-      // split and prefer the one the trust store actually trusts; else fall back to the shortest
-      // (harmless — an untrusted-branch origin just adds no basis).
+      // Branch-origin trust for a raw.githubusercontent.com URL; null otherwise (only a signature
+      // can make it Trusted). A ref can span slashes, so try each split and prefer one the trust
+      // store trusts.
       val origins = ServeStartupBundles.candidateOrigins(spec.source)
       val origin =
         origins.firstOrNull { trustStore.get().trustsBranch(it.repo, it.branch) }
@@ -4787,20 +4141,14 @@ public class ServeRunner(
   }
 
   /**
-   * Fetch each `--catalogs` design system from its `design-artifacts/<system>` branch and register
-   * it as a pinned `?session=<system>` session ([ServeCatalogStore]). Trusted-by-origin when the
-   * branch is in the trust store; otherwise served as `unverified` (the images execute no code).
-   * Best-effort per system — one catalog failing to fetch doesn't sink the others or the server.
-   *
-   * [registerCatalogs] result: wasm-app dirs, the store a refresher re-loads from, and the
-   * configured/load state exposed through status.
+   * Result of [registerCatalogs]: Wasm app dirs, the store a refresher re-loads from, and the
+   * configured/load state exposed through status. Each `--catalogs` system is registered as a
+   * pinned session, Trusted-by-origin or `unverified`; best-effort per system.
    */
   private class CatalogRegistration(
     /**
-     * The in-browser Wasm apps carried by the served catalogs, **live**: the server reads this same
-     * map, so a catalog published at runtime gets its `/wasm/<system>/` route (and its viewer
-     * toggle) as soon as its branch is fetched, and a retired one stops serving stale assets. A
-     * plain snapshot would have frozen the boot-time set.
+     * Served catalogs' Wasm apps, live: the server reads this map, so runtime publishes and
+     * retirements apply immediately.
      */
     val wasm: MutableMap<String, File>,
     val store: ServeCatalogStore,
@@ -4829,8 +4177,8 @@ public class ServeRunner(
       executor.execute {
         val loaded = linkedSetOf<String>()
         try {
-          // Fetch order, not front-page order: a box's load-bearing catalogs come back first
-          // after a restart even though their cards stay where the operator put them (#4231).
+          // Fetch order, not front-page order, so load-bearing catalogs return first after a
+          // restart.
           while (true) {
             val seed = loads.nextInitialLoad() ?: break
             if (closed.get()) return@execute
@@ -4853,9 +4201,8 @@ public class ServeRunner(
               is ServeCatalogStore.Result.Ok -> {
                 if (config.listed) registeredCatalogs += r.system
                 else registeredUnlistedCatalogs += r.system
-                // Seeded as a settled head only when the read was complete: a catalog that came up
-                // serving but could not fetch an optional artifact *right now* must be re-read on
-                // the first tick, not treated as current until someone publishes again.
+                // Seed a settled head only for a complete read; an incomplete one must be re-read
+                // on the first tick.
                 if (!r.incomplete) loaded += r.system
                 System.err.println(
                   "serve: catalog ${r.system} → ${r.previewCount} preview(s), trust=${r.trust} " +
@@ -4923,19 +4270,15 @@ public class ServeRunner(
         blobs = catalogBlobPool,
         serverSideRenderEnabled = allowRenderTrusted,
         liveLaneFailure = liveLaneLaunchLog::lastReason,
-        // The vector fills and the rc-compare pull run after the catalog is published, so a
-        // throttle there lands after the head was recorded. Un-settle the revision so the next
-        // poll re-reads it, exactly as a trust revocation and a retirement do.
+        // Post-publish lanes may be throttled after the head was recorded; un-settle the revision
+        // so the next poll re-reads it.
         onPostPublishIncomplete = { system -> activeRefresher?.forgetHeads(listOf(system)) },
         registerWasm = { system, wasmDir ->
-          // A local `--wasm-dir` is the operator's explicit override, so a published app never
-          // displaces it — including on a later branch refresh, which re-runs this callback, and
-          // including the withdrawal below.
+          // A local `--wasm-dir` override is never displaced or withdrawn by a published app.
           if (system !in localWasm) {
             if (wasmDir == null) {
-              // This generation carries no usable app. Withdrawn rather than left pointing at the
-              // outgoing generation's copy, which is readable until the next sweep: the toggle
-              // would otherwise run the previous catalog's code, then 404.
+              // Withdrawn rather than left pointing at the outgoing generation's copy, which would
+              // run old code and then 404.
               if (wasm.remove(system) != null) {
                 System.err.println(
                   "serve: catalog $system no longer carries an in-browser Wasm app"
@@ -5001,10 +4344,9 @@ public class ServeRunner(
   }
 
   /**
-   * Wire the runtime catalog admin ([ServeCatalogAdmin]) to this server's moving parts: a
-   * registration fetches through the same [store] startup uses, lands in the same [loads] tracker
-   * every consumer reads, and is written back to the operator's `--catalogs-file`. Retiring a
-   * catalog drops its session (closing any live daemon) and its per-preview daemon pool.
+   * Wire the runtime catalog admin ([ServeCatalogAdmin]): registrations fetch through [store], land
+   * in [loads], and are written back to `--catalogs-file`. Retiring a catalog drops its session and
+   * per-preview pool.
    */
   private fun buildCatalogAdmin(
     registry: ServeSessionRegistry,
@@ -5041,22 +4383,10 @@ public class ServeRunner(
     )
 
   /**
-   * Build the background poller that keeps a running server fresh against its catalog branches (see
-   * [ServeCatalogRefresher]). Null when polling is disabled ([catalogRefreshSeconds] ≤ 0) or there
-   * are no catalogs. The caller seeds heads + starts it, and adds it to the server's closeables so
-   * the daemon thread stops on shutdown. A successful re-load re-registers the catalog host in
-   * place (the registry closes the replaced daemon) and rewrites the on-disk `web/wasm/` dir the
-   * `/wasm/<system>/` route serves.
-   */
-  /**
-   * Build the reconciler that keeps the catalog set in step with the nominated registry projects
-   * ([ServeCatalogRegistrySync]). Null when no registry was nominated.
-   *
-   * The publish seam is deliberately the tracker + store pair directly rather than
-   * [ServeCatalogAdmin]: a registry entry is *derived* state, and writing it into the operator's
-   * `catalogs.json` (which is what the admin path does, by design) would leave it behind on the
-   * next boot after the registry stopped listing it — a catalog nobody can explain and nobody asked
-   * for. The registry document is the record; the box holds it only while it is running.
+   * The reconciler keeping the catalog set in step with nominated registry projects
+   * ([ServeCatalogRegistrySync]), or null. Publishes via the tracker and store directly rather than
+   * [ServeCatalogAdmin], because registry entries are derived state and must not persist in
+   * `catalogs.json` after the registry drops them.
    */
   private fun buildCatalogRegistrySync(
     registry: ServeSessionRegistry,
@@ -5098,10 +4428,8 @@ public class ServeRunner(
                 (result as? ServeCatalogStore.Result.Failed)?.reason
               }
             }
-            // Never leave a half-published catalog behind — the same rollback the admin path does
-            // for a failed fetch. Without it, a registry entry whose delivery branch has not been
-            // built yet would sit in the tracker as a permanently-failed card, and the retry the
-            // next pass is supposed to make would be refused as "already published".
+            // Roll back a failed publish so the next pass can retry instead of seeing "already
+            // published".
             if (failure != null) {
               loads.remove(entry.system)
               runCatching { unloadCatalog(registry, wasmCatalogs, entry.system) }
@@ -5125,11 +4453,8 @@ public class ServeRunner(
         },
         intervalMillis = catalogRefreshSeconds * 1000,
       )
-    // The boot fold-in already registered these, so the sync owns them from the start — otherwise
-    // the first pass would see them as somebody else's catalogs and never withdraw them. Only the
-    // entries [catalogRefs] actually took from a registry: one the operator (or an earlier
-    // registry) already claimed won that de-duplication, was never registered from here, and is
-    // not the sync's to re-point or retire.
+    // The sync owns catalogs the boot fold-in registered from a registry, but not those an operator
+    // (or earlier registry) already claimed.
     val claimed = operatorCatalogRefs().mapTo(hashSetOf()) { it.system }
     for (contribution in catalogRegistryContributions) {
       sync.adopt(contribution, contribution.entries.filter { claimed.add(it.system) })
@@ -5138,9 +4463,8 @@ public class ServeRunner(
   }
 
   /**
-   * Drop a registered catalog's session, pools, live bundles, nav entries and in-browser app — the
-   * `unload` half of a retirement, shared by the admin API and the registry sync so the two cannot
-   * forget different things.
+   * Drop a catalog's session, pools, live bundles, nav entries and Wasm app; shared by the admin
+   * API and registry sync so both forget the same things.
    */
   private fun unloadCatalog(
     registry: ServeSessionRegistry,
@@ -5157,25 +4481,21 @@ public class ServeRunner(
       // Never drop a local `--wasm-dir` the operator configured; it isn't the catalog's to remove.
       if (system !in localWasm) wasmCatalogs.remove(system)
     }
-    // Forget its branch head, for the reason a trust revocation does: the poller short-circuits on
-    // an unchanged SHA, so a system retired and later re-listed at the same commit would keep the
-    // head recorded from before, and never be re-read.
+    // Forget its branch head so a re-listing at the same commit is re-read.
     activeRefresher?.forgetHeads(listOf(system))
   }
 
+  /**
+   * The background poller keeping catalogs fresh against their branches ([ServeCatalogRefresher]).
+   * A successful re-load re-registers the host in place and rewrites its `web/wasm/` dir.
+   */
   private fun buildCatalogRefresher(
     store: ServeCatalogStore,
     loads: CatalogLoadTracker,
   ): ServeCatalogRefresher? {
-    // Also built for an admin-enabled server with no configured catalogs: the entries are read from
-    // the tracker per pass, so a catalog published at runtime starts being polled without a
-    // restart.
-    // Deliberately NOT gated on the poll interval. `--catalog-refresh-interval 0` turns the
-    // background poller off, which is a statement about cadence, not about whether an operator may
-    // ask. Returning null here also took away `POST /<system>/refresh` — so a box that had opted
-    // out of polling could clear its blob cache and then have no way to force the re-read the
-    // clear was the first half of. The interval decides only whether [start] is called; see the
-    // `onStarted` hooks.
+    // Built even with no configured catalogs on an admin-enabled server, since entries are read
+    // from the tracker per pass. Not gated on the poll interval: interval 0 only means [start]
+    // isn't called, and `POST /<system>/refresh` must still work.
     if (!needsCatalogMachinery) return null
     // Read from the tracker per pass, not from the startup refs: a catalog published through the
     // admin API must start being polled without a restart (and a retired one must stop).
@@ -5193,17 +4513,9 @@ public class ServeRunner(
       reload = { system, repo ->
         val result = backgroundWork.whileLoadingCatalog {
           synchronized(catalogRegistrationLock) {
-            // Both halves of "is this pass still about the catalog it was queued for". The system
-            // still existing was the only test, and it is not enough: a pass captures each entry's
-            // repo when it snapshots the tracker, and can then sit on this monitor for the whole of
-            // an admin re-point. Reloading the captured OLD repo afterwards would put the old
-            // repo's host back in front of the new registration, with the provenance and
-            // `catalogs.json` both naming the new one — a catalog served from a repository it had
-            // left, reporting that it had left it.
-            //
-            // Declining is the right answer rather than reloading the CURRENT repo: the admin has
-            // just fetched it, so there is nothing to refresh, and the next ordinary pass picks up
-            // the new provenance from the tracker anyway.
+            // Decline if the catalog was re-pointed since this pass snapshotted it: reloading the
+            // old repo would serve from a repository it had left. The admin just fetched the new
+            // one, and the next pass picks it up.
             if (!loads.stillPointsAt(system, repo)) return@synchronized null
             val result = store.load(system, sourceRepo = repo)
             loads.record(result)
@@ -5215,8 +4527,8 @@ public class ServeRunner(
         if (result is ServeCatalogStore.Result.Failed) {
           System.err.println("serve: catalog $system refresh failed: ${result.reason}")
         } else if (result != null) {
-          // The branch that moved may also carry a builder catalog: its published definition and
-          // runtime follow the viewer rather than waiting for a restart (#1054).
+          // A moved branch may also carry a builder catalog; refresh its definition and runtime
+          // without a restart.
           runCatching { uiBuilderPublishedRefresh?.invoke(system) }
             .onFailure {
               System.err.println("serve: UI-builder catalog $system refresh failed: ${it.message}")
@@ -5229,15 +4541,10 @@ public class ServeRunner(
   }
 
   /**
-   * Build a `Trusted` catalog's carried `liveBundle` into a daemon-backed, re-renderable session —
-   * the executable-bundle counterpart of [buildTrustedCatalogSource], and the store's preferred
-   * path when a catalog declares one: [ServeBundleDaemon.materialize] extracts the fetched bundle,
-   * resolves its classpath, and synthesises a `daemon-launch.json` directly — no Gradle build, no
-   * worktree, no repo clone. The store only calls this for an already-`Trusted` catalog whose
-   * bundle fetched cleanly; here we add the remaining fail-closed gate: `--allow-render-trusted`
-   * must be set, same as the source path. Returns true once a daemon session is registered under
-   * [system] (the store then skips both the Gradle source path and the static baked-PNG host);
-   * false ⇒ caller falls back to `buildTrustedSource`, then the static host.
+   * Build a Trusted catalog's `liveBundle` into a daemon-backed session via
+   * [ServeBundleDaemon.materialize] (no Gradle, worktree or clone); preferred over
+   * [buildTrustedCatalogSource]. Adds the remaining gate: `--allow-render-trusted`. Returns true
+   * once registered; false ⇒ fall back to the source build, then the static host.
    */
   private fun buildTrustedCatalogBundle(
     system: String,
@@ -5254,18 +4561,10 @@ public class ServeRunner(
       java.nio.file.Files.createTempDirectory("serve-catalog-bundle-$system").toFile().also {
         it.deleteOnExit()
       }
-    // The per-preview live lane (default render path, monolithic fallback): a bounded, idle-LRU
-    // pool
-    // of daemons, one per edited preview, each materialised from that preview's OWN FULL split
-    // bundle fetched from the trusted branch. Shares the monolithic bundle's rehydrated font pool
-    // ([externalResourcesDir]) — both were split from the same externalised bundle — so a
-    // per-preview daemon rasterises text with the same faces without re-fetching. A per-preview
-    // state carries no alias/bakedFallback, so openHost returns the bare single-preview daemon (not
-    // another composite). When the fetch/materialise fails the pool yields null and
-    // ServeCatalogLiveHost falls back to the monolithic daemon, so the lane never regresses.
-    // The per-preview daemons cost whatever this catalog's backend costs, but the pool is built
-    // before the bundle is materialised (the pool's opener is what materialises it), so the weight
-    // is read through a holder set below rather than captured now.
+    // Per-preview live lane: a bounded idle-LRU pool of daemons, each from its preview's own split
+    // bundle and sharing the monolithic bundle's font pool ([externalResourcesDir]). Its states
+    // carry no alias, so openHost returns a bare daemon; failures fall back to the monolithic
+    // daemon. Seat weight is set through a holder because the pool is built before materialization.
     var perPreviewSeatWeight = 1
     val perPreviewPool =
       ServePerPreviewDaemonPool(
@@ -5287,13 +4586,9 @@ public class ServeRunner(
           ) ?: return@ServePerPreviewDaemonPool null
         openHost(ppState)
       }
-    // Carry the catalog-id→daemon-id alias + the baked-PNG fallback + the per-preview lane on the
-    // state so openHost fronts the daemon with the baked catalog: the published /p/<id> deep links
-    // +
-    // /render/<id>.png thumbnails keep resolving (Android-only variants fall back to baked), while
-    // the mapped ids get a live lane. See ServeCatalogLiveHost. The rehydrated external-resource
-    // pool (fonts lifted out of classes/app.jar) joins the daemon classpath so text rasterises with
-    // the same faces.
+    // Carry the alias, baked fallback and per-preview lane on the state so openHost fronts the
+    // daemon with the baked catalog ([ServeCatalogLiveHost]). The rehydrated resource pool joins
+    // the daemon classpath.
     val materialized =
       ServeBundleDaemon.materialize(
         bundleFile,
@@ -5357,10 +4652,9 @@ public class ServeRunner(
   }
 
   /**
-   * Publish a catalog host and the resources its state closures capture as one ownership transfer.
-   * The ownership maps move first, then the registry entry becomes request-visible; on failure both
-   * maps are restored and the unpublished host/resources are closed. The caller's catalog
-   * registration lock makes this atomic with admin unload and branch refresh.
+   * Publish a catalog host and its captured resources as one ownership transfer: ownership maps
+   * move first, then the registry entry; on failure both are restored and the unpublished resources
+   * closed. Atomic under the caller's registration lock.
    */
   private fun publishCatalogRuntime(
     system: String,
@@ -5388,10 +4682,7 @@ public class ServeRunner(
       return false
     }
     previousResources?.let { runCatching { it.close() } }
-    // Publication succeeded, so any generation this catalog superseded is now genuinely retired and
-    // safe to reclaim. Doing it here rather than when the replacement cache was opened is what
-    // keeps
-    // a failed `openHost` from deleting the cache of the host still serving.
+    // Only after successful publication is the superseded generation safe to reclaim.
     sweepThemeCache()
     sweepCatalogBlobs()
     return true
@@ -5596,12 +4887,9 @@ public class ServeRunner(
   }
 
   /**
-   * Build a `Trusted` catalog's source into a daemon-backed, re-renderable session — the engine
-   * behind `--allow-render-trusted`. The store only calls this for an already-`Trusted` catalog;
-   * here we add the remaining fail-closed gates: the flag is set, the source repo (when given) is
-   * the server's own [catalogRepo], and the source ref clears the worktree ref allowlist (enforced
-   * inside [GitWorktrees.prepare]). Returns true once a daemon session is registered under [system]
-   * (the store then skips the static baked-PNG host); false ⇒ fall back to baked PNGs.
+   * Build a Trusted catalog's source into a daemon-backed session (`--allow-render-trusted`).
+   * Remaining gates: the flag, the source repo being [catalogRepo], and the ref clearing the
+   * allowlist ([GitWorktrees.prepare]). Returns true once registered; false ⇒ baked PNGs.
    */
   private fun buildTrustedCatalogSource(
     system: String,
@@ -5631,9 +4919,8 @@ public class ServeRunner(
           )
           return false
         }
-    // GradleRevisionBuilder builds task names as ":${gradlePath}:…", so gradlePath must be the
-    // colon-less form (e.g. `samples:design-catalog-m3`); a catalog's `source.module` is the
-    // conventional `:samples:…` path, so strip the leading colon (a double `::` fails every build).
+    // GradleRevisionBuilder prefixes `:` itself, so strip the leading colon (`::` fails every
+    // build).
     val gradlePath = source.module.removePrefix(":")
     val relativePath = gradlePath.replace(":", "/")
     val bootstrapArgs =
@@ -5659,27 +4946,19 @@ public class ServeRunner(
         previews = built.previews,
         label = "$system@${source.ref}",
         declaredThemes = built.declaredThemes,
-        // Same catalog-id bridge + baked fallback as the bundle path (a source build's daemon uses
-        // the same function-based ids), so a live source-rebuilt catalog also answers the published
-        // URLs and falls back to baked PNGs for ids it can't render.
+        // Same alias and baked fallback as the bundle path.
         previewAliases = alias,
         bakedFallback = bakedFallback,
         catalogThemeCache = themeCacheFor(system, alias, built.descriptor),
         serverIdleMillis = backgroundWork.idleClock(registry::idleMillis),
         backgroundWork = backgroundWork,
-        // A source-built Android/Robolectric catalog costs the same heavier live-seat weight as the
-        // bundle path — read from the built daemon descriptor, since there's no bundle
-        // manifest.backend here — so a from-source deployment keeps the OOM protection the
-        // weighting
-        // adds (a --live-seats budget can't admit two Android daemons thinking they're
-        // desktop-cost).
+        // Android source builds take the heavier live-seat weight, read from the built descriptor.
         liveSeatWeight = ServeBundleDaemon.liveSeatWeightForDescriptor(built.descriptor),
       )
     val host = openHost(state) ?: return false
     registry.register(system, state, host = host)
-    // The source-backed path registers directly rather than through `publishCatalogRuntime`, so it
-    // needs its own post-publication sweep — without it a deployment of only source-backed catalogs
-    // never reclaims a superseded generation, whatever the cap says.
+    // Registers directly rather than via `publishCatalogRuntime`, so it needs its own
+    // post-publication sweep.
     sweepThemeCache()
     sweepCatalogBlobs()
     System.err.println(
@@ -5690,26 +4969,10 @@ public class ServeRunner(
   }
 
   /**
-   * Re-read every tracked catalog whose source branch [updated] trusts and [before] did not.
-   *
-   * The counterpart to [retireNewlyUntrusted], and the same reasoning read the other way round: a
-   * catalog's trust verdict is computed when it loads and then baked into its registered session,
-   * and [ServeCatalogRefresher] skips a reload while the branch SHA is unchanged. Revocation was
-   * always handled because keeping a stale `Trusted` verdict is a security problem. Keeping a stale
-   * `unverified` one is merely wrong, and it never happened while trust was always in place before
-   * the catalog was configured — but `--catalog-registry` reverses that order, because the registry
-   * contributes catalogs the operator never listed and whose producer is therefore trusted
-   * afterwards. Without this, `POST /admin/trust` succeeds, `producers.json` is correct, and the
-   * catalog goes on serving as `unverified` (no re-render, baked tiers only) until its branch moves
-   * or the box restarts.
-   *
-   * Deliberately **only forgets the heads**, where the revocation path also unregisters. An
-   * under-trusted catalog is serving correct content — there is nothing to tear down, and dropping
-   * a working session to upgrade a badge would turn a cosmetic gap into an outage window. The next
-   * refresher pass re-fetches and re-verifies it in place.
-   *
-   * Scoped to the delta rather than "everything trusted now": the latter would forget every head on
-   * the box on every trust add, re-fetching two dozen catalogs to fix one.
+   * Re-read every tracked catalog whose source branch [updated] trusts and [before] did not. Trust
+   * is baked in at load and the refresher skips unchanged SHAs, so without this a registry catalog
+   * trusted after loading keeps serving as `unverified`. Only forgets heads (no unregister): the
+   * catalog serves correct content meanwhile. Scoped to the delta to avoid re-fetching everything.
    */
   private fun reverifyNewlyTrusted(
     before: TrustStore,
@@ -5736,13 +4999,9 @@ public class ServeRunner(
   }
 
   /**
-   * Drop every registered catalog whose source branch [updated] no longer trusts.
-   *
-   * Called after a trust revocation. Unregistering closes the session's host, which is what takes
-   * down a live daemon started under the old verdict; marking the tracker row failed is what gets
-   * the catalog re-fetched — [ServeCatalogRefresher] skips a reload while the branch SHA is
-   * unchanged, so a revoked-but-still-loaded catalog would otherwise keep serving as `Trusted`
-   * until its branch moved or the box restarted.
+   * Drop every registered catalog whose source branch [updated] no longer trusts. Unregistering
+   * stops daemons started under the old verdict; marking rows failed and forgetting heads gets them
+   * re-fetched.
    */
   private fun retireNewlyUntrusted(
     updated: TrustStore,
@@ -5774,18 +5033,15 @@ public class ServeRunner(
   }
 
   /**
-   * Load the `--trust-store` JSON, or the empty fail-closed store when the flag is absent. A bad
-   * path or unparseable file is a hard error: a public operator who *meant* to pin trusted
-   * producers shouldn't silently fall back to trusting nothing (or, worse, think they configured it
-   * when they didn't).
+   * Load `--trust-store`, or the empty fail-closed store when unset. A bad path or file is a hard
+   * error so an operator never silently trusts nothing.
    */
   private fun loadTrustStore(): TrustStore {
     val path = trustStorePath ?: return TrustStore.EMPTY
     val f = File(path)
     if (!f.isFile) {
-      // With the trust admin armed, an absent file is a legitimate starting state: the operator is
-      // about to create it through `POST /admin/trust`. Without it, a missing file is still fatal —
-      // silently trusting nothing is exactly the failure the hard exit exists to prevent.
+      // With the trust admin armed, an absent file is a valid start (the operator will create it).
+      // Otherwise it stays fatal.
       if (adminToken != null) {
         System.err.println("serve: --trust-store ${f.path} does not exist yet; starting with no")
         System.err.println("serve: trusted producers (add them via POST /admin/trust)")
@@ -5803,25 +5059,13 @@ public class ServeRunner(
   }
 
   /**
-   * Match a preview against `--id` (exact) / `--filter` (substring) / `--preview` (loose reference)
-   * — the shared [previewIdMatchesRequest] rule, so every selector passed must hold; all previews
-   * when none is set.
-   *
-   * This used to be a `--id` beats `--filter` precedence ladder, which read as the safer choice but
-   * could never actually take effect: `renderAllModules` narrows the build through
-   * `modulesMatchingPreviewRequest`, which intersects, so contradictory selectors have already
-   * dropped every module by the time this runs. The ladder's only reachable outcome was to disagree
-   * with the pass that had already decided.
+   * Match a preview against `--id` / `--filter` / `--preview` via the shared
+   * [previewIdMatchesRequest]; every selector given must hold.
    */
   /**
-   * Each discovered module paired with the previews it can actually serve for this request, with
-   * the modules that can serve none dropped (issue #3786 review follow-up).
-   *
-   * This is where a `@PreviewParameter` "maybe" from module selection becomes a fact. Module
-   * selection cannot know a provider's rows — they don't exist until the render writes the fan-out
-   * — so it keeps any parameterized preview that *might* match. By the time this runs the fan-out
-   * is on disk and [ServeParameterRows] can enumerate it, so a module retained for a row that
-   * turned out not to exist contributes an empty list and drops out before the one-module check.
+   * Each module paired with the previews it can serve for this request, dropping those with none.
+   * Module selection had to keep parameterized previews that might match; with the fan-out on disk,
+   * [ServeParameterRows] resolves that.
    */
   private fun modulesWithMatchingPreviews(
     manifests: List<Pair<PreviewModule, PreviewManifest>>
@@ -5831,12 +5075,9 @@ public class ServeRunner(
       .filter { (_, previews) -> previews.isNotEmpty() }
 
   /**
-   * The `@PreviewParameter` fan-out expansion (issue #3749). Discovery emits ONE entry per
-   * parameterized function, so the manifest alone would list a screen whose states come from a
-   * provider as a single card showing value 0 — the symptom that issue was filed about. The render
-   * pass already wrote one file per value, and the daemon accepts those `<baseId>_<row>` ids, so
-   * each on-disk row becomes its own servable preview. A preview with no provider, or whose fan-out
-   * isn't on disk, keeps exactly its old single entry.
+   * `@PreviewParameter` fan-out expansion: discovery emits one entry per parameterized function,
+   * but the render wrote one file per value and the daemon accepts `<baseId>_<row>`, so each
+   * on-disk row becomes its own preview (see #3749). Otherwise the single entry is kept.
    */
   private fun servablePreviewsOf(
     module: PreviewModule,
@@ -5870,13 +5111,9 @@ public class ServeRunner(
         )
       val baseLabel = info.functionName.ifBlank { info.id }
       val rows = ServeParameterRows.rowsFor(info, module.projectDir, claimedOutputs)
-      // `--id` / `--filter` / `--preview` match the declared preview (so `--id Foo` serves all of
-      // Foo's rows, which is what asking for a parameterized preview means) OR a row id directly,
-      // so
-      // a caller can narrow to one state. The declared preview is matched as a *row of the
-      // manifest*, not as a bare id, because `--preview` also accepts `<Class>.<function>` and the
-      // bare function name — forms only the manifest row can answer. A synthetic row id has no
-      // manifest row of its own, so it is matched by id.
+      // Selectors match the declared preview (serving all its rows) or a row id directly. The
+      // declared preview is matched as a manifest row because `--preview` also accepts
+      // `<Class>.<function>` forms.
       when {
         rows.isEmpty() -> if (matches(info)) listOf(serve(info.id, baseLabel)) else emptyList()
         matches(info) -> rows.map { serve(it.id, "$baseLabel · ${it.label}") }
@@ -5896,9 +5133,8 @@ public class ServeRunner(
     )
 
   /**
-   * The same rule for something that has an id but no manifest row — a `@PreviewParameter` row id
-   * (`<baseId>_<row>`), which discovery never declared. Only the id-shaped forms can apply, so
-   * `--preview` degrades to the exact-or-substring half of [previewMatchesReference].
+   * The same rule for an id with no manifest row (a `@PreviewParameter` row id); `--preview`
+   * degrades to exact-or-substring.
    */
   private fun matches(id: String): Boolean =
     previewIdMatchesRequest(id, exactId = exactId, filter = filter, previewRef = previewRef)
@@ -5944,9 +5180,8 @@ public class ServeRunner(
   }
 
   /**
-   * The `guidelines` check, when the operator gave it a key **and** said who may spend it. A key
-   * with nobody named is refused at startup rather than silently left off, and an allowlist with no
-   * key says why the check will report itself skipped.
+   * The `guidelines` check, when given a key and an allowlist. A key with nobody named is refused
+   * at startup.
    */
   private fun buildUiBuilderGuidelines(
     env: Map<String, String> = System.getenv()
@@ -5986,9 +5221,8 @@ public class ServeRunner(
   }
 
   /**
-   * `settings.json` ([ServeSettings]) and the settings this process can change while it runs: the
-   * guidelines model and allow-list, when the check is on, and its picture budget. Anything else
-   * published there applies at the next start.
+   * `settings.json` ([ServeSettings]) and the settings changeable at runtime (guidelines model,
+   * allowlist, picture budget); anything else applies at next start.
    */
   private fun buildSettingsAdmin(
     guidelines: ServeUiBuilderGuidelines?,
@@ -6024,12 +5258,8 @@ public class ServeRunner(
         tokenSupplied = tokenOverride != null,
         public = public,
         previewCount = previewCount,
-        // The page this server is actually about, when the builder is a lane. `--no-open` prints
-        // no URL of its own and the root landing page has no session behind a projectless server,
-        // so without this line a headless caller was handed a 404 as the way in. `/ui-builder`
-        // exactly, as well as anything under it: that spelling is a registered route which
-        // redirects to `/ui-builder/`, so a caller who passes it explicitly must not be sent back
-        // to the root landing page — the very case this line exists to fix.
+        // The builder page, so `--no-open` callers of a projectless builder aren't handed a 404
+        // root. Also matches `/ui-builder` exactly, which redirects.
         builderPath =
           effectiveOpenPath.takeIf { uiBuilderLaneOpen && isUiBuilderPath(openBrowserPath) },
         acceptDocs = acceptDocs,

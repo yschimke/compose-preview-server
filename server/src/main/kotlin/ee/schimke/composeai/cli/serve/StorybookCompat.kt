@@ -5,41 +5,31 @@ import java.util.Base64
 import kotlinx.serialization.Serializable
 
 /**
- * Storybook-compatibility shim for the `compose-preview serve` surface. Emits the two tiny
- * contracts the whole downstream Storybook ecosystem (Chromatic, Percy, storycap/reg-suit,
- * BackstopJS, the `@storybook/test-runner`, the various Storybook MCP servers) is built on:
+ * Storybook-compatibility shim for `compose-preview serve`, emitting the two contracts the
+ * Storybook tool ecosystem (Chromatic, Percy, storycap, the test-runner, Storybook MCP servers) is
+ * built on:
  *
- * 1. **`/index.json`** — the stories index: a `{ "v": 5, "entries": { <storyId>: … } }` manifest a
- *    tool crawls to enumerate every renderable unit and its stable id. This is Storybook's
- *    build-time-generated, documented, versioned contract (renamed from `stories.json` in SB7,
- *    parameter-free since SB8). See [Index] / [Entry].
- * 2. **`iframe.html?id=<storyId>`** — render one story in isolation, no chrome. A screenshot tool
- *    navigates a browser here and captures the viewport. We answer with a minimal HTML page that
- *    embeds the freshly-rendered preview PNG as a `data:` URI ([iframePage]) — self-contained, so
- *    no token has to be threaded onto a sub-resource `<img src>`.
+ * 1. **`/index.json`**: the stories index (`{ "v": 5, "entries": { <storyId>: … } }`) a tool crawls
+ *    to enumerate renderable units. See [Index] / [Entry].
+ * 2. **`iframe.html?id=<storyId>`**: one story in isolation, no chrome, embedding the rendered PNG
+ *    as a `data:` URI ([iframePage]) so no token is threaded onto a sub-resource.
  *
- * The **story id** is the join key between the two, exactly as in Storybook. We mint it from the
- * preview the way CSF's `toId(title, name)` does — `sanitize(title)--sanitize(name)`, kebab-cased —
- * so ids look native to a Storybook consumer. Resolution back to our native preview id ([Story.id])
- * goes through [resolvePreviewId], which also accepts a raw native id verbatim so our own tools /
- * humans can deep-link `iframe.html?id=<fqn>` without knowing the minted form.
+ * The story id is minted like CSF's `toId(title, name)` so ids look native. [resolvePreviewId] maps
+ * it back and also accepts a raw native id, for deep links like `iframe.html?id=<fqn>`.
  *
- * Pure and IO-free (no ktor types) so the id/index/page logic is unit-testable in isolation,
- * mirror- ing [ServeUrls]; the HTTP glue lives in [ServeHttpServer].
+ * Pure and IO-free, like [ServeUrls]; the HTTP glue lives in [ServeHttpServer].
  */
 object StorybookCompat {
 
   /**
-   * Storybook `index.json` schema version. Storybook has emitted `"v": 5` since SB8 (SB7 used 4,
-   * the legacy `stories.json` used 3 with a different, parameter-carrying shape). Consumers key off
-   * the `entries` map regardless; the version is advisory.
+   * Storybook `index.json` schema version (`"v": 5` since SB8). Advisory; consumers key off
+   * `entries`.
    */
   const val INDEX_VERSION: Int = 5
 
   /**
-   * Synthetic `importPath` prefix. We have no CSF source file, so we encode the native preview id
-   * here — informative for a human, and ignored by the visual/remote-URL tools that only navigate
-   * `iframe.html?id=`.
+   * Synthetic `importPath` prefix carrying the native preview id; there is no CSF source, and
+   * visual tools only navigate `iframe.html?id=`.
    */
   private const val IMPORT_PATH_PREFIX = "virtual:compose-preview/"
 
@@ -50,10 +40,8 @@ object StorybookCompat {
   @Serializable data class Index(val v: Int = INDEX_VERSION, val entries: Map<String, Entry>)
 
   /**
-   * One entry in the [Index]. Fields mirror a Storybook `'story'` index entry: [id] is the stable
-   * story id (also the map key), [title] the sidebar grouping path, [name] the story name, and
-   * [importPath] the (here synthetic) source module. [type] is always `"story"` — we emit no docs
-   * entries.
+   * One [Index] entry, mirroring a Storybook `'story'` entry: [id] (also the map key), [title]
+   * sidebar path, [name], and a synthetic [importPath]. [type] is always `"story"`.
    */
   @Serializable
   data class Entry(
@@ -70,27 +58,19 @@ object StorybookCompat {
    */
   data class Story(val storyId: String, val previewId: String, val title: String, val name: String)
 
-  /**
-   * CSF `sanitize`: lowercase, collapse every run of non-`[a-z0-9]` characters to a single `-`, and
-   * trim leading/trailing `-`. Our preview ids are ASCII Kotlin FQNs, so this reproduces
-   * Storybook's id shape faithfully (Storybook's own regex replaces punctuation/space with `-` and
-   * collapses).
-   */
+  /** CSF `sanitize`: lowercase, collapse runs of non-`[a-z0-9]` to `-`, trim `-`. */
   fun sanitize(raw: String): String = raw.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
 
   /**
-   * CSF `toId(kind, name)` → `sanitize(kind)--sanitize(name)`. When either side sanitizes to blank
-   * (e.g. a symbol-only title) it's dropped rather than emitting a dangling `--`, so the result is
-   * always a usable slug.
+   * CSF `toId(kind, name)` → `sanitize(kind)--sanitize(name)`, dropping a side that sanitizes to
+   * blank.
    */
   fun toId(title: String, name: String): String =
     listOf(sanitize(title), sanitize(name)).filter { it.isNotBlank() }.joinToString("--")
 
   /**
-   * Minted stories for [previews], in list order, with deterministic collision suffixes (`-2`,
-   * `-3`, …) so the story id → preview id mapping stays 1:1 even when two previews derive the same
-   * slug. Both [index] and [resolvePreviewId] go through this, so `/index.json` and
-   * `iframe.html?id=` can never disagree.
+   * Minted stories for [previews], in order, with deterministic collision suffixes (`-2`, `-3`, …)
+   * so the mapping stays 1:1. Both [index] and [resolvePreviewId] use this, so they can't disagree.
    */
   fun stories(previews: List<ServePreview>): List<Story> {
     val used = HashSet<String>()
@@ -121,12 +101,9 @@ object StorybookCompat {
     )
 
   /**
-   * Resolve a story id from `iframe.html?id=` to a native preview id. The minted [stories] ids are
-   * the `/index.json` contract, so they're matched **first** — an advertised entry always
-   * round-trips even if some other preview's native id happens to equal this minted id. Only when
-   * the id matches no advertised story does the raw-native-id escape hatch apply (deep-linking a
-   * preview by its `<fqn>`), so the hatch can never shadow an indexed story. Returns null when
-   * nothing matches.
+   * Resolve a story id to a native preview id. Minted ids match first so an advertised entry always
+   * round-trips; only then does a raw native id apply, so it can never shadow an indexed story.
+   * Null when nothing matches.
    */
   fun resolvePreviewId(storyId: String, previews: List<ServePreview>): String? {
     stories(previews)
@@ -138,10 +115,8 @@ object StorybookCompat {
   }
 
   /**
-   * The isolation page for `iframe.html?id=<storyId>`: a chrome-free HTML document that shows the
-   * rendered [pngBytes] at their intrinsic pixel size on a white ground, so a screenshot tool
-   * captures exactly the preview. The PNG is inlined as a `data:` URI — one request, no token on a
-   * sub-resource. [storyId] is HTML-escaped into the title/alt for context.
+   * The isolation page for `iframe.html?id=<storyId>`: the PNG at intrinsic size on white, inlined
+   * as a `data:` URI. [storyId] is HTML-escaped into title/alt.
    */
   fun iframePage(storyId: String, pngBytes: ByteArray): String {
     val (w, h) = WebEscaping.pngDimensions(pngBytes)
@@ -161,20 +136,13 @@ object StorybookCompat {
   }
 
   /**
-   * The SVG isolation page for `iframe.html?id=<storyId>&format=svg`: the figma-svg export
-   * ([svgBytes] from `/render/<id>.svg`) embedded as an **`<img>` with a `data:image/svg+xml` URI**
-   * — a still-**vector**, resolution-independent render that the DOM-serializing visual tools
-   * (Percy, Chromatic, Applitools) re-render in their own cloud browsers, unlike the
-   * fixed-resolution raster PNG page.
+   * The SVG isolation page for `iframe.html?id=<storyId>&format=svg`: the figma-svg export as a
+   * vector render that DOM-serializing tools (Percy, Chromatic) re-render.
    *
-   * **Deliberately an `<img>`, not inline `<svg>` markup** (security): a serve host can hand back
-   * the `figma/<slug>.svg` bytes of an *unverified* catalog (repo-controlled, unsanitised —
-   * `ServeCatalogStore.fetchFigmaSvgs`). Inlining that as markup into a same-origin document would
-   * let a hostile SVG run `<script>` / `on*` handlers. SVG referenced through `<img>` is processed
-   * in the browser's restricted mode — no script execution, no external fetches, everywhere
-   * including the downstream tool's browser — so untrusted bytes are inert while still rendering as
-   * vector. The bytes are base64'd verbatim (no need to strip the XML prolog for a data URI).
-   * [storyId] is HTML-escaped into the title/alt.
+   * **Deliberately an `<img>` with a `data:image/svg+xml` URI, not inline `<svg>` (security):** the
+   * bytes may come from an unverified, unsanitised catalog (`ServeCatalogStore.fetchFigmaSvgs`),
+   * and inline markup in a same-origin document could run scripts. SVG via `<img>` runs in
+   * restricted mode, with no script or external fetches. [storyId] is HTML-escaped.
    */
   fun iframeSvgPage(storyId: String, svgBytes: ByteArray): String {
     val b64 = Base64.getEncoder().encodeToString(svgBytes)

@@ -14,12 +14,9 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 /**
- * End-to-end check for `GET /report-bug` on a real embedded [ServeHttpServer]: what the page shows,
- * what it refuses to echo back, and that it is gated like `/status`.
- *
- * The unit-level shape of the report body lives in [ServeBugReportTest]; this covers the wiring —
- * the route, the token gate, and the resolution of the browser-supplied `from` path into a real
- * session and preview.
+ * End-to-end check for `GET /report-bug`: what it shows, what it refuses to echo, the
+ * `/status`-style token gate, and resolving the browser-supplied `from` into a session and preview.
+ * Body shape is [ServeBugReportTest]'s.
  */
 class ServeBugReportRouteTest {
 
@@ -38,8 +35,8 @@ class ServeBugReportRouteTest {
     File(dir, "index.html").writeText("<html></html>")
     File(dir, "previews").apply { mkdirs() }
     previewIds.forEach { File(dir, "previews/$it.png").writeBytes(png()) }
-    // A design reference for the first preview, so this catalog has a focused comparison and a
-    // spec lane — the two pages that put a second image on the stage (#4765).
+    // A design reference for the first preview, giving this catalog a focused comparison and spec
+    // lane.
     File(dir, "references").apply { mkdirs() }
     File(dir, "references/button.png").writeBytes(png())
     File(dir, "references/index.json")
@@ -162,9 +159,7 @@ class ServeBugReportRouteTest {
 
   @Test
   fun `a root-form viewer resolves through the default session, not just a system prefix`() {
-    // `/p/Red` is the standard shape on a plain `compose-preview serve` — it names no system, and
-    // resolving only `/{system}/p/…` lost the preview, catalog and screenshot on the most common
-    // way this affordance is reached.
+    // `/p/Red` names no system — the common shape on a plain `compose-preview serve`.
     server = newServer(public = true, token = "unused")
     val (_, body) = get("/report-bug?from=%2Fp%2FRed")
     assertTrue(body.contains("<th scope=\"row\">Preview</th>"), body)
@@ -201,9 +196,7 @@ class ServeBugReportRouteTest {
 
   @Test
   fun `the server's own pages are never attributed to the default catalog`() {
-    // `/`, `/status`, `/docs/…` and a 404 belong to the BOX, not to a system. Falling back to the
-    // default session for them would attach that catalog's provenance, trust and render lane to a
-    // report about the front door.
+    // `/`, `/status`, `/docs/…` and 404s belong to the box, so no session's provenance is attached.
     server = newServer(public = true, token = "unused")
     for (path in listOf("%2F", "%2Fstatus", "%2Fdocs%2Fsomething")) {
       val (_, body) = get("/report-bug?from=$path")
@@ -239,9 +232,7 @@ class ServeBugReportRouteTest {
 
   @Test
   fun `a percent-escaped session is decoded before it is looked up`() {
-    // `ServeWeb.queryString` percent-encodes it on the way out, so an on-demand revision session
-    // arrives as `session=a%2Fb` while the registry stores the raw key — looking up the encoded
-    // spelling silently finds nothing and the report loses everything.
+    // `ServeWeb.queryString` percent-encodes the session key (`a%2Fb`); lookup must decode it.
     registry.register("rev/one", host = bundle("rev/one", listOf("Blue")), pinned = true)
     server = newServer(public = true, token = "unused")
     val (_, body) = get("/report-bug?from=%2Fp%2FBlue%3Fsession%3Drev%252Fone")
@@ -335,12 +326,8 @@ class ServeBugReportRouteTest {
 
   @Test
   fun `a host that cannot host a capture says the picture has to be pasted`() {
-    // Issue #556. The lane admits only a browser session naming a login with access to the image
-    // repository, so on an open host it admits nobody — and the page still promised that captures
-    // were "embedded in the report automatically". They were not: the report opened on GitHub with
-    // an empty Screenshot section, and the one sentence that said to paste was written into a
-    // status line at submit time, on a page the reporter leaves in the same gesture because the
-    // issue form is `target="_blank"`.
+    // On an open host the image lane admits nobody, so the page must not promise automatic
+    // embedding and must say to paste before submit (see #556).
     server = newServer(public = true, token = "unused")
     val body = get("/report-bug").second
     assertFalse(body.contains("embedded in the report automatically"), body)
@@ -374,8 +361,8 @@ class ServeBugReportRouteTest {
 
   @Test
   fun `a signed-in-only reported page asks before uploading captures`() {
-    // Captures are hosted at an anonymous-read URL and linked from a public issue, so a picture of
-    // a page only a signed-in user can open waits for an explicit opt-in.
+    // Captures are anonymously readable and linked publicly, so a page needing sign-in requires an
+    // explicit opt-in.
     val page =
       ServeWeb.bugReportPage(
         report =
@@ -411,10 +398,8 @@ class ServeBugReportRouteTest {
 
   @Test
   fun `a report from a browser-composed view says which view, and labels the render as the base one`() {
-    // Issue #4261: the embedded PNG is the only picture of a preview this server can make, and on
-    // a lane that composes its own view it is not what the reporter was looking at. The motion
-    // lane is that case in full — it plays a frame sequence with nothing beside it, so there is no
-    // second image to offer and the render is labelled as the base one.
+    // The motion lane composes its own view with no second image, so the render is labelled as the
+    // base one.
     server = newServer(public = true, token = "unused")
     val (_, body) = get("/report-bug?from=%2Fcompose-m3%2Fp%2Fbutton-filled%3Fmode%3Dmotion")
     assertTrue(body.contains("<th scope=\"row\">View</th>"), body)
@@ -425,8 +410,7 @@ class ServeBugReportRouteTest {
 
   @Test
   fun `a report from the focused comparison carries the pair that page draws`() {
-    // #4765. The path says which page it was and the query says which reference, so the report can
-    // show both panels instead of one that reads as "the render".
+    // The path names the page and the query the reference, so the report shows both panels.
     server = newServer(public = true, token = "unused")
     val (_, body) = get("/report-bug?from=%2Fcompose-m3%2Fcompare%2Fbutton-filled")
     // The page previews both panels…
@@ -451,9 +435,7 @@ class ServeBugReportRouteTest {
 
   @Test
   fun `a reference the comparison never drew is not invented for the report`() {
-    // `?reference=` naming one this preview does not have is the comparison's own 404, so falling
-    // back to the first here would embed a pair that page never showed. Same rule as the preview
-    // segment beside it: match, don't trust.
+    // An unknown `?reference=` is the comparison's own 404, so it must not fall back to the first.
     server = newServer(public = true, token = "unused")
     val (_, body) =
       get("/report-bug?from=%2Fcompose-m3%2Fcompare%2Fbutton-filled%3Freference%3Dno-such-ref")
