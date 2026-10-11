@@ -12,11 +12,9 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Pins the HTML wiring of the server-side thumbnail crop: when a card's [ContentCrop] is present
- * the render `<img>` is wrapped in a `.cp-crop` clip window sized by aspect-ratio (so a Wear
- * sticker shows the component, not its watch canvas) and framed in PERCENTAGES so it shrinks with a
- * narrow grid card instead of overflowing it; when absent the card keeps the plain fit-to-box
- * `<img>` — so a phone/desktop catalog and the plain-module landing are untouched.
+ * Pins the thumbnail crop wiring: with a [ContentCrop] the `<img>` is wrapped in a `.cp-crop`
+ * window sized by aspect-ratio and framed in percentages (so it shrinks with narrow cards); without
+ * one the card keeps the plain fit-to-box `<img>`.
  */
 class ServeWebThumbCropTest {
 
@@ -110,11 +108,9 @@ class ServeWebThumbCropTest {
 
   @Test
   fun `a capped window publishes its width relative to the display cap, not as frozen px`() {
-    // A 300x100 component on a 600x600 render: the largest edge is capped 240/300, so the window
-    // draws 240x80. Freezing that 240px in the HTML is what made a cropped card 20% larger than
-    // its plain neighbour under the narrow-viewport `max-height: 200px` (#4544) — the plain image
-    // shrank and the window did not. Publishing the RELATIONSHIP instead (box width per 1px of
-    // cap, plus the 1x ceiling) lets the stylesheet re-derive it for whatever cap is in force.
+    // A 300x100 component on a 600x600 render draws 240x80 at the 240px cap. The window publishes
+    // the ratio (width per px of cap, plus the 1x ceiling) rather than a fixed width, so the
+    // stylesheet can re-derive it at the narrow-viewport cap (#4544).
     val capped = computeThumbCrop(svg("0 0 300 100", "translate(-150, -250)"), 600, 600)!!
     val html =
       ServeWeb.landingPage(
@@ -124,14 +120,10 @@ class ServeWebThumbCropTest {
         basePath = "/wear-m3",
         thumbCrop = { capped },
       )
-    // 300 wide per 300 of cap = 1, ceiling 300px → min(300px, 1 * 240px) = 240px at the desktop
-    // cap and min(300px, 1 * 200px) = 200px at the narrow one: the same ratio the plain <img>'s
-    // 240 -> 200 `max-height` drop applies.
-    //
-    // The two ratios DIFFER here — 1 against the largest edge, 3 against the height — because this
-    // is a content crop, whose cap axis is `max(box.w, box.h)`. That gap is why the front door's
-    // fixed-height hero well sizes on `--cp-crop-w-per-h`: reading the cap ratio there would have
-    // shrunk this landscape window to 196x65 in a well it already fits.
+    // min(300px, 1 * cap): 240px at desktop, 200px narrow — the same drop as the plain `<img>`. The
+    // two ratios differ here (1 against the largest edge, 3 against height) because a content crop
+    // caps on `max(w, h)`; the front door's fixed-height well must therefore size on
+    // `--cp-crop-w-per-h`.
     assertTrue(
       html.contains(
         "class=\"cp-crop\" style=\"--cp-crop-w-per-cap:1;--cp-crop-w-per-h:3;--cp-crop-max-w:300px;aspect-ratio:240/80\""
@@ -142,9 +134,8 @@ class ServeWebThumbCropTest {
 
   @Test
   fun `a gutter window is capped on its height, so it matches a plain image's max-height`() {
-    // A 249x126 button in a 271x150 render with an 11/11/11/13 gutter. The cap acts on HEIGHT here
-    // (a plain <img> beside it is bounded by `max-height`), so the ratio published is width-per-
-    // cap = 249/126 and the window's height lands on the cap exactly.
+    // A 249x126 button in a 271x150 render with an 11/11/11/13 gutter; the cap acts on height, so
+    // the ratio is 249/126.
     val gutter = computeGutterCrop(11, 11, 11, 13, 271, 150)!!
     val html =
       ServeWeb.landingPage(
@@ -154,10 +145,7 @@ class ServeWebThumbCropTest {
         basePath = "/wear-m3",
         thumbCrop = { gutter },
       )
-    // Both ratios, and here they are the SAME number — which is the invariant worth pinning: for a
-    // gutter crop the cap axis IS the height, so `--cp-crop-w-per-h` adds nothing. It is the
-    // content-crop case above (`--cp-crop-w-per-cap:1` against `--cp-crop-w-per-h:3`) where they
-    // part company, and a well that sizes on its own height has to read the second one.
+    // For a gutter crop the cap axis is the height, so both ratios are the same number.
     assertTrue(
       html.contains("--cp-crop-w-per-cap:1.9762;--cp-crop-w-per-h:1.9762;--cp-crop-max-w:249px"),
       "gutter window width published per cap PIXEL of height (249/126), the cap axis being height",
@@ -201,18 +189,15 @@ class ServeWebThumbCropTest {
       css.contains(".cp-imgwrap .cp-crop img { position: absolute; max-width: none;"),
       "img escapes the fit-to-box cap",
     )
-    // And deliberately NO `max-height` on the window: it carries an inline `aspect-ratio`, so
-    // constraining its height in CSS squashes the box rather than scaling it, and the render
-    // inside would sit at the wrong scale. The display cap belongs to the crop geometry, where
-    // `computeThumbCrop` and `computeGutterCrop` both apply it (m3-catalog#179).
+    // No `max-height` on the window: with an inline `aspect-ratio` it would squash rather than
+    // scale. The cap is applied by `computeThumbCrop`/`computeGutterCrop`.
     assertFalse(
       css.contains(
         ".cp-crop { position: relative; overflow: hidden; display: block; max-width: 100%; max-height"
       ),
       "no CSS height cap on an aspect-ratio window",
     )
-    // The cap the window resolves its published ratio against, and the narrow-viewport drop that
-    // keeps a cropped card the same size as the plain card beside it (#4544).
+    // The cap the window resolves its ratio against, and the narrow-viewport drop (#4544).
     assertTrue(
       css.contains(
         "width: min(var(--cp-crop-max-w, 100%), calc(var(--cp-crop-w-per-cap, 9999) * var(--cp-thumb-cap, 240px)));"
@@ -222,28 +207,17 @@ class ServeWebThumbCropTest {
     assertTrue(css.contains(".cp-crop { --cp-thumb-cap: 200px; }"), "narrow-viewport cap")
     // ...and it must drop in lockstep with the plain image's cap, or the mismatch just moves.
     assertTrue(css.contains(".cp-imgwrap img { max-height: 200px; }"), "plain image's narrow cap")
-    // A front-door system card's hero is a different well: `.cp-syslist .cp-imgwrap` is a fixed
-    // 220px row at every width, and the plain hero in it is exempted from the grid's image cap
-    // (`max-height: none`) for exactly that reason. A CROPPED hero takes its cap through the
-    // variable instead, so the exemption has to be spelled the other way or it draws to the grid's
-    // number in a row that is not the grid's — 240px at desktop, overflowing, and 200px in the
-    // narrow block, visibly short beside the prebaked hero beside it. Pinned here, next to the two
-    // caps it has to agree with, because these three drifting apart is the whole bug.
-    //
-    // 196px rather than 220px: the row's CONTENT height, since `.cp-imgwrap` carries 12px of
-    // padding under the border-box `*` rule. The row height itself would overflow the well by 12px
-    // each way and, in the narrow block, would push the window UP from 200px.
+    // A front-door system card's hero sits in a fixed 220px row where the plain hero is exempt from
+    // the grid's cap; a cropped hero takes its cap through the variable, so it must be set to the
+    // row's content height (196px, after 12px padding each side) or it draws at the grid's cap.
     assertTrue(
       css.contains(
         "width: min(var(--cp-crop-max-w, 100%), calc(var(--cp-crop-w-per-h, var(--cp-crop-w-per-cap, 9999)) * 196px)); }"
       ),
       "a system-card window sizes against the box's own height, capped at the well's 196px",
     )
-    // NOT `--bleed`, and not `--cp-thumb-cap`. `natCapAxis` is the height for a gutter crop and
-    // the largest edge for a content one, and `clip` does not separate them either —
-    // `ServeBundleHost` clears it on a vector crop over a guttered render. So a landscape 300x100
-    // window carries `--bleed` with a largest-edge ratio, and sizing it off the well's height
-    // shrank it 240x80 -> 196x65 for nothing.
+    // Not `--bleed` and not `--cp-thumb-cap`: neither distinguishes a gutter crop's height axis
+    // from a content crop's largest edge, so a landscape window would shrink needlessly.
     assertFalse(
       css.contains(".cp-syslist .cp-crop--bleed { --cp-thumb-cap:"),
       "--bleed is not a proxy for a height-capped crop",
@@ -324,9 +298,8 @@ class ServeWebThumbCropTest {
 
   @Test
   fun `a reused design-system id is attributed to its actual catalog repository`() {
-    // The same spoof the sample ids are already guarded against: a catalog id is claimed by
-    // whoever publishes it, so `compose-m3` from someone else must not read as the official
-    // design system on the public front door.
+    // A catalog id is claimed by whoever publishes it, so `compose-m3` from someone else must not
+    // read as the official design system.
     val impostor =
       ServeWeb.HomeSystem(
         system = "compose-m3",
@@ -421,8 +394,8 @@ class ServeWebThumbCropTest {
 
   @Test
   fun `a group priority lifts its section above the ones the catalog list reaches first`() {
-    // The ordering the front page had before #4601: sections came out in first-appearance order,
-    // so a design system registered after the samples (an admin publish is appended) read last.
+    // Without grouping, sections come out in first-appearance order, so a later-registered design
+    // system reads last.
     fun system(id: String, repo: String, group: ServeWeb.HomeGroup?) =
       ServeWeb.HomeSystem(
         system = id,
@@ -461,9 +434,8 @@ class ServeWebThumbCropTest {
 
   @Test
   fun `a section that two claims spell the same way takes the highest priority declared`() {
-    // Headings are operator text, not unique keys: two groups (or a group and the owner fallback)
-    // can spell one. Recording only the first claim's priority would strand a lifted group under a
-    // heading-mate that registered earlier with none.
+    // Headings are operator text, not unique keys; recording only the first claim's priority would
+    // strand a lifted group under an earlier heading-mate.
     fun system(id: String, repo: String, group: ServeWeb.HomeGroup?) =
       ServeWeb.HomeSystem(
         system = id,

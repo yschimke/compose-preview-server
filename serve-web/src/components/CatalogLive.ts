@@ -1,21 +1,14 @@
-// `<cp-catalog-live>` — long-press a catalog card to start a live daemon session in place.
+// `<cp-catalog-live>`: long-press a catalog card to start a live daemon session in place. The
+// card's baked thumbnail stays as the stage: a `<canvas>` overlay seeded with its pixels (no blank
+// flash while connecting) receives the daemon's frames, and pointer, wheel and key input is
+// forwarded.
 //
-// The grid's counterpart of the viewer's Static⇄Live toggle, without leaving the page. The card
-// keeps its baked thumbnail as the stage: a `<canvas>` is mounted as an absolute overlay on the
-// image's slot, seeded with the thumbnail's pixels so there is no blank flash while the socket
-// connects, and the daemon's frames paint over it. Pointer, wheel and key input are forwarded to the
-// composition, so a component can be pressed, dragged and typed into from the grid.
+// Progressive enhancement: without script or a live lane the cards are plain links. Configuration
+// comes from `window.cpCatalogLive` (an inline object literal, not `data-` attributes), so no
+// preview id put into a URL originates as DOM text.
 //
-// Everything here is progressive enhancement over the server-rendered grid: with scripting off (or
-// on a session with no live lane) the cards are exactly the links they always were.
-//
-// The server emits its configuration as `window.cpCatalogLive` — an object literal in an inline
-// script, NOT `data-` attributes — so no preview id this element puts into a URL originates as DOM
-// text (the same discipline the themed-render URLs follow).
-//
-// Renders nothing of its own; `serve.css` hides the tag. The decisions live next door:
-// `live/pointerMap.ts` (where a press landed on the composition) and `live/session.ts` (which
-// preview, which socket, and what to say when the lane refuses).
+// Renders nothing itself (`serve.css` hides the tag). Decisions live in `live/pointerMap.ts` and
+// `live/session.ts`.
 
 import { ControllerElement, customElement } from "../controllerElement.js";
 import { sameOriginNavigation } from "../dom/sameOrigin.js";
@@ -83,8 +76,8 @@ export class CatalogLive extends ControllerElement {
     private config: LiveConfig = {};
     private holdMs = 500;
     /**
-     * The one live session. Only one card streams at a time, deliberately: a live seat is a render
-     * daemon, and a grid is 80+ cards. Starting one ends the previous.
+     * The one live session: each is a render daemon and a grid has many cards, so starting one ends
+     * the previous.
      */
     private active: Session | null = null;
     private press: Press | null = null;
@@ -149,12 +142,7 @@ export class CatalogLive extends ControllerElement {
         );
     }
 
-    /**
-     * The card whose preview a DECLARED theme is currently showing, if any.
-     *
-     * Read off the pressed chip so a live session started from a themed grid opens under that same
-     * theme rather than snapping back to the catalog's baked palette.
-     */
+    /** The declared theme the pressed chip shows, if any, so a live session opens under it. */
     private themeProvider(): string {
         const pressed = document.querySelector(
             '.cp-theme-btn[aria-pressed="true"]',
@@ -167,16 +155,9 @@ export class CatalogLive extends ControllerElement {
     // ---- the session ---------------------------------------------------------
 
     /**
-     * Keep the server told whether anyone is actually looking at this card.
-     *
-     * Two ways to stop looking without ending the session: scroll the card out of the grid's
-     * viewport, or send the whole tab to the background. Either one used to leave a full-rate
-     * render loop running in the daemon for a picture on nobody's screen — the stream throttles
-     * instead, and stays warm, so scrolling back repaints from the daemon's resume keyframe rather
-     * than reconnecting from cold.
-     *
-     * A browser without `IntersectionObserver` keeps the card permanently on-screen and rides the
-     * tab signal alone; nothing here is load-bearing for correctness.
+     * Tell the server whether anyone is looking: scrolling the card away or backgrounding the tab
+     * throttles the stream (kept warm) rather than rendering for nobody. Without
+     * `IntersectionObserver` only the tab signal is used.
      */
     private watchVisibility(session: Session): () => void {
         const report = (): void => {
@@ -184,10 +165,8 @@ export class CatalogLive extends ControllerElement {
             const socket = session.socket;
             if (this.active !== session || !socket || socket.readyState !== 1)
                 return;
-            // Against what the SERVER believes, not against the last computed state: while the
-            // socket was connecting there was nowhere to send, so a state sampled then is still
-            // news once it opens. A grid scrolls constantly, so the dedup matters — but it has to
-            // dedup on what actually went out.
+            // Compare with what the server was told, not the last computed state: a state sampled
+            // while connecting is still news once open.
             if (visible === session.reportedVisible) return;
             session.reportedVisible = visible;
             socket.send(visibilityMessage(visible));
@@ -239,10 +218,7 @@ export class CatalogLive extends ControllerElement {
         if (reason) this.announce(session.card, reason);
     }
 
-    /**
-     * A failure has to be visible on the card that failed — a live lane that silently does nothing
-     * is indistinguishable from a long press that didn't register.
-     */
+    /** A failure must show on the card, or it's indistinguishable from an unregistered press. */
     private announce(card: HTMLElement, message: string): void {
         const wrap = card.querySelector(".cp-imgwrap");
         if (!wrap) return;
@@ -262,11 +238,8 @@ export class CatalogLive extends ControllerElement {
             card.getAttribute("data-bg-theme"),
         );
         if (!previewId) return;
-        // Sign-in gates the daemon lane on a GitHub-authed box. The press is a deliberate request
-        // for the lane, so it FOLLOWS the login rather than reporting a condition the visitor can't
-        // act on — the same reason the viewer offers an anchor instead of a disabled chip. (A link
-        // can't be nested inside the card, which is itself an `<a>`, so the navigation IS the
-        // affordance.)
+        // On a GitHub-gated box the press follows the sign-in link (the card is itself an `<a>`, so
+        // it can't contain one).
         if (this.config.signInHref) {
             const href = sameOriginNavigation(
                 this.config.signInHref,
@@ -343,11 +316,9 @@ export class CatalogLive extends ControllerElement {
 
         let gotFrame = false;
         socket.onopen = () => {
-            // Nothing could be sent while the socket was connecting, and the state it should have
-            // sent is not always followed by an event that would resend it: a card held in a tab
-            // that is already hidden gets no `visibilitychange`, and off-screen-at-start gets no
-            // second `IntersectionObserver` callback. The server starts every stream visible, so
-            // the current state has to be stated once there is somewhere to state it to.
+            // State visibility once the socket opens: a card in an already-hidden tab or starting
+            // off-screen gets no further event to trigger it, and streams start visible
+            // server-side.
             reportVisibility();
         };
         socket.onmessage = (event: MessageEvent) => {
@@ -382,12 +353,9 @@ export class CatalogLive extends ControllerElement {
     }
 
     /**
-     * Drain one queued frame per animation frame, for as long as this session is the live one.
-     *
-     * Frames are never painted straight from the socket handler. Two watermarks keep the card
-     * moving forwards: the queue drops anything at or below the last frame it released, and
-     * `paintedSeq` drops anything whose decode resolved out of order — see `live/framePainter.ts`
-     * for why the second one is load-bearing and not belt-and-braces.
+     * Drain one queued frame per animation frame while this session is live. Two watermarks keep it
+     * moving forward: the queue drops frames at or below the last released, and `paintedSeq` drops
+     * out-of-order decodes (see `live/framePainter.ts`).
      */
     private runFrameLoop(session: Session): void {
         if (session.painting) return;
@@ -464,9 +432,8 @@ export class CatalogLive extends ControllerElement {
             const point = pixel(event);
             if (!point) return;
             event.preventDefault();
-            // The down is withheld until the first move, so a tap can still be sent as a single
-            // `click` below — the daemon's click fast-path renders between press and release, which
-            // a batched down+up can race.
+            // Withhold the down until the first move so a tap is sent as a single `click` (the
+            // daemon's fast path; a batched down+up can race).
             if (!state.moved) {
                 state.moved = true;
                 send({
@@ -523,11 +490,8 @@ export class CatalogLive extends ControllerElement {
         );
     }
 
-    // ---- the long press ------------------------------------------------------
-    //
-    // A card is a link, so the gesture has to be unambiguous in both directions: a press held past
-    // the threshold goes live AND must not follow the link, while a tap, a drag (a scroll on touch)
-    // or a right-click keeps the card behaving exactly as before.
+    // The long press. A card is a link: a press past the threshold goes live and doesn't follow the
+    // link, while a tap, drag/scroll or right-click behaves as before.
 
     private cancelPress(): void {
         if (!this.press) return;

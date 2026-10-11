@@ -35,9 +35,8 @@ if (localDependencyManifest != null) {
 }
 
 dependencyResolutionManagement {
-  // Kotlin/Wasm adds the Node distribution as an Ivy repository when its setup task is realized.
-  // The build scripts declare no repositories; project preference exists solely for that
-  // plugin-owned toolchain repository.
+  // Kotlin/Wasm adds its Node distribution as an Ivy repository; project preference exists only for
+  // that.
   repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)
   repositories {
     localDependencyManifest?.let { manifest ->
@@ -66,47 +65,20 @@ dependencyResolutionManagement {
     google()
     mavenCentral()
 
-    // ── The CMP Wear port, GROUP-FENCED ─────────────────────────────────────────────────────────
-    // `ee.schimke.wearcmp:*` — Wear Compose Material 3 / Foundation compiled for Compose
-    // Multiplatform, published from the `wear-compose-cmp-maven` branch of `yschimke/wear-m3-catalog-out`.
-    // It publishes `jvm` and `wasmJs` variants, which are exactly `:ui-builder`'s two targets, and
-    // it is what lets the canvas draw Wear components instead of renaming three of them to
-    // Material 3 lookalikes. See `docs/design/UI_BUILDER_WEAR_SCREEN.md`.
-    //
-    // Fenced to the one group with `includeGroup` rather than a prefix guess, so this repository
-    // can never satisfy a request for an `androidx.*` or `ee.schimke.composeai` artifact by
-    // accident. The device-preview lane is unaffected: it renders through the native
-    // `wear-m3-catalog` bundle against the genuine AndroidX AARs, and the port never reaches it.
+    // The CMP Wear port (`ee.schimke.wearcmp:*`, jvm + wasmJs) so the canvas draws real Wear
+    // components; see `docs/design/UI_BUILDER_WEAR_SCREEN.md`. Fenced with `includeGroup` so it can
+    // never satisfy an `androidx.*` or `ee.schimke.composeai` request. The device-preview lane uses
+    // genuine AndroidX AARs.
     maven("https://raw.githubusercontent.com/yschimke/wear-m3-catalog-out/wear-compose-cmp-maven/") {
       name = "wearComposeCmpPort"
       content { includeGroup("ee.schimke.wearcmp") }
     }
 
-    // ── The UI-builder editor archive, from its GitHub release ──────────────────────────────────
-    //
-    // `compose-preview-ui-builder-web` is a ~40 MB Wasm distribution that this build unpacks into
-    // the server distribution. Nothing compiles against it and nothing resolves it transitively,
-    // so yschimke/compose-ui-builder ships it as a release asset rather than putting a frontend
-    // distribution on Maven Central forever. Its three sibling coordinates — the runtime, the
-    // export projection and the render bundle — are on Central, because those are what `:server`
-    // actually compiles against.
-    //
-    // An ivy repository rather than a download task, so it stays an ordinary versioned dependency:
-    // the version catalog names it, Gradle caches it, and the day it moves to a real Maven
-    // repository this block is deleted and nothing else changes.
-    //
-    // `metadataSources { artifact() }` because a release asset is a bare file with no POM and no
-    // Gradle module metadata. That also means the `distribution` variant attributes this build
-    // matches on are NOT carried across — `:server`'s `uiBuilderWeb` configuration asks for the
-    // artifact by extension instead, and its build file says so where it declares the dependency.
-    //
-    // The `v` in the pattern is the TAG's, not a typo: release-please cuts `v3.28.0`, while the
-    // asset it attaches is `compose-preview-ui-builder-web-3.28.0.zip`. The tag segment and the
-    // file name disagree about the prefix, so the layout has to spell both.
-    //
-    // FENCED to the single module, like the Wear port above: this repository can never satisfy a
-    // request for anything else, and a typo in a coordinate fails loudly instead of reaching a
-    // GitHub 404 page and being parsed as a jar.
+    // The UI-builder editor archive (`compose-preview-ui-builder-web`, ~40 MB Wasm), shipped as a
+    // GitHub release asset rather than on Maven Central; an ivy repository keeps it a normal
+    // versioned dependency. `metadataSources { artifact() }` because the asset has no POM/module
+    // metadata, so `:server` requests it by extension. The pattern spells the tag's `v` prefix
+    // separately from the file name's. Fenced to this one module.
     ivy("https://github.com/yschimke/compose-ui-builder/releases/download") {
       name = "uiBuilderWebRelease"
       patternLayout { artifact("v[revision]/[module]-[revision].[ext]") }
@@ -130,11 +102,8 @@ if (localDependencyVersions.isNotEmpty()) {
   }
 }
 
-// BuildFetch remote Gradle build cache, beside the local one: the same wiring compose-ai-tools and
-// compose-preview-daemon carry. Off unless a token resolves, so a fork, a developer machine or a
-// repository without the secret builds exactly as before on the local cache alone. Writes only
-// from trusted CI (ON_CI=true, which `.github/actions/buildfetch-cache` sets on pushes to `main`);
-// pull requests read. `-Pcomposeai.remoteCache=off` skips the remote entirely if it misbehaves.
+// BuildFetch remote build cache, off unless a token resolves. Writes only from trusted CI
+// (`ON_CI=true`, set on pushes to `main`); PRs read. `-Pcomposeai.remoteCache=off` disables it.
 val onCi = providers.environmentVariable("ON_CI").orElse("false").get().toBoolean()
 
 // Non-blank view of one env var or Gradle property: an unset secret that CI still exports as an
@@ -164,45 +133,16 @@ buildCache {
 
 rootProject.name = "compose-preview-server"
 
-// ── Optional composite builds against sibling checkouts ────────────────────────────────────────
+// Optional composite builds against sibling checkouts, replacing published coordinates:
 //
-// Everything this build resolves is a published coordinate by default -- the compose-ai-tools
-// line, the preview daemon, the contracts line, and the UI builder's four seams. Naming a sibling
-// swaps that coordinate for the checkout instead, so a change can be built in both repositories at
-// once:
-//
-//     ./gradlew check -PlocalBuilds=tools
-//     ./gradlew check -PlocalBuilds=tools,daemon
-//     ./gradlew check -PlocalBuilds=all
-//
-// `-PlocalBuild.<name>=<path>` overrides the default checkout location. A named sibling whose
-// directory is missing is an error rather than a silent fall back to Maven: "I asked for my local
-// tools and got the released one" is exactly the confusion this exists to remove.
-//
-// The UI builder is deliberately NOT an entry in `localBuilds`. Gradle project properties are
-// global to the invocation, so the included build reads the same value, and
-// yschimke/compose-ui-builder's settings rejects a sibling name it does not know -- a UI-builder
-// entry there would be a repository including itself. It takes its own property instead:
-//
+//     ./gradlew check -PlocalBuilds=tools,daemon   # or =all
 //     ./gradlew check -PcomposeUiBuilderDir=../compose-ui-builder
 //
-// Unset resolves the releases; set resolves the checkout, which is why the default build -- and
-// the release -- proves the published coordinates are complete.
-//
-// The UI builder is the one entry with EXPLICIT substitution rules, because Gradle's automatic
-// matching keys on group and project name and these four publish under artifact ids their projects
-// are not named after (`:ui-builder-runtime` -> `compose-preview-ui-builder-runtime`). The other
-// upstreams publish the coordinates their projects are named after, which is the case Gradle
-// substitutes automatically.
-//
-// The web archive is the one seam that is not a Maven module -- released as a GitHub asset,
-// reached through the fenced ivy repository above, requested artifact-only. Substitution still
-// matches it: the included project's `runtimeElements` carries the archive, which is what the
-// artifact-only request resolves to.
-//
-// `scripts/stage-local-dependency.py` still exists and is the right tool for a different job --
-// pinning one FIXED upstream build into a workspace-local Maven repository, rather than following
-// a checkout as it changes.
+// `-PlocalBuild.<name>=<path>` overrides the location; a missing directory is an error, not a
+// silent fallback to Maven. The UI builder takes its own property because project properties reach
+// the included build too, and its settings reject unknown `localBuilds` names. It also needs
+// explicit substitution rules, since its artifact ids differ from its project names. For pinning a
+// fixed upstream build instead, use `scripts/stage-local-dependency.py`.
 val localBuildRoots =
   mapOf(
     "tools" to "../compose-ai-tools",
@@ -234,9 +174,7 @@ providers
     includeBuild(directory)
   }
 
-// The UI builder, as an opt-in composite build. The checkout default is the sibling directory a
-// two-repository setup already has; the property is required to turn it on, so its absence is
-// what makes the released coordinates the default.
+// The UI builder as an opt-in composite build; unset means the released coordinates.
 providers.gradleProperty("composeUiBuilderDir").orNull?.let { path ->
   val directory = file(path).canonicalFile
   require(directory.resolve("settings.gradle.kts").isFile) {
@@ -261,9 +199,7 @@ providers.gradleProperty("composeUiBuilderDir").orNull?.let { path ->
 
 include(":server")
 
-// The MCP server — `compose-preview mcp serve`. Moved here from compose-ai-tools because the layer
-// rule places a module that needs an HTTP server in this repository (compose-ai-tools#5176); it
-// consumes the layer-1 daemon/render-session coordinates it used to reach as projects.
+// The MCP server (`compose-preview mcp serve`); it lives here because it needs an HTTP server.
 include(":mcp")
 
 include(":usage-source-psi")

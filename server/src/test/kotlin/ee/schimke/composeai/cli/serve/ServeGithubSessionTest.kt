@@ -20,13 +20,9 @@ import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
 
 /**
- * How long a GitHub sign-in lasts, and how it renews.
- *
- * The session is a signed cookie with a baked-in expiry and no server-side store, so the only way
- * to keep an active visitor signed in is to hand back a fresh cookie as the old one ages. Before
- * this existed the expiry was a flat 12 hours from sign-in with no renewal at all, which is shorter
- * than the gap between one working day and the next — a visitor who signed in yesterday was
- * reliably signed out this morning.
+ * How long a GitHub sign-in lasts and how it renews. The session is a signed cookie with an
+ * embedded expiry and no server-side store, so an active visitor is kept signed in by re-issuing it
+ * as it ages.
  */
 class ServeGithubSessionTest {
 
@@ -78,10 +74,9 @@ class ServeGithubSessionTest {
   private val fs = FakeFileSystem()
 
   /**
-   * Wired only so `/playground` exists: it is the route that actually *consults* the session (302
-   * to sign-in when there is none, 200 for a signed-in visitor whom the fake GitHub grants repo
-   * rights), which makes it the honest probe for "is this cookie still an authenticated visitor
-   * with playground rights". No compile is performed.
+   * Wired so `/playground` exists: it consults the session (302 without one, 200 for a visitor the
+   * fake GitHub grants repo rights), making it the probe for an authenticated session. Nothing is
+   * compiled.
    */
   private val playground =
     PlaygroundCompileService(
@@ -206,10 +201,8 @@ class ServeGithubSessionTest {
   }
 
   /**
-   * The cap that makes the sliding expiry safe. A refreshed cookie copies the `repositoryAccess`
-   * flag GitHub computed at sign-in — the playground gate — and there is no stored access token to
-   * re-ask with, so without an absolute ceiling somebody whose repo access was revoked would keep
-   * the gate open simply by continuing to visit. Sliding must therefore run out.
+   * The absolute cap that makes sliding expiry safe: a refreshed cookie copies `repositoryAccess`
+   * from sign-in with no token to re-check, so revoked access would otherwise persist by visiting.
    */
   @Test
   fun `sliding never carries a session past its absolute cap`() {
@@ -237,9 +230,8 @@ class ServeGithubSessionTest {
   }
 
   /**
-   * Whether this cookie still opens the repo-gated playground — 200 for a signed-in visitor the
-   * fake GitHub granted push rights, a redirect to the sign-in for anyone the session no longer
-   * authenticates. This is the gate the absolute cap exists to close.
+   * Whether this cookie still opens the repo-gated playground (200) rather than redirecting to
+   * sign-in.
    */
   private fun signedIn(cookie: String): Boolean =
     client
@@ -272,20 +264,15 @@ class ServeGithubSessionTest {
           resp.header("Location")
       }
 
-  /**
-   * The eject button. Before it existed the only way to end a session was DevTools: the cookie is
-   * self-renewing for a week of idle and capped at a fortnight, so a visitor on a borrowed machine
-   * had to clear site data.
-   */
+  /** Sign-out, so a visitor on a borrowed machine need not clear site data. */
   @Test
   fun `signing out ends the session`() {
     val cookie = signIn()
     assertTrue(signedIn(cookie), "precondition: the fresh session opens the playground")
     val (cleared, location) = logout(cookie)
     assertTrue(cleared != null, "signing out must write a cp_gh_auth cookie of its own")
-    // Both halves of the deletion, because either alone is a way for this to silently not work: an
-    // attribute set the browser does not match leaves the old cookie in place, and a browser that
-    // keeps an expired cookie anyway still has to be told the value means nothing.
+    // Both halves of the deletion: mismatched attributes leave the old cookie, and a browser
+    // keeping an expired cookie must still get a meaningless value.
     assertEquals(0L, maxAge(cleared))
     assertEquals("", cleared.substringAfter("cp_gh_auth=").substringBefore(";"))
     assertEquals("/", location)
@@ -293,9 +280,8 @@ class ServeGithubSessionTest {
   }
 
   /**
-   * `POST` only, for the reason the approval flow is: a sign-out a prefetcher, a link-unfurler or
-   * somebody else's `<img src>` can fire by *looking at a URL* is not one. No `GET` is registered,
-   * so following the path leaves the session exactly where it was.
+   * `POST` only, so prefetchers, unfurlers or `<img src>` cannot sign someone out; no `GET` is
+   * registered.
    */
   @Test
   fun `following the logout URL does not sign anyone out`() {
@@ -317,9 +303,8 @@ class ServeGithubSessionTest {
   }
 
   /**
-   * Signing out of `/playground` lands back on `/playground` rather than at the index — the same
-   * `return` parameter [ServeGithubAuth.loginPath] already round-trips, and the same safety rule:
-   * only a same-origin relative path survives, so the control can never become an open redirect.
+   * Sign-out returns to the same page via the `return` parameter [ServeGithubAuth.loginPath] uses;
+   * only same-origin relative paths survive, so it cannot be an open redirect.
    */
   @Test
   fun `signing out returns to the page it was invoked from`() {
@@ -330,10 +315,8 @@ class ServeGithubSessionTest {
   }
 
   /**
-   * The sign-out response carries the expired cookie and nothing else. `refreshSession` skips
-   * everything under `/auth/github/`, so an ageing session cannot have a freshly-minted cookie
-   * appended beside its own deletion — two `Set-Cookie` lines for one name being a coin flip
-   * between them.
+   * The sign-out response carries only the expired cookie: `refreshSession` skips `/auth/github/`,
+   * so no fresh cookie is appended beside the deletion.
    */
   @Test
   fun `signing out past the half-life is not re-minted`() {

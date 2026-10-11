@@ -61,11 +61,9 @@ class ServeSessionRegistryTest {
   }
 
   /**
-   * Suspension closes the outgoing daemon OUTSIDE the registry lock (so a blocking shutdown doesn't
-   * stall unrelated sessions), which opens a window where the entry's host is already null while
-   * its daemon is still alive. A resume landing in that window must WAIT, not open a replacement
-   * alongside it — otherwise one session briefly runs two daemon subprocesses and overshoots the
-   * live-seat / memory budget the limiter is there to enforce.
+   * Suspension closes the outgoing daemon outside the registry lock, so for a moment the host is
+   * null while the daemon lives. A resume in that window must wait, not open a second daemon and
+   * overshoot the live-seat / memory budget.
    */
   @Test
   fun `a resume waits for the outgoing daemon to finish closing`() {
@@ -80,8 +78,7 @@ class ServeSessionRegistryTest {
       object : ServeHost by delegate {
         override fun close() {
           closeStarted.countDown()
-          // BOUNDED park: if this test ever fails mid-flight, the registry's own close() must not
-          // block forever on a latch nobody will release — a regression should fail, not hang CI.
+          // Bounded, so a regression fails rather than hanging CI.
           releaseClose.await(10, TimeUnit.SECONDS)
           delegate.close()
           closeFinished.set(true)
@@ -141,10 +138,8 @@ class ServeSessionRegistryTest {
   }
 
   /**
-   * Re-opening a suspended catalog launches its daemon — seconds to a minute. That used to run
-   * under the one registry lock, so on preview.coo.ee a warm catalog's landing page took 25 s
-   * instead of 0.4 s whenever any other catalog was resuming. A slow open must hold up only its own
-   * session.
+   * Re-opening a suspended catalog launches its daemon (seconds to a minute); a slow open must hold
+   * up only its own session, not the registry lock.
    */
   @Test
   fun `a slow resume of one session does not stall another`() {
@@ -289,12 +284,9 @@ class ServeSessionRegistryTest {
 
   @Test
   fun `a reserved route name is never bound to a session`() {
-    // No entry in `sessions` may be named after one of the server's own top-level routes — a
-    // session called `api` is unreachable at `/api/` on the main host (Ktor scores the constant
-    // segment above `/{system}`) but WOULD be served by `/{system}/` on a top-level site host,
-    // which is the isolation leak [ServeSites] exists to prevent. There are two places an id is
-    // bound: `register` (checked) and the on-demand fork in `entryFor` — with `--revisions`, a
-    // permitted ref named `api` reaches only the latter, so both have to refuse it.
+    // No session may be named after a top-level route: `api` is unreachable at `/api/` on the main
+    // host but would be served by `/{system}/` on a site host. Ids are bound in `register` and in
+    // the on-demand fork in `entryFor` (a `--revisions` ref), so both refuse.
     val opener = Opener()
     val factory = CountingFactory()
     ServeSessionRegistry(open = opener, factory = factory, reaperIntervalMillis = 0).use { reg ->
@@ -442,12 +434,8 @@ class ServeSessionRegistryTest {
   }
 
   /**
-   * The counterpart to [ServeSessionRegistry.addSuspendListener].
-   *
-   * `peekHost` tells a caller that needs a session's facts to keep a last-known snapshot across
-   * suspension. Without a retirement signal that advice has no ending: the holder is told to keep
-   * facts and never told the session they belong to is gone, so a host that publishes, serves and
-   * retires catalogs through the admin API retains every one of them for the life of the process.
+   * The counterpart to [ServeSessionRegistry.addSuspendListener]: a retirement signal, so holders
+   * of last-known snapshots can drop sessions that are gone instead of retaining them forever.
    */
   @Test
   fun `unregister notifies snapshot holders so a retired catalog can be dropped`() {
@@ -468,13 +456,9 @@ class ServeSessionRegistryTest {
   }
 
   /**
-   * The guarantee a suspend listener cannot give: no reader can observe a session detached from its
-   * host with its snapshot not yet published.
-   *
-   * `capture` runs under the registry lock immediately before the detach, so the two are one
-   * transition. This asserts it from inside the callback — at the moment `capture` runs the host is
-   * still attached, which is exactly what makes "resident" and "snapshotted" the only two states
-   * visible from outside.
+   * No reader can observe a session detached from its host without its snapshot published:
+   * `capture` runs under the registry lock just before the detach, asserted from inside the
+   * callback.
    */
   @Test
   fun `a snapshot is captured as part of the detach, not after it`() {
@@ -492,9 +476,7 @@ class ServeSessionRegistryTest {
           object : ServeSessionRegistry.SessionSnapshots {
             override fun capture(sessionId: String, host: ServeHost) {
               captured += sessionId
-              // Read through the registry's own accessor: still resident here, because the detach
-              // has not happened yet. If capture ever moves after it, this flips and the window
-              // this test exists to deny is back.
+              // Still resident here, since the detach hasn't happened yet.
               attachedAtCapture = reg.peekHost(sessionId) != null
             }
 
@@ -684,9 +666,8 @@ class ServeSessionRegistryTest {
           host = opener(stateFor("catalog")),
         )
         clock.set(200)
-        // The pass is parked, not holding a lane: `backgroundWorkActive` is false, so the daemon
-        // is reclaimable even though the catalog has targets left. This is the whole change — the
-        // flag used to stay set for the worker's life and the worker never ends.
+        // A parked pass holds no lane, so `backgroundWorkActive` is false and the daemon is
+        // reclaimable even with targets left.
         assertEquals(1, registry.suspendIdle(), "a parked optimizer does not pin its daemon")
         assertEquals(
           1,
@@ -707,12 +688,8 @@ class ServeSessionRegistryTest {
   }
 
   /**
-   * A catalog an operator marked for regeneration is work, and has to be treated as work.
-   *
-   * Warm everywhere and finished nowhere is a state that did not exist before renders could be
-   * inherited across a build. `fullyOptimized` still reads true for it, so the resume filter passed
-   * straight over the one catalog that had just been given something to do — and the action that
-   * marked it answered `queued` while nothing would ever come and work the queue.
+   * A catalog marked for regeneration is work: `fullyOptimized` still reads true for it, so the
+   * resume filter must also check for queued dirty work.
    */
   @Test
   fun `a catalog marked for regeneration is resumed even though every target is warm`() {
@@ -818,10 +795,8 @@ class ServeSessionRegistryTest {
   @Test
   fun `parked catalogs rotate rather than waiting for an incumbent to finish`() {
     val clock = AtomicLong(0)
-    // One lane, so without the challenger slot the single incumbent would hold it indefinitely: a
-    // pass re-queues the instant its slice ends, and `lanes - inUse - queued` then reads zero on
-    // every later sweep, leaving the parked catalogs to wait for someone to FINISH. That is the
-    // starvation the +1 exists to break.
+    // One lane: without the challenger slot the incumbent (which re-queues instantly) would hold it
+    // forever. The +1 breaks that starvation.
     val work = ServeBackgroundWork(maxConcurrentOptimizers = 1, clock = clock::get)
     val reopened = java.util.Collections.synchronizedList(mutableListOf<String>())
     val opener = Opener()
@@ -856,9 +831,8 @@ class ServeSessionRegistryTest {
         val firstRound = reopened.toList()
         assertEquals(2, firstRound.size)
 
-        // The third is not stranded. Park the two that just ran and sweep again: ordering is by
-        // suspension time, so the catalog that has been parked since the first sweep is taken
-        // first and the pair that just ran is NOT resurrected ahead of it.
+        // The third isn't stranded: ordering is by suspension time, so the longest-parked catalog
+        // goes first.
         clock.set(2_000)
         assertEquals(2, registry.suspendIdle())
         reopened.clear()
@@ -942,13 +916,9 @@ class ServeSessionRegistryTest {
   }
 
   /**
-   * A busy answer has to be attributable, or everything downstream of it looks broken for no
-   * visible reason.
-   *
-   * [ServeSessionRegistry.idleMillis] going null stands the theme optimizer down and holds the
-   * `--exit-when-idle` watchdog open, and a lease released in a `finally` can still leak when the
-   * request is cancelled mid-flight. Naming the holders turns "the box says it is busy and is
-   * serving nothing" from an inference into a one-line read on `/status.json`.
+   * Busy answers name their holders: a null [ServeSessionRegistry.idleMillis] stands the optimizer
+   * down and holds the `--exit-when-idle` watchdog, and leaked leases happen, so `/status.json`
+   * shows who.
    */
   @Test
   fun `leasedSessions names exactly the holders that make the server read busy`() {
@@ -976,13 +946,8 @@ class ServeSessionRegistryTest {
   }
 
   /**
-   * The regression this whole change exists for (#4312).
-   *
-   * A viewer WebSocket holds a lease for the socket's whole life, and `leases > 0` used to mean
-   * *busy* outright — so one browser tab left open on a catalog pinned the server's idle clock at
-   * null indefinitely, whether or not anyone was looking at it. Measured on the public box: eight
-   * consecutive minutes with a lease held, `activeStreams 1` and zero renders, after which only the
-   * ceiling let any work through.
+   * A viewer WebSocket holds a lease for its whole life, which used to pin the idle clock at null
+   * for any open tab. Connection leases now age out when quiet.
    */
   @Test
   fun `a lease stops suppressing the idle clock once its holder goes quiet`() {
@@ -1024,12 +989,8 @@ class ServeSessionRegistryTest {
   }
 
   /**
-   * The ageing rule is for *connection* holds only.
-   *
-   * `withLeasedSession` wraps ordinary HTTP work in a lease too, and that work is not always short
-   * — a cold `/render` is 30-70s and a `/bundle.zip` longer. Ageing one of those out would report
-   * the box as quiet while it is still rendering, and let background work start against exactly the
-   * foreground request the quiet gate exists to protect.
+   * Ageing applies to connection holds only: request leases can run long (cold renders, bundles),
+   * and ageing them would start background work against the foreground request.
    */
   @Test
   fun `a request-scoped lease stays busy however long the request runs`() {
@@ -1054,10 +1015,7 @@ class ServeSessionRegistryTest {
       }
   }
 
-  /**
-   * A connection lease going quiet must not un-busy a request that is running alongside it — the
-   * two counts are tracked separately, not collapsed into one.
-   */
+  /** A quiet connection lease must not un-busy a concurrent request; the counts are separate. */
   @Test
   fun `a quiet connection lease does not mask a concurrent request lease`() {
     val clock = AtomicLong(0)
@@ -1083,8 +1041,8 @@ class ServeSessionRegistryTest {
   }
 
   /**
-   * `touch` is called from the socket's message loop, which outlives the lease's `finally` on a
-   * cancelled request. Touching a released lease must not resurrect it as busy.
+   * `touch` from a socket loop can outlive the lease's `finally`; touching a released lease must
+   * not resurrect it.
    */
   @Test
   fun `touching a closed lease does nothing`() {
@@ -1107,12 +1065,8 @@ class ServeSessionRegistryTest {
   }
 
   /**
-   * The busy window has to sit **below** the optimizer's cold-entry window, or a held lease that
-   * only goes quiet after the gate's own window is still the binding constraint and the gate never
-   * opens under one — which is the bug, restated with a different number.
-   *
-   * It also has to sit below the page's presence heartbeat, or an open tab's own keepalive keeps
-   * the lease permanently "active" and nothing changes.
+   * The busy window must sit below both the optimizer's cold-entry window and the page's presence
+   * heartbeat, or a held lease still blocks the gate.
    */
   @Test
   fun `the lease busy window fits inside the optimizer gate and the presence heartbeat`() {
@@ -1127,13 +1081,7 @@ class ServeSessionRegistryTest {
     )
   }
 
-  /**
-   * The GC is the *second* removal path, and it has to discard too.
-   *
-   * Every suspended session is captured, a forked revision host included, so a reclaim that removed
-   * the entry without its snapshot would leak one per reclaimed revision — defeating the bound this
-   * GC exists to enforce, on the surface with the most churn.
-   */
+  /** The GC must discard snapshots too, or every reclaimed revision host would leak one. */
   @Test
   fun `reclaiming a forked session discards its snapshot`() {
     val clock = AtomicLong(0)

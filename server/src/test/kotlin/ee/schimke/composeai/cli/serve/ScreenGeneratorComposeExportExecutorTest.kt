@@ -27,34 +27,11 @@ import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 
 /**
- * The export a served host actually returns, asserted as text.
- *
- * A golden rather than a set of `contains` checks, and the reason is the thing being replaced. The
- * old executor's artifact could not be asserted as text usefully — it always came back with a
- * `WARNING ALMOST_COMPILING_PROJECTION` saying edits "may" be required, so no assertion could
- * distinguish an export that worked from one that did not. The whole claim of this change is that
- * the output is exact and complete, and a golden is what that claim looks like as a test.
- *
- * **The golden below was compiled.** It was written into a Compose source set with material3,
- * foundation and ui on the classpath and `compileKotlinJvm` accepted it — the qualified
- * `MaterialTheme` reads, the qualified `Color(…)` call, and the imported `Modifier` extensions.
- * Turning that into a standing CI gate (a checked-in fixture a Compose module compiles) is a
- * follow-up; what is asserted here is that the generator still produces exactly the text that was
- * compiled.
- *
- * It was regenerated once, when `preview-discovery` reached the version that stopped qualifying a
- * component inside a receiver-scoped slot: the generator had assumed an import could not reach into
- * one, and compose-ai-tools #5123 established by compiling it that an imported top-level composable
- * resolves there perfectly well. Every component is imported and called by its simple name now.
- * That was a real improvement arriving as a red golden, which is what a golden is for — but note
- * the shape of it, because this repository pins that dependency and the next such change lands the
- * same way.
- *
- * And once more when a card's content gained the `Box` this catalog says it is
- * (`ScreenDocumentProjection.cardContentBox`): the two texts inside the card now sit in a
- * `Box(modifier = Modifier.fillMaxWidth())` rather than straight under `Card`'s `ColumnScope`,
- * which is what the canvas and the capability exporter had drawn all along. `Box` is a plain
- * foundation call site the same classpath resolves; the change is structural, not lexical.
+ * The export a served host returns, asserted as a golden because the claim is that the output is
+ * exact and complete. The golden was compiled against material3/foundation/ui once; a standing CI
+ * compile gate is a follow-up. Changes to the pinned `preview-discovery` (e.g. import resolution in
+ * receiver-scoped slots) or to `ScreenDocumentProjection` (the card content `Box`) surface here as
+ * a red golden.
  */
 class ScreenGeneratorComposeExportExecutorTest {
 
@@ -86,19 +63,12 @@ class ScreenGeneratorComposeExportExecutorTest {
       )
       return
     }
-    // The second gate, one level below the vocabulary. `ScreenDocumentProjection` refuses ANY
-    // document carrying a repetition, a component instance, an event binding or a state-bound
-    // property unless `UiBuilderBuildFeatures.remoteCompose` is set - however well the shared
-    // generator can express one. Reading only the probe above is why this test went red on every
-    // default build while the `-PuiBuilderRemoteCompose=true` lane stayed green: the probe answers
-    // "can the vocabulary say this?", not "will this build emit it?". `GeneratedDocumentTest`
-    // already distinguishes the two; this one did not.
-    //
-    // Asserted rather than assumed, which is the difference from the four siblings #792 guarded.
-    // Skipping would give up the claim this test is named for. The claim survives the gate: with
-    // the feature off there is no source to compare, but the two halves must still AGREE, and
-    // agreeing means both refusing for the same reason. A build that dropped one gate and kept
-    // the other is exactly the drift this case exists to catch, and a skip sees none of it.
+    // A second gate below the vocabulary: `ScreenDocumentProjection` refuses repetitions, component
+    // instances, event bindings and state-bound properties unless
+    // `UiBuilderBuildFeatures.remoteCompose` is set. The probe above answers "can the vocabulary
+    // say this?", not "will this build emit it?". Asserted rather than skipped: with the feature
+    // off both halves must still refuse for the same reason, which catches a build that drops one
+    // gate but keeps the other.
     if (!UiBuilderBuildFeatures.remoteCompose) {
       assertTrue(
         browser is ScreenExportGate.Outcome.Refused &&
@@ -206,9 +176,8 @@ class ScreenGeneratorComposeExportExecutorTest {
   }
 
   /**
-   * A themed `m3/surface` exports as a `MaterialTheme` around it, and the service writes what the
-   * browser's gate does: the `MaterialTheme` record the projection adds has to reach this
-   * executor's generator call as well, or every themed design refuses here alone.
+   * A themed `m3/surface` exports wrapped in `MaterialTheme`; the projection's added
+   * `MaterialTheme` record must reach this executor's generator call too.
    */
   @Test
   fun `a themed surface exports its theme, as the browser does`() {
@@ -240,9 +209,8 @@ class ScreenGeneratorComposeExportExecutorTest {
   }
 
   /**
-   * The lanes that compile the source against a Compose Multiplatform Desktop bundle (m3-catalog's)
-   * ask for desktop typefaces: `GoogleFont` is Android-only and would not resolve there. The export
-   * above is unchanged; this is the native preview's and `design render --local`'s generation.
+   * Lanes compiling against a Compose Desktop bundle ask for desktop typefaces (`GoogleFont` is
+   * Android-only); this is the native preview's and `design render --local`'s generation.
    */
   @Test
   fun `a desktop lane writes a theme typeface as a system-font lookup and says so`() {
@@ -285,9 +253,8 @@ class ScreenGeneratorComposeExportExecutorTest {
 
   @Test
   fun `a configured record that will not load names the path, not the flag`() {
-    // The distinction the previous message lost: an operator who never passed
-    // `--ui-builder-components` needs to be told to; one who passed a path with a typo in it needs
-    // the path. Both used to get the first sentence.
+    // An operator who never passed `--ui-builder-components` must be told to; one who passed a
+    // mistyped path needs the path.
     val artifact =
       export(components = { ComponentRecordSource.Lookup.Unusable("no readable file at `/nope`") })
     val message = artifact.diagnostics.single().message
@@ -323,9 +290,7 @@ class ScreenGeneratorComposeExportExecutorTest {
 
   @Test
   fun `a record on an unreadable schema refuses per export, naming the version`() {
-    // The advertised capability is a configuration fact and cannot know what is on disk now, so
-    // the version question is asked here — where a repaired or replaced file is seen on the very
-    // next request rather than never.
+    // The version is checked per request, so a repaired file is seen on the next request.
     val artifact =
       export(
         components = {
@@ -367,10 +332,8 @@ class ScreenGeneratorComposeExportExecutorTest {
 
   @Test
   fun `the default package is the one the preview adapter imports from`() {
-    // `UiBuilderGeneratedPreviewAdapter` writes `import generated.uibuilder.$composableName`, and
-    // the exporter this replaces emitted the same package. A different default compiles on its own
-    // and fails the moment a production artifact reaches that lane — and the golden above would not
-    // catch it, because it passes a package explicitly.
+    // Must match the package `UiBuilderGeneratedPreviewAdapter` imports; the golden passes one
+    // explicitly and would not catch a different default.
     val document = ScreenGeneratorScreenFixture.document()
     val artifact =
       ScreenGeneratorComposeExportExecutor({
@@ -396,9 +359,7 @@ class ScreenGeneratorComposeExportExecutorTest {
 
   @Test
   fun `a refusal keeps every physical line commented, whatever the document put in it`() {
-    // A refusal quotes document-supplied text, and catalog validation admits arbitrary strings in
-    // a typed colour property. A newline there used to leave everything after it uncommented in an
-    // artifact this executor calls a harmless parseable refusal.
+    // A refusal quotes document text, and a newline in it must not leave the rest uncommented.
     val document = ScreenGeneratorScreenFixture.document()
     val artifact =
       export(
@@ -477,12 +438,8 @@ fun ScheduleOperations() {
   }
 
   /**
-   * A design that named devices gets one `@Preview(device = …)` per id, and its own frame beside
-   * them.
-   *
-   * The frame comes along deliberately: the design's own size is the canvas its author approved,
-   * and a file that draws a screen on a Pixel Fold but not at the size it was designed at has
-   * dropped the one picture that was signed off.
+   * A design that named devices gets one `@Preview(device = …)` per id, plus its own frame — the
+   * size its author approved.
    */
   @Test
   fun `a named device set becomes one Preview each, beside the design's own frame`() {
@@ -509,11 +466,7 @@ fun ScheduleOperations() {
     assertFalse("widthDp" in fanOut, fanOut)
   }
 
-  /**
-   * A design that named none is untouched, which is what the golden above already pins and what
-   * makes this change contained: a `@Preview` is a claim about how a screen should be looked at,
-   * and turning it on for every export would put one into files whose authors never asked.
-   */
+  /** A design that named none gets no `@Preview`, as the golden above pins. */
   @Test
   fun `a design naming no devices still carries no preview at all`() {
     val source = export().content

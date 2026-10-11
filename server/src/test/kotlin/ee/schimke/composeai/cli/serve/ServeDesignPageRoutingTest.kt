@@ -19,18 +19,13 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 /**
- * The design-page surface over real HTTP: the pages index, one page's view, and the cached export,
- * on both the `?session=` and the canonical `/{system}/…` form.
- *
- * What's worth pinning here beyond "the routes exist":
- * - the export is **inlined** in the view, because an `<img>` cannot be reached into and hiding a
- *   node is the whole feature;
- * - the `.svg` suffix picks the export off the *same* route as the view, so a page id can never
- *   collide with a separate asset path — and it answers the sanitized markup, not the branch's own
- *   bytes;
- * - a node mapped to a preview this catalog doesn't publish gets an outline but **no** render,
- *   because the alternative is an `<img>` that can only 404;
- * - a catalog that publishes no pages 404s the surface instead of serving an empty stage.
+ * The design-page surface over real HTTP (pages index, a page's view, the cached export) on both
+ * the `?session=` and `/{system}/…` forms. Pinned:
+ * - the export is inlined in the view (an `<img>` can't be reached into, and hiding nodes is the
+ *   feature);
+ * - `.svg` serves the sanitized export off the same route as the view, so ids can't collide;
+ * - a node mapped to an unpublished preview gets an outline but no render (no 404ing `<img>`);
+ * - a catalog with no pages 404s rather than serving an empty stage.
  */
 class ServeDesignPageRoutingTest {
 
@@ -136,23 +131,15 @@ class ServeDesignPageRoutingTest {
     assertEquals(200, code)
     assertTrue(type.startsWith("text/html"))
     assertTrue(body.contains("Shape"))
-    // FIVE nodes on the sheet, but only THREE are components a catalog could implement, and the
-    // count says so. `Shape Set` says `container` on the wire — the variant set the two linked
-    // shapes came out of,
-    // and `.Header` is a private component (Figma's leading-dot convention) — furniture, not work.
-    // Counting every node instead reported `2 of 5` and told a reader three components were
-    // missing when one was.
+    // Five nodes, but only three are implementable components: `Shape Set` is a `container` and
+    // `.Header` is a private component.
     assertTrue(body.contains("2 of 3 components implemented"), body)
     assertTrue(body.contains("/m3-catalog/pages/shape"))
   }
 
   /**
-   * A node we REACHED rather than BUILT gets its own mark, and the legend names it.
-   *
-   * `Shape=Pill` is linked exactly as `Shape=Circle` is — both `link: manifest` — so the link
-   * cannot tell them apart, and on a well-covered sheet painted one colour neither could a reader.
-   * The distinction is what is behind them: a preview written for the component, or a `_VARIANT_`
-   * capture of a neighbouring one with a knob turned.
+   * A node reached via another component's `_VARIANT_` capture gets its own mark, though its link
+   * (`manifest`) looks the same as one with a dedicated preview.
    */
   @Test
   fun `an override cell is marked apart from a component we wrote`() {
@@ -162,9 +149,7 @@ class ServeDesignPageRoutingTest {
         .containsMatchIn(body),
       body,
     )
-    // The component with a preview of its own carries no such claim — and note 1:3 does, despite
-    // this catalog publishing no sticker for it: cell-ness is a fact about the mapping, not about
-    // whether the render made it into the bundle.
+    // Cell-ness is a fact about the mapping, not whether the render is in the bundle.
     assertFalse(
       Regex("data-cp-node=\"1:1\"[^>]*data-cp-cell|data-cp-cell[^>]*data-cp-node=\"1:1\"")
         .containsMatchIn(body),
@@ -174,12 +159,8 @@ class ServeDesignPageRoutingTest {
   }
 
   /**
-   * The kit's own base parts and a sheet that is not a component inventory, over the wire.
-   *
-   * `Base / Corner` is a sixth node on the Shape sheet and the count does not move: a base part is
-   * what a published set is assembled from, not something a catalog owes. And the Icons sheet — 499
-   * nodes in the real kit — states what it is instead of reporting `0 of 499`, which was a third of
-   * the whole kit's apparent gap and drowned every real one.
+   * Kit base parts don't count (`Base / Corner` leaves the count unchanged), and a sheet that isn't
+   * a component inventory (Icons) says so instead of reporting `0 of 499`.
    */
   @Test
   fun `base parts and a non-inventory sheet make no coverage claim`() {
@@ -257,14 +238,8 @@ class ServeDesignPageRoutingTest {
   }
 
   /**
-   * Both design-page surfaces file against the CATALOG, page-scoped.
-   *
-   * The floating launcher unhides its catalog half only on a page carrying `#cp-report`, so a
-   * design page — the surface whose entire subject is somebody's design file — offered the preview
-   * SERVER's tracker as its only route, which is where a report about the design ended up
-   * (issue #4704). Page-scoped, for the reason the comparison wall's is: a sheet shows every
-   * component on it and singles out none, so the report names the page rather than inventing a
-   * preview the reporter never picked.
+   * Design pages file against the catalog, page-scoped: without `#cp-report` the launcher offered
+   * only the server tracker, and a sheet singles out no preview.
    */
   @Test
   fun `the pages index and a page both offer the catalog tracker`() {
@@ -304,9 +279,7 @@ class ServeDesignPageRoutingTest {
 
   @Test
   fun `the stage aspect ratio is locale-independent`() {
-    // A comma-decimal default locale turns `1.5000` into `1,5000`, which is not CSS — the stage
-    // would collapse on a box whose LANG happened to be de_DE. Cheap to get wrong
-    // (`"%.4f".format(x)` reads perfectly innocent), invisible in every English test run.
+    // A comma-decimal default locale would turn `1.5000` into `1,5000`, which isn't CSS.
     val original = java.util.Locale.getDefault()
     try {
       java.util.Locale.setDefault(java.util.Locale.GERMANY)
@@ -344,13 +317,8 @@ class ServeDesignPageRoutingTest {
   }
 
   /**
-   * The pages index as data: the sheets, and the fraction each one claims.
-   *
-   * The counts are the CARD's, not the manifest's node count — `total` is what a catalog could
-   * implement, so the three exclusions the sheet applies (a container, a private component, a base
-   * part) are already gone by the time a consumer reads it. A reader who had to re-derive them from
-   * the raw manifest would get `2 of 5` and file three bugs, which is exactly what scraping the
-   * page used to cost.
+   * The pages index as data. Counts are the card's (exclusions applied), not raw manifest node
+   * counts.
    */
   @Test
   fun `the pages index has a json form carrying each sheet's coverage`() {
@@ -373,12 +341,7 @@ class ServeDesignPageRoutingTest {
   }
 
   /**
-   * One sheet's node → code join as data — the reading the whole endpoint exists for.
-   *
-   * Every row the view marks is a field here: which nodes count (`component`), which are the work
-   * left (`gap`), what implements each (`code`, `previewId`), and whether this catalog can actually
-   * draw it (`renderable`). Reading those off the HTML meant matching a red or blue dot deep in the
-   * DOM.
+   * One sheet's node → code join as data: `component`, `gap`, `code`, `previewId`, `renderable`.
    */
   @Test
   fun `a page has a json form carrying the node to code join`() {
@@ -439,12 +402,7 @@ class ServeDesignPageRoutingTest {
     assertTrue(type.startsWith("image/svg+xml"), type)
   }
 
-  /**
-   * A typo'd format is refused rather than answered with the default.
-   *
-   * `?format=jsonn` silently rendering HTML is a request that looks like it worked, and the caller
-   * that wrote it is by definition parsing the answer as data.
-   */
+  /** A typo'd format is refused rather than defaulting to HTML. */
   @Test
   fun `an unknown format is a bad request, not a silent fallback`() {
     assertEquals(400, get("/m3-catalog/pages?format=bogus").first)
@@ -456,8 +414,7 @@ class ServeDesignPageRoutingTest {
 
   @Test
   fun `the json surfaces 404 as json, never as a styled page`() {
-    // A catalog publishing no sheets has no fraction to report, so it 404s rather than answering
-    // an empty list a check would read as "measured, nothing missing".
+    // No sheets means no fraction: 404 rather than an empty list read as "nothing missing".
     assertEquals(404, get("/plain/pages.json").first)
     assertEquals(404, get("/plain/pages/shape.json").first)
     assertEquals(404, get("/m3-catalog/pages/ghost.json").first)

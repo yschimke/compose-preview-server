@@ -20,7 +20,6 @@ import ee.schimke.composeai.uibuilder.guidelines.plan
 import ee.schimke.composeai.uibuilder.guidelines.wanted
 import ee.schimke.composeai.uibuilder.protocol.ApplyOperationRequestV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
-import ee.schimke.composeai.uibuilder.protocol.CatalogsResponseV1
 import ee.schimke.composeai.uibuilder.protocol.ComponentCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.CreateDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
@@ -91,143 +90,91 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
 /**
- * The UI builder, reachable by an agent rather than only by a browser.
+ * The UI builder, reachable by an agent as well as a browser.
  *
- * ## Why this exists
- *
- * `ui-builder-protocol` has shipped [ee.schimke.composeai.uibuilder.protocol.McpRequestEnvelopeV1]
- * and [McpResponseEnvelopeV1] since v1, and `UiBuilderProtocolMapper`'s own KDoc names the MCP
- * envelope's `actorId` as one of the untrusted fields it refuses to trust — a contract written for
- * a transport nothing implemented. So the builder was a browser feature: a design could be
- * authored, exported and refused entirely inside a tab, and an agent holding a grant for the box
- * could render previews but could not read, edit or export a single design.
- *
- * ## What it is, deliberately
- *
- * A thin typed door onto [UiBuilderServicePort] — the same port the HTTP routes call, with the same
- * [requiredCapability] mapping, the same [UiBuilderProtocolMapper] and the same authenticated actor
- * rule. One MCP tool per protocol request, and the reply is the released [McpResponseEnvelopeV1]
- * rather than a shape invented here. Nothing about a design's semantics lives in this file: an
- * agent that asks for something the service refuses gets the service's own refusal, and a design
- * the export cannot express gets the generator's own reasons.
- *
- * That is what makes this safe to expose. The gate an agent reaches is the gate a person reaches.
+ * A thin typed door onto [UiBuilderServicePort]: the same port, [requiredCapability] mapping,
+ * [UiBuilderProtocolMapper] and authenticated-actor rule the HTTP routes use. One MCP tool per
+ * protocol request, replying with the released [McpResponseEnvelopeV1]. No design semantics live
+ * here, so an agent gets the service's own refusals and the generator's own reasons; the gate an
+ * agent reaches is the gate a person reaches.
  */
 class ServeUiBuilderMcp(
   private val service: UiBuilderServicePort,
   /**
-   * The configured public origin documents created here are homed at, or null when the operator
-   * stated none — then nothing is stamped, rather than a made-up address like `http://localhost`.
+   * Configured public origin new documents are homed at; null stamps nothing rather than a made-up
+   * address.
    */
   private val serverOrigin: () -> String? = { null },
   /**
-   * The native render lane, on a box that has one.
-   *
-   * Null on a host without a playground bundle — compiling a design needs a Kotlin compiler and the
-   * catalog's own classpath, which not every deployment carries. The tool remains discoverable and
-   * returns [NATIVE_RENDER_UNAVAILABLE], so a client gets the same stable operation and can report
-   * the gap instead of guessing why a tool is absent.
+   * The native render lane, or null on a host without a playground bundle. The tool stays
+   * discoverable and returns [NATIVE_RENDER_UNAVAILABLE] so clients can report the gap.
    */
   private val nativePreview: UiBuilderNativePreviewLane? = null,
   /**
-   * The design's discussion, on a host that keeps one.
-   *
-   * Null on a host with no durable UI-builder state, where the comment routes are absent too — the
-   * tools then do not appear in `tools/list` rather than appearing and failing, which is the rule
-   * the whole surface follows.
-   *
-   * This is what makes an agent a participant rather than a tool: it can read what a designer
-   * asked, answer in the same thread, and — through [AWAIT_COMMENTS] — *wait* for the next reply
-   * instead of polling. The browser panel and this share one feed, so a person watching the page
-   * and an agent waiting on a tool call learn about a comment at the same moment.
+   * The design's discussion, or null on a host without durable state (the tools are then absent,
+   * the rule for this whole surface). Shares one feed with the browser panel, and [AWAIT_COMMENTS]
+   * lets an agent wait for replies instead of polling.
    */
   private val comments: ServeUiBuilderCommentStore? = null,
-  /**
-   * The reference overlays kept beside designs, on a host that keeps them.
-   *
-   * Read by nothing here; held so that [DELETE_DESIGN] removes what the operator's own delete
-   * removes. A design's overlay and its discussion are stored beside the design rather than in it,
-   * so the service deleting the design leaves them behind unless somebody sweeps — the admin page
-   * does, and this door must not do less.
-   */
+  /** Reference overlays; held only so [DELETE_DESIGN] sweeps them as the admin delete does. */
   private val references: ServeUiBuilderReferenceStore? = null,
   /**
-   * What each design is for, on a host that records it.
-   *
-   * Null on a host with no durable UI-builder state, where the links routes are absent too — the
-   * tools then do not appear in `tools/list` rather than appearing and failing, which is the rule
-   * the whole surface follows.
-   *
-   * This is what turns "here is a design" into "here is what this design is for": an agent opening
-   * one is told the issue behind it, the frame it reproduces and the pull request that implemented
-   * it, on the reply it was already reading, and can record the same for a design it creates.
+   * What each design is for (issue, frame, implementing PR), or null without durable state (tools
+   * absent).
    */
   private val links: ServeUiBuilderLinksStore? = null,
   private val onLog: (String) -> Unit = { System.err.println(it) },
   /**
-   * The bytes behind a design's `assets` map, on a host that keeps them.
-   *
-   * Null on a host with no durable UI-builder state; the tool is then absent rather than present
-   * and refusing, which is the rule the whole surface follows. This is what lets an agent put a
-   * photograph in a design: `asset/image` names an `assetKey`, and until this tool existed nothing
-   * on this surface could put bytes behind one.
+   * Bytes behind a design's `assets` map, so an agent can put a photograph in a design. Null
+   * without durable state (tool absent).
    */
   private val assets: UiBuilderAssetPort? = null,
   /**
-   * Answers "would this be accepted, and would it export?" without writing anything, on a host that
-   * can open a scratch service over its own catalogs and exporter.
-   *
-   * Null where the host did not wire one; [VALIDATE] is then absent rather than present and
-   * refusing, which is the rule the whole surface follows. See [UiBuilderDraftValidator].
+   * Dry-run "would this be accepted and export?" over a scratch service; null leaves [VALIDATE]
+   * absent. See [UiBuilderDraftValidator].
    */
   private val validator: UiBuilderDraftValidator? = null,
   /**
-   * Review verdicts and the implementing pull request, on a host that keeps them.
-   *
-   * Null on a host with no durable UI-builder state; the decision and implementation tools are then
-   * absent rather than present and refusing, which is the rule the whole surface follows. See
-   * [ServeUiBuilderReviewStore] for why this is beside the design rather than in it.
+   * Review verdicts and the implementing PR; null leaves those tools absent. See
+   * [ServeUiBuilderReviewStore].
    */
   private val reviews: ServeUiBuilderReviewStore? = null,
   /**
-   * Design branches — fork, list, merge, archive — on a host whose service keeps them
-   * (yschimke/compose-ui-builder#377). Null leaves the branch tools absent rather than present and
-   * refusing, which is the rule the whole surface follows. See [ServeUiBuilderBranchTools].
+   * Design branches (fork, list, merge, archive); null leaves the branch tools absent. See
+   * [ServeUiBuilderBranchTools].
    */
   private val branches: UiBuilderBranchPort? = null,
   private val agentPresence: ServeUiBuilderAgentPresence? = null,
   /**
-   * The `guidelines` check of [CHECK_DESIGN], on the operator's OpenRouter key. Null on a host that
-   * did not configure one, where asking for it reports the check as skipped.
+   * The `guidelines` check of [CHECK_DESIGN] on the operator's OpenRouter key; null reports it
+   * skipped.
    */
   private val guidelines: ServeUiBuilderGuidelines? = null,
   /**
-   * Each design's latest guidelines result, whoever ran it. Null on a host with no durable state:
-   * [GET_GUIDELINES] and [RECORD_GUIDELINES] are then absent, and [CHECK_DESIGN] records nothing.
+   * Each design's latest guidelines result. Null leaves [GET_GUIDELINES] and [RECORD_GUIDELINES]
+   * absent and [CHECK_DESIGN] records nothing.
    */
   private val guidelineRecords: ServeUiBuilderGuidelineStore? = null,
   /**
-   * The pictures guidelines prompts attach, kept per revision and drawn ahead of the reader; see
-   * [ServeUiBuilderGuidelineFrames]. Null draws every picture on every request, without a budget.
+   * Cached per-revision guidelines pictures ([ServeUiBuilderGuidelineFrames]); null draws every
+   * picture per request, without a budget.
    */
   private val guidelineFrames: ServeUiBuilderGuidelineFrames? = null,
   /**
-   * A Wear widget's native thumbnail at a revision, when the design list holds one; it is the Pixel
-   * Watch frame, so that frame is not drawn twice. See
-   * [ServeUiBuilderThumbnails.nativeWidgetThumbnail].
+   * A Wear widget's native thumbnail at a revision (the Pixel Watch frame), so it isn't drawn
+   * twice. See [ServeUiBuilderThumbnails.nativeWidgetThumbnail].
    */
   private val widgetThumbnail: (designId: String, revision: Long) -> ByteArray? = { _, _ -> null },
   /**
-   * How long a prompt waits for frames it has no picture of yet; the rest are left out. Asked per
-   * prompt, because publishing `settings.json` can change it while the server runs.
+   * How long a prompt waits for undrawn frames; asked per prompt since `settings.json` can change
+   * it at runtime.
    */
   private val guidelinePictureBudgetMillis: () -> Long = {
     DEFAULT_GUIDELINES_PICTURE_BUDGET_SECONDS * 1_000
   },
   /**
-   * Each builder catalog's own guidelines (`ui-builder.guidelines.json`): a design pinned to a
-   * catalog that publishes them is asked that catalog's rules and shown its pictures; any other
-   * falls back to the bundled rules. Null keeps every design on the bundled rules.
+   * Each builder catalog's own guidelines; others fall back to the bundled rules. Null keeps every
+   * design on the bundled rules.
    */
   private val catalogGuidelines: ServeCatalogGuidelines? = null,
 ) {
@@ -287,16 +234,13 @@ class ServeUiBuilderMcp(
       // service on top of that: only the owner is told who else holds a grant.
       DESIGN_ACCESS -> UiBuilderRouteCapability.READ
       AWAIT_DESIGN -> UiBuilderRouteCapability.READ
-      // History: looking and comparing are reads; a restore writes the design (and the service
-      // also takes the design's own WRITE action), and a fork creates a design, as the history
-      // page's fork form does.
+      // History: listing and diffing are reads; restore writes, and fork creates a design.
       ServeUiBuilderHistoryTools.LIST_REVISIONS,
       ServeUiBuilderHistoryTools.DIFF_DESIGNS -> UiBuilderRouteCapability.READ
       ServeUiBuilderHistoryTools.RESTORE_REVISION,
       ServeUiBuilderHistoryTools.FORK_DESIGN -> UiBuilderRouteCapability.WRITE
-      // Branches: listing is a read of the parent; branching, merging and archiving write it (and
-      // the service takes the parent's own WRITE action on top, or the branch's ownership for an
-      // archive).
+      // Branches: listing reads the parent; branching, merging and archiving write it (the service
+      // adds its own checks).
       ServeUiBuilderBranchTools.LIST_BRANCHES ->
         if (branches == null) null else UiBuilderRouteCapability.READ
       ServeUiBuilderBranchTools.BRANCH_DESIGN,
@@ -311,9 +255,8 @@ class ServeUiBuilderMcp(
       AWAIT_COMMENTS -> if (comments == null) null else UiBuilderRouteCapability.READ
       POST_COMMENT,
       RESOLVE_COMMENT_THREAD,
-      // Acknowledging and reacting write to the board, so they are gated as writes — and an
-      // acknowledgement is the thing that clears the notice an agent is being shown, which only
-      // an actor that may write the discussion should be able to do on its own behalf.
+      // Acknowledging and reacting write to the board, and acknowledging clears the agent's notice,
+      // so they are gated as writes.
       ACKNOWLEDGE_COMMENT,
       REACT_TO_COMMENT -> if (comments == null) null else UiBuilderRouteCapability.WRITE
       CREATE_DESIGN,
@@ -332,31 +275,25 @@ class ServeUiBuilderMcp(
       // A write to the design — the registry is part of the document and moves its revision —
       // gated as one, and absent where the host has nowhere to keep the bytes.
       PUT_ASSET -> if (assets == null) null else UiBuilderRouteCapability.WRITE
-      // Reading and writing what a design is for are gated as the design's own read and write,
-      // even though neither touches the document: a link names an issue and a pull request, which
-      // is exactly as much as the design it is beside says about the work it belongs to.
+      // Links are gated as the design's own read and write, since they say as much about the work
+      // as the design does.
       GET_LINKS -> if (links == null) null else UiBuilderRouteCapability.READ
       SET_LINKS -> if (links == null) null else UiBuilderRouteCapability.WRITE
       // The reference overlay is gated as the browser's reference routes are: attaching one is
       // the design's own write, measuring against it the design's read.
       SET_REFERENCE -> if (references == null) null else UiBuilderRouteCapability.WRITE
       COMPARE_REFERENCE -> if (references == null) null else UiBuilderRouteCapability.READ
-      // The same capability as an export, and for the same reason: a native render compiles and
-      // runs the Kotlin an export hands back, so an actor who may not read that source may not
-      // run it. It stays discoverable on a host that cannot compile: the call then returns the
-      // stable NATIVE_RENDER_UNAVAILABLE refusal below instead of making clients infer capability
-      // from a tool disappearing between otherwise equivalent hosts.
+      // Same capability as export: a native render compiles and runs the exported Kotlin. Stays
+      // discoverable on a host that can't compile, returning NATIVE_RENDER_UNAVAILABLE.
       RENDER_NATIVE -> UiBuilderRouteCapability.EXPORT
       // A read: nothing is written, and the document checked is either the caller's own or one the
       // service has just opened for them as a read.
       VALIDATE -> if (validator == null) null else UiBuilderRouteCapability.READ
-      // Looking at a design is reading it: the default frame is the same PNG export a viewer of
-      // the design is shown. The native frame compiles Kotlin, so [additionalCapabilityFor] asks
-      // for the export capability on top when a call chooses it.
+      // Viewing is reading (the default frame is the PNG export); the native frame also needs
+      // export, via [additionalCapabilityFor].
       VIEW -> UiBuilderRouteCapability.READ
-      // Both read the design and write nothing: a check runs on a scratch copy, and a matrix draws
-      // the PNG export a viewer of the design is already shown, at other sizes. `rendered: true`
-      // compiles Kotlin, so [additionalCapabilityFor] asks for the export capability then.
+      // Both read without writing; `rendered: true` compiles Kotlin, so [additionalCapabilityFor]
+      // requires export then.
       CHECK_DESIGN -> UiBuilderRouteCapability.READ
       RENDER_DESIGN_MATRIX -> if (validator == null) null else UiBuilderRouteCapability.READ
       // Recording a verdict or the implementing pull request is saying something about the design,
@@ -367,9 +304,8 @@ class ServeUiBuilderMcp(
       IMPLEMENTATION_STATUS -> if (reviews == null) null else UiBuilderRouteCapability.READ
       FIND_DESIGN_FOR_PR ->
         if (reviews == null && links == null) null else UiBuilderRouteCapability.READ
-      // Reading the prompt spends no key and writes nothing: a read. Its pictures are native
-      // renders and its source the export, so [additionalCapabilityFor] asks for the export
-      // capability when they are included.
+      // Reading the prompt is a read; its pictures and source need export via
+      // [additionalCapabilityFor].
       GUIDELINES_PROMPT -> UiBuilderRouteCapability.READ
       // A recorded result is said about the design, gated as a decision is.
       GET_GUIDELINES -> if (guidelineRecords == null) null else UiBuilderRouteCapability.READ
@@ -378,11 +314,8 @@ class ServeUiBuilderMcp(
     }
 
   /**
-   * A second capability this particular call needs beyond [capabilityFor], or null.
-   *
-   * Only [VIEW] has one: `renderer: "native"` compiles and runs the design's generated Kotlin,
-   * which [RENDER_NATIVE] gates as an export, and choosing the same lane through a read tool must
-   * not be a way around that.
+   * A second capability this call needs beyond [capabilityFor], or null. Only [VIEW] with
+   * `renderer: "native"`, which must not bypass [RENDER_NATIVE]'s export gate.
    */
   fun additionalCapabilityFor(tool: String, args: JsonObject): UiBuilderRouteCapability? =
     when {
@@ -406,10 +339,8 @@ class ServeUiBuilderMcp(
     }
 
   /**
-   * Runs one tool as [actor], as the released MCP envelope.
-   *
-   * [callId] is the client's own JSON-RPC id, echoed back in the envelope: an agent batching calls
-   * needs to tell two replies apart, and inventing an id here would defeat that.
+   * Runs one tool as [actor], returning the released MCP envelope. [callId] (the client's JSON-RPC
+   * id) is echoed so batched replies can be told apart.
    */
   suspend fun call(
     tool: String,
@@ -573,17 +504,9 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * The catalogs a design may pin to, as a summary unless the whole capability is asked for.
-   *
-   * The released [CatalogsResponseV1] is the entire `CatalogCapabilityV1` of every catalog — each
-   * component's Wasm adapter status, SVG parity, export notes and menu shelving beside the
-   * parameters — and on the hosted deployment that is about 72 KB, spent from an agent's context on
-   * every call to the tool whose description says "start here". Authoring needs a fraction of it:
-   * which components exist, what slots they have, which properties they take and which of those are
-   * required — and the pin, which the capability does not even spell, so a client used to guess the
-   * digest. That is [CatalogSummaryReplyV1], a few KB, and it is the default. `full: true` returns
-   * the released envelope for the export lane and anybody comparing parity, and `componentIds`
-   * narrows either to the components a call is about.
+   * The catalogs a design may pin to, as a summary ([CatalogSummaryReplyV1], a few KB, including
+   * the pin) by default, since the full capability (~72 KB) is mostly irrelevant to authoring.
+   * `full: true` returns the released envelope; `componentIds` narrows either.
    */
   private suspend fun listCatalogs(
     args: JsonObject,
@@ -636,9 +559,8 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * The components whose id, role or traits contain `query` (case-insensitive), in the summary
-   * shape of [listCatalogs]. A whole catalog summary is still thousands of tokens; an agent that
-   * wants `TextField` or `Button` should not pay for the rest.
+   * Components whose id, role or traits contain `query` (case-insensitive), in [listCatalogs]'
+   * summary shape.
    */
   private suspend fun searchComponents(
     args: JsonObject,
@@ -682,11 +604,7 @@ class ServeUiBuilderMcp(
     )
   }
 
-  /**
-   * One component as a few short strings. Measured on the packaged M3 catalog: the same facts as
-   * JSON objects came to 29 KB against the capability's 58, which is not the difference the summary
-   * exists to make; as strings the whole summary comes to about 12.
-   */
+  /** One component as a few short strings, which keeps the whole summary at about 12 KB. */
   private fun summarize(component: ComponentCapabilityV1): ComponentSummaryV1 =
     ComponentSummaryV1(
       id = component.componentId,
@@ -696,10 +614,7 @@ class ServeUiBuilderMcp(
       properties = component.properties.map(::summarize),
     )
 
-  /**
-   * The slot's name, its cardinality in square brackets as `min..max`, then `:` and the roles and
-   * traits it accepts, `|`-separated.
-   */
+  /** Slot name, cardinality `min..max` in square brackets, then `:` and accepted roles/traits. */
   private fun summarize(slot: SlotCapabilityV1): String {
     val accepted = (slot.acceptedRoles + slot.acceptedTraits).joinToString("|")
     val cardinality = "${slot.cardinality.min}..${slot.cardinality.max ?: "*"}"
@@ -707,8 +622,8 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * `name:type`, `!` when required, then `=` and the allowed values `|`-separated — or, past
-   * [SUMMARY_ALLOWED_VALUES] of them, how many there are instead of what they are.
+   * `name:type`, `!` when required, then `=` and allowed values `|`-separated, or a count past
+   * [SUMMARY_ALLOWED_VALUES].
    */
   private fun summarize(property: PropertyCapabilityV1): String {
     val type =
@@ -716,9 +631,7 @@ class ServeUiBuilderMcp(
         is JsonArray -> jsonType.joinToString("|") { it.jsonPrimitive.content }
         else -> jsonType.jsonPrimitive.content
       }
-    // `allowedValues` is a `List<JsonElement>` and a catalog may legitimately put a non-primitive
-    // in one. This is a human-readable summary, so an object renders as its JSON rather than
-    // taking the whole `ui_builder_list_catalogs` response down with an exception.
+    // `allowedValues` may hold non-primitives; render them as JSON rather than throwing.
     val allowed =
       if (property.allowedValues.size > SUMMARY_ALLOWED_VALUES)
         "<${property.allowedValues.size} values; ask for full>"
@@ -732,16 +645,9 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * Rename or delete a design: the two things a session could not do to its own work.
-   *
-   * Neither has a request type in the released contract, so — like a native render and the comment
-   * tools — the reply is a shape of this surface's own rather than an [McpResponseEnvelopeV1]
-   * pretending to be one. A refusal is still the service's own, in the released error envelope, so
-   * "not the owner" reads the same here as everywhere else.
-   *
-   * Deleting sweeps the overlay and the discussion kept beside the design, as the operator's admin
-   * page does; a failure there is logged rather than reported, because the design is already gone
-   * and telling the caller otherwise would invite a retry of something that cannot be retried.
+   * Rename or delete a design. No released request type exists, so the reply is this surface's own
+   * shape, but refusals use the released error envelope. Deleting sweeps overlays and discussion
+   * like the admin page; sweep failures are logged, not reported, since the design is already gone.
    */
   private suspend fun manageDesign(
     tool: String,
@@ -782,9 +688,8 @@ class ServeUiBuilderMcp(
         runCatching { comments?.delete(designId) }
           .onFailure { onLog("serve: comment board for $designId not removed (${it.message})") }
         runCatching {
-          // The store answers with an enum rather than throwing, so a failure reaches this
-          // `runCatching` as an ordinary value: the check has to be on the result, or a record
-          // left on disk is inherited by whatever takes the id next.
+          // The store returns an enum rather than throwing; check it, or a leftover record would be
+          // inherited by the next design with this id.
           if (links?.delete(designId) == LinksDeleteResult.FAILED) {
             onLog("serve: links record for $designId not removed")
           }
@@ -812,12 +717,9 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * The two complete-document writes that deliberately do not pretend to be v1 design mutations.
-   *
-   * Their requests are typed at the service seam and their replies are the released operation
-   * outcome envelope. The host only translates JSON and authenticated identity; exact revisions,
-   * idempotency, authorization, validation, retention and broadcast stay authoritative in the
-   * runtime.
+   * The two complete-document writes, which deliberately aren't v1 design mutations. Typed at the
+   * service seam with released outcome envelopes; revisions, idempotency, authorization and
+   * validation stay with the runtime.
    */
   private suspend fun authoritativeDocumentMutation(
     tool: String,
@@ -835,9 +737,8 @@ class ServeUiBuilderMcp(
         elicitDecision(clientInteraction, decision, offersNewDesign = tool != MOVE_DESIGN_HOME)
           ?: return decision.toString()
       return when (answer.choice) {
-        // The two writes the person can choose here are exactly the call this dry run stands in
-        // for, with the same arguments, operation id and actor — so the same idempotency, revision
-        // check and authorization — and never anything the non-dry-run call could not have done.
+        // The dry run's writable choices are exactly the real call with the same arguments,
+        // operation id and actor.
         "move",
         "save-back" -> documentMutation(tool, designId, baseRevision, args, actor, callId)
         "create-new" ->
@@ -880,13 +781,9 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * The R3 decision behind a home move or a save-back / re-import, as a complete text result.
-   *
-   * A client that negotiated a request scope and declared form elicitation is asked these options
-   * as an `elicitation/create` form instead ([elicitDecision]). Everyone else — and anyone who
-   * declines, cancels or lets the form time out — gets this text, unchanged: the same validation as
-   * the real call, nothing written, and the options for the agent to put to the person in chat
-   * before it repeats the call without `dryRun`.
+   * The R3 decision behind a home move or save-back / re-import, as text. Clients with form
+   * elicitation get [elicitDecision] instead; everyone else (and any decline, cancel or timeout)
+   * gets this: same validation, nothing written, options for the agent to put to the person.
    */
   private fun homeDecision(
     tool: String,
@@ -943,12 +840,9 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * The R3 decision behind importing a document whose `home` is already this server (#1114), as the
-   * same `compose-preview-decision/v1` choices [homeDecision] offers.
-   *
-   * It is a refusal (the tool result stays `isError`, nothing is written) that carries the options
-   * rather than one hint, so an agent can put them to the person and continue with the chosen call.
-   * [reason] is the refusal sentence older clients matched on, kept verbatim.
+   * The R3 decision for importing a document already homed here (#1114), with the same
+   * `compose-preview-decision/v1` choices as [homeDecision]. A refusal (`isError`, nothing written)
+   * carrying options; [reason] is kept verbatim for older clients.
    */
   private fun importOntoHomeDecision(
     designId: String,
@@ -1007,17 +901,13 @@ class ServeUiBuilderMcp(
   private data class DecisionAnswer(val choice: String, val newDesignId: String?)
 
   /**
-   * Puts [decision]'s options to the person as an `elicitation/create` form, when the calling
-   * client negotiated a request scope and declared form support; null otherwise, and null for a
-   * decline, a cancel, a timeout, a malformed answer or a choice that was not offered. Null always
-   * means the same thing to the caller: write nothing and return the text decision.
+   * Put [decision]'s options to the person as an `elicitation/create` form when the client supports
+   * it; otherwise, or on decline, cancel, timeout or an invalid answer, null (write nothing, return
+   * the text decision).
    *
-   * The form carries a closed `choice` enum (the decision's own option ids) and, where creating a
-   * new design is offered, an optional `newDesignId` — the only free text, and only ever used as a
-   * new design's id through the same create path, and the same checks, as [CREATE_DESIGN]. The
-   * answer selects an action; it never widens one. The write it selects runs as the actor the
-   * original call authenticated, and the transport drops an accepted answer whose credential no
-   * longer authorizes that actor.
+   * The form has a closed `choice` enum and, where offered, an optional `newDesignId` used only
+   * through the normal create path. The answer selects an action but never widens it, and runs as
+   * the originally authenticated actor.
    */
   private suspend fun elicitDecision(
     interaction: ServeCatalogMcp.ClientInteraction,
@@ -1079,10 +969,7 @@ class ServeUiBuilderMcp(
     return DecisionAnswer(choice, newDesignId)
   }
 
-  /**
-   * A decision the person answered with an option that writes nothing, as the decision itself plus
-   * what they chose. Not an error: the call did what it was asked, which was to ask.
-   */
+  /** A decision answered with a non-writing option: the decision plus the choice. Not an error. */
   private fun answered(decision: JsonObject, choice: String): String {
     val next =
       if (choice == "apply-operations")
@@ -1102,11 +989,9 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * `create-new` from a save-back or re-import decision: the supplied document as a NEW design
-   * under the id the person typed, its `home` removed so it is homed here under that id instead. It
-   * goes through [createDesign] with no client interaction, so every check a direct [CREATE_DESIGN]
-   * makes still applies — an id already taken is refused as a tool error, never overwritten — and a
-   * second form is never stacked on the first. Null (the text decision) when no id was given.
+   * `create-new` from a decision: the supplied document as a new design under the typed id, `home`
+   * removed. Goes through [createDesign] so every create check applies (an existing id is refused),
+   * and never stacks a second form. Null without an id.
    */
   private suspend fun createNewInstead(
     args: JsonObject,
@@ -1145,14 +1030,9 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * Grant or revoke one actor's access to a design.
-   *
-   * The access revision is read here rather than demanded from the caller. The service takes one to
-   * refuse a change written against a stale access list, which is the right contract for a
-   * long-lived editor holding the list on screen; an agent that just called this tool has no such
-   * screen, and making it fetch a number only to hand the same number straight back would be
-   * ceremony, not safety. The read is inside the same actor's authority, so nothing is skipped: a
-   * caller who may not manage this design is refused by the read exactly as by the write.
+   * Grant or revoke one actor's access. The access revision is read here rather than demanded: the
+   * stale-list guard suits a long-lived editor, not an agent. The read runs under the same actor's
+   * authority, so nothing is skipped.
    */
   private suspend fun share(
     args: JsonObject,
@@ -1181,22 +1061,14 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * A design compiled and rendered by real Compose on the host.
-   *
-   * The one reply here that is **not** an [McpResponseEnvelopeV1], and deliberately so: a native
-   * render is not a `UiBuilderRequestV1`, the released contract defines no request type for one,
-   * and inventing an envelope shape for a request the contract does not define would be worse than
-   * being plainly outside it. The tool description says as much.
-   *
-   * The design is read back through the service as this actor, so a design's own access control
-   * decides whether there is anything to render — a lane that took the document from anywhere else
-   * would be a way to render a design you cannot open.
+   * A design compiled and rendered by real Compose on the host. Not an [McpResponseEnvelopeV1]: the
+   * contract defines no request for it. The design is read through the service as this actor, so
+   * its access control decides whether there is anything to render.
    */
   private suspend fun renderNative(args: JsonObject, actor: AuthenticatedUiBuilderActor): String {
     val designId = args.requiredText("designId")
-    // Read through the service before reporting host capability. Besides keeping missing and
-    // private designs indistinguishable, this establishes the access check that
-    // withCommentNotice relies on before it may inspect this design's discussion.
+    // Read through the service first, keeping missing and private designs indistinguishable and
+    // establishing the access check withCommentNotice relies on.
     val snapshot =
       execute(GetSnapshotRequestV1(designId = designId, revision = args.number("revision")), actor)
         as? UiBuilderServiceResponse.Snapshot
@@ -1249,14 +1121,9 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * The editor canvas as a person sees it: a frame of the design with the selection, the reference,
-   * the comment pins and — when asked — the layout bounds drawn over it, and the same facts as JSON
-   * (compose-preview-server#1114). See [ServeUiBuilderView].
-   *
-   * Not an [McpResponseEnvelopeV1], for the reason a native render is not. The design is read
-   * through the service as this actor first, so its own access control decides whether there is
-   * anything to look at, and the frame is one of the renders the design's other tools already make
-   * — nothing here draws a design a second way.
+   * The editor canvas as a person sees it (selection, reference, comment pins, optional layout
+   * bounds) plus the same facts as JSON (#1114). See [ServeUiBuilderView]. Read as this actor
+   * first; the frame is one of the design's existing renders.
    */
   private suspend fun view(args: JsonObject, actor: AuthenticatedUiBuilderActor): String {
     val designId = args.requiredText("designId")
@@ -1321,10 +1188,8 @@ class ServeUiBuilderMcp(
       } else ServeUiBuilderView.RENDERER_EXPORT
 
   /**
-   * The design [designId] as this actor may see it, and whether they may also change it.
-   *
-   * The tool capability got the call through the door; the design's own access decides the rest, as
-   * it does for the browser's reference routes — a viewer may measure, only an editor attaches.
+   * The design as this actor may see it, and whether they may change it: a viewer may measure, only
+   * an editor attaches.
    */
   private suspend fun referenceDesign(
     designId: String,
@@ -1601,28 +1466,13 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * Wait for somebody to change a design, rather than asking again whether they have.
+   * Wait for a design to change instead of polling.
    *
-   * ## Why a tool and not an MCP notification
-   *
-   * MCP does have server-to-client notifications, but this surface deliberately does not advertise
-   * resource subscriptions: `GET /mcp` — the long-lived Streamable-HTTP listening stream a
-   * notification would travel on — answers 405, and `initialize` advertises `resources:
-   * {"subscribe": false}`. The bounded request-scoped POST stream used for elicitation lives only
-   * until that call's final response; it has no resumable notification cursor. A call that blocks
-   * needs neither, and it is the shape the grant flow's `poll_access` and [AWAIT_COMMENTS] already
-   * use here.
-   *
-   * ## What it is
-   *
-   * The same [UiBuilderServicePort.subscribe] the browser's `/updates` socket is built on, held for
-   * one call. The reply is the released [DesignUpdateEnvelopeV1] — the identical frame that socket
-   * delivers — so an agent and a designer are told the same thing in the same words, and neither
-   * can learn about an edit the other does not.
-   *
-   * The cursor follows the service's own rule rather than a second one invented here: a
-   * `afterSequence` inside the retained window is answered with the operations after it, and one
-   * that is null, too far behind, or ahead of the design is answered with a whole snapshot.
+   * A tool rather than an MCP notification: this surface advertises no resource subscriptions (`GET
+   * /mcp` answers 405), and a blocking call matches `poll_access` and [AWAIT_COMMENTS]. Built on
+   * the same [UiBuilderServicePort.subscribe] as the browser's `/updates` socket, replying with the
+   * identical [DesignUpdateEnvelopeV1]. Cursor rule is the service's: an `afterSequence` inside the
+   * retained window gets the later operations; null, too old or ahead gets a snapshot.
    */
   private suspend fun awaitDesign(args: JsonObject, actor: AuthenticatedUiBuilderActor): String {
     val designId = args.requiredText("designId")
@@ -1648,9 +1498,8 @@ class ServeUiBuilderMcp(
             afterSequence = afterSequence,
           )
         ) { update ->
-          // Presence is chrome — who is looking and what they have selected — and is excluded from
-          // the document, the revision and the sequence. Waking an agent for it would turn a
-          // colleague moving their cursor into a tool call that returns nothing to act on.
+          // Presence isn't part of the document; waking an agent for a cursor move gives it nothing
+          // to act on.
           if (update.movesTheDocument(afterSequence)) waiter.complete(update)
         }
       } catch (rejected: UiBuilderSubscriptionRejectedException) {
@@ -1660,13 +1509,9 @@ class ServeUiBuilderMcp(
       }
     val update =
       try {
-        // The subscription's catch-up update is delivered before `subscribe` returns, so a design
-        // that has already moved past the cursor is answered from here without entering the wait.
-        //
-        // Checked rather than left to `withTimeout`, because `withTimeout(0)` throws without ever
-        // running its body: a caller asking `waitSeconds: 0` — the non-blocking "has anything
-        // changed since my cursor", and the shape a polling loop wants — would be told nothing
-        // happened while the edit it asked about sat completed in this deferred.
+        // The catch-up update arrives before `subscribe` returns, so check completion first:
+        // `withTimeout(0)` throws without running its body, which would misreport a `waitSeconds:
+        // 0` poll.
         if (waiter.isCompleted) waiter.await()
         else
           try {
@@ -1694,15 +1539,9 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * The discussion around a design: read it, join it, close a thread, or wait for the next reply.
-   *
-   * Not an [McpResponseEnvelopeV1], for the same reason a native render is not: the released
-   * contract defines no request type for a comment, and inventing an envelope shape for a request
-   * the contract does not define would be worse than being plainly outside it.
-   *
-   * The design is read through the service as this actor before anything is read or written, so the
-   * design's own access control decides whether there is a discussion here to join — the identical
-   * check the HTTP comment routes make, for the identical reason.
+   * Read a design's discussion, join it, close a thread, or wait for the next reply. Not an
+   * [McpResponseEnvelopeV1] (no released request type). The design is read as this actor first, the
+   * same check the HTTP comment routes make.
    */
   private suspend fun commentTool(
     tool: String,
@@ -1753,9 +1592,8 @@ class ServeUiBuilderMcp(
                 body = args.requiredText("body"),
                 displayName = args.text("displayName") ?: actor.actorId,
               ),
-              // Set by the server, never by an argument: everything reaching this class arrived
-              // over MCP, so the caller is an agent whichever credential it holds. A tool that
-              // could post as a person would be posting somebody else's words under its grant.
+              // Set by the server: everything here arrived over MCP, so the author is an agent and
+              // may never post as a person.
               authorKind = StoredComment.AUTHOR_KIND_AGENT,
             )
             .orThrow()
@@ -1789,16 +1627,9 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * Read or replace what a design is for.
-   *
-   * Authorised twice, exactly as the links routes are: the tool's capability decides whether this
-   * caller may use the builder, and then the design is read *through the service, as this actor*,
-   * so a design they cannot open is "no such design" rather than a record they may write against,
-   * and [SET_LINKS] additionally takes the design's own WRITE action.
-   *
-   * [SET_LINKS] replaces the whole record rather than merging into it, for the reason the route
-   * gives: a partial write is how a design ends up citing the issue it used to be for, and clearing
-   * one link has to be expressible.
+   * Read or replace what a design is for. Authorised twice like the routes: tool capability, then a
+   * read through the service as this actor; [SET_LINKS] also needs the design's WRITE action.
+   * Replaces the whole record so clearing a link is expressible.
    */
   private suspend fun linksTool(
     tool: String,
@@ -1810,9 +1641,7 @@ class ServeUiBuilderMcp(
     val actions =
       service.designActions(actor, designId)
         ?: throw McpRequestException("no design `$designId` this actor can read")
-    // The tool capability got this call through the door; the design decides the rest. Setting a
-    // design's links is authoring it, so it takes that design's own WRITE action and not merely an
-    // agent grant wide enough to reach the tool.
+    // Setting links is authoring, so it needs the design's own WRITE action, not just a wide grant.
     if (tool == SET_LINKS && !actions.contains(DesignAccessActionV1.WRITE)) {
       throw McpRequestException("design `$designId` does not grant this actor write access")
     }
@@ -1848,12 +1677,8 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * The five links out of a tool call's arguments; an omitted one is unset, not unchanged.
-   *
-   * A call naming none of them clears the record, which is a thing an agent may legitimately ask
-   * for — but only by asking for it. A call that names *other* things and no link got there by
-   * misspelling a field, and reading that as a clear is how one typo deletes the issue and the pull
-   * request behind a design.
+   * The five links from the arguments; an omitted one is unset. A call naming no link but other
+   * fields is refused rather than read as a clear, so a typo can't wipe the record.
    */
   private fun JsonObject.linksArgument(): StoredLinks {
     val links =
@@ -1873,29 +1698,13 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * The reply, plus what the design is for, when anybody has said.
+   * [GET_DESIGN]'s reply plus the design's links, spliced in because an agent mid-task won't ask
+   * what a screen is for. Only on a successful snapshot with a record; non-JSON replies pass
+   * through untouched.
    *
-   * ## Why it is spliced onto the reply rather than left to the agent to ask for
-   *
-   * The same reason the comment notice is: an agent handed a design reads the document and starts
-   * work, and the question it does not think to ask is what the screen is *for*. One extra call
-   * would answer it, and an agent mid-task does not make that call — so the issue, the frame and
-   * the pull request arrive on the reply it is already reading, and an agent asked to change a
-   * screen can see the brief behind it without being told one exists.
-   *
-   * Only [GET_DESIGN], only where the reply is a *successful snapshot*, and only where a record
-   * exists: a design nobody has linked pays one stat call and hands the original string back
-   * untouched. A reply that is not a JSON object is handed back as it is — a link is worth having,
-   * and never worth mangling the answer the agent asked for.
-   *
-   * ## Why the snapshot check is load-bearing
-   *
-   * A refused read is not an exception here. [run] hands a `GetSnapshotRequestV1` to the service
-   * and serialises whatever comes back, so a design this actor may not open returns a perfectly
-   * ordinary JSON envelope carrying an error response. Splicing onto that would hand the issue, the
-   * frame, the pull request and the thread of a private design to anyone holding a read capability
-   * who can guess its id — the links would be the answer the access check just refused. So the
-   * record is attached to a snapshot and to nothing else.
+   * The snapshot check is the access check: a refused read comes back as an ordinary envelope
+   * carrying an error, and splicing onto it would leak a private design's links to anyone guessing
+   * its id.
    */
   private fun withLinks(tool: String, args: JsonObject, reply: String): String {
     val store = links ?: return reply
@@ -1907,9 +1716,7 @@ class ServeUiBuilderMcp(
       } catch (_: SerializationException) {
         return reply
       }
-    // The access check is this line. Only a snapshot means the service opened the design as this
-    // actor; an error envelope means it refused, and a refused read must not come back carrying
-    // the links of the design it refused.
+    // The access check: only a snapshot means the service opened the design as this actor.
     if (!parsed.isSnapshotReply()) return reply
     val stored =
       try {
@@ -1928,36 +1735,19 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * Whether this envelope carries a design the service actually handed over.
-   *
-   * Read off the response's own discriminator rather than by decoding it: the envelope a default
-   * agent call produces has had the catalog dropped ([envelope]), so the released serialiser would
-   * reject the very reply this needs to recognise.
+   * Whether this envelope carries a snapshot, read from the discriminator rather than decoded,
+   * since [envelope] may have dropped the catalog.
    */
   private fun JsonObject.isSnapshotReply(): Boolean =
     (this[RESPONSE_KEY] as? JsonObject)?.get(RESPONSE_TYPE_KEY)?.jsonPrimitive?.contentOrNull ==
       SNAPSHOT_RESPONSE_TYPE
 
   /**
-   * The reply, plus the pending-discussion count and what this actor has not been told.
-   *
-   * ## Why it is spliced onto the reply rather than left to the agent to ask for
-   *
-   * Because the agent does not ask. The tools to find a comment have existed since the discussion
-   * did, and the failure they were built for still happened: an agent kept applying mutations and
-   * exporting while a designer's "The play icon looks like a cross" sat unread, because noticing
-   * was opt-in and nothing an agent already read said a word about it. This converts "the agent
-   * must think to ask" into "the agent cannot help but see" — see [CommentNoticeV1].
-   *
-   * ## What it costs
-   *
-   * One board read per reply on the tools in [COMMENT_NOTICE_TOOLS], and nothing at all on a host
-   * that keeps no discussions. A successful [GET_DESIGN] is always parsed once to attach the exact
-   * [UNACKNOWLEDGED_COMMENTS_KEY] count, including zero; the other replies are re-parsed only when
-   * there is a notice to add, so a native render's base64 frame is not walked without a reason.
-   *
-   * A reply that is not a JSON object is handed back as it is: a notice is worth having, and never
-   * worth mangling the answer the agent asked for.
+   * The reply plus the pending-discussion count and what this actor hasn't been told
+   * ([CommentNoticeV1]), so an agent can't miss a designer's comment while it keeps working. Costs
+   * one board read per reply on [COMMENT_NOTICE_TOOLS] and nothing without discussions. A
+   * successful [GET_DESIGN] always gets the exact [UNACKNOWLEDGED_COMMENTS_KEY] count; other
+   * replies are re-parsed only when there is a notice. Non-JSON replies pass through.
    */
   private suspend fun withCommentNotice(
     tool: String,
@@ -1968,9 +1758,8 @@ class ServeUiBuilderMcp(
     val store = comments ?: return reply
     if (tool !in COMMENT_NOTICE_TOOLS) return reply
     val designId = args.text("designId") ?: return reply
-    // The count on GET_DESIGN must only accompany a successful snapshot. An error envelope means
-    // the service refused to open the design; reading or attaching its discussion metadata there
-    // would leak that a guessed private design has activity.
+    // The count rides only on a successful snapshot; on an error envelope it would leak that a
+    // guessed private design has activity.
     val parsedSnapshot =
       if (tool != GET_DESIGN) null
       else
@@ -1981,9 +1770,7 @@ class ServeUiBuilderMcp(
         } catch (_: SerializationException) {
           return reply
         }
-    // The design was read as this actor by the call that produced `reply`, so the access check has
-    // already happened; a reply that never reached the design carries no notice because the board
-    // of a design nobody may read is never consulted here — the tool refused before this point.
+    // The producing call already read the design as this actor, so the access check has happened.
     val notice =
       try {
         val board = store.readOrEmpty(designId)
@@ -2029,14 +1816,9 @@ class ServeUiBuilderMcp(
     }
 
   /**
-   * A new design, either from a document the caller wrote or copied from one this box already has.
-   *
-   * There is no third option, and the absence is deliberate. A design's `catalogPin` names a
-   * catalog revision and a capability digest that the service checks against the live catalog, so a
-   * starter document assembled here would either carry values invented in this file — which the
-   * service would reject — or reach into the browser's own bootstrap, which fetches the checked-in
-   * fixture and patches three fields from the catalog it just listed. Copying an existing design
-   * gives an agent a pin that is real by construction.
+   * A new design, from a caller-written document or copied from an existing one. No starter
+   * template: a `catalogPin` must match the live catalog, so copying gives an agent a pin that is
+   * real by construction.
    */
   private suspend fun createDesign(
     args: JsonObject,
@@ -2122,13 +1904,9 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * Put bytes behind an `assetKey`, so an `asset/image` naming it draws a photograph.
-   *
-   * The bytes arrive base64-encoded because an MCP argument is JSON text; the service sniffs them
-   * (PNG, JPEG, GIF or WebP), stores them by digest, pins the binding into the design's `assets`
-   * and answers the same accepted outcome an `$APPLY` does, with the new revision to quote next.
-   * Idempotent by content: the same bytes under the same key answer `idempotentReplay` and move
-   * nothing.
+   * Put bytes behind an `assetKey` for `asset/image`. Arrives base64 (MCP args are JSON); the
+   * service sniffs the format, stores by digest, pins the binding and answers like an `$APPLY`.
+   * Idempotent by content.
    */
   private suspend fun putAsset(
     args: JsonObject,
@@ -2180,10 +1958,8 @@ class ServeUiBuilderMcp(
       DesignCommandV1(
         designId = args.requiredText("designId"),
         operationId = args.requiredText("operationId"),
-        // Not read from the arguments. `UiBuilderProtocolMapper` rejects a command whose nested
-        // actor is not the authenticated one, and the whole point of that check is that a caller
-        // does not get to choose. Filling it from the grant means the check passes because the
-        // claim is true, rather than because nobody made one.
+        // Never read from arguments: the mapper rejects a nested actor that isn't the authenticated
+        // one, so it is filled from the grant.
         actorId = actor.actorId,
         clientId = args.text("clientId") ?: MCP_CLIENT_ID,
         baseRevision =
@@ -2197,13 +1973,9 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * Check a whole `document`, a stored design, or a batch of `operations` against a stored design,
-   * and save nothing.
-   *
-   * A shape that does not decode is reported as a problem rather than thrown as a tool error: the
-   * caller asked "is this valid?", and "no, and here is why" is the answer, not a failure of the
-   * question. A design the actor cannot read is still refused outright, exactly as [GET_DESIGN]
-   * refuses it, so this is not a way to learn that a private design exists.
+   * Check a document, a stored design, or a batch of operations against one, saving nothing.
+   * Undecodable shapes are reported as problems, not thrown. Unreadable designs are refused like
+   * [GET_DESIGN], so this can't probe for private designs.
    */
   private suspend fun validate(args: JsonObject, actor: AuthenticatedUiBuilderActor): String {
     val lane = validator ?: throw McpRequestException("this host cannot validate designs")
@@ -2288,9 +2060,8 @@ class ServeUiBuilderMcp(
             document.revision,
           )
       }
-    // Checked against the current document, because that is what an apply lands on. A batch
-    // written against an older revision is not refused for it — the reducer rebases what does not
-    // conflict — so a mismatch is a warning, not an error.
+    // A batch against an older revision is rebased by the reducer, so a revision mismatch is a
+    // warning, not an error.
     val baseRevision = args.number("baseRevision")
     val notes =
       if (operations != null && baseRevision != null && baseRevision != document.revision)
@@ -2310,13 +2081,9 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * Everything worth knowing before a design is shown to a person, in one call
-   * (compose-preview-server#1255): the shape and catalog checks [VALIDATE] runs, and the
-   * accessibility checks of [UiBuilderAccessibilityCheck] — on a stored design, a past revision, a
-   * whole document, or a batch of operations applied to a scratch copy and never saved.
-   *
-   * The reply leads with a sentence and the counts, then the findings with the node each is about,
-   * so an agent can act on it without reading the rest.
+   * Everything worth knowing before showing a design to a person, in one call (#1255): [VALIDATE]'s
+   * checks plus [UiBuilderAccessibilityCheck], on a stored design, past revision, whole document or
+   * scratch-applied batch. Leads with a sentence and counts, then findings by node.
    */
   private suspend fun checkDesign(args: JsonObject, actor: AuthenticatedUiBuilderActor): String {
     val checks = args.checksArgument()
@@ -2466,8 +2233,7 @@ class ServeUiBuilderMcp(
       }
     }
 
-    // One native render serves both checks that can use it: touch targets measured on it, and the
-    // picture the guidelines model judges the visual rules from.
+    // One native render serves both touch-target measurement and the guidelines model's picture.
     val render by lazy { if (rendered && document != null) nativeRender(document!!) else null }
     if (CHECK_A11Y in checks && skipped.none { it.check == CHECK_A11Y }) {
       val checked = document
@@ -2674,14 +2440,9 @@ class ServeUiBuilderMcp(
       ?.firstOrNull { it.benchmark.catalogSystemId == document.catalogPin.systemId }
 
   /**
-   * The Compose source [document] exports to, through the same generator `export` uses; null when
-   * the export gate refuses it or the host cannot export Compose.
-   *
-   * A stored design at a revision it still has ([storedDesignId]) is exported exactly as `GET
-   * …/export.compose` exports it — `ExportDesignRequestV1` against the stored revision — so the
-   * prompt attaches the source that route serves. A loose or dry-run document has no stored
-   * revision and goes through `ExportDocument`, which on the live host refused designs the route
-   * exported, so every stored design's prompt said "no Compose source is attached".
+   * The Compose source [document] exports to via the same generator as `export`, or null when
+   * refused or unsupported. A stored design at a retained revision exports exactly like `GET
+   * …/export.compose`; loose or dry-run documents use `ExportDocument`.
    */
   private suspend fun composeSource(
     document: DesignDocumentV1,
@@ -2718,11 +2479,9 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * The request a guidelines model is asked about [document]: the bundled rules for its platform,
-   * the design tree, and — when asked — the frames [DesignGuidelineFrames.plan] names drawn
-   * natively and the Compose source it exports to. The same request `ui_builder_guidelines_prompt`
-   * returns, the prompt route serves and [CHECK_DESIGN] sends, so what an agent or a person reads
-   * is what the model was asked.
+   * The request a guidelines model gets for [document]: platform rules, the design tree, and
+   * optionally the [DesignGuidelineFrames.plan] frames and Compose source. Identical across
+   * `ui_builder_guidelines_prompt`, the prompt route and [CHECK_DESIGN].
    */
   private suspend fun guidelineRequest(
     document: DesignDocumentV1,
@@ -2734,9 +2493,8 @@ class ServeUiBuilderMcp(
     /** The stored design [document] is a revision of; null for a loose or dry-run document. */
     storedDesignId: String? = null,
     /**
-     * Ask Jev first which extra evidence would help, and gather it: a dark or large-font render,
-     * the accessibility tree. Only a check that is about to spend the key does; a prompt shown to a
-     * person or an agent stays the plain first pass.
+     * Ask a triage model first which extra evidence (dark or large-font render, accessibility tree)
+     * would help, then gather it. Only for checks about to spend the key.
      */
     triage: Boolean = false,
     /** The node boxes of a native render already made, for the accessibility evidence. */
@@ -2914,17 +2672,12 @@ class ServeUiBuilderMcp(
   )
 
   /**
-   * The frames [DesignGuidelineFrames.plan] names for [document], each drawn natively: a Wear
-   * widget in the Samsung and Pixel Watch containers, a phone or tablet design at both sizes, a
-   * Wear screen on its device and, when it holds a component its catalog marks [SCROLLABLE_TRAIT],
-   * unrolled.
-   *
-   * A stored design's frames come from [guidelineFrames]: kept per revision, drawn one at a time,
-   * and waited for no longer than [guidelinePictureBudgetMillis] in all — a frame still drawing is
-   * left out and named in [GuidelinePictures.pending]. The device frame is seeded by [devicePng]
-   * when the caller already rendered it, and a widget's Pixel Watch frame by its native thumbnail.
-   * A loose document, or a host with no cache, draws every frame here as before. Either way a
-   * picture drawn at a size other than its frame's is left out rather than mislabelled.
+   * The frames [DesignGuidelineFrames.plan] names for [document], drawn natively (widget
+   * containers, phone/tablet sizes, a Wear device, unrolled when it holds a [SCROLLABLE_TRAIT]
+   * component). Stored designs use [guidelineFrames], waiting at most
+   * [guidelinePictureBudgetMillis] and listing the rest in [GuidelinePictures.pending]; loose
+   * documents draw everything here. A picture at the wrong size is left out rather than
+   * mislabelled.
    */
   private suspend fun guidelinePictures(
     document: DesignDocumentV1,
@@ -3036,8 +2789,8 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * What a background warm of [designId] draws: its latest document and planned frames, read as
-   * [actor]; null for a design with no rules for its platform. See [ServeUiBuilderGuidelineFrames].
+   * What a background warm of [designId] draws: latest document and planned frames read as [actor];
+   * null when its platform has no rules.
    */
   internal suspend fun guidelineFramePlan(
     designId: String,
@@ -3118,10 +2871,8 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * [GUIDELINES_PROMPT] and the prompt route: [designId] at [revision] (the current one when null)
-   * as the request a guidelines model would get, or null when [actor] cannot read it. Pictures and
-   * source only [withRenders]: they are native renders and the Compose export, which the caller has
-   * already been allowed to see.
+   * [GUIDELINES_PROMPT] and the prompt route: [designId] at [revision] (current when null) as a
+   * guidelines request, or null when [actor] can't read it. Pictures and source only [withRenders].
    */
   internal suspend fun guidelinesPromptFor(
     designId: String,
@@ -3174,10 +2925,9 @@ class ServeUiBuilderMcp(
   private val guidelinesInFlight = GuidelinesCheckCoalescer<GuidelinesCheckResult>()
 
   /**
-   * The guidelines check on this host's key for [designId] at its current revision, as
-   * `ui_builder_check_design` runs it with `rendered: true`, recorded as [actor]'s run. [revision],
-   * when given, must be the current one. A second request for the same revision while one is
-   * running waits for that one rather than spending the key twice.
+   * The guidelines check on this host's key at the current revision (as `ui_builder_check_design`
+   * with `rendered: true`), recorded as [actor]'s run. Concurrent requests for the same revision
+   * share one run.
    */
   internal suspend fun runGuidelinesCheck(
     designId: String,
@@ -3245,8 +2995,8 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * [designId]'s recorded result as [GET_GUIDELINES] and the result route answer it: the record,
-   * its findings read against the bundled rules, and whether the design has moved on since.
+   * [designId]'s recorded guidelines result, its findings against the bundled rules, and whether
+   * the design has moved on since.
    */
   internal suspend fun guidelinesFor(
     designId: String,
@@ -3372,11 +3122,9 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * One design on several devices, themes and font scales, as one contact sheet
-   * (compose-preview-server#1255). See [UiBuilderDesignMatrix].
-   *
-   * Each cell is the design's own document with its environment swapped, exported to PNG through
-   * the scratch lane — the stored design is read as this actor first and never written to.
+   * One design across devices, themes and font scales as a contact sheet (#1255,
+   * [UiBuilderDesignMatrix]). Each cell swaps the environment and exports to PNG through the
+   * scratch lane; the stored design is never written.
    */
   private suspend fun renderDesignMatrix(
     args: JsonObject,
@@ -3572,12 +3320,8 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * Review verdicts and the implementing pull request (compose-preview-server#1255). See
-   * [ServeUiBuilderReviewStore].
-   *
-   * The design is read through the service as this actor first, so its own access control decides
-   * whether there is a review here to see — the identical rule the comment tools follow — and
-   * [SET_IMPLEMENTATION] additionally takes the design's own WRITE action, as [SET_LINKS] does.
+   * Review verdicts and the implementing PR (#1255, [ServeUiBuilderReviewStore]). Read as this
+   * actor first; [SET_IMPLEMENTATION] also needs the design's WRITE action.
    */
   private suspend fun reviewTool(
     tool: String,
@@ -3600,9 +3344,7 @@ class ServeUiBuilderMcp(
           store.decide(
             designId,
             actor.actorId,
-            // Set by the server, never by an argument, for the reason a comment's author kind is:
-            // everything reaching this class arrived over MCP, so the caller is an agent, and an
-            // agent must not be able to record a person's approval.
+            // Set by the server: an MCP caller is an agent and must not record a person's approval.
             deciderKind = StoredComment.AUTHOR_KIND_AGENT,
             DecisionRequest(
               revision = revision,
@@ -3704,8 +3446,8 @@ class ServeUiBuilderMcp(
     }
 
   /**
-   * The decision reply: the cursor to quote next, the latest verdict that matches — whether or not
-   * it is new, so a poll is answered without walking the log — and what arrived after the cursor.
+   * The decision reply: the next cursor, the latest matching verdict (new or not), and what arrived
+   * after the cursor.
    */
   private fun decisionReply(
     designId: String,
@@ -3757,9 +3499,8 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * What the code side needs to implement a design, in one call: the revision, the links, the
-   * implementation record and its preview match, the latest verdict, and — unless asked not to —
-   * the Compose export (compose-preview-server#1255).
+   * What the code side needs to implement a design in one call: revision, links, implementation
+   * record and preview match, latest verdict, and optionally the Compose export (#1255).
    */
   private suspend fun implementationStatus(
     store: ServeUiBuilderReviewStore,
@@ -3851,9 +3592,8 @@ class ServeUiBuilderMcp(
   }
 
   /**
-   * From a pull request back to the designs it implements — through the implementation record and
-   * the links record both — with every id read as this actor before it is named, so the answer
-   * never says a design exists to somebody who cannot open it.
+   * From a PR back to the designs it implements, via implementation and links records, naming only
+   * designs this actor can open.
    */
   private suspend fun findDesignForPr(
     args: JsonObject,
@@ -3913,16 +3653,10 @@ class ServeUiBuilderMcp(
     }
 
   /**
-   * The released reply envelope, and — unless the caller asked otherwise — without the catalog a
-   * snapshot embeds.
-   *
-   * A `ServiceSnapshotV1` carries the whole `CatalogCapabilityV1` of the catalog the design pins,
-   * which is right for a browser (one fetch, kept for the session, and the palette needs it) and
-   * wrong for an agent, for whom every byte is conversation context spent per call: on the hosted
-   * deployment a 600-byte document came back as 60 KB. The document's `catalogPin` names the
-   * catalog exactly and [LIST_CATALOGS] serves it, so nothing is lost by leaving it out; the field
-   * is dropped from the JSON rather than blanked, so a reader sees an absence and not an empty
-   * catalog. `includeCatalog: true` restores the released shape byte for byte.
+   * The released reply envelope, by default without the catalog a snapshot embeds: the full
+   * capability suits a browser but cost an agent 60 KB per call. The `catalogPin` and
+   * [LIST_CATALOGS] cover it; the field is dropped, not blanked. `includeCatalog: true` restores
+   * the released shape.
    */
   private fun envelope(
     callId: String,
@@ -4011,20 +3745,10 @@ class ServeUiBuilderMcp(
 
   companion object {
     /**
-     * How many allowed values a summary row spells out before it reports a count instead.
-     *
-     * The summary exists to be small — "the released envelope is about 58 KB and this about 12", as
-     * `ServeUiBuilderMcpIntegrationTest` puts it — and a `|`-separated enumeration is the one field
-     * on it whose length the catalog, not this surface, decides. #710 exposed the complete Material
-     * icon inventory and `m3/icon`.`iconKey` became 11,431 names, which took the *summary* to 241
-     * KB: four times the full envelope it exists to be an alternative to, on every
-     * `ui_builder_list_catalogs` call.
-     *
-     * Twenty-four is chosen to be past every enumeration a person authored — the longest of those
-     * on the packaged m3 catalog is `m3/text`.`style`'s fifteen typography roles — and far short of
-     * a generated inventory. A row over it says how many values there are and where to get them,
-     * which is what the summary/full split is for: an agent that needs all 11,431 asks for `full`,
-     * and the other ninety-nine calls do not pay for them.
+     * How many allowed values a summary row lists before reporting a count. Past every
+     * hand-authored enumeration (the longest is 15) but far short of generated ones like the 11,431
+     * Material icon names, which would otherwise make the summary larger than the full envelope
+     * (#710).
      */
     private const val SUMMARY_ALLOWED_VALUES = 24
 
@@ -4085,10 +3809,9 @@ class ServeUiBuilderMcp(
     const val RECORD_GUIDELINES = "ui_builder_record_guidelines"
 
     /**
-     * [frames] drawn by [render], in order, as the pictures of a guidelines request: each frame's
-     * size written over [document]'s environment, its widget host shape (when it names one) passed
-     * to the renderer, and the device frame answered by [devicePng] when the caller already has it.
-     * A frame [render] cannot draw is left out, and the rest are numbered as they are attached.
+     * Draw [frames] with [render] as a guidelines request's pictures, applying each frame's size
+     * and widget host shape; [devicePng] supplies an existing device frame. Undrawable frames are
+     * omitted and the rest numbered.
      */
     internal fun drawGuidelineFrames(
       document: DesignDocumentV1,
@@ -4143,10 +3866,7 @@ class ServeUiBuilderMcp(
 
     private const val RENDERED_ARGUMENT = "rendered"
     private const val INCLUDE_EXPORT_ARGUMENT = "includeExport"
-    /**
-     * The trait a catalog gives a component whose content scrolls, so a device frame shows only the
-     * top of the screen.
-     */
+    /** Catalog trait for scrolling content, so a device frame shows only the top of the screen. */
     private const val SCROLLABLE_TRAIT = "ScrollableContent"
 
     /** The extra pictures the Jev evidence triage can ask for; cached under these kinds. */
@@ -4197,9 +3917,8 @@ class ServeUiBuilderMcp(
     private const val PLATFORM_KEY = "platform"
 
     /**
-     * Compact on purpose: an absent list and an absent pin are left out rather than written as `[]`
-     * and `null`, since the summary exists to be small. `schema` is kept so a reader can tell the
-     * shape apart from the released envelope.
+     * Compact: absent lists and pins are omitted. `schema` distinguishes this from the released
+     * envelope.
      */
     private val SUMMARY_JSON = Json {
       encodeDefaults = false
@@ -4207,13 +3926,9 @@ class ServeUiBuilderMcp(
     }
 
     /**
-     * What a shared role may do.
-     *
-     * An editor gets the three actions a person editing a design uses; a viewer gets the two that
-     * only read — `export` included, because a design's exported Kotlin is a rendering of what the
-     * viewer is already looking at, and withholding it would make a shared design unusable to the
-     * one audience it was shared with. Neither carries `manageAccess` or `delete`: those stay with
-     * the owner, so being shared with never becomes the power to share on.
+     * Actions a shared role gets. Editors get the three editing actions; viewers the two reads,
+     * including `export` (the exported Kotlin renders what they already see). Neither gets
+     * `manageAccess` or `delete`, so being shared with never becomes the power to share on.
      */
     private fun DesignAccessRoleV1.defaultActions(): List<DesignAccessActionV1> =
       when (this) {
@@ -4288,12 +4003,9 @@ class ServeUiBuilderMcp(
       )
 
     /**
-     * The replies that carry [CommentNoticeV1] when the actor has a thread waiting on them.
-     *
-     * Every one of them is a moment where an agent is demonstrably reading or writing this design's
-     * state, which is exactly when a comment about it is worth knowing. The comment tools
-     * themselves are left out: they answer with the board, so a notice beside it would be the same
-     * news twice.
+     * Replies that carry [CommentNoticeV1] when a thread is waiting: moments when the agent is
+     * clearly working on this design. Comment tools are excluded since they already return the
+     * board.
      */
     val COMMENT_NOTICE_TOOLS =
       setOf(
@@ -4335,8 +4047,7 @@ class ServeUiBuilderMcp(
     internal const val LINKS_KEY = "links"
 
     /**
-     * Tool declarations, built with the caller's own `tool` helper so this list has the same shape
-     * as every other tool on the surface rather than a second one that drifts.
+     * Tool declarations, built with the caller's `tool` helper so they share the surface's shape.
      */
     fun declarations(
       tool: (String, String, String) -> JsonObject,
@@ -5157,8 +4868,8 @@ class ServeUiBuilderMcp(
 }
 
 /**
- * A design's title, changed. The listing entry rather than a snapshot: it carries the new title,
- * the unmoved revision and what the caller may do here, and is a few hundred bytes.
+ * A renamed design: the listing entry (new title, unchanged revision, permitted actions), a few
+ * hundred bytes.
  */
 @kotlinx.serialization.Serializable
 internal data class DesignRenamedV1(
@@ -5177,12 +4888,9 @@ internal data class DesignDeletedV1(
 )
 
 /**
- * What authoring needs to know about the catalogs on this host, and no more.
- *
- * The projection [ServeUiBuilderMcp.LIST_CATALOGS] answers with by default. Everything here is read
- * off the released `CatalogCapabilityV1`; what is left out — adapter status, SVG parity, export
- * notes, menu shelving — matters to the export lane and to nobody composing a screen, and is one
- * `full: true` away.
+ * What authoring needs to know about this host's catalogs, the default
+ * [ServeUiBuilderMcp.LIST_CATALOGS] projection of `CatalogCapabilityV1`. Adapter status, SVG
+ * parity, export notes and shelving are one `full: true` away.
  */
 @OptIn(ExperimentalSerializationApi::class)
 @kotlinx.serialization.Serializable
@@ -5202,20 +4910,17 @@ internal data class CatalogSummaryV1(
   val catalogPin: CatalogReferenceV1? = null,
   val exportCapabilities: ExportCapabilitiesV1 = ExportCapabilitiesV1.Builder().build(),
   /**
-   * Every modifier type some component here accepts, once. Which component accepts which is in the
-   * whole capability; nearly every component accepts nearly all of them, listing the set per
-   * component was most of the summary's bytes, and a modifier a component does not accept is
-   * refused by name when applied.
+   * Every modifier type any component here accepts, listed once; per-component sets were most of
+   * the summary's bytes, and an unaccepted modifier is refused by name.
    */
   val modifiers: List<String> = emptyList(),
   val components: List<ComponentSummaryV1> = emptyList(),
 )
 
 /**
- * A component in the space of a table row. [properties] are `name:type`, with `!` appended when the
- * property is required and `=a|b|c` when the catalog restricts its values; [slots] are the slot's
- * name, its cardinality in square brackets as `min..max` with `*` for unbounded, then
- * `:role|trait|…` naming what the slot accepts.
+ * A component as a table row. [properties] are `name:type` with `!` when required and `=a|b|c` when
+ * restricted; [slots] are the name, cardinality `min..max` in square brackets (`*` unbounded), then
+ * `:role|trait|…`.
  */
 @kotlinx.serialization.Serializable
 internal data class ComponentSummaryV1(
@@ -5227,12 +4932,9 @@ internal data class ComponentSummaryV1(
 )
 
 /**
- * The same JSON with every embedded `ServiceSnapshotV1`'s `catalog` removed.
- *
- * A snapshot is recognised by the three fields it always has beside the catalog — `designId`,
- * `state` and `retainedFromSequence` — so the walk removes the field from a snapshot wherever the
- * envelope puts one (a response, a pushed update) and from nothing else: a node property that
- * happens to be called `catalog` is not a snapshot's.
+ * The same JSON with every embedded `ServiceSnapshotV1`'s `catalog` removed. A snapshot is
+ * recognised by `designId`, `state` and `retainedFromSequence`, so a node property named `catalog`
+ * is left alone.
  */
 /** An export artifact's content as text: UTF-8 as it is, base64 decoded. Null when empty. */
 private fun ExportArtifactV1.text(): String? =
@@ -5259,10 +4961,8 @@ private fun JsonElement.withoutCatalog(): JsonElement =
   }
 
 /**
- * Nothing was said within the wait.
- *
- * Its own shape rather than an empty board, so a caller cannot read "no news" as "the discussion
- * was emptied" — the same distinction the HTTP watch route draws with a 204.
+ * Nothing was said within the wait; a distinct shape (like the HTTP watch's 204) so it isn't read
+ * as an emptied discussion.
  */
 @kotlinx.serialization.Serializable
 internal data class CommentWaitTimeoutV1(
@@ -5274,17 +4974,9 @@ internal data class CommentWaitTimeoutV1(
 )
 
 /**
- * Whether this update is a change to the design, past the cursor the caller quoted.
- *
- * A snapshot always is: the service sends one when the cursor cannot be served from the retained
- * window, and the caller has to resync whether or not it names an edit they care about. A delta is
- * one only when it carries something they have not seen — subscribing at the design's current
- * sequence produces an empty catch-up delta, which is "nothing has happened", not news.
- *
- * Presence never is. It is ephemeral chrome, excluded by design from the document, the revision and
- * the durable sequence, and waking an agent because a colleague moved their cursor would spend a
- * tool call on something with nothing to act on. An outcome is an acknowledgement addressed to
- * whoever submitted it, and the edit it acknowledges arrives as its own delta.
+ * Whether this update changes the design past the caller's cursor. A snapshot always does (the
+ * caller must resync); a delta only if non-empty; presence never does (ephemeral chrome); an
+ * outcome is an acknowledgement, with the edit arriving as its own delta.
  */
 private fun UiBuilderServiceUpdate.movesTheDocument(afterSequence: Long): Boolean =
   when (this) {
@@ -5295,11 +4987,8 @@ private fun UiBuilderServiceUpdate.movesTheDocument(afterSequence: Long): Boolea
   }
 
 /**
- * Nobody changed the design within the wait.
- *
- * Its own shape rather than an empty delta, so a caller cannot read "no news" as "the design was
- * emptied" — the same distinction [CommentWaitTimeoutV1] draws, and the HTTP comment watch draws
- * with a 204.
+ * Nobody changed the design within the wait; distinct from an empty delta, like
+ * [CommentWaitTimeoutV1].
  */
 @kotlinx.serialization.Serializable
 internal data class DesignWaitTimeoutV1(
@@ -5319,13 +5008,9 @@ internal const val GUIDELINES_NOT_ENABLED =
     "account; ask the operator to add you, or run it in the editor with your own OpenRouter key"
 
 /**
- * The Remote Compose profile a design targets, as a guideline rule names it (`wear-widgets`,
- * `launcher-widgets-v6`, `launcher-widgets-v7`, `androidx`, each with `+experimental` when set):
- * the design's own `remoteProfile` when it names one, else the default for its kind — a Wear widget
- * draws on the Wear widgets profile, a launcher widget on the Android 16 launcher's (what the
- * exporter writes), and any other document of a catalog that publishes as `remote-compose` on the
- * AndroidX player. Null for a design that is not Remote Compose at all, so no profile-tagged rule
- * is asked of it.
+ * The Remote Compose profile a design targets, as guideline rules name it (`wear-widgets`,
+ * `launcher-widgets-v6`/`-v7`, `androidx`, optional `+experimental`): the design's own
+ * `remoteProfile`, else its kind's default. Null for non-Remote-Compose designs.
  */
 internal suspend fun remoteProfileOf(
   document: DesignDocumentV1,
@@ -5363,9 +5048,8 @@ internal data class GuidelinesCheckKey(
 )
 
 /**
- * Runs one check per [GuidelinesCheckKey] at a time: a request whose key matches one already
- * running waits for that result instead of spending the key again. Requests that differ in caller
- * or render mode run separately, so a result is never another caller's.
+ * Runs one check per [GuidelinesCheckKey] at a time; a matching request waits for the running one
+ * instead of spending the key again. Different callers or render modes run separately.
  */
 internal class GuidelinesCheckCoalescer<T> {
   private val inFlight =

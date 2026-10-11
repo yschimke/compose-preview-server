@@ -29,13 +29,9 @@ interface ServeImageUploadAuth {
 
   sealed interface Identity {
     /**
-     * Verified: [login] has access to [repository].
-     *
-     * [budgetKey] is who to charge for the upload, which is **not** always [login]. Every verified
-     * installation token shares one placeholder login (there is no user behind one), so keying a
-     * budget on that would put every GitHub App with write access to the gating repo in a single
-     * bucket — one app's batch would 429 another's. The key is therefore the credential's own
-     * fingerprint for those, and the login for a real user.
+     * Verified: [login] has access to [repository]. [budgetKey] is who to charge: the login for a
+     * real user, but the credential's fingerprint for installation tokens, which all share one
+     * placeholder login and would otherwise share one bucket.
      */
     data class Ok(val login: String, val budgetKey: String = "gh:$login") : Identity
 
@@ -43,27 +39,18 @@ interface ServeImageUploadAuth {
     data object Missing : Identity
 
     /**
-     * A credential was presented and is not good enough: unreadable by GitHub, or a real account
-     * without access to the gating repository. [status] is what the route answers with, and
-     * [reason] is safe to hand back — it never contains any part of the token.
+     * A credential was presented but isn't good enough (unreadable by GitHub, or no access to the
+     * gating repo). [status] is the route's answer; [reason] never contains any part of the token.
      */
     data class Refused(val status: Int, val reason: String) : Identity
   }
 }
 
 /**
- * The real gate: verifies the presented token against GitHub, with a short-lived positive/negative
- * cache in front.
- *
- * The cache is not an optimisation so much as a rate control. Without it, every uploaded PNG in a
- * batch of twenty costs two GitHub API calls against the *caller's* rate limit, and an attacker
- * spraying random tokens gets the host to spend its outbound connections one-per-guess. With it, a
- * batch verifies once and a repeated bad token is refused locally.
- *
- * Positive entries are short ([POSITIVE_TTL_SECONDS]) because they cache an *authorisation* —
- * access revoked on GitHub must stop working here promptly, and the whole point of checking live is
- * that it does. Negative entries are shorter still, so a caller who fixes their token's scopes
- * isn't locked out of their own fix.
+ * The real gate: verifies the token against GitHub behind a short-lived positive/negative cache.
+ * The cache is rate control: a batch verifies once rather than spending two API calls per PNG, and
+ * repeated bad tokens are refused locally. Positive entries are short ([POSITIVE_TTL_SECONDS]) so
+ * revoked access stops promptly; negative entries shorter still so a fixed token works quickly.
  */
 class GithubTokenUploadAuth(
   override val repository: String,
@@ -76,9 +63,8 @@ class GithubTokenUploadAuth(
   /** This server's OAuth app, when configured: a user token issued to it is always accepted. */
   private val app: GitHubOAuthApp? = null,
   /**
-   * The GitHub round-trip, as a function so a test can stand in for it: identity + repo access for
-   * a presented credential. Defaults to the real [GitHubOAuthVerifier], whose rule the playground
-   * already shares.
+   * The GitHub round trip as a function (stubbable in tests); defaults to [GitHubOAuthVerifier],
+   * sharing the playground's rule.
    */
   private val verifier: (String, String, Set<String>) -> Result<GitHubOAuthUser> =
     GitHubOAuthVerifier().let { verifier ->
@@ -156,9 +142,8 @@ class GithubTokenUploadAuth(
             "Uploading preview images is limited to that repository's collaborators.",
       )
     }
-    // An installation has no login to charge, so it is charged as the credential it presented.
-    // A GitHub Actions token rotates hourly, so its bucket rotates with it — which is the right
-    // granularity anyway: one workflow run, one budget.
+    // An installation has no login, so it is charged as its credential; an Actions token rotates
+    // hourly, giving one budget per workflow run.
     val budgetKey =
       if (user.login == GitHubOAuthVerifier.INSTALLATION_LOGIN) "app:${fingerprint.take(16)}"
       else "gh:${user.login}"
@@ -173,14 +158,14 @@ class GithubTokenUploadAuth(
 
   companion object {
     /**
-     * How long a verified identity is reused before GitHub is asked again — long enough that a
-     * batch of uploads verifies once, short enough that a revoked token stops working here soon.
+     * How long a verified identity is reused: a batch verifies once, and revocations take effect
+     * soon.
      */
     const val POSITIVE_TTL_SECONDS = 60L
 
     /**
-     * How long a refusal from GitHub sticks — short, so fixing a token's scopes takes effect
-     * quickly. A failure to reach GitHub at all is not cached.
+     * How long a refusal is cached: short, so fixing a token's scopes takes effect quickly.
+     * Failures to reach GitHub aren't cached.
      */
     const val NEGATIVE_TTL_SECONDS = 30L
 
@@ -192,9 +177,9 @@ class GithubTokenUploadAuth(
 }
 
 /**
- * This server's own GitHub OAuth (or GitHub App) client — the `--github-auth-client-*` pair — as
- * the image lane needs it: to ask GitHub whether a presented user token was issued to it (`POST
- * /applications/{client_id}/token`). [toString] leaves the secret out.
+ * This server's own GitHub OAuth (or App) client (`--github-auth-client-*`), used to ask whether a
+ * user token was issued to it (`POST /applications/{client_id}/token`). [toString] omits the
+ * secret.
  */
 class GitHubOAuthApp(val clientId: String, val clientSecret: String) {
   init {
@@ -207,9 +192,8 @@ class GitHubOAuthApp(val clientId: String, val clientSecret: String) {
 }
 
 /**
- * The kind of GitHub token a caller presented, read from its documented prefix. The prefix is part
- * of the credential — changing it makes the token invalid — so it only chooses which rule applies;
- * GitHub still decides whether the token is any good.
+ * The kind of GitHub token presented, from its documented prefix. The prefix only selects which
+ * rule applies; GitHub still validates the token.
  */
 enum class GitHubTokenKind {
   /** `ghp_` (classic) and `github_pat_` (fine-grained): minted by the user for themselves. */
@@ -219,8 +203,8 @@ enum class GitHubTokenKind {
   INSTALLATION,
 
   /**
-   * `gho_` / `ghu_`, and anything unprefixed: a user token some OAuth or GitHub App obtained on the
-   * user's behalf — `gh auth token` is one of these, issued to the GitHub CLI.
+   * `gho_` / `ghu_` and unprefixed tokens: user tokens an OAuth or GitHub App obtained (e.g. `gh
+   * auth token`).
    */
   APP_USER;
 
@@ -235,16 +219,13 @@ enum class GitHubTokenKind {
 }
 
 /**
- * Which GitHub tokens the image lane accepts (`--image-upload-tokens`), beyond the one kind it
- * always accepts: a user token issued to **this server's own** OAuth app, when one is configured.
- *
- * - [personal] — personal access tokens.
- * - [otherApps] — user tokens issued to any other OAuth or GitHub App, `gh auth token` included.
- *   GitHub offers no way to tell *which* app holds such a token without that app's secret, so
- *   accepting them means accepting a token any app the user ever authorized could present.
- * - [installation] — GitHub App installation tokens with write on the repository. An installation
- *   token cannot name its app (`GET /app` needs the app's JWT), so this admits every app installed
- *   on the repository with write, not only GitHub Actions.
+ * Which GitHub tokens the image lane accepts (`--image-upload-tokens`) beyond user tokens issued to
+ * this server's own OAuth app:
+ * - [personal]: personal access tokens.
+ * - [otherApps]: user tokens issued to any other app (`gh auth token` included); GitHub can't say
+ *   which app without its secret.
+ * - [installation]: App installation tokens with write; these can't name their app, so this admits
+ *   any app installed with write.
  */
 data class ImageUploadTokenPolicy(
   val personal: Boolean,
@@ -271,12 +252,10 @@ data class ImageUploadTokenPolicy(
     val ANY = ImageUploadTokenPolicy(personal = true, otherApps = true, installation = true)
 
     /**
-     * Parse `--image-upload-tokens`. Unset takes the default, which depends on whether this server
-     * has its own OAuth app: with one, user tokens issued to other apps are refused (a user who
-     * wants to upload signs in through an agent grant, or uses a personal access token); without
-     * one there is nothing to recognise a user token by, so the lane keeps accepting them as it
-     * always has. Installation tokens are accepted by default either way, because a GitHub Actions
-     * job's `GITHUB_TOKEN` is the lane's documented CI credential.
+     * Parse `--image-upload-tokens`. The unset default depends on whether this server has its own
+     * OAuth app: with one, other apps' user tokens are refused; without one they're accepted as
+     * before. Installation tokens are accepted by default, since `GITHUB_TOKEN` is the documented
+     * CI credential.
      */
     fun parse(raw: String?, appConfigured: Boolean): ImageUploadTokenPolicy {
       val names =
@@ -303,13 +282,13 @@ data class ImageUploadTokenPolicy(
 }
 
 /**
- * GitHub could not give an answer about a token — unreachable, rate limited, a 5xx, or rejecting
- * this server's own client credentials. Not a verdict on the token, so it is never cached.
+ * GitHub gave no answer about a token (unreachable, rate limited, 5xx, or rejecting our client
+ * credentials). Not a verdict, so never cached.
  */
 class GitHubCheckUnavailableException(message: String) : IllegalStateException(message)
 
 /**
- * The token is a kind this host's [ImageUploadTokenPolicy] does not accept. A verdict, not an
- * outage — refused with `403` and the reason, which names no part of the token.
+ * The token is a kind [ImageUploadTokenPolicy] refuses: a verdict, answered `403` with a reason
+ * naming no part of the token.
  */
 class ImageUploadTokenRefusedException(message: String) : IllegalStateException(message)

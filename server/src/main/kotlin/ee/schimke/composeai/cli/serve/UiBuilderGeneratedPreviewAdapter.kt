@@ -1,12 +1,10 @@
 package ee.schimke.composeai.cli.serve
 
 /**
- * Controlled output from `CapabilityComposeCodeExporter` ready for the server's compile lane.
- *
- * The exporter owns the screen source and name. The server owns the catalog target, compiler and
- * render job because those require the resolved live-bundle classpath and the installed BTA/render
- * sidecars. Keeping this value source-only prevents the UI-builder runtime from depending on any of
- * those host implementations.
+ * Output from `CapabilityComposeCodeExporter`, ready for the server's compile lane. The exporter
+ * owns source and name; the server owns catalog target, compiler and render job, which need the
+ * live-bundle classpath and sidecars. Source-only so the UI-builder runtime depends on none of
+ * those.
  */
 data class UiBuilderGeneratedCompose(
   val source: String,
@@ -16,45 +14,25 @@ data class UiBuilderGeneratedCompose(
   val widthDp: Int,
   val heightDp: Int,
   /**
-   * The playground `confType`, which is the same choice as "which daemon draws this".
-   *
-   * `compose-cmp` is the Skiko desktop daemon and was the only value while `m3-catalog` was the
-   * only catalog with a native lane. `compose-android` is the Robolectric daemon, and it is not an
-   * optimisation for Wear — it is the requirement. `androidx.wear.compose:compose-material3` is an
-   * Android AAR: a Wear screen does not compile on the desktop classpath at all, let alone render.
-   *
-   * Defaulted, so every existing caller and test keeps the mode it had; the field exists because
-   * the design's catalog now decides it ([UiBuilderNativeTarget]).
+   * The playground `confType`, which also chooses the daemon: `compose-cmp` is the desktop Skiko
+   * daemon, `compose-android` the Robolectric one, required for Wear (Wear Material 3 is an Android
+   * AAR that won't even compile on desktop). Defaulted; the design's catalog now decides it
+   * ([UiBuilderNativeTarget]).
    */
   val confType: String = COMPOSE_CMP,
   /**
-   * True when the synthesized `@Preview` should **capture** the generated composable as a Remote
-   * Compose document rather than compose it.
-   *
-   * A `@RemoteComposable` body is not a screen: composing it draws nothing, because its
-   * declarations are recorded into a document by whatever wraps the composition. So the entry wraps
-   * it in `RemoteOverridablePreview`, which is where `captureSingleRemoteDocument` is called and
-   * where the display-info and density-behaviour choice was made once, with its reasoning written
-   * down beside it. Nothing here re-decides that; it names the call site that already did.
-   *
-   * Not inferred from [confType]. `remote-compose` is the mode that *publishes* a document, and a
-   * snippet reaching it could equally have wrapped its own body; a generated body never does, and
-   * saying so explicitly is what keeps the entry generator from guessing.
+   * True when the synthesized `@Preview` should capture the generated composable as a Remote
+   * Compose document: a `@RemoteComposable` body draws nothing when composed, so the entry wraps it
+   * in `RemoteOverridablePreview` (where `captureSingleRemoteDocument` and its display/density
+   * choices live). Explicit rather than inferred from [confType].
    */
   val remoteCapture: Boolean = false,
   /**
-   * True when [composableName] names a **Wear widget**'s three declarations rather than a screen.
-   *
-   * A widget's generated source declares `<name>Content` (a `@RemoteComposable` body),
-   * `<name>Background` (its `WearWidgetBrush`) and `<name>Params` (the container spec its scaffold
-   * describes). There is no screen in it to call, so the entry composes none: it records the three
-   * through Glance Wear's own `WearWidgetDocument`, which draws the host's container around the
-   * body exactly as the launcher does — the frame the builder's canvas draws beside it — and plays
-   * the document with the player [widgetPlayer] names.
-   *
-   * Exclusive with [remoteCapture] in practice and not asserted so: that mode wraps a body in
-   * `RemoteOverridablePreview` to publish a document, and a widget is drawn rather than published.
-   * A caller setting both would get the widget entry, which is the one that can draw.
+   * True when [composableName] names a Wear widget's three declarations (`<name>Content` body,
+   * `<name>Background` brush, `<name>Params` container spec) rather than a screen. The entry
+   * records them through Glance Wear's `WearWidgetDocument` inside the host's container and plays
+   * it with [widgetPlayer]. Effectively exclusive with [remoteCapture]; if both are set the widget
+   * entry wins.
    */
   val wearWidget: Boolean = false,
   /** Which player draws a [wearWidget]'s recorded document; ignored for anything else. */
@@ -72,16 +50,11 @@ data class UiBuilderGeneratedCompose(
 }
 
 /**
- * Submits capability-generated Compose to the existing Playground compile and render lane.
- *
- * This adapter deliberately has no compiler, discovery or renderer implementation of its own. It
- * adds one deterministic `@Preview` source file beside the exporter's source, then delegates the
- * complete job to [PlaygroundCompileService]. A successful response therefore has the same
- * compiled-snippet token and enters the same first-frame and redeem paths as an ordinary Playground
- * request.
- *
- * This is an internal trusted-source seam, not a new public arbitrary-Kotlin endpoint. Its caller
- * must snapshot/authorize the design export before setting [isSecurityChecked].
+ * Submits capability-generated Compose to the existing playground compile and render lane. No
+ * compiler, discovery or renderer of its own: it adds one deterministic `@Preview` file and
+ * delegates to [PlaygroundCompileService], so results enter the same first-frame and redeem paths.
+ * An internal trusted-source seam, not an arbitrary-Kotlin endpoint; the caller must authorize the
+ * export before setting [isSecurityChecked].
  */
 class UiBuilderGeneratedPreviewAdapter(private val playground: PlaygroundCompileService) {
 
@@ -169,19 +142,11 @@ class UiBuilderGeneratedPreviewAdapter(private val playground: PlaygroundCompile
           .trimIndent() + "\n"
 
     /**
-     * The same entry for a `@RemoteComposable` body, wrapped in the capture the mode needs.
-     *
-     * `RemoteOverridablePreview` is called in the **body** rather than pinned with
-     * `@PreviewWrapper(RemoteOverridablePreviewWrapper::class)`, and that is not a style choice:
-     * the upstream annotation is `AnnotationRetention.BINARY` and invisible to runtime reflection,
-     * so the only path that recovers a wrapper FQN is `previews.json`'s `params.wrapperClassName`,
-     * which the Gradle plugin fills at discovery time. A playground snippet's manifest is
-     * synthesized from discovered ids and carries no params, so an annotation here would compile
-     * and then be silently ignored — a capture that returns no document for a reason nothing
-     * reports.
-     *
-     * `RcPlatformProfiles.ANDROIDX` is the profile the connector's own wrapper defaults to, named
-     * explicitly because this call site does not inherit that default.
+     * The entry for a `@RemoteComposable` body, wrapped in a capture. `RemoteOverridablePreview` is
+     * called in the body rather than via `@PreviewWrapper`, whose BINARY retention is invisible at
+     * runtime and only recovered from discovered `previews.json` params, which a playground
+     * manifest lacks; the annotation would be silently ignored. `RcPlatformProfiles.ANDROIDX` is
+     * named explicitly since this call site doesn't inherit the wrapper's default.
      */
     private fun remoteCaptureEntry(composableName: String, widthDp: Int, heightDp: Int): String =
       """
@@ -202,24 +167,12 @@ class UiBuilderGeneratedPreviewAdapter(private val playground: PlaygroundCompile
         .trimIndent() + "\n"
 
     /**
-     * The entry for a **Wear widget**, drawn inside the container its host draws.
-     *
-     * `WearWidgetPreview` is upstream's own tooling wrapper
-     * (`androidx.glance.wear:wear-tooling-preview`): it builds the `WearWidgetDocument` from the
-     * brush and the body, runs it through the same `WearWidgetContainer` the real widget pipeline
-     * does — the rounded background, the host padding, the content inset inside it — and rasters
-     * the result. Naming it rather than composing the body directly is the difference between a
-     * render of the widget and a render of its contents floating on nothing.
-     *
-     * Not `CapturingWearWidgetPreview`, the compose-ai-tools wrapper that additionally offers the
-     * encoded document to the render harness's `.rc` sidecar. This lane wants a **frame**; a
-     * document is what the inline-capture lane exists to produce, and naming the wrapper here would
-     * put `ee.schimke.composeai:wear-preview-runtime` on the list of things a bundle must carry
-     * before a widget design can be previewed against it, to publish bytes nobody reads.
-     *
-     * The `@Preview` canvas is the container's whole frame — content plus the padding the design
-     * authored — because that is what the wrapper sizes itself to and what the builder's canvas
-     * draws. The design's `environment` is a screen's and is deliberately not used here.
+     * The entry for a Wear widget, drawn inside its host container via upstream's
+     * `WearWidgetPreview` (`androidx.glance.wear:wear-tooling-preview`), which runs the same
+     * `WearWidgetContainer` as the real pipeline. Not `CapturingWearWidgetPreview`: this lane wants
+     * a frame, and that wrapper would require an extra runtime in every bundle. The canvas is the
+     * container's whole frame (content plus authored padding), not the design's screen
+     * `environment`.
      */
     private fun wearWidgetEntry(name: String, widthDp: Int, heightDp: Int): String =
       """
@@ -246,19 +199,11 @@ class UiBuilderGeneratedPreviewAdapter(private val playground: PlaygroundCompile
         .trimIndent() + "\n"
 
     /**
-     * The widget entry [UiBuilderWidgetPlayer.CMP] selects: the same recording, a different player.
-     *
-     * The document is captured exactly as [wearWidgetEntry]'s `WearWidgetPreview` captures it — the
-     * generated params carry Glance Wear's default `SAFE_FALLBACK_VERSION`, so the AndroidX writer
-     * records the operations the oldest widget host accepts, inside the same `WearWidgetContainer`.
-     * Only the playback differs: the bytes go to the Compose Multiplatform `RcComposePlayer`
-     * (cmp-android) rather than AndroidX's `RemoteDocumentPreview`.
-     *
-     * That player is the reason for this entry. AndroidX's drops a `DrawPath` sized from the
-     * component it draws behind, so a `RemoteButton` came back as its label with no container while
-     * the editor drew the filled pill (yschimke/compose-ui-builder#511). The CMP player draws it,
-     * from the same bytes. The recording is still the AndroidX writer's, which is what keeps this
-     * lane the authoritative one.
+     * The widget entry for [UiBuilderWidgetPlayer.CMP]: the same AndroidX-written recording
+     * (default `SAFE_FALLBACK_VERSION`, same `WearWidgetContainer`), played by the Compose
+     * Multiplatform `RcComposePlayer` instead of AndroidX's `RemoteDocumentPreview`, which drops a
+     * `RemoteButton`'s container (yschimke/compose-ui-builder#511). The AndroidX writer keeps this
+     * lane authoritative.
      */
     private fun cmpWearWidgetEntry(name: String, widthDp: Int, heightDp: Int): String =
       """
@@ -309,11 +254,9 @@ class UiBuilderGeneratedPreviewAdapter(private val playground: PlaygroundCompile
 }
 
 /**
- * Which player draws a Wear widget's recorded document in the native lane.
- *
- * Both record through the AndroidX writer on the Android daemon; they differ only in playback. Kept
- * as a switch rather than a replacement so the lane can go back to the upstream preview the day its
- * player draws what the CMP one does (`--ui-builder-widget-player androidx`).
+ * Which player draws a Wear widget's recorded document in the native lane; both record via AndroidX
+ * and differ only in playback. A switch (`--ui-builder-widget-player androidx`) so the lane can
+ * return to upstream once its player catches up.
  */
 enum class UiBuilderWidgetPlayer(val flagValue: String) {
   /** The Compose Multiplatform `RcComposePlayer` on Android (cmp-android). */

@@ -63,9 +63,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.junit.jupiter.api.io.TempDir
 
 /**
- * compose-preview-server#1255 against the real server, wired as `ServeRunner` wires it: check a
- * design before proposing it, see it on several devices in one picture, wait for a person's
- * verdict, and join a design to the pull request implementing it.
+ * Agent ergonomics against the real server, wired as `ServeRunner` wires it: check a design before
+ * proposing it, see it on several devices in one picture, wait for a person's verdict, and join a
+ * design to its implementing pull request.
  */
 class ServeUiBuilderAgentErgonomicsTest {
   @TempDir lateinit var stateDirectory: Path
@@ -397,8 +397,7 @@ class ServeUiBuilderAgentErgonomicsTest {
     assertTrue(pictures.none { "dataUrl" in it }, pictures.toString())
     assertEquals(listOf("image", "image"), blocks.drop(1).map { it.text("type") })
     assertTrue("Picture 2 (tablet picture)" in prompt.text("userText"))
-    // The source goes along, exported as `GET …/export.compose` exports the stored design (it
-    // used to go through `ExportDocument`, which on the live host attached nothing).
+    // The source goes along, exported as `GET …/export.compose` exports the stored design.
     assertEquals(true, prompt["sourceAttached"]!!.jsonPrimitive.booleanOrNull, prompt.toString())
     assertTrue("```kotlin" in prompt.text("userText"))
     val (_, routeSource) =

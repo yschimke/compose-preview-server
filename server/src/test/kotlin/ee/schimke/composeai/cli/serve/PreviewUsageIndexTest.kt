@@ -6,12 +6,9 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Pins the Dev-mode `uses:` index: that a preview is credited with the calls in **its own**
- * declaration and no other's, that one file is read once for the previews sharing it, and that
- * "could not index" never arrives dressed as "nothing matched".
- *
- * The parse itself is [UsageSourceParserTest]'s subject; what is under test here is the split — the
- * step that decides which of a section file's calls belong to which card.
+ * Pins the Dev-mode `uses:` index: a preview is credited only with calls in its own declaration, a
+ * shared file is read once, and "could not index" never looks like "nothing matched". Parsing is
+ * [UsageSourceParserTest]'s subject; this tests the split of a file's calls between cards.
  */
 class PreviewUsageIndexTest {
 
@@ -86,10 +83,7 @@ class PreviewUsageIndexTest {
 
   private val ids = listOf("Filled", "Tonal")
 
-  /**
-   * The point of the whole feature: neither preview's *name* says it lays out a `Spacer`, and the
-   * grid's own filter can only ever match a name.
-   */
+  /** Neither preview's name mentions `Spacer`, and the grid's own filter can only match names. */
   @Test
   fun `a preview is credited with the calls in its own declaration`() {
     val index = index()
@@ -109,11 +103,7 @@ class PreviewUsageIndexTest {
     assertEquals(setOf("Filled", "Tonal"), index().match("m3", ids, "Sticker").ids)
   }
 
-  /**
-   * Substring, case-insensitive: a filter box is for half-remembered names. `button` therefore
-   * reaches `FilledTonalButton` as well as `Button`, which is the point rather than a rough edge —
-   * "show me everything buttonish" is the question someone changing a button API is asking.
-   */
+  /** Substring and case-insensitive, so `button` reaches `FilledTonalButton` too, deliberately. */
   @Test
   fun `matching is a case-insensitive substring of the callee`() {
     assertEquals(setOf("Filled", "Tonal"), index().match("m3", ids, "button").ids)
@@ -228,14 +218,9 @@ class PreviewUsageIndexTest {
   }
 
   /**
-   * Two top-level declarations with **no blank line between them** — the case
-   * `PlaygroundSeedResolver.declarationLines` deliberately gets wrong.
-   *
-   * Its blank-line rule cannot see the second declaration start, so it returns one range covering
-   * both. That is the safe failure for seeding an editor buffer (hand over too much rather than cut
-   * code in half) and the unsafe one here: under it both previews inherit both call sets and
-   * `uses:Spacer` answers with the preview that never calls one. The parse reports real declaration
-   * spans, so attribution no longer depends on how the file is formatted.
+   * Two declarations with no blank line between them, which
+   * `PlaygroundSeedResolver.declarationLines` merges (safe for seeding an editor, wrong for
+   * attribution). The parse reports real spans.
    */
   @Test
   fun `declarations with no blank line between them do not share their calls`() {
@@ -261,9 +246,8 @@ class PreviewUsageIndexTest {
   }
 
   /**
-   * A body over the fetcher's cap comes back as a truncated prefix plus one byte, and a prefix
-   * still parses — so accepting it would report the calls in the first 256 KiB as if they were the
-   * file's. The cap here matches the fetcher's precisely so that read is refused instead.
+   * An over-cap body comes back as a truncated prefix that still parses; the cap matches the
+   * fetcher's so that read is refused rather than indexed partially.
    */
   @Test
   fun `a truncated read is refused rather than parsed as the whole file`() {

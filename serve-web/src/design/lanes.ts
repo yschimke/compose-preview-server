@@ -1,26 +1,12 @@
-// WHAT THE SHEET SHOWS, AND WHAT IT IS BEING JUDGED AGAINST — two questions, two controls.
+// What the sheet shows, and what it is judged against: two orthogonal controls.
 //
-// The surface used to ask one: a three-way lane of `code` / `design` / `diff`. That worked while
-// there were only ever two pictures of a node, because "diff" could mean "ours, scored against the
-// design" without ever saying so. It stops working the moment a catalog has a `compareWith`
-// sibling: a reader on `remote-m3` wants to see `wear-m3`'s rendition of the same kit node, and to
-// score against that rather than against Figma, and neither fits on an axis whose third value is a
-// verb.
+//   SHOW         - whose picture stands in the design's slots: ours, the sibling's, or the design's
+//                  own drawing.
+//   DIFF AGAINST - which of the other two it is scored against, or nothing.
 //
-// So the lane is factored into the two orthogonal questions it was conflating:
-//
-//   SHOW         — whose picture stands in each of the design's slots: ours, the sibling's, or the
-//                  design's own drawing.
-//   DIFF AGAINST — which of the other two that picture is scored against, or nothing.
-//
-// Both axes range over the SAME three sources, which is what makes a pairing describable in one
-// sentence ("showing ours, diffed against wear-m3") and what keeps the readout honest: a diff is a
-// pair of pictures, and both halves are named on screen rather than one being implied by a verb.
-//
-// The two "show" lanes are still deliberately not a composite — no opacity slider, no `difference`
-// blend over the whole sheet. Those answered "how close are these two pictures" by making the
-// reader squint; the diff axis answers it with a number and a map, and the eye compares two clean
-// frames better than one muddy one.
+// Both range over the same three sources, so a pairing reads as one sentence ("showing ours, diffed
+// against wear-m3") with both halves named on screen. The show lanes are not composited (no opacity
+// slider or blend); the diff axis answers closeness with a number and a map.
 
 /** One picture of a node: this catalog's render, the sibling catalog's, or the design's drawing. */
 export type Source = "code" | "parallel" | "design";
@@ -43,11 +29,9 @@ export interface StageState {
 }
 
 /**
- * What the stage looks like for one pairing.
- *
- * The first three are keyed on the LANE alone — what is being scored changes no pixel of what is
- * drawn, which is exactly the separation this split exists to make. `cp-page-swap-on` still means
- * "a render stands in the design's slots"; WHICH render is `cp-page-parallel-on`'s business.
+ * What the stage looks like for one pairing. The first three are keyed on the lane alone: what is
+ * scored changes no drawn pixel. `cp-page-swap-on` means a render stands in the slots; which render
+ * is `cp-page-parallel-on`'s business.
  */
 export function stageState(lane: Lane, baseline: Baseline): StageState {
     const ours = lane !== "design";
@@ -65,10 +49,8 @@ export function needsRenders(lane: Lane, baseline: Baseline): boolean {
 }
 
 /**
- * Whether this pairing needs the sibling catalog's renders adopted.
- *
- * Asked separately from {@link needsRenders} because the sibling's images come off another
- * catalog's daemon: a reader who never names it must never cost it a request.
+ * Whether this pairing needs the sibling's renders adopted. Separate from {@link needsRenders}
+ * because those images come from another catalog's daemon and must cost nothing unless named.
  */
 export function needsParallel(lane: Lane, baseline: Baseline): boolean {
     return lane === "parallel" || baseline === "parallel";
@@ -79,12 +61,8 @@ export function laneOf(value: string | null | undefined): Lane {
 }
 
 /**
- * The lane this sheet can actually SHOW, which is not every lane a URL may name.
- *
- * `allowsBaseline` already refuses a `parallel` baseline on a sheet that carries no sibling
- * renders, on the reasoning that a comparison this server cannot make is not offered at all. The
- * lane is the same claim from the other side and needs the same answer — otherwise the sheet is
- * asked to SHOW a source it would refuse to score against.
+ * The lane this sheet can actually show: like `allowsBaseline`, a `parallel` lane is refused
+ * without sibling renders.
  */
 export function laneWithin(lane: Lane, hasParallel: boolean): Lane {
     return lane === "parallel" && !hasParallel ? "code" : lane;
@@ -97,13 +75,8 @@ export function baselineOf(value: string | null | undefined): Baseline {
 }
 
 /**
- * Whether [value] is a baseline the sheet can actually be scored against right now.
- *
- * Two rules, both about the reader rather than about the scorer. A source cannot be its own
- * baseline — the answer is zero by construction, and offering it would be a control whose only
- * outcome is "0.0%" in every slot. And a sibling this page carries no renders for is not a
- * comparison this server can make, so the option is not offered at all rather than offered and
- * dashed.
+ * Whether [value] is a usable baseline now: not the lane's own source (always 0.0%), and not a
+ * sibling this page carries no renders for.
  */
 export function allowsBaseline(
     lane: Lane,
@@ -116,14 +89,9 @@ export function allowsBaseline(
 }
 
 /**
- * The baseline to hold after the reader changes what the sheet SHOWS.
- *
- * Flipping onto the source you were scoring against reads as a SWAP — "now show me that one" — so
- * the baseline takes the lane just vacated rather than falling to `off`. It is the same pair seen
- * from the other side and the number does not move; dropping to `off` instead would blank every
- * badge on the one gesture most likely to mean "and how far is it, from here?".
- *
- * Nothing else moves: a baseline that is still legal is left exactly where the reader put it.
+ * The baseline after the shown lane changes. Switching onto the current baseline is a swap: the
+ * baseline takes the vacated lane, keeping the same pair and number. A still-legal baseline is left
+ * alone.
  */
 export function baselineAfterLane(
     previous: Lane,
@@ -137,11 +105,8 @@ export function baselineAfterLane(
 }
 
 /**
- * What the coverage filter does when it is switched on.
- *
- * A coverage filter with nothing to draw on is a no-op the reader cannot see, so asking for it turns
- * the resting marks on. Unchecking leaves them on: it was an explicit state to arrive at, and
- * silently repainting the sheet plain would read as the filter having broken something.
+ * Turning the coverage filter on also turns outlines on (otherwise it shows nothing); turning it
+ * off leaves them on.
  */
 export function outlinesAfterUnlinked(
     unlinkedOn: boolean,
@@ -151,51 +116,32 @@ export function outlinesAfterUnlinked(
 }
 
 /**
- * Whether an overlay is taken out of the tab order and the accessibility tree.
- *
- * CSS alone cannot do this: `opacity: 0` + `pointer-events: none` still leaves a control focusable,
- * so a keyboard user could tab onto an invisible rectangle — no focus ring, no indication of where
- * they are.
- *
- * Keyed on the GAP, not on "unlinked": the filter shows components with no code behind them, and the
- * sheet's private furniture and variant-set containers are neither.
+ * Whether an overlay is removed from the tab order and accessibility tree (CSS alone leaves it
+ * focusable). Keyed on the gap, not "unlinked": private furniture and variant-set containers are
+ * neither.
  */
 export function isInert(unlinkedOnly: boolean, hasGap: boolean): boolean {
     return unlinkedOnly && !hasGap;
 }
 
 /**
- * The class that puts EVERY diff badge on the sheet at once.
- *
- * The diff axis's resting state is one badge — wherever the reader is pointing or focused — because
- * forty red pills over a specimen sheet hide the drawing they are judging
- * (`docs/design/COMPARE_NAVIGATION.md`, F5). This is the deliberate look at all of them, and it is
- * held rather than latched: it is the gesture for "which one is worst?", which is a question you
- * ask for a second and then go back to reading.
- *
- * `serve.css` owns what it does; `<cp-design-page>` owns when it is on.
+ * The class that shows every diff badge at once. The resting state is one badge (where the reader
+ * points), since many pills hide the drawing (`docs/design/COMPARE_NAVIGATION.md` F5); this is
+ * held, not latched. `serve.css` owns its effect; `<cp-design-page>` owns when it is on.
  */
 export const DIFF_ALL_CLASS = "cp-page-diff-all";
 
 /**
- * Whether the sheet is showing every badge.
- *
- * Gated on the baseline as well as on the gesture: the control is only held-able while something is
- * actually being scored, and a stuck `held` with the diff axis off would otherwise arm a class that
- * paints badges the moment a baseline is picked — a sheet that lights up covered in pills for no
- * reason the reader can connect to anything they did.
+ * Whether every badge shows: only while something is scored, so a stuck `held` can't light up the
+ * sheet when a baseline is later picked.
  */
 export function showsEveryBadge(baseline: Baseline, held: boolean): boolean {
     return baseline !== "off" && held;
 }
 
 /**
- * The key a settled score is remembered under.
- *
- * A number is about a PAIR, not about a node, so the pair is in the key: flipping the baseline from
- * Figma to the sibling asks a different question of the same slot, and a cache keyed on the node
- * alone would answer the new question with the old number. Re-entering a pairing already scored
- * stays free, which is what the cache is for.
+ * The key a settled score is cached under: the pair, not just the node, so changing the baseline
+ * asks a new question.
  */
 export function scoreKey(
     lane: Lane,
@@ -206,14 +152,8 @@ export function scoreKey(
 }
 
 /**
- * What a sheet's URL should carry for its four controls, as a plain map.
- *
- * Only departures from the page's defaults are named. A sheet opens on the code lane with no
- * baseline and both filters off, so writing those out would put four redundant parameters on every
- * link someone copies — and the empty map is what `cpUrlState` turns into the clean URL a visitor
- * arrived with. What IS written is the state a refresh used to lose: which drawing the sheet is
- * showing, what it is being scored against, and whether the outlines and the unlinked-only filter
- * are on.
+ * The URL parameters for the four controls: only departures from the defaults (code lane, no
+ * baseline, filters off), so an untouched sheet keeps a clean URL.
  */
 export function pageParams(state: {
     lane: Lane;
@@ -230,12 +170,8 @@ export function pageParams(state: {
 }
 
 /**
- * The state a URL asks for, resolved against what this sheet can actually offer.
- *
- * A baseline the lane forbids (its own source) or that this page carries no renders for is dropped
- * rather than honoured, on `allowsBaseline`'s reasoning: a stale link must not put the sheet into a
- * pairing that does not exist. The unlinked filter implies the outlines it filters, exactly as
- * pressing it does (`outlinesAfterUnlinked`).
+ * The state a URL asks for, resolved against what this sheet offers. A forbidden or unavailable
+ * baseline is dropped; the unlinked filter implies outlines.
  */
 export function pageStateFrom(
     params: {
@@ -246,16 +182,9 @@ export function pageStateFrom(
     },
     hasParallel: boolean,
 ): { lane: Lane; baseline: Baseline; outlines: boolean; unlinked: boolean } {
-    // The lane is resolved against the pairing FIRST, because the baseline is then validated
-    // against it. `laneOf` only parses — a stale `?lane=parallel` on an unpaired sheet survives it,
-    // and `allowsBaseline("parallel", "code", false)` then reads `code` as a perfectly legal
-    // baseline opposite a lane that does not exist. Hydration cannot check a `parallel` radio the
-    // page never rendered, so the sheet settles on its checked `code` lane while still holding the
-    // `code` baseline this function just blessed: `applyLane` turns the diff on and scores every
-    // render against itself, a wall of `0.0%` from one stale link.
-    //
-    // `code` rather than `off`, because that is where the sheet lands anyway — the fallback names
-    // it instead of leaving it to whichever radio happened to be checked.
+    // Resolve the lane first, then validate the baseline against it: a stale `?lane=parallel` on an
+    // unpaired sheet would otherwise let `code` pass as a baseline opposite a missing lane, scoring
+    // every render against itself. Fall back to `code`, where the sheet lands anyway.
     const lane = laneWithin(laneOf(params.lane), hasParallel);
     const asked = baselineOf(params.baseline);
     const baseline = allowsBaseline(lane, asked, hasParallel) ? asked : "off";

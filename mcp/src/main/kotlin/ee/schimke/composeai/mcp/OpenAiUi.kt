@@ -18,15 +18,12 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
 /**
- * OpenAI MCP Extensions metadata (issue #1235): `openai/…` keys that ChatGPT and Codex desktop read
- * from tool and resource `_meta`, and that every other host ignores. Spec:
- * https://github.com/openai/mcp-extensions/blob/main/docs/spec.md — sections "MCP App Entrypoints",
- * "File Extension Entrypoint", "Display Modes", "Icon Guidelines" and "Composer At-Mentions".
- *
- * Everything here is **additive**: it merges `openai/ui` / `openai/extensions` into a `_meta` that
- * already carries the portable MCP Apps keys (`ui.resourceUri`, the legacy flat `ui/resourceUri`,
- * `ui.visibility`), and never rewrites those, so Claude Code, Antigravity and any plain MCP Apps
- * host keep today's behaviour.
+ * OpenAI MCP Extensions metadata: `openai/…` keys ChatGPT and Codex desktop read from tool and
+ * resource `_meta`, ignored by other hosts. Spec:
+ * https://github.com/openai/mcp-extensions/blob/main/docs/spec.md ("MCP App Entrypoints", "File
+ * Extension Entrypoint", "Display Modes", "Icon Guidelines", "Composer At-Mentions"). Purely
+ * additive: the portable MCP Apps keys (`ui.resourceUri`, legacy `ui/resourceUri`, `ui.visibility`)
+ * are never rewritten.
  */
 object OpenAiUi {
   /** `_meta` key for entrypoints (tools) and display modes (UI resource contents). */
@@ -261,9 +258,9 @@ sealed interface OpenAiEntrypoint {
   }
 
   /**
-   * A viewer for files with these [extensions] (each `xxx`, without a leading dot), replacing the
-   * host's default viewer. The tool takes [OpenAiUi.FILE_INPUT_SCHEMA]. Desktop only. Claim only
-   * formats this server owns — never `.kt` (#1235).
+   * A viewer for files with these [extensions] (without a leading dot), replacing the host's
+   * default. The tool takes [OpenAiUi.FILE_INPUT_SCHEMA]. Desktop only. Claim only formats this
+   * server owns, never `.kt`.
    */
   data class File(val extensions: List<String>) : OpenAiEntrypoint {
     init {

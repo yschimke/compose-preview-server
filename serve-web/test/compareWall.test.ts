@@ -1,8 +1,5 @@
 // What the `/compare` wall shows, which artifacts it pairs, and where each choice came from.
-//
-// Almost nothing here fails loudly. A wrong pairing produces a confident number about the wrong two
-// pictures; a wrong resolution order opens a shared link on something other than what it says. Both
-// look like a page working normally.
+// Failures here are silent: a wrong pairing yields a confident number about the wrong pictures.
 
 import assert from "node:assert/strict";
 import { grade } from "../src/compare/grade.js";
@@ -45,9 +42,8 @@ describe("grade", () => {
     });
 
     it("is looser than the spec lane's, deliberately", () => {
-        // Three readings of one metric, and they must NOT be unified: the wall triages dozens of
-        // rows, where 89% still reads as "roughly right, look later"; the spec lane judges one pair
-        // the visitor chose, where 97% is visibly off. Making them agree makes one of them lie.
+        // Three readings of one metric that must not be unified: the wall triages many rows, the
+        // spec lane judges one chosen pair.
         assert.equal(
             grade(98),
             "good",
@@ -85,9 +81,8 @@ describe("variantFor", () => {
     });
 
     it("NEVER substitutes the opposite baked theme", () => {
-        // The rule this module exists for. A dark PNG beside a light vector looks plausible and
-        // scores a number that means nothing — the row then reports a fidelity problem that is
-        // really a pairing mistake, which is worse than showing no row at all.
+        // A dark PNG beside a light vector scores a meaningless number, reporting a pairing mistake
+        // as a fidelity problem.
         assert.equal(
             variantFor(row(["png-light", "svg-light"]), "svg", "dark"),
             "",
@@ -140,9 +135,7 @@ describe("rowTheme", () => {
     });
 
     it("lets a preview's own declared ground outrank both", () => {
-        // The per-preview half: a component that asks for a light ground keeps it even inside a
-        // dark-first catalog, and vice versa. Without this the catalog default swept up every
-        // neutral row regardless of what its preview declared.
+        // A preview's own declared ground overrides the catalog default.
         assert.equal(rowTheme("neutral", "dark", "light"), "light");
         assert.equal(rowTheme("neutral", "light", "dark"), "dark");
         assert.equal(rowTheme("dark", "dark", "light"), "light");
@@ -201,9 +194,8 @@ describe("initialState", () => {
     });
 
     it("lets an explicit ?theme= OUTRANK what was remembered", () => {
-        // The remembered value is a standing preference; a `?theme=` is in the address bar because
-        // someone picked it here or was handed the link. A shared link that silently reverts to the
-        // reader's own preference is not the link that was sent.
+        // A `?theme=` in the address bar beats the remembered preference, so shared links show what
+        // was sent.
         const state = initialState({
             defaults,
             remembered: "dark",
@@ -256,9 +248,8 @@ describe("poppedState", () => {
     });
 
     it("falls back to what THIS LOAD resolved to, not the page's bare default", () => {
-        // The entry with no parameters is the one from before the visitor picked anything. Falling
-        // back to the default would make Back from a shared `?theme=dark` link land somewhere the
-        // visitor has never been.
+        // The parameterless entry predates any pick, so Back from a shared `?theme=dark` restores
+        // that, not the default.
         const state = poppedState({
             initial,
             params: new URLSearchParams(),
@@ -312,9 +303,7 @@ describe("keepRow", () => {
     });
 
     it("COMPOSES the ?preview= narrow with the search box", () => {
-        // The viewer links into this wall for one component. Someone who arrives that way and then
-        // types is narrowing within that preview — not starting a fresh search across the catalog,
-        // which is what overriding either narrow with the other would give them.
+        // Arriving from the viewer for one preview and then typing narrows within that preview.
         assert.equal(
             keepRow(facts, "button", "com.example.FilledButtonPreview"),
             true,
@@ -338,11 +327,8 @@ describe("keepRow", () => {
     });
 
     it("narrows to one component, and composes with the search box", () => {
-        // The scope a reader ARRIVES with rather than types: a component page and the parity index
-        // both link in this way, and neither is asking about one variant. It has to survive typing
-        // — someone who arrives scoped and then searches is narrowing within the component, not
-        // starting a new search across the catalog.
-        // See `docs/design/COMPARE_NAVIGATION.md`, F4.
+        // `?component=` is an arrival scope covering every variant, and survives typing
+        // (`docs/design/COMPARE_NAVIGATION.md`, F4).
         assert.equal(keepRow(facts, "", "", "Button"), true);
         assert.equal(keepRow(facts, "filled", "", "Button"), true);
         assert.equal(keepRow(facts, "slider", "", "Button"), false);
@@ -366,10 +352,8 @@ describe("keepRow", () => {
     });
 
     it("finds a row by a preview id that is no longer in its haystack", () => {
-        // The ids used to be copied into `data-hay` so a typed id matched there. They are written
-        // once in the page's alias table now, so the search has to look at the resolved ids too —
-        // otherwise typing an id the reader can see on the page empties the wall.
-        // See `docs/design/COMPARE_NAVIGATION.md`, F2.
+        // The search also matches ids resolved from the page's alias table
+        // (`docs/design/COMPARE_NAVIGATION.md`, F2).
         const row = { ...facts, hay: "filled button · buttons" };
         assert.equal(keepRow(row, "FilledButtonPreview", ""), true);
         assert.equal(keepRow(row, "com.example.FilledButton", ""), true);
@@ -409,9 +393,8 @@ describe("scoreOf / byWorstFirst", () => {
 
 describe("initialState with an unusable default", () => {
     it("opens on a format the catalog HAS, not a hardcoded svg", () => {
-        // A Remote-Compose-only catalog. Falling back to "svg" opens the wall on a lane with nothing
-        // in it, and an empty table reads as "nothing matches your filter" — the wrong answer to
-        // "this catalog does not publish that format".
+        // A Remote-Compose-only catalog must not open on an empty "svg" lane, which would read as
+        // "nothing matches your filter".
         const state = initialState({
             defaults: { format: "svg", theme: "light" },
             remembered: null,
@@ -464,9 +447,8 @@ describe("bakedScoreOf", () => {
     });
 
     it("answers null — not the unmeasurable sentinel — where there is none", () => {
-        // The two absences are opposites. `-1` means "this browser tried and could not", and leads
-        // the wall; a missing published score means only that the delivery branch had nothing to
-        // say, and a row nobody has measured yet is not a finding.
+        // `-1` means this browser failed to measure (leads the wall); a missing published score is
+        // not a finding.
         assert.equal(bakedScoreOf(null), null);
         assert.equal(bakedScoreOf(""), null);
         assert.equal(bakedScoreOf("Infinity"), null);
@@ -487,9 +469,7 @@ describe("byWorstKnownFirst", () => {
     });
 
     it("differs from the measured order exactly where it must", () => {
-        // Once measured, an unmeasurable row LEADS (`-1`). Before measuring, an unpublished one
-        // trails. Same wall, two questions, and swapping the two would either bury the pairs the
-        // catalog already knows are broken or open on a page of rows claiming to be the worst.
+        // Once measured, an unmeasurable row leads; before measuring, an unpublished one trails.
         assert.equal(byWorstFirst(-1, 40) < 0, true);
         assert.equal(byWorstKnownFirst(null, 40) > 0, true);
     });

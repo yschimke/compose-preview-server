@@ -6,14 +6,9 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * The serve pages' **address-bar state**: what a visitor picked (a section tab, a theme, a filter,
- * a viewer override) is reflected into the page URL, so the page on screen is the page its URL
- * describes — bookmarkable, shareable, and reachable with Back.
- *
- * These are structural assertions on the emitted script; the behaviour itself (click a tab, read
- * `location.search`, go Back, see the previous tab) is driven in a real browser by
- * `preview-harness/serve-lanes.spec.mjs`. Both matter: this one fails fast in `:cli:test` when the
- * wiring is dropped, the browser one proves it actually navigates.
+ * The serve pages' address-bar state: picks (tab, theme, filter, override) are reflected into the
+ * URL so the page is bookmarkable, shareable and Back-navigable. Structural assertions on emitted
+ * script; behaviour is driven in a browser by `preview-harness/serve-lanes.spec.mjs`.
  */
 class ServeUrlStateTest {
 
@@ -32,10 +27,9 @@ class ServeUrlStateTest {
 
   @Test
   fun `catalog landing loads the shared url-state helper`() {
-    // `window.cpUrlState` ships in the page-shell bundle now, which `ServeWeb.document` emits for
-    // every page ahead of the surface's own scripts — so what the landing owes it is that bundle,
-    // in front of the filter script that reads the global. The helper's own behaviour is covered
-    // in `cli/serve-web/test/chrome.test.ts`.
+    // `window.cpUrlState` ships in the page-shell bundle, emitted ahead of the surface's scripts;
+    // the landing must load it before the filter script. Its behaviour is tested in
+    // `cli/serve-web/test/chrome.test.ts`.
     val html = landing()
     assertTrue(html.contains(CHROME_TAG), "the landing page must load the shell bundle")
     assertTrue(
@@ -49,10 +43,8 @@ class ServeUrlStateTest {
     val html = landing()
     assertTrue(html.contains("pushUrl({ tab: current });"), "a tab click must push ?tab=")
     assertTrue(html.contains("pushUrl({ theme: theme });"), "a theme chip must push ?theme=")
-    // The background toggle's own `?bg=` push is asserted against the real element in
-    // `cli/serve-web/test/bgToggle.test.ts` ("pushes a history entry so the checkerboard view is
-    // shareable"). It used to be a substring match on `bg-toggle.js`'s source here, which could
-    // only prove the file *said* it — and says nothing at all once the source is a minified bundle.
+    // The background toggle's `?bg=` push is tested against the real element in
+    // `cli/serve-web/test/bgToggle.test.ts`.
   }
 
   @Test
@@ -88,19 +80,15 @@ class ServeUrlStateTest {
     // localStorage was last written with — otherwise Back out of a theme lands on that theme.
     assertTrue(html.contains("""urlParam("tab") || initialTab"""), html)
     assertTrue(html.contains("""urlParam("theme") || initialTheme"""), html)
-    // Scoped to the grid's own script rather than the whole document. The page shell gained ONE
-    // deliberate reload in #4087 — the one-time `cp-interface-mode` localStorage→cookie migration,
-    // which reloads so the server can re-render with the cookie it just set — and a document-wide
-    // search for `location.reload()` cannot tell that apart from the regression this guards. What
-    // must stay true is narrower and still the point: the grid restores state by re-pointing its
-    // own images, so its script never reloads.
+    // Scoped to the grid's script: the page shell has one deliberate reload (the one-time
+    // `cp-interface-mode` localStorage→cookie migration), but the grid restores state by
+    // re-pointing images and never reloads.
     val gridScript =
       html
         .substringAfter("""var cards = document.querySelectorAll(".cp-card");""")
         .substringBefore("</script>")
-    // `substringAfter` hands back the WHOLE string when its delimiter is absent, so a renamed
-    // marker would quietly re-point this at some other script and assert nothing. Pin the slice to
-    // the script that actually carries the popstate wiring, and fail loudly if it ever drifts.
+    // `substringAfter` returns the whole string when the delimiter is missing, so pin the slice to
+    // the script carrying the popstate wiring.
     assertTrue(
       gridScript.contains("urlState.onPop(function () {"),
       "the extracted slice must be the grid script that restores state",
@@ -118,11 +106,8 @@ class ServeUrlStateTest {
     )
   }
 
-  // "Back restores the background this load opened with, not the stored one" now lives in
-  // `cli/serve-web/test/bgToggle.test.ts`, where it drives the real element through a real
-  // popstate instead of asserting that a source file contains a particular line. A mutation of
-  // the fallback back to `localStorage.getItem(…)` fails it, which the substring match here could
-  // not have caught once the source became a bundle.
+  // "Back restores the background this load opened with" is tested in
+  // `cli/serve-web/test/bgToggle.test.ts` against the real element.
 
   @Test
   fun `the grid and viewer share Vue but load only their surface controls`() {
@@ -153,9 +138,8 @@ class ServeUrlStateTest {
 
   @Test
   fun `a catalog with no previews emits no url wiring`() {
-    // The shell bundle is unconditional — it also carries the Page theme setting, which every page
-    // has — so what "no wiring" means here is that nothing on the page writes state: no filter
-    // script, and no reader of the global.
+    // The shell bundle is unconditional (it also carries the Page theme), so "no wiring" means no
+    // filter script and no reader of the global.
     val empty = ServeWeb.landingPage("empty", emptyList(), token = "t")
     assertFalse(empty.contains("cpUrlState"), "nothing to select ⇒ no state to carry")
   }
@@ -203,9 +187,8 @@ class ServeUrlStateTest {
       interactiveLaneTransition.contains("syncUrl();"),
       "entering Live / Wasm / RC must write ?mode= at the moment of the transition",
     )
-    // …and the other half of the round trip: a bookmarked lane has to open in that lane. The
-    // param is read BEFORE the first sync, which would otherwise clear a mode no control is
-    // holding yet — reading it at apply time restored nothing at all.
+    // …and a bookmarked lane opens in that lane: the param is read before the first sync, which
+    // would otherwise clear it.
     assertTrue(
       script.contains(
         """var initialUrlMode = new URLSearchParams(location.search).get("mode") || "";"""
@@ -213,10 +196,8 @@ class ServeUrlStateTest {
       "the viewer must capture a bookmarked ?mode= before the first URL sync",
     )
     assertTrue(script.contains("var wanted = initialUrlMode;"), "…and apply it on first load")
-    // …after the first snapshot has LANDED. The stage's <img> has no server-rendered src, and
-    // entering an interactive lane cancels the in-flight render, so switching immediately leaves a
-    // cold bookmarked load with an empty stage behind a lane that may be slow — or that fails and
-    // shows an error over nothing.
+    // …after the first snapshot has landed; switching immediately would cancel the in-flight render
+    // and leave an empty stage.
     assertTrue(
       script.contains("""img.addEventListener("load", enterBookmarkedMode);"""),
       "the bookmarked lane waits for the fallback frame",
@@ -236,10 +217,6 @@ class ServeUrlStateTest {
     )
   }
 
-  // The `/compare` wall's own push/replace rules moved to `<cp-compare-wall>` with the port, and
-  // are tested there as BEHAVIOUR rather than as source text: `compareWallElement.test.ts` drives
-  // the format and theme buttons and the search box against a stubbed `cpUrlState` and asserts what
-  // each one writes. A grep for `pushUrl({ format: format });` could not have survived
-  // minification,
-  // and said nothing about whether the call ran.
+  // The `/compare` wall's push/replace rules are tested as behaviour in
+  // `compareWallElement.test.ts`.
 }

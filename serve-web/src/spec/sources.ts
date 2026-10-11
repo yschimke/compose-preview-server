@@ -1,23 +1,10 @@
-// Which source the spec lane is comparing the render against.
-//
-// The lane's four views — Spec, Diff, Triptych, Slider — are instruments over A PAIR OF IMAGES, and
-// they are agnostic about where the second image came from. So a second comparison is a second
-// SOURCE for the existing lane, not a second mode: the latching rules in `views.ts`, the single
-// normalisation pass that keeps the four in one pixel space, and the URL state all carry over
-// untouched (issue #4621).
-//
-// The decisions live here, next door to the lane, for the same reason `views.ts` and `verdict.ts`
-// do: the lane itself is imperative DOM against a server-rendered picker, and the questions worth
-// getting right — which source is active, whether a switch changes anything, what the panel should
-// admit about where its pixels came from — are pure and answerable without a browser.
+// Which source the spec lane compares the render against. The lane's four views work over any pair
+// of images, so another comparison is another source, not another mode. These decisions are pure
+// and testable without a browser.
 
 /**
- * The imported design kit's own reference — the one source that IS a specification.
- *
- * Everything else the picker can offer is another catalog's RENDER, and the difference is not
- * cosmetic: it decides whether the published spec verdict still describes the stage, whether the
- * kit's annotations describe the panel beside the render, and what the reference panel may call
- * itself. Mirrors `ServeHttpServer.parallelSpecSource`'s `id = "parallel"` on the other side.
+ * The imported kit's reference — the only source that is a specification; all others are another
+ * catalog's render. Mirrors `ServeHttpServer.parallelSpecSource`'s `id = "parallel"`.
  */
 export const KIT_SOURCE = "kit";
 
@@ -30,16 +17,14 @@ export interface SpecSource {
     /** Same-origin URL of the image to compare against. */
     src: string;
     /**
-     * One line naming where these pixels came from, shown while the source is selected. Empty for a
-     * source that needs no caveat.
+     * Caveat about where these pixels came from, shown while selected. Empty when none is needed.
      */
     provenance?: string;
 }
 
 /**
- * The server omits a picker for the common one-source lane. Preserve that source as an ordinary
- * descriptor for code that needs to inspect or score it, while keeping the DOM free of a one-item
- * control. Picker-backed lanes remain authoritative when they exist.
+ * The server omits the picker for a one-source lane; this still yields that source as a descriptor
+ * without adding a one-item control. A picker, when present, is authoritative.
  */
 export function sourcesOrFallback(
     sources: readonly SpecSource[],
@@ -50,11 +35,8 @@ export function sourcesOrFallback(
 }
 
 /**
- * The active source: the one marked pressed, else the first.
- *
- * Falling back to the first rather than to "none" is what makes the picker's initial state
- * describable in markup alone — the server marks its default and the lane agrees, but a picker that
- * somehow arrives with nothing pressed still compares against something rather than going blank.
+ * The source marked pressed, else the first — so a picker with nothing pressed still compares
+ * against something.
  */
 export function activeSource(
     sources: readonly SpecSource[],
@@ -69,31 +51,21 @@ export function activeSource(
 }
 
 /**
- * Whether [source] is the imported design spec rather than another catalog's render.
- *
- * A missing source means the single-source lane, which has only ever shown the kit reference — so
- * "no source" answers yes, and the catalog that declares no pairing keeps the lane it had.
+ * Whether [source] is the imported spec. A missing source means the single-source lane, which only
+ * shows the kit reference.
  */
 export function isSpecSource(source: SpecSource | null): boolean {
     return !source || source.id === KIT_SOURCE;
 }
 
-/**
- * Whether the lane offers a genuine choice.
- *
- * One source is not a picker with a single button — it is no picker. A catalog that declares no
- * `compareWith` pairing therefore sees exactly the lane it saw before, with no control that acts on
- * nothing.
- */
+/** Whether the lane offers a genuine choice; one source means no picker. */
 export function offersChoice(sources: readonly SpecSource[]): boolean {
     return sources.length > 1;
 }
 
 /**
- * Whether switching to [nextId] is worth doing.
- *
- * Re-entering the lane costs a raster request and a fresh normalisation pass, so re-picking the
- * source already showing has to be a no-op rather than a cheap-looking rebuild.
+ * Whether switching to [nextId] is worth a raster request and re-normalisation; re-picking the
+ * current source is a no-op.
  */
 export function changesSource(
     sources: readonly SpecSource[],
@@ -107,12 +79,8 @@ export function changesSource(
 }
 
 /**
- * Whether a resting-bar source chip should close the comparison lane.
- *
- * Every source on that bar is a toggle, not just the imported kit. A pressed chip means its source
- * is already on the stage, so pressing it again returns to the render; an unpressed peer still
- * selects its source. Keeping this as one decision prevents the primary and peer click handlers
- * from quietly acquiring different interaction rules again.
+ * Whether a resting-bar source chip should close the comparison lane. Every chip toggles: pressing
+ * a pressed one returns to the render, an unpressed one selects its source.
  */
 export function closesSource(
     onComparisonLane: boolean,
@@ -123,13 +91,8 @@ export function closesSource(
 }
 
 /**
- * What the lane should say about the panel it is showing.
- *
- * The two kinds are NOT symmetric and the label is where that is admitted. The kit reference is a
- * specification — static, imported, fixed at publish time. The sibling's panel is another catalog's
- * RENDER, produced under its own theme, knobs and overrides rather than the ones that produced the
- * render beside it. Implying they are the same kind of thing is the detail most likely to make this
- * feature quietly misleading, so a source that carries a caveat states it.
+ * What the lane says about the panel it shows. A sibling's panel is another catalog's render under
+ * its own theme and overrides, not a specification, so a source carrying a caveat states it.
  */
 export function sourceNote(source: SpecSource | null): string {
     if (!source) return "";
@@ -137,13 +100,8 @@ export function sourceNote(source: SpecSource | null): string {
 }
 
 /**
- * What the address bar should carry for the picked source: its id, or nothing.
- *
- * Nothing is the right answer twice over. A lane with no choice has no state worth naming, and the
- * FIRST source — the one the picker is served pressed — is the default the page already opens on,
- * so spelling it out would pin a redundant parameter onto every link. Only a departure from that
- * default is a fact about the page, and it is the one a refresh used to forget (the strip under
- * the render and the pair on the stage both silently went back to the kit).
+ * The address-bar value for the picked source: its id, or nothing for a lane with no choice or for
+ * the default first source.
  */
 export function sourceParam(
     sources: readonly SpecSource[],
@@ -156,11 +114,8 @@ export function sourceParam(
 }
 
 /**
- * Which source a URL asks for: the named one when the picker offers it, else the default.
- *
- * Falling back rather than refusing is what makes a stale or mistyped `?specSource=` harmless — the
- * page opens on the pair it always opened on, and the next sync drops the parameter it could not
- * honour.
+ * The source a URL asks for, falling back to the default so a stale or mistyped `?specSource=` is
+ * harmless.
  */
 export function sourceForParam(
     sources: readonly SpecSource[],

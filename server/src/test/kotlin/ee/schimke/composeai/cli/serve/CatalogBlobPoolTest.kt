@@ -12,13 +12,9 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * Coverage for [CatalogBlobPool] — the content-addressed store that lets a catalog's heavy bytes
- * (the executable `liveBundle`, its per-preview splits, the externalised resource pool) outlive
- * both a reload and, given a durable root, the process.
- *
- * The load-bearing properties are that a hit is only ever returned once its bytes hash back to the
- * name it is filed under, and that a pool reopened over the same directory reads what the previous
- * one wrote. Everything else here guards those two.
+ * Coverage for [CatalogBlobPool], the content-addressed store for a catalog's heavy bytes. The
+ * load-bearing properties: a hit is returned only once its bytes hash to its name, and a pool
+ * reopened over the same directory reads what the previous one wrote.
  */
 class CatalogBlobPoolTest {
 
@@ -49,9 +45,8 @@ class CatalogBlobPoolTest {
 
   @Test
   fun `bytes that do not hash to the declared digest are refused`() {
-    // Fail-closed: the declared sha256 is the only thing that makes a fetched classpath entry safe
-    // to hand to a classloader, so bytes that do not match it are not merely uncached — they are
-    // not returned at all.
+    // Fail-closed: bytes not matching the declared sha256 are not returned at all, since that hash
+    // is what makes a classpath entry safe to load.
     val pool = CatalogBlobPool(root())
     val declared = sha("what the manifest declared".toByteArray())
 
@@ -223,8 +218,8 @@ class CatalogBlobPoolTest {
 
   @Test
   fun `a read whose blob was corrupted on disk is a miss, not wrong bytes`() {
-    // Same guarantee the produce-once lane gets, on the lane that answers request-path reads: the
-    // blob's name is its digest, so bytes that no longer hash to it are dropped rather than served.
+    // The request-path lane gets the same guarantee: bytes no longer hashing to their name are
+    // dropped.
     val pool = CatalogBlobPool(root())
     val url = "https://raw.githubusercontent.com/o/r/$COMMIT/images/button/ideal.png"
     val bytes = "a baked png".toByteArray()
@@ -247,9 +242,8 @@ class CatalogBlobPoolTest {
 
   @Test
   fun `a hit does not re-stamp a blob that was already touched recently`() {
-    // Once the small-asset lane reads through this pool, a touch per hit is a metadata write on the
-    // request path. Re-stamping is throttled to a resolution the sweeper's hour-wide grace window
-    // cannot tell the difference at.
+    // Touch-on-hit is a metadata write on the request path, so re-stamping is throttled below what
+    // the sweeper's hour-wide grace window can distinguish.
     val now = AtomicLong(1_000_000L)
     val pool = CatalogBlobPool(root(), clock = { now.get() })
     val url = "https://raw.githubusercontent.com/o/r/$COMMIT/images/button/ideal.png"
@@ -269,10 +263,8 @@ class CatalogBlobPoolTest {
 
   @Test
   fun `re-keying bytes that are already held refreshes them against the sweeper`() {
-    // The republish case, and the common one: a regenerated catalog carries mostly byte-identical
-    // assets at a NEW commit, so every unchanged asset's fresh URL dedupes onto the blob already
-    // here. Without a stamp that blob keeps the time it was FIRST written, and the next sweep
-    // evicts precisely the assets that are current.
+    // A republish dedupes unchanged assets onto existing blobs; without a fresh stamp the next
+    // sweep would evict exactly the current assets.
     val now = AtomicLong(1_000_000L)
     val pool = CatalogBlobPool(root(), maxBytes = 0, graceMillis = 60_000, clock = { now.get() })
     val bytes = "an unchanged asset".toByteArray()
@@ -292,9 +284,8 @@ class CatalogBlobPoolTest {
 
   @Test
   fun `occupancy is published by the last census, not measured per read`() {
-    // /status.json is polled, so a snapshot must not walk the pool. Proven by changing the
-    // filesystem behind the pool's back: a reported count that did not move is a reported count
-    // that was not measured, and the next sweep is what corrects it.
+    // `/status.json` is polled, so a snapshot must not walk the pool; the count is corrected by the
+    // next sweep.
     val pool = CatalogBlobPool(root(), graceMillis = 0)
     val bytes = "a baked png".toByteArray()
     pool.write("https://raw.githubusercontent.com/o/r/$COMMIT/images/a.png", bytes)
@@ -327,9 +318,7 @@ class CatalogBlobPoolTest {
 
   @Test
   fun `clearing reclaims abandoned scratch files too`() {
-    // A process killed mid-produce leaves a bundle-sized file under tmp/ that no census counts and
-    // no read will ever want. Without this an operator could clear the cache, be told it holds
-    // nothing, and still find the volume full.
+    // A process killed mid-produce leaves a large file under tmp/; the census must count it.
     val root = root()
     val pool = CatalogBlobPool(root)
     pool.write("https://raw.githubusercontent.com/o/r/$COMMIT/images/a.png", "real".toByteArray())
@@ -365,9 +354,8 @@ class CatalogBlobPoolTest {
 
   @Test
   fun `a pool reports whether persistence was configured and what it adopted`() {
-    // `persistenceConfigured` reports a decision; `adopted` is the evidence. Everything else looks
-    // the same either way: a temp pool fills, serves within-process hits and reports climbing
-    // writes, right up until the container is recreated and none of it is there.
+    // `persistenceConfigured` reports a decision; `adopted` is the evidence that the pool actually
+    // persists.
     val root = root()
     val first = CatalogBlobPool(root, persistenceConfigured = true)
     assertFalse(
@@ -404,10 +392,8 @@ class CatalogBlobPoolTest {
 
   @Test
   fun `the audit catches a key filed against the wrong content`() {
-    // The one failure content-addressing cannot see. Every blob is verified against its OWN name,
-    // so a mis-filed pointer — key K naming content sha S when S is not what K holds — passes every
-    // existing check: the blob under S hashes to S perfectly well. Simulated here by writing one
-    // key's bytes and then auditing it against what the branch actually serves.
+    // A mis-filed pointer (key K naming sha S that K doesn't hold) passes every self-verification;
+    // only an audit against what the branch serves catches it.
     val pool = CatalogBlobPool(root())
     val url = "https://raw.githubusercontent.com/o/r/$COMMIT/images/button.png"
     pool.write(url, "the wrong asset".toByteArray())
@@ -518,9 +504,8 @@ class CatalogBlobPoolTest {
 
   @Test
   fun `an unwritable root degrades to no caching rather than failing the load`() {
-    // Persistence is an optimisation. A box with a read-only or full disk must load catalogs
-    // exactly as it did before this existed, which means every call here answers null or refetches
-    // — never throws.
+    // Persistence is an optimisation: an unwritable disk must yield null or refetches, never
+    // throws.
     val root = File(root(), "nested").apply { writeText("not a directory") }
     val pool = CatalogBlobPool(root)
     val bytes = "x".toByteArray()

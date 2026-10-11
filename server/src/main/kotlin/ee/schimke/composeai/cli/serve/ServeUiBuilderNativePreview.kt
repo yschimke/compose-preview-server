@@ -49,67 +49,42 @@ import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 internal class ServeUiBuilderNativePreview(
   private val executor: ScreenGeneratorComposeExportExecutor,
   /**
-   * The compile lane, as a function rather than the adapter itself.
-   *
-   * Production passes `{ adapter.compile(it, isSecurityChecked = true) }`, and the `true` belongs
-   * at that call site rather than in here: it is the wiring that knows the `ui-builder-export`
-   * capability was checked and that the source came from the generator. A seam also means this
-   * class can be tested without standing up a Kotlin compiler and a catalog bundle, which is the
-   * difference between testing the lane and not testing it.
+   * The compile lane as a function. Production passes `{ adapter.compile(it, isSecurityChecked =
+   * true) }`: the `true` belongs at the call site that knows the export capability was checked and
+   * the source is generated. Also testable without a compiler or bundle.
    */
   private val compile: (UiBuilderGeneratedCompose) -> PlaygroundRunResponse,
   /**
-   * Where each tagged node drew on the frame the compile lane produced, keyed by design node id.
-   *
-   * A second seam beside [compile] rather than a field on its response: `PlaygroundRunResponse` is
-   * published from compose-ai-tools' `render-host` and cannot gain one from this repository. It
-   * does not need to — the bounds are a second capture, and this class owns the payload they ride
-   * on. Defaults to no bounds, which is what a host with no semantics-capable backend has and what
-   * every test that only cares about the frame wants: the overlay is an addition to the picture,
-   * never a precondition for it.
+   * Where each tagged node drew on the compiled frame, keyed by design node id. A separate seam
+   * because `PlaygroundRunResponse` is published from `render-host`. Defaults to no bounds; the
+   * overlay is an addition, never a precondition.
    */
   private val captureNodeBounds: (PlaygroundRunResponse) -> Map<String, AnnotationBounds> = {
     emptyMap()
   },
   /**
-   * Where a design's catalog is compiled and rendered, or null when this host cannot.
-   *
-   * A UI-builder catalog id and a served-catalog id are not the same namespace and only looked like
-   * it while `m3-catalog` was the only catalog with a native lane: a `wear-m3` design has to be
-   * built against a bundle that carries `androidx.wear.compose:compose-material3`, which the host
-   * serves under whatever `--catalogs` id its operator gave it. The daemon comes with it — Wear
-   * Compose is an Android AAR, so that bundle is a `compose-android` one — which is why this
-   * returns the pair rather than a string.
-   *
-   * Defaults to the identity mapping on the desktop daemon, which is exactly what this lane did
-   * before there was anything else to do.
+   * Where a design's catalog is compiled and rendered, or null. Builder ids and served ids are
+   * different namespaces (a `wear-m3` design needs a bundle carrying Wear Material 3, served under
+   * whatever id), and the bundle decides the daemon, hence a pair. Defaults to identity on the
+   * desktop daemon.
    */
   private val nativeTarget: (String) -> UiBuilderNativeTarget? = {
     UiBuilderNativeTarget(catalog = it, confType = UiBuilderGeneratedCompose.COMPOSE_CMP)
   },
   /**
-   * The component packs this host admits, by id — the same set the export executor holds.
-   *
-   * A design that uses a pack's components is compiled against the **pack's** bundle rather than
-   * its catalog's: `confetti-mobile`'s classpath carries Material 3 and Confetti, and
-   * `m3-catalog`'s carries only the first, so the pack's is the one that can resolve every import.
-   * Two packs in one design have no such bundle and are refused with [MIXED_PACKS].
+   * Component packs this host admits (same set as the export executor). A design using a pack
+   * compiles against the pack's bundle, which carries both the pack and Material 3; two packs have
+   * no common bundle and are refused with [MIXED_PACKS].
    */
   private val packs: Set<String> = emptySet(),
   /**
-   * Which player draws a Wear widget's recorded document (`--ui-builder-widget-player`).
-   *
-   * The recording is the AndroidX writer's either way, so the lane stays authoritative under both;
-   * see [UiBuilderWidgetPlayer] for why the CMP one is the default.
+   * Which player draws a Wear widget's recorded document (`--ui-builder-widget-player`); the
+   * recording is AndroidX's either way. See [UiBuilderWidgetPlayer].
    */
   private val widgetPlayer: UiBuilderWidgetPlayer = UiBuilderWidgetPlayer.DEFAULT,
   /**
-   * Whether a served catalog's bundle carries the CMP player (`rc-player-compose`), by served id.
-   *
-   * The [UiBuilderWidgetPlayer.CMP] entry imports it, so a bundle without it would fail every
-   * widget compile on an unresolved reference; such a bundle is drawn with
-   * [UiBuilderWidgetPlayer.ANDROIDX] instead. Defaults to yes, which is what every test that does
-   * not ask about it wants.
+   * Whether a served bundle carries the CMP player (`rc-player-compose`), by served id; without it
+   * widgets use [UiBuilderWidgetPlayer.ANDROIDX]. Defaults to yes.
    */
   private val carriesCmpWidgetPlayer: (catalog: String) -> Boolean = { true },
 ) : UiBuilderNativePreviewLane {
@@ -118,9 +93,8 @@ internal class ServeUiBuilderNativePreview(
     document: DesignDocumentV1,
     widgetHostShape: WearWidgetHostShape,
   ): UiBuilderNativePreviewOutcome {
-    // Asked before anything is generated: a design drawing on two packs has no bundle to compile
-    // against whatever its Kotlin says, and this is a sentence about the design rather than about
-    // a record, so it should not be pre-empted by a missing record for the second pack.
+    // Checked before generation: two packs have no bundle regardless of the Kotlin, and that
+    // design-level sentence shouldn't be pre-empted by a missing record.
     val usedPacks = ScreenGeneratorComposeExportExecutor.packsUsedBy(document, packs)
     if (usedPacks.size > 1) {
       return UiBuilderNativePreviewOutcome.Refused(
@@ -132,17 +106,10 @@ internal class ServeUiBuilderNativePreview(
         ),
       )
     }
-    // The design's own catalog, not a default. A design pinned to one catalog and compiled against
-    // another is a screen made of different components that happens to type-check. A design using
-    // a pack is compiled against the pack's bundle, which carries both the pack's classes and the
-    // Material 3 its catalog names; the catalog's own bundle carries only the latter. Otherwise the
-    // design's own catalog, exactly as before there were packs.
-    //
-    // Resolved ONCE: the source's typefaces are written for this bundle — a Compose Multiplatform
-    // Desktop one (m3-catalog's) has no Google Fonts `GoogleFont` and gets `SystemFont` lookups —
-    // and catalog routing can change under a refresh, so a second lookup could compile that
-    // source against the other kind of classpath. Its absence is refused after generation, so a
-    // design the generator cannot express still hears that first.
+    // The design's own catalog (or its single pack), never a default: compiling against another
+    // catalog would type-check a different screen. Resolved once, since typefaces are generated for
+    // this bundle's kind and routing may change under a refresh. A missing target is refused after
+    // generation so design errors are reported first.
     val catalogSystemId = usedPacks.singleOrNull() ?: document.catalogPin.systemId
     val resolvedTarget = nativeTarget(catalogSystemId)
     val typefaces =
@@ -164,9 +131,8 @@ internal class ServeUiBuilderNativePreview(
         is ScreenGeneratorComposeExportExecutor.Generated.Refused ->
           return UiBuilderNativePreviewOutcome.Refused(outcome.code, outcome.reasons)
       }
-    // Refused before the compile rather than after, and by name: "this host has no bundle for
-    // `wear-m3`" is an operator's line of configuration, where a compiler error about an
-    // unresolved `androidx.wear.compose.material3.ScreenScaffold` reads like a bug in the design.
+    // Refused by name before compiling: a missing bundle is host configuration, and a compiler
+    // error about Wear imports would read as a design bug.
     val target =
       resolvedTarget
         ?: return UiBuilderNativePreviewOutcome.Refused(
@@ -184,10 +150,8 @@ internal class ServeUiBuilderNativePreview(
         listOf("Remote content requires an Android capture/player bundle for `$catalogSystemId`"),
       )
     }
-    // A widget is measured by its container, not by the screen its design environment describes:
-    // the generator reports the frame the host draws — the content box plus the padding this design
-    // authored — and rendering at the environment's size instead would put a 216×124 container in
-    // the middle of a watch face.
+    // A widget renders at its container frame (content box plus authored padding), not the design
+    // environment's screen size.
     val widget = generated.widgetFrame
     val player =
       if (
@@ -217,23 +181,16 @@ internal class ServeUiBuilderNativePreview(
           widgetPlayer = player,
         )
       )
-    // Only asked for a frame: a compile that failed has no render to read bounds off, and asking
-    // anyway would stand up a second daemon session to answer nothing.
-    // A widget's body is Remote Compose rather than Compose UI, so its nodes carry no test tag and
-    // the annotation lane has nothing to report. Asked only where an answer exists, rather than
-    // standing up a second daemon session to come back empty.
+    // Bounds only for a rendered frame, and not for widgets or Remote content, whose nodes carry no
+    // test tags; avoids a pointless second daemon session.
     val bounds =
       if (response.image == null || widget != null || generated.remoteContent) emptyMap()
       else captureNodeBounds(response)
-    // The tag set is reported rather than inferred by the caller: it is what a bounds lookup is
-    // keyed by, and a client that recomputed it from the document would drift the moment the
-    // projection stopped tagging something.
+    // The tag set is reported, not inferred by clients, since it keys the bounds lookup.
     return UiBuilderNativePreviewOutcome.Rendered(
       response,
-      // Nothing is tagged in recorded Remote content, including widgets. Claiming tags would look
-      // up
-      // bounds for every node and find none — a silent "the overlay is broken" where the truth is
-      // that this frame has none.
+      // Recorded Remote content (including widgets) has no tags; claiming them would make the
+      // overlay look broken.
       if (widget != null || generated.remoteContent) emptyList() else document.nodes.keys.sorted(),
       bounds,
       failure = if (response.image == null) response.noFrameReason() else null,
@@ -243,43 +200,30 @@ internal class ServeUiBuilderNativePreview(
 
   internal companion object {
     /**
-     * The design is fine and this host cannot build it: no served bundle is mapped to its catalog.
-     *
-     * Distinct from the generator's own codes on purpose. `UNPROVEN_CALL_SITE` and
-     * `RECORD_FREE_DESIGN` are things to change about the *design*; this one is a thing to change
-     * about the *host*, and telling a designer to edit their screen because an operator has not
-     * served a Wear bundle is the wrong half of the system to send them to.
+     * The design is fine but this host can't build it: no served bundle is mapped to its catalog.
+     * Distinct from generator codes, which point at the design; this points at host configuration.
      */
     const val NO_NATIVE_CATALOG = "NO_NATIVE_CATALOG"
 
     /**
-     * The design draws on more than one component pack, and no single served bundle links them all.
-     * A thing to change about the design, unlike [NO_NATIVE_CATALOG].
+     * The design uses more than one component pack and no bundle links them all; a design problem,
+     * unlike [NO_NATIVE_CATALOG].
      */
     const val MIXED_PACKS = "MIXED_PACKS"
   }
 }
 
 /**
- * Which served bundle, on which daemon, a UI-builder catalog's designs are rendered against.
- *
- * Two fields rather than one because they are not independently choosable: a bundle's dependency
- * set decides its backend, so naming a bundle names a daemon. Carrying them together is what stops
- * a host from asking the Skiko daemon to load an Android AAR and reporting the resulting compile
- * failure as the design's fault.
+ * Which served bundle, on which daemon, a builder catalog's designs render against. Together
+ * because a bundle's dependencies decide its backend, so the Skiko daemon is never asked to load an
+ * Android AAR.
  */
 data class UiBuilderNativeTarget(val catalog: String, val confType: String)
 
 /**
- * Why this response carries no frame, in one sentence a designer can act on.
- *
- * The compile lane reports a failure in whichever field fits it, and only one of those is an
- * `exception`: a snippet that does not compile comes back with ERROR [diagnostics] and a null
- * exception, because the playground frontend draws those as inline squiggles rather than as a
- * message. The UI builder has no such editor to squiggle — it sent a design, not source — so a
- * caller that forwarded the exception alone reported "compiled, no frame" for a compile that
- * failed, which is the one reading that is never true. Read every field, in the order that puts the
- * most specific cause first, and fall back to naming the renderer rather than to silence.
+ * Why this response has no frame, in one actionable sentence. Compile errors arrive as ERROR
+ * [diagnostics] with a null exception (the playground draws them inline), so every field is read,
+ * most specific first, falling back to naming the renderer.
  */
 internal fun PlaygroundRunResponse.noFrameReason(): String {
   exception
@@ -293,17 +237,14 @@ internal fun PlaygroundRunResponse.noFrameReason(): String {
     val hidden = errors.size - MAX_REPORTED_DIAGNOSTICS
     return if (hidden > 0) "$shown\n… and $hidden more" else shown
   }
-  // Compiled, a @Preview was discovered (that failure sets `exception`), and the render seam still
-  // came back empty: no sidecar for this mode, or a render this host swallowed. Say which half of
-  // the lane it was, so the next question is asked of the host rather than of the design.
+  // Compiled and discovered, but the render seam returned nothing (no sidecar, or a swallowed
+  // render): point at the host, not the design.
   return "the design compiled, but this host's renderer produced no frame for it"
 }
 
 /**
- * One diagnostic as text: the compiler's own message, anchored where it has a position.
- *
- * [PlaygroundDiagnostic.line]/[PlaygroundDiagnostic.ch] are 0-based, because CodeMirror is; a human
- * counts from one, so they are shifted here and nowhere else.
+ * One diagnostic as text, anchored where it has a position. Lines and columns are 0-based
+ * (CodeMirror) and shifted to 1-based here only.
  */
 private fun PlaygroundDiagnostic.render(): String {
   val anchor =
@@ -320,19 +261,13 @@ private fun PlaygroundDiagnostic.render(): String {
 private const val MAX_REPORTED_DIAGNOSTICS = 5
 
 /**
- * The seam `ServeHttpServer` takes, so the lane itself can stay internal.
- *
- * A public constructor parameter cannot name an internal type, and widening
- * [ScreenGeneratorComposeExportExecutor] and `ComponentRecordSource` to satisfy that would export
- * three implementation types to make one wiring possible.
+ * The seam `ServeHttpServer` takes, keeping the lane internal (a public constructor can't name
+ * internal types).
  */
 fun interface UiBuilderNativePreviewLane {
   /**
-   * @param widgetHostShape which host container to frame a Wear widget design in. Ignored by every
-   *   other design.
-   *
-   * No default on the parameter, because a `fun interface`'s abstract method may not carry one —
-   * the overload below is where a caller with no opinion goes.
+   * @param widgetHostShape which host container frames a Wear widget design; ignored otherwise. A
+   *   `fun interface` method can't have defaults; see the overload below.
    */
   fun render(
     document: DesignDocumentV1,
@@ -341,41 +276,30 @@ fun interface UiBuilderNativePreviewLane {
 }
 
 /**
- * Render in the frame the editor opens on, for a caller that has no opinion about the shape.
- *
- * The MCP tool and the local runner are both such callers: they ask for "the picture of this
- * design", and the squircle is what that meant before a shape could be chosen.
+ * Render in the editor's default frame (the squircle), for callers with no shape preference (MCP
+ * tool, local runner).
  */
 fun UiBuilderNativePreviewLane.render(document: DesignDocumentV1): UiBuilderNativePreviewOutcome =
   render(document, WearWidgetHostShape.Default)
 
 sealed interface UiBuilderNativePreviewOutcome {
   /**
-   * The compile lane's answer, first frame and stream token included.
-   *
-   * [nodeBounds] maps a design node id to the box it drew, in the frame's own render pixels — the
-   * space [imageBase64][NativePreviewResultV1.imageBase64] is in, so a client scales both by the
-   * one factor it already computes to fit the image. A node the render never placed simply has no
-   * entry, which is the honest outcome and the one `UiBuilderInspectionSnapshot` already gives a
-   * lazy slot that never composed.
+   * The compile lane's answer with first frame and stream token. [nodeBounds] maps node ids to
+   * boxes in the frame's render pixels (the [imageBase64][NativePreviewResultV1.imageBase64]
+   * space); unplaced nodes have no entry.
    */
   data class Rendered(
     val response: PlaygroundRunResponse,
     val taggedNodeIds: List<String>,
     val nodeBounds: Map<String, AnnotationBounds> = emptyMap(),
     /**
-     * Why there is no frame, or null when there is one.
-     *
-     * Derived here rather than at each caller so the HTTP route and the MCP tool cannot report a
-     * different reason for the same response — and so neither has to know that the compile lane
-     * spreads its failures across `exception` and `diagnostics`. See [noFrameReason].
+     * Why there is no frame, or null; derived here ([noFrameReason]) so HTTP and MCP report the
+     * same reason.
      */
     val failure: String? = null,
     /**
-     * What the frame draws differently from the design though it rendered: today, theme typefaces
-     * written as desktop `SystemFont` lookups (`TYPEFACE_SYSTEM_FONT_LOOKUP`), which draw in the
-     * platform's default face wherever the family is not installed on this host. Without it the
-     * frame would look authoritative about type it never had.
+     * How the frame differs from the design though it rendered, e.g. typefaces drawn as
+     * `SystemFont` lookups (`TYPEFACE_SYSTEM_FONT_LOOKUP`) in the default face.
      */
     val warnings: List<String> = emptyList(),
   ) : UiBuilderNativePreviewOutcome

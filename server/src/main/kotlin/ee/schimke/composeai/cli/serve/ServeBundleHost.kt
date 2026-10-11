@@ -26,270 +26,163 @@ import okio.FileSystem
 import okio.Path.Companion.toOkioPath
 
 /**
- * A [ServeHost] backed by a **portable bundle** on disk (the `ServeBundle` / WebEmbed layout:
- * `previews/<id>.png` beside an `index.html`), not a daemon. This is the shared/public mode: a
- * pre-rendered bundle is uploaded once and served read-only, with no checkout, build, or render
- * session. Overrides are ignored (the bundle is whatever was baked); there is no live stream lane,
- * so connections transparently use the snapshot fallback that returns these PNGs.
- *
- * Cheap and stateless (just file reads), so the registry pins it resident rather than suspending
- * it.
+ * A [ServeHost] backed by a portable bundle on disk (`previews/<id>.png` beside an `index.html`),
+ * not a daemon: the shared/public mode where a pre-rendered bundle is served read-only. Overrides
+ * are ignored and there is no live stream lane. Cheap and stateless, so the registry pins it
+ * resident.
  */
 class ServeBundleHost(
   private val bundleDir: File,
   override val label: String,
   /**
-   * Producer-trust verdict for this bundle, attached at ingestion ([ServeBundleStore]) so the API /
-   * viewer can badge it. Defaults to `Unverified` for bundles registered without a check (e.g. a
-   * `--bundles <dir>` directory, which has no original signed file to verify).
+   * Producer-trust verdict attached at ingestion ([ServeBundleStore]) for badging. Defaults to
+   * `Unverified` for unchecked bundles (e.g. a `--bundles` directory).
    */
   val trust: BundleVerifier.Verdict = BundleVerifier.Verdict.Unverified("not checked"),
   /**
-   * Whether this host serves a **design-system catalog** rather than a plain bundle.
-   *
-   * The type cannot answer this. `ServeBundleHost` backs three different things — a catalog
-   * published by [ServeCatalogStore], a `--bundles` directory ([ServeRunner]), and an uploaded
-   * portable bundle ([ServeBundleStore]) — and only the first has a `catalog.json` behind it. The
-   * other two are plain bundles that happen to share the implementation, so an `is ServeBundleHost`
-   * test reads them as catalogs too.
-   *
-   * Set true only where a catalog is actually being built. Callers that speak *about a catalog* —
-   * the page-scoped issue report says "this catalog" — need this rather than the type, or a plain
-   * uploaded bundle is offered a report naming a catalog it does not have (#4728 review).
-   *
-   * Not inferred from [title] / [provenance] / [catalogSource]: those are all individually optional
-   * on a real catalog, so absence proves nothing and a catalog declaring none of them would be
-   * misread as plain.
+   * Whether this host serves a design-system catalog rather than a plain bundle. The type can't
+   * tell: it also backs `--bundles` directories and uploaded bundles. Set only where a catalog is
+   * built; not inferred from [title] / [provenance] / [catalogSource], which are all optional on a
+   * real catalog.
    */
   val isCatalog: Boolean = false,
   /**
-   * Human display title for a design-system catalog (e.g. "Compose Material 3"), taken from
-   * `catalog.json`'s `title`. Null for a plain uploaded bundle (no such metadata). Surfaced on the
-   * public server's home index so each system card reads as a name, not a bare id.
+   * Display title from `catalog.json`'s `title`; null for a plain bundle. Shown on the home index
+   * cards.
    */
   val title: String? = null,
-  /**
-   * Short one-line descriptor for a catalog card — the underlying library coordinate(s) from
-   * `catalog.json`'s `library`. Null when the catalog declares none (or for a plain bundle).
-   */
+  /** One-line card descriptor from `catalog.json`'s `library`; null when undeclared. */
   val subtitle: String? = null,
-  /**
-   * The stage background surface the catalog declared (`catalog.json`'s `display.surface`) —
-   * `"light"` / `"dark"` / null. When `"dark"`, the front door and grid back this system's stickers
-   * on a dark stage. Null ⇒ the server falls back to its name-based default.
-   */
+  /** Declared stage surface (`"light"`/`"dark"`); null ⇒ the server's name-based default. */
   val stageSurface: String? = null,
   /**
-   * What KIND of catalog this is, as it declared itself (`catalog.json`'s `display.role`), and
-   * through that what shape its component pages take — see [ServeWeb.PageRole], which parses it.
-   *
-   * Carried as the catalog's own string rather than as the parsed role so this host stays a record
-   * of what was published: an unknown role is a catalog from a newer producer, and reading it back
-   * out of here has to say so rather than report the default it degraded to.
+   * The catalog's declared `display.role`, kept as the raw string so an unknown role from a newer
+   * producer stays visible. Parsed by [ServeWeb.PageRole].
    */
   val catalogRole: String? = null,
   /**
-   * The catalog's own colour palette, projected onto the serve chrome's CSS custom properties by
-   * [ServeThemeCss] from the delivery branch's `tokens.dtcg.json` — so this system's pages are
-   * framed in its own colours rather than the built-in indigo shell. Null for a plain uploaded
-   * bundle, or a catalog that publishes no (usable) tokens; the pages then keep the built-in
-   * chrome.
+   * The catalog's palette as serve-chrome CSS custom properties ([ServeThemeCss]); null keeps the
+   * built-in chrome.
    */
   val webThemeCss: String? = null,
   /**
-   * The hero preview the catalog declared (`display.hero`) — a `componentId` (e.g.
-   * `"Template/TimeText"`) or a flattened preview id. Resolved against [previews] by
-   * [declaredHeroPreviewId]; null ⇒ the server picks a representative itself.
+   * Declared hero (`display.hero`), a `componentId` or preview id resolved by
+   * [declaredHeroPreviewId]; null ⇒ the server picks one.
    */
   val declaredHero: String? = null,
   /**
-   * The local dir holding a catalog's `figma/<slug>.svg` exports (+ `<slug>.figma-raster/` crops),
-   * populated by [ServeCatalogStore]. When set, {@link renderSvg} serves the baked editable vector
-   * per preview; null for a plain uploaded bundle (which then 404s the `.svg` lane).
+   * Local dir of the catalog's `figma/<slug>.svg` exports and crops, filled by [ServeCatalogStore];
+   * null ⇒ the `.svg` lane 404s.
    */
   private val figmaDir: File? = null,
   /**
-   * Provenance of a served design-system catalog (the trusted `repo@branch` it was fetched from,
-   * when it was generated, and the compose-ai-tools + design-parity versions that produced it),
-   * populated by [ServeCatalogStore] from the catalog's `catalog.json` + fetch origin. Null for a
-   * plain uploaded bundle (no such metadata). Surfaced on the catalog landing's provenance strip.
+   * Provenance of a served catalog (source `repo@branch`, generation time, producing versions) for
+   * the landing's provenance strip; null for a plain bundle.
    */
   val provenance: ServeWeb.CatalogProvenance? = null,
   /**
-   * The catalog's **source** (repo/ref/module of the Kotlin), from `catalog.json`'s `source` — set
-   * by [ServeCatalogStore]. Distinct from [provenance] (the delivery branch): this is what the
-   * viewer builds a per-preview GitHub source link from, joining `module` + the preview's
-   * module-relative `sourceFile`. Null for a plain uploaded bundle or a catalog that declared no
-   * source.
+   * The catalog's Kotlin source (repo/ref/module), distinct from [provenance] (the delivery
+   * branch); used for per-preview GitHub source links.
    */
   val catalogSource: ServeWeb.CatalogSource? = null,
   /**
-   * The sibling system this catalog is a parallel rendition of (`catalog.json`'s `compareWith`),
-   * populated by [ServeCatalogStore]. With [parallelByComponentId] it is what lets the viewer's
-   * spec lane offer the counterpart's render as a second comparison source: this says WHICH SYSTEM,
-   * that says WHICH COMPONENT in it, and neither half resolves alone.
-   *
-   * Null for a plain uploaded bundle and for every catalog that declares no pairing.
+   * The sibling system this catalog is a parallel rendition of; with [parallelByComponentId] it
+   * offers the counterpart's render as a comparison source. Null when undeclared.
    */
   val compareWithSystem: String? = null,
   /**
-   * `componentId` → the counterpart's `componentId` in [compareWithSystem], from each published
-   * component's `parallel`. Empty for a catalog that declares no pairing, or one published before
-   * `parallel` reached the manifest (yschimke/compose-ai-tools#4631) — in which case the lane
-   * simply isn't offered, exactly as it wasn't before.
+   * `componentId` → counterpart `componentId` in [compareWithSystem]. Empty when undeclared or
+   * published before `parallel` existed.
    */
   val parallelByComponentId: Map<String, String> = emptyMap(),
   /**
-   * `componentId` → the OTHER catalogs that publish this same component, from each published
-   * component's `related`, normalised by [ServeRelatedCatalogs.declaredFor] at load.
-   *
-   * Not a second [parallelByComponentId]. That is one counterpart in the one [compareWithSystem]
-   * sibling and answers a parity question; this is any number of directed links to catalogs that
-   * are ABOUT this component — its AndroidX sample call sites, say — which is why it had to be a
-   * list and could not overload `compareWith`, already spent here on the Remote Compose rendition
-   * (yschimke/compose-ai-tools#5398).
-   *
-   * Declared, not resolved: an entry naming a system this box does not serve is still here.
-   * [ServeRelatedCatalogs.resolve] is what turns these into links against what is registered right
-   * now, because that changes between requests and this map must not.
-   *
-   * Empty for a catalog that declares none, and for every catalog published before the field
-   * reached the manifest.
+   * `componentId` → other catalogs publishing this component ([ServeRelatedCatalogs.declaredFor]).
+   * Unlike [parallelByComponentId] (one parity counterpart), these are any number of directed
+   * "about" links. Declared, not resolved: [ServeRelatedCatalogs.resolve] matches them against what
+   * is registered per request.
    */
   val relatedByComponentId: Map<String, List<ServeRelatedCatalogs.Declared>> = emptyMap(),
   /**
-   * Why this session is snapshot-only, when it is — populated by [ServeCatalogStore] for the baked
-   * host it terminally registers (e.g. a catalog with no `liveBundle`), and left empty for a plain
-   * uploaded bundle or for the baked host that merely *fronts* a live daemon (that session isn't
-   * degraded). Surfaced by the viewer banner + `/api/previews`. See [ServeDegradation].
+   * Why this session is snapshot-only, set by [ServeCatalogStore] for a terminally registered baked
+   * host; empty for plain bundles and for a baked host fronting a daemon. See [ServeDegradation].
    */
   override val degradations: List<ServeDegradation> = emptyList(),
   /**
-   * Catalog previews to list that have **no baked PNG on disk** — the `catalog.json` `deferred[]`
-   * records, which CI declared live-only instead of rasterising (issue #2965). Supplied by
-   * [ServeCatalogStore] ONLY for the baked host that fronts a live daemon, so each of these ids has
-   * a daemon twin that renders it on request; the terminally-registered baked-only host gets none
-   * (a card whose every render 404s is worse than an absent one). They join [previews] with their
-   * `previews/variants.json` metadata like any other catalog preview — so they sit in the right
-   * tab, group and order — and are re-exposed as [liveOnlyPreviewIds] for the live composite's
-   * routing. [render] still returns [RenderOutcome.NotFound] for them: this host has no pixels, and
-   * it is the composite's job to reach the daemon.
+   * Live-only (deferred) previews with no baked PNG, supplied only for a baked host fronting a live
+   * daemon (so each has a daemon twin). They join [previews] with their variant metadata and are
+   * re-exposed as [liveOnlyPreviewIds]; [render] still returns [RenderOutcome.NotFound] for them.
    */
   liveOnly: List<String> = emptyList(),
   /**
-   * Whether a background lane will stage this session's published Remote Compose player comparison.
-   *
-   * This is what makes [rcComparePending] mean "the lane has not landed yet" rather than "there is
-   * no manifest on disk". Only [ServeCatalogStore] schedules that lane, and only for a catalog with
-   * previews to re-key — every other session (a plain uploaded bundle, a served directory) has no
-   * lane to wait for. Gating on the file alone made `pending()` permanently true for those, which
-   * dropped every one of their viewer pages to `no-store` for the life of the host: the pages are
-   * fully baked and exactly the ones edge caching is for.
+   * Whether a background lane will stage this session's player comparison, so [rcComparePending]
+   * means "not landed yet" rather than "no manifest". Only catalogs schedule it; without this,
+   * plain bundles would be permanently pending and lose edge caching.
    */
   private val stagesRcCompare: Boolean = false,
   /**
-   * Ids this catalog publishes a baked PNG for, **whether or not those pixels are local yet**.
-   *
-   * A plain uploaded bundle passes none and keeps the original identity model: its previews are
-   * exactly the PNGs under `previews/`. A **catalog** passes its full declared set, because
-   * [ServeCatalogStore] no longer downloads every image before publishing — `catalog.json` alone
-   * names every card, and fetching a couple of hundred PNGs one round-trip at a time is what kept a
-   * catalog invisible for minutes after its metadata had already arrived. Missing pixels arrive via
-   * [fetchBakedPng] on first use.
+   * Ids this catalog publishes a baked PNG for, whether or not the pixels are local yet. Catalogs
+   * pass their declared set (images are fetched lazily via [fetchBakedPng]); plain bundles pass
+   * none and are exactly their `previews/` PNGs.
    */
   declaredBaked: List<String> = emptyList(),
   /**
-   * Fetch one declared preview's baked PNG from the catalog's delivery branch, or null when it
-   * can't be had. Supplied by [ServeCatalogStore] so that network policy — the SSRF gate, the
-   * per-asset size cap, the test seam — stays in the one place that owns it; this host only ever
-   * calls it. Null for a plain bundle, whose pixels are all local already, which also keeps that
-   * path free of any network dependency.
+   * Fetch one declared preview's PNG from the delivery branch, or null. Supplied by
+   * [ServeCatalogStore], which owns the SSRF gate, size cap and test seam; null for a plain bundle.
    */
   private val fetchBakedPng: ((String) -> ByteArray?)? = null,
   /**
-   * Ids this catalog publishes an animated capture for.
-   *
-   * Separate from [declaredBaked] because a capture is not a preview: it never appears in the grid,
-   * owns no card, and is only ever reachable from the still it accompanies. Empty for a plain
-   * uploaded bundle and for any catalog exported before the branch carried these bytes.
+   * Ids this catalog publishes an animated capture for. Separate from [declaredBaked]: a capture
+   * owns no card and is reachable only from its still.
    */
   declaredMotion: List<String> = emptyList(),
   /**
-   * Fetch one declared capture's bytes from the delivery branch, or null when they can't be had.
-   * Same seam as [fetchBakedPng], for the same reason: the store owns URL assembly, the SSRF gate,
-   * the size cap and the test seam, and this host only names an id it was told about.
-   */
-  /**
-   * Fetches one declared capture off the delivery branch, reporting **why** a failure failed.
-   *
-   * Outcome-shaped rather than `ByteArray?` for the reason the transport seam is: a second seam
-   * beside a bytes-shaped one is a lane waiting to be forgotten. The reason travels because the
-   * route needs it — a throttled capture is a `503` the reader can retry, and a `404` says the
-   * catalog never published it.
+   * Fetch one declared capture from the delivery branch, reporting why a failure failed: a throttle
+   * is a retryable 503, an absence a 404. Same store-owned seam as [fetchBakedPng].
    */
   private val fetchMotion: ((String) -> BranchFetch)? = null,
   /** Each declared capture's branch path, so a pinned (`?at=<sha>`) request can resolve one. */
   private val motionBranchPaths: Map<String, String> = emptyMap(),
   /**
-   * Each declared preview's path on the delivery branch (`images/<slug>/<variant>.png`), which is
-   * what a **pinned** request resolves against: the same tree, read at an older commit. Empty for a
-   * plain uploaded bundle (nothing to pin to) and for any host with no delivery branch behind it.
+   * Each declared preview's delivery-branch path, which pinned requests resolve against at an older
+   * commit. Empty for plain bundles.
    */
   private val bakedBranchPaths: Map<String, String> = emptyMap(),
   /**
-   * The delivery branch's published revisions, newest first — the catalog's own version history,
-   * read from the branch when it was loaded ([ServeCatalogStore.fetchRevisions]). Its head is the
-   * revision being served; the rest are what a page offers as pinnable destinations. Empty for an
-   * uploaded bundle, and for a catalog whose branch history couldn't be read.
+   * The delivery branch's revisions, newest first ([ServeCatalogStore.fetchRevisions]); the head is
+   * served, the rest are pinnable. Empty when unavailable.
    */
   val revisions: List<ServeCatalogRevision.Revision> = emptyList(),
   /** Preview inventories precomputed by the publisher, keyed by historic delivery commit. */
   private val revisionPreviewIds: Map<String, Set<String>>? = null,
   /**
-   * Per-image history precomputed by the publisher.
-   *
-   * Unlike [revisions], this is not capped by unrelated commits on the delivery branch: one
-   * timeline contains only commits that changed that preview's PNG. It therefore supplies the
-   * missing revision rows and run boundaries when GitHub's branch-wide Atom window has been filled
-   * by parity/index refreshes. Null for older publishers and plain bundles.
+   * Per-image history precomputed by the publisher: only commits that changed each PNG, so it fills
+   * rows the branch-wide Atom window lost to unrelated commits. Null for older publishers and plain
+   * bundles.
    */
   private val indexedPreviewHistory: PreviewHistoryManifest.Manifest? = null,
   /**
-   * The publishes in which one render's bytes changed, by branch path — supplied by
-   * [ServeCatalogStore], null for a host with no delivery branch.
-   *
-   * Its own seam rather than a use of [fetchPinnedAsset] because it reads a different surface for a
-   * different question: that one fetches bytes at a commit, this one asks the branch's history when
-   * those bytes last moved. Returning null means "could not ask", which [renderChangeCommits] is
-   * careful to keep distinct from the empty set.
+   * Publishes in which one render's bytes changed, by branch path; null for a host with no delivery
+   * branch. A null result means "could not ask", kept distinct from empty by [renderChangeCommits].
    */
   private val fetchRenderChanges: ((path: String) -> Set<String>?)? = null,
   /**
-   * Each design reference's path **on the delivery branch**, which is not the path the served
-   * manifest carries: catalog import rewrites every raster to a server-owned `references/<id>.png`.
-   * That rewrite is what contains the lane, and it is also why the branch path has to be handed
-   * over separately — it is the only string that addresses the raster at an older commit.
+   * Each design reference's delivery-branch path; the served manifest rewrites rasters to
+   * `references/<id>.png`, so this is the only way to address one at an older commit.
    */
   private val referenceBranchPaths: Map<String, String> = emptyMap(),
   /**
-   * Fetch one published asset from the delivery branch **at a given commit**, or null when it can't
-   * be had. Supplied by [ServeCatalogStore] for the same reason [fetchBakedPng] is: this host names
-   * a commit and a path, and the store owns URL assembly, the size cap and the test seam. Null ⇒
-   * the host serves no pinned revisions ([supportsPinnedRevisions]).
+   * Fetch a published asset at a given commit, or null; store-owned like [fetchBakedPng]. Null ⇒ no
+   * pinned revisions ([supportsPinnedRevisions]).
    */
   private val fetchPinnedAsset: ((commit: String, path: String) -> ByteArray?)? = null,
   /**
-   * [fetchPinnedAsset], but reporting **why** a read failed.
-   *
-   * Preferred over [fetchPinnedAsset] when supplied; the plain seam remains for callers (and the
-   * fixtures) that have no way to tell a throttle from an absence. This is what makes
-   * [pinnedMisses] safe to keep forever — see the reasoning there.
+   * [fetchPinnedAsset], reporting why a read failed; preferred when supplied. This is what makes
+   * [pinnedMisses] safe to keep forever.
    */
   private val fetchPinnedAssetOutcome: ((commit: String, path: String) -> BranchFetch)? = null,
   /**
-   * Resolves ids to branch paths **as they were at a given commit** ([ServePinnedManifest]). Null
-   * for a host with no delivery branch; when present it takes precedence over the tip's maps below,
-   * which remain the fallback for a commit whose manifests can't be read.
+   * Resolves ids to branch paths as of a given commit ([ServePinnedManifest]); takes precedence
+   * over the tip's maps, which remain the fallback.
    */
   private val pinnedManifest: ServePinnedManifest? = null,
   private val fileSystem: FileSystem = SystemFileSystem,
@@ -336,15 +229,9 @@ class ServeBundleHost(
   override fun designPages(): ServeDesignPageStore = designPages
 
   /**
-   * The bytes of one shared backplate, or null.
-   *
-   * Resolved through [ServeDesignPageStore.asset] and nothing else. The store has already checked
-   * the record's declaration, that its `uri` stays inside the bundle, the file's signature and its
-   * size — so an id that answers here names a file this server decided to serve. Joining
-   * [bundleDir] to a `uri` taken straight from the manifest instead would be an arbitrary file read
-   * on behalf of a delivery branch nobody here wrote.
-   *
-   * Lives on this class because [bundleDir] does; `ServeHost` has no asset accessor to override.
+   * One shared backplate's bytes, or null, resolved only through [ServeDesignPageStore.asset],
+   * which has validated declaration, containment, signature and size. Joining [bundleDir] to a
+   * manifest `uri` directly would be an arbitrary file read.
    */
   fun designPageAssetBytes(id: String): ByteArray? {
     val asset = designPages.asset(id) ?: return null
@@ -352,9 +239,8 @@ class ServeBundleHost(
     return runCatching { file.readBytes() }.getOrNull()
   }
 
-  // The published player comparison, if the catalog's branch shipped one. Unlike the manifests
-  // above this store resolves lazily: its lane PNGs land on the catalog's background fetch lane, so
-  // a host built the moment `catalog.json` arrived must be able to see them once they do.
+  // Resolved lazily: lane PNGs land on the catalog's background fetch lane after this host is
+  // built.
   private val rcCompare = ServeRcCompareStore.load(bundleDir, fileSystem)
 
   override fun rcCompare(): RcCompareManifest? = rcCompare.manifest()
@@ -374,10 +260,8 @@ class ServeBundleHost(
   override fun parityIssues(): ParityIssues? = parityIssues
 
   /**
-   * The bundle's `guidelines.json` — what `compose-preview guidelines` judged each preview against
-   * its catalog's design guidelines — read once, on first use rather than at construction, since a
-   * hosted catalog lifts the file out of its live bundle after the host may already exist.
-   * Fail-soft: no file, or a file that does not parse, is no results rather than an error.
+   * The bundle's `guidelines.json` results, read lazily since a hosted catalog may lift the file
+   * out of its live bundle after the host exists. Fail-soft.
    */
   private val guidelineResults by lazy {
     BundleGuidelineResults(ServeGuidelineResultsStore.load(bundleDir, fileSystem))
@@ -388,28 +272,15 @@ class ServeBundleHost(
   ): ee.schimke.composeai.guidelines.protocol.GuidelineRecordV1? =
     guidelineResults.forPreview(previewId)
 
-  // Same read-once rule as the feeds around it: a published verdict describes the catalog this
-  // host was built from, so re-reading it per request could only ever pair a newer verdict with an
-  // older inventory.
+  // Read once: a published verdict describes the catalog this host was built from.
   private val parityFindings = ServeParityFindingStore.load(bundleDir, fileSystem)
 
   override fun parityFindingsFor(previewId: String, referenceId: String): List<ParityFindingSet> =
     parityFindings.forComparison(previewId, referenceId)
 
-  // Read once at load, like the feeds above — and for a sharper reason than saving a file read.
-  //
-  // A catalog refresh swaps the staged directory over `bundleDir` and only *then* finishes its
-  // post-swap work (the Wasm app, vectors, themes, live bundles) before registering a rebuilt host.
-  // Everything else this host serves — `previews`, `parityIssues`, the design references — was read
-  // when the host was built, so a per-call read of this one file would put a **new** document
-  // beside an **old** inventory for the whole of that window. That is not a stale number: the
-  // dashboard's walk joins the two, so an acceptance naming a preview the new catalog has and the
-  // old host does not reads as `orphaned-target`, and the panel reports a problem that does not
-  // exist. A false finding is worse than a late one.
-  //
-  // Nothing is lost by caching it. A refresh rebuilds this host from the swapped directory, so a
-  // delivery-branch commit still reaches a serving host within one refresh tick; the per-call read
-  // only ever differed from that inside the window where it was wrong.
+  // Read once at load, not per call: a refresh swaps the directory before registering the rebuilt
+  // host, and a per-call read would pair a new document with the old inventory, producing false
+  // `orphaned-target` findings. A refresh rebuilds this host anyway.
   private val knownDifferences = ServeKnownDifferences.document(bundleDir, fileSystem)
 
   override fun knownDifferences(): ServeKnownDifferences.Document? = knownDifferences
@@ -423,12 +294,8 @@ class ServeBundleHost(
     annotations.forPreview(previewId)
 
   /**
-   * The kinds of published annotation the viewer's inspection layers actually draw.
-   *
-   * `layout` is published alongside these and belongs to the compare page, which reads the same
-   * manifest for a different surface. Handing it to the overlay would put boxes in the legend under
-   * no heading at all — `<cp-inspect-layers>` groups by the kind a layer declares, and there is no
-   * layout layer.
+   * Published annotation kinds the inspection layers draw; `layout` belongs to the compare page and
+   * has no layer in `<cp-inspect-layers>`.
    */
   private fun drawableAnnotations(previewId: String): List<DesignAnnotation> =
     annotationsForPreview(previewId).filter {
@@ -436,32 +303,19 @@ class ServeBundleHost(
     }
 
   /**
-   * Whether the catalog published typography over **this preview's own baked frame**, so the
-   * Typography layer has something to draw without a daemon. See [renderAnnotations].
+   * Whether the catalog published typography over this preview's own baked frame. See
+   * [renderAnnotations].
    */
   override fun hasPublishedTypographyFor(previewId: String): Boolean =
     previewId in previewIds &&
       annotationsForPreview(previewId).any { it.kind == AnnotationKind.TYPOGRAPHY }
 
   /**
-   * Replay the catalog's **published** annotations for [previewId] as the `.annotations` product.
-   *
-   * A static bundle has no daemon to capture a semantics tree from, which is why [ServeHost]'s
-   * default is `NotFound` — but a published catalog carries `annotations/index.json`, whose preview
-   * layer is exactly these facts measured over the very PNG this host serves. Answering from it is
-   * not an approximation: this host never re-renders, so [overrides] cannot move the pixels the
-   * bounds describe (an override-bearing request gets the same baked frame, and the HTTP layer
-   * reports what it dropped). That makes the overlay work on a plain published catalog instead of
-   * ticking a checkbox that fetches a 404 and silently draws nothing.
-   *
-   * Typography only, in practice: the theme layer is derived live from a render's semantics tree
-   * ([ServeDesignAnnotations]) and no producer authors it into a bundle. `tags` comes from the
-   * bundle's own published index, so the two halves still describe one frame.
+   * Replay the catalog's published annotations (`annotations/index.json`) as the `.annotations`
+   * product. Exact rather than approximate: this host never re-renders, so overrides can't move the
+   * pixels. Typography only in practice, since the theme layer is derived live.
    */
-  /**
-   * This host has no daemon, so its annotations are the catalog's published ones replayed over the
-   * catalog's baked frame — the one lane where the layers and the PNG describe the same render.
-   */
+  /** No daemon here, so annotations are the published ones over the baked frame. */
   override val annotationsFollowBakedFrame: Boolean = true
 
   override fun renderAnnotations(
@@ -470,10 +324,7 @@ class ServeBundleHost(
     layers: Set<String>?,
   ): AnnotationsOutcome {
     if (previewId !in previewIds) return AnnotationsOutcome.NotFound
-    // Narrowed to what the caller named, unlike the daemon lane: there the three layers ride on
-    // one capture and filtering saves nothing, while here it makes the response say exactly what
-    // was asked for — which is what lets the HTTP layer's content ETag vary correctly with
-    // `layers=` instead of returning one body under several meanings.
+    // Narrowed to the requested layers so the content ETag varies correctly with `layers=`.
     val published =
       drawableAnnotations(previewId).let { all ->
         if (layers == null) all else all.filter { it.kind in layers }
@@ -493,27 +344,20 @@ class ServeBundleHost(
     tagIndex.forPreview(previewId)
 
   /**
-   * Per-preview `state`/`theme` from the catalog's `previews/variants.json` manifest (written by
-   * [ServeCatalogStore]). Empty for a plain uploaded bundle that carries no manifest — every
-   * preview then stays stateless (null state/theme), preserving the pre-toggle behaviour.
-   * Best-effort: an unreadable / malformed manifest degrades to empty rather than failing the host.
+   * Per-preview state/theme from `previews/variants.json`; empty for a plain bundle. Malformed
+   * manifests degrade to empty.
    */
   private val variantMeta: Map<String, ServeCatalogStore.VariantMeta> = readVariantMeta()
 
   /**
-   * Per-preview `id → module-relative sourceFile`. A **catalog** carries this on each
-   * `previews/variants.json` entry ([ServeCatalogStore.VariantMeta.sourceFile]); a plain **uploaded
-   * bundle** may instead carry a root `previews.json` manifest. We read the variants map first (the
-   * catalog path this feature targets) and fall back to `previews.json` for ids it didn't cover, so
-   * both session shapes resolve. Empty when neither source records a path. Feeds
-   * [ServePreview.sourceFile].
+   * Per-preview `id → module-relative sourceFile`, from `previews/variants.json` (catalogs) then a
+   * root `previews.json` (uploaded bundles). Feeds [ServePreview.sourceFile].
    */
   private val sourceFilesById: Map<String, String> = readSourceFiles()
 
   /**
-   * Per-preview discovery params from the bundle's root `previews.json`. Besides sizing Remote
-   * Compose replays, this preserves each baked preview's explicit `uiMode` for the viewer's
-   * Day/Night default. Empty when the bundle carries no manifest.
+   * Per-preview discovery params from the root `previews.json`, sizing Remote Compose replays and
+   * preserving explicit `uiMode`. Empty without a manifest.
    */
   private val previewParamsById:
     Map<String, ee.schimke.composeai.previewdata.PreviewParams> by lazy {
@@ -533,20 +377,9 @@ class ServeBundleHost(
   }
 
   /**
-   * Per-preview body-line anchors, feeding [ServePreview.bodyLine] so the playground handoff can
-   * seed one declaration instead of a whole section file.
-   *
-   * Read exactly the way [sourceFilesById] is — the catalog's `previews/variants.json` first, then
-   * a root `previews.json` for ids it didn't cover — and that is load-bearing rather than tidiness.
-   * A **catalog** stages no root manifest at all and keys its previews by flattened route ids
-   * (`button-filled__ideal__default__dark`), not the discovery ids a bundle manifest carries, so a
-   * manifest-only read resolves nothing for exactly the case this feature exists to serve and the
-   * handoff silently stays whole-file. The `variants.json` path is where a catalog's anchors live;
-   * the manifest path is the plain uploaded bundle.
-   *
-   * A `VariantMeta` is per *image* and an anchor is per *function*, so this does restate the same
-   * number across a component's themes and states — the same duplication `sourceFile` already
-   * accepts there, for the same reason: it is the only per-preview record a catalog publishes.
+   * Per-preview body-line anchors for [ServePreview.bodyLine], read like [sourceFilesById]:
+   * catalogs key previews by route ids and stage no root manifest, so `variants.json` must come
+   * first.
    */
   private val bodyLinesById: Map<String, Int> by lazy {
     val out = LinkedHashMap<String, Int>()
@@ -572,21 +405,11 @@ class ServeBundleHost(
     out
   }
 
+  /** Live-only ids this host lists, minus any that also have baked pixels (baked wins). */
+  /** The declared baked set; an id here is never live-only even while its file is missing. */
   /**
-   * The live-only ids this host lists, minus any that turned out to have a baked PNG after all (a
-   * catalog that both baked and deferred the same route — belt and braces: the baked pixels win, so
-   * the id keeps its ordinary snapshot lane).
-   */
-  /**
-   * The declared baked set. An id here is **not** live-only even while its file is missing — that
-   * is the whole point of declaring it — so it takes precedence over [liveOnly] below.
-   */
-  /**
-   * Ids this catalog publishes a capture for, as a set for the containment check on request.
-   *
-   * Declared here rather than beside the motion fill below because the preview list is built during
-   * construction and reads it — a property initialised later would be empty at that point, and
-   * every capture would be filtered out of the manifest it is supposed to appear in.
+   * Declared capture ids. Declared here because the preview list built during construction reads
+   * it.
    */
   private val declaredMotionIds: Set<String> = declaredMotion.toSet()
 
@@ -600,12 +423,8 @@ class ServeBundleHost(
     }
 
   override val previews: List<ServePreview> =
-    // Three sources, deduped: the PNGs already on disk, the catalog's declared baked set (whose
-    // pixels may still be remote — see [declaredBaked]), and the live-only (deferred) ids, which
-    // carry no file by design. Walk recursively: a preview id may contain '/', stored as a nested
-    // `previews/<id>.png`, and ids are reconstructed relative to `previews/` with '/' separators
-    // (matching the bundle layout). From here the three are indistinguishable except in where
-    // `render` finds the bytes.
+    // Three sources, deduped: PNGs on disk, the declared baked set (possibly remote), and live-only
+    // ids. Walked recursively because ids may contain `/` (nested `previews/<id>.png`).
     (previewsDir
         .walkTopDown()
         .filter {
@@ -651,9 +470,7 @@ class ServeBundleHost(
           label = id,
           spatial = spatialFile(id, SPATIAL_SCENE_FILE)?.isFile == true,
           componentId = meta?.componentId,
-          // Only captures this host can actually land. A manifest entry with no fetch seam behind
-          // it (a plain bundle, or a catalog whose store didn't register the lane) would offer the
-          // reader a control that 404s, which is worse than not offering it.
+          // Only captures this host can actually fetch; otherwise the control would 404.
           motion =
             if (fetchMotion == null) emptyList()
             else
@@ -670,9 +487,8 @@ class ServeBundleHost(
                   )
                 },
           renderFailure = meta?.renderFailure ?: readRenderFailure(id),
-          // A packed sidecar remains authoritative for ordinary uploaded bundles. Published
-          // catalogs additionally carry these declarations inline so a supplement-only preview's
-          // controls are visible before its per-preview daemon is opened lazily.
+          // A packed sidecar is authoritative for uploaded bundles; catalogs also carry
+          // declarations inline so controls show before a per-preview daemon opens.
           overrides = readOverrides(id).ifEmpty { meta?.overrides.orEmpty() },
           remoteComposeKnobs =
             readRemoteComposeKnobs(id).ifEmpty { meta?.remoteComposeKnobs.orEmpty() },
@@ -680,24 +496,14 @@ class ServeBundleHost(
           supportsGestures = meta?.supportsGestures == true,
           fixedTheme = meta?.fixedTheme == true,
           secondary = meta?.secondary == true,
-          // `state` comes only from a `catalog.json`-backed bundle's `variants.json`
-          // (`meta.state`).
-          // A plain module bundle has no manifest, so an `@OverrideVariant` synthetic preview
-          // (`Foo_VARIANT_off`) stays stateless and shows as its own grid card. It is NOT folded
-          // here
-          // from the id: `ServeWeb`'s state grouping keys off the flattened `__<state>__` catalog
-          // id,
-          // which a raw `_VARIANT_<name>` id doesn't carry, so marking it as a state would fold it
-          // out of the grid without a switcher link to reach it (it would vanish). Folding a
-          // raw-bundle variant needs `ServeWeb`'s `baseKey`/`stateInvariantKey` to understand the
-          // `_VARIANT_` suffix — a separate change. The catalog-served path already folds
-          // correctly.
+          // `state` comes only from a catalog's `variants.json`. A raw `@OverrideVariant` id
+          // (`Foo_VARIANT_off`) is not folded here: `ServeWeb`'s state grouping keys on the catalog
+          // `__<state>__` form, so it would vanish without a switcher link.
           state = meta?.state,
           theme = meta?.theme,
           props = meta?.props,
-          // Like `state`, only a `catalog.json`-backed bundle carries this: a plain module bundle's
-          // device fan-out has no manifest to name the breakpoints, so its renders stay size-less
-          // and each keeps its own card rather than being folded out with no switcher to reach it.
+          // Like `state`, only catalogs name breakpoints; plain bundle renders keep their own
+          // cards.
           size = meta?.size,
           section = meta?.section,
           group = meta?.group,
@@ -707,16 +513,9 @@ class ServeBundleHost(
           sourceFile = sourceFilesById[id],
           sourceModule = meta?.sourceModule,
           bodyLine = bodyLinesById[id],
-          // The `@Preview` ground and device frame, from whichever source this session actually
-          // has. An uploaded bundle carries a root `previews.json` and answers directly; a
-          // published CATALOG does not stage one, and its metadata rides on
-          // `previews/variants.json` instead. Without the second source every catalog preview
-          // arrived with the annotation defaults, so `PreviewBackdrop` fell back to the catalog's
-          // declared stage for all of them and the device clip never resolved — on the ordinary
-          // read-only path, which is how a published catalog is normally read.
-          //
-          // The bundle wins where both exist: it is this render's own manifest, while the catalog
-          // record was written by an export that may predate the bundle in front of us.
+          // Ground and device frame from whichever source exists: an uploaded bundle's root
+          // `previews.json`, or a catalog's `variants.json` record. The bundle wins where both
+          // exist, being this render's own manifest.
           uiMode = previewParams?.uiMode ?: 0,
           showBackground = previewParams?.showBackground == true,
           backgroundColor = previewParams?.backgroundColor ?: 0L,
@@ -730,52 +529,38 @@ class ServeBundleHost(
   private val publishedIds: Set<String> = previews.mapTo(HashSet()) { it.id }
 
   /**
-   * This host is the **baked** surface of a published catalog, so it is the one that can answer
-   * what mode a sticker was drawn in — from the record's own `theme`, its id, or the folded pair it
-   * belongs to. See [ServeBakedTheme]; the live composites in front of it delegate here.
+   * The baked surface of a published catalog answers which mode a sticker was drawn in. See
+   * [ServeBakedTheme].
    */
   override fun bakedTheme(previewId: String): UiMode? =
     ServeBakedTheme.resolve(previewId, variantMeta[previewId]?.theme) { it in publishedIds }
 
   /**
-   * This host is also the one that can answer *which Remote Compose player* drew those pixels, for
-   * the same reason: only the session holding the manifest knows whether a preview pinned the
-   * view-backed lane with `@PreviewWrapper(RemoteViewPreviewWrapper::class)`.
-   *
-   * Two manifests can answer, and a session with neither answers **null** rather than guessing —
-   * see [ServeHost.bakedRcPlayer] for what a null buys. Overridden here rather than defaulted
-   * because this host is the one that holds them.
+   * Also answers which Remote Compose player drew the pixels, since only this host holds the
+   * manifests. With neither manifest it answers null rather than guessing; see
+   * [ServeHost.bakedRcPlayer].
    */
   override fun bakedRcPlayer(previewId: String): RemoteComposePlayerKind? {
     if (!hasRemoteComposeDoc(previewId)) return null
-    // A bundle's root `previews.json` answers implicitly: an ENTRY for this preview means the
-    // manifest speaks for it, and its `wrapperClassName` is the pin or null for "pinned nothing".
-    // Presence of the entry is the test, not presence of the field — every unpinned preview has a
-    // null field, and reading that as "unknown" would give up provenance we actually have.
+    // A root `previews.json` entry speaks for the preview: its `wrapperClassName` is the pin, or
+    // null for none. Presence of the entry is the test, not of the field.
     previewParamsById[previewId]?.let {
       return if (it.wrapperClassName == REMOTE_VIEW_PREVIEW_WRAPPER) RemoteComposePlayerKind.VIEW
       else RemoteComposePlayerKind.EMBEDDED
     }
-    // A published catalog stages no such manifest, so it must say so explicitly
-    // ([ServeCatalogStore.PreviewParamsMeta.capturePlayer]) or be taken as unknown. Inferring the
-    // embedded default here is what would serve a view-pinned preview's capture in answer to
-    // `?rcPlayer=androidx-embedded`; an unknown costs a redundant query parameter instead.
-    //
-    // Newer daemons record `androidx-embedded` / `androidx-view`; older ones recorded the same two
-    // players as `cmp-android` / `java`, which [ServeRcPlayerIds.fromCaptureRecord] maps back. Only
-    // a capture record is read that way — a `?rcPlayer=cmp-android` request means the CMP player.
+    // A published catalog must record the player explicitly
+    // ([ServeCatalogStore.PreviewParamsMeta.capturePlayer]) or it is unknown; inferring the
+    // embedded default could serve a view-pinned capture. Legacy `cmp-android` / `java` values are
+    // mapped by [ServeRcPlayerIds.fromCaptureRecord].
     return ServeRcPlayerIds.playerKindOf(
       ServeRcPlayerIds.fromCaptureRecord(variantMeta[previewId]?.previewParams?.capturePlayer)
     )
   }
 
   /**
-   * The catalog's declared hero ([declaredHero]) resolved to one of this host's actual preview ids,
-   * or null when nothing was declared / the declaration matches no preview. Accepts a full preview
-   * id, or a `componentId` / preview-function name matched against a preview's slug head (the
-   * segment before `__`) using the same slug normalisation the exporter used — so a spec can name
-   * `"Template/TimeText"` and hit `template-timetext__ideal__…`. The server uses this as the front
-   * door hero before falling back to its own representative pick.
+   * The declared hero ([declaredHero]) resolved to a preview id, or null. Accepts a full preview
+   * id, or a `componentId` / function name matched against a preview's slug head with the
+   * exporter's normalisation.
    */
   val declaredHeroPreviewId: String? by lazy {
     val hero = declaredHero?.takeIf { it.isNotBlank() } ?: return@lazy null
@@ -852,11 +637,7 @@ class ServeBundleHost(
     }
   }
 
-  /**
-   * Best-effort read of the catalog's `previews/variants.json` state/theme manifest. Mirrors
-   * [readOverrides] / [declaredThemes]: absent or unparseable → empty map, so a plain bundle (no
-   * manifest) simply has no state/theme metadata.
-   */
+  /** Best-effort read of `previews/variants.json`; absent or unparseable → empty. */
   private fun readVariantMeta(): Map<String, ServeCatalogStore.VariantMeta> {
     val manifest = File(previewsDir, ServeCatalogStore.VARIANTS_FILE).toOkioPath()
     if (!fileSystem.exists(manifest)) return emptyMap()
@@ -872,12 +653,8 @@ class ServeBundleHost(
   }
 
   /**
-   * Best-effort read of `id → sourceFile`. Prefers the catalog's `previews/variants.json` (each
-   * [ServeCatalogStore.VariantMeta.sourceFile], already parsed into [variantMeta]), then falls back
-   * to a root `previews.json` manifest for any id the variants map didn't cover (the plain uploaded
-   * bundle path). Fail-soft like [declaredThemes]: an absent / unreadable `previews.json` just
-   * contributes nothing; entries without a `sourceFile` are dropped so `sourceFilesById[id]` is
-   * null and no source link renders.
+   * Best-effort `id → sourceFile`: `variants.json` entries first, then a root `previews.json`.
+   * Entries without a `sourceFile` are dropped.
    */
   private fun readSourceFiles(): Map<String, String> {
     val out = LinkedHashMap<String, String>()
@@ -904,12 +681,9 @@ class ServeBundleHost(
   }
 
   /**
-   * The app-declared `@ThemeCatalog` themes, read from the bundle's `previews.json` when it carries
-   * one (the synthetic `THEME_CATALOG` entries discovery emits). A plain static bundle can't apply
-   * a `themeProvider` (no daemon to load the provider), so the viewer shows the App theme selector
-   * as a disabled, informational list — mirroring how declared knobs render on a static bundle.
-   * Empty when the bundle carries no `previews.json` (a bare `previews/`-only WebEmbed) or declares
-   * none.
+   * App-declared `@ThemeCatalog` themes from `previews.json`. A static bundle can't apply a
+   * `themeProvider`, so the viewer shows them as a disabled, informational list. Empty without a
+   * manifest.
    */
   override val declaredThemes: List<ServeTheme> = run {
     val previewsJson = File(bundleDir, PREVIEWS_JSON).toOkioPath()
@@ -928,10 +702,8 @@ class ServeBundleHost(
   }
 
   /**
-   * Read the editable knobs carried for [id] in the bundle's `previews/<id>.overrides.json` sidecar
-   * (the `compose/overrides` payload the producer packed). Absent / unreadable → no knobs. The host
-   * can't re-render (it replays baked PNGs), so [canApplyOverrides] stays false and the viewer
-   * shows these as disabled, informational controls.
+   * Editable knobs from `previews/<id>.overrides.json`; absent → none. Shown as disabled controls
+   * since this host can't re-render.
    */
   private fun readOverrides(
     id: String
@@ -947,10 +719,8 @@ class ServeBundleHost(
   }
 
   /**
-   * Read the Remote Compose named-value knobs carried for [id] in the bundle's
-   * `previews/<id>.remotecompose.json` sidecar (the `compose/remotecompose` declarations payload).
-   * The RC counterpart of [readOverrides]: absent / unreadable → no knobs. A baked bundle can't
-   * re-render, so the viewer shows these as informational controls until a live daemon backs them.
+   * Remote Compose named-value knobs from `previews/<id>.remotecompose.json`; the RC counterpart of
+   * [readOverrides].
    */
   private fun readRemoteComposeKnobs(
     id: String
@@ -977,18 +747,9 @@ class ServeBundleHost(
 
   /**
    * The local file holding [previewId]'s baked PNG, fetching it from the delivery branch first if
-   * it isn't there yet — the single point every pixel reader on this host goes through ([render],
-   * [readPngSize], [computeContentCrop]), so none of them can accidentally see a declared preview
-   * as pixel-less.
-   *
-   * Returns null when there are no pixels to be had: an unknown id, a live-only (deferred) id, or a
-   * declared one whose fetch failed. A failed fetch is not remembered — the next request retries,
-   * which is what makes a transient branch blip self-heal instead of stranding a card for the life
-   * of the host.
-   *
-   * Fetches are per-id serialised so a grid painting twenty cards at once issues one request per
-   * preview rather than one per reader; the double-check inside the lock means the second caller
-   * reads the file the first just wrote.
+   * needed; the single point every pixel reader goes through. Null for unknown, live-only, or
+   * failed ids; failures aren't remembered, so transient blips self-heal. Fetches are serialised
+   * per id, with a double-check inside the lock.
    */
   private fun bakedPngFile(previewId: String): okio.Path? {
     val path = previewFile(previewId, PNG_SUFFIX)?.toOkioPath() ?: return null
@@ -998,26 +759,14 @@ class ServeBundleHost(
     synchronized(fillLocks.computeIfAbsent(previewId) { Any() }) {
       if (fileSystem.exists(path)) return path
       val bytes = runCatching { fetch(previewId) }.getOrNull() ?: return null
-      // Written to a sibling and moved into place atomically. The existence check above is
-      // deliberately outside this lock (a warm read must not queue behind a cold fetch), so the
-      // destination must never exist in a half-written state — a reader that saw it would serve a
-      // truncated PNG.
+      // Written to a sibling and moved atomically: the existence check is outside the lock, so
+      // readers must never see a half-written file.
       return runCatching {
         path.parent?.let(fileSystem::createDirectories)
-        // Named per destination AND per host instance, not a shared temp.
-        //
-        // Per destination because two ids filling concurrently hold different locks, so a single
-        // shared partial name would let one preview's bytes be published under another's id.
-        //
-        // Per instance because [fillLocks] is per host, while this path is derived from the
-        // generation directory and is therefore shared by every host over it. Two instances DO
-        // coexist: the registry detaches and closes a session's host when it goes idle and builds
-        // a fresh one on the next resume, so a fill still running against the old instance can
-        // overlap a fill through the new one. They would take different locks and write the same
-        // `.partial`, interleaving two byte streams into one file that is then published atomically
-        // as a truncated PNG. With a per-instance name each writes its own temp and both move
-        // their complete copy onto the same destination, which is atomic and idempotent — the
-        // bytes are the same published render either way.
+        // Named per destination and per host instance. Per destination because different ids hold
+        // different locks. Per instance because [fillLocks] is per host while the path is shared by
+        // every host over the generation dir, and the registry can briefly run an old and a new
+        // host together; each writes its own temp and both atomically publish identical bytes.
         val partial = path.parent!!.resolve("${path.name}.$instanceTag$PARTIAL_SUFFIX")
         fileSystem.write(partial) { write(bytes) }
         fileSystem.atomicMove(partial, path)
@@ -1028,19 +777,16 @@ class ServeBundleHost(
   }
 
   /**
-   * Whether this host can answer a `?at=<sha>` pin — it has a delivery branch to read older commits
-   * from. False for a plain uploaded bundle, whose bytes exist nowhere but this disk.
+   * Whether this host can answer a `?at=<sha>` pin (it has a delivery branch); false for a plain
+   * bundle.
    */
   val supportsPinnedRevisions: Boolean
     get() = fetchPinnedAsset != null || fetchPinnedAssetOutcome != null
 
   /**
-   * [previewId]'s baked render **as published at [commit]**, or null when there is no such thing.
-   *
-   * Null is the only honest answer to a pin this host can't satisfy — an id the catalog never
-   * baked, a commit predating the preview, a fetch that failed. It must never fall back to the
-   * current bytes: a permalink that silently answers with today's render is the bug this whole
-   * feature exists to fix, and it would be undetectable from the outside.
+   * [previewId]'s baked render as published at [commit], or null. Never falls back to current
+   * bytes: a permalink silently answering with today's render is exactly the bug this exists to
+   * prevent.
    */
   fun pinnedRender(commit: String, previewId: String): PinnedOutcome =
     pinnedAsset(
@@ -1049,17 +795,9 @@ class ServeBundleHost(
     )
 
   /**
-   * [previewId]'s render at [commit], addressed by the path **the generated history records for
-   * it** rather than by today's catalog layout.
-   *
-   * [pinnedRender] resolves the path from the pinned manifest or the branch tip, which is right for
-   * a permalink to a page. A timeline entry is a stronger statement: the publisher recorded that
-   * exactly this path carried those bytes at that commit, so using it removes a layout lookup that
-   * can miss — a preview whose render path moved between publishes resolves through its own history
-   * instead of through a tip that no longer names it.
-   *
-   * The path is never caller-supplied; it comes from the manifest this server fetched. Falls back
-   * to [pinnedRender] where no timeline names the preview.
+   * [previewId]'s render at [commit], addressed by the path the generated history records for it
+   * rather than today's layout, so a preview whose path moved still resolves. The path comes from
+   * the fetched manifest, never the caller; falls back to [pinnedRender].
    */
   fun pinnedIndexedRender(commit: String, previewId: String): PinnedOutcome {
     val path =
@@ -1069,19 +807,10 @@ class ServeBundleHost(
   }
 
   /**
-   * A preview this catalog published at [commit] but does **not** list today, as a record the
-   * viewer can page.
-   *
-   * This is the other half of resolving a retired id. [pinnedRender] finds its pixels; without this
-   * the *page* around them still 404s, because the session's preview list is built from the branch
-   * tip and a renamed-away id is not in it — so a permalink made before the rename would answer
-   * with an image but not with the page a person actually opened.
-   *
-   * Null for an id this revision didn't publish either, and null when its catalog can't be read:
-   * inventing a page for an id nothing confirms would be worse than admitting we don't have it.
-   * Deliberately minimal — an id and whatever component identity that revision gave it. Everything
-   * else the viewer draws (axes, siblings, references, knobs) describes the *current* catalog, and
-   * a pinned page has all of those lanes off anyway.
+   * A preview this catalog published at [commit] but no longer lists, as a pageable record, so a
+   * permalink made before a rename opens the page and not only the image. Null when that revision
+   * didn't publish it or its catalog can't be read. Deliberately minimal: other lanes describe the
+   * current catalog and are off on pinned pages.
    */
   fun pinnedPreview(commit: String, previewId: String): ServePreview? {
     val paths = pinnedManifest?.forCommit(commit) ?: return null
@@ -1096,22 +825,15 @@ class ServeBundleHost(
   }
 
   /**
-   * Whether [commit]'s own catalog could be read — i.e. whether it is entitled to answer for what
-   * that revision published.
-   *
-   * The page lookup needs this separately from [pinnedPreview], because "no such preview then" and
-   * "I could not ask" must lead to different pages: the first is a 404, the second falls back to
-   * the tip. Returning null from [pinnedPreview] alone cannot say which happened.
+   * Whether [commit]'s own catalog could be read, so "no such preview then" (404) is
+   * distinguishable from "could not ask" (fall back to tip).
    */
   fun pinnedCatalogIsAuthoritative(commit: String): Boolean =
     pinnedManifest?.forCommit(commit)?.catalogRead == true
 
   /**
-   * Whether one indexed revision carried [previewId].
-   *
-   * Image history is authoritative when it names the commit even if the rolling preview inventory
-   * no longer reaches that far back. Null still means this branch predates both generated indexes,
-   * so menus retain their legacy fail-open behaviour.
+   * Whether one indexed revision carried [previewId]. Image history is authoritative when it names
+   * the commit; null means the branch predates both indexes (menus fail open).
    */
   fun revisionContainsPreview(commit: String, previewId: String): Boolean? {
     val normalized =
@@ -1121,14 +843,9 @@ class ServeBundleHost(
   }
 
   /**
-   * The publisher's timeline for [previewId], or null when this catalog carries no generated
-   * history (an older publisher, or a plain uploaded bundle).
-   *
-   * Already in memory and already pinned: [indexedPreviewHistory] is fetched from the same
-   * immutable tree as `catalog.json`, so it describes exactly the catalog being served rather than
-   * whatever the delivery branch has since moved on to. Exposed because a remote consumer that only
-   * has the manifest's *URL* must fetch the whole document to read one preview out of it — measured
-   * at 1 MB for a 497-byte answer on `m3-catalog`.
+   * The publisher's timeline for [previewId], or null without generated history. Already pinned to
+   * the served tree; exposed so remote consumers needn't fetch the whole (~1 MB) manifest for one
+   * preview.
    */
   fun indexedTimeline(previewId: String): PreviewHistoryManifest.PreviewTimeline? =
     indexedPreviewHistory?.previews?.get(previewId)
@@ -1145,12 +862,9 @@ class ServeBundleHost(
     }
 
   /**
-   * Boundaries for indexed image versions, aligned to rows this menu can actually display.
-   *
-   * [PreviewHistoryManifest.ManifestVersion.introducedBy] is the exact change boundary. A collapsed
-   * history run can, rarely, have an older introducing commit than its displayed [commit], though;
-   * when that introducing row is outside the recovered window, use the displayed commit so the
-   * indexed version still gets a marker instead of collapsing into its neighbour.
+   * Boundaries for indexed image versions, aligned to displayable rows:
+   * [PreviewHistoryManifest.ManifestVersion.introducedBy] when visible, else the displayed commit
+   * so the version still gets a marker.
    */
   private fun indexedRenderChanges(previewId: String, visibleRevisions: Set<String>): Set<String> =
     indexedPreviewHistory
@@ -1166,49 +880,19 @@ class ServeBundleHost(
       .toSet()
 
   /**
-   * The delivery-branch publishes in which [previewId]'s render actually changed, or null when
-   * neither the generated image index nor the branch can answer.
+   * Delivery-branch publishes in which [previewId]'s render changed, or null when neither the
+   * generated index nor the branch can answer. Empty means no change in the window (identical
+   * pixels); null means draw no markers.
    *
-   * Null and the empty set are different answers and both are real: empty means the available
-   * sources named no change — every publish in the window carries identical pixels, which is the
-   * *interesting* case this feature exists to show — while null means neither source answered and
-   * the viewer must draw no markers rather than claim everything is identical.
+   * Cached per preview for the host's life, matching the load's single pinned commit. Shares
+   * [pinnedPermits] with the pinned-asset lane, since both bound anonymous branch reads, and misses
+   * are serialised per preview on [fillLocks] so concurrent menu opens don't take every permit for
+   * duplicate requests. Blocking; called on [Dispatchers.IO][kotlinx.coroutines.Dispatchers.IO].
    *
-   * Cached per preview and never invalidated within a load, which is exactly as fresh as the rest
-   * of the page: a load reads one commit ([ServeCatalogStore.load]), so the branch history behind
-   * it is fixed for the life of this host and a later publish arrives with the next load.
-   *
-   * Shares [pinnedPermits] with the pinned-asset lane rather than taking a pool of its own. They
-   * bound the same scarce thing — concurrent reads of the delivery branch — and this route is
-   * likewise reachable by an anonymous caller naming a preview per request, so leaving it unbounded
-   * would reopen precisely the hole that semaphore was added to close.
-   *
-   * Misses are serialized **per preview** on [fillLocks], the same way a cold baked-PNG fill is,
-   * and that is load-bearing rather than tidiness: the semaphore counts permits, it does not
-   * deduplicate, so without this a single preview whose menu is opened by four readers at once
-   * would take all four branch-read permits and issue four identical feed requests — starving the
-   * pinned-asset lane that shares them. Re-checking the cache under the permit is not enough on its
-   * own, because it only helps once the first fetch has already finished.
-   *
-   * Blocking, and called from [Dispatchers.IO][kotlinx.coroutines.Dispatchers.IO] rather than a
-   * request thread — see the route.
-   *
-   * ### Known limitation: the TIP path only
-   *
-   * The feed is read for [bakedBranchPaths]`[previewId]` — the path this preview has *now*. Ids are
-   * stable across publishes and the paths under them are not, which is why [pinnedRender] resolves
-   * through [branchPath] against the manifests at each commit instead. This lane does not: if a
-   * preview's published path changed inside the window, publishes that touched the *former* path
-   * are invisible here, and the revisions below the new path's first commit collapse into one run
-   * even when the old PNG changed several times — understating the count rather than overstating
-   * it.
-   *
-   * Not resolved per revision on purpose. Doing so costs a manifest read to learn the old path plus
-   * a second feed read to cover it, on a lane whose whole argument is that one cheap read replaces
-   * downloading and hashing a dozen PNGs — so it would roughly triple the cost of every cold menu
-   * open to correct a case that needs a publisher to move a stable id's path mid-window. If that
-   * turns out to happen in practice, the fix is to resolve the path at the window's oldest revision
-   * and union the two feeds; see the PR discussion.
+   * Known limitation: the feed is read only for the tip path ([bakedBranchPaths]), so changes under
+   * a former path are missed and the count is understated. Resolving per revision would roughly
+   * triple the cost of a cold menu open; if paths do move in practice, resolve the path at the
+   * window's oldest revision and union both feeds.
    */
   fun renderChangeCommits(
     previewId: String,
@@ -1237,9 +921,8 @@ class ServeBundleHost(
         } finally {
           pinnedPermits.release()
         }
-      // The path feed is a useful live supplement, while history.json is the durable index. Union
-      // both when the feed answers; if it is unavailable, the generated boundaries are still an
-      // authoritative answer for the versions the manifest exposes.
+      // Union the live path feed with history.json when the feed answers; otherwise the generated
+      // boundaries alone are authoritative.
       val changes = fetched?.plus(indexed) ?: indexed.takeIf { it.isNotEmpty() }
       // Only a real answer is remembered. A failed read says nothing about the branch, and caching
       // it would strand the markers off for the life of the host over one blip.
@@ -1271,11 +954,8 @@ class ServeBundleHost(
     )
 
   /**
-   * What came of a pinned read. [Missing] and [Busy] are kept apart because they are different
-   * statements about the world — "that revision published no such asset", which is permanent and
-   * belongs in a 404, versus "this server would not go and look right now", which is temporary and
-   * belongs in a 503. Collapsing them would teach a visitor (or a link checker) that a perfectly
-   * good permalink is dead.
+   * Outcome of a pinned read. [Missing] (permanent, 404) and [Busy] (temporary, 503) stay distinct
+   * so a good permalink is never reported dead.
    */
   sealed interface PinnedOutcome {
     data class Ok(val bytes: ByteArray) : PinnedOutcome {
@@ -1293,22 +973,12 @@ class ServeBundleHost(
   }
 
   /**
-   * Where [id]'s asset lived **at [commit]**, preferring that commit's own manifest over the tip's
-   * map.
+   * Where [id]'s asset lived at [commit], preferring that commit's manifest over the tip's map:
+   * render ids derive from paths (a moved file is a different id), and reference paths move
+   * independently of ids, so the tip gives wrong answers for history.
    *
-   * The order is the whole point: the tip's map answers a historical question with a current
-   * answer. What that costs differs by lane, and both are real:
-   * - a **render** id is *derived* from its path, so a moved file is a different id — and the id a
-   *   permalink names is then one the live catalog no longer contains at all. The tip's map cannot
-   *   resolve it under any path, so every link made before a rename 404s;
-   * - a **reference** carries its id and its raster path independently, so the id survives while
-   *   the path moves. The tip's map then resolves confidently to a path that commit never had.
-   *
-   * The tip's map is the fallback for **an absent manifest only**, not for an id the manifest
-   * doesn't list. A readable manifest is authoritative about its own revision: if it doesn't name
-   * the id, that revision did not publish it, and the honest answer is nothing. Falling back there
-   * would serve whatever happens to sit at today's path in that commit — a file the revision may
-   * well contain, under an id its own manifest says it never published.
+   * The tip map is the fallback only for an absent manifest. A readable manifest that doesn't list
+   * the id means that revision didn't publish it.
    */
   private fun branchPath(
     commit: String,
@@ -1323,14 +993,9 @@ class ServeBundleHost(
   }
 
   /**
-   * One published asset at one commit, memoised.
-   *
-   * `(commit, path)` addresses immutable bytes — that is what makes the whole feature work — so a
-   * hit never has to be revalidated, and the cache is what keeps a pinned page from re-fetching the
-   * branch on every reload. Its value is in the same link being opened twice (a page and its
-   * reload, a chat unfurl and the click that follows) rather than in holding a working set, so at
-   * capacity it simply drops an arbitrary entry: with a long tail of one-off links there is no
-   * recency order worth maintaining, and the cost of a miss is one small fetch.
+   * One published asset at one commit, memoised. `(commit, path)` is immutable, so hits never need
+   * revalidation; at capacity an arbitrary entry is dropped, since the value is in repeated opens
+   * of the same link, not a working set.
    */
   private fun pinnedAsset(commit: String, path: String?): PinnedOutcome {
     // Either seam is enough to have a pinned lane; the outcome-reporting one is preferred
@@ -1342,16 +1007,10 @@ class ServeBundleHost(
     pinnedCache[key]?.let {
       return PinnedOutcome.Ok(it)
     }
-    // A URL this branch has already refused is refused again from memory. Without it, a page whose
-    // images all 404 re-asks the branch once per image, and a visitor reloading it does so again —
-    // the same wasted round trips a *successful* pin only pays once for.
+    // Refuse known misses from memory instead of re-asking the branch per image.
     if (key in pinnedMisses) return PinnedOutcome.Missing
-    // Admission. Every other lane that reaches out is bounded; this one was not, and it is the only
-    // lane whose target a *request* chooses — `?at=<any syntactically valid sha>` names a fetch, so
-    // an anonymous caller could otherwise open as many concurrent branch reads as it liked and hold
-    // an IO worker for each. A bounded permit turns that into a queue with a ceiling, and a caller
-    // that cannot get a permit in time is told the server is busy rather than told the revision
-    // does not exist — those are different answers and a permalink must not confuse them.
+    // Admission: `?at=<sha>` lets a request choose the fetch, so a bounded permit stops an
+    // anonymous caller opening unlimited branch reads. Timing out answers Busy, not Missing.
     if (!pinnedPermits.tryAcquire(PINNED_FETCH_WAIT_SECONDS, java.util.concurrent.TimeUnit.SECONDS))
       return PinnedOutcome.Busy
     val outcome =
@@ -1370,10 +1029,7 @@ class ServeBundleHost(
       }
     val bytes = outcome.bytesOrNull
     if (bytes == null) {
-      // ONLY a real absence is remembered. `(commit, path)` is immutable, so "that revision has no
-      // such file" is permanent and worth keeping — but a throttle or a 503 says nothing about the
-      // revision, and memoising one turns a blip into a hole that outlives it. That was the
-      // accepted cost of not being able to tell them apart; [BranchFetch] removes the excuse.
+      // Only a real absence is remembered; a throttle says nothing about the revision.
       if (outcome == BranchFetch.NotFound) remember(pinnedMisses, key, MAX_PINNED_MISS_ENTRIES)
       return PinnedOutcome.Missing
     }
@@ -1396,12 +1052,8 @@ class ServeBundleHost(
   private val pinnedCache = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
 
   /**
-   * URLs this branch answered nothing for. Deliberately keyed like [pinnedCache] and deliberately
-   * *not* time-bounded: `(commit, path)` is immutable, so "that revision has no such file" is a
-   * permanent fact — unlike a transient failure, which this cannot tell apart and therefore
-   * remembers too. That is the accepted cost: the set is small and drops entries under pressure, so
-   * a blip strands a pin until eviction rather than for the life of the process, and the far more
-   * common case (a genuinely absent asset, asked for repeatedly) stops costing round trips.
+   * URLs this branch answered nothing for, keyed like [pinnedCache]. Not time-bounded: `(commit,
+   * path)` is immutable. The set is small and drops entries under pressure.
    */
   private val pinnedMisses: MutableSet<String> =
     java.util.Collections.synchronizedSet(LinkedHashSet())
@@ -1413,35 +1065,23 @@ class ServeBundleHost(
     previewFile(previewId, PNG_SUFFIX)?.toOkioPath()?.takeIf(fileSystem::exists)
 
   /**
-   * Distinguishes this host's staging files from those of any other host over the same generation
-   * directory. See the partial-file naming in [bakedPngFile] for why that is not hypothetical.
-   *
-   * Deliberately NOT `System.identityHashCode`: that is a 32-bit value with no uniqueness
-   * guarantee, so two live hosts can share one — and two hosts sharing a tag is exactly the case
-   * this exists to rule out, which would put both back on a single `.partial` and defeat the
-   * staging. A monotonic counter makes it unique within the process; the random salt covers two
-   * processes over one generation directory, which the counter alone cannot see.
+   * Distinguishes this host's staging files from other hosts over the same generation dir (see
+   * [bakedPngFile]). Not `System.identityHashCode`, which can collide; a monotonic counter plus a
+   * random salt is unique within and across processes.
    */
   private val instanceTag: String = nextInstanceTag()
 
   private val fillLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
 
   /**
-   * The staged file for one animated capture, fetching it on first request.
-   *
-   * Deliberately a near-copy of [bakedPngFile] rather than a shared generic: the two lanes differ
-   * in the one place that matters (the extension, which a browser is not free to guess) and share
-   * the part that is merely mechanical. Folding them together would mean threading a suffix through
-   * the fill path, which is how a capture ends up written under a still's name.
+   * The staged file for one capture, fetched on first request. A near-copy of [bakedPngFile] rather
+   * than a shared generic, so a capture can never be written under a still's name.
    */
   private fun motionFile(motionId: String, extension: String): BranchFetch {
     if (motionId !in declaredMotionIds) return BranchFetch.NotFound
     if (extension !in MOTION_EXTENSIONS) return BranchFetch.NotFound
-    // The requested suffix must be the one THIS capture was published as, not merely a format the
-    // lane supports. Checking only the allowlist would let `<id>.gif` serve an APNG's bytes typed
-    // as
-    // a GIF: the same bytes, a content type the requester chose, and a browser that renders one
-    // frame and stops. The declared branch path is the authority on which it is.
+    // The suffix must be the one this capture was published as, not just an allowed format;
+    // otherwise a request could type an APNG as GIF.
     if (motionBranchPaths[motionId]?.endsWith(extension) != true) return BranchFetch.NotFound
     val path = previewFile(motionId, extension)?.toOkioPath() ?: return BranchFetch.NotFound
     if (fileSystem.exists(path)) return readStagedMotion(path)
@@ -1477,11 +1117,8 @@ class ServeBundleHost(
     .getOrElse { BranchFetch.Transport(it::class.simpleName ?: "error") }
 
   /**
-   * The bytes of one published capture, or null when this host can't serve it.
-   *
-   * The only motion entry point: a caller names an id and an extension it read off the served
-   * manifest, and gets bytes or nothing. Both are checked against what the catalog declared, so a
-   * request can neither invent an id nor choose the suffix its response is typed with.
+   * The bytes of one published capture. Id and extension are both checked against what the catalog
+   * declared, so a request can't invent either.
    */
   override fun motionRead(motionId: String, extension: String): BranchFetch =
     motionFile(motionId, extension)
@@ -1490,18 +1127,12 @@ class ServeBundleHost(
   fun motionBranchPath(motionId: String): String? = motionBranchPaths[motionId]
 
   /**
-   * The local-pixels fast path. Deliberately [localBakedPng], not [bakedPngFile]: a declared
-   * preview whose PNG hasn't arrived yet needs a fetch, and fetching is work that belongs behind
-   * admission like any other. Answering null sends it down the ordinary [render] path, which fills
-   * it.
+   * Local-pixels fast path via [localBakedPng], not [bakedPngFile]: fetching belongs behind
+   * admission, so a missing PNG returns null and goes down the ordinary [render] path.
    */
   /**
-   * The fetching counterpart of [bakedRender], for [ServeThumbWarmer].
-   *
-   * [bakedPngFile] is exactly the call [bakedRender] declines to make: it fills a declared-but-not
-   * yet-local PNG from the delivery branch, per-id serialised and atomically moved into place. Here
-   * that is the whole point — this runs off the request thread precisely so the fetch can happen —
-   * and the bytes are discarded because the file landing on disk is the result.
+   * The fetching counterpart of [bakedRender] for [ServeThumbWarmer]: runs off the request thread
+   * so [bakedPngFile] may fill the file; the bytes are discarded.
    */
   override fun warmBakedRender(previewId: String) {
     if (previewId !in previewIds) return
@@ -1517,10 +1148,8 @@ class ServeBundleHost(
     )
   }
 
-  // Deliberately [localBakedPng], for the same reason [bakedRender] is: measuring an image must
-  // never trigger the fetch that would make it measurable. A declared-but-not-yet-local preview
-  // reports no size, and the page omits the dimensions rather than paying a network round trip to
-  // fill in an optimisation.
+  // [localBakedPng] for the same reason as [bakedRender]: measuring must never trigger a fetch, so
+  // a non-local preview reports no size.
   override fun bakedRenderSize(previewId: String): Pair<Int, Int>? {
     if (previewId !in previewIds) return null
     return readPngSize(localBakedPng(previewId) ?: return null)
@@ -1553,19 +1182,15 @@ class ServeBundleHost(
     return fileSystem.exists(File(irDir, "$previewId$RC_SUFFIX").toOkioPath())
   }
 
-  // The cmp-jvm render is sized to the baked PNG's exact pixel dimensions — so the desktop-player
-  // PNG lands at the same size the viewer shows the baked / View-player lane at — with the density
-  // the capture used. Null when the preview has no captured doc or no baked PNG to size against.
+  // The cmp-jvm render is sized to the baked PNG's pixels at the capture density; null without a
+  // doc or baked PNG.
   override fun remoteComposeRenderSpec(previewId: String): RcJvmRenderSpec? {
     if (!hasRemoteComposeDoc(previewId)) return null
     // Sized against the baked PNG, so a declared-but-not-yet-local preview fills first.
     val (widthPx, heightPx) = readPngSize(bakedPngFile(previewId) ?: return null) ?: return null
-    // The DEVICE before the renderer's default, because this lane is form-factor-shaped and the
-    // default is not: 2.625 is a phone number (a 200dp preview bakes to 525px on the desktop
-    // renderer), and every Wear id in the device catalog is 2.0. Replaying a watch document at
-    // 2.625 scales it by 1.31 against the baked PNG it is sized to — the two lanes of one preview
-    // disagreeing about how big a dp is. `renderDensityFor` is the same resolution the viewer's
-    // own dp→px conversion uses, so the replay and the size overrides cannot drift apart.
+    // Device density before the renderer default: 2.625 is a phone number and every Wear device is
+    // 2.0, so using the default would scale a watch replay against its baked PNG. Same resolution
+    // as the viewer's dp→px, so the two can't drift.
     val density = renderDensityFor(previewId) ?: DEFAULT_RENDER_DENSITY
     return RcJvmRenderSpec(widthPx, heightPx, density)
   }
@@ -1589,30 +1214,18 @@ class ServeBundleHost(
   }
 
   /**
-   * Serve the baked `compose/figma-svg` export for [previewId] from the catalog's [figmaDir], with
-   * its hybrid raster crops inlined so the SVG is self-contained. The SVG is per component **slug**
-   * (`figma/<slug>.svg`) and a preview id folds the slug + variant (`<slug>__<variant>`), so the
-   * slug is the id up to the first `__`. [SvgOutcome.NotFound] for a plain bundle (no [figmaDir]),
-   * an unknown id, or a preview whose component carried no figma-svg. Overrides don't apply
-   * (static).
+   * Serve the baked `compose/figma-svg` export for [previewId] from [figmaDir] with its raster
+   * crops inlined. [SvgOutcome.NotFound] for a plain bundle, unknown id, or a component without
+   * one. Overrides don't apply.
    */
-  // Per-preview SVG availability (issue #2352). `hasSvgExport` is true for the whole session as
-  // soon
-  // as the catalog carries a `figma/` dir, but a specific preview whose component slug has no baked
-  // `figma/<slug>.svg` still 404s the `.svg` lane (see `renderSvg`). Gate the viewer's SVG control
-  // on
-  // the actual file so it isn't offered on a preview that would render "failed". Same slug lookup
-  // as
-  // `renderSvg`, minus the read.
+  // Per-preview SVG availability: gate the viewer's SVG control on the actual file, since a slug
+  // without `figma/<slug>.svg` 404s (see #2352).
   override fun hasSvgExportFor(previewId: String): Boolean = figmaSvgFileFor(previewId) != null
 
   /**
-   * The baked figma-svg file serving [previewId], or null when the catalog carries none. The
-   * catalog ships two shapes: the **per-variant** vector `figma/<slug>/<variant>.svg` (one per
-   * `images[]` entry — the dark/light/locale/size variants), and the back-compat **per-component**
-   * `figma/<slug>.svg` (one per slug, light-preferred). Prefer the per-variant file — serving the
-   * slug vector for a `…__dark` id hands out the light theme — and fall back to the slug vector for
-   * a catalog published before the per-variant emit existed.
+   * The baked figma-svg serving [previewId], or null: the per-variant `figma/<slug>/<variant>.svg`
+   * first (the slug vector is light-only), then the per-component `figma/<slug>.svg` for older
+   * catalogs.
    */
   private fun figmaSvgFileFor(previewId: String): okio.Path? {
     val figma = figmaDir ?: return null
@@ -1639,13 +1252,9 @@ class ServeBundleHost(
   }
 
   /**
-   * Web/document variant of [renderSvg]: instead of base64-embedding the hybrid raster crops, link
-   * them to their published home — the same files on the catalog's delivery branch
-   * (`raw.githubusercontent.com/<repo>/<branch>/figma/…`), which [provenance] records from the
-   * fetch. Keeps the web-served SVG at vector size while a document viewer resolves the crops over
-   * HTTP (an `<img>`-loaded SVG can't, but that context gets the self-contained default instead).
-   * Falls back to the embedded default when the catalog carries no provenance (a plain uploaded
-   * bundle, a local `--bundles` dir) — there's no public home to link.
+   * Web variant of [renderSvg]: link raster crops to their published home on the delivery branch
+   * (from [provenance]) instead of embedding them, keeping the SVG small. Falls back to the
+   * embedded default without provenance.
    */
   override fun renderSvgForWeb(previewId: String, overrides: PreviewOverrides): SvgOutcome {
     val prov = provenance ?: return renderSvg(previewId, overrides)
@@ -1665,33 +1274,22 @@ class ServeBundleHost(
   }
 
   /**
-   * The content-crop that frames [previewId]'s thumbnail to the component box, or `null` when the
-   * card should show the raw render (no figma-svg for the slug, unknown id, unreadable files, or a
-   * render already tight to the component — see [computeThumbCrop]). Read once from the baked
-   * `figma/<slug>.svg` (its root `viewBox` + `translate`) and the render PNG's IHDR dimensions,
-   * then memoised: a catalog's baked files don't change under a resident host, and a refresh
-   * re-registers a fresh host (dropping this cache), so this stays a couple of small local reads
-   * per preview across the whole life of a landing page — no daemon, no per-request re-read.
+   * The crop framing [previewId]'s thumbnail to the component box, or null for the raw render (see
+   * [computeThumbCrop]). Read from the baked SVG's `viewBox` and the PNG's IHDR, then memoised for
+   * the host's life.
    */
   fun contentCrop(previewId: String): ContentCrop? {
     cropCache[previewId]?.let {
       return it.orElse(null)
     }
-    // A crop needs both the PNG and the component's vector, and either can still be in flight: the
-    // PNG fills on first use, and the vectors are filled by a background pass after the catalog
-    // publishes. Answer null without memoising while either is outstanding, so the card starts
-    // cropping as soon as they land rather than staying uncropped until the next catalog refresh.
-    // Only a decision made against files that are actually present is cached.
+    // Either the PNG or the vector may still be in flight; answer null without memoising so the
+    // card crops once they land.
     if (localBakedPng(previewId) == null && previewId in declaredBakedIds) return null
-    // A declared capture gutter answers on its own — it needs no vector, so a preview the figma
-    // pass hasn't reached (or never will) still gets its gutter trimmed rather than waiting on a
-    // file that decides a different question.
+    // A declared capture gutter needs no vector, so it applies even before (or without) the figma
+    // pass.
     val gutter = declaredCaptureGutter(previewId)
     val svgOutstanding = figmaDir != null && figmaSvgFileFor(previewId) == null
-    // While a vector may still be landing, a gutter crop is a provisional answer: serve it (a card
-    // that waits is a card drawn at the wrong size) but do NOT memoise it, or the vector would
-    // never be reconsidered until the host is rebuilt. Only a decision made against files that are
-    // actually present is cached — the same rule the guard above states.
+    // While a vector may still land, a gutter crop is provisional: served but not memoised.
     if (svgOutstanding) return if (gutter == null) null else sharedContentCrop(previewId, gutter)
     val computed = java.util.Optional.ofNullable(sharedContentCrop(previewId, gutter))
     cropCache[previewId] = computed
@@ -1699,37 +1297,19 @@ class ServeBundleHost(
   }
 
   /**
-   * The density this preview's renders are produced at, or null when nothing this session carries
-   * says.
-   *
-   * Resolved exactly the way the render lane resolves it
-   * (`PreviewManifestRouter.ResolvedRenderParams`: `density ?: params.density ?: device density ?:
-   * 2.0`), because the two must agree or a dp→px conversion made against this answer sends the
-   * renderer a frame in the wrong unit. The last step of that chain — the 2.0 default — is
-   * deliberately NOT applied here: it belongs to the caller, which has to know the difference
-   * between "this preview renders at 2.0" and "nothing here knows", and `ServeWeb` documents which
-   * it is emitting.
-   *
-   * Both manifests are read because a session has one or the other, never both. An uploaded
-   * bundle's root `previews.json` carries the discovery params, `density` among them. A published
-   * catalog stages `previews/variants.json` instead, whose `PreviewParamsMeta` has no density field
-   * at all — but it does carry the raw `@Preview(device = …)` string, and the device catalog is
-   * what the renderer would have resolved the density from anyway. That second path is the one that
-   * answers on a published catalog, which is most of what this server hosts.
-   *
-   * The device is usually the whole story: of the 56 ids `DeviceDimensions` knows, 42 are not 2.0 —
-   * 2.625 is the commonest at 15 — so `@Preview(device = "id:pixel_5")` renders at 2.75 and a page
-   * that said 2 converted every dp box the reader typed by 0.73 of what it meant. The Wear ids are
-   * all 2.0, so the Wear catalogs were right by luck; the phone ones were not.
+   * The density this preview's renders are produced at, or null when nothing here says. Resolved
+   * like the render lane (`PreviewManifestRouter.ResolvedRenderParams`), minus the final 2.0
+   * default, which the caller applies so it can tell "renders at 2.0" from "unknown". Uploaded
+   * bundles carry `density` in `previews.json`; published catalogs only carry the `@Preview(device
+   * = …)` string, which resolves through the device catalog (most phone devices are not 2.0).
    */
   fun renderDensityFor(previewId: String): Float? =
     previewParamsById[previewId]?.declaredDensity()
       ?: deviceDensity(variantMeta[previewId]?.previewParams?.device)
 
   /**
-   * The `@CaptureGutter` this preview declared, in render pixels, from whichever manifest this
-   * session has: an uploaded bundle's root `previews.json` (dp, resolved against its own density)
-   * or a published catalog's `previews/variants.json` (already pixels). Null when it declares none.
+   * The declared `@CaptureGutter` in render pixels, from `previews.json` (dp, resolved against its
+   * density) or `variants.json` (already pixels); null when none.
    */
   private fun declaredCaptureGutter(previewId: String): ServeCatalogStore.CaptureGutterPx? =
     (previewParamsById[previewId]?.asPreviewParamsMeta() ?: variantMeta[previewId]?.previewParams)
@@ -1740,14 +1320,9 @@ class ServeBundleHost(
     java.util.concurrent.ConcurrentHashMap<String, java.util.Optional<ContentCrop>>()
 
   /**
-   * [computeContentCrop], memoised across every host over the same files.
-   *
-   * [cropCache] lives and dies with this host, and a catalog's host is rebuilt every time the
-   * registry resumes it — which, on a box under memory pressure, is most visits. Each rebuild then
-   * decoded every card's PNG again on the landing's request thread to find its alpha bounds: four
-   * seconds of a cold `/jetsnack/` on preview.coo.ee. The answer depends only on the files, and a
-   * rebuilt host reads the same generation directory, so it is keyed by those files' identity
-   * (path, size, modification time) and the gutter — a file that changes is a different key.
+   * [computeContentCrop], memoised across every host over the same files. [cropCache] dies with the
+   * host, which the registry rebuilds on resume, so decoding every PNG again made cold landings
+   * slow. Keyed by file identity (path, size, mtime) and gutter.
    */
   private fun sharedContentCrop(
     previewId: String,
@@ -1788,11 +1363,8 @@ class ServeBundleHost(
     // Same per-variant-first resolution as `renderSvg` — a variant vector's viewBox reflects the
     // exact render this preview's PNG shows.
     val svgFile = figmaSvgFileFor(previewId)
-    // Deliberately the already-local file, NOT `bakedPngFile`: the landing page computes a crop for
-    // every card while building its HTML, so filling here would serially download a whole cold
-    // catalog on the first page request — the exact stall lazy fetching exists to remove, moved
-    // onto the request thread. A cold card simply renders uncropped; the browser's own
-    // `/render/<id>.png` request lands the file, and the next page build crops it.
+    // The already-local file, not `bakedPngFile`: filling here would serially download a cold
+    // catalog on the landing request. Cold cards render uncropped until their PNG lands.
     val png = localBakedPng(previewId) ?: return null
     return try {
       val bytes = fileSystem.read(png) { readByteArray() }
@@ -1802,21 +1374,16 @@ class ServeBundleHost(
       val fromSvg =
         svgFile
           ?.let {
-            // The drawn extent is unioned in so a focus ring or disabled outline OUTSIDE the
-            // layout-derived figma box is never clipped — but on a guttered render those same
-            // pixels are the shadow the gutter reserved room for, and they are going to bleed
-            // rather than be clipped. Unioning them there would grow the window past the component
-            // and draw it smaller than its siblings, which is the whole complaint.
+            // Union the drawn extent so focus rings outside the figma box aren't clipped, except on
+            // a guttered render, where those pixels are the shadow and would make the component
+            // look smaller.
             val bounds = if (gutter == null) pngAlphaBounds(bytes) else null
             computeThumbCrop(fileSystem.read(it) { readUtf8() }, rw, rh, bounds)
           }
-          // A vector crop on a GUTTERED render must not hide its overflow either: the box it frames
-          // is the component, and the pixels the gutter holds are that component's shadow. Clipping
-          // them is the bug the gutter exists to prevent, whichever crop decided the box.
+          // On a guttered render the crop must not clip the shadow the gutter reserves.
           ?.let { if (gutter == null) it else it.copy(clip = false) }
-      // The vector wins where it applies: it frames the component inside a canvas the render was
-      // drawn on (a Wear watch face), which is a tighter question than "how much margin did the
-      // capture add", and it already accounts for the gutter's pixels by unioning the drawn extent.
+      // The vector wins where it applies (it frames the component inside its canvas); otherwise
+      // crop to the gutter.
       fromSvg ?: gutter?.let { computeGutterCrop(it.left, it.top, it.right, it.bottom, rw, rh) }
     } catch (e: Exception) {
       null
@@ -1890,40 +1457,25 @@ class ServeBundleHost(
     /** A staging tag no other live host can hold. See [instanceTag]. Visible for tests. */
     internal fun nextInstanceTag(): String = "$processSalt-${instanceCounter.getAndIncrement()}"
 
-    /**
-     * How many pinned (`?at=<sha>`) assets one catalog host keeps resident. Small on purpose: this
-     * is a de-duplicator for the same permalink being opened again, not a working set — a pinned
-     * URL is by nature a one-off link into the past, and holding hundreds of historical renders
-     * would trade a real memory cost against traffic that mostly never repeats.
-     */
+    /** Pinned assets kept per host: a de-duplicator for re-opened permalinks, not a working set. */
     private const val MAX_PINNED_CACHE_ENTRIES = 32
 
-    /**
-     * How many URLs this branch has already refused are remembered, so a page of absent pinned
-     * images stops costing round trips. Larger than the hit cache because a miss costs bytes to
-     * remember and a hit costs a whole PNG.
-     */
+    /** Remembered branch misses; larger than the hit cache since a miss costs only a key. */
     private const val MAX_PINNED_MISS_ENTRIES = 256
 
     /**
-     * How many previews' render-change sets stay resident. Generous next to the pinned caches
-     * because an entry is a handful of shas rather than a PNG, and the access pattern is the
-     * opposite of a permalink's: a reader browsing a catalog opens the revision menu on preview
-     * after preview, and every repeat within a load is an answer that cannot have changed.
+     * Render-change sets kept resident; entries are a few shas and readers open menu after menu.
      */
     private const val MAX_RENDER_CHANGE_ENTRIES = 512
 
     /**
-     * Concurrent branch reads the pinned lane may have in flight. Small: these are small files off
-     * a CDN, the caches absorb repeats, and the number exists to bound what an anonymous caller can
-     * make this server do — not to make pinned pages fast.
+     * Concurrent pinned-lane branch reads; bounds what an anonymous caller can make this server do.
      */
     private const val MAX_CONCURRENT_PINNED_FETCHES = 4
 
     /**
-     * How long a pinned read waits for a permit before answering "busy". Long enough that an
-     * ordinary page's images queue through rather than failing, short enough that a flood is shed
-     * instead of parking request threads.
+     * How long a pinned read waits for a permit before answering busy: ordinary pages queue
+     * through, floods are shed.
      */
     private const val PINNED_FETCH_WAIT_SECONDS = 5L
 
@@ -1934,10 +1486,8 @@ class ServeBundleHost(
     private const val SLUG_SEPARATOR = "__"
 
     /**
-     * Normalise a declared hero (a `componentId` like `"Template/TimeText"` or a preview-function
-     * name) to the slug the exporter bakes into preview ids — mirrors `@design-parity`'s `slug()`
-     * (non-`[a-zA-Z0-9._-]` → `-`, trim, lowercase), so `display.hero` resolves against the served
-     * ids regardless of how the author wrote it.
+     * Normalise a declared hero to the slug the exporter bakes into ids; mirrors `@design-parity`'s
+     * `slug()`.
      */
     private fun heroSlug(value: String): String =
       value.replace(Regex("[^a-zA-Z0-9._-]+"), "-").trim('-').lowercase().ifBlank { "x" }
@@ -1950,11 +1500,8 @@ class ServeBundleHost(
     private const val PREVIEWS_JSON = "previews.json"
 
     /**
-     * FQN of the published `PreviewWrapperProvider` that pins a preview to the view-backed Remote
-     * Compose player. A preview naming it on `params.wrapperClassName` bakes through
-     * [RemoteComposePlayerKind.VIEW] rather than the `RemoteOverridablePreview` default — see
-     * [ServeHost.bakedRcPlayer]. Matched by name because the wrapper lives in the app's own
-     * classpath, not this server's.
+     * FQN of the `PreviewWrapperProvider` pinning a preview to the view-backed player
+     * ([RemoteComposePlayerKind.VIEW]); matched by name since it lives on the app's classpath.
      */
     private const val REMOTE_VIEW_PREVIEW_WRAPPER =
       "ee.schimke.composeai.daemon.RemoteViewPreviewWrapper"
@@ -1971,20 +1518,13 @@ class ServeBundleHost(
   }
 }
 
-// Last-resort render density for a cmp-jvm render, when neither the manifest nor the device it
-// names says — the desktop renderer's own default (a 200dp preview bakes to 525px). It is a PHONE
-// number, which is why nothing reaches it until [deviceDensity] has been asked: every Wear id in
-// the device catalog is 2.0, and 42 of the 56 ids are not 2.0 at all. File-level rather than on the
-// companion because the params→meta mapping below resolves a capture gutter's dp against it too.
+// Last-resort cmp-jvm density (the desktop renderer's default, a phone value), used only after
+// [deviceDensity]. File-level because the params→meta mapping below also uses it.
 private const val DEFAULT_RENDER_DENSITY = 2.625f
 
 /**
- * The density a `@Preview(device = …)` renders at, or null when it names none this build knows.
- *
- * The device catalog is the renderer's own source for this — `PreviewManifestRouter` resolves
- * `density ?: params.density ?: deviceDims.density` — so reading it here is not a second opinion,
- * it is the same one. An unknown id answers null rather than throwing: a manifest may name a device
- * this build's catalog has not learned, and a render sized by the fallback beats a page that 500s.
+ * The density a `@Preview(device = …)` renders at (same device catalog the renderer uses), or null
+ * for an unknown device rather than throwing.
  */
 private fun deviceDensity(device: String?): Float? =
   device
@@ -1993,23 +1533,15 @@ private fun deviceDensity(device: String?): Float? =
     ?.takeIf { it > 0f }
 
 /**
- * What this manifest entry says its render density is: the stated one, else its device's.
- *
- * Null is "this entry does not say", which is not the same claim as any particular number — the
- * callers differ on what to do about it, and each states its own fallback. A stated but
- * non-positive density is no answer either, so it falls through to the device rather than
- * suppressing it.
+ * The entry's stated density, else its device's; null means unstated, and each caller picks its own
+ * fallback. Non-positive values fall through.
  */
 private fun ee.schimke.composeai.previewdata.PreviewParams.declaredDensity(): Float? =
   density?.takeIf { it > 0f } ?: deviceDensity(device)
 
 /**
- * Whether a `@Preview(locale = …)` render was composed right-to-left — the direction the renderer
- * resolved a capture gutter's leading / trailing edges against.
- *
- * The renderer's own rule, out of the renderer's own module: the bidi pseudolocale first (`ar-XB`
- * mirrors, `en-XA` does not), then the real language table. A second copy of that table here would
- * be a thing to drift.
+ * Whether a `@Preview(locale = …)` render was right-to-left, using the renderer's own rule (bidi
+ * pseudolocales, then the language table) rather than a second copy.
  */
 private fun rendersRightToLeft(locale: String?): Boolean {
   if (locale.isNullOrBlank()) return false
@@ -2020,12 +1552,8 @@ private fun rendersRightToLeft(locale: String?): Boolean {
 }
 
 /**
- * A bundle manifest's `@Preview` params in the shape a catalog publishes them.
- *
- * The two sources describe the same annotation and are reduced to one type here rather than being
- * read separately at the call site, so "which fields does a ground need?" is answered once. Only
- * the fields a browse surface consults before opening a daemon cross over — the rest of
- * `PreviewParams` (locale, font scale, density) belongs to the render, not to how it is presented.
+ * A bundle manifest's `@Preview` params in the shape a catalog publishes, so "which fields does a
+ * ground need?" is answered once. Only fields consulted before opening a daemon cross over.
  */
 private fun ee.schimke.composeai.previewdata.PreviewParams.asPreviewParamsMeta():
   ServeCatalogStore.PreviewParamsMeta =
@@ -2036,10 +1564,8 @@ private fun ee.schimke.composeai.previewdata.PreviewParams.asPreviewParamsMeta()
     device = device,
     widthDp = widthDp,
     heightDp = heightDp,
-    // The one field that is derived rather than copied: the annotation states dp, and every
-    // consumer of this record works in the render's pixels. `density` is on this manifest, so the
-    // bundle path resolves it here the same way the exporter resolves it for a published catalog —
-    // per edge, rounded on its own, which is what the renderer did when it grew the canvas.
+    // Gutter dp is converted to render pixels per edge with this manifest's density, as the
+    // exporter does for catalogs.
     captureGutter =
       captureGutter?.let { gutter ->
         val scale = declaredDensity() ?: DEFAULT_RENDER_DENSITY
@@ -2067,17 +1593,14 @@ private data class BundleRenderError(
 )
 
 /**
- * A bundle's guideline results, looked up by bundle id. A bundle renames each preview to a
- * path-safe id (`[^A-Za-z0-9._-]` becomes `_`), and a report written before compose-ai-tools
- * remapped its ids into the bundle still carries the raw ones, so an exact miss falls back to the
- * results' ids made safe the same way. A safe id more than one raw id maps to is left out.
+ * A bundle's guideline results by bundle id. Bundles rename ids to path-safe form
+ * (`[^A-Za-z0-9._-]` → `_`), and older reports carry raw ids, so an exact miss falls back to
+ * safe-mapped ids; ambiguous ones are left out.
  */
 internal class BundleGuidelineResults(private val results: ServeGuidelineResults?) {
   private val bySafeId:
     Map<String, ee.schimke.composeai.guidelines.protocol.GuidelineRecordV1> by lazy {
-    // A safe id two different raw ids share is ambiguous — the bundle gave the second a `_n` suffix
-    // in an order this report need not follow — so it answers nothing rather than possibly
-    // another preview's result.
+    // An ambiguous safe id answers nothing rather than possibly another preview's result.
     val grouped = results?.records?.entries.orEmpty().groupBy { bundleSafeId(it.key) }
     grouped.filterValues { it.size == 1 }.mapValues { it.value.single().value }
   }

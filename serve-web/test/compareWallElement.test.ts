@@ -1,10 +1,7 @@
-// Behavioural contract for `<cp-compare-wall>`.
-//
-// The decisions are pinned next door — `compareWall.test.ts`. What only the element can answer is
-// the wiring: that the scorer handle is read late enough to exist, that a lane switch cannot be
-// overwritten by the previous lane's slower rows, that the published player wall replaces the
-// client-rendered table wholesale rather than running behind it, and that the worst rows end up
-// where the wall is read.
+// Behavioural contract for `<cp-compare-wall>`. Decisions are pinned in `compareWall.test.ts`; this
+// covers the wiring: the scorer handle is read late enough, a lane switch can't be overwritten by
+// the previous lane's slower rows, the player wall replaces the client table, and the worst rows
+// end up first.
 
 import "./setup.js";
 import assert from "node:assert/strict";
@@ -20,10 +17,7 @@ interface Scorer {
     settle(): void;
 }
 
-/**
- * `window.ComposePreviewCompare`, published LATE by default — which is what the real page does, and
- * the thing this element must not cache too early.
- */
+/** `window.ComposePreviewCompare`, published late by default as on the real page. */
 function stubScorer(
     scores: Record<string, number>,
     options: {
@@ -57,9 +51,8 @@ function stubScorer(
             state.calls.push(reference);
             return { percent: scores[reference] ?? 0, geometry: 3.5 };
         },
-        // The reference lane goes through the normalise / diff / score composition, so the pair the
-        // map is painted from and the pair the percentage is taken over are the same frames. The
-        // stub keeps the score keyed off the reference URL, exactly as `scoreImageUrls` does.
+        // The reference lane normalises, diffs and scores one pair, so map and percentage describe
+        // the same frames. The stub keys the score off the reference URL like `scoreImageUrls`.
         normaliseImageUrls: async (
             reference: string,
             candidate: string,
@@ -99,10 +92,8 @@ function stubScorer(
 }
 
 /**
- * One row, carrying the `<kind>-<variant>` artifacts the server writes.
- *
- * [attrs] is written verbatim, for the row attributes whose value is not a URL — the published
- * `data-match-<variant>` score, above all.
+ * One row with the server's `<kind>-<variant>` artifacts. [attrs] is written verbatim (e.g. the
+ * published `data-match-<variant>` score).
  */
 const rowHtml = (name: string, have: string[], attrs = "") => `
   <tr class="cp-compare-row" data-label="${name}" data-hay="${name.toLowerCase()}"
@@ -202,7 +193,7 @@ describe("<cp-compare-wall>", () => {
     });
 
     it("leads with a row it could not score at all", async () => {
-        // An unmeasurable pair outranks every measured one: it is the row nobody is looking at.
+        // An unmeasurable pair outranks every measured one.
         stubScorer({ "/a/Button-svg-light": 20 });
         await mount();
         await settle();
@@ -214,9 +205,8 @@ describe("<cp-compare-wall>", () => {
     });
 
     it("reads the scorer LATE, so the page's script order cannot silence it", async () => {
-        // The compare page emits the components bundle BEFORE `format-compare.js`. An element that
-        // cached the handle when it upgraded would cache `null` and every row would read
-        // "unavailable" — silently, on a page that otherwise looks like it is working.
+        // The components bundle loads before `format-compare.js`, so a handle cached at upgrade
+        // would be null.
         await mount();
         await flush();
         stubScorer({ "/a/Button-svg-light": 88, "/a/Card-svg-light": 88 });
@@ -308,10 +298,8 @@ describe("<cp-compare-wall>", () => {
     });
 
     it("does not load the pictures of a row the filter hides", async () => {
-        // Dressing assigns both image `src` values, so dressing every row and filtering afterwards
-        // had the browser fetch and decode the whole wall for a link showing one comparison. On the
-        // large catalogs this page exists for that is hundreds of full-resolution pairs for a single
-        // visible row.
+        // Dressing assigns image sources, so it must follow filtering, or a single-row link decodes
+        // the whole wall.
         stubScorer({
             "/a/Button-svg-light": 90,
             "/a/Card-svg-light": 90,
@@ -415,9 +403,7 @@ describe("<cp-compare-wall>", () => {
     });
 
     it("hands the filter to the published wall and stops, rather than running behind it", async () => {
-        // The lane wall owns its rows and every number it shows was computed offline. Leaving the
-        // client-rendered table running would decode a document per preview for a table nobody can
-        // see.
+        // The lane wall's numbers are offline; the client table must not keep decoding behind it.
         const filtered: string[] = [];
         (window as Record<string, unknown>).cpRcLanes = {
             filter: (q: string) => filtered.push(q),
@@ -444,9 +430,8 @@ describe("<cp-compare-wall>", () => {
     });
 
     it("does not let a slow lane write its scores over a newer one's", async () => {
-        // Every row decodes and scores two frames, so a switch mid-run leaves the old lane's
-        // promises in flight. Without the generation counter they land on rows the visitor is now
-        // looking at in a different format.
+        // A lane switch mid-run leaves the old lane's promises in flight; the generation counter
+        // keeps them off the new lane's rows.
         const scorer = stubScorer(
             { "/a/Button-svg-light": 11, "/a/Card-svg-light": 11 },
             { hold: true },
@@ -467,9 +452,8 @@ describe("<cp-compare-wall>", () => {
     });
 
     it("paints the middle diff map, and only in the reference lane", async () => {
-        // The wall's reason to carry a third panel at all: the reference lane compares
-        // independently-authored artwork, so "which pixels moved" is a real question there and a
-        // meaningless one in the vector lanes, which export the render they are scored against.
+        // Only the reference lane compares independent artwork, so only it has a "which pixels
+        // moved" map.
         const scorer = stubScorer({ "/a/Button-reference-light": 80 });
         await mount({
             available: 'data-has-svg="1" data-has-reference="1"',
@@ -557,11 +541,8 @@ describe("<cp-compare-wall>", () => {
     });
 
     it("does not let an abandoned lane's map land on the row", async () => {
-        // The rows of a lane the visitor has left are still in flight when the next lane starts a
-        // second pass over the SAME elements. The score is already generation-guarded; the map has
-        // to be too, or the abandoned run repaints a canvas the new run has finished with and the
-        // row shows one lane's magenta beside the other's render and percentage. Blanking the canvas
-        // at the top of a run cannot close this — the stale paint arrives after that.
+        // The map must be generation-guarded too, or an abandoned run repaints a canvas the new run
+        // finished.
         window.history.replaceState(null, "", "/compare?format=reference");
         const scorer = stubScorer(
             {
@@ -602,12 +583,8 @@ describe("<cp-compare-wall>", () => {
     });
 
     it("stops an abandoned chain before it resets the rows behind it", async () => {
-        // Bumping the generation stops a stale run's RESULTS from landing; it does not stop the
-        // chain, which keeps walking its remaining rows. Everything a row is reset to on the way to
-        // its measurement — the vector's src, "comparing…", the blanked map — was written before the
-        // only guard there was, so a stale chain arriving behind a finished one wiped rows the
-        // visitor was already reading and then discarded the measurement that would have refilled
-        // them. Those rows stayed blank for as long as the page was open.
+        // A stale chain keeps walking its rows even after its results are dropped; guarding only
+        // results let it wipe rows (src, "comparing…", blank map) and never refill them.
         window.history.replaceState(null, "", "/compare?format=reference");
         const scorer = stubScorer(
             {
@@ -654,11 +631,8 @@ describe("<cp-compare-wall>", () => {
     });
 
     it("bounds the map it keeps to what the column can draw", async () => {
-        // A reference exported at full device resolution normalises to a frame far larger than the
-        // 200px column that shows it, and the wall retains one per row rather than the detail page's
-        // one. Kept at source size, a catalog of large captures is hundreds of megabytes of backing
-        // store nobody can see — and a frame past the browser's canvas limit turns a row that used
-        // to score into "unavailable".
+        // Full-resolution references normalise to frames far larger than the 200px column, and the
+        // wall keeps one per row, so maps are bounded (and oversized frames would fail).
         const scorer = stubScorer(
             { "/a/Button-reference-light": 80 },
             { map: { width: 1600, height: 2400 } },
@@ -681,10 +655,7 @@ describe("<cp-compare-wall>", () => {
         // Bounded, not squashed: a map drawn at the wrong proportion would misreport where the two
         // drawings disagree, which is the one thing this column exists to say.
         assert.equal(diff.width, Math.round((1600 / 2400) * 440));
-        // And the bound is asked for UP FRONT, not applied to the finished map: normalising at the
-        // frame's own size would hold three full-resolution buffers per row on the way to a picture
-        // 200px wide, and a frame past the browser's canvas limit would fail there rather than
-        // scoring — which is what this lane used to do before it drew anything.
+        // The bound is requested up front, not applied after normalising at full size.
         assert.deepEqual(scorer.bounds, [440]);
     });
 
@@ -753,10 +724,8 @@ describe("<cp-compare-wall>", () => {
     });
 
     it("gives a format pick its own history entry, and typing none", async () => {
-        // The distinction the deleted source-text test was protecting. A discrete pick is a place
-        // the visitor can go Back to; a keystroke is not, or Back walks the search box one letter at
-        // a time. Both go through `cpUrlState`, which preserves the session keys — writing
-        // `history.replaceState` here would drop them.
+        // A discrete pick is a Back target, a keystroke isn't. Both go through `cpUrlState`, which
+        // preserves session keys.
         const pushed: Array<Record<string, string>> = [];
         const replaced: Array<Record<string, string>> = [];
         (window as Record<string, unknown>).cpUrlState = {
@@ -799,9 +768,8 @@ describe("<cp-compare-wall>", () => {
     });
 
     it("repaints the page's chrome for the theme being compared, on a pick AND on Back", async () => {
-        // Every pop path restores its theme by ASSIGNING the control's value, which fires no
-        // `change` — so each one has to hand the restored choice over itself. Missing it left Back
-        // from Dark to a Light entry re-rendering the preview light inside a page still pinned dark.
+        // Every pop path restores the theme by assigning the control's value (no `change` event),
+        // so each must hand the restored choice on itself.
         const followed: string[] = [];
         let popHandler = () => {};
         (window as Record<string, unknown>).cpPageTheme = {
@@ -836,12 +804,9 @@ describe("<cp-compare-wall>", () => {
     });
 
     it("fixes the RC player's theme and fonts BEFORE it measures", async () => {
-        // An ordering invariant, and every step earns its place. The artifact theme is an explicit
-        // comparison input — inherit the OS's `prefers-color-scheme` and a light PNG gets scored
-        // against a dark canvas. The first paint is what DISCOVERS the named font families, so
-        // `fontsReady` is only meaningful after it, and the resolved glyphs only reach the canvas on
-        // the repaint after that. Measure early and the lane reports the visitor's own `sans-serif`
-        // against a PNG baked with Roboto: a permanent residual that reads as a layout defect.
+        // An ordering invariant: the explicit artifact theme first (not the OS preference), then
+        // the first paint (which discovers named fonts), then `fontsReady`, then a repaint, then
+        // measure.
         const order: string[] = [];
         (window as Record<string, unknown>).RC = {
             RcdPlayer: class {
@@ -894,10 +859,8 @@ describe("<cp-compare-wall>", () => {
     });
 
     it("keeps the baseline on the left on every lane, and only renames the header", async () => {
-        // ONE order, every lane: baseline · diff · ours. Handed a document written the other way
-        // round (the shape the server emitted before `COMPARE_NAVIGATION.md` F3), the wall
-        // normalises it on arrival and leaves it there — pressing a baseline button changes what
-        // the left column IS, never where to look for it.
+        // One order on every lane: baseline · diff · ours. A document in the old order is
+        // normalised on arrival (`COMPARE_NAVIGATION.md` F3).
         stubScorer({ "/a/Button-reference-light": 80 });
         document.body.innerHTML = `
           <cp-compare-wall></cp-compare-wall>
@@ -973,10 +936,7 @@ describe("<cp-compare-wall>", () => {
     });
 
     it("keeps the delta map between the pair when the columns swap", async () => {
-        // The map is only a diff OF the two pictures if it sits between them. The pair is
-        // normalised on arrival, and a normalisation that reasoned about the pair alone would shunt
-        // whatever was parked in the middle to the end of the row — leaving the wall claiming a
-        // middle column while drawing a trailing one.
+        // The map must stay between the two pictures when the pair is reordered.
         stubScorer({ "/a/Button-reference-light": 80 });
         document.body.innerHTML = `
           <cp-compare-wall></cp-compare-wall>
@@ -1045,10 +1005,8 @@ describe("<cp-compare-wall>", () => {
     });
 
     it("paints every row's pictures before it has scored any of them", async () => {
-        // The picture sources used to be assigned INSIDE the serial scoring chain, so a wall drew
-        // one row's two panels per completed comparison and showed nothing but labels until then —
-        // tens of seconds on a real catalog. Nothing about pointing an `<img>` at a URL needs the
-        // scorer (issue #4624).
+        // Picture sources are set before scoring, so the wall draws immediately rather than one row
+        // per completed comparison.
         stubScorer(
             { "/a/Button-svg-light": 90, "/a/Card-svg-light": 90 },
             { hold: true },
@@ -1068,9 +1026,7 @@ describe("<cp-compare-wall>", () => {
     });
 
     it("shows the published score before it has measured anything", async () => {
-        // The wall used to open on a column of "waiting…" and stay there for as long as it took to
-        // decode and score two rasters per row. The delivery branch already measured every one of
-        // these pairs with this same scorer, so the number exists before the page is served.
+        // Published scores seed the wall before any measurement.
         window.history.replaceState(null, "", "/compare?format=reference");
         const scorer = stubScorer(
             { "/a/Button-reference-light": 62 },
@@ -1134,8 +1090,7 @@ describe("<cp-compare-wall>", () => {
     });
 
     it("leaves a row with no published score where the server put it", async () => {
-        // "Nobody has measured this yet" is not a finding, and must not lead the wall the way an
-        // unmeasurable row does — a catalog baked before the producer existed carries none at all.
+        // Unscored rows must not lead the wall the way unmeasurable rows do.
         window.history.replaceState(null, "", "/compare?format=reference");
         stubScorer({}, { holdReference: true });
         await mount({
@@ -1164,9 +1119,7 @@ describe("<cp-compare-wall>", () => {
     });
 
     it("does not seed the vector lanes from a score about another comparison", async () => {
-        // `data-match-light` sits on the same row the SVG lane scores, and describes a render
-        // against an independently-drawn design. Seeding SVG from it would state a number about a
-        // comparison that lane is not making.
+        // `data-match-light` describes render-vs-design, so it must not seed the SVG lane.
         stubScorer({ "/a/Button-svg-light": 88 }, { hold: true });
         await mount({
             rows: [
@@ -1182,9 +1135,7 @@ describe("<cp-compare-wall>", () => {
     });
 
     it("keeps a published score when this browser cannot measure the pair", async () => {
-        // A throw here is a fact about this browser, not about the pair: the delivery branch scored
-        // it with this very scorer. Falling to "unavailable" would lose a real number and sort the
-        // row to the top as though nobody had ever measured it.
+        // A browser-side failure doesn't erase a published score.
         window.history.replaceState(null, "", "/compare?format=reference");
         (window as Record<string, unknown>).ComposePreviewCompare = undefined;
         await mount({
@@ -1242,10 +1193,8 @@ describe("<cp-compare-wall>", () => {
         assert.equal(document.querySelector(".cp-compare-row"), null);
     });
 
-    // Everything above runs on happy-dom, which has no `IntersectionObserver` — so it exercises the
-    // fallback the wall keeps for a browser without one, where the whole wall is measured up front.
-    // These pin the other half: what a browser that CAN say "this row is on screen" gets, which is
-    // the one that matters on a catalog of several hundred rows.
+    // happy-dom has no `IntersectionObserver`, so the tests above exercise the measure-everything
+    // fallback; these cover a browser that can report visibility.
     describe("with a viewport to measure against", () => {
         let realObserver: typeof IntersectionObserver;
         let observed: Set<Element>;

@@ -18,21 +18,13 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 /**
- * The two places a replayed preview's theme could still be offered but not applied: the **socket
- * lanes**, and a **mixed catalog**'s theme control.
- *
- * `ServeThemeReplaySeedTest` pins the expansion itself over the HTTP render lane — a
- * `themeProvider` for a replayed preview becomes the `rc.<role>=color:…` seeds that re-theme its
- * captured document. This file pins the two ways a request could reach a renderer around it:
- * 1. The WebSocket lanes parse their own overrides from `initial` / `setOverrides` / `switch`
- *    messages. Forwarding a raw provider there streams frames the theme never touched while the
- *    viewer shows it as selected — unchanged pixels presented as a themed render (#3449) with a
- *    socket in front of them, and worse than the snapshot case because a later frame clears the
- *    error overlay while the wrong stream keeps running.
- * 2. A catalog holding **both** replayed and recomposing previews publishes the union of its
- *    themes, because one recomposing preview can apply all of them. A replayed preview mapped for
- *    only some must not be offered the rest — the click would reach the terminal 409 the gate
- *    exists to prevent.
+ * Where a replayed preview's theme could be offered but not applied. `ServeThemeReplaySeedTest`
+ * pins the `themeProvider` → `rc.<role>=color:…` expansion on the HTTP lane; this pins the two
+ * other routes:
+ * 1. The WebSocket lanes parse their own overrides (`initial`/`setOverrides`/`switch`); forwarding
+ *    a raw provider would stream untouched frames while the viewer shows the theme selected.
+ * 2. A mixed catalog publishes the union of its themes, so a replayed preview mapped for only some
+ *    must not be offered the rest (the click would hit the terminal 409).
  */
 class ServeThemeReplayLaneTest {
 
@@ -48,9 +40,8 @@ class ServeThemeReplayLaneTest {
       .toByteArray()
 
   /**
-   * A catalog whose previews are of **both** kinds: `<name>-replayed` carries a captured document,
-   * `<name>-live` does not. The mix is the point — with only one kind the union and the per-preview
-   * set are the same list, and neither gate can be wrong.
+   * A catalog with both kinds: `<name>-replayed` carries a captured document, `<name>-live` does
+   * not. With only one kind the union and per-preview sets coincide and neither gate is tested.
    */
   private inner class MixedHost(
     private val name: String,
@@ -62,8 +53,7 @@ class ServeThemeReplayLaneTest {
     val liveId = "$name-live"
 
     /**
-     * One declared bool knob per preview, so a page has a control to read. `true` by default, so a
-     * link asking for `false` is visible in the markup exactly when it was seeded.
+     * One bool knob per preview, `true` by default, so a seeded `false` is visible in the markup.
      */
     private val enabledKnob =
       listOf(
@@ -151,17 +141,10 @@ class ServeThemeReplayLaneTest {
     page.lineSequence().first { it.contains("""data-knob-key="$key"""") }
 
   /**
-   * A deep link seeds the viewer's controls only with the axes this page's image could be carrying,
-   * and on a replayed preview a `knob.*` is not one of them.
-   *
-   * `?fallback=baked` makes `respondDroppedOverrides` answer with pixels that ignored what it could
-   * not apply. A replayed preview has no composition for a named knob to reach — that is what
-   * `CatalogLiveRouting.irReplayDroppedOverrideNames` names — even though this host renders every
-   * other axis perfectly well, so a host-wide "can this session apply overrides?" reads `true` and
-   * would have seeded a control the pixels never saw.
-   *
-   * The recomposing twin is the control case: same host, same link, and there the render DOES apply
-   * it, so withholding the seed would be the same disagreement pointing the other way.
+   * A deep link seeds controls only with axes this page's image could carry; on a replayed preview
+   * a `knob.*` is not one (`CatalogLiveRouting.irReplayDroppedOverrideNames`), even though the host
+   * can apply overrides in general. The recomposing twin is the control case where the seed
+   * applies.
    */
   @Test
   fun `a baked fallback seeds the axes its render kept, and withholds the ones replay drops`() {
@@ -177,10 +160,6 @@ class ServeThemeReplayLaneTest {
       "a recomposing preview withheld a knob its render applied",
     )
   }
-
-  // ---------------------------------------------------------------------------------------------
-  // The socket lanes.
-  // ---------------------------------------------------------------------------------------------
 
   /** Drive a snapshot socket and return the overrides its frame was rendered with. */
   private fun streamOverrides(
@@ -228,11 +207,8 @@ class ServeThemeReplayLaneTest {
   }
 
   /**
-   * `switch` with no new overrides carries the *held* ones onto the preview it lands on, so the
-   * seeds have to be derived after the landing rather than before. Held un-expanded and expanded
-   * per preview, a switch from a recomposing preview to a replayed one seeds it; the reverse hands
-   * the provider back. Expanding at store time instead would pin whichever preview the socket
-   * opened on.
+   * `switch` without overrides carries the held ones onto the new preview, so seeds are derived per
+   * preview after landing; expanding at store time would pin the preview the socket opened on.
    */
   @Test
   fun `switching to a replayed preview re-derives the seeds for it`() {
@@ -255,10 +231,6 @@ class ServeThemeReplayLaneTest {
     assertNull(onReplayed.themeProvider)
   }
 
-  // ---------------------------------------------------------------------------------------------
-  // Mixed catalogs.
-  // ---------------------------------------------------------------------------------------------
-
   @Test
   fun `a replayed preview is offered only the themes published for replay`() {
     val html = get("/mixed/p/${mixed.replayedId}")
@@ -277,9 +249,8 @@ class ServeThemeReplayLaneTest {
   }
 
   /**
-   * The grid's chips are the union — one recomposing card publishes every declared theme — so a
-   * replayed card that can't take all of them is gated out of the control rather than into an
-   * error. Its `themeBase` is the empty string, which the browser's per-card worker skips.
+   * The grid's chips are the union, so a replayed card that can't take them all is gated out: its
+   * `themeBase` is empty, which the browser's per-card worker skips.
    */
   @Test
   fun `a partially mapped replayed card is not themed from the grid`() {

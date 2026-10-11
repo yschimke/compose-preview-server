@@ -9,38 +9,23 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * Builds the prefilled GitHub **new-issue** link the viewer offers beside its "source" link, so
- * someone looking at a preview that renders wrongly can file it against the repo that owns the code
- * — carrying the facts a triager would otherwise have to ask for (which system, which preview,
- * which catalog build, the deep link, and the PNG at the settings on screen).
+ * Builds the prefilled GitHub new-issue link the viewer offers beside "source", carrying the facts
+ * a triager would ask for (system, preview, catalog build, deep link, render PNG).
  *
- * **Why a prefilled link rather than the server filing the issue itself.** [ServeGithubAuth] keeps
- * only a signed cookie holding the visitor's login and their repo-access verdict — the OAuth token
- * is deliberately discarded after the check. Filing server-side "as the visitor" would mean asking
- * for issue-write scope and holding user tokens on a public box, a real escalation for no gain:
- * their browser is already signed in to GitHub, so handing it a prefilled `issues/new` URL files
- * the issue under their own identity with nothing to custody. Sign-in still shows up here — when
- * the server knows the visitor's login it names it in the affordance's tooltip — but the flow works
- * signed out too, because GitHub prompts for login on the issue form anyway.
+ * A prefilled link rather than server-side filing: [ServeGithubAuth] discards the OAuth token, and
+ * holding issue-write tokens on a public box would be an escalation for nothing; the visitor's
+ * browser files under their own identity. Works signed out too.
  *
- * **The screenshot is pasted, not linked.** The body links the `/render` PNG at the current
- * settings (handy, but it re-renders against whatever the catalog is when someone reads the issue),
- * and asks for a paste — the viewer's "Copy PNG" puts real `image/png` bytes on the clipboard, so
- * one keystroke in the issue box uploads the exact pixels to GitHub's own CDN, where they stay put.
- *
- * **A report from the comparison carries the pair, not one panel.** The focused comparison's whole
- * subject is a design reference and a render disagreeing, and both are ordinary URLs on this
- * server, so [Context.referenceUrl] puts them side by side in the body. The diff between them is
- * the one panel with no URL — the browser composes it out of the two — and stays a paste, which is
- * the same split the server's own report draws in [ServeBugReport].
+ * The screenshot is pasted, not just linked (the `/render` link re-renders against later catalog
+ * state); "Copy PNG" puts exact bytes on the clipboard. From the comparison, the body carries both
+ * the reference and render ([Context.referenceUrl]); the browser-composed diff stays a paste, as in
+ * [ServeBugReport].
  */
 internal object ServeIssueReport {
 
   /**
-   * Stand-in for the render URL inside [body], so the viewer JS can keep the report in sync with
-   * the on-screen overrides without re-assembling the whole body client-side: the form's hidden
-   * `body` input carries the text with this placeholder in it and swaps in the live `/render` URL
-   * on each refresh.
+   * Stand-in for the render URL in [body]; the viewer JS swaps in the live `/render` URL on each
+   * refresh.
    */
   const val RENDER_PLACEHOLDER: String = "{{render}}"
 
@@ -48,53 +33,24 @@ internal object ServeIssueReport {
   const val RAW_SCORES_PLACEHOLDER: String = "{{rawScores}}"
 
   /**
-   * Stand-in for the locator's `overrides:` VALUE, on a page whose controls move after it is
-   * served.
-   *
-   * The viewer is that page. The server fills the form's hidden `body` for the settings the page
-   * was *served* at, and the controls then re-render the frame in place without another request —
-   * so a locator written entirely server-side would name the default variant while the render URL
-   * beside it in the same body names whatever the reporter dialled in. The index would key the
-   * issue to one identity and the pixels would show another, which is the failure
-   * `compose-parity-locator/v1` exists to prevent.
-   *
-   * So `overrides:` gets its own placeholder next to [RENDER_PLACEHOLDER], substituted from live
-   * viewer state on the same refresh pass that substitutes the render URL — one pass, one source,
-   * so the two halves cannot disagree with each other. Only the *value* is a placeholder, not the
-   * whole line: the key stays server-written, so `report/locator.ts` can match the line exactly
-   * (`overrides: {{overrides}}`) rather than rewriting the first catalog-authored value that
-   * happens to carry the literal.
-   *
-   * Carried only by the template form — a visitor with scripting off files the server's own body,
-   * whose overrides are the ones their URL asked for and whose render URL is the matching one.
+   * Stand-in for the locator's `overrides:` value on a page whose controls change after it is
+   * served, substituted in the same pass as [RENDER_PLACEHOLDER] so locator and render URL can't
+   * disagree. Only the value is a placeholder, so `report/locator.ts` can match `overrides:
+   * {{overrides}}` exactly. Template form only; JS-off visitors file the server's body.
    */
   const val OVERRIDES_PLACEHOLDER: String = "{{overrides}}"
 
   /**
-   * Stand-in for the selection's `element:` / `bounds:` lines inside the locator block.
-   *
-   * Occupies a **whole line** and is substituted with its newline, so a body with nothing selected
-   * reproduces byte for byte the block this writer emits on its own. The selection is the one part
-   * of a locator the server cannot know: it is made by clicking, after the page is served. Only the
-   * template form carries it — see [body]'s `renderPlaceholder`, which the same reasoning produced.
+   * Stand-in for the selection's `element:` / `bounds:` lines. A whole line substituted with its
+   * newline, so an empty selection reproduces the server's block byte for byte. Template form only.
    */
   const val SELECTION_PLACEHOLDER: String = "{{selection}}"
 
   /**
-   * The classification line's fixed opening — the reporter's answer to "where does this belong?",
-   * which `<cp-report-classification>` finds by this prefix and rewrites as a whole line.
-   *
-   * A **prefix** rather than a placeholder, and the body it opens is written by the server in full
-   * rather than left blank, because the answer travels to GitHub in the `<select>` itself: its
-   * value is the `labels` query parameter, so the label is applied with or without JavaScript. The
-   * body line is the same fact in prose, for the reader of the issue and for the case where the
-   * repository has no such label to apply.
-   *
-   * That is also why [CLASSIFICATION_UNSTATED] says what it says. A visitor with scripting off can
-   * pick an answer — the select works — but cannot have the body rewritten, so any *specific*
-   * sentence the server pre-wrote would be a claim about their answer that the label beside it
-   * could contradict. Pointing at the label instead is true in every case, and is the one thing a
-   * body can say about a value it does not know.
+   * The classification line's fixed opening, which `<cp-report-classification>` finds and rewrites.
+   * The answer reaches GitHub through the `<select>` (its value is the `labels` parameter), so it
+   * works without JS; the body line repeats it in prose. Hence [CLASSIFICATION_UNSTATED] points at
+   * the label rather than pre-writing a claim JS-off visitors can't update.
    */
   const val CLASSIFICATION_PREFIX: String = "**Where it belongs:** "
 
@@ -104,21 +60,10 @@ internal object ServeIssueReport {
   const val CLASSIFICATION_UNSTATED: String = "as labelled on this issue"
 
   /**
-   * Stand-in for locator blocks the SERVER cannot write, because which comparisons they name is
-   * chosen after the page is served.
-   *
-   * The comparison wall's own report is page-scoped: it names the page and the lane, and carries no
-   * locator, because a wall singles out no preview. That is still true of the page — but not of a
-   * reader who has ticked four rows, and an umbrella issue naming several components is a shape
-   * this format already has (`locatorsFromBody` returns a list, and the producer emits a row per
-   * block). So the wall's template carries this line and `<cp-compare-wall>` fills it with one
-   * block per ticked row, using the same writer this object exposes, ported to `report/locator.ts`
-   * and pinned to the same shared fixture.
-   *
-   * Occupies a whole LINE and is substituted with its newline, so a report filed with nothing
-   * ticked reproduces byte for byte the page-scoped body the server writes on its own — which is
-   * also what a visitor with JavaScript off files, since the ticking is the part that needs a
-   * browser.
+   * Stand-in for locator blocks chosen after serving: the comparison wall's report is page-scoped,
+   * but `<cp-compare-wall>` fills this with one block per ticked row (using the writer ported to
+   * `report/locator.ts`). A whole line substituted with its newline, so nothing ticked (or JS off)
+   * reproduces the page-scoped body byte for byte.
    */
   const val LOCATORS_PLACEHOLDER: String = "{{locators}}"
 
@@ -130,21 +75,13 @@ internal object ServeIssueReport {
   /** Repo bugs fall back to when a session names no source of its own — the renderer is ours. */
   const val FALLBACK_REPO: String = "yschimke/compose-ai-tools"
 
-  /**
-   * The facts a report carries. Everything but [repo] is optional: a plain local session knows
-   * neither its catalog nor a source file, and simply drops those rows rather than filing a
-   * half-empty template.
-   */
+  /** The facts a report carries. All but [repo] are optional; missing rows are dropped. */
   data class Context(
     /** `owner/name` the issue is filed against — see [repoFor]. */
     val repo: String,
     /**
-     * The preview's flattened id (`Button__filled__dark`), the one unambiguous handle.
-     *
-     * Null on a **page-scoped** report — the comparison wall shows every component in the catalog
-     * and singles out none, so a report filed from it names the page and the lane rather than
-     * inventing a preview the visitor never picked. The body then drops its `| Preview |` row and
-     * [locator] returns null, exactly as it already does for the optional rows below.
+     * The preview's flattened id. Null on a page-scoped report (the comparison wall singles out no
+     * preview), which drops the `| Preview |` row and makes [locator] null.
      */
     val previewId: String? = null,
     /** Human label, when the manifest recorded one; the title falls back to [previewId]. */
@@ -158,12 +95,8 @@ internal object ServeIssueReport {
     /** Preview-id axes only; live controls belong exclusively to [overrides]. */
     val variant: String = "",
     /**
-     * The selected element, when the reporter picked one — see [Locator.element].
-     *
-     * Server-side this is normally null even on the focused comparison: a selection is made by
-     * clicking, after the page has been served, so the page's JS writes it into the body template's
-     * [SELECTION_PLACEHOLDER] instead. The field is here for a caller that already knows — and
-     * because [locator] has to be able to state a complete record either way.
+     * The selected element ([Locator.element]). Usually null server-side since selection happens
+     * after serving; the page JS fills [SELECTION_PLACEHOLDER] instead.
      */
     val element: String? = null,
     /** The selected region, when the reporter dragged one. See [Bounds] and [element]. */
@@ -183,37 +116,22 @@ internal object ServeIssueReport {
     /** Absolute focused comparison URL for this preview/reference pair. */
     val comparisonUrl: String? = null,
     /**
-     * Absolute URL of the **page** the report was filed from, for a report that names no preview.
-     * Carries the page's own query — which lane the comparison wall was showing, for instance —
-     * because that is the whole of what a page-scoped report can point a triager at.
+     * Absolute URL of the page a preview-less report came from, including its query (e.g. the
+     * wall's lane).
      */
     val pageUrl: String? = null,
     /** Absolute `/render/<id>.png` URL at the overrides in force when the page was served. */
     val renderUrl: String? = null,
     /**
-     * Absolute `/reference/<id>.png` URL of the design reference the render was **on screen
-     * beside**, at the same pin and generation as [renderUrl].
-     *
-     * Set only by a page whose subject is the pair — the focused comparison. A report from there
-     * used to embed the render alone, so an issue about the two sides disagreeing arrived showing
-     * one of them and a triager had to open the comparison to see what the complaint was about
-     * ([#4765](https://github.com/yschimke/compose-ai-tools/issues/4765)). With both, the body
-     * carries the comparison's two outer panels; the diff between them is composed in the browser
-     * out of these very pixels and has no URL of its own, so it stays a paste.
-     *
-     * Null everywhere else, deliberately. The viewer's plain lane has no reference on the stage,
-     * and its spec lane keeps the picked source out of the URL — a body that embedded "the"
-     * reference there would be asserting what the reporter was looking at rather than reporting it.
+     * Absolute `/reference/<id>.png` URL of the reference shown beside the render, same pin and
+     * generation as [renderUrl]. Set only by the focused comparison, so the issue shows both sides
+     * (#4765). Null elsewhere: other lanes have no reference on stage or keep it out of the URL.
      */
     val referenceUrl: String? = null,
     /**
-     * Whether the render lane answers **without a session token** — i.e. the server is `--public`.
-     *
-     * [withoutToken] strips the token from every URL that reaches an issue body, because the token
-     * is the capability to drive the server. On a token-gated box that makes [renderUrl] a URL the
-     * lane itself 404s ([ServeHttpServer]'s render handler rejects a tokenless request), so an
-     * embedded image would be broken in every filed issue no matter how reachable the host is.
-     * Defaults to false so a caller that doesn't know keeps the link form.
+     * Whether the render lane answers without a session token (`--public`). [withoutToken] strips
+     * tokens from issue bodies, so on a token-gated box an embedded render would always 404.
+     * Defaults to false (link form).
      */
     val publicRender: Boolean = false,
     /** Browser-computed parity measurements; absent until the focused comparison finishes. */
@@ -272,25 +190,14 @@ internal object ServeIssueReport {
     val space: String = RENDER_PIXELS,
   ) {
     /**
-     * The invariants both parsers enforce, checked where the rectangle is *made* rather than where
-     * it is serialised.
-     *
-     * A writer that emitted a rectangle its own producer refuses would hand the reporter a
-     * prefilled body that looks right and takes the **whole issue** out of the index when the
-     * workflow next runs — a failure with no symptom until someone wonders why the report never
-     * appeared. The reachable version of that is batch 03's drag selection, which starts in display
-     * pixels: a missed conversion is a mistake at the point of construction, and this is where it
-     * should stop.
+     * Both parsers' invariants, checked at construction: a rectangle the producer refuses would
+     * silently drop the whole issue from the index on the next workflow run.
      */
     init {
       require(space == RENDER_PIXELS) { "bounds space must be $RENDER_PIXELS, was $space" }
-      // The origin may be **negative**, deliberately: a uniquely tagged node can extend above or
-      // left of the render root, and both tag-index producers emit signed coordinates for that case
-      // — `ServeSemanticsTags` asks only for `right > left` / `bottom > top`, `tag-index.mjs`
-      // parses
-      // `-?\d+`, and `ServeTagIndex` validates only the extent. Requiring a non-negative origin
-      // here would mean batch 03 could not copy the bounds the index handed it. Clipping is the
-      // comparison's plane transform's business, not this constructor's.
+      // The origin may be negative: tagged nodes can extend past the render root, and both
+      // tag-index producers emit signed coordinates. Clipping belongs to the comparison's plane
+      // transform.
       require(width >= 1 && height >= 1) {
         "bounds must have a positive extent, was ${width}x$height"
       }
@@ -298,13 +205,8 @@ internal object ServeIssueReport {
   }
 
   /**
-   * Which repo a preview's bug belongs to: the catalog's **source** repo (the Kotlin the preview is
-   * declared in) when known, else its **delivery** repo (the `design-artifacts/<system>` branch's
-   * repo — better than nothing, and usually the same project), else [FALLBACK_REPO].
-   *
-   * Note that the source repo can be a fork (Android's samples are rendered from preview branches
-   * in `yschimke/compose-samples`); that is deliberately where the report goes, because it is where
-   * the preview code that misrendered actually lives.
+   * Which repo a preview's bug belongs to: the catalog's source repo (where the preview code lives,
+   * possibly a fork), else its delivery repo, else [FALLBACK_REPO].
    */
   fun repoFor(source: ServeWeb.CatalogSource?, provenance: ServeWeb.CatalogProvenance?): String =
     source?.repo?.trim()?.takeIf { it.isNotEmpty() }
@@ -312,12 +214,10 @@ internal object ServeIssueReport {
       ?: FALLBACK_REPO
 
   /**
-   * Issue body, in markdown. [renderPlaceholder] swaps the render link for [RENDER_PLACEHOLDER] so
-   * the viewer JS can substitute the live URL; the server-rendered `href` uses the real one, which
-   * is what a visitor with JS off gets. [overridesPlaceholder] does the same for the locator's
-   * `overrides:` value, and belongs with it — the two describe one frame, and a body that
-   * substituted only the render URL would file pixels the identity beside them does not name.
-   * [rawScoresPlaceholder] is for the one page that measures ([RAW_SCORES_PLACEHOLDER]).
+   * Issue body in markdown. [renderPlaceholder] and [overridesPlaceholder] swap the render URL and
+   * locator `overrides:` value for placeholders the viewer JS fills (together, since they describe
+   * one frame); JS-off visitors get the real values. [rawScoresPlaceholder] is for the one page
+   * that measures ([RAW_SCORES_PLACEHOLDER]).
    */
   fun body(
     ctx: Context,
@@ -335,47 +235,31 @@ internal object ServeIssueReport {
       ctx.toolVersion
         ?.takeIf { it.isNotBlank() }
         ?.let { add("| Rendered by | compose-ai-tools $it |") }
-      // The placeholder belongs to a page that actually SCORES, which is the focused comparison and
-      // nothing else. It used to be inferred from `renderPlaceholder && referenceId != null`, and
-      // that inference stopped holding the moment the viewer started naming a reference too (#5000)
-      // — the viewer's only always-available number is `scoreSvgUrls`, a render-fidelity
-      // measurement unrelated to the design reference, so a `{{rawScores}}` row there would either
-      // be filed verbatim or filled with a plausible, mislabelled number. Asked of the caller
-      // instead: the page that fills it is the page that says so.
+      // Asked of the caller rather than inferred: only the focused comparison scores, and the
+      // viewer now names a reference too (#5000) but has no matching number.
       val scores =
         if (rawScoresPlaceholder && !ctx.referenceId.isNullOrBlank()) RAW_SCORES_PLACEHOLDER
         else ctx.rawScores?.let(::formatRawScores)
       scores?.let { add("| Raw comparison | `$it` |") }
     }
-    // The placeholder stands in for a render URL this body HAS; a report that names no render (a
-    // page-scoped one) must not grow a `{{render}}` nothing will ever substitute — the wall runs no
-    // script over its report body, so the placeholder would be filed verbatim.
+    // Only a body that has a render gets `{{render}}`; nothing would substitute it on a page-scoped
+    // report.
     val hasRender = !withoutToken(ctx.renderUrl).isNullOrBlank()
     val render =
       if (renderPlaceholder) RENDER_PLACEHOLDER.takeIf { hasRender }
       else withStage(withoutToken(ctx.renderUrl))?.takeIf { it.isNotBlank() }
-    // Whether the render can be *embedded* is decided by the real URL even when the body is the
-    // JS template, so both forms of the body have the same shape and the placeholder swap can't
-    // turn a working image into a broken one. Two independent conditions have to hold: GitHub's
-    // proxy must be able to *reach* the URL, and the lane must *answer* it without the token this
-    // body strips.
+    // Embeddability is decided from the real URL in both body forms: GitHub's proxy must reach it,
+    // and the lane must answer without the stripped token.
     val embed = render != null && ctx.publicRender && isEmbeddable(ctx.renderUrl)
     val reference = withoutToken(ctx.referenceUrl)?.takeIf { it.isNotBlank() }
-    // The pair is embedded only when BOTH halves can be, and never on its own. Half a comparison
-    // is worse evidence than the render alone: a reader would take the one panel that made it as
-    // the side being complained about, and the two are only meaningful against each other. In
-    // practice they stand or fall together — the reference lane is this same origin, gated by the
-    // same token — so this is a guard rather than a branch anyone reaches.
+    // The pair is embedded only when both halves can be; half a comparison misleads.
     val embedPair =
       embed &&
         reference != null &&
         ctx.publicRender &&
         isEmbeddable(ctx.referenceUrl) &&
-        // The pair is laid out as a two-cell table, and a `|` anywhere in either URL shears the
-        // row into extra columns — so a URL carrying one keeps the single-image form rather than
-        // arriving as visibly broken markdown. Both are built by our own encoders and the client's
-        // swap goes through `new URL()`, so this is the guard for a shape none of them produce
-        // rather than a case anyone has seen.
+        // A `|` in either URL would break the two-cell table, so fall back to the single-image
+        // form.
         listOfNotNull(ctx.renderUrl, ctx.referenceUrl).none { it.contains('|') }
     val links = buildList {
       withoutToken(ctx.pageUrl)?.takeIf { it.isNotBlank() }?.let { add("[Open this page]($it)") }
@@ -387,9 +271,7 @@ internal object ServeIssueReport {
         ?.let { add("[Open comparison]($it)") }
       // Only worth its own line when the image isn't already showing it.
       if (!embed) render?.let { add("[PNG at these settings]($it)") }
-      // Same rule for the other panel: a comparison filed from a box GitHub cannot reach still
-      // says where both sides live, so a triager who can reach it sees the pair rather than
-      // half of it.
+      // Without the embedded pair, still link the reference so both sides are reachable.
       if (!embedPair) reference?.let { add("[Design reference PNG]($it)") }
     }
     return buildString {
@@ -398,10 +280,8 @@ internal object ServeIssueReport {
       append("$CLASSIFICATION_PREFIX$CLASSIFICATION_UNSTATED\n\n")
       append("### Screenshot\n\n")
       if (embedPair) {
-        // Both outer panels of the comparison, in the order the page draws them, so an issue about
-        // the two sides disagreeing opens showing the disagreement (#4765). A two-cell table
-        // rather than two stacked images: GitHub lays the cells side by side, which is the whole
-        // point — a reference above a render reads as two unrelated pictures.
+        // Both outer panels side by side as a two-cell table (#4765); stacked images read as
+        // unrelated.
         append("| Design reference | Render |\n| --- | --- |\n")
         append("| ![reference](").append(reference).append(") | ")
         append("![${altText(ctx)}]($render) |\n\n")
@@ -427,9 +307,8 @@ internal object ServeIssueReport {
             "GitHub then hosts the pixels itself. -->\n\n\n"
         )
       } else if (ctx.previewId.isNullOrBlank()) {
-        // No preview means no "Export & direct links" panel to point at: what a page-scoped report
-        // wants attached is the page, and the capture control in the report launcher is the tool
-        // that grabs it.
+        // A page-scoped report has no export panel; point at the launcher's capture control
+        // instead.
         append(
           "<!-- Paste it here. The \"Report a problem\" launcher on the page has a capture " +
             "control that copies the whole view, a region, or one element to your clipboard, so " +
@@ -450,10 +329,8 @@ internal object ServeIssueReport {
       locator(ctx)?.let {
         append("\n").append(locatorBlock(it, selectionPlaceholder, overridesPlaceholder))
       }
-      // No leading blank line of its own: the placeholder is a line the filler either replaces
-      // (writing its own separator ahead of the blocks) or deletes outright, and a blank line the
-      // server had already committed to would survive the deletion and leave a body that is not the
-      // one it writes without this parameter.
+      // No leading blank line, so deleting the placeholder leaves exactly the body written without
+      // it.
       if (locatorsPlaceholder) append(LOCATORS_PLACEHOLDER).append("\n")
     }
   }
@@ -481,10 +358,8 @@ internal object ServeIssueReport {
       referenceId = reference,
       variant = ctx.variant,
       overrides = ctx.overrides,
-      // Verbatim, deliberately: the tag is JSON-quoted on the wire, so edge whitespace survives
-      // both parsers and the selected tag keeps its identity. A tag index treats `" glyph "` and
-      // `"glyph"` as different keys, and normalising here would point the acceptance at the wrong
-      // one — or at none. Only an *empty* tag is dropped, which both parsers refuse anyway.
+      // Verbatim: the tag is JSON-quoted on the wire and edge whitespace is part of its identity.
+      // Only an empty tag is dropped.
       element = ctx.element?.takeIf { it.isNotEmpty() },
       bounds = ctx.bounds,
       revision = ctx.catalog?.trim()?.takeIf { it.isNotEmpty() },
@@ -510,11 +385,8 @@ internal object ServeIssueReport {
     preview.id.substringAfter("__", missingDelimiterValue = "").replace("__", "/")
 
   /**
-   * The block, as markdown. [selectionPlaceholder] swaps the selection's two lines for
-   * [SELECTION_PLACEHOLDER] so the page's JS can write in what the reporter picked;
-   * [overridesPlaceholder] does the same for the `overrides:` value on a page whose controls move
-   * after it is served (see [OVERRIDES_PLACEHOLDER]). The server-rendered body uses the real values
-   * for both, which is what a visitor with JS off files.
+   * The locator block as markdown. [selectionPlaceholder] and [overridesPlaceholder] swap in
+   * placeholders the page JS fills ([OVERRIDES_PLACEHOLDER]); the server body uses real values.
    */
   fun locatorBlock(
     locator: Locator,
@@ -540,13 +412,8 @@ internal object ServeIssueReport {
   }
 
   /**
-   * Every locator a body carries, in order.
-   *
-   * One issue may name several components — an umbrella report like m3-catalog#42's Elevated shadow
-   * level covers three — and one block can only say one of them, so the body carries one block each
-   * and the index emits a row per block. Returns empty when the body has none; a body whose blocks
-   * contradict each other (two repositories, two systems, or one component twice) is the producer's
-   * to reject, since it is the side that turns them into rows.
+   * Every locator block in a body, in order (one issue may name several components). Contradictory
+   * blocks are for the producer to reject.
    */
   fun locatorsFromBody(body: String): List<Locator> =
     body.split("```$LOCATOR_FENCE\n").drop(1).mapNotNull { rest ->
@@ -569,9 +436,7 @@ internal object ServeIssueReport {
         .mapNotNull { line ->
           val separator = line.indexOf(':')
           if (separator <= 0) null
-          // Trim **both** ends, as the producer does. This side trimmed only the start, so a value
-          // carrying a trailing space read one way here and another there — two engines disagreeing
-          // about what a block says, which is precisely what the shared fixture exists to stop.
+          // Trim both ends, as the producer does, so the two parsers agree.
           else line.substring(0, separator).trim() to line.substring(separator + 1).trim()
         }
         .toMap()
@@ -601,21 +466,13 @@ internal object ServeIssueReport {
   }
 
   /**
-   * `element` is written as a **JSON string**, which is what keeps a tag from becoming syntax.
-   *
-   * The block is line-oriented `key: value`, and a `testTag` is an arbitrary string: one containing
-   * a newline would not stay one field — `row\nrevision: injected` reads back as an element plus a
-   * revision nobody wrote — and one carrying a fence delimiter could end the block early and drop
-   * the whole issue from the index. Quoting also makes a tag with leading or trailing whitespace
-   * expressible, which a format whose readers trim otherwise cannot carry at all.
+   * `element` as a JSON string, so a tag can't become syntax: a newline would inject fields and a
+   * fence could end the block. Quoting also preserves edge whitespace.
    */
   fun canonicalElement(element: String): String =
     Json.encodeToString(JsonPrimitive.serializer(), JsonPrimitive(element))
 
-  /**
-   * Canonical bounds JSON: the same code-point key order the overrides carry, so a block is
-   * comparable byte for byte without parsing it back.
-   */
+  /** Canonical bounds JSON with code-point key order, comparable byte for byte. */
   fun canonicalBounds(bounds: Bounds): String =
     Json.encodeToString(
       JsonObject.serializer(),
@@ -676,12 +533,8 @@ internal object ServeIssueReport {
   }
 
   /**
-   * Markdown-safe alt text: the preview's label or id, with `]`, `[` and `|` stripped.
-   *
-   * The brackets would close the image's own alt span; the pipe is there because the comparison
-   * form of the body puts this text inside a two-cell table, where one would shear the row into a
-   * third column. Catalog-authored labels are arbitrary text, so both are the producer's to
-   * neutralise rather than the reader's to survive.
+   * Markdown-safe alt text: label or id with `]`, `[` and `|` stripped (the alt span and the
+   * two-cell table).
    */
   private fun altText(ctx: Context): String {
     val what =
@@ -692,36 +545,15 @@ internal object ServeIssueReport {
   }
 
   /**
-   * Whether [url] is one GitHub can actually render inline.
-   *
-   * An embedded image is fetched **by GitHub's camo proxy, not by the reader's browser**, so it has
-   * to be reachable from the public internet over HTTPS. A developer's `compose-preview serve` on
-   * `http://127.0.0.1:8080` (or a box on a private LAN, or a plain-HTTP host) fails that, and an
-   * embed would put a broken-image icon in their issue where a working link belongs — so those
-   * bodies keep the link form instead. Deliberately conservative: anything not clearly public is
-   * treated as not embeddable.
-   *
-   * This is **reachability only**. Whether the lane will actually serve the request is a separate
-   * question — see [Context.publicRender], which [body] requires as well.
+   * Whether GitHub can render [url] inline: camo fetches it, so it must be public HTTPS.
+   * Conservative: localhost, LAN and plain HTTP keep the link form. Reachability only; see
+   * [Context.publicRender].
    */
   /**
-   * A render URL with the stage asked for — `?bg=auto`, [ServeRenderMatte].
-   *
-   * An issue body is the case the stage exists for. A render is transparent by design, every
-   * surface on this server puts it on a resolved ground in CSS, and none of that survives the trip
-   * into a GitHub comment: what lands there is raw alpha on GitHub's white. A dark-first catalog
-   * then files its bug reports as blank rectangles — which is literally what
-   * [wear-m3-catalog#284](https://github.com/yschimke/wear-m3-catalog/issues/284) looks like, an
-   * issue about a card's missing border whose screenshot shows neither the card nor the border.
-   *
-   * `auto` rather than a fixed shape because the right ground differs per render and the server can
-   * measure which: a round capture keeps its bezel, a screen template that paints its own surface
-   * is left alone, and only a sticker that would be invisible gets plates. A reader who wants the
-   * raw alpha appends `&bg=off`, and the link in the body still points at the same preview either
-   * way.
-   *
-   * Left alone when the URL already carries a `bg` (a reporter who chose one keeps it) or is not
-   * one of ours to append to.
+   * A render URL with `?bg=auto` ([ServeRenderMatte]). Renders are transparent and GitHub shows raw
+   * alpha on white, so dark-first catalogs would file blank rectangles. `auto` picks a ground per
+   * render (bezel kept, self-painting screens left alone, invisible stickers get plates); `&bg=off`
+   * gets raw alpha. Unchanged when `bg` is already present or the URL isn't ours.
    */
   internal fun withStage(url: String?): String? {
     val value = url?.trim()?.takeIf { it.isNotEmpty() } ?: return url
@@ -757,25 +589,15 @@ internal object ServeIssueReport {
   }
 
   /**
-   * The GitHub new-issue form for [repo], used as a `<form action>` rather than a link the JS
-   * rewrites.
-   *
-   * The viewer surfaces this as a **GET form**: the reporter's `title` is a typed-in input and
-   * `body` is a hidden one. That is not a styling preference: keeping the prefilled report current
-   * as the knobs change means writing page state into it, and writing a page-derived string into an
-   * anchor's `href` is a navigation sink (a `javascript:` URL there would execute) — CodeQL flags
-   * it, correctly, no matter how the value is guarded afterwards. A form has no such sink: the
-   * action is a server-rendered literal the JS never touches, the live render URL only ever lands
-   * in an input value, and the browser does the query encoding on submit.
+   * GitHub's new-issue form for [repo], used as a GET `<form action>`: the live body goes into an
+   * input value, never an anchor `href` (a navigation sink CodeQL rightly flags), and the browser
+   * encodes the query.
    */
   fun action(repo: String): String = "https://github.com/$repo/issues/new"
 
   /**
-   * [url] with any `token=` query parameter dropped. A token-gated session bakes its session token
-   * into every link on the page; that token **is** the capability to drive the server, so it must
-   * never be carried into an issue body that gets posted publicly. The rest of the query (the
-   * overrides that shape the render) is kept, since it is what makes the link reproduce what the
-   * reporter saw.
+   * [url] without `token=`: the session token is the capability to drive the server and must never
+   * reach a public issue. The override query is kept so the link reproduces what the reporter saw.
    */
   fun withoutToken(url: String?): String? {
     val u = url?.takeIf { it.isNotBlank() } ?: return null

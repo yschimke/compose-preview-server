@@ -9,22 +9,16 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /**
- * Projects a published catalog's **own design tokens onto the serve web chrome**, so `/wear-m3/`
- * paints in Wear M3's colours rather than the fixed shell palette.
+ * Projects a published catalog's own design tokens onto the serve web chrome, so `/wear-m3/` paints
+ * in Wear M3's colours.
  *
- * Input is the branch's `tokens.dtcg.json` (`tokensFile`), the DTCG projection of the colour scheme
- * the catalog rendered with, so re-publishing a catalog re-themes its pages. Output is an inline
- * `:root` override emitted after `serve.css`, covering both the `--md-sys-color-*` roles and the
- * `--cp-*` aliases ([m3Roles]) so role-styled components re-theme too. Semantic colours (trust
- * badges, scores, parity lanes) stay literal.
- *
- * A catalog bakes one mode; the CSS declares both. The matching mode gets the full sync, the
- * opposite mode keeps built-in neutrals and takes only the accent family, and every text colour is
- * pushed to a minimum contrast ([ensureContrast]). Both are emitted as `light-dark(<light>,
- * <dark>)` pairs so `.cp-scheme-light` / `.cp-scheme-dark` can pin the mode via `color-scheme`.
- *
- * The neutral ramp is mixed from `(background, text)` rather than read from `outline` /
- * `onSurfaceVariant`, which catalogs publish inconsistently.
+ * Input is the branch's `tokens.dtcg.json`; output is an inline `:root` override after `serve.css`,
+ * covering `--md-sys-color-*` roles and `--cp-*` aliases ([m3Roles]). Semantic colours (trust
+ * badges, scores, parity lanes) stay literal. A catalog bakes one mode: the matching mode gets the
+ * full sync, the other keeps built-in neutrals plus the accent family, and text is pushed to a
+ * minimum contrast ([ensureContrast]). Emitted as `light-dark(<light>, <dark>)` pairs so
+ * `.cp-scheme-*` can pin the mode. The neutral ramp is mixed from `(background, text)` because
+ * catalogs publish `outline`/`onSurfaceVariant` inconsistently.
  */
 internal object ServeThemeCss {
 
@@ -39,19 +33,15 @@ internal object ServeThemeCss {
   private const val MIN_ACCENT_CONTRAST = 4.0
   private const val MIN_ON_ACCENT_CONTRAST = 4.0
 
-  /**
-   * …and for body text, which the whole neutral ramp is derived from — so it is held to WCAG AA for
-   * normal text rather than the 3:1-ish floor a decorative accent can live at.
-   */
+  /** …and for body text, which the whole neutral ramp derives from: WCAG AA for normal text. */
   private const val MIN_BODY_CONTRAST = 4.5
 
   private val json = Json { ignoreUnknownKeys = true }
 
   /**
-   * The chrome palette of `serve.css`'s built-in light mode, used verbatim for a non-matching mode.
-   * These are the **M3 baseline scheme**'s surface roles — `surface`, `surfaceContainerLow`,
-   * `surfaceContainerHigh`, `onSurface` — and must stay in step with the `:root` block of
-   * `serve.css`, which declares the same four.
+   * `serve.css`'s built-in light chrome (the M3 baseline `surface`, `surfaceContainerLow`,
+   * `surfaceContainerHigh`, `onSurface`), used verbatim for a non-matching mode; keep in step with
+   * `serve.css`'s `:root`.
    */
   private val builtInLight =
     Neutrals(
@@ -71,16 +61,14 @@ internal object ServeThemeCss {
     )
 
   /**
-   * Build the inline stylesheet for a catalog's `tokens.dtcg.json`, or null when the file is
-   * unparseable or carries too little to theme from (it must at least name a surface and a
-   * primary). Fail-soft by design: a catalog with no usable tokens simply serves the built-in
-   * chrome.
+   * The inline stylesheet for a `tokens.dtcg.json`, or null when unparseable or missing a surface
+   * or primary. Fail-soft: the built-in chrome is served instead.
    */
   fun fromDtcg(tokensJson: String): String? = stylesheet(parseColors(tokensJson))
 
   /**
-   * The `color` group of a DTCG token file as `role -> value`, keeping only entries that actually
-   * parse as a colour. Values are `#rrggbb` / `#rrggbbaa` as written by the export driver.
+   * The DTCG `color` group as `role -> value`, keeping only parseable `#rrggbb` / `#rrggbbaa`
+   * colours.
    */
   fun parseColors(tokensJson: String): Map<String, String> {
     val root =
@@ -97,21 +85,18 @@ internal object ServeThemeCss {
   }
 
   /**
-   * The `:root` override for [colors], or null when it names no `surface`/`background` or no
-   * `primary` — the two roles the whole projection is anchored on.
+   * The `:root` override for [colors], or null without a `surface`/`background` and a `primary`,
+   * the projection's two anchors.
    */
   fun stylesheet(colors: Map<String, String>): String? {
     val surfaceToken = colors["surface"] ?: colors["background"] ?: return null
     val primaryToken = colors["primary"] ?: return null
-    // Composite any alpha away against white first: a token like `#000000de` (an alpha-carrying
-    // `onSurface`, which several app catalogs publish) has to become a concrete colour before it
-    // can be reasoned about, and the surface it is read on is the only sensible backdrop.
+    // Composite alpha away first (e.g. `#000000de` `onSurface`), against white for the surface and
+    // against the surface for the rest.
     val surface = flatten(surfaceToken, Rgb(255, 255, 255)) ?: return null
     val primary = flatten(primaryToken, surface) ?: return null
-    // Body text anchors the entire neutral ramp, so it gets the same treatment the accent does and
-    // then some: nudged toward the readable pole, and abandoned for that pole outright if even the
-    // nudge can't clear the floor. A catalog whose `onSurface` is (say) white on a white surface
-    // would otherwise publish an unreadable page.
+    // Body text anchors the neutral ramp: nudged toward the readable pole, or replaced by it if
+    // even that fails, so white-on-white can't publish an unreadable page.
     val text =
       (colors["onSurface"] ?: colors["onBackground"])
         ?.let { flatten(it, surface) }
@@ -122,9 +107,8 @@ internal object ServeThemeCss {
 
     val light = mode(colors, surface, text, primary, dark = false, matches = !catalogIsDark)
     val dark = mode(colors, surface, text, primary, dark = true, matches = catalogIsDark)
-    // One declaration per property, carrying both halves. The two lists are produced by the same
-    // function over the same roles, so they are the same properties in the same order — zipping
-    // them is safe, and asserted by ServeThemeCssTest.
+    // One declaration per property with both halves; both lists come from the same function over
+    // the same roles, so zipping is safe (asserted by ServeThemeCssTest).
     return buildString {
       append(":root {\n")
       light.zip(dark).forEach { (l, d) ->
@@ -161,23 +145,15 @@ internal object ServeThemeCss {
       (colors["onPrimary"]?.takeIf { matches }?.let { flatten(it, accent) } ?: readableOn(accent))
         .let { ensureContrast(it, accent, MIN_ON_ACCENT_CONTRAST, toward = readableOn(accent)) }
 
-    // The two tonal containers this chrome actually paints, each with its own checked label.
-    //
-    // M3 assigns them to *different* jobs, which is why they are resolved separately rather than
-    // sharing one "soft accent": `primaryContainer` backs the brand mark, while
-    // `secondaryContainer` is the SELECTED state of every chip, segmented-button segment, drawer
-    // toggle, navigation row and history stop. A catalog that authors a distinct secondary family
-    // (wear-m3's rose `#652936`, say) means it for exactly those, so passing its primary container
-    // through to them would ignore half a published scheme.
+    // The two tonal containers the chrome paints, resolved separately because M3 gives them
+    // different jobs: `primaryContainer` backs the brand mark, `secondaryContainer` is the selected
+    // state of chips, segments, toggles and nav rows.
     val primaryContainer =
       container(colors, "primaryContainer", mix(accent, bg, 0.14), bg, dark, matches)
     val onPrimaryContainer =
       onContainer(colors, "onPrimaryContainer", primaryContainer, accentStrong, matches)
-    // A catalog with no secondary family — which is most of them, and every one published before
-    // this projection existed — falls back to the PRIMARY container rather than to the bare derived
-    // tint, so those pages keep exactly the chip fill they have today. Only a catalog that actually
-    // authors a *usable* secondary container moves; one whose secondary lands on the wrong side of
-    // the page for this mode is rejected by [container] and lands on the same fallback.
+    // Catalogs without a usable secondary family fall back to the primary container, keeping their
+    // existing chip fill.
     val secondaryContainer =
       container(colors, "secondaryContainer", primaryContainer, bg, dark, matches)
     val onSecondaryContainer =
@@ -228,22 +204,11 @@ internal object ServeThemeCss {
   }
 
   /**
-   * The **M3 role** half of the projection — the `--md-sys-color-*` custom properties `serve.css`'s
-   * token layer declares, so a component styled against a role follows a served catalog exactly as
-   * one styled against a `--cp-*` alias does.
-   *
-   * These are deliberately **derived from the values computed above** rather than read straight out
-   * of the token file a second time. A catalog's raw `onSurface` may be unreadable on its own
-   * surface, its `primary` may not clear contrast against the page, and its light-scheme
-   * `primaryContainer` has no business on a dark page — all of which [mode] has already resolved.
-   * Deriving here means the two families can never disagree about the same colour, which is the
-   * whole reason the aliases exist.
-   *
-   * The exceptions are the roles the chrome has no alias for — the secondary accent, the tertiary
-   * and error families, and the surface-container ladder. Those are taken from the catalog when it
-   * publishes them **and** the mode being painted is the one it baked; otherwise they are derived,
-   * so a light-first catalog never paints a light error container onto a dark page. The two tonal
-   * container pairs are resolved in [mode] instead, because `--cp-accent-soft` is one of them.
+   * The `--md-sys-color-*` half of the projection, derived from the values [mode] already resolved
+   * (contrast, mode-appropriate containers) so roles and aliases never disagree. Roles without an
+   * alias (secondary, tertiary, error families, surface-container ladder) come from the catalog
+   * only when painting its baked mode, else are derived, so light containers never land on a dark
+   * page. Tonal container pairs are resolved in [mode].
    */
   private fun m3Roles(
     colors: Map<String, String>,
@@ -352,11 +317,9 @@ internal object ServeThemeCss {
   private fun builtIn(dark: Boolean) = if (dark) builtInDark else builtInLight
 
   /**
-   * The catalog's own surfaces. M3's `surfaceContainerLow` is "one step of elevation from
-   * `surface`" — *darker* in a light scheme, *lighter* in a dark one — which is exactly the
-   * page-vs-card relation the chrome wants, so it becomes the page background in light mode and the
-   * card fill in dark mode. Catalogs that publish no container roles get the same relation by
-   * mixing the text colour into the surface.
+   * The catalog's own surfaces: `surfaceContainerLow` (one elevation step from `surface`) becomes
+   * the light page background or the dark card fill, the page-vs-card relation the chrome wants.
+   * Without container roles, the same relation is mixed from text into surface.
    */
   private fun catalogNeutrals(
     colors: Map<String, String>,
@@ -383,10 +346,8 @@ internal object ServeThemeCss {
   }
 
   /**
-   * A published tonal container fill (`primaryContainer`, `secondaryContainer`, …). The catalog's
-   * own value is the faithful choice when the mode being painted is the one it baked, but only if
-   * it lands on the right side of the page — a light-scheme container is a glaring patch on a dark
-   * page — so it is checked against the mode and derived from the accent otherwise.
+   * A published tonal container fill, used only when painting its baked mode and when it lands on
+   * the right side of the page; otherwise derived from the accent.
    */
   private fun container(
     colors: Map<String, String>,
@@ -403,12 +364,8 @@ internal object ServeThemeCss {
   }
 
   /**
-   * The label that sits **on** [fill] — the catalog's published `on…Container` when this is its
-   * mode, else [fallback] — always pushed to a readable contrast against that exact fill.
-   *
-   * Checking against the fill rather than against the page is the whole point: a container and its
-   * label are resolved as a pair (the fill may have been rejected and derived above), so a label
-   * validated against anything else can still come out invisible on the fill it actually lands on.
+   * The label on [fill]: the catalog's `on…Container` in its own mode, else [fallback], always
+   * pushed to readable contrast against that exact fill (which may itself have been derived).
    */
   private fun onContainer(
     colors: Map<String, String>,
@@ -421,10 +378,7 @@ internal object ServeThemeCss {
       ensureContrast(it, fill, MIN_ON_ACCENT_CONTRAST, toward = readableOn(fill))
     }
 
-  // ---------------------------------------------------------------------------------------------
-  // Colour maths. sRGB only — the tokens are 8-bit hex and the output is 8-bit hex, so there is
-  // nothing to gain from a wider working space here.
-  // ---------------------------------------------------------------------------------------------
+  // Colour maths, sRGB only: tokens and output are 8-bit hex.
 
   data class Rgb(val r: Int, val g: Int, val b: Int)
 
@@ -476,10 +430,8 @@ internal object ServeThemeCss {
     if (luminance(backdrop) > 0.42) Rgb(17, 17, 20) else Rgb(255, 255, 255)
 
   /**
-   * Nudge [color] toward [toward] until it reaches [target] contrast against [backdrop]. Capped at
-   * a 75% mix so a brand colour that can never reach the target stays recognisably itself rather
-   * than collapsing into the text colour; the cap is only ever hit by a colour whose contrast with
-   * the page is hopeless in that mode.
+   * Nudge [color] toward [toward] until it reaches [target] contrast on [backdrop], capped at a 75%
+   * mix so an unreachable brand colour stays recognisable.
    */
   internal fun ensureContrast(color: Rgb, backdrop: Rgb, target: Double, toward: Rgb): Rgb {
     if (contrast(color, backdrop) >= target) return color

@@ -51,11 +51,8 @@ class ServeUiBuilderComponentLibrary(
   )
 
   /**
-   * One published symbol, read and checked.
-   *
-   * [nodes] is the body reachable from the component's root, not the whole file: a symbol file may
-   * carry a frame or a swatch around the thing it publishes, and what an importing design copies in
-   * is the subtree the component names.
+   * One published symbol, read and checked. [nodes] is the body reachable from the component's
+   * root, not the whole file, which may carry a surrounding frame.
    */
   data class Symbol(
     val entry: Entry,
@@ -74,12 +71,9 @@ class ServeUiBuilderComponentLibrary(
     val generation: String?,
     val readAt: Long,
     /**
-     * Null when the read itself failed — an unreachable source or an index this host cannot parse.
-     *
-     * Cached as a failure rather than as "publishes nothing", because those are different facts and
-     * one of them is a lie. A design that imported a component from a branch that is down for ten
-     * minutes must not be told the project deleted it; the drift report reserves a separate state
-     * for exactly this, and it can only use it if the failure survives the cache.
+     * Null when the read failed (unreachable source or unparseable index). Cached as a failure, not
+     * as "publishes nothing", so a briefly unreachable branch isn't reported to importers as a
+     * deletion.
      */
     val entries: IndexRead?,
   )
@@ -87,46 +81,30 @@ class ServeUiBuilderComponentLibrary(
   private val indexes = ConcurrentHashMap<String, CachedIndex>()
 
   /**
-   * Every published component across [catalogs], catalog order preserved, one entry per system and
-   * id.
-   *
-   * The first coordinate to publish an id wins, which is the order the symbol route resolves in, so
-   * a listing never offers a row whose body comes from somewhere else. It is how a component that
-   * has moved into the project's repository shadows the copy this host still holds
-   * ([ServeUiBuilderComponentStore]): the project's coordinates come first.
+   * Every published component across [catalogs] in catalog order, one per system and id. First
+   * publisher wins, matching the symbol route, which lets a component moved into the project's
+   * repository shadow the host's copy ([ServeUiBuilderComponentStore]).
    */
   fun list(catalogs: List<ServeUiBuilderDesignLibrary.Coordinate>): List<Entry> =
     catalogs.flatMap(::index).distinctBy { it.system to it.componentId }
 
   /**
-   * A parsed index: what it offers, and which ids it named but this host will not offer.
-   *
-   * [rejected] is not a diagnostic. "The project no longer publishes this" and "the project still
-   * names this and the entry is broken" are different answers, and without the rejected ids the
-   * second is indistinguishable from the first — a malformed `file` on an entry reads as a deletion
-   * to anything asking whether a component is still there.
+   * A parsed index: what it offers, and ids it named but won't offer. [rejected] keeps "still named
+   * but broken" distinct from "removed" for drift reporting.
    */
   data class IndexRead(val entries: List<Entry>, val rejected: Set<String> = emptySet())
 
   /**
-   * One catalog's published components.
-   *
-   * Concurrent for the reason the design index is: two viewers opening a palette at once reach this
-   * on different request threads, a cold read is one HTTP round trip, and the read is idempotent —
-   * so two of them are harmless where a lock would put both behind one.
+   * One catalog's published components. Unlocked: concurrent cold reads are idempotent single round
+   * trips.
    */
   fun index(catalog: ServeUiBuilderDesignLibrary.Coordinate): List<Entry> =
     readIndex(catalog)?.entries.orEmpty()
 
   /**
-   * The same read, keeping the two distinctions [index] throws away: null is *could not read it*,
-   * and [IndexRead.rejected] is *named but not offerable*.
-   *
-   * A palette has nothing to do with either — there is nothing to offer in any of those cases — so
-   * [index] flattens them. The drift report does: "the project removed this component", "its index
-   * could not be read just now" and "it still names this component and the entry is broken" are
-   * three different answers, and flattening any of them into an empty index reports a deletion that
-   * did not happen.
+   * The same read, keeping what [index] flattens: null means could not read, [IndexRead.rejected]
+   * means named but not offerable. The drift report needs both to avoid reporting deletions that
+   * didn't happen.
    */
   fun readIndex(catalog: ServeUiBuilderDesignLibrary.Coordinate): IndexRead? {
     val cached = indexes[catalog.system]
@@ -149,18 +127,16 @@ class ServeUiBuilderComponentLibrary(
       else
         runCatching { parseIndex(catalog.system, bytes.toString(Charsets.UTF_8)) }
           .getOrElse {
-            // Said once per read rather than swallowed: the project published something and it is
-            // not being offered, which is the one case an operator cannot otherwise tell apart
-            // from publishing nothing at all.
+            // Logged once per read: an unreadable index is otherwise indistinguishable from
+            // publishing nothing.
             onLog(
               "serve: ${catalog.system} publishes a component index that is not readable " +
                 "(${it.message})"
             )
             null
           }
-    // A failure is cached too, and deliberately: without it an unreachable branch is re-fetched on
-    // every request that touches the palette. What must not be cached is the *wrong* answer, and
-    // that is why the failure is kept as itself rather than as an empty list.
+    // Failures are cached too (else an unreachable branch is refetched per request), kept as
+    // failures rather than empty lists.
     if (catalog.cacheable)
       indexes[catalog.system] = CachedIndex(catalog.generation, clock(), entries)
     return entries
@@ -174,12 +150,8 @@ class ServeUiBuilderComponentLibrary(
     index(catalog).firstOrNull { it.componentId == componentId }?.let { symbol(catalog, it) }
 
   /**
-   * The symbol behind an entry the caller already resolved.
-   *
-   * The overload exists for the reason the design library's does: a local directory source is
-   * deliberately uncached, so two reads can land either side of somebody exporting the project, and
-   * a caller that took its metadata from one and its body from the other would describe one symbol
-   * with another's content.
+   * The symbol behind an already-resolved entry. Local directory sources are uncached, so metadata
+   * and body must come from the same read.
    */
   fun symbol(catalog: ServeUiBuilderDesignLibrary.Coordinate, entry: Entry): Symbol? {
     val bytes =
@@ -198,12 +170,8 @@ class ServeUiBuilderComponentLibrary(
   }
 
   /**
-   * The file behind an entry, as the project or host holds it, once it checks out as a symbol.
-   *
-   * What moving a host-held component into a repository copies: the whole one-component document,
-   * environment and all, rather than the [Symbol] a design imports — which is only the part a
-   * design needs. Null for anything [symbol] would refuse, so nothing is copied into a project that
-   * its own library would then drop.
+   * The whole one-component document behind an entry (environment included), for moving a host-held
+   * component into a repository. Null for anything [symbol] would refuse.
    */
   fun document(catalog: ServeUiBuilderDesignLibrary.Coordinate, entry: Entry): DesignDocumentV1? {
     val bytes =
@@ -216,17 +184,14 @@ class ServeUiBuilderComponentLibrary(
   }
 
   /**
-   * The checked symbol a document publishes, or null with a logged reason.
-   *
-   * Internal rather than private so the checks can be exercised directly against a document the
-   * test builds, without a source to read it from.
+   * The checked symbol a document publishes, or null with a logged reason. Internal for direct
+   * testing.
    */
   internal fun symbolOf(entry: Entry, document: DesignDocumentV1): Symbol? {
     val system = entry.system
     val id = entry.componentId
-    // Exactly one, because the file *is* the symbol. None means the export published a design by
-    // mistake; more than one means nothing in the file says which of them the entry names, and
-    // guessing would make the answer depend on map order.
+    // Exactly one component: none means a design was published by mistake; several leave the entry
+    // ambiguous.
     val declared = document.components
     if (declared.size != 1) {
       onLog(
@@ -236,10 +201,8 @@ class ServeUiBuilderComponentLibrary(
       return null
     }
     val (declaredId, component) = declared.entries.single()
-    // The id in the index and the id in the file have to agree. The design library learned to cope
-    // with a stale export publishing an entry for A whose document carries B; here it is refused
-    // instead, because a symbol is referenced by id and a mismatch would let a design record a
-    // reference that resolves to different content than the one it was shown.
+    // Index id and file id must agree; a mismatch would let a design reference resolve to different
+    // content than it was shown.
     if (declaredId != id) {
       onLog("serve: $system publishes component $id whose file declares `$declaredId` instead")
       return null
@@ -254,11 +217,9 @@ class ServeUiBuilderComponentLibrary(
     val missing = mutableListOf<String>()
     val placements = mutableListOf<String>()
     val cyclic = mutableListOf<String>()
-    // Two different questions, and one set cannot answer both. `body` is what has been collected,
-    // so a node reached twice down two branches is simply already done; `onStack` is what is being
-    // walked right now, so a node reached again while it is still open is a back edge. Reading the
-    // first as the second is how a slot pointing at its own ancestor read as a finished subtree,
-    // and the file was published as usable for an importer to hang on.
+    // Two sets: `body` is what's collected (a node reached twice via two branches is done),
+    // `onStack` is the current walk (reaching an open node is a cycle). Conflating them let a slot
+    // pointing at its ancestor pass as a finished subtree.
     val onStack = linkedSetOf<String>()
     fun walk(nodeId: String) {
       if (nodeId in onStack) {
@@ -370,9 +331,8 @@ class ServeUiBuilderComponentLibrary(
           file = file,
         )
       }
-    // Minus what is actually offered, not minus what was *seen*: an id reaches `seen` before its
-    // file name is checked, so subtracting that set silently emptied `rejected` for the very case
-    // it exists to describe. An id is only un-rejected if some entry under it did produce a symbol.
+    // Minus what is actually offered, not what was seen (ids reach `seen` before their file name is
+    // checked).
     return IndexRead(
       entries = entries,
       rejected = rejected - entries.map { it.componentId }.toSet(),
@@ -396,14 +356,9 @@ class ServeUiBuilderComponentLibrary(
     const val PALETTE_PREFIX: String = "project"
 
     /**
-     * A symbol's content digest: what an importing design records alongside the id, and what tells
-     * it later that the library moved underneath it.
-     *
-     * Over the component and its body only — not the file — so reformatting the file, renaming the
-     * design around the symbol, or bumping the document's revision does not read as drift. Keys are
-     * sorted at every level before encoding, so two files that differ only in the order they wrote
-     * their properties produce one digest; a real edit to a property, a slot or a modifier produces
-     * another.
+     * A symbol's content digest, recorded by importers to detect drift. Over the component and its
+     * body only, with keys sorted at every level, so reformatting or renaming the surrounding file
+     * isn't drift but a real edit is.
      */
     fun digestOf(component: DesignComponentV1, nodes: Map<String, DesignNodeV1>): String {
       val canonical =

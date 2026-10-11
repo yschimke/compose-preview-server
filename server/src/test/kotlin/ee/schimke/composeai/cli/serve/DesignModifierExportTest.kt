@@ -49,19 +49,11 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
- * Every modifier the builder can author, and what it exports as.
- *
- * The catalog admits a modifier onto a component by **type** — `modifierCapabilities` is a list of
- * type names — so any type the projection has no branch for refuses a document the builder was
- * happy to write. Six of the twenty-eight had branches, which is why a design carrying a
- * `background`, a `border`, a `width` or an `align` came back as "which this projection has no
- * expression for" however carefully it was drawn.
- *
- * The first test below is the one that keeps that from happening again: it is a list of every
- * subtype, and a modifier added to `ui-builder-protocol` without a branch here lands in the
- * catch-all it asserts against. The rest assert the argument shapes that are easy to get subtly
- * wrong — a `Float` where the API takes one, a named axis Compose does not declare, a scope a
- * member extension is not in.
+ * Every modifier the builder can author, and what it exports as. The catalog admits modifiers by
+ * type, so any type the projection lacks a branch for refuses a document the builder happily wrote.
+ * The first test lists every subtype so a new `ui-builder-protocol` modifier without a branch
+ * fails; the rest pin argument shapes that are easy to get subtly wrong (`Float`s, named axes,
+ * scopes).
  */
 class DesignModifierExportTest {
 
@@ -119,13 +111,9 @@ class DesignModifierExportTest {
 
   @Test
   fun `no modifier kind falls through to the catch-all, and only the scoped ones refuse at a root`() {
-    // Two claims in one loop, because they are the same claim from either side. Nothing reaches
-    // the `else` branch — that is the regression this file exists for — and what does refuse at
-    // the root refuses for a *reason about placement*: `weight`, the three `align`s and
-    // `matchParentSize` are members of a slot's receiver. The two scrolls used to be on this list
-    // as well, for a `rememberScrollState()` the vocabulary supposedly could not hold; it can,
-    // inline, and they export now (#481). `remoteCall` refuses for a reason about the target: it
-    // is a `RemoteModifier` call, which only a Remote Compose widget can carry.
+    // Nothing reaches the `else` branch, and what refuses at the root refuses for a placement
+    // reason: `weight`, the three `align`s and `matchParentSize` are slot-receiver members.
+    // `remoteCall` refuses because only a Remote Compose widget can carry a `RemoteModifier` call.
     val refused = mutableListOf<String>()
     for (modifier in EVERY_MODIFIER) {
       val reasons = reasonsFor(document(text(modifier)))
@@ -151,11 +139,8 @@ class DesignModifierExportTest {
 
   @Test
   fun `a scroll remembers its state inline, at the call, rather than refusing`() {
-    // The pair that was refused on purpose for several rounds — "a `remember { … }` preamble this
-    // projection does not emit" — and the diagnosis was wrong about where the state lives.
-    // `rememberScrollState()` is a `@Composable` call with every parameter defaulted, legal exactly
-    // where the modifier is written, which is how a person writes it: one modifier on a feed
-    // column cost the whole file (#481), and now it costs one link.
+    // `rememberScrollState()` is a `@Composable` call with all parameters defaulted, legal right
+    // where the modifier is written, so the scroll modifiers export inline.
     for ((modifier, name) in
       listOf(
         VerticalScrollModifierV1 to "verticalScroll",
@@ -211,9 +196,8 @@ class DesignModifierExportTest {
 
   @Test
   fun `a bound with no number at all is refused, not emitted as an unconstrained call`() {
-    // `widthIn()` compiles and constrains nothing, which is not what a document holding two
-    // unusable numbers meant — the same reason `Modifier.padding()` is refused rather than
-    // emitted. `offset()` is the same shape and gets the same answer.
+    // `widthIn()` with two unusable numbers constrains nothing, so it is refused like
+    // `Modifier.padding()`; `offset()` likewise.
     assertEquals(
       listOf("node `text` constrains `widthIn` with neither a min nor a max that is a number"),
       reasonsFor(document(text(WidthInModifierV1(JsonNull, null)))),
@@ -226,9 +210,8 @@ class DesignModifierExportTest {
 
   @Test
   fun `every modifier taking a Float takes one, not a Double`() {
-    // `alpha(0.5)` does not compile: these are `Float` parameters, and a nested `Fractional`
-    // renders as a `Double`. It is the same narrowing `Modifier.weight` needed (#5212 upstream),
-    // and five more modifiers were waiting on it.
+    // These are `Float` parameters, and a nested `Fractional` renders as a `Double`, so
+    // `alpha(0.5)` would not compile.
     assertEquals(
       listOf(
         ChainLink(
@@ -327,12 +310,8 @@ class DesignModifierExportTest {
   }
 
   /**
-   * The spelling every committed Google-app design actually uses.
-   *
-   * A modifier's `shape` is a free string, and the builder writes a NUMBER into it for a corner the
-   * designer sized by hand — `UiBuilderRenderer.shapeFor` draws `"16"` as a 16dp corner and the
-   * capability exporter's `shapeDp` writes the same. This projection refused it, which made the
-   * record-driven export unusable on the designs this repository ships.
+   * A numeric `shape` string (`"16"`), as committed designs use for a hand-sized corner; it renders
+   * as a 16dp corner like `UiBuilderRenderer.shapeFor` and the capability exporter's `shapeDp`.
    */
   @Test
   fun `a numeric shape is the corner radius the canvas draws`() {
@@ -431,10 +410,9 @@ class DesignModifierExportTest {
 
   @Test
   fun `each align resolves in the one scope that declares it`() {
-    // Three members called `align` with three different parameter types, and which one is legal is
-    // decided by where the node sits rather than by anything about the node. Emitting the wrong
-    // one is an unresolved reference, not a wrong picture, so it is checked here and again by the
-    // generator against the record's `composableSlotReceiver`.
+    // Three `align` members take different parameter types, chosen by where the node sits; the
+    // wrong one is an unresolved reference, so the generator also checks the record's
+    // `composableSlotReceiver`.
     assertEquals(
       listOf(
         ChainLink(
@@ -516,9 +494,8 @@ class DesignModifierExportTest {
 
   @Test
   fun `a weight authored as a modifier is the same link as one authored as a property`() {
-    // The two spellings both reach the builder and mean one thing. `fill` exists only on the
-    // modifier form, and is written only when the document set it — omitted, Compose's default of
-    // `true` is what the property form has always meant.
+    // Both spellings mean one thing. `fill` exists only on the modifier form and is written only
+    // when the document set it (Compose's default is `true`).
     assertEquals(
       listOf(
         ChainLink(
@@ -544,12 +521,9 @@ class DesignModifierExportTest {
 
   private companion object {
     /**
-     * One of every `DesignModifierV1`, with values a real document would carry.
-     *
-     * Hand-listed rather than reflected over, because a constructed instance needs values a
-     * reflection walk cannot invent — but the list is *checked* by reflection, in the last test
-     * below. A subtype missing from here would be a hole in the coverage test rather than a
-     * failure, which is the one thing a coverage test must not have.
+     * One of every `DesignModifierV1` with realistic values. Hand-listed because instances need
+     * values reflection can't invent, but the list is checked by reflection in the last test so a
+     * missing subtype fails.
      */
     val EVERY_MODIFIER: List<DesignModifierV1> =
       listOf(
@@ -589,9 +563,7 @@ class DesignModifierExportTest {
 
   @Test
   fun `the list above holds every modifier the protocol declares`() {
-    // The coverage test is only as good as this list, and a subtype added upstream would be
-    // invisible to it. `DesignModifierV1` is sealed, so the JVM knows the real answer — this
-    // module's tests are JVM-only even though the projection is not.
+    // `DesignModifierV1` is sealed, so the JVM knows every subtype; this keeps the list complete.
     assertEquals(
       DesignModifierV1::class.sealedSubclasses.mapNotNull { it.simpleName }.sorted(),
       EVERY_MODIFIER.map { it::class.simpleName!! }.sorted(),

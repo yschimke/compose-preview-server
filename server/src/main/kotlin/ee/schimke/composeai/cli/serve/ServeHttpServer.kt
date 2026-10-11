@@ -158,38 +158,34 @@ private val UI_BUILDER_ASSET_EXTENSIONS =
   )
 
 /**
- * The embedded Ktor (CIO) HTTP server fronting a [ServeSessionRegistry]. Thin IO shell: a token
- * gate, the routes, and the query-param → [ServeOverrides] → render → PNG glue. All shared,
- * concurrency-safe state lives in the per-tenant [ServeRenderHost]s; this class adds none of its
- * own per-request state, so it serves any number of clients.
+ * The embedded Ktor (CIO) HTTP server fronting a [ServeSessionRegistry]. A thin IO shell: token
+ * gate, routes, and query-param → [ServeOverrides] → render → PNG glue. All shared,
+ * concurrency-safe state lives in the per-tenant [ServeRenderHost]s; this class keeps no
+ * per-request state.
  *
- * **Multi-tenant:** one server fronts many sessions instead of one per module. Every route resolves
- * a [ServeRenderHost] from the registry by the request's `?session=` (falling back to
- * [defaultSessionId]); the registry forks the tenant behind its factory on first use. Unknown
- * sessions 404 like a bad token.
+ * **Multi-tenant:** every route resolves a [ServeRenderHost] by the request's `?session=` (falling
+ * back to [defaultSessionId]); the registry forks the tenant on first use. Unknown sessions 404
+ * like a bad token.
  *
  * Endpoints (all token-gated except `/healthz`, `/readyz`, `/version`, and the `/wasm/` and
  * `/ui-builder/` static assets):
  * - `GET /` landing page, `GET /p/{id}` viewer page,
  * - `GET /{system}/feed.xml` demand-activated catalog change feed,
- * - `GET /render/{id}.png` PNG bytes (`POST` with the parameters in the body, for a knob value too
- *   large for a URL), `GET /{system}/a2ui` the A2UI document playground,
+ * - `GET /render/{id}.png` PNG bytes (`POST` with the parameters in the body for oversized knob
+ *   values), `GET /{system}/a2ui` the A2UI document playground,
  * - `GET /api/previews` JSON, `GET /healthz` liveness,
  * - `GET /hero/{system}/{hash}.png` a prebaked, immutable front-door thumbnail ([ServeHeroImages]),
- * - `GET /social/{hash}.png` the drawn link-unfurl card a page advertises ([ServeSocialCard]), and
- *   `GET /favicon.svg` / `/favicon.ico` / `/apple-touch-icon.png` the site icon ([ServeSiteIcon]) —
- *   all ungated, because a link unfurler presents no token when it fetches what a page pointed it
- *   at, and an icon fetcher never presents one at all,
- * - `GET /readyz` readiness (green only after every configured design system renders — the
- *   rolling-update gate),
+ * - `GET /social/{hash}.png` the link-unfurl card ([ServeSocialCard]), and `GET /favicon.svg` /
+ *   `/favicon.ico` / `/apple-touch-icon.png` ([ServeSiteIcon]) — ungated, since unfurlers and icon
+ *   fetchers present no token,
+ * - `GET /readyz` readiness (green only after every configured design system renders),
  * - `GET /index.json` Storybook stories index, `GET /iframe.html?id=` isolated story render
- *   (`&format=svg` serves the vector export as an inert SVG image for DOM-capture tools),
- *   ([StorybookCompat]) — the drop-in surface downstream Storybook visual tools consume,
+ *   (`&format=svg` serves an inert SVG) ([StorybookCompat]),
  * - `GET /version` host identity (CLI version, serve schema, public flag),
  * - `GET /bundle.zip` portable bundle, `WS /ws/{id}` streamed-frame lane.
  *
  * A bad/missing token returns **404** (not 401) so the server's existence isn't confirmed to a
- * scanner; the token is compared in constant time ([ServeUrls.tokensMatch]).
+ * scanner; tokens are compared in constant time ([ServeUrls.tokensMatch]).
  */
 class ServeHttpServer(
   private val host: String,
@@ -203,28 +199,24 @@ class ServeHttpServer(
   /** When non-null, enables `POST /bundles/{name}` for clients to contribute bundles at runtime. */
   private val bundleStore: ServeBundleStore? = null,
   /**
-   * Public mode: serve **without** requiring the token — every route is open. For a deployed public
-   * preview server (preview.coo.ee) where browsing the published catalogs / uploaded bundles is the
-   * point. Safe by construction: rendering a bundle/catalog executes no code, re-rendering
-   * untrusted Compose is refused, uploads are size-capped + the `?url=` fetch is SSRF-gated. Off by
-   * default, so a normal `serve` stays token-gated (a bad/absent token still 404s).
+   * Public mode: serve without requiring the token. For a deployed public preview server. Safe by
+   * construction: rendering a bundle/catalog executes no code, re-rendering untrusted Compose is
+   * refused, uploads are size-capped and `?url=` fetches are SSRF-gated. Off by default.
    */
   private val isPublic: Boolean = false,
   /** Render the streamlined Storybook-like catalog/component browsing presentation. */
   private val componentBrowser: Boolean = false,
   /**
-   * Largest `ir/<id>.rc` `GET /render/<id>.rc.json` will inflate. See [projectDocument] for why
-   * there is a bound at all; it is a parameter so a test can prove the refusal with a
-   * kilobyte-sized fixture instead of allocating the production limit 102 times over.
+   * Largest `ir/<id>.rc` `GET /render/<id>.rc.json` will inflate (see [projectDocument]). A
+   * parameter so tests can use a small fixture.
    */
   private val maxProjectableDocumentBytes: Int = DEFAULT_MAX_PROJECTABLE_DOCUMENT_BYTES,
   /**
-   * In-browser CMP tier: system id → the assembled Wasm app directory (the
-   * `:samples:cmp-wasm-catalog:wasmCatalogDist` output). When a catalog session's id is a key here,
-   * its viewer offers a "Run in browser (Wasm)" toggle that mounts `/wasm/<system>/?id=<component>`
-   * in a sandboxed iframe. The assets are static, generic client code (the same app for everyone,
-   * no session data), so the `/wasm/` route is **ungated** — letting the iframe's relative
-   * `fetch('./composeApp.wasm')` work without threading the token through every sub-resource.
+   * In-browser CMP tier: system id → assembled Wasm app directory
+   * (`:samples:cmp-wasm-catalog:wasmCatalogDist`). A catalog session listed here offers "Run in
+   * browser (Wasm)", mounting `/wasm/<system>/?id=<component>` in a sandboxed iframe. The assets
+   * are generic static client code with no session data, so `/wasm/` is ungated and relative
+   * fetches need no token.
    */
   private val wasmCatalogs: Map<String, File> = emptyMap(),
   /** Shared browser fallback projected at `/wasm/<system>/` for known catalog sessions. */
@@ -251,36 +243,27 @@ class ServeHttpServer(
    */
   private val rcPlayerWasmDir: File? = null,
   /**
-   * The operator's preferred default Remote Compose player (`--rc-default-player`), canonical, or
-   * null for the built-in order. Reaches the viewer as `data-rc-default` only on a preview that
-   * enables it ([ServeRcPlayerIds.defaultPlayer]).
+   * The operator's preferred default Remote Compose player (`--rc-default-player`), or null for the
+   * built-in order. Reaches the viewer as `data-rc-default` only on a preview that enables it
+   * ([ServeRcPlayerIds.defaultPlayer]).
    */
   private val preferredRcPlayer: String? = null,
   /**
-   * Design-system catalog sessions that registered (`--catalogs`), e.g. `["compose-m3","wear-m3"]`.
-   * Surfaced as `?session=<system>` nav links on the landing page so the public front door lists
-   * the served systems instead of hiding them behind the query param. Empty ⇒ no nav row (the
-   * default).
+   * Registered design-system catalog sessions (`--catalogs`), e.g. `["compose-m3","wear-m3"]`,
+   * listed on the front door. Empty ⇒ no nav row.
    */
   private val catalogSessions: List<String> = emptyList(),
   /**
-   * App catalogs registered UNLISTED (`--catalogs-unlisted`), e.g. `["meshcore-mobile","cadence"]`.
-   * Served at `/<system>/` exactly like [catalogSessions], but kept OFF the front door: NOT listed
-   * on the `/` systems index and NOT on the in-catalog "Design systems" nav row — reachable only by
-   * their path / `?session=` (shareable by direct link). This lets an app catalog be published
-   * without advertising it on the public landing. They still count toward whether a home index
-   * exists, so an app's own landing keeps a "← back" link whenever the server also lists systems.
+   * App catalogs registered unlisted (`--catalogs-unlisted`): served at `/<system>/` like
+   * [catalogSessions] but not listed on the front door or nav — reachable by direct link only. They
+   * still count toward whether a home index exists.
    */
   private val appCatalogSessions: List<String> = emptyList(),
   /**
    * **Top-level sites** (`--sites m3.preview.coo.ee=m3-catalog`, or `catalogs.json`'s `sites`):
-   * host names that serve one already-published catalog as though it were the whole server. See
-   * [ServeSites] — it's a routing/presentation view over the same session, not a second tenant, so
-   * it costs a map lookup per request and nothing else. Empty (the default) leaves every request
-   * behaving exactly as it did before sites existed.
-   *
-   * The **live** map ([ServeSiteRegistry]) rather than a startup snapshot, so `/admin/sites` can
-   * publish a hostname on a running box ([ServeSiteAdmin]).
+   * hostnames that serve one published catalog as the whole server. A routing/presentation view
+   * over the same session ([ServeSites]); costs a map lookup per request. The live map
+   * ([ServeSiteRegistry]) so `/admin/sites` can publish hostnames at runtime ([ServeSiteAdmin]).
    */
   private val sites: ServeSiteRegistry = ServeSiteRegistry.empty(),
   private val uiBuilderHost: String? = null,
@@ -288,10 +271,9 @@ class ServeHttpServer(
   /** `--ui-builder-host-root`; see [uiBuilderRootMode]. */
   private val uiBuilderHostRoot: Boolean = false,
   /**
-   * Configured catalog availability shared with startup + refresh. When present, `/status` includes
-   * failed/pending catalogs instead of silently omitting them. Catalog loading remains best-effort:
-   * `/readyz` validates a representative usable session, while this tracker makes partial service
-   * explicit and recoverable. Null preserves the plain/test server behaviour.
+   * Configured catalog availability shared with startup + refresh, so `/status` includes
+   * failed/pending catalogs. `/readyz` validates usable sessions; this makes partial service
+   * explicit. Null for plain/test servers.
    */
   private val catalogLoads: CatalogLoadTracker? = null,
   /** Persistent last-successful thumbnails, independent of catalog initialization. */
@@ -302,42 +284,33 @@ class ServeHttpServer(
   private val catalogFeed: ServeCatalogChangeFeed? = null,
   portRange: Int = DEFAULT_PORT_RANGE,
   /**
-   * Max renders in flight across the HTTP `/render` lane. Defaults to the host's CPU count so a
-   * small box (1–2 vCPU) sheds a render storm instead of thrashing; excess requests wait briefly
-   * for a slot, then get `503 + Retry-After`. Renders also serialise inside [ServeRenderHost], so
-   * this is a load-shedding bound on concurrent HTTP work, not a parallel-render knob.
+   * Max renders in flight across the HTTP `/render` lane, defaulting to the CPU count. Excess
+   * requests wait briefly, then get `503 + Retry-After`. Renders also serialise inside
+   * [ServeRenderHost], so this is load shedding, not a parallelism knob.
    */
   maxConcurrentRenders: Int = Runtime.getRuntime().availableProcessors().coerceAtLeast(1),
   /**
-   * Live-seat **permit budget** for concurrent **live** (daemon-backed) stream sessions. Each live
-   * session charges permits equal to its backend weight ([ServeSessionState.liveSeatWeight]): a
-   * desktop CMP daemon costs 1, a heavier Android/Robolectric one costs more, so one heavy catalog
-   * can't hog a flat seat count and starve several cheap ones. A session that can't get its permits
-   * is refused with WebSocket close 1013 (Try Again Later) rather than spawning a daemon that would
-   * risk the OOM killer. `0` (the default) is unbounded — the historical behaviour for a local
-   * `serve` on a developer box. Static (snapshot/Wasm) sessions never consume a permit, so the
-   * public server's default tiers are unaffected; this only bites when `--allow-render-trusted`
-   * puts a live daemon behind a catalog. See [LiveSeatLimiter].
+   * Permit budget for concurrent live (daemon-backed) stream sessions. Each session charges its
+   * backend weight ([ServeSessionState.liveSeatWeight]) — desktop CMP 1, Android/Robolectric more —
+   * and one that can't get permits is refused with WebSocket close 1013 rather than risking the OOM
+   * killer. `0` (default) is unbounded. Static sessions never consume permits. See
+   * [LiveSeatLimiter].
    */
   maxLiveSeats: Int = 0,
   /**
-   * The seat budget to charge, when the caller needs to share one with something built earlier.
-   * `serve` passes the same limiter it hands the catalog daemon pools, so a pooled render daemon
-   * and a live stream draw on one budget instead of two independent ones — the whole point of the
-   * budget being "what this box can run at once". Null builds a private limiter from
-   * [maxLiveSeats], which is what every other entry point (and every test) wants.
+   * A seat budget shared with something built earlier: `serve` passes the limiter it gives the
+   * catalog daemon pools, so pooled render daemons and live streams draw on one budget. Null builds
+   * a private limiter from [maxLiveSeats].
    */
   liveSeatLimiter: LiveSeatLimiter? = null,
   /**
-   * The server's spare Android sandbox workers ([ServeSpareSandboxes]), for `/status.json`: null
-   * when the server keeps none. A supplier rather than a snapshot, read per status request.
+   * The server's spare Android sandbox workers ([ServeSpareSandboxes]) for `/status.json`; null
+   * when none. A supplier, read per request.
    */
   private val spareSandboxSnapshot: () -> SandboxSparePool.Snapshot? = { null },
   /**
-   * Recent daemon **startup failures** — the render/live daemon a session tried to (re)open but
-   * couldn't. Populated by [ServeCommand.openHost] (the single choke point every registry-driven
-   * relaunch passes through) and surfaced on `/status` + `/status.json`. Null ⇒ no log wired
-   * (tests, or a build that doesn't record them); the status page then shows an empty failure list.
+   * Recent daemon startup failures, recorded by [ServeCommand.openHost] (every registry relaunch
+   * passes through it) and shown on `/status` + `/status.json`. Null ⇒ empty failure list.
    */
   private val daemonLog: DaemonStartupLog? = null,
   /**
@@ -351,207 +324,170 @@ class ServeHttpServer(
   /** Catalog auto-refresh interval in seconds (`--catalog-refresh-interval`); `0` ⇒ disabled. */
   private val catalogRefreshSeconds: Long = 0,
   /**
-   * What `--catalog-registry` nominated, and what each nomination gave us at boot — surfaced in the
-   * status config because nothing else exposes it.
-   *
-   * The nomination decides whether a whole project's catalogs are served at all, and until now it
-   * appeared in no diagnostic the server offers: a box running WITHOUT the flag and a box whose
-   * registry read failed produced byte-identical `/status.json`, both simply missing the catalogs.
-   * The only evidence was a boot line in the container log, which needs shell access on the host to
-   * read. Empty ⇒ the feature is off.
+   * What `--catalog-registry` nominated and what each nomination gave at boot, shown in the status
+   * config so a missing flag and a failed registry read are distinguishable. Empty ⇒ off.
    */
   /**
-   * Read per request, not captured: the registry sync publishes and retires catalogs at runtime,
-   * and `/status` must report what each registry contributes now (see [catalogRegistryStatus]).
+   * Read per request: the registry sync publishes and retires catalogs at runtime
+   * ([catalogRegistryStatus]).
    */
   private val catalogRegistries: () -> List<CatalogRegistryStatus> = { emptyList() },
   /**
-   * Catalog-owned UI-builder catalogs this process cannot serve fully, with why; read per request
-   * because a catalog refresh can recover one. Reported on `/status` and the designs page.
+   * Catalog-owned UI-builder catalogs this process cannot fully serve, with why; read per request
+   * since a refresh can recover one. Reported on `/status` and the designs page.
    */
   private val uiBuilderCatalogProblems: () -> Map<String, String> = { emptyMap() },
   /** Whether `POST /bundles` runtime uploads are accepted (`--accept-bundles`). */
   private val acceptBundlesEnabled: Boolean = false,
   /**
-   * Runtime catalog administration ([ServeCatalogAdmin]) — publishing and retiring catalogs without
-   * recreating the container, persisted to the operator's `catalogs.json`. Null (the default) means
-   * the `/admin/catalogs` routes are **not registered at all**, so they 404 like any unknown path.
+   * Runtime catalog administration ([ServeCatalogAdmin]), persisted to `catalogs.json`. Null ⇒
+   * `/admin/catalogs` is not registered and 404s.
    */
   private val catalogAdmin: ServeCatalogAdmin? = null,
   /**
-   * One-step GitHub project onboarding ([ServeOnboarding]) — `POST /admin/onboard` takes a
-   * repository URL, discovers the delivery branches it already publishes, and registers each
-   * through [catalogAdmin]. Gated by the same [adminToken]; null ⇒ the route is **not registered at
-   * all**, so it 404s like any unknown path.
-   *
-   * Separate from [catalogAdmin] only so a server can be built with one and not the other (the
-   * tests do); `serve` wires them together, because onboarding without an administrator to publish
-   * through would have nothing to do.
+   * GitHub project onboarding ([ServeOnboarding]): `POST /admin/onboard` takes a repository URL,
+   * discovers its delivery branches and registers each through [catalogAdmin]. Gated by
+   * [adminToken]; null ⇒ not registered. Separate from [catalogAdmin] so tests can build one
+   * without the other.
    */
   private val onboarding: ServeOnboarding? = null,
   /**
-   * Onboarding a project with **nothing published yet** ([ServeSourceOnboarding]) — `POST
-   * /admin/onboard/scan` reports the Compose modules in a pasted repository by reading a shallow
-   * clone of it. Gated by the same [adminToken]; null ⇒ the route is not registered.
-   *
-   * Separate from [onboarding] because the two answer different questions: that one registers what
-   * a repository already delivers, this one works out what is in it. Neither builds anything — that
-   * happens on a runner in the import staging repository.
+   * Onboarding a project with nothing published yet ([ServeSourceOnboarding]): `POST
+   * /admin/onboard/scan` reports a repository's Compose modules from a shallow clone. Gated by
+   * [adminToken]; null ⇒ not registered. Builds nothing; that happens in the import staging
+   * repository.
    */
   private val sourceOnboarding: ServeSourceOnboarding? = null,
   /**
-   * Runtime producer-trust administration ([ServeTrustAdmin]) — adding and removing trusted
-   * branches / keys / CI identities without an image rebuild. Gated by the same [adminToken] as
-   * [catalogAdmin]; null ⇒ the `/admin/trust` routes are **not registered at all**.
+   * Runtime producer-trust administration ([ServeTrustAdmin]): trusted branches / keys / CI
+   * identities without an image rebuild. Gated by [adminToken]; null ⇒ not registered.
    *
-   * Note this token is more powerful than it looks on a box running `--allow-render-trusted`:
-   * trusting a branch there makes that producer's Compose eligible for server-side execution.
+   * With `--allow-render-trusted`, trusting a branch makes that producer's Compose eligible for
+   * server-side execution, so this token is powerful.
    */
   private val trustAdmin: ServeTrustAdmin? = null,
   /**
-   * Runtime **site** administration ([ServeSiteAdmin]) — publishing and retiring the hostnames in
-   * [sites] without recreating the container, persisted to the same `catalogs.json`. Gated by the
-   * same [adminToken]; null ⇒ the `/admin/sites` routes are **not registered at all**.
+   * Runtime site administration ([ServeSiteAdmin]) for the hostnames in [sites], persisted to
+   * `catalogs.json`. Gated by [adminToken]; null ⇒ `/admin/sites` not registered.
    */
   private val siteAdmin: ServeSiteAdmin? = null,
   /**
-   * The instance's **UI-builder editor pin** ([ServeUiBuilderEditorAdmin], #1035) — which editor
-   * release `catalogs.json` pins, verified before it is written. Gated by [adminToken]; null ⇒ the
-   * `/admin/editor` routes are not registered.
+   * The instance's UI-builder editor pin ([ServeUiBuilderEditorAdmin]): which editor release
+   * `catalogs.json` pins, verified before writing. Gated by [adminToken]; null ⇒ `/admin/editor`
+   * not registered.
    */
   private val editorAdmin: ServeUiBuilderEditorAdmin? = null,
   /**
-   * The UI builder's **catalog settings** ([ServeUiBuilderSettingsAdmin]): `catalogs.json`'s
-   * `uiBuilder` block, the replacement for the `SERVE_UI_BUILDER_*` catalog variables. Gated by
-   * [adminToken]; null ⇒ the `/admin/ui-builder/config` routes are not registered.
+   * The UI builder's catalog settings ([ServeUiBuilderSettingsAdmin]): `catalogs.json`'s
+   * `uiBuilder` block, replacing the `SERVE_UI_BUILDER_*` variables. Gated by [adminToken]; null ⇒
+   * not registered.
    */
   private val uiBuilderSettingsAdmin: ServeUiBuilderSettingsAdmin? = null,
   /**
-   * The deployment's **settings** ([ServeSettingsAdmin]): `settings.json`, the reviewed home of
-   * every non-secret `SERVE_*` setting, with where each serving value came from. Gated by
-   * [adminToken]; null ⇒ the `/admin/settings` routes are not registered.
+   * Deployment settings ([ServeSettingsAdmin]): `settings.json`, home of every non-secret `SERVE_*`
+   * setting, with each value's source. Gated by [adminToken]; null ⇒ not registered.
    */
   private val settingsAdmin: ServeSettingsAdmin? = null,
   /**
-   * Runtime **UI-builder** administration ([ServeUiBuilderAdmin]) — listing every design on the
-   * host and deleting one, whoever owns it. Gated by [adminToken], [adminReadToken], or a
-   * configured [uiBuilderAdministrators] identity; null ⇒ the `/admin/ui-builder` routes are not
-   * registered. The actor allowlist is deliberately narrower than the machine-wide admin token.
+   * Runtime UI-builder administration ([ServeUiBuilderAdmin]): list every design and delete any.
+   * Gated by [adminToken], [adminReadToken], or a configured [uiBuilderAdministrators] identity;
+   * null ⇒ not registered. The actor allowlist is deliberately narrower than the admin token.
    */
   private val uiBuilderAdmin: ServeUiBuilderAdmin? = null,
   /**
-   * The designs catalog projects publish ([ServeUiBuilderDesignLibrary]), browsable and openable
-   * from the same admin screen. Gated by the same [adminToken] and the same null-means-absent rule
-   * as [uiBuilderAdmin]; opening one writes a design, which is why it sits behind admin rather than
-   * beside the public browse routes.
+   * The designs catalog projects publish ([ServeUiBuilderDesignLibrary]), browsable from the admin
+   * screen. Same gate and null rule as [uiBuilderAdmin]; opening one writes a design.
    */
   private val uiBuilderDesignLibrary: ServeUiBuilderDesignLibrary? = null,
   /**
-   * Which catalogs to look in, read at request time rather than captured: the set changes when a
-   * catalog is registered at runtime or its branch head moves, and a library that answered from a
-   * snapshot taken at boot would keep offering a retired catalog's designs.
+   * Which catalogs to look in, read per request since catalogs are registered and branch heads move
+   * at runtime.
    */
   private val uiBuilderDesignCatalogs: () -> List<ServeUiBuilderDesignLibrary.Coordinate> = {
     emptyList()
   },
   /**
-   * The components those same projects publish ([ServeUiBuilderComponentLibrary]), read from the
-   * same coordinates as their designs. Listing them is read-only — nothing on this host changes
-   * until a design imports one — but it sits behind the same admin token as the design library
-   * because it exposes the same projects.
+   * The components those projects publish ([ServeUiBuilderComponentLibrary]). Read-only, but behind
+   * the admin token because it exposes the same projects.
    */
   private val uiBuilderComponentLibrary: ServeUiBuilderComponentLibrary? = null,
   /**
-   * The components this host's editors publish ([ServeUiBuilderComponentStore]), read after the
-   * projects' own so a committed component shadows the host copy. Null serves the library
-   * read-only.
+   * Components this host's editors publish ([ServeUiBuilderComponentStore]), read after the
+   * projects' so a committed component shadows the host copy. Null serves the library read-only.
    */
   private val uiBuilderComponentStore: ServeUiBuilderComponentStore? = null,
   /**
-   * The record the Compose export generates a given catalog's designs from, so the browser's code
-   * pane can read the same one. See [installUiBuilderCatalogRecordRoutes].
-   *
-   * A function rather than a map for the reason `ScreenGeneratorComposeExportExecutor`'s published
-   * components are one: a catalog's record can arrive after this server is constructed, and a value
-   * read at startup would be the empty answer forever. The default serves none, which leaves every
-   * editor on the record embedded in its own build — the behaviour before this route.
+   * The record the Compose export generates a catalog's designs from, so the browser's code pane
+   * reads the same one ([installUiBuilderCatalogRecordRoutes]). A function because records can
+   * arrive after construction. The default serves none.
    */
   private val uiBuilderCatalogRecord: (catalogSystemId: String) -> ComponentRecordFile? = { null },
   /**
-   * Shared secret for the `/admin/catalogs` routes (`--admin-token`). Separate from the browsing
-   * [token] on purpose: a public box hands its browse URL to everyone, so admin needs its own
-   * credential and must stay gated even when [isPublic] is set. Null/blank ⇒ no admin routes, so a
-   * server that never opted in can't be administered at all.
+   * Shared secret for the admin routes (`--admin-token`), separate from the browse [token] and
+   * gated even when [isPublic]. Null/blank ⇒ no admin routes.
    */
   private val adminToken: String? = null,
   /**
-   * Narrow diagnostic credential for the UI-builder design list. Unlike [adminToken], this never
-   * admits a document body or mutation; see [rejectBadAdminToken].
+   * Narrow diagnostic credential for the UI-builder design list; never admits a document body or
+   * mutation. See [rejectBadAdminToken].
    */
   private val adminReadToken: String? = null,
   /** GitHub identities that administer UI-builder designs, without reaching other admin lanes. */
   uiBuilderAdminActors: Set<String> = emptySet(),
   /**
    * When non-null, enables the **document** lane: `GET /docs` (upload page), `POST /docs` (ingest a
-   * known document format), and `GET /d/{id}` (the expiring permalink that plays it back). Supplied
-   * by `--accept-docs`. Independent of [bundleStore] — a document is a single file with its own
-   * short-lived link, not a preview session.
+   * known format), `GET /d/{id}` (expiring permalink). Supplied by `--accept-docs`; independent of
+   * [bundleStore].
    */
   private val docStore: ServeDocStore? = null,
   /**
    * When non-null, enables the **image** lane: `POST /images` ingests a rendered preview PNG and
-   * `GET /i/{id}.png` serves it back at an embeddable URL. Supplied by `--accept-images`.
+   * `GET /i/{id}.png` serves it at an embeddable URL. Supplied by `--accept-images`.
    *
-   * Its sibling above is an anonymous drop-box; this one is not. Uploading requires a GitHub
-   * account with access to the operator's repository ([imageUploadAuth]), which `ServeCommand`
-   * refuses to start the lane without — so the pair is always wired together, and "the store exists
-   * but nothing gates it" is unrepresentable here rather than merely unlikely. Reads are open,
-   * because the whole purpose is a URL GitHub's image proxy can fetch on behalf of a PR body; the
-   * unguessable id is the access control. See [ServeImageStore].
+   * Uploading requires a GitHub account with access to the operator's repository
+   * ([imageUploadAuth]); `ServeCommand` refuses to start the lane without it. Reads are open so
+   * GitHub's image proxy can fetch them; the unguessable id is the access control. See
+   * [ServeImageStore].
    */
   private val imageStore: ServeImageStore? = null,
   /** Who may upload to [imageStore]. Non-null exactly when that store is; see its KDoc. */
   private val imageUploadAuth: ServeImageUploadAuth? = null,
   /**
-   * Per-caller budget on `POST /images`, keyed by GitHub login. Bounds both the obvious abuse (one
-   * account filling the store) and the less obvious one (each uncached upload costs the host two
-   * GitHub API calls). Null ⇒ unlimited, which is right for a single-user local host.
+   * Per-login budget on `POST /images`, bounding store filling and GitHub API calls per upload.
+   * Null ⇒ unlimited.
    */
   private val imageUploadLimiter: ServeRateLimiter? = null,
   /**
    * When non-null, enables the **playground** lane: `POST /api/{version}/compiler/run` compiles a
    * snippet against a catalog classpath and returns diagnostics + an expiring preview token.
-   * Supplied by `--playground-bundle`. Because the lane exists to run **user-supplied code**, it is
-   * enabled under `--public` only behind a per-session sandbox that passed the startup containment
-   * probe ([PlaygroundPublicGate]); `ServeCommand` decides and simply doesn't wire this in when the
-   * gate refuses. See
+   * Supplied by `--playground-bundle`. It runs user code, so under `--public` it is only wired
+   * behind a sandbox that passed the startup containment probe ([PlaygroundPublicGate]). See
    * [docs/design/PLAYGROUND.md](../../../../../../../../docs/design/PLAYGROUND.md).
    */
   private val playgroundService: PlaygroundCompileService? = null,
   /**
-   * Set when the public playground is served by a sibling process at this origin
-   * (`--playground-external`): its handoff links are rendered against this engine's catalogs while
-   * none of [playgroundService]'s routes are mounted here.
+   * Set when a sibling process serves the public playground at this origin
+   * (`--playground-external`): handoff links render against this engine's catalogs, but
+   * [playgroundService]'s routes aren't mounted.
    */
   private val externalPlaygroundLinks: PlaygroundCompileService? = null,
   /**
    * When non-null, enables Stage-2 redemption: `GET /pg/<token>` redeems a preview token into a
-   * live streamed session (registered under the token id) and redirects to its viewer. Supplied by
-   * `ServeCommand` alongside [playgroundService]; the two share one [PlaygroundTokenStore].
+   * live session and redirects to its viewer. Shares a [PlaygroundTokenStore] with
+   * [playgroundService].
    *
    * Present without [playgroundService] on a `--compile-engine` host: the UI builder's native pane
-   * still redeems its own tokens in process, but `/pg/` is only mounted with the public surface.
+   * redeems tokens in process, but `/pg/` is mounted only with the public surface.
    */
   private val playgroundRedeem: PlaygroundRedeemService? = null,
   /**
-   * Optional GitHub auth. When present, public browsing can stay open while code-running surfaces
-   * (playground + live WebSocket sessions) require a signed-in GitHub account.
+   * Optional GitHub auth: public browsing stays open while code-running surfaces (playground, live
+   * WebSocket) require sign-in.
    */
   private val githubAuth: ServeGithubAuth? = null,
   /**
    * `ui_builder_check_design`'s `guidelines` check on the operator's OpenRouter key, open only to
-   * the accounts `--ui-builder-guidelines-users` / `--ui-builder-guidelines-orgs` name. Null leaves
-   * the check reported as skipped.
+   * `--ui-builder-guidelines-users` / `--ui-builder-guidelines-orgs`. Null reports it skipped.
    */
   private val uiBuilderGuidelines: ServeUiBuilderGuidelines? = null,
   /** Each builder catalog's own guidelines; null where the host keeps none. */
@@ -564,40 +500,33 @@ class ServeHttpServer(
   /**
    * Resolve a browser session into an image-uploader login for [ServeImageUploadAuth.repository].
    *
-   * The headless image lane still accepts a GitHub bearer token. This second admission path is for
-   * the bug-report page, whose capture bundle has a signed OAuth cookie but deliberately never has
-   * the OAuth token that produced it. [ServeRunner] wires this only when the cookie proves access
-   * to the EXACT repository the image lane gates on; a public browsing session or a cookie for a
-   * different repository therefore buys no hosting. Kept as a function so the HTTP boundary can be
-   * tested without manufacturing a signed OAuth cookie.
+   * For the bug-report page, whose signed OAuth cookie never carries the OAuth token. [ServeRunner]
+   * wires this only when the cookie proves access to exactly the gated repository. A function so
+   * the HTTP boundary is testable without a signed cookie.
    */
   private val imageBrowserLogin: ((ApplicationCall, String) -> String?)? = null,
   /**
    * When non-null, enables **agent access grants**: `POST /agent-access/request` opens a request,
    * `GET /agent-access/{id}` is the human approval page, and `POST /agent-access/poll` hands the
-   * minted bearer to the agent that asked. Supplied by `--agent-grants`. See
+   * bearer to the agent. Supplied by `--agent-grants`. See
    * [docs/design/AGENT_ACCESS_GRANTS.md](../../../../../../../../docs/design/AGENT_ACCESS_GRANTS.md).
    *
-   * A grant satisfies the same three gates a human does — [rejectBadToken],
-   * [rejectMissingGithubAuth], [rejectMissingGithubRepoAccess] — so enabling this adds one new way
-   * to answer the existing questions and no new surface behind them.
+   * A grant satisfies the same gates a human does — [rejectBadToken], [rejectMissingGithubAuth],
+   * [rejectMissingGithubRepoAccess] — adding no new surface.
    */
   private val agentGrants: ServeAgentGrantStore? = null,
   /** Durable public OAuth client metadata; grants and authorization codes remain ephemeral. */
   private val mcpOAuthClientsFile: File? = null,
   /**
-   * Per-caller budget on the two **ungated** grant routes (`request` and `poll`), keyed by client
-   * address. Ungated is the point — an agent with no credential must be able to ask — so this is
-   * the only thing standing between the route and an anonymous caller filling the request map. Null
-   * ⇒ unlimited, which is right for a single-user local host.
+   * Per-address budget on the two ungated grant routes (`request`, `poll`) — the only bound on
+   * anonymous callers filling the request map. Null ⇒ unlimited.
    */
   private val agentGrantLimiter: ServeRateLimiter? = null,
   /** Register Streamable HTTP MCP endpoints for served catalogs. */
   private val catalogMcpEnabled: Boolean = false,
   /**
-   * The longest a request-scoped MCP interaction — sending `elicitation/create` and waiting for a
-   * person's answer — may take before the call falls back to its text decision. A seam for tests;
-   * production keeps the two-minute default.
+   * How long a request-scoped MCP elicitation may wait for a person before falling back to its text
+   * decision. A test seam; production uses two minutes.
    */
   private val catalogMcpInteractionTimeoutMillis: Long =
     ServeMcpRequestScopes.DEFAULT_INTERACTION_TIMEOUT_MILLIS,
@@ -610,75 +539,65 @@ class ServeHttpServer(
   /** The design listing's cached card pictures; null draws cards from the live export. */
   private val uiBuilderThumbnails: ServeUiBuilderThumbnails? = null,
   /**
-   * Compiles and renders a design with real Compose on this host. Non-null only where the builder
-   * and the playground compile lane are both configured, because a native render needs both.
+   * Compiles and renders a design with real Compose. Non-null only when both the builder and the
+   * playground compile lane are configured.
    */
   private val uiBuilderNativePreview: UiBuilderNativePreviewLane? = null,
   /**
-   * Captures one design's inline Remote Compose content into the document it describes. Non-null on
-   * the same hosts [uiBuilderNativePreview] is, and for the same reason: it needs the generator and
-   * the compile lane both.
+   * Captures a design's inline Remote Compose content into its document. Non-null on the same hosts
+   * as [uiBuilderNativePreview].
    */
   private val uiBuilderInlineCapture: UiBuilderInlineCaptureLane? = null,
   /**
-   * Per-design reference overlays. Null leaves the reference routes unregistered, which is the
-   * honest answer on a host with no durable UI-builder state: an overlay that cannot outlive the
-   * session is not the feature, and a route that always forgets is worse than one that is absent.
+   * Per-design reference overlays. Null leaves the routes unregistered on hosts without durable
+   * UI-builder state.
    */
   private val uiBuilderReferenceStore: ServeUiBuilderReferenceStore? = null,
-  /**
-   * Per-design comment threads. Null leaves the comment routes unregistered, for the same reason
-   * the reference store does: a discussion that cannot outlive the session is not the feature.
-   */
+  /** Per-design comment threads. Null leaves the routes unregistered (no durable state). */
   private val uiBuilderCommentStore: ServeUiBuilderCommentStore? = null,
   /**
-   * Per-design back-links — the issue, the frame, the pull request, the thread, the design this one
-   * continues. Null leaves the links routes unregistered, for the same reason the reference and
-   * comment stores do: a record of what a design is for that the next restart forgets is not the
-   * feature.
+   * Per-design back-links (issue, frame, PR, thread, predecessor design). Null leaves the routes
+   * unregistered (no durable state).
    */
   private val uiBuilderLinksStore: ServeUiBuilderLinksStore? = null,
   /**
-   * Per-design review verdicts and the implementing pull request. Null leaves the review routes and
-   * the decision and implementation tools unregistered, for the links store's reason.
+   * Per-design review verdicts and the implementing PR. Null leaves the review routes and
+   * decision/implementation tools unregistered.
    */
   private val uiBuilderReviewStore: ServeUiBuilderReviewStore? = null,
   /**
-   * Each design's latest guidelines result. Null leaves the guidelines result routes and the
-   * get/record tools unregistered; the prompt route and tool stay, since they keep nothing.
+   * Each design's latest guidelines result. Null leaves the result routes and get/record tools
+   * unregistered; the prompt route and tool stay.
    */
   private val uiBuilderGuidelineStore: ServeUiBuilderGuidelineStore? = null,
   /** Shared server-side folders for designs; null leaves folder organization unavailable. */
   private val uiBuilderFolderStore: ServeUiBuilderFolderStore? = null,
   private val uiBuilderProjectStore: ServeUiBuilderProjectStore? = null,
   /**
-   * The asset lane of [uiBuilderService] — the bytes behind a design's `assets` map. Null leaves
-   * the asset routes and the `ui_builder_put_asset` tool unregistered, which is what a host with no
-   * durable UI-builder state honestly has: a picture the next restart forgets is not the feature.
+   * The asset lane of [uiBuilderService] (the bytes behind a design's `assets` map). Null leaves
+   * the asset routes and `ui_builder_put_asset` unregistered (no durable state).
    */
   uiBuilderAssets: UiBuilderAssetPort? = null,
   /**
-   * The branch lane of [uiBuilderService] — fork a design into a branch, list, merge and archive
-   * branches (yschimke/compose-ui-builder#377). Null leaves the branch tools unregistered. The
-   * service itself, not a decorator of it: the runtime is where a branch's parent is recorded.
+   * The branch lane of [uiBuilderService]: fork, list, merge and archive design branches. Null
+   * leaves the branch tools unregistered. It is the service itself, since the runtime records a
+   * branch's parent.
    */
   uiBuilderBranches: UiBuilderBranchPort? = null,
   /**
-   * Checks a design or a mutation batch without saving it — `ui_builder_validate`. Null leaves the
-   * tool unadvertised, which is what a host that cannot open a scratch service over its own
-   * catalogs and exporter honestly has.
+   * Checks a design or mutation batch without saving (`ui_builder_validate`). Null leaves the tool
+   * unadvertised.
    */
   private val uiBuilderValidator: UiBuilderDraftValidator? = null,
   /**
-   * Observability for the playground lane on `/status.json` — which posture admitted it, whether
-   * the configured jail actually contains anything on this host, and whether each mode's classpath
-   * has resolved. Null when the lane isn't wired at all. See [PlaygroundHealth].
+   * Playground observability for `/status.json`: admitting posture, whether the jail contains
+   * anything, and per-mode classpath resolution. Null when the lane isn't wired. See
+   * [PlaygroundHealth].
    */
   private val playgroundHealth: (() -> PlaygroundHealth)? = null,
   /**
-   * Delivery-branch read counters for `/status.json`, read from the catalog store that owns them. A
-   * provider rather than the snapshot itself because `/status.json` is polled and the numbers move;
-   * null for a server with no catalog store, whose branch-read count is not zero but undefined.
+   * Delivery-branch read counters for `/status.json`, from the catalog store. A provider since the
+   * numbers move; null without a catalog store.
    */
   private val branchFetchStats: (() -> BranchFetchSnapshot?)? = null,
   /** Cross-catalog optimizer admission for `/status.json`, read from the shared background-work. */
@@ -686,74 +605,65 @@ class ServeHttpServer(
   /** Disk tier for warmed theme renders, for `/status.json`. Null when persistence is off. */
   private val themeCacheStats: (() -> ThemeCacheStoreSnapshot?)? = null,
   /**
-   * The catalog blob cache's occupancy and read outcomes for `/status.json`, read from the pool
-   * that owns them. Null on a server with no catalogs, whose pool is not merely empty but unused.
+   * Catalog blob cache occupancy and read outcomes for `/status.json`. Null on a server with no
+   * catalogs.
    */
   private val catalogCacheStats: (() -> CatalogBlobPoolSnapshot?)? = null,
   /**
-   * Drop everything the catalog blob cache holds, for `DELETE /admin/catalog-cache`. Separate from
-   * [catalogCacheStats] for the reason the optimizer's pause is separate from its counters: reading
-   * occupancy is safe on any server, and discarding it is an operator action that wants the token.
+   * Drop the catalog blob cache, for `DELETE /admin/catalog-cache`. Separate from
+   * [catalogCacheStats] because discarding needs the admin token.
    */
   private val catalogCacheClear: (() -> CatalogBlobPoolSnapshot)? = null,
   /**
-   * The shared background-work handle, for the admin pause/resume routes. Separate from
-   * [themeOptimizerStats] because reading counters is safe on any server while standing the
-   * optimizer down is an operator action and wants the admin token.
+   * The shared background-work handle for the admin pause/resume routes. Separate from
+   * [themeOptimizerStats] because pausing needs the admin token.
    */
   private val themeOptimizerAdmin: ServeBackgroundWork? = null,
   /**
-   * Per-caller budget on the compile lane (issue #3214), or null to leave it unmetered. Every other
-   * playground bound is a whole-host one, so without this two callers issuing back-to-back compiles
-   * hold every slot and everyone else is told the playground is busy.
+   * Per-caller budget on the compile lane, or null for unmetered; otherwise two busy callers can
+   * hold every slot.
    */
   private val playgroundRateLimiter: ServeRateLimiter? = null,
   /**
-   * Trust the **last** entry of `X-Forwarded-For` as the client address when rate-limiting an
-   * anonymous caller, instead of the socket peer.
+   * Trust the **last** `X-Forwarded-For` entry as the client address for anonymous rate limiting,
+   * instead of the socket peer.
    *
-   * Off by default and opt-in for a reason: the header is client-supplied, so trusting it on a
-   * directly-exposed host lets a caller forge a fresh identity per request and bypass the limit
-   * entirely. The *last* entry — not the first — is the one a single reverse proxy set from the
-   * peer address it actually saw (nginx's `$proxy_add_x_forwarded_for` appends it; Caddy without
-   * `trusted_proxies` replaces the header with it), which a client cannot forge. That is exactly
-   * one hop's worth of trust; behind two proxies this names the inner one.
+   * Opt-in because the header is client-supplied: on a directly exposed host it would let callers
+   * forge identities. The last entry is the one a single reverse proxy appended from the peer it
+   * saw (nginx `$proxy_add_x_forwarded_for`; Caddy without `trusted_proxies` replaces the header).
+   * Exactly one hop of trust; behind two proxies it names the inner one.
    */
   private val trustForwardedFor: Boolean = false,
   /**
-   * Reads a preview's Kotlin off GitHub so `/playground?from=…` can open it — the "try this preview
-   * in the playground" handoff. Null disables the handoff (and its links); the playground itself is
-   * unaffected. Injected rather than built here so tests never reach the network.
+   * Reads a preview's Kotlin off GitHub for the `/playground?from=…` handoff. Null disables the
+   * handoff. Injected so tests never reach the network.
    */
   private val playgroundSourceFetch: ((String) -> ByteArray?)? = null,
   /** Aggregate view counts; pass a file-backed store to keep them across server restarts. */
   private val engagementStore: ServeEngagementStore = ServeEngagementStore(),
   /**
-   * Project mode's render-history source, computed from the local repository. When non-null, a
-   * viewer whose session has **no delivery provenance** (i.e. not a catalog) inlines that preview's
-   * timeline and enables `GET /history/render/{blob}.png`, which serves an old render out of the
-   * local object store. Null — every hosted/bundle-only box — leaves both out entirely, so the
-   * route 404s rather than existing unwired.
+   * Project mode's local render history. When non-null, a viewer whose session has no delivery
+   * provenance inlines the timeline and `GET /history/render/{blob}.png` serves old renders from
+   * the local object store. Null leaves both out.
    */
   private val projectHistory: ServeProjectHistory? = null,
   /** Trusted module roots for local browse sessions, keyed by their session ids. */
   private val localSourceRoots: Map<String, File> = emptyMap(),
   /**
-   * This machine's site-local addresses, for the operator's "Open on your phone" card on a `--lan`
-   * server. A parameter so a test can name one on a host that has none.
+   * This machine's site-local addresses for the "Open on your phone" card on a `--lan` server. A
+   * parameter for tests.
    */
   private val lanAddresses: () -> List<String> = ServeUrls::siteLocalIpv4Addresses,
   /**
-   * Web Push ([installPushRoutes]): the subscriptions and this deployment's VAPID key. Null on a
-   * host without GitHub sign-in or without a UI builder, which is a host with nobody to notify and
-   * nothing to notify them about; the routes then 404.
+   * Web Push ([installPushRoutes]): subscriptions and the VAPID key. Null without GitHub sign-in or
+   * a UI builder; the routes then 404.
    */
   private val push: ServePushLane? = null,
 ) {
 
   /**
-   * Which design a branch was forked from, read from the runtime, so a grant naming a design also
-   * reaches its branches ([ServeUiBuilderGrantScope]). Null where the host wires no branches.
+   * Which design a branch was forked from, so a grant naming a design also reaches its branches
+   * ([ServeUiBuilderGrantScope]). Null when branches aren't wired.
    */
   private val projectBranches: UiBuilderBranchPort? = uiBuilderBranches?.let { raw ->
     uiBuilderProjectStore?.let { ServeUiBuilderProjectBranches(raw, it) } ?: raw
@@ -762,9 +672,9 @@ class ServeHttpServer(
     projectBranches?.let(ServeUiBuilderGrantScope::parentsOf)
 
   /**
-   * The design service every route, sidecar, stream and MCP tool here reaches designs through, with
-   * a grant that names its designs held to them — see [ServeUiBuilderGrantScope]. Nothing in this
-   * class reaches the unwrapped port, which is why the constructor parameter is not a property.
+   * The design service every route, sidecar, stream and MCP tool uses, with grants held to the
+   * designs they name ([ServeUiBuilderGrantScope]). Nothing here reaches the unwrapped port, which
+   * is why the constructor parameter is not a property.
    */
   private val designService: UiBuilderServicePort? = uiBuilderService?.let { raw ->
     val service =
@@ -798,17 +708,13 @@ class ServeHttpServer(
   private val uiBuilderRuntimeAssets = ServeUiBuilderRuntimeAssets.load(uiBuilderRuntimeDirs)
 
   /**
-   * Resolves `/playground?from=<system>/<previewId>` to that preview's source. Built here rather
-   * than injected because the lookup is this server's own registry: the request names a system and
-   * a preview id, and everything that forms the fetch URL comes from the catalog metadata behind
-   * them. Null when no fetcher was supplied, or the lane isn't wired at all.
+   * Resolves `/playground?from=<system>/<previewId>` to the preview's source, using this server's
+   * own registry metadata for the fetch URL. Null without a fetcher.
    */
   private val playgroundSeeds: PlaygroundSeedResolver? = playgroundSourceFetch
-  // Deliberately NOT gated on `playgroundService`. The resolver reads and cleans a preview's
-  // source, which the viewer's Source panel wants on every host that can browse a catalog —
-  // including the many that cannot compile it (a pin-only host, or one with no Robolectric
-  // sidecar, which is every Android and Wear catalog on the public deployment). Only the
-  // *handoff* needs a compiler, and `playgroundLinkFor` checks for one itself.
+  // Not gated on `playgroundService`: the viewer's Source panel needs cleaned source on every host
+  // that can browse a catalog, including ones that can't compile it. `playgroundLinkFor` checks for
+  // a compiler itself.
   ?.let { fetch ->
     PlaygroundSeedResolver(
       locate = ::sourceLocationFor,
@@ -818,12 +724,8 @@ class ServeHttpServer(
   }
 
   /**
-   * Answers the Dev-mode `uses:` filter — which previews call a given composable. Built on exactly
-   * the metadata and fetcher the seed resolver uses, and for the same reason: a preview's source
-   * location is this server's own registry, and one lookup should not disagree with the other.
-   *
-   * Null when no fetcher was supplied, which is also when the Source panel is absent — a host that
-   * cannot read a preview's source cannot index its calls either.
+   * Answers the Dev-mode `uses:` filter (which previews call a composable), built on the same
+   * metadata and fetcher as the seed resolver. Null without a fetcher.
    */
   private val previewUsage: PreviewUsageIndex? = playgroundSourceFetch?.let { fetch ->
     PreviewUsageIndex(
@@ -834,11 +736,8 @@ class ServeHttpServer(
   }
 
   /**
-   * Where a preview's source lives, across the three states a session can be in.
-   *
-   * Shared by the seed resolver and the usage index rather than written twice: both are answering
-   * "which file is this preview declared in", and a second copy of the resident/suspended/retired
-   * ladder below is a place for them to drift apart.
+   * Where a preview's source lives across resident / suspended / retired sessions, shared by the
+   * seed resolver and usage index so they can't drift.
    */
   private fun sourceLocationFor(
     system: String,
@@ -848,20 +747,14 @@ class ServeHttpServer(
     // to answer where a file lives.
     val host = sessions.peekHost(system)
     return when {
-      // Resident: authoritative, in BOTH directions. A live host that does not list this
-      // preview — a catalog refreshed under the same id with it dropped, or its source
-      // metadata cleared — has to answer "no". Falling through to a remembered location there
-      // would serve the previous publication's source instead of a 404, so its negative
-      // answer drops the stale entry too.
+      // Resident: authoritative both ways. A live host that doesn't list the preview answers "no"
+      // and drops any stale remembered entry.
       host != null -> sourceLocationOf(host, previewId)
-      // Suspended, but still a session this server serves: answer from the snapshot taken as
-      // it was suspended. Taken from the host being suspended, so a catalog refreshed and then
-      // idled out snapshots the REPLACEMENT — the case a lazily-primed map got wrong, since a
-      // stale entry could answer a tab that loaded before the refresh.
+      // Suspended but still served: answer from the snapshot taken at suspension (of the
+      // replacement, if the catalog was refreshed).
       sessions.isKnownSession(system) -> catalogSourceLocationsSeen[system]?.get(previewId)
-      // Retired: the catalog is gone and every other session-backed route for it 404s. A
-      // remembered location would keep answering — and keep re-fetching the old repository
-      // once the seed's TTL lapsed — long after the catalog was withdrawn.
+      // Retired: the catalog is gone, so answer nothing rather than keep serving (and re-fetching)
+      // a remembered location.
       else -> null
     }
   }
@@ -890,12 +783,9 @@ class ServeHttpServer(
   val port: Int = pickPort(host, requestedPort, portRange)
 
   /**
-   * The server home a created or imported design is stamped with, or null to stamp none.
-   *
-   * Only an origin the operator stated counts (`--ui-builder-public-origin`, else
-   * `--github-auth-callback-base-url`). A bind address is not an identity: an auto-picked port
-   * changes on restart and two local servers on one port would each claim the other's designs, so a
-   * server without a configured origin leaves new designs unhomed, as they were before homes.
+   * The server home stamped on created or imported designs, or null. Only an operator-stated origin
+   * counts (`--ui-builder-public-origin`, else `--github-auth-callback-base-url`); a bind address
+   * is not an identity.
    */
   private val canonicalServerOriginValue: String? = canonicalOrigin?.let { configured ->
     requireNotNull(normalizeServerHomeUrl(configured)) {
@@ -912,17 +802,16 @@ class ServeHttpServer(
   private val startedAtMillis: Long = System.currentTimeMillis()
 
   /**
-   * Frame counters for the live socket lane, reported on `/status.json` as `liveFrames`. Owned here
-   * rather than by a host because a socket outlives the streams it opens and can move between
-   * previews; the recorder follows the client, not the daemon. See [LiveFramePerfStats].
+   * Frame counters for the live socket lane (`liveFrames` on `/status.json`). Owned here because a
+   * socket outlives its streams and follows the client. See [LiveFramePerfStats].
    */
   private val liveFrameStats = LiveFramePerfStats()
 
   private val renderSemaphore = Semaphore(renderSlots)
   private val uiBuilderAgentPresence = ServeUiBuilderAgentPresence()
   /**
-   * The UI-builder MCP tools, built once: the catalog MCP endpoint serves them, and the guidelines
-   * prompt route builds its request through the same code the prompt tool does.
+   * The UI-builder MCP tools, built once and shared by the MCP endpoint and the guidelines prompt
+   * route.
    */
   private val uiBuilderMcp: ServeUiBuilderMcp? by lazy {
     designService?.let {
@@ -984,26 +873,16 @@ class ServeHttpServer(
   private val catalogRefreshesInFlight = ConcurrentHashMap.newKeySet<String>()
 
   /**
-   * Readiness latch for `/readyz` (the rolling-update gate). Unlike `/healthz` — a static "ok" that
-   * only proves the HTTP listener is up — readiness is `true` only once **every configured design
-   * system** has *actually rendered* on this host, so docker-rollout won't drain traffic onto (and
-   * retire the old replica for) a new container whose render pipeline is broken, whose catalogs
-   * failed to load, or whose design systems have not finished warming.
+   * Readiness latch for `/readyz`, the rolling-update gate. Unlike `/healthz` (listener up), this
+   * is true only once every configured design system has actually rendered here, so a broken new
+   * replica isn't promoted.
    *
-   * Every design system rather than one representative preview, because one was not enough: the
-   * gate went green off whichever catalog happened to be first while `glimmer-catalog` still had no
-   * renders, and the 3.38.0 rollout put a catalog page in front of visitors with all 24 of its
-   * images missing. See [ServeCatalogsConfig.DESIGN_SYSTEMS_GROUP] for why that group and only that
-   * group — waiting on all 22 catalogs would hold a rollout open for the slowest third-party fetch
-   * on the box. Latches on the first success and stays set: the probe render is a baked,
-   * override-free snapshot for a catalog session (cheap, never wakes the daemon — see
-   * [ServeCatalogLiveHost.render]), but a plain daemon module would pay its cold render, so it runs
-   * at most once (see [readinessProber]) and the poll only ever reads this flag.
+   * Every design system, not one representative preview, which let a catalog with no renders go
+   * live. [ServeCatalogsConfig.DESIGN_SYSTEMS_GROUP] explains why only that group. Latches on first
+   * success; the probe render runs at most once ([readinessProber]).
    *
-   * Set by the **server-owned** [readinessProber] thread, never inside a request coroutine: the
-   * `/readyz` handler must stay instant so a health checker's short command timeout (the Docker
-   * healthcheck allows 5s) can't cancel a slow first render mid-flight and discard the result — the
-   * render happens off the request path, latches here when it lands, and the next poll sees it.
+   * Set by the server-owned [readinessProber] thread, never in a request coroutine, so `/readyz`
+   * stays instant and a healthcheck timeout can't cancel a first render.
    */
   private val ready = AtomicBoolean(false)
 
@@ -1011,24 +890,20 @@ class ServeHttpServer(
   private val readinessProbeStarted = AtomicBoolean(false)
 
   /**
-   * The server-owned background thread that renders the design systems until they all succeed, then
-   * latches [ready]. Kicked off lazily by the first `/readyz` poll (so a plain `serve` that's never
-   * health-checked pays no eager render) and interrupted on [stop]. Retries on failure so a daemon
-   * still cold-starting eventually flips ready without the request path ever blocking.
+   * The background thread that renders the design systems until all succeed, then latches [ready].
+   * Started lazily by the first `/readyz` poll, interrupted on [stop], and retries on failure.
    */
   @Volatile private var readinessProber: Thread? = null
 
   /**
-   * Live-seat limiter: a permit **budget** ([maxLiveSeats]) charged per session by its backend
-   * weight, so a heavy Android daemon costs more of the box than a cheap desktop CMP one. `<= 0` ⇒
-   * unbounded. See [maxLiveSeats] and [LiveSeatLimiter].
+   * Live-seat limiter: a permit budget ([maxLiveSeats]) charged per session by backend weight. `<=
+   * 0` ⇒ unbounded. See [LiveSeatLimiter].
    */
   private val liveSeats: LiveSeatLimiter = liveSeatLimiter ?: LiveSeatLimiter(maxLiveSeats)
 
   /**
-   * Prebaked front-door hero thumbnails, served by the `/hero/` route. Baked once per catalog host
-   * (see [rememberCatalogMeta]) so the public landing costs the server a handful of map lookups
-   * rather than a dozen full-resolution renders. See [ServeHeroImages].
+   * Prebaked front-door hero thumbnails for `/hero/`, baked once per catalog host
+   * ([rememberCatalogMeta]). See [ServeHeroImages].
    */
   private val heroImages =
     ServeHeroImages(heroCacheDir).also { images ->
@@ -1036,23 +911,20 @@ class ServeHttpServer(
     }
 
   /**
-   * Fills the baked PNGs a page build asked for and could not find, off the request thread, so the
-   * NEXT build of that page can thumbnail them ([ServeThumbWarmer] has the measurements).
+   * Bakes the PNGs a page build missed, off the request thread, so the next build can thumbnail
+   * them ([ServeThumbWarmer]).
    */
   private val thumbWarmer =
     ServeThumbWarmer(onLog = { System.err.println("serve: thumbnail warm: $it") })
 
   /**
-   * Drawn link-unfurl cards, served by the `/social/` route. Composed from the hero thumbnails
-   * above — so a card costs no render and no extra decode of a full-resolution PNG — and memoised
-   * by its inputs. See [ServeSocialCard].
+   * Drawn link-unfurl cards for `/social/`, composed from the hero thumbnails and memoised by
+   * inputs. See [ServeSocialCard].
    */
   private val socialCards = ServeSocialCard()
 
   /**
-   * Whether the `/admin/catalogs` routes exist on this server: both an administrator
-   * ([catalogAdmin]) and an [adminToken] are required. Fail-closed by construction — an operator
-   * who never set a token gets no admin surface, not an open one.
+   * Whether `/admin/catalogs` exists: requires both [catalogAdmin] and [adminToken]. Fail-closed.
    */
   private val adminEnabled: Boolean = catalogAdmin != null && !adminToken.isNullOrBlank()
 
@@ -1087,10 +959,8 @@ class ServeHttpServer(
       !adminToken.isNullOrBlank()
 
   /**
-   * As [uiBuilderDesignLibraryEnabled], for `/admin/ui-builder/component-library`.
-   *
-   * Needs no service or directory of its own: listing components reads projects and writes nothing
-   * here, so a host can offer the component library while its editor is read-only.
+   * As [uiBuilderDesignLibraryEnabled], for `/admin/ui-builder/component-library`. Needs no service
+   * of its own, so a read-only editor host can still offer it.
    */
   private val uiBuilderComponentLibraryEnabled: Boolean =
     uiBuilderComponentLibrary != null && !adminToken.isNullOrBlank()
@@ -1103,11 +973,8 @@ class ServeHttpServer(
     sourceOnboarding != null && !adminToken.isNullOrBlank()
 
   /**
-   * As [adminEnabled], for `DELETE /admin/catalog-cache`.
-   *
-   * Paired with the token like every sibling rather than registered on the handle alone: discarding
-   * the cache is destructive-ish (it costs a re-fetch, not data), and a box whose operator never
-   * configured a credential must not expose it at all.
+   * As [adminEnabled], for `DELETE /admin/catalog-cache`; requires the token so an unconfigured box
+   * exposes nothing.
    */
   private val catalogCacheAdminEnabled: Boolean =
     catalogCacheClear != null && !adminToken.isNullOrBlank()
@@ -1120,12 +987,9 @@ class ServeHttpServer(
     uiBuilderHost != null && requestHost(call, trustForwardedFor) == uiBuilderHost
 
   /**
-   * The builder is served at the root of [uiBuilderHost] (`ServeUiBuilderHostRoot.kt`). Decided
-   * once: the rooted routes are registered at bind time, like every other route.
-   *
-   * Only for an editor that reads its base path ([uiBuilderRootEditorProblem]). Asked for with an
-   * older one, the host stays on `/ui-builder/` and says why, rather than serving a root every page
-   * of which fails to open its design.
+   * The builder is served at the root of [uiBuilderHost] (`ServeUiBuilderHostRoot.kt`); decided
+   * once at bind time. An editor that can't read its base path ([uiBuilderRootEditorProblem]) keeps
+   * the host on `/ui-builder/` and logs why.
    */
   private val uiBuilderRootMode: Boolean =
     uiBuilderHost != null &&
@@ -1146,8 +1010,7 @@ class ServeHttpServer(
 
   /**
    * A builder page's path as [call]'s host spells it: `/<rest>` on the rooted builder host,
-   * `/ui-builder/<rest>` everywhere else. For the redirects the server writes itself, so a create
-   * or a legacy permalink lands on the rooted URL in one hop instead of bouncing through
+   * `/ui-builder/<rest>` elsewhere, so server-written redirects land in one hop instead of via
    * [uiBuilderRootRedirect].
    */
   private fun uiBuilderPagePath(call: ApplicationCall, rest: String): String =
@@ -1157,10 +1020,8 @@ class ServeHttpServer(
     embeddedServer(CIO, host = host, port = port) {
       install(WebSockets)
       // A socket opened with the GitHub session cookie is accepted only from a page this server
-      // served (see [ServeSameOriginRequests]). Answered here, before the upgrade, so the refusal
-      // is a plain 403 rather than a socket that opens and closes; every socket route — the live
-      // lane's `/ws/{name}` and the UI-builder design and comment feeds — goes through it. A
-      // client authenticated by a header or query token sends no session cookie and is unaffected.
+      // served ([ServeSameOriginRequests]). Checked before the upgrade so refusal is a plain 403.
+      // Covers every socket route; header/query-token clients send no cookie and are unaffected.
       intercept(ApplicationCallPipeline.Plugins) {
         val current: ApplicationCall = context
         if (
@@ -1171,11 +1032,9 @@ class ServeHttpServer(
           finish()
         }
       }
-      // A browser opening a page with the browse token in its query trades it for the browse cookie
-      // ([ServeBrowseCookie]) and is sent to the same URL without it, so the token leaves the
-      // address bar, the history and every link the page then builds. Registered only on a gated
-      // box, and it answers a top-level page load carrying exactly the operator token and nothing
-      // else: an API call, a socket, an image, a grant or a wrong token falls straight through.
+      // A top-level page load carrying exactly the operator token in its query trades it for the
+      // browse cookie ([ServeBrowseCookie]) and is redirected without it, keeping the token out of
+      // the address bar, history and links. Only on a gated box; anything else falls through.
       if (!isPublic && serverToken.isNotBlank()) {
         intercept(ApplicationCallPipeline.Plugins) {
           val current: ApplicationCall = context
@@ -1189,10 +1048,9 @@ class ServeHttpServer(
           finish()
         }
       }
-      // A browser may also arrive with a short-lived agent grant. Exchange that bearer for a
-      // derived HttpOnly credential backed by the same live grant, then remove it from the URL.
-      // Unlike the operator cookie this is installed on public boxes too: a public catalog still
-      // needs a grant for UI-builder write/export capabilities.
+      // A browser arriving with a short-lived agent grant exchanges it for a derived HttpOnly
+      // credential backed by the same grant, then the URL is cleaned. Installed on public boxes
+      // too, since UI-builder write/export still needs a grant.
       agentGrants?.let { store ->
         intercept(ApplicationCallPipeline.Plugins) {
           val current: ApplicationCall = context
@@ -1219,9 +1077,8 @@ class ServeHttpServer(
             return@intercept
           }
           if (exchange == null) return@intercept
-          // A browser already acting as a different live grant is not switched by a link alone:
-          // the link could be someone else's. Ask on a page of our own, whose form only a
-          // same-origin POST can submit.
+          // A browser already acting as a different live grant isn't switched by a link alone (it
+          // could be someone else's); ask on our own page, submitted by same-origin POST.
           val conflicting = ServeAgentGrantCookie.conflictingGrant(current, store, exchange)
           if (conflicting != null) {
             respondAgentGrantSwitchConfirmation(current, conflicting, exchange)
@@ -1237,27 +1094,17 @@ class ServeHttpServer(
           finish()
         }
       }
-      // Top-level sites ([ServeSites]): make the canonical `/<system>/…` spelling behave, on a site
-      // host, as though this box served only that one catalog. Registered before routing (and only
-      // when sites are configured, so an ordinary server has no interceptor at all) because it has
-      // to answer INSTEAD of the `/{system}/…` handlers, not after them.
-      //
-      // Two cases, and both cost one map lookup on a request that would otherwise be served anyway:
-      //   • this site's own system — 301 to the same page's rooted URL, so `m3.preview.coo.ee/`
-      //     and `…/m3-catalog/` don't compete as two spellings of one page in a crawler's index;
-      //   • another served catalog — 404, because a neighbour reachable through this domain is
-      //     precisely what a top-level site exists not to be. Only ids this server actually serves
-      //     are considered, so every constant route (`/p/…`, `/render/…`, `/assets/…`, `/healthz`)
-      //     falls straight through untouched.
-      // Installed when a site is configured OR when one could be published at runtime: the
-      // interceptor is what makes a site host behave like a site at all, and a `/admin/sites`
-      // registration on a box that started with none would otherwise take effect only on the next
-      // restart — the exact staleness the route exists to remove. On a server with neither, there
-      // is still no interceptor at all.
+      // Top-level sites ([ServeSites]): on a site host, make `/<system>/…` behave as though this
+      // box served only that catalog. Registered before routing because it must answer instead of
+      // the `/{system}/…` handlers.
+      // - the site's own system — 301 to the rooted URL, so crawlers see one spelling;
+      // - another served catalog — 404, since a site must not expose neighbours. Only served ids
+      //   count, so constant routes fall through.
+      // Installed when a site is configured or could be published at runtime via `/admin/sites`;
+      // otherwise there is no interceptor.
       // The rooted builder host (`ServeUiBuilderHostRoot.kt`): a browser opening a `/ui-builder/…`
-      // page there is sent to the same page's rooted URL, so old links, bookmarks and an older
-      // editor
-      // bundle's own links converge on one address. Only navigations; see [uiBuilderRootRedirect].
+      // page is redirected to its rooted URL so old links converge. Navigations only; see
+      // [uiBuilderRootRedirect].
       if (uiBuilderRootMode) {
         intercept(ApplicationCallPipeline.Plugins) {
           val current: ApplicationCall = context
@@ -1287,28 +1134,19 @@ class ServeHttpServer(
           val first = decodeSegment(path.trimStart('/').substringBefore('/'))
           if (first.isEmpty()) return@intercept
           if (first == system) {
-            // `trimStart` on the remainder as well as the head: `/<system>//evil.example` would
-            // otherwise build `//evil.example`, which a browser reads as a protocol-relative URL
-            // to another origin — an open redirect on every site host. The target must be exactly
-            // one leading slash, i.e. same-origin by construction.
+            // `trimStart` on the remainder too: `/<system>//evil.example` would otherwise build a
+            // protocol-relative open redirect. The target must have exactly one leading slash.
             val rest = path.trimStart('/').substringAfter('/', "").trimStart('/')
             val query = current.request.queryString().prefixedQuery()
-            // 308, not 301: the canonical prefix also carries POST routes (`/{system}/refresh`,
-            // `/{system}/api/presence`, the theme-lease pair), and a 301 is re-issued as GET by
-            // most clients — the request would arrive at the rooted path with the wrong method.
+            // 308, not 301: the canonical prefix carries POST routes, and most clients re-issue a
+            // 301 as GET.
             current.response.headers.append(HttpHeaders.Location, "/$rest$query")
             current.respond(HttpStatusCode.PermanentRedirect)
             finish()
           } else if (!isRootedRoute(first)) {
-            // The site's OWN styled 404 — every mistyped path on a site hostname lands here, so a
-            // plain string would undo the one-skin-per-hostname property for the page a visitor is
-            // most likely to meet.
-            //
-            // …but ONLY for a caller who is already allowed to see this server. This interceptor
-            // runs BEFORE the routes' own `rejectBadToken`, and `notFoundPage` threads the access
-            // token through its links — so on a token-gated box the styled page would have handed
-            // the secret to any unauthenticated request for a made-up path, which is every scanner.
-            // An unauthorized caller gets the same bare 404 the token gate itself answers with.
+            // The site's own styled 404, but only for callers already allowed to see this server:
+            // this runs before `rejectBadToken`, and `notFoundPage` threads the token through its
+            // links. Unauthorized callers get the bare 404.
             if (!current.isAuthorizedCall()) {
               current.respondText("not found", status = HttpStatusCode.NotFound)
               finish()
@@ -1343,24 +1181,13 @@ class ServeHttpServer(
           }
         }
       }
-      // Answer HEAD everywhere GET is answered. Every route on this server is registered with
-      // `get`, so without this a HEAD got 405 where a constant path segment matched and 404 where
-      // routing needed a `{system}` — the whole site was un-HEAD-able.
-      //
-      // That is what broke link unfurling: an unfurler probes a URL and its `og:image` with HEAD
-      // before committing to a download, and a 4xx there reads as "this link is dead" rather than
-      // "this server only speaks GET". The same probe is what link checkers, uptime monitors and
-      // `curl -I` use, so all three were being told the site was broken.
-      //
-      // The plugin re-runs the GET pipeline and drops the body, so the headers a probe is asking
-      // about (content type and length, `Cache-Control`, ETag, the generation marker) match the GET
-      // exactly — which is the whole point of the probe.
+      // Answer HEAD wherever GET is answered (every route is registered with `get`). Unfurlers,
+      // link checkers, uptime monitors and `curl -I` probe with HEAD and treat 4xx as dead. The
+      // plugin runs the GET pipeline and drops the body, so headers match exactly.
       install(AutoHeadResponse)
-      // Sliding sessions: any request carrying a session past its half-life gets a freshly signed
-      // cookie, so a visitor who keeps coming back is never bounced through GitHub. Runs once the
-      // response is ready to send, so it covers every response and can see the route's own
-      // `Cache-Control` (a `public` response is left without a session cookie), and no-ops (no
-      // `Set-Cookie` at all) for a young session or no session. See
+      // Sliding sessions: a session past its half-life gets a freshly signed cookie. Runs when the
+      // response is ready, so it covers every response and can see the route's `Cache-Control` (a
+      // `public` response gets no session cookie). No-op for young or absent sessions. See
       // [ServeGithubAuth.refreshSession].
       githubAuth?.let { auth ->
         install(
@@ -1374,29 +1201,16 @@ class ServeHttpServer(
       // The Content-Security-Policy on every HTML response ([ServePagePolicy]). Installed before
       // the entity-tag phase, so a page's header is staged before a `304` can short-circuit it.
       ServePagePolicy.install(this) { pagePolicyFormActions() }
-      // A strong validator on every HTML page a cache is allowed to keep, so the revalidation the
-      // page's own lifetime *demands* can end in a `304` instead of a full re-render.
+      // A strong `ETag` on every cacheable HTML page, so the revalidation [ANON_PAGE_CACHE_CONTROL]
+      // (`max-age=0, … must-revalidate`) and [STATIC_PAGE_CACHE_CONTROL] demand can end in `304`
+      // instead of a full re-render.
       //
-      // [ANON_PAGE_CACHE_CONTROL] is `max-age=0, … must-revalidate`: correct about who may store
-      // the bytes and how long, and — with no `ETag` beside it — a standing instruction to ask
-      // again on every navigation and be answered with the whole body every time. Measured on the
-      // deployed host that is 367 KB of assembled markup (45 KB gzipped) per visit to
-      // `/m3-catalog/`, plus the server-side assembly behind it. The same held for
-      // [STATIC_PAGE_CACHE_CONTROL] once its minute was up.
+      // Privacy is unchanged: `Vary: Cookie` and `private`/`public` still decide who may store.
+      // Skipped for `no-store`, HTML without a lifetime, and non-200 responses.
       //
-      // The `ETag` changes none of the privacy rules: `Vary: Cookie` and the `private`/`public`
-      // split still decide **who** may store a response. This decides only whether a permitted
-      // revalidation ends in `304` or in `200` + body. `no-store` pages are skipped outright —
-      // there is nothing to revalidate against a cache that was told to keep nothing — as is any
-      // HTML that named no lifetime at all, and any status but `200`: a `304` is an assertion
-      // about a cacheable success, not about an error page.
-      //
-      // The validator is [pageEntityTag] — the markup, minus the one element that moves under
-      // every visitor — and costs one SHA-256 over a page that was just assembled, against a
-      // request it can remove entirely. Registered as its own phase BEFORE `ContentEncoding` so
-      // the hash is over the page, identical for a gzipped and an unencoded delivery of it, and so
-      // [AutoHeadResponse] (which runs in `After`) still sees a response carrying the `ETag` a
-      // `curl -I` is asking about.
+      // The validator is [pageEntityTag] (the markup minus the per-visit element), one SHA-256 per
+      // page. Its own phase before `ContentEncoding`, so the hash is encoding-independent and
+      // [AutoHeadResponse] (in `After`) still sees the `ETag`.
       sendPipeline.insertPhaseBefore(ApplicationSendPipeline.ContentEncoding, HTML_ENTITY_TAG_PHASE)
       sendPipeline.intercept(HTML_ENTITY_TAG_PHASE) { message ->
         val html = message as? TextContent
@@ -1414,19 +1228,10 @@ class ServeHttpServer(
           proceedWith(NotModifiedResponse)
         }
       }
-      // Compress the text-ish lanes only. Every page, `/status.json`, the figma-svg exports and
-      // the baked CSS/JS are markup that gzips 3-8x, and the biggest of them (a vendored editor,
-      // an SVG export) dominate their page's transfer.
-      //
-      // Deliberately an ALLOWLIST, not "everything except a few": this host's heavy lanes are
-      // already-compressed bytes — catalog PNGs (`/render`, `/hero`), packed `.bundle` images,
-      // and the multi-megabyte Wasm app tier. Gzip cannot shrink those, so compressing them would
-      // burn CPU per request on a box that is also running render daemons, and re-encoding an
-      // 8 MB Wasm payload on every visit is exactly the kind of cost this change is meant to
-      // avoid. An unlisted type is served through untouched.
-      //
-      // `minimumSize` keeps the small stuff alone: `/healthz` ("ok") and `/readyz` are polled on a
-      // ~10s healthcheck loop, and framing a 2-byte body costs more than it saves.
+      // Compress text-ish lanes only (pages, `/status.json`, figma-svg exports, baked CSS/JS). An
+      // allowlist because the heavy lanes are already compressed (PNGs, `.bundle` images, multi-MB
+      // Wasm) and re-encoding them would burn CPU on a box running render daemons. `minimumSize`
+      // skips tiny bodies like `/healthz` and `/readyz`, which are polled frequently.
       install(Compression) {
         gzip {
           matchContentType(
@@ -1457,11 +1262,10 @@ class ServeHttpServer(
             uiBuilderInlineCapture,
             identityDetails = ::uiBuilderIdentityDetails,
             agentPresence = uiBuilderAgentPresence,
-            // The native pane's live lane, on a host that has Stage-2 redemption. The token the
-            // compile already minted is redeemed into a registered session, and the editor opens
-            // the same `/{session}/ws/{preview}` socket the viewer's Live toggle opens — no new
-            // streaming protocol, no new handler. A host with no redemption, or a design whose
-            // mode has no daemon backend here, simply answers without the live fields.
+            // The native pane's live lane on hosts with Stage-2 redemption: the compile's token is
+            // redeemed into a registered session and the editor opens the same
+            // `/{session}/ws/{preview}` socket as the viewer's Live toggle. Otherwise the response
+            // omits the live fields.
             liveNativeSession =
               playgroundRedeem?.let { redeem ->
                 { token, preview ->
@@ -1550,9 +1354,8 @@ class ServeHttpServer(
           if (designAssets != null) {
             installUiBuilderAssetRoutes(sameOriginUiBuilderAuthorization, designAssets)
           }
-          // Whether a design's imported components still match the library they came from. Inside
-          // this block rather than beside the library listing: it reads *a design*, so it needs the
-          // service, and the design's own access control is what decides who may ask.
+          // Whether a design's imported components still match their library. Inside this block
+          // because it reads a design, needing the service and the design's own access control.
           if (uiBuilderComponentLibrary != null) {
             installUiBuilderComponentDriftRoutes(
               designService,
@@ -1562,11 +1365,9 @@ class ServeHttpServer(
             )
           }
         }
-        // The components the served projects share. Behind the builder's own credential rather than
-        // the admin token, because a palette has to read this and the editor holds no admin token —
-        // and outside the block above, because reading a project's published components needs a
-        // credential checker and a library, not a design service. A host that serves the builder
-        // read-only still has a palette.
+        // The components the served projects share, behind the builder's own credential (the editor
+        // holds no admin token) and outside the block above, so read-only builder hosts still have
+        // a palette.
         if (uiBuilderAuthorization != null && uiBuilderComponentLibrary != null) {
           installUiBuilderComponentLibraryRoutes(
             uiBuilderAuthorization,
@@ -1579,33 +1380,24 @@ class ServeHttpServer(
               },
           )
         }
-        // What the export generates from, for the editor that has to agree with it. Outside the
-        // design-service block for the same reason the library listing is: it answers a question
-        // about a catalog, and a host serving the builder read-only still has a code pane.
+        // What the export generates from, for the editor's code pane; outside the design-service
+        // block so read-only hosts have it.
         if (uiBuilderAuthorization != null) {
           installUiBuilderCatalogRecordRoutes(uiBuilderAuthorization, uiBuilderCatalogRecord)
         }
 
-        // `/healthz` — ungated liveness: "ok" the moment the listener is up. Leaks nothing, and
-        // proves nothing beyond "the process is answering HTTP". The rolling-update gate is
-        // `/readyz` below, not this.
+        // `/healthz`: ungated liveness, "ok" once the listener is up. Not the rolling-update gate;
+        // see `/readyz`.
         get("/healthz") { call.respondText("ok") }
 
-        // `/readyz` — ungated READINESS: "ready" only once every design system has actually
-        // rendered on this host (see [ready]). This is the gate docker-rollout should wait on
-        // before
-        // it drains traffic onto a new replica and retires the old one — `/healthz` going green
-        // only
-        // means the port bound, so a replica whose render pipeline is broken (dead daemon, missing
-        // baked fallback, empty/failed catalog load) would pass it and get promoted into a 500-ing
-        // live server. 503 ("warming") until the first render succeeds; then it latches green.
+        // `/readyz`: ungated readiness, "ready" only once every design system has rendered here
+        // ([ready]). docker-rollout should wait on this before promoting a replica. 503 ("warming")
+        // until then; latches green.
         get("/readyz") { handleReadyz() }
 
-        // `/version` — ungated machine-readable identity for the host: the CLI version, the serve
-        // API schema, and whether this box runs open (public) or token-gated. Lets a deployer,
-        // Watchtower check, or the design-artifacts gallery confirm which build is live without a
-        // token, and keeps the released version OUT of the HTML goldens (it lives here, not in the
-        // landing footer, so a release never churns the fixture diff).
+        // `/version`: ungated host identity (CLI version, serve API schema, public or gated), so
+        // deployers and checks can confirm the live build without a token. Keeps the version out of
+        // the HTML goldens.
         get("/version") {
           call.respondText(
             JSON.encodeToString(
@@ -1617,14 +1409,12 @@ class ServeHttpServer(
         }
 
         githubAuth?.let { auth ->
-          // Configured browser hosts allow the post-callback return redirect: the only
-          // hostnames a sign-in started elsewhere may be sent back to. Passed in rather than known
-          // to the auth object, so host configuration stays with the server.
+          // Configured browser hosts are the only hostnames a sign-in started elsewhere may return
+          // to. Passed in so host config stays with the server.
           get(ServeGithubAuth.START_PATH) { with(auth) { handleStart(browserHosts) } }
           get(ServeGithubAuth.CALLBACK_PATH) { with(auth) { handleCallback(browserHosts) } }
-          // POST only, on purpose: see [ServeGithubAuth.handleLogout]. No GET is registered, so a
-          // prefetcher or an unfurler that follows the URL gets a 405 rather than signing the
-          // visitor out.
+          // POST only ([ServeGithubAuth.handleLogout]): a prefetcher or unfurler following the URL
+          // gets 405 rather than signing the visitor out.
           post(ServeGithubAuth.LOGOUT_PATH) {
             // Before the session cookie is cleared, while it still names who is signing out.
             push?.forgetSignedOutBrowser(call)
@@ -1632,17 +1422,15 @@ class ServeHttpServer(
           }
         }
 
-        // The agent-grant lane (`--agent-grants`): an agent with no credential asks for one, a
-        // human approves it in a browser, and the agent collects a short-lived bearer. See
+        // The agent-grant lane (`--agent-grants`): an agent asks, a human approves in a browser,
+        // and the agent collects a short-lived bearer. See
         // [docs/design/AGENT_ACCESS_GRANTS.md](../../../../../../../../docs/design/AGENT_ACCESS_GRANTS.md).
         //
-        // `request` and `poll` are deliberately **ungated** — an agent that could already
-        // authenticate would have no reason to be here — so both are per-address rate limited and
-        // neither grants anything on its own: `request` only parks an entry a human must act on,
-        // and `poll` answers only to the device secret it minted. The approval routes are the
-        // opposite: they require a real operator identity and are the one place a grant is born.
-        //
-        // Constant first segments, so they outscore the `/{system}` catch-all.
+        // `request` and `poll` are ungated (the agent has no credential yet), so both are
+        // per-address rate limited and grant nothing alone: `request` parks an entry for a human,
+        // and `poll` answers only to the device secret it minted. The approval routes require a
+        // real operator identity and are the only place a grant is created. Constant first segments
+        // outscore the `/{system}` catch-all.
         agentGrants?.let { store ->
           post(ServeAgentGrants.REQUEST_PATH) { handleAgentGrantRequest(store) }
           post(ServeAgentGrants.POLL_PATH) { handleAgentGrantPoll(store) }
@@ -1678,17 +1466,12 @@ class ServeHttpServer(
             }
           }
 
-          // The OAuth 2.1 façade over the same flow, for clients that cannot be told about it in
-          // prose. An MCP client meeting a 401 follows exactly one script — resource metadata,
-          // authorization-server metadata, dynamic registration, authorization code + PKCE — and
-          // these are the five documents and two endpoints that script asks for. Nothing here
-          // mints anything: `/oauth/authorize` opens an ordinary grant request and sends the human
-          // to the approval page above, and `/oauth/token` hands back the grant that page created.
-          // See [ServeMcpOAuth].
-          //
-          // The metadata documents are unauthenticated by necessity: they are what a caller reads
-          // *because* it has no credential, and they describe endpoints rather than disclosing
-          // anything about this box's contents.
+          // The OAuth 2.1 façade over the same flow, for MCP clients that follow the 401 → resource
+          // metadata → authorization-server metadata → dynamic registration → authorization code +
+          // PKCE script. Nothing here mints anything: `/oauth/authorize` opens an ordinary grant
+          // request and `/oauth/token` returns the grant the approval page created. See
+          // [ServeMcpOAuth]. The metadata documents are necessarily unauthenticated and disclose
+          // nothing about content.
           get(ServeMcpOAuth.PROTECTED_RESOURCE_METADATA_PATH) {
             respondProtectedResourceMetadata(store)
           }
@@ -1707,10 +1490,9 @@ class ServeHttpServer(
           post(ServeMcpOAuth.TOKEN_PATH) { handleOAuthToken(store) }
         }
 
-        // Aggregate Streamable HTTP MCP. Existing callers remain independent JSON requests. A
-        // 2025 client that advertises form elicitation may additionally receive a bounded session
-        // id and use request-scoped SSE while that POST is waiting for its response. There is no
-        // long-lived GET notification stream or duplicated application state.
+        // Aggregate Streamable HTTP MCP. Callers stay independent JSON requests; a 2025 client
+        // advertising form elicitation may get a bounded session id and request-scoped SSE while
+        // its POST waits. No long-lived GET stream or duplicated state.
         if (catalogMcp != null) {
           post("/mcp") { handleCatalogMcp() }
           get("/mcp") { rejectCatalogMcpListen() }
@@ -1718,9 +1500,8 @@ class ServeHttpServer(
           get(ServeCatalogMcp.IMAGE_URL_PATH) { handleSignedRenderPng() }
         }
 
-        // The UI-builder document and mutation JSON Schemas, the same bytes the MCP resources
-        // `compose-preview://schemas/…` serve, for a tool that is not an MCP client. Ungated like
-        // `/version`: they are generated from the released protocol and describe no design.
+        // The UI-builder document and mutation JSON Schemas (the same bytes as the
+        // `compose-preview://schemas/…` MCP resources) for non-MCP tools. Ungated like `/version`.
         if (designService != null) {
           get("${UiBuilderJsonSchemas.HTTP_PREFIX}{name}") {
             val schema =
@@ -1735,35 +1516,24 @@ class ServeHttpServer(
           }
         }
 
-        // `/status` — the operator/observer view of this running host: published catalogs + their
-        // trust/liveness/load errors, the render daemons up right now, the effective config, and
-        // recent daemon startup failures. HTML by default (`?format=json` for the machine form);
-        // `/status.json` is
-        // the canonical JSON a monitor / Home Assistant sensor polls. Both are gated like the rest
-        // (open in `--public`, else token-required) — the running-daemon + config detail is more
-        // sensitive than `/version`/`/healthz`, so a private box keeps it behind the token.
+        // `/status`: the operator view of this host — published catalogs with
+        // trust/liveness/errors, running daemons, effective config, recent startup failures. HTML
+        // by default (`?format=json`); `/status.json` is the canonical JSON for monitors. Gated
+        // like everything else, since it is more sensitive than `/version`.
         get("/status") { handleStatus(json = false) }
         get("/status.json") { handleStatus(json = true) }
 
-        // `/report-bug` — file a bug against the repo that ships THIS SERVER, prefilled with the
-        // diagnostics a triager would otherwise have to ask for. Distinct from the per-preview
-        // "report an issue" affordance, which files a *preview* bug against the project whose code
-        // declares it; see [ServeBugReport] for why the two are separate reports rather than one
-        // with a repo switch. Gated exactly like `/status`, and for the same reason: it reports
-        // the same catalog-load and daemon-failure detail, so a private box keeps it behind the
-        // token.
+        // `/report-bug`: file a bug against the server's own repo, prefilled with diagnostics.
+        // Distinct from the per-preview report ([ServeBugReport] explains why). Gated like
+        // `/status`, since it reports the same detail.
         get(ServeBugReport.PATH) { handleBugReport() }
-        // The installed app's share target ([ServeShareTarget]), named by the web app manifest.
-        // Gated like the report page it leads to: on a token-gated box the installed app's browse
-        // cookie is the credential, exactly as for any other navigation.
+        // The installed app's share target ([ServeShareTarget]), gated like the report page it
+        // leads to; the installed app's browse cookie is the credential.
         post(ServeShareTarget.ACTION_PATH) { handleShareTarget() }
         get("${ServeShareTarget.SHARED_PATH}/{id}") { handleSharedImage() }
 
-        // The crawler-facing pair (see [ServeSiteIndex]). Both are deliberately UNGATED even on a
-        // token-gated host: a crawler has no token, and answering the styled HTML 404 — which is
-        // what these paths did before they existed — tells it nothing. A private server's
-        // `robots.txt` says "disallow everything" and its sitemap is simply absent, which is the
-        // honest answer and the one that keeps its URLs out of an index.
+        // The crawler-facing pair ([ServeSiteIndex]), ungated even on a gated host: a private
+        // server's `robots.txt` disallows everything and its sitemap is absent.
         get("/robots.txt") { handleRobotsTxt() }
         get("/sitemap.xml") { handleSitemapXml() }
 
@@ -1772,37 +1542,28 @@ class ServeHttpServer(
         get("/assets/serve/{name}") { handleServeWebAsset(versioned = false) }
         get("/assets/serve/{version}/{name}") { handleServeWebAsset(versioned = true) }
 
-        // In-browser CMP tier: serve the static Wasm app for a registered system at
-        // `/wasm/<system>/<file>`. Ungated (generic client code, no session data) so the viewer's
-        // sandboxed iframe and its relative asset fetches work without a token.
+        // Serve the static Wasm app for a registered system at `/wasm/<system>/<file>`, ungated
+        // (generic client code) so the sandboxed iframe's relative fetches work.
         //
-        // Registered UNCONDITIONALLY. [wasmCatalogs] is a live view of the served catalogs' apps,
-        // but routes are installed once, at bind time — and since #3127 the listener binds BEFORE
-        // the catalogs load, so a `wasmCatalogs.isNotEmpty()` guard here always saw an empty map
-        // and dropped the route for the whole process lifetime. The viewer meanwhile reads the
-        // same live map later (it offers "Run in browser (Wasm)" for any system present in it), so
-        // the toggle appeared while every `/wasm/…` fetch 404'd — the serve-lanes E2E's "Wasm
-        // iframe re-renders on knob override" failure. An unknown system 404s inside the handler
-        // either way, so the route costs nothing when no app is ever registered.
+        // Registered unconditionally: routes are installed at bind time, before catalogs load,
+        // while [wasmCatalogs] is a live view. An unknown system 404s in the handler.
         get("/wasm/{system}/{path...}") { handleWasmAsset(privateRoute = false) }
-        // Auto-discovered local apps are project output, not the generic/published client assets
-        // `/wasm/` was designed for. Put the token in the path so relative JS/Wasm requests retain
-        // it, and reject the ordinary route for the same system to prevent a token-free bypass.
+        // Auto-discovered local apps are project output, so the token goes in the path (relative
+        // requests keep it) and the ordinary route is refused for that system to prevent a
+        // token-free bypass.
         get("/wasm-private/{access}/{system}/{path...}") { handleWasmAsset(privateRoute = true) }
 
-        // The builder is a distinct product surface, not a mode of the catalog-scoped Wasm
-        // preview app; its page routes are registered by [uiBuilderPageRoutes] under `/ui-builder`
-        // on every host, and — with `--ui-builder-host-root` — a second time at the ROOT of the
-        // builder host, behind [UiBuilderHostRootSelector], which steps aside for every server
-        // route ([ServeSites.RESERVED_SYSTEMS]) and for every other host.
+        // The builder's page routes are registered by [uiBuilderPageRoutes] under `/ui-builder` on
+        // every host, and with `--ui-builder-host-root` again at the root of the builder host
+        // behind [UiBuilderHostRootSelector], which yields to server routes
+        // ([ServeSites.RESERVED_SYSTEMS]) and other hosts.
         uiBuilderPageRoutes("/ui-builder")
         if (uiBuilderRootMode) {
           createChild(UiBuilderHostRootSelector(::isUiBuilderHost)).uiBuilderPageRoutes("")
         }
 
-        // The CMP/Wasm Remote Compose player is a single shared app rather than a per-catalog app.
-        // Keep it opt-in while operation coverage is incomplete; an unset directory simply makes
-        // this route 404 and leaves the selector chip disabled.
+        // The shared CMP/Wasm Remote Compose player, opt-in while operation coverage is incomplete;
+        // unset ⇒ 404 and a disabled selector chip.
         get("/rc-player-wasm/{path...}") {
           val dir = rcPlayerWasmDir
           if (dir == null) {
@@ -1818,14 +1579,13 @@ class ServeHttpServer(
             return@get
           }
           val file = resolved.toFile()
-          // Opened top-level, the player's shell runs under `sandbox allow-scripts`
+          // Opened top-level, the player shell runs under `sandbox allow-scripts`
           // ([ServePagePolicy.sandboxFor]), an opaque origin whose module and Wasm requests need
-          // CORS — the same answer `/wasm/` gives for the same reason.
+          // CORS (as `/wasm/`).
           call.response.headers.append(HttpHeaders.AccessControlAllowOrigin, "*")
           val etag = "\"${file.length().toString(16)}-${file.lastModified().toString(16)}\""
-          // These filenames are stable across preview-host releases. Revalidate every use so a
-          // rollout cannot leave an already-open browser executing an older protocol decoder for
-          // another hour; unchanged multi-megabyte assets still take the cheap ETag/304 path.
+          // Filenames are stable across releases, so revalidate every use to avoid running a stale
+          // decoder; unchanged assets still get a cheap ETag/304.
           call.response.headers.append(HttpHeaders.CacheControl, "no-cache")
           call.response.headers.append(HttpHeaders.ETag, etag)
           if (call.request.headers[HttpHeaders.IfNoneMatch] == etag) {
@@ -1836,28 +1596,18 @@ class ServeHttpServer(
           call.respondBytes(bytes, wasmContentType(file.name))
         }
 
-        // Prebaked front-door hero thumbnails ([ServeHeroImages]). Deliberately NOT the `/render`
-        // lane: the bytes are already cropped, downscaled and resident in memory, so this takes no
-        // session lease and no render permit — it can't queue behind a catalog render, and it can't
-        // wake an idle daemon. The name IS the content hash, so the response is `immutable`: a
-        // repeat visitor's browser serves the whole front door's imagery from cache without asking.
-        // A constant first segment, so it outscores the `/{system}` catch-all in Ktor routing.
+        // Prebaked front-door hero thumbnails ([ServeHeroImages]). Not the `/render` lane: bytes
+        // are resident, so no session lease, render permit or daemon wake. The name is the content
+        // hash, so `immutable`. A constant first segment outscores the `/{system}` catch-all.
         get("/hero/{system}/{name}") { handleHeroImage() }
 
-        // The drawn link-unfurl card a page advertises as its `og:image` ([ServeSocialCard]).
-        // Cached exactly like `/hero/` and for the same reason — the name is the content hash — but
-        // the immutability matters more here: unfurlers key their caches by URL and several never
-        // revalidate, so a card URL whose pixels could change would pin a stale picture in Slack
-        // indefinitely. A constant first segment, so it outscores the `/{system}` catch-all.
+        // The link-unfurl card a page advertises as `og:image` ([ServeSocialCard]), content-hashed
+        // and `immutable` like `/hero/` — important because unfurlers key caches by URL and some
+        // never revalidate.
         get("/social/{name}") { handleSocialCard() }
 
-        // The site icon, in the three forms the web asks for ([ServeSiteIcon]). These are what an
-        // unfurl card shows *beside* the picture — Slack, iMessage, Discord and Google all resolve
-        // a site icon from the page's `<link rel="icon">` tags or by probing `/favicon.ico`, and
-        // before these routes existed every one of them fell back to a generic globe. Ungated even
-        // on a token-gated server: an icon carries no session data, and a favicon fetch never
-        // carries the token anyway (the browser requests it outside the page's query string), so
-        // gating it would only guarantee the blank tab it is here to fix.
+        // The site icon in its three web forms ([ServeSiteIcon]), shown by unfurlers beside the
+        // card. Ungated: icons carry no session data and favicon fetches never carry the token.
         get(ServeSiteIcon.SVG_PATH) { respondSiteIcon(ServeSiteIcon.svg) }
         get(ServeSiteIcon.ICO_PATH) { respondSiteIcon(ServeSiteIcon.ico) }
         get(ServeSiteIcon.APPLE_TOUCH_PATH) { respondSiteIcon(ServeSiteIcon.appleTouchIcon) }
@@ -1866,57 +1616,43 @@ class ServeHttpServer(
         get(ServeSiteIcon.MASKABLE_ICON_PATH) { respondSiteIcon(ServeSiteIcon.maskableIcon) }
         // The push notification's status-bar badge, also the manifest's `monochrome` icon.
         get(ServeSiteIcon.BADGE_PATH) { respondSiteIcon(ServeSiteIcon.badgeIcon) }
-        // Installable as an app ([ServeSiteIcon.manifest]). Ungated like the icons it names: the
-        // browser fetches it without the page's query string, and it describes nothing private.
-        //
-        // Per host: a top-level site installs as its own app, under its catalog's name and colour,
-        // rather than as one more "Compose Preview" window that opens the box's front door.
+        // The web app manifest ([ServeSiteIcon.manifest]), ungated like the icons. Per host, so a
+        // top-level site installs as its own app with its catalog's name and colour.
         get(ServeSiteIcon.MANIFEST_PATH) { respondSiteIcon(manifestFor(call)) }
-        // The push service worker: root-scoped, push and notificationclick only, no fetch handler
-        // (see `serve-web/src/push/pushWorker.ts`). Ungated like the manifest — the browser fetches
-        // a worker's updates without the page's credential — and served even on a host with push
-        // off, so a browser that subscribed before an operator turned it off still updates to the
-        // current script rather than keeping a stale one.
+        // The push service worker: root-scoped, push and notificationclick only
+        // (`serve-web/src/push/pushWorker.ts`). Ungated because the browser fetches worker updates
+        // without credentials, and served even with push off so existing subscribers update.
         get(PUSH_SERVICE_WORKER_PATH) { respondPushServiceWorker() }
         push?.let { lane -> installPushRoutes(lane) { browserHosts } }
         // The manifest's install-dialog screenshots: committed captures, ungated like the icons.
         get(ServeSiteIcon.SCREENSHOT_NARROW_PATH) { respondScreenshot() }
         get(ServeSiteIcon.SCREENSHOT_WIDE_PATH) { respondScreenshot() }
 
-        // The in-browser Remote Compose player: a single shared IIFE bundle (global `RC`), baked
-        // into the CLI jar as a classpath resource and served here so the viewer's client-side
-        // `<canvas>` render lane (fetch `/render/<id>.rc` → `RC.RcdPlayer`) can load it. Always
-        // available (unlike the operator-gated Wasm apps) — the bundle rides in the jar, not a
-        // per-catalog dir. Ungated (generic client code, no session data) and CORS-open like the
-        // Wasm assets so a sandboxed viewer iframe can pull it. A constant first segment, so it
-        // outscores the `/{system}` catch-all in Ktor routing.
+        // The in-browser Remote Compose player: a shared IIFE bundle (global `RC`) baked into the
+        // CLI jar, for the viewer's `<canvas>` lane (`/render/<id>.rc` → `RC.RcdPlayer`). Always
+        // available, ungated and CORS-open like the Wasm assets. A constant first segment outscores
+        // the `/{system}` catch-all.
         get("/rc-player/bundle.js") { respondPlayerAsset(playerAsset(RC_PLAYER_RESOURCE)) }
 
-        // The typefaces that player draws a document's *generic* families in ([ServeRcFonts]): the
-        // generated `@font-face` stylesheet plus the vendored face files it points at. Registering
-        // them is what makes the browser lane comparable to the baked PNG beside it — unregistered,
-        // the player's `Roboto, sans-serif` request falls through to the viewer's own generics
-        // (issue #3480). Ungated and CORS-open for the same reason as the player bundle: font bytes
-        // baked into the jar, no session data.
+        // The typefaces the player draws generic families in ([ServeRcFonts]): the generated
+        // `@font-face` stylesheet and vendored faces, so the browser lane matches the baked PNG.
+        // Ungated and CORS-open like the player bundle.
         get("${ServeRcFonts.URL_BASE}/{name}") { handleRcFont() }
-        // A Google Fonts family at one weight, for a UI-builder design whose typeface the editor
-        // bundle does not vendor ([ServeGoogleFonts]). Ungated and CORS-open like the route above:
-        // public font bytes, and the runtime frames that ask are sandboxed and credential-less.
+        // A Google Fonts family at one weight for a UI-builder design whose typeface the editor
+        // doesn't vendor ([ServeGoogleFonts]). Ungated and CORS-open: public font bytes, requested
+        // by sandboxed credential-less frames.
         get("${ServeGoogleFonts.ROUTE}/{family}/{weight}") { handleGoogleFont() }
         // A Noto slice Compose's web text fallback asks for when no loaded font has a glyph
         // ([ServeNotoFallbackFonts]); gstatic itself is outside the page's `connect-src`.
         get("${ServeNotoFallbackFonts.ROUTE}/{path...}") { handleNotoFallbackFont() }
 
-        // The document lane (`--accept-docs`): ingest one **known document format** (Remote Compose
-        // or Lottie — see [ServeDocFormats]) and hand back an expiring permalink that plays it in
-        // the browser. Registered only when the operator opts in. Constant first segments, so they
-        // outscore the `/{system}` catch-all in Ktor routing.
-        // The image lane (`--accept-images`): ingest a rendered preview PNG from an authenticated
-        // GitHub collaborator and serve it back at an embeddable URL, so an agent can put real
-        // before/after pixels in a PR body from a box with no `gh` and no push rights. Two routes
-        // and no page: the caller is a script, and a browse surface over other people's uploads is
-        // the one thing an unguessable-link store must not grow. Registered only when the operator
-        // opts in; constant first segments, so they outscore the `/{system}` catch-all.
+        // The document lane (`--accept-docs`): ingest a known format (Remote Compose or Lottie,
+        // [ServeDocFormats]) and return an expiring permalink that plays it. Opt-in; constant first
+        // segments.
+        // The image lane (`--accept-images`): ingest a preview PNG from an authenticated GitHub
+        // collaborator and serve it at an embeddable URL, so agents can put before/after pixels in
+        // a PR body. Two routes and no browse page, since an unguessable-link store must not list
+        // uploads. Opt-in.
         if (imageStore != null && imageUploadAuth != null) {
           get("/images/capability") { handleImageUploadCapability(imageUploadAuth) }
           post("/images") { handleImageUpload(imageStore, imageUploadAuth) }
@@ -1929,18 +1665,14 @@ class ServeHttpServer(
           get("/d/{id}") { handleDocPage(store) }
           get("/d/{id}/raw") { handleDocRaw(store) }
           get("/d/{id}/render.png") { handleDocRender(store) }
-          // Each format's vendored browser player, looked up in the registry rather than routed
-          // per-format. Ungated + CORS-open like `/rc-player/bundle.js` (generic client code, no
-          // session data).
+          // Each format's vendored browser player, looked up in the registry. Ungated + CORS-open
+          // like `/rc-player/bundle.js`.
           get("/doc-player/{format}/bundle.js") { handleDocPlayer() }
         }
 
         // The playground lane (`--playground-bundle`): compile a snippet against a catalog
-        // classpath
-        // and return diagnostics + an expiring preview token. The frontend inserts a `{version}`
-        // path segment (e.g. `/api/1/compiler/run`) which we capture and ignore. The constant
-        // `/api`
-        // first segment outscores the `/{system}` catch-all. Never registered under `--public`.
+        // classpath, returning diagnostics + an expiring preview token. The `{version}` segment
+        // (e.g. `/api/1/compiler/run`) is captured and ignored. Never registered under `--public`.
         if (playgroundService != null) {
           val svc = playgroundService
           post("/api/{version}/compiler/run") { handlePlaygroundRun(svc) }
@@ -1950,40 +1682,33 @@ class ServeHttpServer(
               handlePlaygroundEditLeaseRelease(svc)
             }
           }
-          // The runtime catalog selector's list. Fetched by the editor on load rather than only
-          // baked into the page: catalogs are fetched in the background *after* the server is up,
-          // so
-          // a page rendered during startup would otherwise show a short (or empty) selector and
-          // never learn better without a manual reload.
+          // The catalog selector's list, fetched by the editor on load because catalogs load in the
+          // background after startup.
           get("/api/{version}/compiler/catalogs") { handlePlaygroundCatalogs(svc) }
-          // The Stage-1 editor page (`GET /playground`): the browser surface that POSTs to the run
-          // route above and surfaces the diagnostics + first-frame + `/pg/` (live) or `/d/` (RC)
-          // handoff. Only mounted when the lane is enabled, and — like the lane — never under
+          // The Stage-1 editor page (`GET /playground`), mounted only with the lane and never under
           // `--public`.
           get("/playground") { handlePlaygroundPage(svc) }
         } else {
-          // Reserve the well-known page path even when the compile lane is disabled. Otherwise
-          // public catalog hosts route `/playground` through the `/{system}` catch-all and report
-          // that a design system named "playground" does not exist.
+          // Reserve `/playground` even without the compile lane, so it isn't routed through the
+          // `/{system}` catch-all as a missing design system.
           get("/playground") { handlePlaygroundDisabledPage() }
         }
 
-        // Stage-2 redemption (`GET /pg/<token>`): redeem a preview token into a live streamed
-        // session and redirect to its viewer. Mounted with the playground lane; token-gated.
-        // The path segment is named `{pgToken}`, NOT `{token}`: on a token-gated host the access
-        // token rides as `?token=…`, and `call.parameters` merges path + query, so a `{token}` path
-        // segment would collide with the access token and redeem the wrong id (a NotFound 404).
-        // Only beside the public surface: a `--compile-engine` host still holds a redeem service,
-        // but only for the UI builder's native pane, which redeems in process.
+        // Stage-2 redemption (`GET /pg/<token>`): redeem a preview token into a live session and
+        // redirect to its viewer.
+        // The segment is `{pgToken}`, not `{token}`: `call.parameters` merges path and query, so
+        // `{token}` would collide with the `?token=` access token.
+        // Only beside the public surface; a `--compile-engine` host's redeem service is for the
+        // native pane, which redeems in process.
         if (playgroundService != null) {
           playgroundRedeem?.let { redeem ->
             get("/pg/{pgToken}") { handlePlaygroundRedeem(redeem) }
           }
         }
 
-        // Shared/public mode ingestion: a client contributes a pre-rendered bundle (upload the zip
-        // as the body, or pass `?url=` to a build-results artifact) and gets back a ?session= link.
-        // Only registered when the operator opts in (a bundle store is supplied).
+        // Shared/public mode ingestion: upload a pre-rendered bundle (zip body, or `?url=` to a
+        // build artifact) and get a `?session=` link. Only registered when a bundle store is
+        // supplied.
         bundleStore?.let { store ->
           post("/bundles/{name}") {
             if (rejectBadTokenForIngest()) return@post
@@ -2012,10 +1737,9 @@ class ServeHttpServer(
               }
             val result =
               withContext(Dispatchers.IO) {
-                // isSecurityChecked = true: this route is token-gated (rejectBadToken above) and
-                // the
-                // store still defends in depth (name sanitisation, zip-slip, size cap; SSRF host
-                // allowlist for the url case). The marker records the entry point was authorised.
+                // isSecurityChecked = true: the route is token-gated (rejectBadToken above) and the
+                // store defends in depth (name sanitisation, zip-slip, size cap, SSRF host
+                // allowlist).
                 if (url != null) store.addFromUrl(name, url, isSecurityChecked = true)
                 else store.add(name, body!!, isSecurityChecked = true)
               }
@@ -2040,20 +1764,14 @@ class ServeHttpServer(
           }
         }
 
-        // Runtime catalog administration: publish a catalog (`POST /admin/catalogs`), retire one
-        // (`DELETE /admin/catalogs/{system}`), or list what's configured (`GET /admin/catalogs`).
-        // The catalog set is operator config, not image content — these routes are how it's edited
-        // on a running box, and every mutation is written back to `catalogs.json` so it survives a
-        // restart. Registered ONLY when both an admin implementation and an `--admin-token` are
-        // present, so a server that didn't opt in has no admin surface to find.
+        // Runtime catalog administration: `POST /admin/catalogs` publishes, `DELETE
+        // /admin/catalogs/{system}` retires, `GET /admin/catalogs` lists. Mutations are written
+        // back to `catalogs.json`. Registered only with both an admin implementation and
+        // `--admin-token`.
         if (themeOptimizerAdmin != null && !adminToken.isNullOrBlank()) {
           val optimizer = themeOptimizerAdmin
-          // Stand the optimizer down for a while, without a restart.
-          //
-          // Restarting was the only lever before, and it is the worst one available while a box is
-          // struggling: it throws away every warm daemon and re-runs every catalog load, which is
-          // precisely the work that made the box slow. `minutes` is bounded so a fat-fingered pause
-          // cannot silently disable the cache for a week.
+          // Pause the optimizer without a restart (which would discard warm daemons and redo
+          // catalog loads). `minutes` is bounded.
           post("/admin/theme-optimization/pause") {
             if (rejectBadAdminToken()) return@post
             val minutesText = call.request.queryParameters["minutes"]
@@ -2085,41 +1803,29 @@ class ServeHttpServer(
               ContentType.Application.Json,
             )
           }
-          // Per-catalog cache control, the pair that answers "these pixels look wrong".
-          //
-          // Separate verbs because they cost very different things and the cheap one is almost
-          // always right. `regenerate` marks the catalog's warmed renders for re-render and
-          // deletes nothing, so every preview keeps serving while the background pass replaces
-          // them — the answer for pixels *suspected* wrong by something no fingerprint sees, a
-          // base image that changed the installed fonts being the case that motivated it. `drop`
-          // takes them, and every preview for that catalog goes cold at once.
+          // Per-catalog cache control. `regenerate` marks warmed renders for re-render and deletes
+          // nothing, so previews keep serving while the background pass replaces them (for pixels
+          // suspected wrong, e.g. after a font change in the base image). `drop` deletes them,
+          // making every preview cold.
           post("/admin/catalogs/{system}/theme-cache/regenerate") {
             if (rejectBadAdminToken()) return@post
             val system = call.parameters["system"].orEmpty()
-            // The retained STATE, not the live host. `peekHost` answers null for a suspended
-            // session, and since the optimizer residency work that is most catalogs most of the
-            // time — so peeking at hosts would 404 precisely the idle catalogs this action exists
-            // to refresh, and only for being idle. The cache hangs off the state and outlives the
-            // daemon, so this neither needs nor wakes one.
+            // Use the retained state, not the live host: `peekHost` is null for suspended sessions
+            // (most catalogs), and the cache lives on the state, so no daemon is needed or woken.
             val cache = sessions.peekState(system)?.catalogThemeCache
             if (cache == null) {
               call.respondText("no such catalog: $system", status = HttpStatusCode.NotFound)
               return@post
             }
             val queued = withContext(Dispatchers.IO) { cache.markPersistedDirty() }
-            // Wake the pass that has to work the queue. A converged catalog's optimizer task has
-            // already exited and its host is usually suspended as well, so marking alone would
-            // answer `queued: true` with nobody coming — the mark is durable, but "durable" and
-            // "being worked" are the two different promises this route makes and it has to keep
-            // both. Best-effort: a catalog that cannot be revived still has its mark on disk and
-            // is picked up by the ordinary resume rotation.
+            // Wake the pass that works the queue: a converged catalog's optimizer has exited and
+            // its host is usually suspended, so marking alone would leave nobody working.
+            // Best-effort; the mark persists for the resume rotation.
             if (queued > 0) withContext(Dispatchers.IO) { sessions.wakeOptimizer(system) }
             call.response.headers.append(HttpHeaders.CacheControl, "no-store")
             if (queued < 0) {
-              // Two different refusals, both of which must not read as a queued regeneration: the
-              // pass has no targets to work (theme optimization switched off, so nothing would ever
-              // be re-rendered) or the mark could not be persisted (a full or read-only volume,
-              // where a restart would silently forget the request).
+              // Two refusals that must not read as queued: no targets (theme optimization off) or
+              // the mark couldn't be persisted (full or read-only volume).
               call.respondText(
                 Json.encodeToString(
                   ThemeCacheActionDto.serializer(),
@@ -2158,19 +1864,10 @@ class ServeHttpServer(
               return@post
             }
             val dropped = withContext(Dispatchers.IO) { cache.dropPersisted() }
-            // Wake the pass, exactly as the regenerate route does. A drop leaves a catalog that
-            // was warm everywhere full of gaps, and a converged catalog's optimizer task has
-            // already exited — so without this the 200 advertises a rewarming that waits on the
-            // capacity-limited resume rotation, or on a visitor's heartbeat, before it starts. The
-            // drop is the more urgent of the two, not the less: every preview is cold now.
-            //
-            // And exactly as the regenerate route does, only when there is a pass to wake.
-            // `-Dcomposeai.serve.themeOptimization=false` leaves the catalog with no optimization
-            // targets, and regenerate declines the whole action on that (`markPersistedDirty`
-            // answers -1, so `queued > 0` is false). The drop still succeeds — throwing the bytes
-            // away needs no pass — but the wake behind it would resume a suspended host and carry
-            // `keepLiveWarm` on into `scheduleWarm`, cold-starting an Android daemon and taking a
-            // live seat for a refill that cannot happen.
+            // Wake the pass as regenerate does, since a drop leaves the catalog cold. But only when
+            // there is a pass: with `-Dcomposeai.serve.themeOptimization=false` there are no
+            // targets (`markPersistedDirty` answers -1), and waking would cold-start a daemon and
+            // take a live seat for nothing. The drop itself still succeeds.
             if (dropped && cache.hasOptimizationTargets) {
               withContext(Dispatchers.IO) { sessions.wakeOptimizer(system) }
             }
@@ -2178,9 +1875,8 @@ class ServeHttpServer(
             call.respondText(
               Json.encodeToString(
                 ThemeCacheActionDto.serializer(),
-                // `dropped = false` is a real answer, not an error: the generation write lock is
-                // held by a render publishing right now, and the caller should try again rather
-                // than believe the bytes are gone.
+                // `dropped = false` means a render holds the generation write lock right now; the
+                // caller should retry.
                 ThemeCacheActionDto(
                   system = system,
                   action = "drop",
@@ -2205,22 +1901,18 @@ class ServeHttpServer(
           }
         }
 
-        // Discard the catalog blob cache. Whole-pool and not per catalog — blobs are named by
-        // their own digest and deliberately shared between systems, so none has an owning catalog
-        // to delete it by (see [CatalogBlobPool.clear]). Everything dropped is re-fetchable, so the
-        // cost of using this unnecessarily is bandwidth. Responds with what the pool holds
-        // afterwards, which is the same shape `/status.json` reports, so an operator can see it
-        // took.
+        // Discard the catalog blob cache. Whole-pool: blobs are content-named and shared between
+        // systems, so none has an owning catalog ([CatalogBlobPool.clear]). Everything is
+        // re-fetchable. Responds with the post-clear pool state in the `/status.json` shape.
         if (catalogCacheAdminEnabled) {
           delete("/admin/catalog-cache") {
             if (rejectBadAdminToken()) return@delete
             val after = withContext(Dispatchers.IO) { catalogCacheClear!!.invoke() }
             call.response.headers.append(HttpHeaders.CacheControl, "no-store")
             call.respondText(
-              // JSON, not the bare companion: that one leaves `encodeDefaults` off, which silently
-              // drops exactly the fields whose default value is the alarming one — an operator
-              // clearing a temp-backed pool would get a response with no `persistenceConfigured`
-              // in it at all. Same encoder as `/status.json` so the two agree in shape.
+              // The configured `Json` (with `encodeDefaults`), same as `/status.json`; the bare
+              // companion would drop fields like `persistenceConfigured` whose default is the
+              // alarming value.
               JSON.encodeToString(CatalogBlobPoolSnapshot.serializer(), after),
               ContentType.Application.Json,
             )
@@ -2242,12 +1934,8 @@ class ServeHttpServer(
             val result = withContext(Dispatchers.IO) { admin.unregister(system) }
             respondAdminResult(result)
           }
-          // Front-page sections. The last part of the catalog config with no runtime path: a
-          // section
-          // could only be added by editing the box's catalogs.json and restarting, and a catalog
-          // claiming an undefined one was rejected — so a committed config could not converge.
-          // Defining a section also re-resolves the claims of catalogs ALREADY registered, or
-          // defining it would collect nothing.
+          // Front-page sections at runtime. Defining a section also re-resolves the claims of
+          // already-registered catalogs.
           get("/admin/groups") {
             if (rejectBadAdminToken()) return@get
             respondAdminGroups(admin)
@@ -2263,11 +1951,9 @@ class ServeHttpServer(
           }
         }
 
-        // One-step project onboarding: `POST /admin/onboard` with a GitHub repository URL
-        // publishes every `design-artifacts/` delivery branch that repository already delivers.
-        // Nothing it
-        // does is unavailable through `POST /admin/catalogs` — it just doesn't require the caller
-        // to already know the delivery contract well enough to spell each catalog id out (#4789).
+        // One-step onboarding: `POST /admin/onboard` with a GitHub URL publishes every
+        // `design-artifacts/` branch the repository delivers. Equivalent to `POST /admin/catalogs`
+        // per catalog, without needing to know each id.
         if (onboardingEnabled) {
           post("/admin/onboard") {
             if (rejectBadAdminToken()) return@post
@@ -2275,10 +1961,9 @@ class ServeHttpServer(
           }
         }
 
-        // Onboarding a project that publishes nothing yet (#12): report what Compose previews a
-        // pasted repository holds, by reading a shallow clone of it. Building it is deliberately
-        // NOT this box's job — that happens on a runner in the import staging repository, and its
-        // output arrives here as an ordinary `design-artifacts/` branch through the route above.
+        // Onboarding a project that publishes nothing yet: report the Compose previews in a
+        // repository from a shallow clone. Building happens on a runner in the import staging
+        // repository, arriving as a `design-artifacts/` branch via the route above.
         if (sourceOnboardingEnabled) {
           post("/admin/onboard/scan") {
             if (rejectBadAdminToken()) return@post
@@ -2286,11 +1971,8 @@ class ServeHttpServer(
           }
         }
 
-        // Runtime site administration. `sites` was the last part of the deployment config with no
-        // runtime path: a hostname committed to catalogs.json could not reach a running box at all,
-        // so standing one up meant editing the host's untracked .env and recreating the container.
-        // Registered separately from the catalog routes so a server can opt into one without the
-        // other.
+        // Runtime site administration, so a hostname can reach a running box without editing `.env`
+        // and recreating the container. Registered separately from the catalog routes.
         if (siteAdminEnabled) {
           val admin = siteAdmin!!
           get("/admin/sites") {
@@ -2308,8 +1990,8 @@ class ServeHttpServer(
           }
         }
 
-        // The instance's editor pin (#1035). A PUT fetches and verifies the archive before writing
-        // the pin, so the reply can take a while; the pin applies at the next start.
+        // The instance's editor pin. A PUT fetches and verifies the archive before writing the pin,
+        // so the reply can be slow; the pin applies at the next start.
         if (editorAdminEnabled) {
           val admin = editorAdmin!!
           get("/admin/editor") {
@@ -2362,11 +2044,10 @@ class ServeHttpServer(
           }
         }
 
-        // Runtime UI-builder administration: the operator's list of every design on this host and
-        // the only way to delete one. The page at `/admin/ui-builder` is the screen; the JSON
-        // routes under `/admin/ui-builder/designs` are what it (and a script) drive. Same
-        // fail-closed shape as the other admin surfaces: no admin object or no configured
-        // credential, no routes. Actor administrators are scoped to this surface only.
+        // Runtime UI-builder administration: list every design on this host and delete one.
+        // `/admin/ui-builder` is the screen; the JSON routes under `/admin/ui-builder/designs`
+        // drive it. Fail-closed like the other admin surfaces; actor administrators are scoped to
+        // this surface only.
         if (uiBuilderAdminEnabled) {
           val admin = uiBuilderAdmin!!
           get("/admin/ui-builder") {
@@ -2392,10 +2073,8 @@ class ServeHttpServer(
             if (uiBuilderAdminAccess(allowReadToken = true) == null) return@get
             respondAdminUiBuilderDesigns(admin)
           }
-          // Copy a design out before deciding what to do with it. The one route here that is
-          // meant to work on a design the host cannot serve — an unusable design's document is
-          // exactly what an operator needs in hand to repair it, and deleting is the only other
-          // move available on one.
+          // Copy a design out — the one route meant to work on a design the host cannot serve,
+          // since an operator needs its document to repair it.
           get("/admin/ui-builder/designs/{designId}/document") {
             if (uiBuilderAdminAccess() == null) return@get
             respondAdminUiBuilderDocument(admin, call.parameters["designId"].orEmpty())
@@ -2444,9 +2123,8 @@ class ServeHttpServer(
           }
         }
 
-        // The designs catalog projects publish. Read-only until somebody opens one, which is an
-        // ordinary create against the same service the editor writes through — so the same
-        // admin token gates both, and a host with no library simply has no routes.
+        // The designs catalog projects publish. Opening one is an ordinary create against the
+        // editor's service, so the same admin token gates both.
         if (uiBuilderDesignLibraryEnabled) {
           val library = uiBuilderDesignLibrary!!
           get("/admin/ui-builder/library") {
@@ -2463,9 +2141,8 @@ class ServeHttpServer(
           }
         }
 
-        // The components those projects share between their own designs. Listing only: importing
-        // one into a design is the editor's move, and it needs the symbol's digest recorded
-        // alongside its id, which is a design write rather than a library read.
+        // The components those projects share. Listing only; importing one is a design write done
+        // by the editor.
         if (uiBuilderComponentLibraryEnabled) {
           val components = uiBuilderComponentLibrary!!
           get("/admin/ui-builder/component-library") {
@@ -2482,13 +2159,10 @@ class ServeHttpServer(
           }
         }
 
-        // Runtime producer-trust administration. The trust store is operator config on the same
-        // volume as catalogs.json, so a producer can be trusted on a running box — which is what
-        // makes runtime catalog registration useful at all: without it a catalog published via
-        // `POST /admin/catalogs` serves, but badges `unverified` until an image rebuild ships a new
-        // baked trust store. Removal is by the same discriminated entry shape as addition, with the
-        // selector fields (`repo`, `keyId`, `identity`) carried as query parameters so an
-        // `<owner>/<repo>` pattern needn't be path-escaped.
+        // Runtime producer-trust administration, on the same volume as catalogs.json, so a catalog
+        // published via `POST /admin/catalogs` can be trusted without an image rebuild. Removal
+        // uses the same entry shape, with selector fields (`repo`, `keyId`, `identity`) as query
+        // parameters so `<owner>/<repo>` needn't be path-escaped.
         if (trustAdminEnabled) {
           val admin = trustAdmin!!
           get("/admin/trust") {
@@ -2514,22 +2188,17 @@ class ServeHttpServer(
           }
         }
 
-        // A persistent frame lane. The browser opens this, receives frames as JSON
-        // ([ServeStreamProtocol]), and sends override / switch / input messages back. Token is
-        // checked post-handshake (can't 404 after upgrade) — a bad token closes immediately. Two
-        // routes share one handler: the query-param `?session=` form and the path-prefixed
-        // `/{system}/ws/{name}` form (the session is then the `{system}` segment).
+        // A persistent frame lane: the browser receives JSON frames ([ServeStreamProtocol]) and
+        // sends override / switch / input messages. The token is checked post-handshake (a 404 is
+        // impossible after upgrade), closing immediately if bad. Two routes share one handler:
+        // `?session=` and `/{system}/ws/{name}`.
         webSocket("/ws/{name}") { serveStreamLane() }
         webSocket("/{system}/ws/{name}") { serveStreamLane() }
 
-        // Session-selecting routes come in two forms that share one handler each: the query-param
-        // `?session=` form (back-compat) and the path-prefixed `/{system}/…` form (the canonical
-        // public URL — the `{system}` segment IS the session). `sessionInPath = true` picks the
-        // latter. Constant first segments (`/healthz`, `/version`, `/bundle.zip`, `/wasm/…`, …)
-        // score
-        // higher than `/{system}` in Ktor routing, so they still win — only genuinely unknown
-        // single
-        // segments fall through to a session lookup (and 404 like a bad session).
+        // Session-selecting routes come in two forms sharing a handler: `?session=` (back-compat)
+        // and `/{system}/…` (canonical; the segment is the session), chosen by `sessionInPath`.
+        // Constant first segments outscore `/{system}` in Ktor routing, so only unknown single
+        // segments fall through to a session lookup.
         get("/") {
           if (isUiBuilderRootCall(call)) {
             // The editor's home IS this host's root page.
@@ -2555,11 +2224,8 @@ class ServeHttpServer(
         get("/reference/{name}") { handleDesignReferenceAsset(sessionInPath = false) }
         get("/{system}/reference/{name}") { handleDesignReferenceAsset(sessionInPath = true) }
 
-        // The published element tag index (see [ServeTagIndex]). Per preview, like `/reference` and
-        // `/pages` beside it, because that is what the artifact is: one index per render, published
-        // with the stickers. It had no HTTP surface until the focused comparison's element selector
-        // became its first consumer — inventing a route before a caller existed would have frozen a
-        // guess.
+        // The published element tag index ([ServeTagIndex]), one per render like `/reference` and
+        // `/pages`.
         get("/tags/{name}") { handleTagIndex(sessionInPath = false) }
         get("/{system}/tags/{name}") { handleTagIndex(sessionInPath = true) }
 
@@ -2568,27 +2234,18 @@ class ServeHttpServer(
         get("/spatial/{name}/{path...}") { handleSpatialAsset(sessionInPath = false) }
         get("/{system}/spatial/{name}/{path...}") { handleSpatialAsset(sessionInPath = true) }
 
-        // Design pages (see [ServeDesignPages]). One route per level rather than a
-        // separate asset path: `{name}` ending in `.png` is the backdrop image, anything else is
-        // the screen's own view — the same suffix convention `/reference/{name}` already uses.
-        //
-        // `.json` joins `.svg` on the same suffix convention, at both levels: the pages lane
-        // carries the node → code join, which is a distinct fact from `parity.json`'s coverage and
-        // derivable from no other endpoint, and reading it out of the view meant parsing markup.
-        // Both ids reserve the suffix ([ServeDesignPageStore.isDrawable]), so a page cannot be
-        // published under a name that would shadow its own data.
+        // Design pages ([ServeDesignPages]). One route per level: `{name}` ending in `.png` is the
+        // backdrop, `.svg` and `.json` (the node → code join) are data, anything else is the view —
+        // the `/reference/{name}` suffix convention. Both ids reserve the suffixes
+        // ([ServeDesignPageStore.isDrawable]).
         get("/pages") { handleDesignPageIndex(sessionInPath = false) }
         get("/{system}/pages") { handleDesignPageIndex(sessionInPath = true) }
         get("/pages.json") { handleDesignPageIndex(sessionInPath = false, json = true) }
         get("/{system}/pages.json") { handleDesignPageIndex(sessionInPath = true, json = true) }
-        // The shared backplates a design page composites itself over. Registered BEFORE the
-        // single-segment page routes and two segments deep, so `/pages/assets/<hash>` can never be
-        // read as the page named `assets`.
-        //
-        // The id is the asset's own content hash, so the URL is `immutable` for the same reason
-        // `/hero/` is: it can never come to mean different bytes, and a repeat visitor paints the
-        // whole scene from cache. Serving goes through the store, never through a path in the
-        // manifest — see [handleDesignPageAsset].
+        // Shared backplates for design pages, registered before the single-segment page routes and
+        // two segments deep so `/pages/assets/<hash>` can't be read as a page named `assets`.
+        // Content-hash ids, so `immutable`; served through the store, never a manifest path
+        // ([handleDesignPageAsset]).
         get("/pages/assets/{id}") { handleDesignPageAsset(sessionInPath = false) }
         get("/{system}/pages/assets/{id}") { handleDesignPageAsset(sessionInPath = true) }
         get("/pages/{name}") { handleDesignPage(sessionInPath = false) }
@@ -2606,12 +2263,9 @@ class ServeHttpServer(
         get("/parity.json") { handleParity(sessionInPath = false, json = true) }
         get("/{system}/parity.json") { handleParity(sessionInPath = true, json = true) }
 
-        // The committed known differences (see [ServeKnownDifferences]). Two routes because the
-        // engine needs two things and neither can be folded into the page: the document as **raw
-        // text**, so `document-unreadable` and the byte cap stay reachable in the consumer that
-        // owns
-        // those verdicts, and each artifact as bytes, so the browser decodes the same PNG the
-        // offline run does rather than an `<img>` the canvas has already normalised to RGBA.
+        // The committed known differences ([ServeKnownDifferences]). The document as raw text (so
+        // `document-unreadable` and the byte cap stay with its consumer) and each artifact as bytes
+        // (so the browser decodes the same PNG the offline run does).
         get("/parity/known-differences.json") { handleKnownDifferences(sessionInPath = false) }
         get("/{system}/parity/known-differences.json") {
           handleKnownDifferences(sessionInPath = true)
@@ -2640,9 +2294,8 @@ class ServeHttpServer(
         get("/api/render-runs/{name}") { handleRenderRuns(sessionInPath = false) }
         get("/{system}/api/render-runs/{name}") { handleRenderRuns(sessionInPath = true) }
         get("/api/components") { handleGlobalComponents() }
-        // Outlines for the icons a client is about to draw, rather than the face they come from:
-        // a grid page is ~45 KB here against 4.8 MB for the font. See
-        // docs/design/UI_BUILDER_MATERIAL_SYMBOLS.md.
+        // Outlines for the icons a client is about to draw, rather than the whole font (~45 KB vs
+        // 4.8 MB). See docs/design/UI_BUILDER_MATERIAL_SYMBOLS.md.
         get("/api/icons/{style}/names") { handleIconNames() }
         get("/api/icons/{style}") { handleIconOutlines() }
         get("/api/daemons") { handleDaemonStatus(sessionInPath = false) }
@@ -2654,12 +2307,9 @@ class ServeHttpServer(
         post("/api/theme-render-lease/release") { handleThemeRenderLeaseRelease() }
         post("/{system}/api/theme-render-lease/release") { handleThemeRenderLeaseRelease() }
 
-        // Storybook-compatibility surface (see [StorybookCompat]). `/index.json` is the stories
-        // index every downstream visual tool (Chromatic, Percy, storycap/reg-suit, BackstopJS, the
-        // test-runner) crawls to enumerate stories; `iframe.html?id=<storyId>` renders one story in
-        // isolation for a screenshot tool. Both come in the query-`?session=` and
-        // path-`/{system}/…`
-        // forms like the rest; the constant first segment outscores `/{system}`.
+        // Storybook-compatibility surface ([StorybookCompat]): `/index.json` is the stories index
+        // visual tools crawl; `iframe.html?id=<storyId>` renders one story in isolation. Both in
+        // `?session=` and `/{system}/…` forms.
         get("/index.json") { handleStorybookIndex(sessionInPath = false) }
         get("/{system}/index.json") { handleStorybookIndex(sessionInPath = true) }
 
@@ -2673,11 +2323,9 @@ class ServeHttpServer(
 
         get("/p/{name}") { handleViewer(sessionInPath = false) }
         get("/{system}/p/{name}") { handleViewer(sessionInPath = true) }
-        // The cross-catalog LAYER diff for one render (issue #4838) — what this catalog and its
-        // `compareWith` sibling each resolved for the same cell. A page of its own rather than a
-        // lane of the viewer, because it compares two catalogs rather than instrumenting one
-        // render, and `?format=json` because "do our two runtimes resolve the same family here?"
-        // is a question CI should be able to gate on without parsing markup.
+        // The cross-catalog layer diff for one render: what this catalog and its `compareWith`
+        // sibling resolved for the same cell. Its own page because it compares catalogs;
+        // `?format=json` lets CI gate on it.
         get("/parallel/{name}") { handleParallelLayers(sessionInPath = false) }
         get("/{system}/parallel/{name}") { handleParallelLayers(sessionInPath = true) }
 
@@ -2686,35 +2334,29 @@ class ServeHttpServer(
 
         get("/render/{name}") { handleRender(sessionInPath = false) }
         get("/{system}/render/{name}") { handleRender(sessionInPath = true) }
-        // The same render with its parameters in the BODY: a knob value too large for a URL — an
-        // A2UI document is kilobytes of JSON Lines — has no other way in. It is not a second
-        // render route: [handleRenderPost] reads the body and hands [handleRender] the merged
-        // parameters, so every gate and lane below is the GET's own.
+        // The same render with parameters in the body, for knob values too large for a URL (an A2UI
+        // document). [handleRenderPost] merges them and hands off to [handleRender], so every gate
+        // is the GET's.
         post("/render/{name}") { handleRenderPost(sessionInPath = false) }
         post("/{system}/render/{name}") { handleRenderPost(sessionInPath = true) }
         // The A2UI playground: a textarea bound to the catalog's `document` string knob, POSTed to
         // the route above. 404 on a catalog that declares no such preview.
         get("/{system}/a2ui") { handleA2uiPlayground(sessionInPath = true) }
-        // The root-mounted form, for a viewer served at `/p/{name}` (the default session, a
-        // query-selected one, or a top-level catalog site), whose playground link has no system
-        // segment to carry.
+        // The root-mounted form, for a viewer at `/p/{name}` whose playground link has no system
+        // segment.
         get("/a2ui") { handleA2uiPlayground(sessionInPath = false) }
 
-        // The motion lane, beside `/render` rather than inside it: a capture is not a render of a
-        // preview, it is a second artifact about the same component, and folding it into the render
-        // route would mean that route's suffix decided the content type from a fetched path.
-        // The motion browser: every capture this catalog publishes, on one page. A constant
-        // first segment like `/pages` and `/parity`, and a sibling of the per-capture asset route
-        // below — Ktor scores `/motion` and `/motion/{name}` as distinct paths, so the index does
-        // not shadow the bytes.
+        // The motion lane, beside `/render` rather than inside it: a capture is a separate
+        // artifact, and folding it in would let a fetched path decide the content type.
+        // The motion browser, a constant first segment like `/pages`; Ktor scores `/motion` and
+        // `/motion/{name}` separately.
         get("/motion") { handleMotionIndex(sessionInPath = false) }
         get("/{system}/motion") { handleMotionIndex(sessionInPath = true) }
         get("/motion/{name}") { handleMotion(sessionInPath = false) }
         get("/{system}/motion/{name}") { handleMotion(sessionInPath = true) }
 
-        // Project mode only (see [projectHistory]): one version of a render, addressed by its
-        // content sha, read straight out of the local repository. Registered conditionally like
-        // every other optional lane, so a server without a repo has no such route at all.
+        // Project mode only ([projectHistory]): one version of a render by content sha, read from
+        // the local repository. Registered conditionally.
         if (projectHistory != null) {
           get("/history/render/{name}") { handleHistoryRender() }
           get("/{system}/history/render/{name}") { handleHistoryRender() }
@@ -2736,17 +2378,14 @@ class ServeHttpServer(
   }
 
   /**
-   * The session id this request selects. In **path mode** ([sessionInPath]) it's the `{system}`
-   * path segment (the canonical `/<system>/…` form); otherwise the `?session=` query param, falling
-   * back to [defaultSessionId]. Returned even when unknown — the lease then 404s like a bad
-   * session.
+   * The session id this request selects: the `{system}` segment in path mode ([sessionInPath]),
+   * else `?session=`, falling back to [defaultSessionId]. Returned even when unknown; the lease
+   * then 404s.
    */
   private fun RoutingContext.selectedSessionId(sessionInPath: Boolean): String =
     if (sessionInPath) call.parameters["system"] ?: defaultSessionId
-    // A top-level site's host OUTRANKS `?session=`. It has to: the whole guarantee is one catalog
-    // per hostname, and a query param that could re-point the session would hand a neighbour's
-    // previews out through `/api/previews?session=wear-m3` while `/wear-m3/` 404s — the isolation
-    // undone by the older spelling of the same request.
+    // A top-level site's host outranks `?session=`, or `/api/previews?session=wear-m3` would expose
+    // a neighbour through the site.
     else siteSystem() ?: call.request.queryParameters["session"] ?: defaultSessionId
 
   /** `?format=json` — the spelling `/status` established and every page-with-data route reuses. */
@@ -2754,12 +2393,8 @@ class ServeHttpServer(
     call.request.queryParameters["format"].equals("json", ignoreCase = true)
 
   /**
-   * Refuses a `?format=` this route does not understand, instead of quietly serving the default.
-   *
-   * A silent fallback makes `?format=jsonn` — or a caller's `?format=yaml` — look like a working
-   * request that returned HTML, which a consumer then parses as data. The negotiation is only ever
-   * between the page and its data here, so the allowlist is fixed: absent, `html`, or `json`.
-   * Returns true when it has already answered the call.
+   * Refuses an unknown `?format=` instead of silently serving HTML that a consumer would parse as
+   * data. Allowed: absent, `html`, `json`. Returns true when it has answered.
    */
   private suspend fun RoutingContext.rejectUnknownFormat(): Boolean {
     val format = call.request.queryParameters["format"] ?: return false
@@ -2774,9 +2409,9 @@ class ServeHttpServer(
   }
 
   /**
-   * A catalog's RSS document. The request itself is the subscription signal: [catalogFeed] renews
-   * its interest lease and queues background catch-up, while this handler immediately returns the
-   * last completed document (or a valid empty document on the first cold request).
+   * A catalog's RSS document. The request renews [catalogFeed]'s interest lease and queues
+   * background catch-up; the handler returns the last completed document (or a valid empty one on
+   * first cold request).
    */
   private suspend fun RoutingContext.handleCatalogFeed(sessionInPath: Boolean) {
     if (rejectBadToken()) return
@@ -2804,11 +2439,9 @@ class ServeHttpServer(
   }
 
   /**
-   * The routing/authentication values a feed URL carries.
-   *
-   * Feed readers cannot replay an Authorization-style header for URLs embedded in RSS, so the
-   * document's own links have to carry what the server controls — and only that: never let
-   * arbitrary request parameters become durable feed state.
+   * The routing/authentication values a feed URL carries. Readers can't replay headers for URLs
+   * embedded in RSS, so links carry server-controlled values only, never arbitrary request
+   * parameters.
    */
   private fun RoutingContext.feedLinkQuery(basePath: String, webSessionId: String?): String =
     buildList {
@@ -2820,12 +2453,8 @@ class ServeHttpServer(
     .joinToString("&")
 
   /**
-   * The **Changelog** destination a catalog page's footer offers: this catalog's own `/feed.xml`.
-   *
-   * The feed is the published history of the design system the visitor is looking at, and until now
-   * the only way to find it was to know the URL. Empty — so the footer drops the entry rather than
-   * offering a 404 — on a server started with the feed lane off, and for a session the feed does
-   * not serve (a plain local module has no delivery branch to have a history on).
+   * The **Changelog** link for a catalog page's footer: this catalog's `/feed.xml`. Empty when the
+   * feed lane is off or the session has no delivery branch.
    */
   private fun RoutingContext.changelogHref(
     system: String,
@@ -2838,13 +2467,9 @@ class ServeHttpServer(
   }
 
   /**
-   * The catalog this request's **host** publishes as a top-level site, or null on the main host
-   * (and on every server with no sites configured, which is the fast path). See [ServeSites].
-   *
-   * Read the way [externalOrigin] reads the host: `X-Forwarded-Host` only when [trustForwardedFor]
-   * says a reverse proxy we believe sets it, else the request's own `Host`. A request that reaches
-   * the listener direct carries its `Host` verbatim, which is what a local `curl -H 'Host:
-   * m3.preview.coo.ee'` needs, and Caddy passes the visitor's `Host` through too.
+   * The catalog this request's host publishes as a top-level site, or null (fast path when no
+   * sites). See [ServeSites]. Reads `X-Forwarded-Host` only under [trustForwardedFor], like
+   * [externalOrigin], else the request's `Host`.
    */
   private fun ApplicationCall.siteSystem(): String? {
     if (sites.isEmpty) return null
@@ -2857,14 +2482,9 @@ class ServeHttpServer(
   private fun RoutingContext.siteSystem(): String? = call.siteSystem()
 
   /**
-   * The catalog identity a **top-level site**'s non-catalog pages should wear — its name, its
-   * palette, and the `localStorage` key its theme choice is remembered under. All three empty on
-   * the main host, and on a site whose catalog has not loaded yet.
-   *
-   * A site hostname publishes one design system, so `/status` and the 404 on that host are that
-   * system's pages too. Without this they rendered in the built-in chrome beside a themed landing —
-   * one hostname wearing two skins. Read through [ServeSessionRegistry.peekHost], which never
-   * resumes: a 404 must not wake a daemon to find out what colour to be.
+   * The catalog identity (name, palette, theme `localStorage` key) a top-level site's non-catalog
+   * pages should wear, so `/status` and 404s match the hostname. Empty on the main host or before
+   * the catalog loads. Read via [ServeSessionRegistry.peekHost], which never resumes a daemon.
    */
   private fun RoutingContext.siteSkin(): Triple<String, String, String> = call.siteSkin()
 
@@ -2878,10 +2498,10 @@ class ServeHttpServer(
         ?: catalogMetaSeen[system]?.title
         ?: host?.label
         ?: system
-    // Same key the catalog's own pages use, so one choice follows a visitor across the hostname
-    // instead of `/status` and the grid each remembering their own light/dark.
-    // Palette from the resident bundle, else the last-known snapshot: residency, not registration,
-    // is what the idle timer takes away, and a suspended site must keep its colours.
+    // Same key as the catalog's own pages, so one theme choice follows the visitor across the
+    // hostname.
+    // Palette from the resident bundle, else the last-known snapshot, so a suspended site keeps its
+    // colours.
     val themeCss =
       bundle?.webThemeCss?.takeIf { it.isNotBlank() }
         ?: catalogMetaSeen[system]?.webThemeCss.orEmpty()
@@ -2889,42 +2509,27 @@ class ServeHttpServer(
   }
 
   /**
-   * Whether a GitHub sign-in started from *this* request's origin can actually come back to it.
+   * Whether a GitHub sign-in started from this request's origin can come back to it.
    *
-   * This used to be false on every top-level site whose box pins a callback base URL
-   * (`--github-auth-callback-base-url`, which the deployment sets): the `cp_gh_state` cookie is
-   * host-only, so it was written on the site host while GitHub returned to the pinned one, and the
-   * callback saw no state and answered 401. The affordance was withheld rather than walk a visitor
-   * into that, which left live and playground snapshot-only on every site.
-   *
-   * [ServeGithubAuthConfig.cookieDomain] fixes it at the root: written for the parent domain, both
-   * cookies are sent to the pinned callback host and to every site host under it, so the CSRF check
-   * works where it always did and one session covers the family. The state carries the originating
-   * host purely so the callback knows where to send the visitor back to.
-   *
-   * What stays false is a host outside that domain — an unlisted vhost, or a site on a different
-   * domain entirely. The cookies would not reach it, so a sign-in started there would land the
-   * visitor back signed-out, and offering the link would still be advertising a dead end.
+   * With [ServeGithubAuthConfig.cookieDomain] the state and session cookies are written for the
+   * parent domain, so the pinned callback host and every site host under it share them; the state
+   * carries the originating host for the return redirect. False for hosts outside that domain,
+   * where a sign-in would land the visitor back signed out.
    */
   private fun RoutingContext.oauthCanRoundTrip(): Boolean =
     githubAuth?.canRoundTrip(requestHost(call, trustForwardedFor), browserHosts) ?: true
 
   /**
-   * The session id to hand [ServeWeb] for nav-marking + link building, and the URL [basePath] its
-   * same-session links get. Path mode → the `{system}` segment + `/<system>` base (links stay on
-   * the path, no `?session=`); query mode → the raw `?session=` (null for the default session) +
-   * empty base (links keep the legacy `&session=` behaviour). Kept separate from
-   * [selectedSessionId] so the default module session renders with token-only links exactly as
-   * before (byte-identical goldens).
+   * The session id for [ServeWeb] nav-marking and links, and the [basePath] for same-session links.
+   * Path mode → the `{system}` segment and `/<system>`; query mode → raw `?session=` (null for
+   * default) and empty base. Separate from [selectedSessionId] so the default session keeps
+   * token-only links (byte-identical goldens).
    */
   private fun RoutingContext.webSessionAndBase(sessionInPath: Boolean): Pair<String?, String> {
     val system = if (sessionInPath) call.parameters["system"] else null
     if (system != null) return system to "/" + WebEscaping.urlEncodeSegment(system)
-    // A top-level site: the session is this host's catalog, and its base path is EMPTY — that empty
-    // string is the whole reason links stay on the custom domain instead of walking back to
-    // `preview.coo.ee/<system>/`. The session id is still passed so nav-marking and the engagement
-    // counters attribute to the right catalog; it is the same catalog either way, so a visit
-    // through the site host and one through the canonical path count together.
+    // A top-level site: the session is this host's catalog with an empty base path, so links stay
+    // on the custom domain. The session id still drives nav-marking and engagement counters.
     siteSystem()?.let {
       return it to ""
     }
@@ -2932,14 +2537,9 @@ class ServeHttpServer(
   }
 
   /**
-   * The catalogs the playground may offer **this** request: every one on the main host, and only
-   * its own on a top-level site.
-   *
-   * The playground lives at constant paths (`/playground`, `/api/<v>/compiler/catalogs`), so the
-   * canonical-path interceptor never sees it — its first segment names no session. Without this, a
-   * site host would list, preselect and compile against every catalog on the box, which is the
-   * one-catalog-per-host contract broken by the one lane that runs code. The pinned "Server
-   * default" entry (empty id) is not a catalog and is kept either way.
+   * The catalogs the playground may offer this request: all on the main host, only its own on a
+   * top-level site. The playground's constant paths bypass the canonical-path interceptor, so this
+   * enforces one catalog per host. The pinned "Server default" entry is kept.
    */
   private fun RoutingContext.siteScopedCatalogChoices(
     service: PlaygroundCompileService
@@ -2950,13 +2550,9 @@ class ServeHttpServer(
   }
 
   /**
-   * Whether the host's **pinned** playground default compiles against this site's own catalog.
-   *
-   * The pinned entry carries an empty id and reads as "Server default", which sounds catalog-less
-   * but is not: `--playground-bundle=wear-m3` on a box whose site is `compose-m3` makes that
-   * default a *neighbour's* classpath. Keeping the option, or accepting `catalog: ""`, would let a
-   * one-catalog hostname compile against another design system under a name that never says so. A
-   * pin naming no catalog at all (local files) is nobody's neighbour and stays offered.
+   * Whether the host's pinned playground default compiles against this site's own catalog. A pin to
+   * a neighbour's bundle would let a site compile against another design system under "Server
+   * default"; a pin to local files is nobody's neighbour.
    */
   private fun RoutingContext.sitePinIsOwn(service: PlaygroundCompileService): Boolean {
     val site = siteSystem() ?: return true
@@ -2977,10 +2573,9 @@ class ServeHttpServer(
       )
       return
     }
-    // Authorize before reserving the per-catalog refresh lane. A response can reach the client
-    // before this coroutine resumes after respondText(), so admitting first briefly exposed the
-    // rejected request as "in flight" and a following request could receive 202 instead of the
-    // same 404. Rejected work never needs admission or cleanup.
+    // Authorize before reserving the per-catalog refresh lane: the response can reach the client
+    // before this coroutine resumes, so admitting first could make a following request see 202
+    // instead of 404.
     val force = call.request.queryParameters["force"] == "1"
     if (force && rejectBadAdminToken()) return
     if (!catalogRefreshesInFlight.add(system)) {
@@ -2993,17 +2588,10 @@ class ServeHttpServer(
       )
       return
     }
-    // `?force=1` re-fetches even when the branch has not moved. The ordinary check short-circuits
-    // on an unchanged head, which is what makes polling cheap and is right almost always — but it
-    // also means there is otherwise no way to say "read it again anyway", which is exactly what an
-    // operator wants after clearing the blob cache, or when they simply want the published bytes
-    // re-read rather than reasoned about.
-    // Gated by the ADMIN token, not the browse token this handler opens with. On a `--public` box
-    // the browse gate authorizes everyone, and an ordinary refresh is safe to hand out because it
-    // short-circuits on an unchanged head — a repeated call costs one `git ls-remote`. Forcing
-    // removes that short-circuit, so an anonymous caller could drive a full re-stage (and, with a
-    // cold pool, a bundle re-download) in a loop. Refused the way the admin surface refuses
-    // everything, which also means a box with no configured admin token cannot be forced at all.
+    // `?force=1` re-fetches even when the branch hasn't moved (e.g. after clearing the blob cache).
+    // Gated by the admin token, not the browse token: an ordinary refresh short-circuits on an
+    // unchanged head (one `git ls-remote`), but forcing doesn't, so an anonymous caller on
+    // `--public` could loop full re-stages. Without an admin token, forcing is impossible.
     val result =
       try {
         withContext(Dispatchers.IO) { refresh(system, force) }
@@ -3023,10 +2611,9 @@ class ServeHttpServer(
   }
 
   /**
-   * Where a form on one of this server's pages may end up after GitHub sign-in: a POST that needs
-   * an identity redirects into `/auth/github/start`, GitHub, the pinned callback host, and back to
-   * the top-level site the visitor started on. Browsers check `form-action` against every hop, so
-   * each host in that chain is listed ([ServePagePolicy]). Empty without GitHub sign-in.
+   * Hosts a form may end up at after GitHub sign-in (`/auth/github/start`, GitHub, the pinned
+   * callback host, back to the site), for `form-action` ([ServePagePolicy]). Empty without GitHub
+   * sign-in.
    */
   private fun pagePolicyFormActions(): List<String> {
     val auth = githubAuth ?: return emptyList()
@@ -3034,14 +2621,9 @@ class ServeHttpServer(
   }
 
   /**
-   * Browser-visible origin for absolute Open Graph image URLs. Caddy preserves `Host` and supplies
-   * `X-Forwarded-Proto` while terminating TLS; direct/local serve requests fall back to Ktor's
-   * connection scheme and Host header. Only the first proxy value is relevant when a request
-   * crossed more than one hop.
-   *
-   * The `X-Forwarded-*` values are read only with [trustForwardedFor] — the switch that says a
-   * reverse proxy sets them. Without it they are whatever the caller chose to send, so the origin
-   * comes from the connection and `Host` alone.
+   * Browser-visible origin for absolute Open Graph image URLs. Behind Caddy, `Host` is preserved
+   * and `X-Forwarded-Proto` supplied; direct requests use the connection scheme and `Host`. Only
+   * the first proxy value matters. `X-Forwarded-*` is read only with [trustForwardedFor].
    */
   private fun RoutingContext.externalOrigin(): String {
     val forwardedScheme = forwardedHeader(call, "X-Forwarded-Proto", trustForwardedFor)
@@ -3075,28 +2657,19 @@ class ServeHttpServer(
       .let { if (it.isEmpty()) "" else "?$it" }
 
   /**
-   * The global presentation selected in the sticky header. The command chooses the initial mode
-   * (`browse` → Catalog, `serve` → Dev); the visitor's own choice, remembered in the
-   * [ServeWeb.INTERFACE_MODE_COOKIE] cookie, wins over that; an explicit `?chrome=` on the URL wins
-   * over both.
+   * The global presentation mode. The command sets the initial mode (`browse` → Catalog, `serve` →
+   * Dev); the visitor's [ServeWeb.INTERFACE_MODE_COOKIE] wins over that; an explicit `?chrome=`
+   * wins over both.
    *
-   * The cookie is what makes this a *mode the visitor is in* rather than a property of each URL. It
-   * rides along with every request to this host, so no link has to carry the choice — which is what
-   * the previous scheme did, rewriting every same-origin `href` on the page to append `?chrome=`
-   * and bouncing a bare URL through a `location.replace` to restore the value from `localStorage`.
-   * That put a parameter nobody chose into every URL a visitor copied, shared, or bookmarked.
-   *
-   * `?chrome=` survives as a **permalink**: a link may pin the presentation it was written for, for
-   * that request only. It deliberately does not write the cookie — following someone else's link
-   * should not silently change which mode you are in afterwards.
+   * The cookie travels with every request, so no link needs to carry the choice. `?chrome=` is a
+   * per-request permalink and deliberately doesn't write the cookie.
    */
   private fun ApplicationCall.componentBrowserMode(): Boolean {
     interfaceMode(request.queryParameters[CHROME_PARAM])?.let {
       return it
     }
-    // Only on this branch: the body now depends on the Cookie header, and without `Vary` a shared
-    // cache would key one visitor's Catalog-mode HTML by URL alone and hand it to a Dev-mode
-    // visitor. A pinned `?chrome=` never reads the cookie, so it keeps the wider cache key.
+    // Only on this branch: the body now depends on the cookie, so shared caches must vary on it. A
+    // pinned `?chrome=` never reads the cookie.
     varyOnCookie()
     return interfaceMode(request.cookies[ServeWeb.INTERFACE_MODE_COOKIE]) ?: componentBrowser
   }
@@ -3104,24 +2677,14 @@ class ServeHttpServer(
   private fun RoutingContext.componentBrowserMode(): Boolean = call.componentBrowserMode()
 
   /**
-   * The header's GitHub control, or null where there is nothing honest to offer.
-   *
-   * Withheld when the sign-in cannot come back to *this* origin ([oauthCanRoundTrip]) — a host
-   * outside the cookie domain, or host-only cookies against a pinned callback. Following the link
-   * there writes the CSRF state where the callback can never read it, so the visitor lands back
-   * signed out; the card and viewer affordances have always been withheld on that predicate, and a
-   * header button is the same dead end one page up. It only started mattering for the landing
-   * because that page did not render this control at all before.
-   *
-   * A signed-in identity cannot be hidden by this in practice: cookies that reached this host are
-   * cookies the callback could have written.
+   * The header's GitHub control, or null when the sign-in can't return to this origin
+   * ([oauthCanRoundTrip]): the CSRF state would be unreadable at the callback and the visitor would
+   * land back signed out. A signed-in identity is never hidden by this in practice.
    */
   /**
-   * [lane] names what the sign-in unlocks on the page asking for the control, which is what its
-   * tooltip describes. Defaults to Live — the front door and `/status` stand above any one catalog
-   * and answer for the broad case. A catalog landing whose only gated lane is the playground passes
-   * [ServeWeb.GatedLane.PLAYGROUND], and only then is `--github-auth-repo` named: repository access
-   * is the playground's gate, and naming it beside Live is the confusion this change removes.
+   * [lane] is what the sign-in unlocks on the requesting page, for the tooltip. Defaults to Live; a
+   * landing whose only gated lane is the playground passes [ServeWeb.GatedLane.PLAYGROUND], the
+   * only case `--github-auth-repo` is named.
    */
   private fun RoutingContext.githubAuthStatus(
     lane: ServeWeb.GatedLane = ServeWeb.GatedLane.LIVE
@@ -3144,22 +2707,14 @@ class ServeHttpServer(
       }
 
   /**
-   * What the front door may offer this visitor about the UI builder — see
-   * [ServeWeb.UiBuilderInvite].
+   * What the front door may offer this visitor about the UI builder ([ServeWeb.UiBuilderInvite]).
+   * Null when the builder isn't deployed.
    *
-   * Null when the builder is not deployed here at all (`--ui-builder` unset, or no catalog
-   * authoring-enabled): there is nothing to advertise and nothing to explain.
-   *
-   * The permission question is asked of [uiBuilderAuthorization], with the **same capability the
-   * create route will demand** ([UiBuilderRouteCapability.WRITE]) and off the same call, so the
-   * card and the POST behind it can never disagree. That matters more than it sounds: the
-   * credential can be an operator token, a GitHub session with repository access, or an agent
-   * grant, and only the authorizer knows which of them this request carries.
-   *
-   * A refusal is turned into a sentence rather than into an absence. [ServeMachineAuthorization]
-   * answers `Missing` for a signed-in visitor whose account lacks the repository access the
-   * capability gates on — it never got as far as a credential it could name — so the reason is
-   * assembled here, where the repository and the login are both known.
+   * Asks [uiBuilderAuthorization] with the same capability the create route demands
+   * ([UiBuilderRouteCapability.WRITE]), so card and POST agree whatever the credential (operator
+   * token, GitHub session, agent grant). [ServeMachineAuthorization] answers `Missing` for a
+   * signed-in visitor lacking repository access, so the reason is assembled here where repo and
+   * login are known.
    */
   private fun RoutingContext.uiBuilderInvite(): ServeWeb.UiBuilderInvite? {
     val authorization = uiBuilderAuthorization ?: return null
@@ -3183,12 +2738,8 @@ class ServeHttpServer(
 
   /**
    * The identity endpoint's account of this caller beyond its actor id: whether anyone is signed
-   * in, why a write would be refused, and where to sign in.
-   *
-   * [canWrite] arrives already decided by the route — the same WRITE question [uiBuilderInvite]
-   * asks — so the reason is only ever attached to a refusal the write routes would really make. The
-   * sign-in link returns to the page the editor was loaded on, so signing in lands the person back
-   * on the design they were looking at rather than on the home page.
+   * in, why a write would be refused, and where to sign in. [canWrite] comes from the route (the
+   * same WRITE question as [uiBuilderInvite]). The sign-in link returns to the editor page.
    */
   private fun uiBuilderIdentityDetails(
     call: ApplicationCall,
@@ -3211,8 +2762,8 @@ class ServeHttpServer(
   }
 
   /**
-   * The same-host page the identity request came from, or the builder's home. Only a path is kept —
-   * never another host — and the sign-in route sanitizes it again on the way back.
+   * The same-host page the identity request came from, or the builder home. Only a path is kept;
+   * the sign-in route sanitizes it again.
    */
   private fun uiBuilderReturnPath(call: ApplicationCall): String {
     val fallback = "/ui-builder"
@@ -3269,11 +2820,7 @@ class ServeHttpServer(
       else -> null
     }
 
-  /**
-   * Declare that this response was chosen by a request cookie. Appended at most once: several
-   * things on one response can depend on cookies ([markGeneration]'s cacheable HTML, the interface
-   * mode above), and repeating the header buys nothing.
-   */
+  /** Add `Vary: Cookie`, at most once, since several things on a response may depend on cookies. */
   private fun ApplicationCall.varyOnCookie() {
     val already =
       response.headers.values(HttpHeaders.Vary).any {
@@ -3288,17 +2835,15 @@ class ServeHttpServer(
   private fun RoutingContext.externalPageUrl(): String = externalOrigin() + call.request.origin.uri
 
   /**
-   * Resolve the tenant for [sessionId] and run [block] with its host while holding a
-   * [ServeSessionRegistry.Lease] for the request's whole duration — so the reaper can't suspend the
-   * daemon mid-request (e.g. a long `/bundle.zip` that renders every preview). Responds 404 when
-   * the session can't be created/opened. The lease is always released.
+   * Resolve the tenant for [sessionId] and run [block] holding a [ServeSessionRegistry.Lease] for
+   * the whole request, so the reaper can't suspend the daemon mid-request. Responds 404 when the
+   * session can't be opened. The lease is always released.
    */
   private suspend fun RoutingContext.withLeasedSession(
     sessionId: String,
     /**
-     * How to respond when the session can't be created/opened. Defaults to the bare `text/plain`
-     * 404 (correct for asset / API lanes); the HTML *page* routes (landing, viewer) pass an
-     * [respondNotFoundHtml] so a dead link lands on the styled site rather than plain text.
+     * How to respond when the session can't be opened: bare `text/plain` 404 by default; HTML page
+     * routes pass [respondNotFoundHtml].
      */
     onMissing: (suspend RoutingContext.() -> Unit)? = null,
     block: suspend (ServeHost) -> Unit,
@@ -3312,42 +2857,23 @@ class ServeHttpServer(
     try {
       block(lease.host)
     } finally {
-      // Called directly, NOT through `withContext` — the same rule [withLeasedSessionOrNull]
-      // already spells out, which this lane was missing.
-      //
-      // A `withContext` in a `finally` never runs once the job is cancelled: it checks the job on
-      // entry and throws straight back out. Cancellation is exactly when this matters — a visitor
-      // navigating away, a crawler abandoning a fetch, a socket dropped mid-render all cancel the
-      // request coroutine here — and a skipped release leaves the lease count permanently
-      // elevated. That is far worse than one resident daemon: a leaked lease keeps its session
-      // resident for the life of the process, so its daemon is never suspended and the
-      // `--exit-when-idle` watchdog (`connectionIdleMillis`) never fires. Since #4312 it no longer
-      // also pins the theme optimizer's clock — a lease stops counting as busy once its holder goes
-      // quiet — but that relaxation is a floor under the damage, not a licence to leak one.
-      //
-      // Safe to call inline: `Lease.close` is a non-suspending, idempotent compare-and-set.
-      // This helper backs the page and asset lanes — the routes an aborted browse actually hits —
-      // so it is the one that had to get this right.
+      // Called directly, not through `withContext`: a `withContext` in a `finally` throws
+      // immediately once the job is cancelled — exactly when a visitor navigates away or a socket
+      // drops. A skipped release leaks the lease, keeping the session resident forever and stopping
+      // `--exit-when-idle` (`connectionIdleMillis`) from firing. `Lease.close` is non-suspending
+      // and idempotent.
       lease.close()
     }
   }
 
   /**
-   * [withLeasedSession] for a lane that reads a **value** off the host rather than responding from
-   * inside the lease — so the caller decides the status code once, with the lease already released.
+   * [withLeasedSession] for a lane that reads a value off the host, so the caller picks the status
+   * after the lease is released. Null covers both "no session" and "nothing there". [block] runs on
+   * [Dispatchers.IO], since reading an asset may hit the delivery branch.
    *
-   * Null covers both "no such session" and "the host had nothing", which is all this route's two
-   * callers distinguish. [block] runs on [Dispatchers.IO]: reading a published asset can miss the
-   * staged copy and go to the delivery branch, and that is a network round trip which must not run
-   * on a request thread.
-   *
-   * **Resumes, but never creates.** [ServeSessionRegistry.lease] falls through to the session
-   * factory for an id it doesn't know, which in project mode with `--revisions` means checking out
-   * a ref and running a Gradle build. That is the right behaviour for a render — the whole point of
-   * a revision session — and exactly wrong here, where a revision host has no published captures
-   * and the request can only end in 404 anyway. Gating on [isKnownSession] keeps what the fix is
-   * for (an already-registered catalog that went idle) without turning a published-asset lane into
-   * a way to make a stranger's server build arbitrary refs.
+   * Resumes but never creates: [ServeSessionRegistry.lease] would fall through to the session
+   * factory, which in project mode with `--revisions` checks out a ref and runs Gradle. Gating on
+   * [isKnownSession] keeps strangers from triggering arbitrary builds via a lane that can only 404.
    */
   private suspend fun <T> RoutingContext.withLeasedSessionOrNull(
     sessionId: String,
@@ -3358,25 +2884,21 @@ class ServeHttpServer(
     return try {
       withContext(Dispatchers.IO) { block(lease.host) }
     } finally {
-      // Called directly, NOT through `withContext`. `Lease.close` is a non-suspending
-      // compare-and-set, and a `withContext` in a `finally` is skipped outright once the job is
-      // cancelled — which is precisely when this matters, since a client that disconnects during
-      // the branch fetch cancels here. A skipped release leaves the lease count permanently
-      // elevated, and a session with an open lease is never suspended: one aborted request would
-      // pin that catalog's daemon resident for the life of the process.
+      // Called directly, not through `withContext`, which is skipped once the job is cancelled
+      // (e.g. a client disconnecting during the branch fetch); a leaked lease pins the daemon
+      // resident forever.
       lease.close()
     }
   }
 
   /**
-   * A styled HTML 404 for the browser-facing page routes (landing, viewer) — see
-   * [ServeWeb.notFoundPage]. Asset/API lanes keep their bare `text/plain` 404.
+   * A styled HTML 404 for browser-facing page routes ([ServeWeb.notFoundPage]). Asset/API lanes
+   * keep the bare `text/plain` 404.
    */
   private suspend fun RoutingContext.respondNotFoundHtml(message: String) {
     val skin = siteSkin()
-    // These misses are not immutable: catalog refresh, admin registration, or asynchronous parity
-    // staging can make the same URL valid without a deployment. Never let a browser or proxy keep
-    // the old 404 after that state changes.
+    // Not immutable: refresh, admin registration or parity staging can make the URL valid later, so
+    // the 404 must not be cached.
     markGeneration("static-page", DYNAMIC_RESOURCE_CACHE_CONTROL)
     call.respondText(
       ServeWeb.notFoundPage(
@@ -3416,9 +2938,8 @@ class ServeHttpServer(
   }
 
   /**
-   * `POST /docs` (body = the document, or `?url=` to fetch one): ingest a document and answer with
-   * its expiring permalink. `?name=` is a display label only — never a path, never the format
-   * decision (the store content-sniffs).
+   * `POST /docs` (body = document, or `?url=`): ingest and answer with its expiring permalink.
+   * `?name=` is a display label only; the store content-sniffs the format.
    */
   private suspend fun RoutingContext.handleDocUpload(store: ServeDocStore) {
     if (rejectBadTokenForIngest()) return
@@ -3439,9 +2960,8 @@ class ServeHttpServer(
       } else {
         null
       }
-    // isSecurityChecked = true: this route is token-gated (rejectBadToken above), and the store
-    // still defends in depth (format sniff, size + count caps, TTL; SSRF allowlist for the url
-    // case). The marker records that the entry point was authorised.
+    // isSecurityChecked = true: token-gated (rejectBadToken above); the store defends in depth
+    // (format sniff, size + count caps, TTL, SSRF allowlist).
     val result =
       withContext(Dispatchers.IO) {
         if (url != null) store.addFromUrl(name, url, isSecurityChecked = true)
@@ -3474,45 +2994,34 @@ class ServeHttpServer(
   }
 
   /**
-   * `POST /api/{version}/compiler/run`: compile a playground snippet and return the Stage-1 result
-   * — diagnostics (both our shape and the stock `errors` map) plus, on a clean compile, an expiring
-   * preview token. Token-gated; the compile runs **user-supplied code** in-process, which is why
-   * the CLI refuses to enable this lane under `--public`. `isSecurityChecked = true`: the route
-   * cleared its token gate (`rejectBadToken`); the service still bounds the work (size cap, token
-   * TTL/caps).
+   * `POST /api/{version}/compiler/run`: compile a playground snippet and return diagnostics (our
+   * shape and the stock `errors` map) plus, on success, an expiring preview token. Runs user code
+   * in-process, so the CLI refuses this lane under `--public`. `isSecurityChecked = true`: the
+   * token gate passed; the service bounds the work.
    */
   /**
-   * `GET /playground`: the Stage-1 editor page. Token-gated (the lane runs user code, so it is
-   * never public); a static HTML page whose script POSTs to `/api/{v}/compiler/run` and follows the
-   * returned `/pg/` or `/d/` handoff.
+   * `GET /playground`: the Stage-1 editor page. Token-gated (never public); its script POSTs to
+   * `/api/{v}/compiler/run` and follows the `/pg/` or `/d/` handoff.
    */
   private suspend fun RoutingContext.handlePlaygroundPage(service: PlaygroundCompileService) {
     if (rejectBadToken()) return
     if (rejectMissingGithubAuth()) return
     if (rejectMissingGithubRepoAccess()) return
-    // `?from=<system>/<previewId>` — the handoff from a viewer page: open that preview's own Kotlin
-    // in the editor with its catalog preselected. `?catalog=<system>` is the lighter half from a
-    // catalog landing: preselect the design system, keep the starter sample. Both resolve entirely
-    // through this server's own registry, so a request never names a URL the host then fetches.
-    //
-    // A seed that can't be resolved is not an error page: the playground still works, so it opens
-    // on
-    // the sample. The startup log carries the reason.
+    // `?from=<system>/<previewId>` opens that preview's Kotlin with its catalog preselected;
+    // `?catalog=<system>` just preselects the catalog. Both resolve through this server's registry,
+    // so a request never names a URL to fetch. An unresolvable seed opens the sample; the log says
+    // why.
     val seed =
       call.request.queryParameters["from"]?.let { raw ->
         val system = raw.substringBefore('/')
         val previewId = raw.substringAfter('/', "")
-        // `?from=` is supplied by the caller, not by the selector this page renders — so narrowing
-        // the selector does not narrow this. On a site host a `from` naming a neighbour would
-        // otherwise seed the editor with that catalog's Kotlin source, which is the one-catalog
-        // contract broken by a query parameter. Ignored rather than refused: the playground still
-        // opens, on its sample.
+        // `?from=` is caller-supplied, so on a site host a neighbour's `from` is ignored (not
+        // refused) to keep one catalog per host.
         val siteSystem = siteSystem()
         if (system.isBlank() || previewId.isBlank()) null
         else if (siteSystem != null && system != siteSystem) null
-        // On the IO dispatcher: an uncached seed is a synchronous GitHub GET with 10 s connect +
-        // 10 s read, and running that on the routing dispatcher lets a handful of concurrent
-        // handoffs during GitHub latency stall every other route on this host.
+        // On the IO dispatcher: an uncached seed is a synchronous GitHub GET (10 s connect + 10 s
+        // read) that would stall the routing dispatcher.
         else withContext(Dispatchers.IO) { playgroundSeeds?.seed(system, previewId) }
       }
     markGeneration("static-page", pageCacheControl())
@@ -3535,10 +3044,8 @@ class ServeHttpServer(
 
   /**
    * `GET /api/{version}/compiler/catalogs`: what the editor's catalog selector may offer — the
-   * host's pinned default (when it has one) plus every served catalog that can back a compile here,
-   * each with the modes its bundle backend supports. Gated exactly like the run route: it
-   * enumerates what this host serves, and the playground's whole point is that only admitted
-   * callers see it.
+   * pinned default plus every catalog that can back a compile, with their modes. Gated like the run
+   * route.
    */
   private suspend fun RoutingContext.handlePlaygroundCatalogs(service: PlaygroundCompileService) {
     if (rejectBadToken()) return
@@ -3570,8 +3077,8 @@ class ServeHttpServer(
 
   /**
    * `GET /pg/<token>`: redeem a preview token into a live session and redirect to its viewer. An
-   * unknown/expired token — or a well-formed one this host has no live backend for — is a styled
-   * 404 that discloses neither. Token-gated (the redeemed session runs user code).
+   * unknown/expired token, or one without a live backend here, gets a styled 404 that discloses
+   * neither. Token-gated.
    */
   private suspend fun RoutingContext.handlePlaygroundRedeem(redeem: PlaygroundRedeemService) {
     if (rejectBadToken()) return
@@ -3585,18 +3092,16 @@ class ServeHttpServer(
       respondNotFoundHtml(gone)
       return
     }
-    // `?preview=<id>` opens the session on a specific one of the snippet's previews. Read from the
-    // QUERY, not the path, so it can't collide with the access token the path already dodges; the
-    // service validates it against the snippet's own set and falls back to the first.
+    // `?preview=<id>` opens a specific preview of the snippet. Read from the query (not the path)
+    // to avoid the access token; validated by the service, falling back to the first.
     val preview = call.request.queryParameters["preview"]?.takeIf { it.isNotBlank() }
     when (val outcome = redeem.redeem(id, preview)) {
       PlaygroundRedeemService.Outcome.NotFound -> respondNotFoundHtml(gone)
       PlaygroundRedeemService.Outcome.Unavailable ->
         respondNotFoundHtml("Live preview isn't available on this host.")
       is PlaygroundRedeemService.Outcome.Live -> {
-        // Hand off to the existing path-form viewer for the just-registered session; its
-        // `/{session}/ws/{preview}` lane streams it and enforces the live-seat budget. Carry the
-        // token so the token-gated viewer + WS accept the follow-on requests.
+        // Hand off to the path-form viewer for the new session, whose `/{session}/ws/{preview}`
+        // lane enforces the live-seat budget. Carry the token for the gated follow-on requests.
         val suffix =
           if (!linksCarryToken()) ""
           else "?token=" + java.net.URLEncoder.encode(linkToken(), Charsets.UTF_8)
@@ -3606,13 +3111,9 @@ class ServeHttpServer(
   }
 
   /**
-   * Who to charge for a request, for rate-limiting purposes.
-   *
-   * The **authenticated GitHub login** where there is one: it survives a changed address, it is the
-   * identity the repo-access gate already admitted on, and on a repo-access-gated host it is what
-   * every compile carries. Otherwise the client address, which is all a token-gated or local host
-   * has. Prefixed so the two spaces can never collide — a login is not an address, and a caller who
-   * signs in should not inherit the budget an anonymous neighbour behind the same NAT just spent.
+   * Who to charge for rate limiting: the authenticated GitHub login if any (stable across
+   * addresses), else the client address. Prefixed so the two spaces never collide and signing in
+   * doesn't inherit a NAT neighbour's spent budget.
    */
   private fun RoutingContext.rateLimitKey(): String {
     githubAuth
@@ -3625,22 +3126,15 @@ class ServeHttpServer(
   }
 
   /**
-   * Who to charge **by address**, ignoring any signed-in identity — the key for work that happens
-   * before this request has an identity to charge, or that is deliberately metered per address.
-   *
-   * Separate from [rateLimitKey] because a lane that charges a caller twice — once before it knows
-   * who they are and once after — must not land both charges in the same bucket. It would halve the
-   * budget an operator configured, and at `--image-rate-limit 1` refuse every request.
+   * Who to charge by address only, for work before an identity exists or deliberately per-address.
+   * Separate from [rateLimitKey] so a lane charging twice doesn't put both charges in one bucket.
    */
   private fun RoutingContext.clientAddressKey(): String = "ip:" + clientAddress()
 
   /**
-   * The caller's address under this server's forwarding policy — the trusted final
-   * `X-Forwarded-For` hop when `--trust-forwarded-for` is set, else the socket peer.
-   *
-   * Extracted from [clientAddressKey] so the rate limiter and anything that *displays* an address
-   * cannot answer the question differently. They did: the grant approval page rendered the raw
-   * peer, which behind a proxy is the proxy, on every request.
+   * The caller's address under the forwarding policy: the trusted final `X-Forwarded-For` hop with
+   * `--trust-forwarded-for`, else the socket peer. Shared by the rate limiter and any display of
+   * the address.
    */
   private fun RoutingContext.clientAddress(): String {
     val forwarded =
@@ -3654,8 +3148,8 @@ class ServeHttpServer(
   }
 
   /**
-   * Charge this request against its caller's budget, responding `429` + `Retry-After` and returning
-   * null when they are over it. A non-null result MUST be released when the work finishes.
+   * Charge this request against its caller's budget, answering `429` + `Retry-After` and returning
+   * null when over. A non-null result must be released.
    */
   private suspend fun RoutingContext.acquirePlaygroundPermit():
     ServeRateLimiter.Decision.Admitted? {
@@ -3706,9 +3200,8 @@ class ServeHttpServer(
         )
         return
       }
-    // Not advertising a neighbour is not the same as refusing to compile against one: the id is a
-    // request field, so a site host has to reject it outright or the selector's absence is
-    // cosmetic. Empty stays legal — that is the host's pinned default, which is not a catalog.
+    // A site host must reject a neighbour's catalog id outright, since it is a request field. Empty
+    // (the pinned default) stays legal.
     val site = siteSystem()
     val foreignCatalog = request.catalog.isNotEmpty() && request.catalog != site
     // An EMPTY catalog is the pinned default, which is only legitimate here when the pin is this
@@ -3807,9 +3300,9 @@ class ServeHttpServer(
   }
 
   /**
-   * Refuse a request authenticated by the GitHub session cookie alone that did not come from a page
-   * this server served, and — for a [json] route — one whose body is not declared as JSON. Header
-   * and bearer credentials pass untouched; see [ServeSameOriginRequests].
+   * Refuse a request authenticated only by the GitHub session cookie that didn't come from this
+   * server's page, and, for a [json] route, one whose body isn't declared JSON. Header and bearer
+   * credentials pass ([ServeSameOriginRequests]).
    */
   private suspend fun RoutingContext.rejectForeignSessionRequest(json: Boolean = false): Boolean {
     if (ServeSameOriginRequests.isForeignSessionRequest(call, browserHosts)) {
@@ -3902,13 +3395,9 @@ class ServeHttpServer(
   // ---- The image lane (`--accept-images`) -----------------------------------------------------
 
   /**
-   * Whether this browser session may use the image lane for report captures.
-   *
-   * Catalog reports are filed in place rather than through `/report-bug`, so their static page
-   * cannot carry the per-request [imageBrowserLogin] decision that the dedicated report page gets.
-   * The capture bundle probes this narrow route instead. It deliberately admits only the signed
-   * browser-session path: a bearer token or agent grant is useful to a headless uploader, but is
-   * not a credential the catalog page should discover or ask for.
+   * Whether this browser session may use the image lane for report captures. Catalog reports are
+   * filed in place, so the capture bundle probes this route. Admits only the signed browser
+   * session, not bearer tokens or grants.
    */
   private suspend fun RoutingContext.handleImageUploadCapability(auth: ServeImageUploadAuth) {
     if (rejectBadToken()) return
@@ -3917,44 +3406,32 @@ class ServeHttpServer(
       call.respondText("image uploads unavailable", status = HttpStatusCode.Forbidden)
       return
     }
-    // Whether an anonymous visitor could open this host's pages at all. The capture bundle reads
-    // it to decide if a capture may be uploaded without asking: on a token-gated host every page
-    // is signed-in-only, and the image URL the upload returns is anonymous-read.
+    // Whether anonymous visitors can open this host's pages; on a token-gated host captures need
+    // explicit consent since image URLs are anonymous-read.
     call.response.headers.append(CAPTURE_SCOPE_HEADER, if (isPublic) "public" else "private")
     call.respondText("", status = HttpStatusCode.NoContent)
   }
 
   /**
-   * `POST /images?name=<label>` (body = the image bytes): ingest a rendered preview and answer with
-   * the URL to embed.
+   * `POST /images?name=<label>` (body = image bytes): ingest a rendered preview and answer with the
+   * URL to embed.
    *
-   * **Authenticated, always.** The caller presents `Authorization: Bearer <github-token>` and must
-   * come back as a collaborator on the gating repository ([ServeImageUploadAuth]) — on a `--public`
-   * host too, where every browsing surface is open. This is the one write surface on the server
-   * that hands out hosting under the operator's own name, so "anonymous" is not one of its
-   * postures.
-   *
-   * `?name=` is a display label only — never a path, never the format decision (the store
-   * content-sniffs).
+   * Always authenticated, even on `--public`: the caller presents `Authorization: Bearer
+   * <github-token>` and must be a collaborator on the gating repository ([ServeImageUploadAuth]),
+   * since this hosts content under the operator's name. `?name=` is a display label only; the store
+   * content-sniffs.
    */
   private suspend fun RoutingContext.handleImageUpload(
     store: ServeImageStore,
     auth: ServeImageUploadAuth,
   ) {
     if (rejectBadToken()) return
-    // **Before** the identity check, keyed by address: verifying a token is a synchronous call to
-    // GitHub, so an unauthenticated caller spraying unique invalid tokens would otherwise spend one
-    // of this host's outbound requests and one of its threads per guess — and neither the
-    // fingerprint cache (every value is new) nor the per-login budget below (never reached) bounds
-    // that. This is the only budget an anonymous caller is ever charged against.
-    // Address-only, never [rateLimitKey]: that one prefers a signed-in cookie login, which on a
-    // GitHub-auth host can be the same string the post-verification charge below uses — the two
-    // budgets would then share one bucket and halve what the operator configured.
-    // A grant the operator ticked `images` on is an identity in its own right, and it is checked
-    // BEFORE the GitHub round trip — not as a fallback after one fails. A human operator of this
-    // box already made the access decision, by hand, minutes ago and for a bounded window; asking
-    // GitHub again would be asking a second question nobody needs answered, and would make an
-    // agent's upload depend on a credential the whole grant flow exists so it need not hold.
+    // Charged before the identity check, by address: verifying a token is a synchronous GitHub
+    // call, and nothing else bounds an anonymous caller spraying invalid tokens.
+    // Address-only, not [rateLimitKey], which may return the same login key as the
+    // post-verification charge and halve the budget.
+    // A grant with `images` is checked before the GitHub round trip: the operator already decided,
+    // and the agent shouldn't need a GitHub credential.
     grantedImageIdentity()?.let { granted ->
       val permit = acquireImagePermit(granted.budgetKey) ?: return
       try {
@@ -3964,12 +3441,9 @@ class ServeHttpServer(
       }
       return
     }
-    // A bug report is filed by a browser, which holds the signed OAuth session rather than the
-    // short-lived GitHub credential used during sign-in. Admit that already-verified identity only
-    // through the repository-matching resolver the runner supplied. This is deliberately before
-    // the anonymous verification budget: no GitHub round-trip is made and the caller is already a
-    // stable identity, so charging its IP first would halve a one-upload budget just as the grant
-    // path above would.
+    // A bug report comes from a browser holding a signed OAuth session, admitted through the
+    // runner's repository-matching resolver. Before the anonymous budget, since no GitHub call is
+    // made and charging the IP would halve a one-upload budget.
     imageBrowserLogin?.invoke(call, auth.repository)?.let { login ->
       // Admitted by the session cookie alone, so only from a page this server served. A caller
       // presenting a bearer, a grant or a token header is judged by its own gate as before.
@@ -3991,9 +3465,8 @@ class ServeHttpServer(
         // it exists to bound *verification*, and the accepted upload below has its own budget.
         verifyPermit.release()
       } ?: return
-    // Per-caller budget, charged to the *verified* identity rather than to the client address: the
-    // address of an agent in CI is shared or ephemeral, and the identity is the thing we actually
-    // know. The key comes from the gate, not from the login — see [Identity.Ok.budgetKey].
+    // Per-caller budget charged to the verified identity (CI addresses are shared or ephemeral).
+    // The key comes from the gate ([Identity.Ok.budgetKey]).
     val permit = acquireImagePermit(identity.budgetKey) ?: return
     try {
       acceptImageUpload(store, identity.login)
@@ -4003,12 +3476,9 @@ class ServeHttpServer(
   }
 
   /**
-   * Store the posted image and answer `201` with the line the caller pastes.
-   *
-   * Split out of [handleImageUpload] because there are now two ways to have been admitted — a
-   * verified GitHub credential, or an agent grant the operator ticked `images` on — and exactly one
-   * thing to do afterwards. [login] is whatever the admitting gate decided attribution should read
-   * as, and is what `uploadedBy` reports.
+   * Store the posted image and answer `201` with the line to paste. Shared by both admission paths
+   * (verified GitHub credential or `images` grant); [login] is the attribution reported as
+   * `uploadedBy`.
    */
   private suspend fun RoutingContext.acceptImageUpload(store: ServeImageStore, login: String) {
     val name = call.request.queryParameters["name"]
@@ -4033,9 +3503,8 @@ class ServeHttpServer(
     ) {
       is ServeImageStore.Result.Ok -> {
         val image = result.image
-        // Absolute, because the caller is about to paste it somewhere this server will never see
-        // — a PR body renders on github.com, where a relative path means nothing. Built from the
-        // forwarded origin, so a host behind Caddy hands back its public https:// name.
+        // Absolute, built from the forwarded origin, since it will be pasted into a PR body on
+        // github.com.
         val url = externalOrigin() + image.path
         val size = image.dimensions
         call.respondText(
@@ -4051,10 +3520,8 @@ class ServeHttpServer(
               height = size?.height,
               path = image.path,
               url = url,
-              // The line the caller actually wanted. Handing back the finished markdown is not a
-              // convenience: an agent that assembles it itself is one backtick away from the
-              // `![alt](`url`)` shape that renders as literal text and silently loses the
-              // evidence the upload existed to provide.
+              // Return finished markdown so callers don't produce the `![alt](`url`)` shape that
+              // renders as literal text.
               markdown = "![${image.name}]($url)",
               uploadedBy = image.uploadedBy,
               expiresIn = ServeWeb.humanDuration(store.remainingSeconds(image)),
@@ -4072,10 +3539,8 @@ class ServeHttpServer(
 
   /**
    * Charge one unit of image-lane work to [key], answering `429` + `Retry-After` and returning null
-   * when the caller is over budget. A non-null result MUST be released.
-   *
-   * Returns a no-op permit when the operator disabled the budget, so a call site never has to
-   * distinguish "admitted" from "unmetered".
+   * when over budget. A non-null result must be released. A no-op permit when the budget is
+   * disabled.
    */
   private suspend fun RoutingContext.acquireImagePermit(
     key: String
@@ -4092,22 +3557,12 @@ class ServeHttpServer(
   }
 
   /**
-   * The upload identity of a live agent grant carrying [AgentGrantCapability.IMAGES], or null when
-   * this call presents no such grant (in which case the GitHub gate has its say as before).
+   * The upload identity of a live agent grant with [AgentGrantCapability.IMAGES], or null when the
+   * call presents none (the GitHub gate then decides).
    *
-   * This is the whole of the link between the grant lane and the image lane, and it is small on
-   * purpose: a grant does not become a GitHub account here, it becomes *an admitted caller with a
-   * name*. Two details carry the weight.
-   *
-   * **Attribution names the grant and the human behind it**, so `uploadedBy` on the stored image
-   * and in the `201` reads `agent grant 682daf65 (approved by @yschimke)` rather than borrowing a
-   * login nobody authenticated. An operator reading `/status` can tell a grant's upload from a
-   * collaborator's at a glance, and the approver is on the record either way.
-   *
-   * **The budget key is the grant**, not the address and not a login: a grant is already bounded
-   * (it expires, it is revocable, and the box caps how many are live), so per-grant is the bucket
-   * that matches what was actually handed out. Two grants approved for two different tasks do not
-   * throttle each other, and one grant cannot spend another's budget.
+   * Attribution names the grant and its approver (`agent grant 682daf65 (approved by @yschimke)`)
+   * rather than borrowing a login. The budget key is the grant itself: grants are already bounded
+   * (expiry, revocation, live cap), so grants don't throttle each other.
    */
   private fun RoutingContext.grantedImageIdentity(): ServeImageUploadAuth.Identity.Ok? {
     val grant = agentGrantFor(call) ?: return null
@@ -4119,9 +3574,8 @@ class ServeHttpServer(
   }
 
   /**
-   * The verified identity behind this upload, or null once the refusal has been written. Split out
-   * so the route reads as "who is this, then do the work" and the two refusal shapes (no credential
-   * vs. not good enough) stay in one place.
+   * The verified identity behind this upload, or null once a refusal has been written; keeps both
+   * refusal shapes in one place.
    */
   private suspend fun RoutingContext.authorizeImageUpload(
     auth: ServeImageUploadAuth
@@ -4156,13 +3610,9 @@ class ServeHttpServer(
   /**
    * `GET /i/{id}.png`: the image itself.
    *
-   * **Deliberately ungated, even on a token-gated host**, and this is the one asymmetry in the lane
-   * worth stating plainly. The document lane appends the host token to the permalink it hands back,
-   * which is right for a link pasted into a chat — but this URL's destination is a *pull request
-   * body*, so the same trick would publish the server's browse token to everyone who can read the
-   * PR. And GitHub fetches embedded images through its own proxy, anonymously: a gated URL would
-   * never paint. So the 128-bit id carries the whole grant, exactly as it does for `/d/<id>`, and
-   * the token stays out of it.
+   * Deliberately ungated, even on a token-gated host: these URLs go into PR bodies, so appending
+   * the browse token would publish it, and GitHub's image proxy fetches anonymously. The 128-bit id
+   * is the access control, as for `/d/<id>`.
    */
   private suspend fun RoutingContext.handleImage(store: ServeImageStore) {
     val raw = call.parameters["id"] ?: ""
@@ -4195,9 +3645,8 @@ class ServeHttpServer(
   }
 
   /**
-   * Serve a vendored player bundle: ungated (generic client code, no session data), CORS-open so a
-   * sandboxed viewer iframe can pull it, cached with a content ETag so a repeat load is a
-   * cheap 304.
+   * Serve a vendored player bundle: ungated (generic client code), CORS-open for sandboxed iframes,
+   * with a content ETag for cheap 304s.
    */
   private suspend fun RoutingContext.respondPlayerAsset(asset: PlayerAsset) {
     if (asset.bytes.isEmpty()) {
@@ -4228,11 +3677,8 @@ class ServeHttpServer(
 
   /**
    * `GET /rc-fonts/{name}`: the generated `@font-face` stylesheet ([ServeRcFonts.STYLESHEET]) or
-   * one of the vendored faces it declares. Anything else 404s — the route serves a fixed, declared
-   * set, never an arbitrary classpath path.
-   *
-   * Cached like the player bundles (ETag + a short `max-age`): the bytes are fixed at build time,
-   * so a repeat visitor revalidates cheaply instead of re-downloading a few hundred KB per face.
+   * one of its vendored faces; anything else 404s. Cached like the player bundles (ETag + short
+   * `max-age`).
    */
   private suspend fun RoutingContext.handleRcFont() {
     val name = call.parameters["name"] ?: ""
@@ -4270,14 +3716,13 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /api/fonts/google/{family}/{weight}`: that family's TrueType file. 404 for a family not on
-   * fonts.google.com or a weight that is not a hundred, 502 when Google could not be reached —
-   * either way the editor draws the default face, as it did before the route existed.
+   * `GET /api/fonts/google/{family}/{weight}`: the family's TrueType file. 404 for an unknown
+   * family or non-hundred weight, 502 when Google is unreachable; the editor then uses the default
+   * face.
    */
   private suspend fun RoutingContext.handleGoogleFont() {
-    // Every answer is CORS-open, not only the font: the asker is a sandboxed runtime frame with an
-    // opaque origin, and a 404 without the header reached its console as a CORS failure instead
-    // of the "no such face" it is.
+    // Every answer is CORS-open: the asker is a sandboxed opaque-origin frame, and a 404 without
+    // the header would surface as a CORS error.
     call.response.headers.append(HttpHeaders.AccessControlAllowOrigin, "*")
     val fonts = googleFonts
     val family = call.parameters["family"].orEmpty()
@@ -4312,9 +3757,8 @@ class ServeHttpServer(
 
   /**
    * `GET /api/fonts/noto/{family}/v{n}/{file}.woff2`: the Noto slice Compose's text fallback would
-   * have fetched from `fonts.gstatic.com/s/` at that path. 404 for a path not in Compose's list,
-   * 502 when Google could not be reached — either way the glyph stays undrawn, as it was before the
-   * route.
+   * fetch from `fonts.gstatic.com/s/` at that path. 404 for paths not in Compose's list, 502 when
+   * Google is unreachable.
    */
   private suspend fun RoutingContext.handleNotoFallbackFont() {
     // CORS-open on every answer, for the same sandboxed runtime frames as [handleGoogleFont].
@@ -4364,20 +3808,17 @@ class ServeHttpServer(
   }
 
   /**
-   * Describe the work behind a response in headers that survive a reverse proxy. This lets a
-   * browser, curl, or an agent distinguish cheap published bytes from a daemon render without
-   * access to the host logs. Static pages are cacheable only in public mode: token-bearing private
-   * URLs must never be stored by a shared cache.
+   * Describe the work behind a response in proxy-surviving headers, so clients can tell published
+   * bytes from a daemon render. Static pages are cacheable only in public mode; token-bearing
+   * private URLs must never reach a shared cache.
    */
   private fun ApplicationCall.markGeneration(generation: String, cacheControl: String? = null) {
     response.headers.append(GENERATION_HEADER, generation)
     cacheControl?.let { response.headers.append(HttpHeaders.CacheControl, it) }
-    // Belt to `private, no-store`'s braces: an intermediary that under-honours the directive still
-    // learns the body turns on the session cookie, rather than keying one visitor's HTML by URL
-    // alone.
-    // Load-bearing for ANON_PAGE_CACHE_CONTROL, not just belt-and-braces: that value invites a
-    // shared cache to store the response, and without `Vary: Cookie` the cache would key one
-    // anonymous rendering by URL alone and hand it to a signed-in visitor.
+    // Backup for `private, no-store`: an intermediary that under-honours it still learns the body
+    // depends on the session cookie.
+    // Load-bearing for ANON_PAGE_CACHE_CONTROL, which invites shared caching: without `Vary:
+    // Cookie` a cache would serve an anonymous rendering to a signed-in visitor.
     if (cacheControl == SIGNED_IN_PAGE_CACHE_CONTROL || cacheControl == ANON_PAGE_CACHE_CONTROL) {
       varyOnCookie()
     }
@@ -4400,14 +3841,10 @@ class ServeHttpServer(
   /** `GET /` (query) and `GET /{system}[/]` (path): the session's preview-list landing page. */
   private suspend fun RoutingContext.handleLanding(sessionInPath: Boolean) {
     if (rejectBadToken()) return
-    // Front door: when this server publishes design-system catalogs, the bare `/` (no `?session=`,
-    // no `/<system>` path) is an INDEX of those systems — each with a meaningful preview — rather
-    // than an arbitrary default module's grid. A plain `serve` (no `--catalogs`) keeps the module
-    // landing. A query `?session=` or a `/<system>` path still selects that session's landing
-    // below.
-    // …unless this request arrived on a top-level site host, whose `/` IS its catalog's landing.
-    // A site that opened on an index of its neighbours would be advertising exactly what it exists
-    // not to.
+    // Front door: with design-system catalogs, the bare `/` is an index of the systems; a plain
+    // `serve` keeps the module landing. `?session=` or a `/<system>` path selects a session's
+    // landing below.
+    // …except on a top-level site host, whose `/` is its catalog's landing.
     if (
       !sessionInPath &&
         siteSystem() == null &&
@@ -4454,27 +3891,14 @@ class ServeHttpServer(
           "/render/${WebEscaping.urlEncodeSegment(it)}.png" +
           requestQuerySuffix()
       }
-      // Measured off the PNG header, so the unfurl card can declare `og:image:width`/`height`
-      // instead of making the fetcher download the render to find out. Skipped when the URL carries
-      // overrides — `heroUrl` inherits the page's query, so the image would be a re-render at a
-      // size
-      // the bake doesn't describe (same reasoning as the viewer's `imageSize`).
+      // Read from the PNG header so the unfurl can declare `og:image:width`/`height`. Skipped with
+      // overrides, since the image would then be a re-render at an unknown size.
       val heroSize =
         if (requestCarriesOverrides()) null else heroId?.let { renderHost.bakedRenderSize(it) }
-      // …and, like the front door, prefer a **drawn** card over the render itself: this catalog's
-      // hero thumbnail set into a 1200×630 layout with the catalog's name and preview count, rather
-      // than a bare phone screenshot an unfurler has to crop to a band. Same reasoning and the same
-      // baked pixels as [handleHomeIndex]; see [ServeSocialCard].
-      //
-      // Skipped when the request carries overrides, for the reason `heroSize` is: the page then
-      // describes a re-render, and a card built from the baked hero would advertise the wrong
-      // picture for that URL.
-      //
-      // The hero is baked here rather than read out of `catalogMetaSeen`, so a visitor who lands
-      // straight on `/<system>/` — the shape of URL people actually share — gets a card without
-      // having gone through the front door first. It is the same memoised call the front door makes
-      // ([ServeHeroImages.heroFor] is per host instance), so this costs one decode per catalog for
-      // the whole life of that host, not one per request.
+      // Prefer a drawn 1200×630 card ([ServeSocialCard]) of this catalog's hero with its name and
+      // count, as [handleHomeIndex] does. Skipped with overrides. Baked here (memoised per host via
+      // [ServeHeroImages.heroFor]) so a shared `/<system>/` URL gets a card without visiting the
+      // front door first.
       val bundle = catalogBundleHost(renderHost)
       val heading = ServeWeb.catalogHeading(bundle?.title, renderHost.label)
       // Hoisted out of the argument list because the header's sign-in control reads it too: a
@@ -4504,9 +3928,8 @@ class ServeHttpServer(
             imageHeight = card.height,
           )
         else
-        // No baked hero for this catalog yet, or the request carries overrides. The render is a
-        // worse picture but a real one, and `twitterCard` demotes it to the small card its shape
-        // can fill rather than claiming a banner it cannot.
+        // No baked hero yet, or overrides present: use the render; `twitterCard` demotes it to the
+        // card its shape fits.
         ServeWeb.UnfurlMetadata(
             pageUrl = externalPageUrl(),
             imageUrl = heroUrl,
@@ -4525,24 +3948,16 @@ class ServeHttpServer(
           trust = catalogBundleHost(renderHost)?.let { BundleVerifier.summary(it.trust) },
           isPublic = isPublic,
           componentBrowser = componentBrowserMode(),
-          // A back-to-home button whenever this server publishes a front-door index — listed
-          // catalogs OR unlisted app catalogs (mirrors handleLanding's home-index condition), so
-          // an
-          // app-only server's landings still link home.
-          // …and never on a top-level site: there is no front door on this hostname to go back
-          // to,
-          // and a "← All design systems" button would either lie or leave the domain.
+          // A back-to-home button whenever this server has a front-door index (listed or unlisted
+          // catalogs, as in handleLanding).
+          // …but never on a top-level site, which has no front door.
           hasHomeIndex =
             siteSystem() == null &&
               (listedCatalogs().isNotEmpty() || unlistedCatalogs().isNotEmpty()),
           basePath = basePath,
           changelogHref = changelogHref(selectedSessionId, basePath, webSessionId),
-          // One action per comparable format, each gated on the same condition `comparisonPage`
-          // turns that format on with — so "compare SVG" and "compare RC players" only appear
-          // when
-          // there is something behind them.
-          // …without waking a daemon to find out: see
-          // [ServeCatalogLiveHost.hasSvgExportWithoutWaking].
+          // One action per comparable format, gated on the same condition `comparisonPage` uses.
+          // …without waking a daemon; see [ServeCatalogLiveHost.hasSvgExportWithoutWaking].
           hasSvgComparison =
             renderHost.previews.any {
               (renderHost as? ServeCatalogLiveHost)?.hasSvgExportWithoutWaking(it.id)
@@ -4551,28 +3966,20 @@ class ServeHttpServer(
           hasRcComparison =
             renderHost.rcCompare() != null ||
               renderHost.previews.any { renderHost.hasRemoteComposeDoc(it.id) },
-          // Same condition `comparisonPage` turns the `reference` format on with, so the deep
-          // link
-          // never lands on a format the page does not offer.
+          // Same condition `comparisonPage` enables the `reference` format on.
           hasReferenceComparison =
             renderHost.previews.any { renderHost.designReferencesFor(it.id).isNotEmpty() },
-          // Same condition `handleParity` serves on, so the link never leads to that route's 404
-          // —
-          // and, since the acceptance lane was added there, so the page it made reachable is not
-          // reachable only by typing the URL.
+          // Same condition `handleParity` serves on.
           hasParityView =
             renderHost.parityActivity() != null ||
               renderHost.parityIssues() != null ||
               renderHost.knownDifferences() != null ||
               renderHost.previews.any { renderHost.designReferencesFor(it.id).isNotEmpty() },
-          // The PAIRED implementation, named the way the wall names it. Same source the wall
-          // reads
-          // (`parallelSpecSource`), so the chip and the format it deep-links can never disagree
-          // about whether there is a sibling catalog to compare against.
+          // The paired implementation from the same source the wall reads (`parallelSpecSource`),
+          // so chip and format agree.
           parallelComparisonLabel =
             renderHost.previews.firstNotNullOfOrNull { parallelSpecSource(renderHost, it)?.label },
-          // Scoped to the system being served: one repository may publish several catalogs and
-          // the index producer pushes the identical file onto each delivery branch. See
+          // Scoped to the served system; the index is identical across a repository's catalogs. See
           // [ServeWeb.issuesForSystem].
           parityIssues =
             ServeWeb.issuesForSystem(
@@ -4581,17 +3988,14 @@ class ServeHttpServer(
             ),
           // Same count `handleMotionIndex` gates on, so the chip never leads to that route's 404.
           motionCaptureCount = renderHost.previews.sumOf { it.motion.size },
-          // Same condition `handleDesignPageIndex` serves on, for the same reason. Listed by name
-          // in the navigation tree, so the landing has to know what they are called, not just how
-          // many there are.
+          // Same condition `handleDesignPageIndex` serves on; names are needed for the navigation
+          // tree.
           designPages =
             renderHost.designPages().pages.map { page ->
               ServeWeb.PageLink(page.id, page.name, designPageSections(page))
             },
-          // …and name that action after the design tool the catalog is specified by, read from
-          // the
-          // references it published (or from the parity feed's Figma lane when the references are
-          // rasters with no provider). Null ⇒ the generic "design parity" label.
+          // Name that action after the design tool, read from the published references (or the
+          // parity feed's Figma lane for provider-less rasters). Null ⇒ "design parity".
           designToolLabel =
             renderHost.previews.firstNotNullOfOrNull { preview ->
               renderHost.designReferencesFor(preview.id).firstNotNullOfOrNull {
@@ -4604,75 +4008,47 @@ class ServeHttpServer(
           provenance = catalogBundleHost(renderHost)?.provenance,
           refreshUrl =
             if (catalogRefresh != null) "$basePath/refresh${requestQuerySuffix()}" else null,
-          // "try in playground" — opens the editor with this design system preselected, so a
-          // snippet compiles against the catalog you were just browsing. Omitted on a host with
-          // no
-          // lane; the per-preview handoff is the viewer's `playgroundHref`.
+          // "try in playground": opens the editor with this design system preselected. Omitted
+          // without the lane; per-preview handoff is the viewer's `playgroundHref`.
           playgroundHref = catalogPlaygroundHref,
           // Crop each card's thumbnail to the component's figma-svg content box (cheap baked
-          // reads),
-          // so a Wear sticker shows the component, not the empty watch canvas around it.
+          // reads).
           thumbCrop = { id -> catalogBundleHost(renderHost)?.contentCrop(id) },
-          // …and point each card at a prebaked, downscaled copy of its render where one can be
-          // baked from local pixels, so the page ships a few hundred kB of thumbnails instead of
-          // a
-          // couple of MB of full-resolution PNGs. Baking reads only what is already on disk (see
-          // [ServeHeroImages.gridThumbFor]) — this runs per card on the request thread, so it
-          // must
-          // never fetch.
+          // Point each card at a prebaked, downscaled copy where one can be baked from local pixels
+          // ([ServeHeroImages.gridThumbFor]). Runs per card on the request thread, so it must never
+          // fetch.
           thumbHash = { id ->
             heroImages
               .gridThumbFor(renderHost, id, catalogBundleHost(renderHost)?.contentCrop(id))
               ?.hash
-              // A miss means this preview's PNG is not local yet, so the card falls back to the
-              // full-resolution URL — and that URL is what used to be the only thing that ever
-              // fetched it. Ask for the fetch off-thread instead, so the next build of this page
-              // thumbnails the card rather than waiting for a reader to download 50 kB of it.
+              // On a miss the card uses the full-resolution URL; request the fetch off-thread so
+              // the next page build can thumbnail it.
               .also { if (it == null) thumbWarmer.enqueue(renderHost, id) }
           },
-          // A heartbeat while the tab is open, so a visitor reading the grid keeps their session
-          // —
-          // and its daemon — alive. Especially now: the cards above are cacheable, so browsing
-          // this
-          // page can make no requests at all for as long as someone cares to read it.
+          // A heartbeat keeps the session and daemon alive while the tab is open; the cached cards
+          // may make no requests at all.
           presenceUrl = "$basePath/api/presence${requestQuerySuffix()}",
           // The catalog's declared stage surface (`display.surface`), so a dark-first system's
           // unthemed cards sit on the dark stage instead of the default white.
           declaredSurface = catalogBundleHost(renderHost)?.stageSurface,
           // …and its own colour palette, so this system's pages are framed in its colours.
           themeCss = catalogBundleHost(renderHost)?.webThemeCss.orEmpty(),
-          // Why the catalog is snapshot-only, when it is (no live bundle, unverified, …) — shown
-          // as
-          // a banner under the header so a browser sees it before opening a preview.
+          // Why the catalog is snapshot-only, if it is, shown as a banner under the header.
           degradations = renderHost.degradations,
-          // The module's declared @ThemeCatalog themes join the header's Theme control, so the
-          // grid
-          // can be redrawn under any theme the catalog configures — not just baked Light/Dark.
-          // Only
-          // a daemon-twinned card can actually re-render one, hence the per-preview predicate.
+          // Declared @ThemeCatalog themes join the Theme control; only daemon-twinned cards can
+          // re-render, hence the per-preview predicate.
           declaredThemes = applicableThemes(renderHost),
           canRenderThemeFor = { id -> renderHost.canRenderOverridesFor(id) },
-          // …and a twin that REPLAYS a captured document rather than recomposing can't honour a
-          // theme provider either, however live it is: the render below refuses it with a
-          // terminal
-          // 409. Same predicate that refusal is derived from, deliberately read here rather than
-          // re-derived — the viewer greys the identical choice off `irReplay`, and a grid that
-          // disagreed with either would offer chips that turn every card into an error.
-          // A replayed card is theme-overridable exactly when it can apply every theme this page
-          // offers. On a pure-replay catalog the chips below are already narrowed to the mapped
-          // ones, so that is the whole declared set and nothing changes. In a **mixed** catalog
-          // the
-          // chips are the union — one recomposing preview is enough to publish all of them — and
-          // a
-          // replayed card mapped for only some would light up chips that 409 it.
+          // A twin that replays a captured document can't honour a theme provider either (409);
+          // same predicate as the refusal and the viewer's `irReplay`.
+          // A replayed card is theme-overridable only when it can apply every theme this page
+          // offers. In a mixed catalog the chips are the union, so a card mapped for only some
+          // would 409.
           irReplayFor = { id ->
             isReplayedPreview(renderHost, id) && !everyThemeApplies(renderHost, id)
           },
-          // Long-press a card to open a live daemon session inside it. Same two conditions the
-          // viewer's Live toggle answers to — the session offers the stream lane, and this
-          // preview
-          // has a daemon twin to stream — so a card only takes the gesture when the socket behind
-          // it would deliver real frames rather than replaying baked pixels.
+          // Long-press to open a live session in a card: the session offers the stream and the
+          // preview has a daemon twin, as for the viewer's Live toggle.
           canStreamLiveFor = { id ->
             renderHost.hasLiveStream && renderHost.canRenderOverridesFor(id)
           },
@@ -4692,35 +4068,21 @@ class ServeHttpServer(
           // A top-level site's pages carry their session in the ORIGIN, so same-session links
           // drop the `?session=` the rooted legacy form would add. See [ServeSites].
           sessionInOrigin = siteSystem() != null,
-          // The header's sign-in control. `liveSignInHref` above already sends a long-press at
-          // the login, but that gesture is undiscoverable: on a site host this landing IS the
-          // front door, so without a visible control the only way to find the sign-in was
-          // another hostname's index (wear-m3-catalog#68).
+          // The header's sign-in control: on a site host this landing is the front door, and the
+          // long-press route to sign-in (`liveSignInHref`) is undiscoverable.
           //
-          // Only where a login unlocks something on THIS catalog: a live lane to stream, or a
-          // playground that compiles against it. A static bundle (or one whose live breaker has
-          // opened) with no playground has nothing behind the control, and inviting a sign-in
-          // that
-          // changes nothing is the dead affordance the viewer's chip already refuses to be. The
-          // front door keeps its unconditional control — it stands above every catalog, so it
-          // cannot answer for one, and any of them may offer a lane.
-          //
-          // The lane it speaks for is whichever this catalog actually has. With no live stream
-          // the
-          // playground is the only thing behind the login, and its gate is repository access — so
-          // the control says so instead of promising a Live lane this catalog cannot offer.
+          // Only where a login unlocks something here (a live lane, or a playground compiling
+          // against this catalog); otherwise it would be a dead affordance. The lane it names is
+          // the one this catalog has: with no live stream it is the playground, whose gate is
+          // repository access. The front door keeps its unconditional control.
           githubAuth =
             when {
               renderHost.hasLiveStream -> githubAuthStatus()
               catalogPlaygroundHref != null -> githubAuthStatus(ServeWeb.GatedLane.PLAYGROUND)
               else -> null
             },
-          // The catalog report on the page most visitors arrive on — what the floating launcher's
-          // catalog half points at in Dev, and the only reporting affordance Catalog mode has at
-          // all. Scoped to the page rather than to a card: the grid singles out no component, and
-          // a
-          // report naming one the reporter never picked would be worse than one naming the
-          // catalog.
+          // The page-scoped catalog report on the landing — the launcher's catalog half in Dev and
+          // Catalog mode's only reporting affordance.
           reportIssue = pageScopedReportIssue(renderHost, selectedSessionId, "this catalog"),
         ),
         ContentType.Text.Html,
@@ -4731,10 +4093,9 @@ class ServeHttpServer(
   /** Join this page to its catalog's short-lived themed-thumbnail burst allocation. */
   private suspend fun RoutingContext.handleThemeRenderLease(sessionInPath: Boolean) {
     if (rejectBadToken()) return
-    // This route mints nothing but permission to run a *burst of live theme renders*. A `preview`
-    // grant would be handed the lease and then refused every render it authorises, which is a
-    // confusing way to say no; refuse the ticket instead. (The release counterpart is deliberately
-    // ungated — handing capacity back is always welcome.)
+    // This route only grants permission for a burst of live theme renders, so refuse a `preview`
+    // grant up front rather than lease and then refuse every render. Release is deliberately
+    // ungated.
     if (rejectGrantBelowScope(AgentGrantScope.LIVE, api = true)) return
     if (rejectForeignSessionRequest()) return
     val sessionId = selectedSessionId(sessionInPath)
@@ -4760,22 +4121,12 @@ class ServeHttpServer(
   /**
    * `POST /api/presence` (and its `/{system}/` form): a heartbeat from an open catalog tab.
    *
-   * Sessions are reaped after an idle window ([ServeSessionRegistry.DEFAULT_IDLE_TIMEOUT_MILLIS]),
-   * and idleness is measured in *requests*. A visitor reading one catalog page makes none — the
-   * more so now that its thumbnails and heroes are `immutable` and repaint from cache — so a tab
-   * that has been open for a quarter of an hour looks exactly like an abandoned one, and the daemon
-   * behind it is shut down under a visitor who is still there. This is the signal that says
-   * otherwise.
+   * Sessions are reaped after an idle window ([ServeSessionRegistry.DEFAULT_IDLE_TIMEOUT_MILLIS])
+   * measured in requests, and a reader of cached pages makes none. Leasing the session keeps it
+   * (and its daemon) resident, resuming it if suspended; [ServeHost.keepLiveWarm] then readies the
+   * live lane for a visitor who has only seen baked pixels.
    *
-   * Two things happen, and the cheap one is the important one:
-   * - Leasing the session marks it as in use, which is what actually keeps it (and its daemon)
-   *   resident, and resumes it if it had already been suspended.
-   * - [ServeHost.keepLiveWarm] then gets its live lane ready, for the visitor who has only browsed
-   *   prebaked pixels and so has never woken a daemon at all — the common case by design.
-   *
-   * Deliberately silent: 204 with no body, no error surface. A heartbeat is not something a page
-   * can act on, and one that fails (offline, a catalog since removed) simply means the next one
-   * tries again.
+   * Silent: 204 with no body; a failed heartbeat just retries next time.
    */
   private suspend fun RoutingContext.handlePresence(sessionInPath: Boolean) {
     if (rejectBadToken()) return
@@ -4787,13 +4138,8 @@ class ServeHttpServer(
       selectedSessionId(sessionInPath),
       onMissing = { call.respond(HttpStatusCode.NoContent) },
     ) { renderHost ->
-      // Warming is the only part that can cost anything, so it is gated on the live-seat budget: on
-      // a busy box a browsing visitor's *convenience* ranks below someone else's actual request.
-      // A load signal, not a reservation — the warm runs off the request path and takes no seat of
-      // its own — but it is enough to stop a room full of idle tabs from each waking a daemon while
-      // the box is already saturated. The keepalive's other half (the lease above) is
-      // unconditional:
-      // holding on to a daemon that is already up costs nothing and is the whole point.
+      // Only the warm is gated on the live-seat budget (a browsing convenience ranks below real
+      // requests); it takes no seat itself. The lease above is unconditional.
       if (liveSeats.availablePermits() > 0) renderHost.keepLiveWarm()
       call.respond(HttpStatusCode.NoContent)
     }
@@ -4820,10 +4166,8 @@ class ServeHttpServer(
       sessionId,
       onMissing = { respondNotFoundHtml("That design system was not found on this server.") },
     ) { renderHost ->
-      // Resolve each cross-catalog source once. The wall asks the same question while filtering,
-      // grouping and writing rows; repeating the pairing walk at every stage is needless metadata
-      // churn and makes it easier for a sibling session disappearing mid-response to produce a
-      // button whose rows carry no source.
+      // Resolve each cross-catalog source once; the wall asks repeatedly, and a sibling
+      // disappearing mid-response could otherwise leave a button whose rows lack a source.
       val pairedDesignSources =
         renderHost.previews.associateWith { preview ->
           if (renderHost.designReferencesFor(preview.id).isEmpty())
@@ -4848,20 +4192,15 @@ class ServeHttpServer(
         respondNotFoundHtml("This session has no native formats or design references to compare.")
         return@withLeasedSession
       }
-      // Uncacheable while the published player comparison is still staging: the page's shape
-      // depends on a manifest that lands asynchronously, and a short edge cache would otherwise
-      // serve the pre-manifest shape for minutes after the lanes were ready.
+      // Uncacheable while the player comparison is still staging, since the page's shape depends on
+      // a manifest that lands asynchronously.
       markGeneration(
         "static-page",
         if (renderHost.rcComparePending()) DYNAMIC_RESOURCE_CACHE_CONTROL else pageCacheControl(),
       )
-      // The wall's own "report a catalog issue" — the launcher's catalog half, which stays hidden
-      // on a page that carries no `#cp-report` and left this page offering the SERVER tracker as
-      // its only route (issue #4289). Page-scoped: the wall names no single preview, so neither
-      // does the report — it carries the page (with the lane its query names), the catalog build
-      // and the tool version, and drops the preview-shaped rows the way every other optional fact
-      // is dropped. A row's own defect keeps the better route it already had: opening the focused
-      // comparison, which files against that exact preview and reference.
+      // The wall's page-scoped "report a catalog issue", so the launcher has a catalog half here.
+      // It carries the page (with its lane), catalog build and tool version, without preview rows;
+      // a single row's defect is better reported from its focused comparison.
       val reportIssue =
         pageScopedReportIssue(renderHost, sessionId, "these comparisons", pickable = true)
       call.respondText(
@@ -4888,11 +4227,9 @@ class ServeHttpServer(
           unfurl = ServeWeb.UnfurlMetadata(pageUrl = externalPageUrl()),
           reportIssue = reportIssue,
           generation = catalogGeneration(renderHost),
-          // Every row of THIS catalog's index, otherwise unfiltered: the wall joins it to each row
-          // itself, which is a join it has to do per row anyway and one this handler cannot do for
-          // it. The system scope is the exception, because it is the one filter the wall's own join
-          // cannot express — it matches on component and preview id, and a sibling catalog built
-          // from the same repository shares both. See [ServeWeb.issuesForSystem].
+          // This catalog's whole index, unfiltered except by system: the wall joins per row itself,
+          // but cannot tell sibling catalogs from one repository apart. See
+          // [ServeWeb.issuesForSystem].
           parityIssues =
             ServeWeb.issuesForSystem(renderHost.parityIssues()?.issues.orEmpty(), sessionId),
           // The index's own stamp, so an opened Bugs panel can say what its `closed` is as of. The
@@ -4910,17 +4247,12 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /<system>/parity` — the catalog's design-parity dashboard: coverage, the merged code ↔
-   * Figma activity feed, and the mapping gaps.
+   * `GET /<system>/parity`: the catalog's design-parity dashboard — coverage, the merged code ↔
+   * Figma activity feed, and mapping gaps.
    *
-   * Offered for every session, not only ones publishing an activity feed: the coverage half is
-   * computed live from the previews and their design references, so a catalog that has adopted
-   * nothing new still gets an honest "N of M components are mapped" page. Only a session with
-   * neither references nor a feed 404s, because there the page would be a table of zeroes.
-   *
-   * `?format=json` returns the same dashboard as data — the shape a CI check or a dashboard poller
-   * wants, and the reason the view model is computed in [ServeParityDashboard] rather than inline
-   * in the HTML.
+   * Coverage is computed live, so any session with references or a feed gets a page; only a session
+   * with neither 404s. `?format=json` returns the same dashboard as data (computed in
+   * [ServeParityDashboard]).
    */
   private suspend fun RoutingContext.handleParity(sessionInPath: Boolean, json: Boolean) {
     if (rejectBadToken()) return
@@ -4942,38 +4274,17 @@ class ServeHttpServer(
       // The bands this catalog draws, scoped to the system on the mount; `issues` stays whole for
       // the acceptance walk's lifecycle join. See [ServeWeb.issuesForSystem].
       val systemIssues = ServeWeb.issuesForSystem(issues, sessionId)
-      // A published known-difference document keeps the page reachable on its own, alongside the
-      // three lanes that already do. It is the one lane whose *interesting* state is a catalog with
-      // nothing else left: every acceptance in it may name a preview or reference this session no
-      // longer serves, which is exactly `orphaned-target` — and 404ing here would withhold the
-      // panel
-      // from the only catalog whose whole document is the finding.
-      // **The HTML page only.** `ParityResponse` carries coverage, drift, activity and gaps — all
-      // of
-      // which are empty for such a catalog — and nothing about acceptances, because the host does
-      // not
-      // parse that document and the verdicts are the browser's. Admitting `?format=json` here would
-      // answer 200 with a dashboard of zeroes whose one interesting fact is unrepresentable in the
-      // schema, which reads as "this catalog is fine" to exactly the CI check that shape exists
-      // for.
+      // A published known-difference document keeps the page reachable on its own, since a catalog
+      // whose acceptances are all `orphaned-target` is exactly the finding.
+      // HTML only: `ParityResponse` can't represent acceptances, so a JSON answer would be a
+      // dashboard of zeroes that reads as "fine" to CI.
       val accepts = renderHost.knownDifferences() != null
-      // ---- The dashboard is an INDEX, not a place -----------------------------------------------
+      // The dashboard is an index: each component links into the comparison wall scoped to it, the
+      // activity feed is folded behind a disclosure, and the landing lists it under `Reports`
+      // (`docs/design/COMPARE_NAVIGATION.md`, §3.4).
       //
-      // It used to be a mini site: coverage bands, a filtered activity feed, a gap table, an issue
-      // index and a comparison inventory, none of which led anywhere — so it was both the least
-      // visited page here and the one that had to be read end to end. Its facts each belong to a
-      // surface the reader is already on (`docs/design/COMPARE_NAVIGATION.md`, §3.4), and this page
-      // keeps the one job none of them can do: saying which components are worth opening, and
-      // opening them.
-      //
-      // So every component here now links into the comparison wall SCOPED TO THAT COMPONENT, the
-      // activity feed is folded away behind a disclosure (it is a changelog, and the catalog
-      // publishes one), and the landing offers this under `Reports` rather than beside the
-      // comparisons it is not one of.
-      //
-      // The gate reads the SCOPED list, not the whole index: a catalog whose only rows were filed
-      // against a sibling system has nothing of its own to say here, and serving it the bands of a
-      // catalog it is not is the same wrong answer this page would have given, one route later.
+      // The gate reads the system-scoped list, so a catalog whose only rows belong to a sibling has
+      // nothing here.
       if (activity == null && !mapped && systemIssues.isEmpty() && (json || !accepts)) {
         if (json) call.respond(HttpStatusCode.NotFound)
         else
@@ -5000,14 +4311,10 @@ class ServeHttpServer(
         )
         return@withLeasedSession
       }
-      // **The audit-bearing page is not cacheable**, the way an `rcComparePending` comparison is
-      // not. The walk joins two things of different lifetimes: the preview inventory and the issue
-      // rows are baked into this HTML, while the document it walks is fetched live at `no-store`.
-      // Served from cache after an in-place catalog refresh, a *fresh* document would be resolved
-      // against a *stale* inventory — and a preview added or renamed in between reads as
-      // `orphaned-target`, which is a false finding of exactly the kind this panel exists to make
-      // trustworthy. The comparison band has no such gap: it is generation-bound by
-      // `referenceSha256`, and there is no equivalent anchor for a walk over the whole catalog.
+      // The audit-bearing page is not cacheable: the inventory and issue rows are baked into the
+      // HTML while the document is fetched live (`no-store`), so a cached page after a refresh
+      // would report false `orphaned-target` findings. There is no generation anchor for a
+      // catalog-wide walk.
       markGeneration(
         "static-page",
         if (accepts) DYNAMIC_RESOURCE_CACHE_CONTROL else pageCacheControl(),
@@ -5029,30 +4336,21 @@ class ServeHttpServer(
           hasReferenceFor = hasReference,
           parityIssues = systemIssues,
           parityIssuesGeneratedAt = renderHost.parityIssues()?.generatedAt,
-          // Unscoped, and deliberately: an acceptance committed by this catalog may cite an issue
-          // filed against a sibling system published from the same repository, and the join reads
-          // state by URL. See [ServeWeb.issuesForSystem].
+          // Unscoped: an acceptance may cite an issue filed against a sibling system, and the join
+          // reads state by URL. See [ServeWeb.issuesForSystem].
           acceptanceIssues = issues,
           generation = catalogGeneration(renderHost),
-          // The catalog-wide acceptance walk, offered only to a catalog that publishes a
-          // known-difference document. This is the walk's target set, and every field is spelled
-          // the
-          // way the comparison page spells it in its locator — `system` from the mount, `component`
-          // and `variant` from [ServeIssueReport] — because an acceptance matches on all of them
-          // and
-          // a second derivation here would report the whole document orphaned.
-          //
-          // The handler decides the identity; the page builds the URLs, which is the same split
-          // [KnownDifferenceScope] draws and the reason a hand-rolled query never loses its token.
+          // The catalog-wide acceptance walk, only for a catalog publishing a known-difference
+          // document. Fields are spelled as the comparison page's locator does (`system` from the
+          // mount, `component` and `variant` from [ServeIssueReport]), since acceptances match on
+          // all of them. The page builds the URLs ([KnownDifferenceScope]).
           acceptanceAudit =
             renderHost.knownDifferences()?.let {
               renderHost.previews.map { preview ->
                 KnownDifferenceCatalogPreview(
-                  // The **resolved session id**, not the base path's first segment. The two differ
-                  // for a catalog whose name carries a character a URL segment escapes (`@` is
-                  // legal in a session name and encodes to `%40`), and an identity that changed
-                  // spelling with the route form would report a document healthy through
-                  // `/<system>/parity` and orphaned through `?session=`, from the same bytes.
+                  // The resolved session id, not the base path segment: they differ for names with
+                  // escaped characters (`@` → `%40`), and the identity must not change with the
+                  // route form.
                   system = sessionId,
                   id = preview.id,
                   component = ServeIssueReport.componentIdFor(preview),
@@ -5079,13 +4377,9 @@ class ServeHttpServer(
   }
 
   /**
-   * Refuse a request whose `at=` is present but is not a commit sha.
-   *
-   * The alternative — ignoring it — is the one behaviour this feature must never have: it would
-   * answer a request that explicitly asked for a particular publish with whatever is current, under
-   * a URL whose whole promise is the opposite, and nothing about the response would say so. A
-   * `?at=main` is a mistake worth naming rather than quietly satisfying (see
-   * [ServeCatalogRevision.normalize] for why a ref is not a pin).
+   * Refuse a request whose `at=` is present but not a commit sha. Ignoring it would answer a
+   * request for a specific publish with current bytes. A ref is not a pin
+   * ([ServeCatalogRevision.normalize]).
    */
   private suspend fun RoutingContext.rejectMalformedPin(): Boolean {
     val raw = call.request.queryParameters[ServeCatalogRevision.PARAM] ?: return false
@@ -5098,11 +4392,8 @@ class ServeHttpServer(
   }
 
   /**
-   * Refuse a request whose `gen=` is present but is not a commit sha.
-   *
-   * Same rule and same reason as [rejectMalformedPin]: a generation that isn't one resolves to "the
-   * page could not name its own publish", and the only honest answers to that are a 400 or a
-   * response that is explicitly uncacheable. A 400 is the one that shows up in a log.
+   * Refuse a request whose `gen=` is present but not a commit sha, as [rejectMalformedPin] does; a
+   * 400 shows up in logs.
    */
   private suspend fun RoutingContext.rejectMalformedGeneration(): Boolean {
     val raw = call.request.queryParameters[ServeCacheGeneration.PARAM] ?: return false
@@ -5115,14 +4406,10 @@ class ServeHttpServer(
   }
 
   /**
-   * The delivery-branch commit this session is serving — the generation every frame URL its pages
-   * write is scoped to ([ServeCacheGeneration]), or null when there is nothing to name.
-   *
-   * Null for the same sessions that get no revision surface: an uploaded bundle, a local project, a
-   * daemon-backed module. [ServeBundleHost.supportsPinnedRevisions] is the load-bearing half of the
-   * condition rather than a tidy-up — scoping a frame commits the asset lane to answering for an
-   * older generation out of the branch, and a host that cannot be pinned cannot do that, so a
-   * scoped URL from one would 404 the moment the catalog moved.
+   * The delivery-branch commit this session serves — the generation its pages' frame URLs are
+   * scoped to ([ServeCacheGeneration]) — or null (uploaded bundle, local project, daemon module).
+   * [ServeBundleHost.supportsPinnedRevisions] is load-bearing: scoping commits the asset lane to
+   * serving older generations from the branch, which an unpinnable host cannot do.
    */
   private fun catalogGeneration(renderHost: ServeHost): String? =
     catalogBundleHost(renderHost)
@@ -5132,23 +4419,13 @@ class ServeHttpServer(
       ?.let(ServeCacheGeneration::normalize)
 
   /**
-   * The generation a request names when it is **not** the one this host is serving, i.e. the page
-   * that wrote this URL is a publish behind.
-   *
-   * Null in every other case, which is the common one: no `gen=` at all (an unscoped link, a
-   * hand-typed URL, an unfurler), or a `gen=` naming exactly what is on disk. Both fall through to
-   * the ordinary lane; only the third case has to go to the branch.
-   *
-   * Returning the sha rather than a boolean is what lets the caller feed it straight into the pin
-   * path — reconciling a stale generation IS reading a published revision, and doing it through a
-   * second mechanism would be a second set of rules about what may be fetched from where.
+   * The generation a request names when it is not the one this host serves (the page is a publish
+   * behind); null otherwise. Returning the sha lets the caller reuse the pin path, so stale
+   * generations follow the same fetch rules.
    */
   /**
-   * Whether this request named the generation the host is serving — the case in which the URL is
-   * content-addressed and the response may say so.
-   *
-   * Deliberately not "`gen=` is absent or matches": an unscoped URL is a moving target, and giving
-   * it an `immutable` lifetime is precisely the drift this parameter exists to remove.
+   * Whether this request named the generation the host is serving, so the response may be marked
+   * immutable. Absent `gen=` doesn't count: an unscoped URL is a moving target.
    */
   private fun RoutingContext.carriesCurrentGeneration(renderHost: ServeHost): Boolean {
     val asked =
@@ -5165,17 +4442,12 @@ class ServeHttpServer(
   }
 
   /**
-   * The revision state for a catalog page: the pin the request carries, and the delivery branch's
-   * recent publishes to offer as destinations ([ServeWeb.CatalogRevisions]).
+   * The revision state for a catalog page: the request's pin and the branch's recent publishes
+   * ([ServeWeb.CatalogRevisions]).
    *
-   * A pin is honoured whether or not it appears in that list. The list is the tail of a feed —
-   * about the last dozen publishes — while a permalink is meant to outlive them; refusing a sha
-   * just because it has scrolled off would make every link expire on a schedule nobody chose. What
-   * decides a pin is whether the branch still answers for it, which the asset lanes find out by
-   * asking.
-   *
-   * A session with no delivery branch behind it (an uploaded bundle, a local project) gets no
-   * revision surface at all rather than an empty control.
+   * A pin is honoured whether or not it is in that list (the feed only covers about a dozen
+   * publishes); the asset lanes decide by asking the branch. Sessions without a delivery branch get
+   * no revision surface.
    */
   private fun RoutingContext.catalogRevisions(
     renderHost: ServeHost,
@@ -5188,23 +4460,19 @@ class ServeHttpServer(
         ServeCatalogRevision.normalize(call.request.queryParameters[ServeCatalogRevision.PARAM]),
       revisions = if (previewId == null) host.revisions else availableRevisions(host, previewId),
       repo = host.provenance?.repo,
-      // The publish this page is being assembled FROM, which every frame on it is scoped to. It
-      // rides with the pin because they answer one question between them: a pinned page's frames
-      // take the pin, an unpinned page's take this ([ServeWeb.assetQuery]).
+      // The publish this page is assembled from: pinned pages' frames take the pin, unpinned ones
+      // take this ([ServeWeb.assetQuery]).
       generation = catalogGeneration(renderHost),
     )
   }
 
   /**
-   * The catalog publishes as they apply to one preview, newest first.
+   * Catalog publishes as they apply to one preview, newest first.
    *
-   * A delivery branch's feed is catalog-wide, so it includes commits from before a newly-added
-   * preview existed. Offering those as this preview's versions only manufactures links to honest
-   * 404s. The publisher rolls a compact preview index forward with every catalog generation, so
-   * this is an in-memory lookup rather than one historical `catalog.json` fetch per row. A missing
-   * index fails open, keeping older publishers backward-compatible. Once a valid index exists, an
-   * unindexed commit is not a catalog generation (for example a parity-issue refresh on the same
-   * delivery branch), so it is omitted rather than offered as another copy of the same image.
+   * The feed is catalog-wide, so commits from before the preview existed are dropped using the
+   * compact preview index the publisher rolls forward (an in-memory lookup). A missing index fails
+   * open for older publishers; once one exists, an unindexed commit (e.g. a parity-issue refresh)
+   * is omitted.
    */
   private fun availableRevisions(
     host: ServeBundleHost,
@@ -5217,10 +4485,8 @@ class ServeHttpServer(
       host.revisions.filterIndexed { index, revision ->
         index == 0 || host.revisionContainsPreview(revision.commit, previewId) != false
       }
-    // history.json is ordered newest-first but contains only distinct image versions. Merge those
-    // durable rows with the branch feed, whose extra rows preserve unchanged publishes while they
-    // remain visible. Sorting by their ISO publish date restores the chronology across both
-    // sources; the map keeps the feed's richer record when a commit appears in both.
+    // Merge history.json's distinct image versions with the branch feed's rows, sort by ISO publish
+    // date, and prefer the feed's record when a commit appears in both.
     val tail =
       (host.indexedPreviewRevisions(previewId) + fromFeed)
         .associateBy { it.commit }
@@ -5232,23 +4498,15 @@ class ServeHttpServer(
   }
 
   /**
-   * Answer one **pinned** image request: the published bytes at a delivery-branch commit, or a 404
-   * naming why there are none.
-   *
-   * `(commit, path)` is immutable, so the response is `immutable` too — a pinned page reloads and a
-   * shared link re-opens without touching the branch again — under exactly the same public/private
-   * split the other content-addressed lanes use ([prebakedImageCacheControl]): on a token-gated box
-   * the URL carries the bearer token, and licensing a shared proxy to keep private catalog imagery
-   * for a year is not a trade a permalink is worth.
+   * Answer one pinned image request: the published bytes at a delivery-branch commit, or a 404
+   * saying why there are none. `(commit, path)` is immutable, so the response is too, under the
+   * same public/private split as other content-addressed lanes ([prebakedImageCacheControl]); on a
+   * token-gated box the URL carries the token, so shared proxies must not keep it.
    */
   private suspend fun RoutingContext.respondPinnedAsset(
     outcome: ServeBundleHost.PinnedOutcome?,
     missing: String,
-    /**
-     * Applied to the bytes on the way out, for the render lane's `?bg=` stage. Identity everywhere
-     * else — a design reference is already opaque art, and a permalink to one has nothing to
-     * composite.
-     */
+    /** Applied to the bytes on the way out, for the render lane's `?bg=`; identity elsewhere. */
     transform: suspend (ByteArray) -> ByteArray = { it },
   ) {
     when (outcome) {
@@ -5256,9 +4514,8 @@ class ServeHttpServer(
         markGeneration("pinned-asset", prebakedImageCacheControl(isPublic))
         call.respondBytes(transform(outcome.bytes), ContentType.Image.PNG)
       }
-      // The lane is admission-bounded, and a shed request is not a dead link. Saying so with a 503
-      // + Retry-After keeps a link checker (and a visitor) from concluding that a revision which
-      // exists is gone, and tells a well-behaved client when to come back.
+      // A shed request answers 503 + Retry-After so link checkers and visitors don't conclude the
+      // revision is gone.
       ServeBundleHost.PinnedOutcome.Busy -> {
         call.response.headers.append(HttpHeaders.RetryAfter, "5")
         call.respondText(
@@ -5330,14 +4587,10 @@ class ServeHttpServer(
           )
         return@withLeasedSession
       }
-      // A reference is republished with the catalog, so this lane reads the branch for the same two
-      // reasons the render lane does: an explicit `at=` pin, and a `gen=` naming a publish this
-      // host is no longer serving ([ServeCacheGeneration]). The second is what keeps a comparison
-      // page that a refresh overtook scoring its own generation's mock rather than today's.
+      // References are republished with the catalog, so this lane reads the branch for an explicit
+      // `at=` pin or a `gen=` this host no longer serves ([ServeCacheGeneration]).
       val pinnedCommit = requestedPin ?: staleGeneration(renderHost)
-      // A pinned comparison has to pin BOTH panels. A reference is republished with the catalog
-      // like everything else, so leaving this lane on the tip would score today's mock against a
-      // historical render — a comparison of two moments rather than of two sides.
+      // A pinned comparison must pin both panels, or it compares two moments.
       if (pinnedCommit != null) {
         respondPinnedAsset(
           outcome =
@@ -5352,10 +4605,8 @@ class ServeHttpServer(
       if (bytes == null) {
         call.respond(HttpStatusCode.NotFound)
       } else {
-        // A `gen=` that reached here names the generation on disk, so these bytes are what that URL
-        // will always answer with — content-addressed, and cacheable on the terms every other
-        // content-addressed lane uses. Without one the URL is a moving target and keeps the short
-        // private lifetime it always had.
+        // A `gen=` here names the generation on disk, so the response is content-addressed and
+        // cacheable; without one it keeps the short private lifetime.
         markGeneration(
           "design-reference",
           if (carriesCurrentGeneration(renderHost)) prebakedImageCacheControl(isPublic)
@@ -5368,11 +4619,8 @@ class ServeHttpServer(
 
   /** The catalog's published design pages, or a 404 when it publishes none. */
   /**
-   * The catalog-wide motion browser (see [ServeWeb.motionIndexPage]).
-   *
-   * 404s when the catalog records nothing, exactly as the design-page index does for a catalog that
-   * publishes no pages: the landing gates its chip on the same count, so a reader only reaches this
-   * by typing the URL, and a page reading "0 recordings" is a worse answer than "there are none".
+   * The catalog-wide motion browser ([ServeWeb.motionIndexPage]). 404s when the catalog records
+   * nothing, matching the landing chip's gate.
    */
   private suspend fun RoutingContext.handleMotionIndex(sessionInPath: Boolean) {
     if (rejectBadToken()) return
@@ -5428,9 +4676,8 @@ class ServeHttpServer(
     ) { renderHost ->
       val pages = renderHost.designPages().pages
       if (pages.isEmpty()) {
-        // 404 in both spellings, for the reason the HTML form does it: a catalog that publishes no
-        // sheets has no coverage to report, and `{"pages":[]}` reads as "measured, nothing there"
-        // to exactly the check that would gate on it.
+        // 404 in both spellings: a catalog with no sheets has no coverage, and `{"pages":[]}` would
+        // read as "measured, nothing there".
         if (json) call.respond(HttpStatusCode.NotFound)
         else respondNotFoundHtml("This design system publishes no design pages.")
         return@withLeasedSession
@@ -5473,25 +4720,16 @@ class ServeHttpServer(
   }
 
   /**
-   * One published design page: its view, or — when the name carries a `.svg` suffix — the cached
-   * export itself. The export is the design's own, staged at catalog load and sanitized once by
-   * [ServeDesignPageStore]; the server holds no Figma credential and never fetches it per request.
-   *
-   * The asset route answers the *same* sanitized markup the view inlines, deliberately. Serving the
-   * branch's raw bytes here would publish markup this server has already judged unsafe to inline,
-   * and two different answers for one URL is how a check gets bypassed.
+   * One published design page: its view, or with a `.svg` suffix the cached export. The export is
+   * staged at catalog load and sanitized once by [ServeDesignPageStore]; no Figma credential or
+   * per-request fetch. The asset route serves the same sanitized markup the view inlines, never the
+   * raw branch bytes.
    */
   /**
-   * `GET /{system}/pages/assets/{id}` — the bytes of one shared backplate.
-   *
-   * Served **only** through [ServeDesignPageStore.asset], never from a path the manifest supplies.
-   * That is the whole safety property of this route: the store has already checked the declaration,
-   * the containment of the path, the file's signature and its size, so an id that resolves here is
-   * one this server decided to serve. Reading the manifest's `uri` directly would hand a delivery
-   * branch an arbitrary file read.
-   *
-   * `immutable`, like `/hero/`: the id IS the content hash, so this URL can never come to mean
-   * different bytes and a repeat visitor paints the scene from cache without asking.
+   * `GET /{system}/pages/assets/{id}`: one shared backplate's bytes. Served only via
+   * [ServeDesignPageStore.asset], which has checked declaration, path containment, signature and
+   * size; reading the manifest's `uri` directly would be an arbitrary file read. `immutable`: the
+   * id is the content hash.
    */
   private suspend fun RoutingContext.handleDesignPageAsset(sessionInPath: Boolean) {
     if (rejectBadToken()) return
@@ -5519,9 +4757,8 @@ class ServeHttpServer(
     val (webSessionId, basePath) = webSessionAndBase(sessionInPath)
     val name = call.parameters["name"].orEmpty()
     val isImage = name.endsWith(".svg")
-    // `.json` is the third spelling of the same page, and `?format=json` on the view is the fourth
-    // — the `/status` convention, so a caller that already knows it doesn't have to learn a path.
-    // Neither applies to the export: `.svg?format=json` names bytes, not a document about them.
+    // `.json` and `?format=json` are the third and fourth spellings of the page (the `/status`
+    // convention); neither applies to the `.svg` export.
     val isJson = !isImage && (name.endsWith(".json") || wantsJson())
     val pageId = name.removeSuffix(".svg").removeSuffix(".json")
     // A machine caller gets machine answers all the way down, misses included.
@@ -5563,17 +4800,9 @@ class ServeHttpServer(
         )
         return@withLeasedSession
       }
-      // The sibling catalog's rendition of the very cells this sheet defines, resolved per node
-      // through the same `compareWith` + `parallel` pairing the viewer's spec lane uses. A sheet is
-      // where that comparison finally has somewhere to live: the pairing has always been able to
-      // answer "what does wear-m3 make of THIS component", and until now a reader had to open one
-      // component at a time to ask it.
-      //
-      // Skipped whole on a top-level site, for [parallelSpecSource]'s reason: a site host answers a
-      // neighbouring system's `/render/` with its own 404, so the images could only ever be broken.
-      // Skipped just as cheaply on the ordinary catalog, since `resolveParallel` returns null on
-      // the
-      // first step for anything that declares no `compareWith`.
+      // The sibling catalog's rendition of this sheet's cells, resolved per node through the
+      // `compareWith` + `parallel` pairing. Skipped on a top-level site ([parallelSpecSource]: the
+      // sibling's `/render/` 404s there) and cheap for catalogs with no `compareWith`.
       val previewsById = renderHost.previews.associateBy { it.id }
       val parallelRenders = LinkedHashMap<String, String>()
       var parallelLabel: String? = null
@@ -5591,18 +4820,15 @@ class ServeHttpServer(
           moduleLabel = renderHost.label,
           page = page,
           svg = svg,
-          // The scene beneath the sheet. `background` is the store's VERIFIED set — a plate whose
-          // file is not the format, size and path its record claimed is already absent — and
-          // `assetHref` resolves through the store again, so a placement naming anything unverified
-          // yields no URL and is dropped rather than drawn as a hole.
+          // The scene beneath the sheet: `background` is the store's verified set, and `assetHref`
+          // resolves through the store again, so unverified placements are dropped.
           background = store.background(page),
           assetHref = { id -> store.asset(id)?.let { pageAssetUrl(sessionId, id) } },
           fileKey = store.fileKey,
           parallelRenders = parallelRenders,
           parallelLabel = parallelLabel,
-          // Named only when there is a second catalog to tell it apart from. On its own a sheet has
-          // one set of renders and calling them "Ours" is both shorter and unambiguous; beside
-          // `wear-m3`, a button reading `Ours` is the half of the pair that doesn't say what it is.
+          // Named only when there is a second catalog to distinguish from; alone, "Ours" is
+          // unambiguous.
           ownLabel =
             if (parallelRenders.isEmpty()) null
             else
@@ -5631,9 +4857,8 @@ class ServeHttpServer(
   }
 
   /**
-   * One staged rc-compare lane image — a player's published render of an `ir/<id>.rc` document, or
-   * the build-time pixel diff of it against the baked PNG. Immutable for the life of a catalog
-   * generation (a refresh restages them), so it caches like the baked PNGs do.
+   * One staged rc-compare lane image (a player's render of `ir/<id>.rc`, or its build-time diff
+   * against the baked PNG). Immutable for a catalog generation, cached like the baked PNGs.
    */
   private suspend fun RoutingContext.handleRcCompareAsset(sessionInPath: Boolean) {
     if (rejectBadToken() || rejectMalformedGeneration()) return
@@ -5641,10 +4866,8 @@ class ServeHttpServer(
     val name = "${call.parameters["lane"].orEmpty()}/${call.parameters["name"].orEmpty()}"
     withLeasedSession(sessionId, onMissing = { call.respond(HttpStatusCode.NotFound) }) { renderHost
       ->
-      // The catalog restages these on refresh and keeps only the current staging, so a wall from an
-      // earlier publish has no answer here — and today's raster under that publish's printed
-      // mismatch percentage is a confident number about two pictures that were never compared.
-      // Refusing lets the page reload instead ([ServeCacheGeneration]).
+      // Only the current staging is kept, so a wall from an earlier publish gets a refusal rather
+      // than today's raster under that publish's mismatch number ([ServeCacheGeneration]).
       val stale = staleGeneration(renderHost)
       if (stale != null) {
         call.respondText(
@@ -5695,14 +4918,9 @@ class ServeHttpServer(
             preview.sourceFile,
           )
         }
-      // The frame this page drew, named as the page names it: an override-free, unpinned
-      // comparison carries the generation it was assembled from, so a report filed from here
-      // embeds the pixels the verdict above it was measured on rather than whatever the catalog
-      // publishes by the time someone opens the issue ([ServeCacheGeneration]).
-      //
-      // Both panels take it, exactly as the page's own `assetQuery` gives both of them one suffix:
-      // a report that embedded this generation's render beside the reference lane's tip would be a
-      // comparison across two publishes, which is the failure the shared scope exists to prevent.
+      // The frame this page drew: an override-free, unpinned comparison carries its generation, so
+      // a report embeds the pixels the verdict was measured on ([ServeCacheGeneration]). Both
+      // panels take it, like the page's `assetQuery`.
       val assetQuerySuffix =
         if (
           overrideParams.isEmpty() &&
@@ -5731,10 +4949,8 @@ class ServeHttpServer(
               "${externalOrigin()}$basePath/render/${WebEscaping.urlEncodeSegment(preview.id)}" +
                 ".png$assetQuerySuffix"
             ),
-          // …and the panel it is being compared against, so the issue opens showing the
-          // disagreement rather than one side of it (#4765). The reference the PAGE resolved, not
-          // the query's raw value: `?reference=` may be absent, in which case both this and the
-          // panel above it are the preview's first.
+          // …and the reference panel, so the issue shows both sides. The reference the page
+          // resolved, since `?reference=` may be absent.
           referenceUrl =
             ServeIssueReport.withoutToken(
               "${externalOrigin()}$basePath/reference/" +
@@ -5746,10 +4962,8 @@ class ServeHttpServer(
         ServeWeb.ReportIssue(
           action = ServeIssueReport.action(reportContext.repo),
           body = ServeIssueReport.body(reportContext),
-          // The template the page's JS fills. It carries the selection placeholder as well as the
-          // render and score ones: what the reporter picked is decided by clicking, after the page
-          // was served, and it belongs in the SAME locator block the server already wrote rather
-          // than in a second block a producer would have to reconcile.
+          // The template the page's JS fills, including the selection placeholder, so picks land in
+          // the same locator block the server wrote.
           bodyTemplate =
             ServeIssueReport.body(
               reportContext,
@@ -5762,37 +4976,24 @@ class ServeHttpServer(
         )
       val revisions = catalogRevisions(renderHost, preview.id)
       val pinned = revisions.pinned != null
-      // Whether the frame on screen is the catalog's BAKED render, replayed rather than produced
-      // for this request — the one condition under which the server can promise that a product
-      // fetched by a SEPARATE request (`.png` vs `.annotations`) describes the same frame.
-      // `canApplyOverrides` is false exactly for the hosts that replay baked pixels for an
-      // override-free browse; a daemon-backed host renders per request, so its two products may
-      // disagree wherever output varies (animation, conditional composition, live data). A pin or
-      // an override re-renders on any host, and `tagIndexForPreview` is the published static index
+      // Whether the frame on screen is the catalog's baked render replayed, rather than produced
+      // for this request — the condition under which a separately fetched product (`.png` vs
+      // `.annotations`) describes the same frame. `canApplyOverrides` is false exactly for hosts
+      // replaying baked pixels; a pin or override re-renders on any host; `tagIndexForPreview` is
       // measured in CI over the baked render.
       //
-      // This used to be necessary but NOT sufficient, and the gap was caching: an override-free
-      // baked `/render/<id>.png` was served on a lifetime of its own while this index was fetched
-      // separately, so a client could pair one generation's pixels with another generation's
-      // bounds. That matters because a tag selection persists the index's bounds as the acceptance
-      // baseline — bounds from another frame surviving into a record that later reports an
-      // unchanged element as moved.
-      //
-      // Closed by [ServeCacheGeneration] (issue #4695), and it took BOTH halves. The frame URL and
-      // this page's `/tags/<id>` URL are scoped to the same publish, the frame lane answers for
-      // that publish out of the delivery branch, and the tag lane — which can only ever describe
-      // today's render — refuses a generation the catalog has moved on from rather than answering
-      // with bounds measured on a different frame. So the pair on screen is one publish or the
-      // picker fails closed. The condition below is now sufficient as well as necessary.
+      // Caching is handled by [ServeCacheGeneration]: the frame URL and `/tags/<id>` URL are scoped
+      // to the same publish, and the tag lane refuses a generation the catalog has moved past, so
+      // the pair is one publish or the picker fails closed.
       val frameIsReplayedBaked =
         !pinned && overrideParams.isEmpty() && !renderHost.canApplyOverrides
       val tagIndex = renderHost.tagIndexForPreview(preview.id)
       val tagsDescribeFrame = frameIsReplayedBaked && tagIndex.isNotEmpty()
       val tagSelectionNote =
         when {
-          // A pin or an override means the frame was produced for this request, so NEITHER the
-          // published tag index nor the separately-fetched annotation layer describes it. Both
-          // selectors are withheld together, and the note says so once.
+          // A pin or override means the frame was produced for this request, so neither the
+          // published tag index nor the separately fetched annotations describe it; both selectors
+          // are withheld with one note.
           pinned ->
             "Element selection is off on a pinned revision: the tag index and the semantics " +
               "layers describe the current render, not this one. Drag a region instead."
@@ -5820,9 +5021,7 @@ class ServeHttpServer(
           changelogHref = changelogHref(sessionId, basePath, webSessionId),
           isPublic = isPublic,
           trust = catalogBundleHost(renderHost)?.let { BundleVerifier.summary(it.trust) },
-          // …and it must not drop the catalog's stage either: a dark-first system's sticker is
-          // drawn for a dark ground, so comparing it on the default one hid the very pixels the
-          // page was opened to inspect (yschimke/wear-m3-catalog#56).
+          // …nor the catalog's stage: a dark-first sticker needs its dark ground.
           declaredSurface = catalogBundleHost(renderHost)?.stageSurface,
           // Stepping from the themed comparison table into its focused Reference/Diff/Actual view
           // must not drop back to the built-in chrome mid-journey.
@@ -5830,81 +5029,46 @@ class ServeHttpServer(
           unfurl = ServeWeb.UnfurlMetadata(pageUrl = externalPageUrl()),
           version = SERVE_VERSION,
           displayTitle = catalogBundleHost(renderHost)?.title,
-          // Annotation layers describe the CURRENT catalog's layout and typography. Drawing them
-          // over a pinned pair would overlay today's bounds on historical pixels and label the
-          // result as that revision's spec — the same "current output on a pinned page" the viewer
-          // refuses, arriving through a payload rather than a lane. They are published per catalog
-          // load, not per revision, so there is nothing historical to draw instead.
+          // Annotation layers describe the current catalog's layout; on a pinned pair they would
+          // label historical pixels with today's spec, and nothing per-revision exists.
           referenceAnnotations =
             if (pinned) emptyList() else renderHost.annotationsForReference(reference.id),
           actualAnnotations =
             if (pinned) emptyList() else renderHost.annotationsForPreview(previewId),
-          // Withheld on a pin for the same reason the layers above are, and more sharply: a
-          // finding's anchors are bounds in the PUBLISHED render's pixel space, so drawing them
-          // over a historical frame would point at whatever happens to sit at those coordinates
-          // today and label it with a claim about a different render. The prose would be wrong too
-          // — a padding the catalog has since fixed would read as an open defect on the revision
-          // that still has it, which is the one page where that reading is least recoverable.
+          // Withheld on a pin (anchors are bounds in the published render's pixel space) and under
+          // an override (the verdict was measured on the published frame, so its claims would be
+          // false for what is on screen). The redline survives overrides as a reading aid; a
+          // verdict is a claim.
           //
-          // …and withheld under an OVERRIDE, which the annotation layers above are not. A knob, a
-          // font scale, a locale or a theme re-renders the Actual panel, and this verdict was
-          // measured on the frame the catalog published: the boxes would land beside the elements
-          // they name, and the sentences would assert a padding nobody is looking at. The redline
-          // survives an override because it is a reading aid that degrades to being slightly out
-          // of date; a verdict is a CLAIM, and a claim about pixels that are not on screen is
-          // simply false.
-          //
-          // Deliberately NOT `frameIsReplayedBaked`, which also excludes every host that renders
-          // per request: an override-free browse of a daemon-backed catalog draws the same
-          // component at the same size, so gating on that would take the panel away from every
-          // live catalog to buy nothing. The hazard is a frame the VIEWER moved, and these two
-          // conditions are exactly that.
+          // Not `frameIsReplayedBaked`, which would also hide the panel on every
+          // per-request-rendering host where an override-free browse draws the same frame.
           parityFindings =
             if (pinned || overrideParams.isNotEmpty()) emptyList()
             else renderHost.parityFindingsFor(previewId, reference.id),
-          // Same rule as the authored layers above, for the same reason: the derived ones are
-          // projected from TODAY's render, so drawing them over a pinned frame would label
-          // historical pixels with the current semantics tree.
+          // Same rule as the authored layers: derived ones come from today's render.
           derivedAnnotations = !pinned && renderHost.hasDesignAnnotationsFor(preview.id),
-          // The baked half of the same Typography layer, read here for the same reason the viewer
-          // reads it: a published catalog measured typography off the frame it also published, so
-          // the layer works on a host with no daemon at all. Without it this page's mount was
-          // gated on the semantics lane alone — which no selectable host has — and the annotation
-          // pick below could never be offered to anyone.
+          // The baked Typography lane, as in the viewer: published typography measured off the
+          // published frame works without a daemon, which is what makes the annotation pick below
+          // offerable at all.
           publishedTypography = !pinned && renderHost.hasPublishedTypographyFor(preview.id),
-          // The layers still DRAW on a re-rendered frame — they are a reading aid and being a
-          // render out of date costs nothing there. Clicking one is different: it records a region
-          // as an acceptance's authoring-time baseline, and `.annotations` is a separate request
-          // from the PNG the client already decoded, so on a host that renders per request the two
-          // can describe different frames wherever output varies. The drag is unaffected: it is
-          // read off the displayed pixels, so it describes what the reporter saw by construction.
+          // Layers still draw on a re-rendered frame, but clicking one records a baseline, and on a
+          // per-request host `.annotations` and the decoded PNG may differ. Drags read displayed
+          // pixels and are unaffected.
           //
-          // `frameIsReplayedBaked` alone is NOT enough here, and the difference is the whole point:
-          // it names the PNG lane, while both live catalog wrappers keep the PNG baked for an
-          // override-free browse and still ask their daemon for annotations first. A baked frame
-          // with live annotations is the same mismatch by another route, so the host states which
-          // lane its annotations follow rather than having it inferred from a neighbouring flag.
+          // `frameIsReplayedBaked` alone isn't enough: live wrappers keep the PNG baked but ask the
+          // daemon for annotations, so the host states which lane its annotations follow.
           annotationsSelectable = frameIsReplayedBaked && renderHost.annotationsFollowBakedFrame,
           tagIndexAvailable = tagsDescribeFrame,
           tagSelectionNote = tagSelectionNote,
-          // The acceptance band, and only on a catalog that has published a document. Absent rather
-          // than empty: an empty band would appear on every comparison in every catalog, and the
-          // page would also carry the engine's bundle — the heaviest asset on it — to evaluate
-          // nothing.
+          // The acceptance band, only for a catalog that published a document (absent rather than
+          // empty, saving the engine bundle).
           //
-          // **And never on a pinned revision.** Both panels take the pin, so the pixels are
-          // historical — while the document, and the `referenceSha256` below, come from the catalog
-          // as it is *now*. The fingerprint gate would then be comparing today's metadata against
-          // yesterday's bytes: it can pass, and an acceptance authored long after that revision
-          // would be reported as `valid` and suppress pixels on a comparison it was never published
-          // for. A historical revision's acceptances are not published, so there is nothing correct
-          // to show here and the honest answer is to show nothing. The other layers on this page
-          // are withheld on a pin for the same reason.
+          // Never on a pinned revision: the pixels are historical but the document and
+          // `referenceSha256` are current, so the fingerprint gate could pass and suppress pixels
+          // with an acceptance never published for that revision.
           //
-          // The scope fields are read from the SAME `reportContext` the locator is written from,
-          // not derived a second time. An acceptance matches on every recorded field, `system` and
-          // `component` included, so two spellings of one identity would let a record miss the very
-          // comparison it was authored on.
+          // Scope fields come from the same `reportContext` as the locator, so a record always
+          // matches the comparison it was authored on.
           knownDifferences =
             renderHost
               .knownDifferences()
@@ -5912,15 +5076,8 @@ class ServeHttpServer(
               ?.let {
                 val system = reportContext.system
                 val component = reportContext.componentId
-                // Both are optional on a report — a page-scoped one names neither — and
-                // **required**
-                // by an acceptance's scope, which matches on every recorded field. A comparison
-                // that
-                // cannot name its system or its component can therefore never match a record, so
-                // the
-                // band and its bundle are left off rather than evaluating a document that has
-                // nothing
-                // to say about this page.
+                // Both are optional on a report but required by an acceptance's scope; without them
+                // nothing can match, so the band and bundle are omitted.
                 if (system == null || component == null) return@let null
                 KnownDifferenceScope(
                   system = system,
@@ -5929,17 +5086,11 @@ class ServeHttpServer(
                   referenceId = reference.id,
                   variant = reportContext.variant,
                   overrides = overrideParams,
-                  // Null when the reference publishes no digest, which is `reference-hash-missing`
-                  // and a **refusal**: the fingerprint gate has nothing to compare against, and a
-                  // gate
-                  // that cannot have fired must not be reported as having passed.
+                  // Null when the reference publishes no digest (`reference-hash-missing`): a
+                  // refusal, since a gate that couldn't run must not report a pass.
                   referenceSha256 = reference.raster.sha256,
-                  // Empty unless the published index describes the frame on screen. That is the
-                  // same
-                  // gate the element *picker* is behind, and for a stronger reason here: an
-                  // element-scoped acceptance whose gate cannot run suppresses nothing, so handing
-                  // over an index measured on a different render would report an element that never
-                  // moved as moved — a false invalidation with a plausible explanation attached.
+                  // Empty unless the published index describes the frame on screen (the picker's
+                  // gate); otherwise an element-scoped acceptance would report a false move.
                   tagIndex =
                     if (!tagsDescribeFrame) emptyMap()
                     else
@@ -5973,24 +5124,16 @@ class ServeHttpServer(
   }
 
   /**
-   * Admin gate: the `/admin/catalogs` routes require [adminToken] — **never** the browse token, and
-   * never open in `--public` mode (a public box publishes its browse URL to the world). Responds
-   * 404 like the browse gate so the surface isn't confirmed to a scanner, and compares in constant
-   * time.
+   * Admin gate: the admin routes require [adminToken] — never the browse token, never open under
+   * `--public`. Responds 404 like the browse gate and compares in constant time.
    *
-   * The credential is read from the [ADMIN_TOKEN_HEADER] header only — never a `?token=` query
-   * parameter. A query string is written to proxy access logs and browser history, and carried in
-   * `Referer`; a header is not. Every in-repo caller (the CI publish script, the admin page's
-   * script, the documented `curl` lines) already sends the header.
+   * Read from the [ADMIN_TOKEN_HEADER] header only, never `?token=`, which leaks into proxy logs,
+   * history and `Referer`. All in-repo callers send the header.
    */
   private suspend fun RoutingContext.rejectBadAdminToken(allowReadToken: Boolean = false): Boolean {
     val provided = call.request.headers[ADMIN_TOKEN_HEADER]
-    // An unconfigured token is not a token everyone matches. `tokensMatch` compares bytes, so a
-    // blank expected value is satisfied by an empty header — which would turn "the operator never
-    // set a
-    // credential" into "no credential is required", the exact inversion the `*Enabled` flags below
-    // exist to prevent. They gate registration; this gates the check, so a route that forgets to
-    // pair itself with one still fails closed rather than open.
+    // A blank configured token must not match an empty header; this keeps any route that forgets
+    // its `*Enabled` registration gate fail-closed.
     if (adminToken.isNullOrBlank() && (!allowReadToken || adminReadToken.isNullOrBlank())) {
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return true
@@ -6015,13 +5158,10 @@ class ServeHttpServer(
   )
 
   /**
-   * UI-builder-only admin gate; never used by catalog, trust, site, or onboarding routes.
-   *
-   * Like [rejectBadAdminToken] it reads the token from [ADMIN_TOKEN_HEADER] only. The single
-   * exception is [allowPageQueryToken], which `GET /admin/ui-builder` alone sets: a browser can
-   * only open a page by URL, so the HTML shell still accepts `?token=`. That page carries no design
-   * data — its script strips the parameter from the address bar on load and sends the token in the
-   * header to every JSON route, none of which accepts the query form.
+   * UI-builder-only admin gate; never used by catalog, trust, site, or onboarding routes. Reads
+   * [ADMIN_TOKEN_HEADER] only, except with [allowPageQueryToken] (set by `GET /admin/ui-builder`
+   * alone): a browser opens pages by URL, so that data-free shell accepts `?token=`, strips it on
+   * load, and uses the header for every JSON route.
    */
   private suspend fun RoutingContext.uiBuilderAdminAccess(
     allowReadToken: Boolean = false,
@@ -6179,12 +5319,9 @@ class ServeHttpServer(
   }
 
   /**
-   * `POST /admin/onboard`: publish every catalog a GitHub repository delivers, from its URL alone.
-   *
-   * Answers 200 as long as *something* is serving as a result — including the idempotent re-post of
-   * a project already onboarded here — with the per-catalog outcomes in the body, so a repository
-   * whose second catalog wouldn't fetch doesn't hide the first one that did. Only a repository
-   * where nothing at all ended up serving is an error status.
+   * `POST /admin/onboard`: publish every catalog a GitHub repository delivers, from its URL.
+   * Answers 200 if anything ends up serving (including idempotent re-posts), with per-catalog
+   * outcomes; only total failure is an error status.
    */
   private suspend fun RoutingContext.handleAdminOnboard(onboarding: ServeOnboarding) {
     val body =
@@ -6235,9 +5372,8 @@ class ServeHttpServer(
         call.respondText(
           JSON.encodeToString(AdminOnboardResponse.serializer(), payload),
           ContentType.Application.Json,
-          // Every discovered branch failed to publish: the request was well-formed and the
-          // repository readable, so the fault is upstream — the same bad-gateway reading a failed
-          // `POST /admin/catalogs` gets.
+          // Every discovered branch failed to publish: an upstream fault, so bad gateway, as for
+          // `POST /admin/catalogs`.
           status = if (result.served.isEmpty()) HttpStatusCode.BadGateway else HttpStatusCode.OK,
         )
       }
@@ -6245,11 +5381,8 @@ class ServeHttpServer(
   }
 
   /**
-   * `POST /admin/onboard/scan`: what Compose previews are in a pasted repository.
-   *
-   * Answers 200 even when the repository holds no previews — that is a *finding*, not an error, and
-   * the body says which modules were looked at and why each was passed over. Only a URL that isn't
-   * one (400) or a repository that couldn't be cloned (502) is a failure status.
+   * `POST /admin/onboard/scan`: what Compose previews are in a pasted repository. 200 even with
+   * none (a finding, with per-module reasons); 400 for a bad URL, 502 if cloning fails.
    */
   private suspend fun RoutingContext.handleAdminOnboardScan(onboarding: ServeSourceOnboarding) {
     val request = receiveOnboardSourceRequest() ?: return
@@ -6421,8 +5554,8 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /admin/settings`: `settings.json` as stored, and for every setting what is serving, where
-   * it came from, and whether the file or the environment changes it at the next start.
+   * `GET /admin/settings`: `settings.json` as stored, plus each setting's serving value, its
+   * source, and what changes at next start.
    */
   private suspend fun RoutingContext.respondAdminSettings(admin: ServeSettingsAdmin) {
     val (configured, problem) =
@@ -6559,10 +5692,8 @@ class ServeHttpServer(
   }
 
   /**
-   * Map a [ServeSiteAdmin.Result] onto its HTTP status + JSON body.
-   *
-   * A 409 for "already exactly this" is what makes the reconcile additive and re-runnable: the
-   * publish script treats it as success, so a config pushed twice converges instead of erroring.
+   * Map a [ServeSiteAdmin.Result] onto an HTTP status + JSON body. A 409 for "already exactly this"
+   * lets the publish script treat re-runs as success.
    */
   private suspend fun RoutingContext.respondAdminSiteResult(result: ServeSiteAdmin.Result) {
     when (result) {
@@ -6582,11 +5713,8 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /admin/ui-builder/library`: every design the catalogs this host serves publish.
-   *
-   * On the IO dispatcher because a cold index is an HTTP round trip per catalog, and best-effort
-   * per catalog inside the library itself: one project's unreachable branch must not empty the
-   * screen for the rest.
+   * `GET /admin/ui-builder/library`: every design the served catalogs publish. On IO (a cold index
+   * is an HTTP round trip per catalog), best-effort per catalog.
    */
   private suspend fun RoutingContext.respondAdminUiBuilderLibrary(
     library: ServeUiBuilderDesignLibrary
@@ -6615,15 +5743,12 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /admin/ui-builder/component-library`: every component the projects this host serves share.
-   *
-   * On the IO dispatcher and best-effort per project for the reasons the design listing is: a cold
-   * index is one HTTP round trip per project, and one unreachable branch must not empty the list
-   * for the rest.
+   * `GET /admin/ui-builder/component-library`: every component the served projects share. On IO and
+   * best-effort per project, like the design listing.
    */
   /**
-   * Every place a shared component is read from: the projects first, then what this host's editors
-   * published, so a component committed to a project shadows the host copy of it.
+   * Every place a shared component is read from: projects first, then this host's editors, so a
+   * committed component shadows the host copy.
    */
   private fun uiBuilderComponentCatalogs(): List<ServeUiBuilderDesignLibrary.Coordinate> =
     uiBuilderDesignCatalogs() + uiBuilderComponentStore?.coordinates().orEmpty()
@@ -6656,21 +5781,17 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /admin/ui-builder/component-library/{system}/{componentId}`: one symbol, checked.
-   *
-   * Answers with the body an importing design would copy in and the digest it would record beside
-   * the id — the pair that lets a later read say the library moved rather than silently redrawing.
-   * A symbol that does not check out is a 404 with the reason the library logged: from the caller's
-   * side there is no such usable component, which is the same answer as none at all.
+   * `GET /admin/ui-builder/component-library/{system}/{componentId}`: one symbol, checked. Answers
+   * the body a design would import and the digest it would record. A symbol that doesn't check out
+   * is a 404 with the library's logged reason.
    */
   private suspend fun RoutingContext.respondAdminUiBuilderComponentSymbol(
     library: ServeUiBuilderComponentLibrary,
     system: String,
     componentId: String,
   ) {
-    // Every coordinate for this system, not the first: `--ui-builder-designs` can name a local
-    // checkout for the same system a served catalog covers, and the listing flattens both. Taking
-    // only the head made a component published solely on the branch 404 here while appearing there.
+    // Every coordinate for this system, not just the first: `--ui-builder-designs` can name a local
+    // checkout for a system a served catalog also covers.
     val catalogs = uiBuilderComponentCatalogs().filter { it.system == system }
     if (catalogs.isEmpty()) {
       call.respondText(
@@ -6679,11 +5800,10 @@ class ServeHttpServer(
       )
       return
     }
-    // In configured order, so a local export still shadows the branch when both publish the id, and
-    // the first *usable* one answers: a source that publishes the id but fails the library's checks
-    // should not hide a good symbol behind it, having already been reported in the log.
-    // One index read per coordinate feeds both the metadata and the body, so they describe the same
-    // symbol even when the source is a directory somebody is exporting into as this runs.
+    // In configured order (a local export shadows the branch), taking the first usable one; failing
+    // sources were already logged.
+    // One index read per coordinate feeds both metadata and body, so they describe the same symbol
+    // even mid-export.
     val symbol =
       withContext(Dispatchers.IO) {
         catalogs.firstNotNullOfOrNull { catalog ->
@@ -6760,12 +5880,8 @@ class ServeHttpServer(
       }
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
     if (outcome is ServeUiBuilderCreate.Outcome.Created) {
-      // What the project says the design is for, carried across with it. Only on the design this
-      // call actually opened: a design already here has a links record of its own, possibly edited
-      // since, and the published index does not get to overwrite somebody's work by being re-read.
-      // And only when the document is the one the entry describes. A stale or wrongly renamed
-      // export can publish an entry for design A whose document carries id B; the design created
-      // is B, and B is not what the entry's issue and pull request are about.
+      // Carry the project's back-links across, but only for the design this call opened (existing
+      // links records aren't overwritten), and only when the document's id matches the entry's.
       entry
         ?.takeIf { it.designId == document.id }
         ?.links
@@ -6831,10 +5947,8 @@ class ServeHttpServer(
         degradedReason = degraded[it.designId],
       )
     }
-    // A design whose own stored files would not read is not in the map above — it never became a
-    // design in memory — so it would have no row here, on the page the startup warning sends an
-    // operator to, offering the one recovery it actually has. It gets a row of its own, with what
-    // is knowable about it: the id it is reported under, and why the host will not serve it.
+    // A design whose stored files won't read isn't in the map above, so give it its own row (id and
+    // reason) on the page the startup warning points to.
     val quarantined =
       (unusable.keys - designs.map { it.designId }.toSet()).sorted().map { designId ->
         AdminUiBuilderDesignDto(
@@ -6862,10 +5976,8 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /admin/ui-builder/designs/{designId}/document`: one stored design document, as JSON.
-   *
-   * Served as an attachment so the browser saves it rather than rendering it — the operator wants
-   * the file, and the admin screen links straight here.
+   * `GET /admin/ui-builder/designs/{designId}/document`: one stored design document as a JSON
+   * attachment.
    */
   private suspend fun RoutingContext.respondAdminUiBuilderDocument(
     admin: ServeUiBuilderAdmin,
@@ -6882,9 +5994,7 @@ class ServeHttpServer(
       return
     }
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
-    // The id came off the wire, so it is reduced to a safe filename rather than trusted in a header
-    // built by concatenation. The body is the record of which design this is; the filename is only
-    // a convenience.
+    // The id came off the wire, so it is reduced to a safe filename for the header.
     val filename = designId.replace(UNSAFE_FILENAME_CHARACTER, "_")
     call.response.headers.append(
       HttpHeaders.ContentDisposition,
@@ -6926,10 +6036,8 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /admin/trust`: the producers currently trusted.
-   *
-   * Pinned public keys are listed by id and name only — the key material itself is in the
-   * operator's producers.json and there's no reason to echo it back over the network.
+   * `GET /admin/trust`: the trusted producers. Pinned public keys are listed by id and name only,
+   * never key material.
    */
   private suspend fun RoutingContext.respondAdminTrust(admin: ServeTrustAdmin) {
     val store = withContext(Dispatchers.IO) { admin.list() }
@@ -6985,16 +6093,12 @@ class ServeHttpServer(
   }
 
   /**
-   * The [ServeBundleHost] carrying a catalog's browse metadata (title / subtitle / trust verdict) —
-   * the host itself for a static catalog, or the baked host a [ServeCatalogLiveHost] fronts when
-   * the catalog is served live. Null for a plain daemon module session (no bundle metadata). Lets
-   * the trust badge + card title survive a catalog being fronted by the live composite.
+   * The [ServeBundleHost] carrying a catalog's browse metadata: the host itself when static, or the
+   * baked host behind a [ServeCatalogLiveHost]. Null for a plain daemon module.
    */
   /**
-   * The catalogs on the front-page index **right now**. Read from [catalogLoads] when it's wired,
-   * because the configured set is no longer fixed at startup: the admin API publishes and retires
-   * catalogs on a running server, and the tracker is what those mutations land in. Falls back to
-   * the constructor-supplied [catalogSessions] for a plain/test server with no tracker.
+   * The catalogs on the front-page index now: from [catalogLoads] when wired (the admin API changes
+   * the set at runtime), else the constructor's [catalogSessions].
    */
   private fun listedCatalogs(): List<String> =
     catalogLoads?.snapshot()?.filter { it.config.listed }?.map { it.config.system }
@@ -7006,76 +6110,55 @@ class ServeHttpServer(
       ?: appCatalogSessions
 
   /**
-   * Whether [first] — a request's first path segment on a **site host** — names one of the server's
-   * own routes, and so is not a session at all. Everything else 404s there.
+   * Whether [first], a request's first path segment on a site host, names one of the server's own
+   * routes. Everything else 404s there.
    *
-   * This is an **allowlist**, deliberately. Enumerating what is *foreign* instead — catalog ids,
-   * registered sessions, `<system>@<rev>` — can only chase the ways a session can exist: an
-   * uploaded bundle, a suspended entry that `peekHost` reports as absent, a `--revisions` ref like
-   * `main` that is not registered at all until the generic route leases it and the factory *builds*
-   * it. The set of constant first segments is closed and already written down
-   * ([ServeSites.RESERVED_SYSTEMS]), so a site host serves its own system, serves the routes, and
-   * refuses everything else — including whatever the next session kind is.
+   * An allowlist ([ServeSites.RESERVED_SYSTEMS]) because enumerating foreign sessions can't keep up
+   * with every way a session can exist (uploads, suspended entries, `--revisions` refs the factory
+   * would build). A missing top-level route then fails visibly rather than leaking.
    *
-   * The cost is that a top-level route missing from that list 404s on a site host. That is a
-   * visible, tested failure rather than a silent leak, which is the right way round for a feature
-   * whose whole promise is that the hostname publishes one catalog.
-   *
-   * Letting a reserved segment through is only safe while **no session can be named one**, because
-   * Ktor matches whole paths and this matches a prefix: a bundle uploaded as `api` would make
-   * `/api/` (which no constant route matches) fall to `/{system}/` and serve that bundle. So the
-   * invariant is enforced at the two places a session gets its name —
-   * [ServeBundleStore.sanitizeName] refuses a reserved upload name, and [ServeSites] refuses a site
-   * whose catalog id is one.
+   * Letting a reserved segment through is only safe while no session can be named one (Ktor matches
+   * whole paths, this a prefix), so [ServeBundleStore.sanitizeName] refuses reserved upload names
+   * and [ServeSites] refuses reserved catalog ids.
    */
   private fun isRootedRoute(first: String): Boolean {
-    // The visitor's own redeemed playground session is the one session a site host must let
-    // through: this server minted it seconds ago under an unguessable token id and is redirecting
-    // them to it, so refusing it would 404 the last step of their own run.
+    // The visitor's own just-redeemed playground session (unguessable token id) must be allowed
+    // through.
     if (playgroundRedeem?.isRedeemedSession(first) == true) return true
     return first in ServeSites.RESERVED_SYSTEMS
   }
 
   /**
-   * The UI builder's page routes — shell, assets, the designs index, create/copy, a design's access
-   * and history pages — under [base]: `/ui-builder` everywhere, and `""` at the root of the builder
-   * host when `--ui-builder-host-root` is on. The handlers read only their route parameters, so the
-   * same handler serves both spellings of a page.
+   * The UI builder's page routes (shell, assets, designs index, create/copy, access and history
+   * pages) under [base]: `/ui-builder`, or `""` at the builder host root with
+   * `--ui-builder-host-root`. Handlers read only route parameters, so one handler serves both.
    */
   private fun Route.uiBuilderPageRoutes(base: String) {
-    // The builder is a distinct product surface, not a mode of the catalog-scoped Wasm
-    // preview app. Its static shell is public like the existing Wasm assets; design data and
-    // mutations remain separately authenticated API concerns.
+    // The builder's static shell is public like the Wasm assets; design data and mutations are
+    // separately authenticated.
     if (base.isNotEmpty())
       get(base) {
         if (uiBuilderDir == null) call.respondText("not found", status = HttpStatusCode.NotFound)
         else {
-          // WITH the query. On a token-gated host the credential rides as `?token=…`, and the
-          // Wasm client reads it from `location.search` — so dropping it here landed the editor
-          // on a page whose identity, design and WebSocket requests were all unauthenticated,
-          // for anyone who typed, bookmarked or was handed the slashless spelling.
+          // With the query: on a token-gated host the Wasm client reads `?token=` from
+          // `location.search`.
           val query = call.request.queryString()
           call.respondRedirect(if (query.isEmpty()) "$base/" else "$base/?$query")
         }
       }
-    // A person's index over only the designs the service says this actor may read. This is not
-    // the operator's `/admin/ui-builder`: it has no delete or document-replacement path, and a
-    // design that was never shared with the caller never reaches the page.
+    // A person's index over only the designs the service lets this actor read; no delete or
+    // document replacement (unlike `/admin/ui-builder`).
     get("${base}/designs") { handleUiBuilderDesigns() }
-    // Creating a design is a POST, and its answer is a redirect to the design's permalink.
-    // The form the New design dialog submits is an ordinary HTML form, so the browser follows
-    // the `303` itself and lands on a URL that is safe to reload, bookmark and share — which
-    // is the whole reason creation is not a navigation to a `?create=1` URL any more.
+    // Create is a POST answered with a `303` to the design's permalink, so the browser lands on a
+    // URL safe to reload and share.
     post("${base}/designs") { handleUiBuilderCreate() }
-    // Starting from a design that already exists rather than from a template. Registered
-    // before the compatibility route below, whose `{catalog}` would otherwise swallow
-    // `designs` — it is two segments, so nothing about the old form's target changes.
+    // Copy from an existing design. Registered before the compatibility route below, whose
+    // `{catalog}` would otherwise swallow `designs`.
     post("${base}/designs/copy") { handleUiBuilderCopy() }
     // Compatibility for creation forms emitted by older builder bundles.
     post("${base}/{catalog}") { handleUiBuilderCreate() }
-    // Sharing one design, as a page rather than a hand-written protocol POST. Registered
-    // before the asset catch-all; a literal `access` segment outranks `{path...}`, so the
-    // editor shell is still what every other path under a design serves.
+    // Sharing one design as a page. A literal `access` segment outranks `{path...}`, so other paths
+    // still serve the editor shell.
     get("${base}/{designId}/access") { handleUiBuilderAccess() }
     post("${base}/{designId}/access") { handleUiBuilderAccessUpdate() }
     // A design's history: its retained revisions as pictures, each one openable, restorable
@@ -7083,8 +6166,7 @@ class ServeHttpServer(
     get("${base}/{designId}/history") { handleUiBuilderHistory() }
     post("${base}/{designId}/history/{revision}/restore") { handleUiBuilderRestore() }
     post("${base}/{designId}/history/{revision}/fork") { handleUiBuilderFork() }
-    // Removing one's own design, which until now only an operator's token or an MCP tool
-    // could do. Owner-only, and it is the service that says so.
+    // Delete one's own design. Owner-only, enforced by the service.
     post("${base}/{designId}/delete") { handleUiBuilderDelete() }
     // Shared file-manager metadata. A move changes no design revision, but it is visible to
     // every collaborator, so the design's WRITE action gates the form.
@@ -7107,8 +6189,8 @@ class ServeHttpServer(
   private fun String.prefixedQuery(): String = if (isEmpty()) "" else "?$this"
 
   /**
-   * One percent-decoded path segment, or the segment verbatim when it isn't valid encoding. Used to
-   * compare a first path segment against a catalog id; a bad escape simply won't match one.
+   * One percent-decoded path segment, or the segment verbatim if the encoding is invalid. Used to
+   * compare against catalog ids.
    */
   private fun decodeSegment(raw: String): String = runCatching {
     java.net.URLDecoder.decode(raw, Charsets.UTF_8)
@@ -7116,13 +6198,9 @@ class ServeHttpServer(
     .getOrDefault(raw)
 
   /**
-   * `/playground?from=<system>/<previewId>` for a preview, or null when this host would not honour
-   * it — no playground lane, no source fetcher, a preview whose catalog never recorded a source
-   * path, or a catalog this host cannot compile against. Checked here rather than left to the
-   * target page so a dead link is never rendered.
-   *
-   * Carries the access token like every other link this server builds, so the handoff survives on a
-   * token-gated host.
+   * `/playground?from=<system>/<previewId>` for a preview, or null when this host wouldn't honour
+   * it (no lane, no fetcher, no recorded source path, or a catalog it can't compile). Checked here
+   * so dead links are never rendered. Carries the access token.
    */
   private fun RoutingContext.playgroundLinkFor(
     host: ServeHost,
@@ -7136,18 +6214,11 @@ class ServeHttpServer(
     // trip would offer an editor that ends in a 401.
     if (!playgroundReachable()) return null
     if (sourceFile.isNullOrBlank()) return null
-    // The handoff is only an offer when THIS catalog is a compile target here. A serve host browses
-    // far more catalogs than its playground can compile: a pin-only host compiles exactly its pin,
-    // and a host with no Robolectric sidecar compiles no Android catalog at all — which is every
-    // Wear and app catalog on the public deployment. Without this check the viewer offered the link
-    // anyway, the editor opened that preview's Kotlin, and the compile silently retargeted at
-    // whichever catalog happened to be first in the selector, so Run answered with a screen of
-    // unresolved references against a design system the visitor never chose.
+    // Only offer the handoff when this catalog is a compile target here; otherwise the editor would
+    // compile against whichever catalog is first and report unresolved references.
     if (!playgroundService.compilesCatalog(system)) return null
-    // The SAME condition the resolver applies, not a proxy for it. A plain daemon session or an
-    // uploaded bundle can carry a `sourceFile` from its own `previews.json` while having no catalog
-    // source to resolve it against — the resolver then returns null and the click lands on the
-    // generic sample, which is precisely the dead affordance this link is supposed to never be.
+    // The same condition the resolver applies: plain sessions or uploads can carry a `sourceFile`
+    // with no catalog source to resolve it.
     if (catalogBundleHost(host)?.catalogSource == null) return null
     val from = WebEscaping.urlEncodeSegment(system) + "/" + WebEscaping.urlEncodeSegment(previewId)
     val token =
@@ -7156,20 +6227,14 @@ class ServeHttpServer(
   }
 
   /**
-   * `/playground?catalog=<system>` for a catalog landing — the lighter half of the same handoff:
-   * preselect this design system, keep the starter snippet. Null when there is no lane to open, or
-   * when this host cannot compile against that design system (same reasoning as [playgroundLinkFor]
-   * — a landing that offers "try this in the playground" for a catalog the playground can't select
-   * is the same dead affordance, one page earlier).
+   * `/playground?catalog=<system>` for a catalog landing: preselect the design system with the
+   * starter snippet. Null without a lane or when this host can't compile the catalog (as
+   * [playgroundLinkFor]).
    */
   /**
-   * Whether a playground handoff can complete from *this* request's origin at all.
-   *
-   * The playground is gated on GitHub auth, so on a site host whose box pins an OAuth callback the
-   * link leads into the same dance whose state cookie cannot reach the callback — a 401 at the end
-   * of a button that promised an editor. The live-preview prompts were already withheld for this;
-   * the handoff links are the same dead end and are withheld with them, rather than left as the one
-   * affordance that still walks a visitor into it.
+   * Whether a playground handoff can complete from this request's origin. The playground is
+   * GitHub-gated, so where the OAuth round trip can't return to this origin the links are withheld,
+   * like the live prompts.
    */
   private fun RoutingContext.playgroundReachable(): Boolean =
     githubAuth == null || oauthCanRoundTrip()
@@ -7184,41 +6249,25 @@ class ServeHttpServer(
   }
 
   /**
-   * The counterpart component's render in the `compareWith` sibling, as a second source for the
-   * viewer's spec lane (issue #4621).
+   * The counterpart's render in the `compareWith` sibling, as a second source for the viewer's spec
+   * lane.
    *
-   * The pairing is carried in two halves and BOTH have to resolve, because half of it means
-   * nothing: the catalog's `compareWith` names the sibling SYSTEM, and the component's `parallel`
-   * names the counterpart COMPONENT in it. From there this walks to the sibling's own preview id,
-   * which is what a render URL needs.
+   * Both halves must resolve: the catalog's `compareWith` names the sibling system and the
+   * component's `parallel` names the counterpart. Any failure means no second source:
+   * 1. this hostname serves the whole box, not one catalog (a top-level site [ServeSites] 404s
+   *    neighbours);
+   * 2. this catalog declares `compareWith`;
+   * 3. this preview's component declares `parallel`;
+   * 4. the sibling is served on this host;
+   * 5. the sibling has a preview for that component.
    *
-   * Every step is allowed to fail, and each failure simply means no second source — the lane then
-   * offers exactly what it offered before. The chain is long because it spans two catalogs, not
-   * because it is doing anything clever:
-   *
-   * 1. this hostname serves the whole box rather than ONE catalog — a top-level site ([ServeSites])
-   *    answers a neighbour's `/{system}/…` with its own 404 on purpose, so a sibling reachable from
-   *    `m3.example.test` is precisely what a site exists not to be;
-   * 2. this catalog declares a `compareWith` system;
-   * 3. this preview belongs to a component that declares a `parallel`;
-   * 4. the sibling is served on THIS host (a pairing with a system we do not host is a fact about
-   *    the spec, not a link we can offer);
-   * 5. the sibling has a preview for that component id.
-   *
-   * [ServeSessionRegistry.peekHost], never `lease`: this is a metadata read while building a page,
-   * and standing a suspended sibling's daemon up to decide whether to draw a button would be a
-   * daemon per page view. A suspended sibling therefore offers no lane — fail-soft, like the rest
-   * of this surface.
+   * Uses [ServeSessionRegistry.peekHost], never `lease`, so building a page never wakes a suspended
+   * sibling.
    */
   /**
-   * The counterpart render this preview is paired with in the `compareWith` sibling, or null when
-   * any half of the pairing does not resolve.
-   *
-   * Split out of [parallelSpecSource] because two surfaces need the same walk and only one of them
-   * needs a URL: the spec lane puts the sibling's raster on the stage, while the cross-catalog
-   * layer diff ([handleParallelLayers]) reads both sides' annotations server-side and paints no
-   * foreign image at all. Which is why the site-host guard lives in the caller rather than here —
-   * see [parallelSpecSource].
+   * The counterpart render in the `compareWith` sibling, or null. Split from [parallelSpecSource]
+   * because the layer diff ([handleParallelLayers]) needs the walk without a URL; the site-host
+   * guard lives in the caller.
    */
   private data class ResolvedParallel(
     val system: String,
@@ -7232,10 +6281,8 @@ class ServeHttpServer(
     val cell: String,
   ) {
     /**
-     * How the pair came to be, in one clause for a provenance line. A cell the sibling does not
-     * draw is a finding about the two systems rather than an inconvenience to hide: pairing it with
-     * the component's default silently would make the two catalogs look MORE aligned the further
-     * they have diverged, which is the wrong direction for a parity surface.
+     * How the pair was formed, for a provenance line. A cell the sibling doesn't draw is stated,
+     * never silently paired with the default.
      */
     val pairedOn: String =
       when {
@@ -7250,19 +6297,11 @@ class ServeHttpServer(
   }
 
   /**
-   * The cross-catalog pairing for one preview, memoised for the length of this request.
-   *
-   * Three pages ask the same question about the same preview more than once — the viewer wants the
-   * kit reference ([pairedDesignSpecSource]), the sibling's render ([parallelSpecSource]) and
-   * whether a layer diff exists, and the compare wall wants the first two for **every** preview it
-   * shows. Each of those used to walk the sibling catalog's whole preview list and read a design
-   * reference per candidate, so a wall over a catalog the size of `remote-m3` paid that walk twice
-   * per row before a byte of HTML was written.
-   *
-   * Memoised twice over: the resolved pairing per preview, and the sibling's previews grouped by
-   * component id once per sibling, which is what turns the per-preview scan into a lookup. Scoped
-   * to one `ApplicationCall` exactly as [agentGrantFor] is, so a catalog that refreshes between
-   * requests is never answered from a previous request's index.
+   * The cross-catalog pairing for one preview, memoised for this request. The viewer and compare
+   * wall ask repeatedly (kit reference [pairedDesignSpecSource], sibling render
+   * [parallelSpecSource], layer diff). Caches the resolved pairing per preview and the sibling's
+   * previews grouped by component per sibling. Scoped to one `ApplicationCall` like
+   * [agentGrantFor], so refreshes are never answered from stale indexes.
    */
   private fun RoutingContext.resolveParallel(
     host: ServeHost,
@@ -7289,10 +6328,8 @@ class ServeHttpServer(
     val componentId = preview.componentId?.takeIf { it.isNotBlank() } ?: return null
     val parallelId = bundle.parallelByComponentId[componentId] ?: return null
     val siblingHost = sessions.peekHost(siblingSystem) ?: return null
-    // The sibling's own render OF THIS CELL, and only then its canonical sticker. Which cell a
-    // render is — the design-kit node it is specified by, else its own state/props/size — is the
-    // one key that survives two catalogs spelling their preview ids differently; see
-    // [ServeParallelPairing], which also carries why the fallback has to be said out loud.
+    // The sibling's render of this cell (matched by design-kit node, else state/props/size), then
+    // its canonical sticker; see [ServeParallelPairing].
     val pairing =
       ServeParallelPairing.pair(
         preview = preview,
@@ -7315,16 +6352,13 @@ class ServeHttpServer(
   }
 
   /**
-   * The sibling catalog's own render route for [previewId], carrying this page's credential.
-   *
-   * Same origin: it is that catalog's ordinary render route on this very server, which is the whole
-   * reason a cross-catalog comparison is cheap to offer here and expensive anywhere else. The token
-   * is [linkToken] and not the server's own — a caller holding an agent grant gets pages wired with
-   * THEIR token, and a foreign-catalog raster must not be the one link that leaks the operator's.
+   * The sibling catalog's render route for [previewId] on this same server, with this page's
+   * credential. Uses [linkToken], not the server's own token, so a grant holder's page never leaks
+   * the operator's.
    */
   /**
-   * The URL for one verified backplate, carrying the same credential as every other URL on the
-   * page. Mirrors [parallelRenderUrl]; the id is a content hash, so the path is stable forever.
+   * URL for one verified backplate with the page's credential; mirrors [parallelRenderUrl]. The id
+   * is a content hash.
    */
   private fun RoutingContext.pageAssetUrl(system: String, assetId: String): String =
     "/" +
@@ -7345,10 +6379,8 @@ class ServeHttpServer(
     host: ServeHost,
     preview: ServePreview,
   ): ServeWeb.SpecSource? {
-    // One catalog per hostname: on a site host the interceptor above answers `/{system}/…` for any
-    // system but this one with the site's own 404, so the sibling's render is unreachable from this
-    // page however well the pairing resolves. Offering the source anyway would put a button on the
-    // stage whose only possible outcome is "the design spec could not be loaded".
+    // On a site host the sibling's render is unreachable (the interceptor 404s other systems), so
+    // don't offer the source.
     if (siteSystem() != null) return null
     val parallel = resolveParallel(host, preview) ?: return null
     val siblingSystem = parallel.system
@@ -7358,19 +6390,12 @@ class ServeHttpServer(
     return ServeWeb.SpecSource(
       id = "parallel",
       label = siblingLabel,
-      // Same origin: this is the sibling catalog's ordinary render route on this very server,
-      // which is the whole reason the pairing is cheap to offer here and expensive anywhere else
-      // (a static compare page can only bake thumbnails at publish time), and is what satisfies
-      // the lane's own same-origin guard in `viewer.ts` `specRasterSrc()`.
-      // …but the same credential every other URL on this page carries. `/render/` is token-gated
-      // like the rest of the box, so a bare path meets `rejectBadToken`'s own 404 on every server
-      // that is not `--public` — which is every local `serve` and every private deployment. See
-      // [parallelRenderUrl], which the design-page sheet builds the same URL through.
+      // Same origin, which satisfies the lane's guard in `viewer.ts` `specRasterSrc()`.
+      // …with the page's credential, since `/render/` is token-gated off `--public`. See
+      // [parallelRenderUrl].
       rasterUrl = parallelRenderUrl(siblingSystem, siblingPreview.id),
-      // The caveat that keeps the pair honest. Unlike the kit reference, this panel is another
-      // catalog's RENDER, produced under its own theme, knobs and overrides rather than the ones
-      // that produced the render beside it. Saying so is the difference between a comparison and an
-      // implied equivalence.
+      // The provenance caveat: this panel is another catalog's render under its own theme, knobs
+      // and overrides.
       provenance =
         "$siblingLabel's own render of ${siblingPreview.componentId ?: parallel.componentId}" +
           "$pairedOn, " +
@@ -7379,9 +6404,8 @@ class ServeHttpServer(
   }
 
   /**
-   * The design reference attached to this preview's paired sibling. Parallel catalogs implement the
-   * same design-kit component, so the sibling's mapping is also the authoritative design target for
-   * a Remote Compose preview that has not duplicated that reference into its own manifest.
+   * The design reference attached to this preview's paired sibling, used as the design target for a
+   * Remote Compose preview that doesn't duplicate the reference.
    */
   private fun RoutingContext.pairedDesignSpecSource(
     host: ServeHost,
@@ -7410,22 +6434,13 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /{system}/parallel/{preview}` — the **cross-catalog layer diff** for one render, as a page
-   * or (with `?format=json`) as data.
+   * `GET /{system}/parallel/{preview}`: the cross-catalog layer diff for one render, as a page or
+   * `?format=json`.
    *
-   * The pairing lane has always been able to put the sibling's *raster* beside this one
-   * ([parallelSpecSource]). This is the half a raster cannot answer: two Compose runtimes drawing
-   * one design system disagree about the family a text node actually resolved, the value behind a
-   * token, the insets of a box — none of which survives a 227dp pixel comparison as anything a
-   * reader can act on, and all of which is stated outright one layer up. See [ServeParallelLayers].
-   *
-   * Read-only and cheap: both sides' layers come from `annotations/index.json`, which each catalog
-   * publishes measured over the very frame it serves. Nothing is rendered, no daemon is stood up
-   * ([ServeSessionRegistry.peekHost], like the pairing itself), and no bytes leave the box.
-   *
-   * Unlike the spec lane, this works on a **top-level site** too: the diff is joined server-side,
-   * so it needs no URL into the neighbour catalog — only the link to the counterpart's own viewer
-   * is withheld there, because that is the one thing a site host would answer with its own 404.
+   * Answers what rasters can't: the resolved font family, token values and insets on each side
+   * ([ServeParallelLayers]). Read-only and cheap: both sides come from `annotations/index.json`,
+   * via [ServeSessionRegistry.peekHost], with nothing rendered. Works on a top-level site too,
+   * since it's joined server-side; only the link to the counterpart's viewer is withheld there.
    */
   private suspend fun RoutingContext.handleParallelLayers(sessionInPath: Boolean) {
     if (rejectBadToken()) return
@@ -7448,10 +6463,8 @@ class ServeHttpServer(
       }
       val parallel = resolveParallel(renderHost, preview)
       if (parallel == null) {
-        // Three different silences share this answer — the catalog declares no `compareWith`, the
-        // component names no `parallel`, or the sibling is not served here — and none of them is a
-        // property of THIS preview that the page could helpfully describe. What they have in common
-        // is the only thing worth saying: there is no counterpart to diff against.
+        // No `compareWith`, no `parallel`, or no served sibling: all mean there is no counterpart
+        // to diff against.
         missing("This render has no counterpart in a sibling design system on this server.")
         return@withLeasedSession
       }
@@ -7461,9 +6474,8 @@ class ServeHttpServer(
           there = parallel.host.annotationsForPreview(parallel.preview.id),
         )
       if (diff.isEmpty) {
-        // Neither catalog publishes a layer for this cell. 404 in both spellings, exactly as the
-        // design-pages index does it: an empty document reads as "compared, and they agree", which
-        // is the one thing this must never say when nothing was compared at all.
+        // Neither catalog publishes a layer for this cell: 404 in both spellings, since an empty
+        // document would read as agreement.
         missing(
           "Neither this catalog nor its sibling publishes annotation layers for this render, " +
             "so there is nothing to compare."
@@ -7531,58 +6543,28 @@ class ServeHttpServer(
   }
 
   /**
-   * The **page-scoped** "report a catalog issue" for a surface that names no single preview.
-   *
-   * Every catalog page belongs to a catalog and can therefore be wrong in that catalog's own
-   * repository, but only the surfaces that draw one preview could say which one — so the landing
-   * grid, the pages index, a design page and the motion browser carried no `#cp-report` at all, the
-   * floating launcher's catalog half stayed hidden on them, and the SERVER tracker was the only
-   * route out of a page whose whole subject is someone else's design system
-   * ([#4704](https://github.com/yschimke/compose-ai-tools/issues/4704)). This is the report the
-   * comparison wall introduced for exactly that reason (#4289), lifted out of it: it names the
-   * **page** — its URL with the query it was served at, the catalog build and the tool version —
-   * and drops every preview-shaped row the way [ServeIssueReport.body] already drops any optional
-   * fact it wasn't given. [subject] is what the affordance calls what is wrong, in its own prose.
-   *
-   * A preview's own defect keeps the better route it already has wherever one exists: the viewer
-   * and the focused comparison file against that exact preview.
+   * The page-scoped "report a catalog issue" for surfaces that name no single preview (landing
+   * grid, pages index, design page, motion browser), so the floating launcher's catalog half
+   * appears there. Names the page (URL with query), the catalog build and tool version, and drops
+   * preview rows as [ServeIssueReport.body] drops absent facts. [subject] is the affordance's
+   * wording. Previews keep their own per-preview reports.
    */
   /**
-   * The page-scoped catalog report for this surface, or null when there is no catalog to file
-   * against.
+   * The page-scoped catalog report, or null when there is no catalog to file against.
    *
-   * Nullable deliberately, and every caller's parameter already says so — *"Null (a plain module,
-   * or any caller that has nothing to file against) omits it entirely"*. The handlers passed it
-   * unconditionally, so a `compose-preview serve` on a PLAIN MODULE offered to file a bug about
-   * "this catalog": there is no catalog, `catalogBundleHost` is null, and
-   * [ServeIssueReport.repoFor] fell back to compose-ai-tools — the tool's own tracker named as the
-   * repo declaring a catalog the visitor does not have.
-   *
-   * The gate is whether a catalog EXISTS, not whether it names a repo. A catalog that declares
-   * neither source nor provenance still has something to report about, and the fallback is the
-   * right last resort for it — "better than nothing, and usually the same project". Gating on the
-   * repo instead would silently drop the tracker from every such catalog, which
-   * `ServeDesignPageRoutingTest` and `ServeHttpRoutingTest` both assert it must not.
-   *
-   * [ServeBundleHost.isCatalog] rather than the host type, because `ServeBundleHost` also backs a
-   * `--bundles` directory and an uploaded portable bundle. Those are plain bundles with no
-   * `catalog.json`, and the type alone read them as catalogs — so an upload was offered a report
-   * about "this catalog" against the fallback repo, the same defect as the plain module one door
-   * along (#4728 review).
+   * Gated on a catalog existing ([ServeBundleHost.isCatalog]), not on a named repo: a catalog
+   * without source or provenance still falls back to [ServeIssueReport.repoFor]'s default
+   * (`ServeDesignPageRoutingTest` and `ServeHttpRoutingTest` assert this). A plain module, a
+   * `--bundles` directory or an uploaded bundle is not a catalog.
    */
   private fun RoutingContext.pageScopedReportIssue(
     renderHost: ServeHost,
     sessionId: String,
     subject: String,
     /**
-     * Whether this page can name comparisons the visitor picks — the comparison wall, and nothing
-     * else so far.
-     *
-     * True adds the [ServeIssueReport.LOCATORS_PLACEHOLDER] line to the template and the two facts
-     * a browser-written locator cannot derive from the row it is about (the system, and the
-     * delivery revision). Left false everywhere else deliberately: a placeholder on a page with
-     * nothing to fill it would be filed verbatim, and a design page or the motion browser has no
-     * picker to fill it with.
+     * Whether this page can name visitor-picked comparisons (only the comparison wall). True adds
+     * [ServeIssueReport.LOCATORS_PLACEHOLDER] and the facts a browser-written locator can't derive
+     * (system, delivery revision); elsewhere the placeholder would be filed verbatim.
      */
     pickable: Boolean = false,
   ): ServeWeb.ReportIssue? {
@@ -7614,28 +6596,13 @@ class ServeHttpServer(
   }
 
   /**
-   * This page's URL with the presentation mode the request RESOLVED pinned onto it.
-   *
-   * A report link is read by someone who does not have the reporter's cookie. The mode is
-   * deliberately a property of the visitor rather than of each URL — the previous scheme appended
-   * `?chrome=` to every same-origin href and was removed because it "put a parameter nobody chose
-   * into every URL a visitor copied" — but `?chrome=` was kept for exactly this: *"a link may pin
-   * the presentation it was written for"*. Without it a Catalog-mode report opens the Dev landing
-   * for a triager whose own cookie says Dev, which is a different surface from the one reported.
-   *
-   * Both modes are pinned, not just Catalog: a Dev-mode report read by a Catalog-mode triager is
-   * the same failure mirrored. A URL that already carries `?chrome=` is left alone — it pinned
-   * itself, and that pin is what the request resolved anyway.
+   * This page's URL with the resolved presentation mode pinned via `?chrome=`, so a triager with a
+   * different cookie sees the reported surface. Both modes are pinned.
    */
   private fun RoutingContext.pageUrlPinningChrome(): String {
     val url = externalPageUrl()
-    // A RECOGNISED pin is left alone: `componentBrowserMode` honours it, so the URL already names
-    // the mode the page was served in. An UNRECOGNISED one is not — `interfaceMode` returns null
-    // for anything but `catalog`/`dev`, and the request falls back to the cookie or the server
-    // default. Carrying that value into the report would pin a mode the page was never in, which
-    // is the wrong-surface failure this exists to prevent arriving through the one value nobody
-    // validated. So it is REPLACED rather than kept or appended to — a second `chrome=` would
-    // leave the reader's own parser to break the tie.
+    // A recognised pin is kept; an unrecognised `chrome=` (which `interfaceMode` ignores) is
+    // replaced rather than appended to, so the URL names the mode actually served.
     if (interfaceMode(call.request.queryParameters[CHROME_PARAM]) != null) return url
     val mode = if (componentBrowserMode()) "catalog" else "dev"
     val base = url.substringBefore('?')
@@ -7647,19 +6614,10 @@ class ServeHttpServer(
   }
 
   /**
-   * The DECODED name of a raw `k=v` query pair.
-   *
-   * Ktor decodes a parameter name before it reaches [io.ktor.http.Parameters], so `?%63hrome=x` is
-   * `chrome` to every read in this file — including the [interfaceMode] check that decides this URL
-   * carries an unrecognised pin. Comparing the raw text instead kept that pair and appended a
-   * second `chrome=`, and a reader taking the FIRST value read the invalid one, ignored it and fell
-   * back to their own mode: the wrong-surface failure the pin exists to prevent, restored by the
-   * replacement meant to close it.
-   *
-   * `plusIsSpace` matches how Ktor reads a query component. A name that is not valid
-   * percent-encoding cannot be what Ktor decoded to `chrome`, so it keeps its raw text and is
-   * preserved rather than dropped — this only ever removes a pair the server itself reads as the
-   * chrome pin.
+   * The decoded name of a raw `k=v` query pair. Ktor decodes parameter names, so `?%63hrome=x` is
+   * `chrome` to [interfaceMode]; comparing raw text would keep that pair and append a second
+   * `chrome=`. `plusIsSpace` matches Ktor's query decoding. Invalid percent-encoding keeps its raw
+   * text, so only pairs the server reads as the chrome pin are removed.
    */
   private fun queryParamName(pair: String): String {
     val raw = pair.substringBefore('=')
@@ -7667,14 +6625,9 @@ class ServeHttpServer(
   }
 
   /**
-   * The ground and shape a `?bg=` request should composite for [previewId], or null when this host
-   * cannot state one (an unknown id, a preview with no backdrop in the chain).
-   *
-   * Resolved through [ServeWeb.backdropFor] and [ServeWeb.effectiveDeviceFrame] — the very
-   * functions the viewer, the grid and the compare wall draw their CSS from — so a matted PNG and
-   * the page it was copied off cannot disagree about what is behind the render. That sharing is the
-   * whole design: the resolvers already existed and already agreed with each other; all that was
-   * missing was a lane that put their answer into bytes.
+   * The ground and shape a `?bg=` request should composite for [previewId], or null when unknown.
+   * Resolved via [ServeWeb.backdropFor] and [ServeWeb.effectiveDeviceFrame], the same functions the
+   * viewer, grid and wall use for CSS, so a matted PNG matches its page.
    */
   private fun renderStage(
     renderHost: ServeHost,
@@ -7685,9 +6638,8 @@ class ServeHttpServer(
     val preview = renderHost.previews.firstOrNull { it.id == previewId } ?: return null
     val darkFirst =
       ServeWeb.SystemDisplay.resolveDarkFirst(
-        // The system name, exactly as the cmp-jvm lane resolves it: on a mounted catalog the
-        // session id IS the system (`/remote-m3/render/…`), and a session without one has no
-        // declared surface to prefer anyway.
+        // The system name as the cmp-jvm lane resolves it: on a mounted catalog the session id is
+        // the system.
         sessionId.orEmpty(),
         catalogBundleHost(renderHost)?.stageSurface,
       )
@@ -7701,44 +6653,24 @@ class ServeHttpServer(
   }
 
   /**
-   * The component's **related** directories for the viewer's drawer subtree — the other catalogs
-   * that are ABOUT the component on screen, one directory per catalog, a row per destination.
+   * The component's related directories for the viewer's drawer: other catalogs about the
+   * component, one per catalog, a row per destination. Resolved here because it needs the registry
+   * ([ServeRelatedCatalogs] holds the policy).
    *
-   * Resolved here rather than in the page because every half of the answer is the registry's: which
-   * of the declared systems this box serves, whether each has a host right now, and which preview
-   * in it the declared component id names. See [ServeRelatedCatalogs] for the policy — this is the
-   * lookup it deliberately does not do.
+   * Keyed on the component: declarations from every render are unioned and shown on all of them, so
+   * samples declared on one cell are findable from any.
    *
-   * ## Keyed on the component, not on the render
-   *
-   * The declarations of EVERY render of this component are unioned, and the result is shown on all
-   * of them. A sample is written against the component; some are written against one of its cells,
-   * and the catalog is free to declare the link there. Splitting the directory per render would
-   * mean a reader on `Pressed` cannot see the samples declared on the default — and a reader on the
-   * default cannot see the one written for `Pressed`, which is the render it actually explains.
-   * Neither is worth a lane of its own: the union is a short list, and being findable from wherever
-   * the reader happens to be standing is the whole point of putting it in the drawer.
-   *
-   * Fails soft at every step, like the rest of this surface: an unregistered system is dropped by
-   * [ServeRelatedCatalogs.resolve], a registered one with no host yet keeps its rows and marks them
-   * not live, and a component id the destination does not publish is dropped here.
+   * Fails soft: unregistered systems are dropped by [ServeRelatedCatalogs.resolve], registered ones
+   * without a host are marked not live, and unpublished component ids are dropped here.
    */
   /**
-   * The BACK-LINKS for one component: the catalogs that declare a `related` link pointing AT it,
-   * and which of their own components does the pointing.
+   * The back-links for one component: catalogs whose `related` links point at it, and which of
+   * their components points.
    *
-   * `related` is directed and declared in one place — a kit catalog names the samples that explain
-   * its components, and the samples catalog, which is imported from upstream and regenerated on
-   * every refresh, declares nothing. Deriving the reverse here is what lets the sample page carry
-   * "this explains Button" without a second copy of the mapping that would have to be kept true.
-   *
-   * Which also settles what happens on a box serving the samples catalog alone: nothing. There is
-   * no kit catalog there to link back to, so an absent back-link is the truth rather than a gap —
-   * the argument for deriving rather than stamping, stated as a behaviour.
-   *
-   * Resident catalogs only ([ServeSessionRegistry.peekHost], never `lease`): the index is built by
-   * walking a catalog's declarations, and a suspended catalog would have to be woken to be walked.
-   * A box that has not loaded the kit catalog yet shows no back-link and grows one when it does.
+   * `related` is declared in one place (the samples catalog is regenerated from upstream and
+   * declares nothing), so the reverse is derived here. On a box with only the samples catalog there
+   * are no back-links, which is correct. Resident catalogs only ([ServeSessionRegistry.peekHost]),
+   * so nothing is woken.
    */
   private fun RoutingContext.componentBackLinkDirectories(
     preview: ServePreview,
@@ -7775,18 +6707,9 @@ class ServeHttpServer(
         else
           ServeWeb.ComponentDirectory(
             "about",
-            // Named for WHAT the rows are, read off the source catalog's declared role.
-            //
-            // A fixed word cannot work: `related` is directed, and this directory lands on
-            // whichever
-            // end did NOT declare the link, so "Explains" — correct while the kit was expected to
-            // declare it — read backwards the moment the samples catalog declared it instead. A kit
-            // component does not explain its samples.
-            //
-            // The source catalog's heading is true in both directions but says more than a reader
-            // needs: on a kit page, a group headed "Wear Material 3 Samples" spends a catalog title
-            // where one word does the work. A catalog that declares what KIND it is gets that word;
-            // anything else keeps the heading, which is the only other answer that stays true.
+            // Named for what the rows are, from the source catalog's declared role, since `related`
+            // is directed and a fixed word would read backwards from one end. Without a declared
+            // role, the catalog's heading is used.
             source.heading,
             rows,
           )
@@ -7794,13 +6717,9 @@ class ServeHttpServer(
   }
 
   /**
-   * The related-link facts for [system], without waking an idle catalog daemon.
-   *
-   * A resident host is authoritative, including an authoritative empty result after a refresh. Once
-   * suspended, the snapshot taken as the host was detached answers instead. This is the same
-   * resident/suspended/retired ladder as [sourceLocationFor]: relationship metadata comes from the
-   * published catalog, so suspension cannot make it stale, and absence must not mean that the
-   * catalog stopped declaring its links.
+   * The related-link facts for [system] without waking an idle daemon: the resident host is
+   * authoritative (including empty), else the snapshot taken at suspension — the same ladder as
+   * [sourceLocationFor].
    */
   private fun relatedCatalogOf(system: String): RelatedCatalog? {
     val host = sessions.peekHost(system)
@@ -7834,15 +6753,11 @@ class ServeHttpServer(
         componentId = componentId,
         selfSystem = selfSystem,
         registered = registered,
-        // peekHost, never lease: this is a metadata read while building a page, and standing a
-        // suspended catalog's daemon up to decide how to draw a drawer row would be a daemon per
-        // page view.
+        // peekHost, never lease: drawing a drawer row must not wake a daemon.
         isLive = { sessions.peekHost(it) != null },
       )
     if (links.isEmpty()) return emptyList()
-    // One directory per destination catalog, in the order the links were declared, each named by
-    // that catalog's own heading. The name is the catalog's to choose and not this server's — the
-    // same rule the rest of this surface follows, and the reason no catalog is named in here.
+    // One directory per destination catalog in declared order, named by that catalog's own heading.
     return links
       .groupBy { it.system }
       .mapNotNull { (system, systemLinks) ->
@@ -7850,9 +6765,8 @@ class ServeHttpServer(
         val heading =
           host?.let { ServeWeb.catalogHeading(catalogBundleHost(it)?.title, it.label) } ?: system
         val rows = systemLinks.mapNotNull { link ->
-          // A live destination is resolved to a real preview, so the row links at a page that
-          // exists and can carry that catalog's own name for the component. Without a host there
-          // is nothing to resolve against, and the row stands on what the link itself declared.
+          // A live destination is resolved to a real preview (and its own name for the component);
+          // without a host the row uses what the link declared.
           val target =
             host?.previews?.firstOrNull { ServeIssueReport.componentIdFor(it) == link.componentId }
           if (host != null && target == null) return@mapNotNull null
@@ -7878,8 +6792,8 @@ class ServeHttpServer(
   }
 
   /**
-   * The previews a system's landing grid shows: all of them, less a published catalog's A2UI
-   * playground, which the host lists for `/{system}/a2ui` but the catalog never made a card of
+   * The previews a system's landing grid shows: all, less a catalog's A2UI playground preview,
+   * which the host lists for `/{system}/a2ui` but isn't a card
    * ([ServeCatalogLiveHost.playgroundPreviewIds]).
    */
   private fun landingPreviews(host: ServeHost): List<ServePreview> {
@@ -7897,10 +6811,9 @@ class ServeHttpServer(
     }
 
   /**
-   * The public server's front-page index: the published design systems ([catalogSessions]) under a
-   * "Design systems" section, each a card linking to its `/<system>/` catalog. The unlisted app
-   * catalogs ([appCatalogSessions]) are intentionally NOT indexed here — they're served at
-   * `/<system>/` but stay off the front door. See [homeSystemsFor].
+   * The front-page index: published design systems ([catalogSessions]) as cards linking to
+   * `/<system>/`. Unlisted app catalogs ([appCatalogSessions]) are not indexed. See
+   * [homeSystemsFor].
    */
   private suspend fun RoutingContext.handleHomeIndex() {
     val systems = withContext(Dispatchers.IO) { homeSystemsFor(listedCatalogs()) }
@@ -7918,15 +6831,9 @@ class ServeHttpServer(
             "${WebEscaping.urlEncodeSegment(it)}.png"
         }
     val featuredUrl = featuredPath?.let { externalOrigin() + it + requestQuerySuffix() }
-    // The FULL render behind the featured card, kept only as the fallback unfurl image for when no
-    // card can be drawn (see below). The full render rather than the `/hero/` thumbnail the page
-    // lays out, because those are downscaled to card size (the front door's is 216×480) — under
-    // every unfurler's floor for a large-image card and under Google's 512² guidance for using the
-    // image at all. The page wants a small file; a link preview wants a big picture.
-    // Read from the remembered metadata, not from a live host: `peekHost` is null for a suspended
-    // catalog, and falling back would quietly re-advertise the undersized thumbnail exactly when
-    // the
-    // featured catalog is idle — the common case, not a rare one.
+    // The full render behind the featured card, as the fallback unfurl image (the `/hero/`
+    // thumbnail is below unfurlers' large-card floor). Read from remembered metadata, since
+    // `peekHost` is null for an idle catalog.
     val featuredRender =
       featured?.heroPreviewId?.let { id ->
         // Same rule as the viewer and the catalog landing: the URL below inherits the request's
@@ -7938,17 +6845,9 @@ class ServeHttpServer(
             "${WebEscaping.urlEncodeSegment(id)}.png"
         (externalOrigin() + path + requestQuerySuffix()) to size
       }
-    // …but what the front door actually advertises is a **drawn** card ([ServeSocialCard]): a
-    // 1200×630 picture of the site, at the aspect every unfurler lays a large card out at. It has
-    // to be drawn rather than picked, because no catalog render is that shape — the featured hero
-    // is a 1078×2399 phone screenshot, so pointing at it meant the card showed a horizontal band
-    // through the middle of one app scaffold and nothing that identified this site at all.
-    //
-    // Composed from the hero thumbnails the front door already baked, in the order a visitor meets
-    // them, so it costs no render and no second decode of a full-resolution PNG. On
-    // `Dispatchers.IO`
-    // beside `homeSystemsFor` for the same reason that call is: the first visit after a catalog
-    // changes pays a rasterize, and that is not work for the request thread.
+    // What the front door advertises is a drawn 1200×630 card ([ServeSocialCard]), since no catalog
+    // render has that shape. Composed from the already-baked hero thumbnails; on `Dispatchers.IO`
+    // like `homeSystemsFor`, since the first visit after a change rasterizes.
     val card =
       withContext(Dispatchers.IO) {
         socialCards.cardFor(
@@ -8001,24 +6900,13 @@ class ServeHttpServer(
   }
 
   /**
-   * The catalogs a crawler may enumerate: the **listed** ones, each with its preview ids and its
-   * generation date. Unlisted app catalogs are excluded for exactly the reason they're kept off the
-   * front door — they're served, not published — so the sitemap and the home index agree on what
-   * this server claims to offer.
+   * The catalogs a crawler may enumerate: the listed ones (unlisted app catalogs excluded, as on
+   * the front door), with preview ids and generation dates.
    *
-   * Reads through [ServeSessionRegistry.peekHost] + [catalogMetaSeen] rather than leasing, which is
-   * the same trick `/status` and the home index use: enumerating every catalog's previews by lease
-   * would resume every suspended daemon on the box, and a sitemap fetch is the last request that
-   * should cost that. A catalog that has never been resident contributes nothing yet and appears
-   * once it has been seen.
-   *
-   * Deliberately does **not** call [rememberCatalogMeta] to freshen a resident host, even though it
-   * could: that path bakes the hero thumbnail ([ServeHeroImages.heroFor] renders, decodes and
-   * rescales a PNG) and reads render sizes, and doing it here would put that work on the Ktor
-   * request coroutine for every listed system — the home index moves the same work to
-   * `Dispatchers.IO` precisely because it is not free. A sitemap needs two lightweight fields, so
-   * it reads them straight off the resident host and falls back to whatever a previous page view
-   * already remembered.
+   * Reads via [ServeSessionRegistry.peekHost] + [catalogMetaSeen] so a sitemap fetch never resumes
+   * daemons; never-resident catalogs appear once seen. Doesn't call [rememberCatalogMeta], which
+   * bakes hero thumbnails and would put that work on the request coroutine; it reads the two fields
+   * directly.
    */
   private fun crawlableCatalogs(onlySystem: String? = null): List<ServeSiteIndex.CatalogEntry> =
     (if (onlySystem != null) listOf(onlySystem) else listedCatalogs()).mapNotNull { system ->
@@ -8037,10 +6925,8 @@ class ServeHttpServer(
 
   /** `GET /robots.txt`: what a crawler may ask this server for. See [ServeSiteIndex]. */
   private suspend fun RoutingContext.handleRobotsTxt() {
-    // Advertised only when there is something in it — an empty sitemap is a broken promise, and a
-    // token-gated host has no crawlable pages at all.
-    // On a top-level site the sitemap covers that site's own catalog, so the advertisement is
-    // gated on the same scoped set the sitemap itself is built from.
+    // Advertised only when non-empty; a token-gated host has no crawlable pages.
+    // On a top-level site, gated on the same scoped set the sitemap uses.
     val sitemapUrl =
       if (isPublic && crawlableCatalogs(siteSystem()).isNotEmpty())
         externalOrigin() + "/sitemap.xml"
@@ -8050,9 +6936,8 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /sitemap.xml`: every catalog landing and preview viewer, each stamped with the date its
-   * catalog was generated. 404 on a token-gated host — its pages need a token the crawler doesn't
-   * have, so publishing their URLs would only mint dead links.
+   * `GET /sitemap.xml`: every catalog landing and preview viewer, dated by catalog generation. 404
+   * on a token-gated host, whose URLs a crawler couldn't open.
    */
   private suspend fun RoutingContext.handleSitemapXml() {
     if (!isPublic) {
@@ -8072,23 +6957,14 @@ class ServeHttpServer(
   /**
    * `GET /hero/{system}/{name}`: a prebaked front-door hero thumbnail ([ServeHeroImages]).
    *
-   * The whole point of this lane is that it does none of what `/render` does — no session lease, no
-   * render permit, no disk read, no chance of waking a suspended daemon. The bytes were cropped,
-   * downscaled and hashed when the catalog was first seen, and live in memory; serving one is a map
-   * lookup and a write.
-   *
-   * `{name}` is the content hash, so the bytes behind a URL can never change: the response is
-   * `immutable` with a year-long `max-age`, and a repeat visitor's browser paints the whole index
-   * from cache with no request at all. The `{system}` segment is only there to keep the URLs
-   * readable — the hash alone identifies the image, which is also why a URL minted before a catalog
-   * refresh keeps working. Gated like the rest (open in `--public`, else token-required).
+   * No session lease, render permit, disk read or daemon wake: the bytes are in memory. `{name}` is
+   * the content hash, so responses are `immutable` with a year-long `max-age`; `{system}` is
+   * cosmetic, so URLs survive refreshes. Gated like the rest.
    */
   private suspend fun RoutingContext.handleHeroImage() {
     if (rejectBadToken()) return
-    // Scoped like `/wasm/<system>/…`, and for the same reason: the `{system}` segment is not the
-    // first one, so the canonical-path interceptor never inspects it. Once a neighbour's hero has
-    // been baked — loading the main index is enough — its thumbnail would stay fetchable through a
-    // hostname that publishes one catalog.
+    // Scoped like `/wasm/<system>/…`: `{system}` isn't the first segment, so the canonical-path
+    // interceptor doesn't see it, and a site host must not serve a neighbour's hero.
     val site = call.siteSystem()
     val hero =
       if (site != null && call.parameters["system"] != site) null
@@ -8107,24 +6983,17 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /social/{name}`: a drawn link-unfurl card ([ServeSocialCard]).
-   *
-   * Ungated, unlike `/hero/`. The card is only ever *named* by an `og:image` on a page the fetcher
-   * has already been given, it is drawn from the site's own chrome plus thumbnails that are public
-   * on the front door, and — decisively — a link unfurler does not replay a page's token when it
-   * fetches the image it was pointed at. Gating this would leave a token-gated server advertising
-   * an image every consumer 403s on, which is the failure this whole lane exists to remove.
+   * `GET /social/{name}`: a drawn link-unfurl card ([ServeSocialCard]). Ungated, unlike `/hero/`:
+   * unfurlers don't replay a page's token, and the card is drawn from public chrome and front-door
+   * thumbnails.
    */
   private suspend fun RoutingContext.handleSocialCard() {
     val site = call.siteSystem()
     val card =
       call.parameters["name"]
         ?.let { socialCards.byFileName(it) }
-        // A site hostname answers for one catalog, including in an unfurl. The file name is a
-        // content hash, so a card baked for a neighbour (and published by its `og:image` on the
-        // main host) would otherwise be fetchable back through this domain and hand a chat client
-        // that catalog's title and thumbnails under this site's name. The front door's own card
-        // (system == null) is nobody's catalog and is refused here for the same reason.
+        // A site hostname answers for one catalog, so cards for neighbours (and the front door's
+        // own, `system == null`) are refused, even though names are content hashes.
         ?.takeIf { site == null || site in it.systems }
     if (card == null) {
       call.respondText("no such card", status = HttpStatusCode.NotFound)
@@ -8140,16 +7009,12 @@ class ServeHttpServer(
   }
 
   /**
-   * Respond one of the site icons ([ServeSiteIcon]).
-   *
-   * Not `immutable` like the hashed lanes: these live at well-known paths that an icon fetcher
-   * guesses rather than reads, so the bytes behind them *do* change across a deploy. A day of
-   * caching plus the ETag is the trade — an icon is a few hundred bytes, and pinning a stale one
-   * for a year in every visitor's browser would be the worse mistake.
+   * Respond one of the site icons ([ServeSiteIcon]). Not `immutable`: they live at guessed
+   * well-known paths and change across deploys, so a day of caching plus ETag.
    */
   /**
-   * This box's web app manifest. Built once: its only inputs are whether this box serves a UI
-   * builder — which is what its launcher shortcuts lead to — and the fixed brand.
+   * This box's web app manifest, built once from whether a UI builder is served (its launcher
+   * shortcuts) and the fixed brand.
    */
   private val siteManifest: ServeSiteIcon.Icon by lazy {
     ServeSiteIcon.manifest(
@@ -8183,10 +7048,9 @@ class ServeHttpServer(
     java.util.concurrent.ConcurrentHashMap<List<String>, ServeSiteIcon.Icon>()
 
   /**
-   * The manifest for the host [call] arrived on: [siteManifest] on the main host, and on a
-   * top-level site ([ServeSites]) one named for that site's catalog and coloured by its palette.
-   * Its `id`, `start_url` and `scope` are `/` like the main host's, but a manifest's members
-   * resolve against its own origin — so each site host is a separate installable app.
+   * The manifest for [call]'s host: [siteManifest] on the main host, or for a top-level site
+   * ([ServeSites]) one named and coloured for its catalog. Members resolve against each origin, so
+   * each site is a separate installable app.
    */
   private fun manifestFor(call: ApplicationCall): ServeSiteIcon.Icon {
     val system = call.siteSystem() ?: return siteManifest
@@ -8210,9 +7074,8 @@ class ServeHttpServer(
   }
 
   /**
-   * `push-sw.js`, from the committed serve-web bundle. Uncached like the UI builder's worker, for
-   * the same reason: a worker is identified by its URL and must pick up each release's bytes.
-   * `Service-Worker-Allowed: /` is what lets a page register it for the whole origin.
+   * `push-sw.js` from the serve-web bundle. Uncached, since a worker is identified by URL and must
+   * pick up each release. `Service-Worker-Allowed: /` allows whole-origin scope.
    */
   private suspend fun RoutingContext.respondPushServiceWorker() {
     val asset = ServeWebAssets.load(PUSH_SERVICE_WORKER_ASSET)
@@ -8251,8 +7114,8 @@ class ServeHttpServer(
   }
 
   /**
-   * Whether this render request asks for the base preview and nothing else — the only shape a
-   * prebaked grid thumbnail can answer. See the `?thumb=` lane in [handleRender] for why.
+   * Whether this render request asks for the base preview and nothing else, the only shape a
+   * prebaked grid thumbnail can answer (see `?thumb=` in [handleRender]).
    */
   private fun RoutingContext.plainThumbRequest(): Boolean =
     renderParams().entries().none { (key, _) ->
@@ -8260,23 +7123,17 @@ class ServeHttpServer(
         key == "scroll" ||
         key == "rcPlayer" ||
         key == "mode" ||
-        // A stage (`?bg=`) is post-processing over the bytes rather than a different render, but
-        // the thumbnail's URL is the *content hash* of the un-matted pixels — answering a matted
-        // request from it would serve the wrong bytes under an `immutable` lifetime. Same rule as
-        // the pin below: leave the lane, take the ordinary render path, get the stage applied.
+        // A `?bg=` stage changes the bytes, and the thumbnail URL is the hash of un-matted pixels,
+        // so take the ordinary render path.
         key == ServeRenderMatte.PARAM ||
-        // A pin asks for a *different* version of the render, which the in-memory thumbnail is by
-        // definition not — it is baked from the catalog on disk. Same rule as the overrides above:
-        // anything that changes which pixels are being asked for leaves this lane.
+        // A pin asks for a different version than the baked thumbnail, so leave this lane.
         key == ServeCatalogRevision.PARAM ||
         key in ServeExplodedSvg.PARAMS
     }
 
   /**
-   * Respond a prebaked grid thumbnail ([ServeHeroImages.gridThumbFor]). Cached exactly like the
-   * `/hero/` lane and for the same reason: the URL carries the bytes' content hash, so what it
-   * names can never change and the browser need not revalidate — a second visit to a catalog paints
-   * its grid from cache.
+   * Respond a prebaked grid thumbnail ([ServeHeroImages.gridThumbFor]), cached like `/hero/`: the
+   * URL carries the content hash.
    */
   private suspend fun RoutingContext.respondGridThumb(thumb: ServeHeroImages.Thumb) {
     call.response.headers.append(HttpHeaders.CacheControl, prebakedImageCacheControl())
@@ -8289,11 +7146,9 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /status` (HTML, or JSON with `?format=json`) and `GET /status.json` (JSON): a live
-   * snapshot of this host — configured catalogs + their availability/trust/liveness, the render
-   * daemons up right now, the effective config, and recent daemon startup failures. Gated like the
-   * API routes (open in `--public`, else token-required). The JSON form is the canonical machine
-   * surface for a monitor / Home Assistant sensor; the HTML form is its human face.
+   * `GET /status` (HTML, or `?format=json`) and `GET /status.json`: a live snapshot of this host —
+   * catalogs with availability/trust/liveness, running daemons, effective config, recent startup
+   * failures. Gated like the API routes. JSON is the canonical machine surface.
    */
   private suspend fun RoutingContext.handleStatus(json: Boolean) {
     if (rejectBadToken() || rejectUnknownFormat()) return
@@ -8301,11 +7156,8 @@ class ServeHttpServer(
     // Operational state must reach browsers and monitors immediately in both directions: neither
     // a healthy snapshot after failure nor a stale failure after recovery is useful status.
     markGeneration("status", DYNAMIC_RESOURCE_CACHE_CONTROL)
-    // On a top-level site, `/status` reports on THAT app only: its catalog row, its daemons, and
-    // the startup failures that name it. A visitor to `m3.preview.coo.ee/status` has no business
-    // learning what else this box happens to run, and a monitor pointed at the site should alert on
-    // the site. The same underlying snapshot is taken either way — the scoping is a filter over it,
-    // not a second collection pass.
+    // On a top-level site, `/status` reports only that app (its catalog row, daemons and failures),
+    // filtered from the same snapshot.
     val data = withContext(Dispatchers.IO) { buildStatusData(onlySystem = siteSystem()) }
     val skin = siteSkin()
     if (wantJson) {
@@ -8337,59 +7189,46 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /report-bug`: the preview server's own bug-report page.
+   * `GET /report-bug`: the server's own bug-report page.
    *
-   * Collects what a triager needs about *this deployment* — the running build, its posture and
-   * uptime, the JVM and OS the renders happen on, any catalog that is not cleanly loaded, and the
-   * most recent daemon-startup / render failures — then adds what the visitor was looking at,
-   * resolved from the `from` path their footer form carried. [ServeWeb.bugReportPage] shows all of
-   * it before anything is filed; [ServeBugReport] turns it into the issue body.
+   * Collects what a triager needs about this deployment (build, posture, uptime, JVM/OS, unhealthy
+   * catalogs, recent daemon/render failures) plus what the visitor was viewing, from the footer
+   * form's `from` path. [ServeWeb.bugReportPage] shows it before filing; [ServeBugReport] builds
+   * the body.
    *
-   * The `from` value is browser-supplied and reaches HTML, a link, and a public issue body, so it
-   * is accepted only as a same-origin path with its token stripped ([ServeBugReport.sanitizeFrom]),
-   * and the preview it names is resolved by **matching an existing preview id** rather than being
-   * trusted as one. A path that resolves to nothing costs the report its page section and nothing
-   * else.
+   * `from` is browser-supplied and reaches HTML, links and a public issue, so it is accepted only
+   * as a same-origin path with the token stripped ([ServeBugReport.sanitizeFrom]), and its preview
+   * is resolved by matching an existing id. An unresolvable path just loses the page section.
    */
   private suspend fun RoutingContext.handleBugReport() {
     if (rejectBadToken()) return
     val from = ServeBugReport.sanitizeFrom(call.request.queryParameters[ServeBugReport.FROM_PARAM])
     val ref = ServeBugReport.parsePath(from)
     val pathSystem = ref.system?.let(::decodeQueryValue)
-    // Which session the reported page was showing. Three sources, most specific first:
-    //  - a top-level site publishes exactly one system and its pages carry no `/{system}` prefix,
-    //    so the host itself is the answer and the path could not have named it;
-    //  - a `/{system}/…` path names it directly;
-    //  - a ROOT-form viewer (`/p/Red`, the standard single-module shape) names none, and carries
-    //    its session in `?session=` — else it is the default session. Without this fallback every
-    //    report from a plain `compose-preview serve` lost its preview, catalog, render lane and
-    //    screenshot, which is the most common way this affordance is reached.
+    // Which session the reported page showed, most specific first:
+    //  - a top-level site's host;
+    //  - a `/{system}/…` path;
+    //  - a root-form viewer (`/p/Red`) with `?session=`, else the default session — the common
+    // plain `serve` case.
     val system =
       siteSystem()
         ?: pathSystem?.takeIf { sessions.isKnownSession(it) }
-        // An EXPLICIT `?session=` is the visitor's own page saying which catalog it was showing,
-        // so it is honoured wherever it appears — the query-mode catalog routes (`/?session=…`,
-        // `/pages/foo?session=…`, `/parity?session=…`) carry the footer too and have no system in
-        // their path at all.
+        // An explicit `?session=` is honoured anywhere, since query-mode catalog routes have no
+        // system in their path.
         ?: explicitSessionId(from)?.takeIf { sessions.isKnownSession(it) }
-        // The DEFAULT session is a guess, not a statement, so it stays narrow: root-form viewers
-        // only. `ref.system == null` keeps a path that DID name a system — an unknown or
-        // misspelled one — from being silently re-attributed to the default catalog, which would
-        // attach that catalog's provenance and trust and could even match a same-named preview in
-        // it. `previewSegment != null` keeps the server's own pages (`/`, `/status`, `/docs/…`, a
-        // 404) from claiming to belong to the default catalog at all: they belong to the box.
+        // The default session is only assumed for root-form viewers: a path naming an unknown
+        // system must not be re-attributed, and server pages (`/`, `/status`, `/docs/…`, a 404)
+        // belong to no catalog.
         ?: if (ref.system == null && ref.previewSegment != null) {
           defaultSessionId.takeIf { it.isNotBlank() && sessions.isKnownSession(it) }
         } else null
-    // Resident host when there is one. `peekHost` deliberately never resumes a suspended catalog,
-    // so an idle-timed-out session reads as null here — the last-known snapshot below is what keeps
-    // the report from silently losing a still-registered catalog's provenance and trust.
+    // Resident host when there is one; `peekHost` never resumes, so the last-known snapshot below
+    // keeps a suspended catalog's provenance and trust.
     val host = system?.let { sessions.peekHost(it) }
     val bundle = host?.let { catalogBundleHost(it) }
     val seen = if (host == null) system?.let { catalogMetaSeen[it] } else null
-    // Match, don't trust: the segment is browser-supplied, so it names a preview only if this
-    // session actually has one that encodes to it. A suspended session answers from the ids its
-    // snapshot recorded, which is the same list the resident host would have offered.
+    // Match, don't trust: the segment names a preview only if this session has one encoding to it
+    // (a suspended session uses its snapshot's ids).
     val previewIds = host?.previews?.map { it.id } ?: seen?.previewIds.orEmpty()
     val previewId =
       ref.previewSegment?.let { segment ->
@@ -8398,27 +7237,20 @@ class ServeHttpServer(
     val preview = previewId?.let { id -> host?.previews?.firstOrNull { it.id == id } }
     val basePath =
       if (system == null || siteSystem() != null) "" else "/${WebEscaping.urlEncodeSegment(system)}"
-    // The overrides the reporter actually had on screen. They live in `from`'s query (the viewer
-    // rewrites it as the knobs change), and without carrying them the report embeds the DEFAULT
-    // render rather than the one that prompted it — which is the whole evidentiary point.
+    // The overrides the reporter had on screen (from `from`'s query), so the report embeds the
+    // render that prompted it.
     val overrideSuffix = renderOverrideSuffix(from, system)
-    // Which design reference — if any — was on the stage BESIDE that render, and only where the
-    // reporter's own path and query settle it rather than the server picking one (#4765).
-    //
-    // Two pages put a reference there and they are knowable to different depths. The focused
-    // comparison names its pair in the URL, so the answer is exact. The viewer's spec lane names
-    // its lane (`?mode=spec`) but keeps the SOURCE picker in the DOM, so a catalog that offers a
-    // second source could have been showing that instead — there the reference is embedded only
-    // when the lane has nothing to switch to. Every other page leaves this null and keeps the base
-    // render alone, which is the same restraint `ServeBugReport.Page.view` was added for.
+    // Which design reference was on stage beside the render, only where the reporter's path and
+    // query settle it. The focused comparison names its pair exactly; the viewer's spec lane
+    // (`?mode=spec`) only when it has no second source to switch to. Otherwise null, keeping the
+    // base render alone.
     val stageReference = previewId?.let { id ->
       val references = host?.designReferencesFor(id).orEmpty()
       when {
         ref.previewRoute == ServeBugReport.COMPARE_ROUTE -> {
           val named = ServeBugReport.referenceSegment(from)
-          // Match, don't trust — and mirror `handleReferenceComparison` exactly: a `?reference=`
-          // naming one this preview does not have is the page's own 404, so falling back to the
-          // first here would embed a pair that page never drew.
+          // Match, don't trust, mirroring `handleReferenceComparison`: an unknown `?reference=` is
+          // that page's 404, so don't fall back to the first.
           if (named == null) references.firstOrNull()
           else
             references.firstOrNull {
@@ -8426,9 +7258,8 @@ class ServeHttpServer(
             }
         }
         ref.previewRoute == ServeBugReport.VIEWER_ROUTE && ServeBugReport.onSpecLane(from) ->
-          // The lane's own default is the first reference ([ServeWeb.SpecSource]); a second
-          // source means the picker had somewhere to go and the URL does not say whether it went
-          // there, so the report keeps the render alone rather than guessing which pair it was.
+          // The lane defaults to the first reference ([ServeWeb.SpecSource]); with a second source
+          // the URL can't say which was shown, so keep the render alone.
           if (host != null && preview != null && parallelSpecSource(host, preview) != null) null
           else references.firstOrNull()
         else -> null
@@ -8470,10 +7301,8 @@ class ServeHttpServer(
             seen != null -> "suspended (idle)"
             else -> null
           },
-        // Read from the reporter's own query rather than from anything the server rendered: the
-        // viewer rewrites `?mode=`/`?specView=` as the visitor moves between lanes, so the served
-        // HTML knows the lane the page OPENED on and only the address bar knows the one they were
-        // on when something looked wrong. See issue #4261.
+        // Read from the reporter's query, since the viewer rewrites `?mode=`/`?specView=` as the
+        // visitor moves between lanes.
         view = ServeBugReport.viewLabel(from),
         degradations = host?.degradations.orEmpty().map { "${it.code} — ${it.detail}" },
         renderUrl =
@@ -8483,9 +7312,8 @@ class ServeHttpServer(
                 overrideSuffix
             )
           },
-        // The same suffix the render carries. The reference lane reads none of the overrides in it
-        // — a knob does not move a design reference — but it does read the `at=` pin, and a pinned
-        // comparison whose reference quietly came from the tip would put two moments side by side.
+        // The same suffix as the render: the reference lane ignores overrides but honours the `at=`
+        // pin.
         referenceUrl =
           stageReference?.let {
             ServeIssueReport.withoutToken(
@@ -8496,14 +7324,10 @@ class ServeHttpServer(
         publicRender = isPublic,
       )
     val skin = siteSkin()
-    // Which catalog's tracker a *pixel* bug belongs in, so the page can name and link it instead of
-    // telling the reporter to go and find the link on a preview. Always answerable on a top-level
-    // site — the hostname is the catalog — and answerable for any `/{system}/…` page too. Skipped
-    // when the catalog's own tracker turns out to be [ServeBugReport.REPO]: a paragraph pointing at
-    // the tracker the form already files against says nothing. The test is against that repo rather
-    // than [ServeIssueReport.FALLBACK_REPO] — since the server moved to its own repository those
-    // two are different trackers, and a catalog that falls back to the CLI's is still a second,
-    // real destination worth naming.
+    // Which catalog's tracker a pixel bug belongs in, so the page can name and link it; always
+    // answerable on a top-level site and for `/{system}/…` pages. Skipped when it is
+    // [ServeBugReport.REPO] itself (compared against that, not [ServeIssueReport.FALLBACK_REPO],
+    // which is now a different tracker).
     val catalogTarget = system?.let { id ->
       val provenance = bundle?.provenance ?: seen?.provenance
       val repo = ServeIssueReport.repoFor(bundle?.catalogSource, provenance)
@@ -8530,9 +7354,8 @@ class ServeHttpServer(
         body = withShared(ServeBugReport.body(server, page)),
         bodyTemplate = withShared(ServeBugReport.body(server, page, clientPlaceholder = true)),
         repo = ServeBugReport.REPO,
-        // The thumbnail is fetched by the visitor's own browser against this server, so it keeps
-        // the token the report body strips — otherwise a gated box shows a broken image on the
-        // page that is meant to prove what the reporter saw.
+        // The on-page thumbnail is fetched by the visitor's browser, so it keeps the token the
+        // report body strips.
         renderUrl =
           previewId?.let {
             val gate =
@@ -8561,10 +7384,8 @@ class ServeHttpServer(
       ServeWeb.bugReportPage(
         report = report,
         sections = bugReportSections(server, page),
-        // The bare route, NOT `externalPageUrl()`. This page's query is browser-supplied `from`,
-        // and `og:url` would put it back into the document verbatim — echoing an unvalidated,
-        // possibly off-origin URL into the markup, which is exactly what `sanitizeFrom` refuses to
-        // do for every other use of the value. There is nothing to unfurl per-report anyway.
+        // The bare route, not `externalPageUrl()`: the query is browser-supplied `from`, and
+        // `og:url` would echo it unvalidated.
         unfurl = ServeWeb.UnfurlMetadata(pageUrl = externalOrigin() + ServeBugReport.PATH),
         version = SERVE_VERSION,
         siteName = skin.first,
@@ -8572,14 +7393,9 @@ class ServeHttpServer(
         themeStorageKey = skin.third,
         navSuffix =
           if (!linksCarryToken()) "" else "?token=${WebEscaping.urlEncodeSegment(linkToken())}",
-        // Resolve THIS caller, not merely the existence of a resolver. The lane admits a
-        // browser only when its OAuth session names a login with access to the *image*
-        // repository, so a resolver that exists still answers null for an anonymous visitor
-        // — and for a signed-in one whose OAuth repository is not the image repository.
-        // Advertising the lane on either meant every report attempted a doomed upload,
-        // disabled Submit while it failed, and spent the anonymous verification budget
-        // before falling back to the clipboard. Asking the same question the upload path
-        // asks costs nothing here: it is a cookie read, not a GitHub round trip.
+        // Resolve this caller, not just whether a resolver exists: the lane admits only an OAuth
+        // session for the image repository, and advertising it otherwise makes every report attempt
+        // a doomed upload. A cookie read, not a GitHub call.
         canUploadCaptures =
           imageStore != null &&
             imageUploadAuth != null &&
@@ -8596,13 +7412,10 @@ class ServeHttpServer(
   private val sharedItems = ServeShareTarget.Store()
 
   /**
-   * `POST /report-bug/share`: what the OS share sheet sends the installed app.
-   *
-   * A browser-initiated navigation, so it is answered with a `303` to a page rather than with data:
-   * an image or free text lands in the bug report (parked in [sharedItems] for the page to import),
-   * and a link to one of this server's own pages opens that page. A cross-site form that tries to
-   * plant a picture in somebody's report is refused — the share sheet's own POST is
-   * browser-initiated (`Sec-Fetch-Site: none`), so it is never cross-site.
+   * `POST /report-bug/share`: what the OS share sheet sends the installed app. Answered with a
+   * `303`: images or text land in the bug report (parked in [sharedItems]); links to this server
+   * open that page. Cross-site posts are refused; the share sheet's own POST is `Sec-Fetch-Site:
+   * none`.
    */
   private suspend fun RoutingContext.handleShareTarget() {
     if (rejectBadToken()) return
@@ -8676,15 +7489,12 @@ class ServeHttpServer(
       ?.takeIf { it.isNotBlank() }
 
   /**
-   * "Open on your phone" for the operator of a `--lan` server: each network URL, a QR code for the
-   * first, and the secure-context caveat — on the landing page they already have open.
+   * "Open on your phone" for the operator of a `--lan` server: network URLs, a QR code, and the
+   * secure-context caveat.
    *
-   * Shown only to the operator, which here means all of: the server is bound to every interface;
-   * the request reached the listener directly from this machine (a loopback peer, a loopback
-   * `Host`, and no proxy forwarding headers — a reverse proxy on the same box makes every visitor
-   * look local otherwise); and it carries the operator's own token or browse cookie, not an agent
-   * grant. The card puts the operator's token into a link, so anything looser would hand it to
-   * whoever else can load the page. The response is then `no-store`.
+   * Shown only when the server binds every interface, the request came directly from this machine
+   * (loopback peer and `Host`, no forwarding headers), and it carries the operator's token or
+   * browse cookie (not a grant), since the card embeds the token. The response is `no-store`.
    */
   private fun RoutingContext.operatorLanCard(): String? {
     if (!ServeUrls.isExposed(host)) return null
@@ -8741,9 +7551,8 @@ class ServeHttpServer(
     else html.replaceFirst("<main class=\"cp-main\">", "<main class=\"cp-main\">\n$card")
 
   /**
-   * The session a root-form viewer path was showing, from the `?session=` its links carry, else the
-   * host's default. Only meaningful for a path with no `/{system}` prefix; the caller checks the
-   * result is a session this server actually knows before using it.
+   * The session a root-form viewer path showed: its `?session=`, else the default. The caller
+   * checks the session is known.
    */
   private fun explicitSessionId(from: String?): String? {
     val query = from?.substringAfter('?', missingDelimiterValue = "").orEmpty()
@@ -8753,20 +7562,14 @@ class ServeHttpServer(
         .firstOrNull { it.startsWith("session=") }
         ?.substringAfter('=')
         ?.takeIf { it.isNotBlank() } ?: return null
-    // Decoded, because `ServeWeb.queryString` percent-encodes it on the way out: an on-demand
-    // revision session (`feature/foo`) reaches us as `session=feature%2Ffoo` while the registry
-    // stores the raw key, so looking up the encoded spelling silently finds nothing and the report
-    // loses its catalog, preview, render lane and screenshot.
+    // Decoded, since `ServeWeb.queryString` percent-encodes it (`feature/foo` → `feature%2Ffoo`)
+    // while the registry stores the raw key.
     return decodeQueryValue(raw)
   }
 
   /**
-   * Percent-decode a query VALUE without the `+`-means-space rule.
-   *
-   * `URLDecoder` applies `application/x-www-form-urlencoded`, where a literal `+` decodes to a
-   * space — but these values are produced by `WebEscaping.urlEncodeSegment`, which leaves `+`
-   * alone. Pre-escaping the `+` keeps it literal through the decode, so a session or preview id
-   * containing one survives instead of turning into a space that matches nothing.
+   * Percent-decode a query value without the `+`-means-space rule, since
+   * `WebEscaping.urlEncodeSegment` leaves `+` literal.
    */
   private fun decodeQueryValue(value: String): String? = runCatching {
     URLDecoder.decode(value.replace("+", "%2B"), StandardCharsets.UTF_8)
@@ -8774,44 +7577,23 @@ class ServeHttpServer(
     .getOrNull()
 
   /**
-   * **This** request's override query, as the map a report or a render URL means by "the overrides
-   * in force".
-   *
-   * Filtered to the params the render lane actually consumes ([ServeOverrides.isOverrideParam]) and
-   * normalised exactly the way the page's own links are, so routing-only params (`session`,
-   * `reference`) and the token never ride along into a caller that meant the *overrides*.
-   *
-   * Shared by the viewer and the focused comparison rather than written out at each: the two file
-   * reports about the same preview, and an override normalised one way in one report and another
-   * way in the other would make the same bug arrive looking like two.
+   * This request's override query, filtered to what the render lane consumes
+   * ([ServeOverrides.isOverrideParam]) and normalised like the page's links, so routing params and
+   * the token never ride along. Shared by the viewer and focused comparison so their reports agree.
    */
   /**
-   * [requestOverrideParams], but empty whenever this page's picture cannot be showing them.
+   * [requestOverrideParams], minus whatever this page's picture cannot be showing, so controls
+   * never claim a state the pixels lack.
    *
-   * Seeding the viewer's controls from the request is what stops a deep link's values from reaching
-   * the snapshot and nothing else. It is only honest while the image beside those controls actually
-   * carries the override; where it deliberately does not, a seeded control claims a state the
-   * pixels never had — the same contradiction, drawn the other way round, and worse for being on a
-   * *disabled* control the visitor cannot correct.
+   * A pinned revision (`?at=<sha>`) drops every seed, matching `pinnedRenderQuerySuffix`. Otherwise
+   * only an accepted baked fallback (`?fallback=baked`, via `respondDroppedOverrides`) can ignore
+   * an override, and per axis:
+   * - no lane can apply it at all (no server render path and no Wasm app [wasmSrc]);
+   * - the preview is replayed from a Remote Compose document, so `knob.*` and string `rc.*` can't
+   *   apply; [CatalogLiveRouting.irReplayDroppedOverrideNames] decides, matching
+   *   [droppedOverridesFor].
    *
-   * A **pinned revision** (`?at=<sha>`) drops every seed: its image is the historical baked
-   * artifact, and `pinnedRenderQuerySuffix` strips every render override from that URL for exactly
-   * this reason.
-   *
-   * Otherwise only an accepted **baked fallback** (`?fallback=baked`) can answer with pixels that
-   * ignored an override — `respondDroppedOverrides` returns them and names what it dropped — and
-   * *which* seeds to withhold there is a question about **axes**, not about the host. Two ways an
-   * axis fails to reach the pixels, and a page can be in either:
-   * - the session has no lane that could apply one at all: neither serve-side render path, and no
-   *   in-browser Wasm app ([wasmSrc]) that would mount the component with the override itself;
-   * - the preview is **replayed** from a captured Remote Compose document rather than recomposed,
-   *   so a `knob.*` (and a string `rc.*`) has no composition to reach, even though the host renders
-   *   perfectly well. [CatalogLiveRouting.irReplayDroppedOverrideNames] is the authority on that
-   *   set, and asking it — rather than a host-wide capability — is what keeps this guard and the
-   *   render lane's own refusal ([droppedOverridesFor]) answering the same question.
-   *
-   * Everything the render can honour still seeds, including on those pages: withholding an axis the
-   * pixels DID apply would recreate the disagreement pointing the other way.
+   * Everything the render honours still seeds.
    */
   private fun RoutingContext.seedableOverrideParams(
     renderHost: ServeHost,
@@ -8845,13 +7627,9 @@ class ServeHttpServer(
   }
 
   /**
-   * A page's request overrides, split into the ones its controls may open on and the ones they may
-   * not.
-   *
-   * Both halves are needed and neither is derivable from the other downstream: the seeded map
-   * paints the markup, and the withheld set is what the page has to TELL the viewer, since
-   * `hydrateFromUrl` reads `location.search` itself and would otherwise restore what the server
-   * declined.
+   * A page's request overrides split into those its controls may open on and those they may not.
+   * The withheld set must be told to the viewer, since `hydrateFromUrl` reads `location.search`
+   * itself.
    */
   internal data class OverrideSeeds(
     val seeded: Map<String, String>,
@@ -8859,9 +7637,8 @@ class ServeHttpServer(
   ) {
     companion object {
       /**
-       * [seeded] plus everything in [all] it left behind — narrowed to the per-axis prefixes the
-       * viewer's controls hold, since the display axes (`fontScale`, `device`, …) are hydrated by
-       * their own code paths and named by neither control.
+       * [seeded] plus whatever of [all] it left out, narrowed to the per-axis prefixes the viewer's
+       * controls hold (display axes like `fontScale` and `device` hydrate separately).
        */
       fun of(all: Map<String, String>, seeded: Map<String, String>): OverrideSeeds =
         OverrideSeeds(
@@ -8889,15 +7666,10 @@ class ServeHttpServer(
       .let { ServeWeb.SystemDisplay.normalizeOverrideParams(sessionId, it) }
 
   /**
-   * The reported page's own override query, re-emitted as a `?…` suffix for a `/render` URL.
-   *
-   * Taken from `from` rather than from this request, because `from` is the page whose pixels are
-   * being reported. Filtered to the params the render lane actually consumes
-   * ([ServeOverrides.isOverrideParam]) and normalised the same way the viewer's own links are, so
-   * routing-only params (`session`, `reference`) and the token cannot ride along — the token is
-   * added separately, and only to the on-page thumbnail.
-   *
-   * Empty when the page carried no overrides, which keeps the default render URL exactly as it was.
+   * The reported page's override query as a `?…` suffix for a `/render` URL, taken from `from` (the
+   * reported page). Filtered ([ServeOverrides.isOverrideParam]) and normalised like the viewer's
+   * links; the token is added separately for the on-page thumbnail only. Empty when there are no
+   * overrides.
    */
   private fun renderOverrideSuffix(from: String?, system: String?): String {
     val query = from?.substringAfter('?', missingDelimiterValue = "").orEmpty()
@@ -8926,17 +7698,9 @@ class ServeHttpServer(
   }
 
   /**
-   * The most recent failures worth carrying in a bug report, newest first: daemon startups that
-   * never came up and renders that failed or timed out, merged and capped.
-   *
-   * Merged **by timestamp before the cap**, not concatenated. Concatenating let a run of old
-   * startup failures consume the whole budget and drop a render failure from seconds ago — hiding
-   * the very event that prompted the report. Sorting the raw records and cutting afterwards means
-   * the cap always keeps the newest, whichever kind they are.
-   *
-   * Capped because an issue body is read by a human: a server that has been failing for a week has
-   * hundreds of these and the tail says nothing the head doesn't. The full history stays on
-   * `/status`.
+   * The most recent failures for a bug report, newest first: daemon startups and render
+   * failures/timeouts, merged by timestamp before capping so the newest always survive. Capped for
+   * readability; full history is on `/status`.
    */
   private fun recentFailureLines(status: StatusData): List<String> {
     val startup =
@@ -9008,22 +7772,17 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /readyz`: the rolling-update readiness gate. Instant and non-blocking — it only reads the
-   * [ready] latch, returning `200 "ready"` once it's set and `503 "warming"` before. The render
-   * that flips the latch runs on the server-owned [readinessProber], NOT in this request coroutine,
-   * so a health checker's short command timeout (the Docker healthcheck allows 5s) can never cancel
-   * a slow first render and discard its result — the first poll just kicks the prober off and
-   * reports "warming"; a later poll sees the latched value. So the ~10s poll stays cheap even
-   * against a daemon-backed module whose cold render runs for much longer than the poll timeout.
+   * `GET /readyz`: the rolling-update readiness gate. Instant: it reads the [ready] latch (`200
+   * "ready"` / `503 "warming"`). The render runs on [readinessProber], so a healthcheck timeout
+   * (Docker allows 5s) can't cancel it; the first poll starts the prober.
    */
   private suspend fun RoutingContext.handleReadyz() {
     if (ready.get()) {
       call.respondText("ready")
       return
     }
-    // Upload-only server (`--accept-bundles`, no landing session, no configured catalogs): there's
-    // no representative preview to render, so "ready" means the listener is up and waiting for
-    // uploads. Catalog-only starts still wait for the first loaded catalog below.
+    // Upload-only server (`--accept-bundles`, no landing session or catalogs): nothing to render,
+    // so ready once listening. Catalog-only starts still wait below.
     if (defaultSessionId.isBlank() && catalogLoads?.snapshot().isNullOrEmpty()) {
       ready.set(true)
       call.respondText("ready")
@@ -9034,12 +7793,9 @@ class ServeHttpServer(
   }
 
   /**
-   * Start the server-owned readiness prober on the first `/readyz` poll (idempotent via
-   * [readinessProbeStarted]). It renders the design systems off the request path, retrying on
-   * failure, and latches [ready] on the first fully successful pass — so a client that times out
-   * mid-probe never discards the work. A daemon thread (interrupted on [stop]); it exits as soon as
-   * [ready] is set. Gated behind an actual `/readyz` hit so a plain `serve` that's never
-   * health-checked pays no eager render.
+   * Start the readiness prober on the first `/readyz` poll (idempotent via
+   * [readinessProbeStarted]). It renders the design systems off the request path, retrying until a
+   * fully successful pass latches [ready]. A daemon thread, interrupted on [stop].
    */
   private fun ensureReadinessProbe() {
     if (!readinessProbeStarted.compareAndSet(false, true)) return
@@ -9066,20 +7822,14 @@ class ServeHttpServer(
   }
 
   /**
-   * One readiness attempt: render one preview from **every configured design system**
-   * ([CatalogLoadTracker.designSystemSystems]), and report success only if all of them answer.
+   * One readiness attempt: render one preview from every configured design system
+   * ([CatalogLoadTracker.designSystemSystems]); success only if all answer. Systems still warming
+   * are logged by name.
    *
-   * A pass means the render path works end-to-end for the catalogs this box exists to serve —
-   * loaded, previews present, bytes produced. A single failure returns false so the prober retries;
-   * the systems still warming are logged by name, because "warming" with no names is the state this
-   * gate used to report for ten minutes before docker-rollout gave up.
+   * With no design systems configured (plain `serve`, dev box, upload-only), falls back to the
+   * representative-session probe, since a server that renders nothing isn't ready.
    *
-   * With no design systems configured at all — a plain `serve`, a dev box, an upload-only server —
-   * this falls back to the old representative-session probe rather than reporting ready for free:
-   * those servers have no design-system list to wait on, and a server that renders nothing is still
-   * not ready.
-   *
-   * Runs on the [readinessProber] thread (the leases and renders are blocking). Never throws.
+   * Runs on [readinessProber] (blocking). Never throws.
    */
   private fun probeReadiness(): Boolean {
     val designSystems = catalogLoads?.designSystemSystems().orEmpty()
@@ -9098,15 +7848,9 @@ class ServeHttpServer(
   }
 
   /**
-   * Can [system] serve a render **right now**: lease its session and render one preview
-   * override-free. False for every way that can fail — not registered yet, registered with no
-   * previews, a render error, or an exception — because the prober's job is to keep waiting, not to
-   * distinguish them.
-   *
-   * The render is the whole point. A catalog counts as `loaded` the moment its previews are
-   * discovered, which is several steps before its lane can produce bytes, and that gap is what a
-   * visitor sees as a catalog page whose every image is missing. Rendering one preview is the
-   * cheapest question that cannot be answered yes in that window.
+   * Whether [system] can render right now: lease its session and render one preview override-free.
+   * False on any failure. A catalog counts as `loaded` before it can produce bytes, so only an
+   * actual render answers this.
    */
   private fun renderableNow(system: String): Boolean {
     val lease = sessions.lease(system) ?: return false
@@ -9152,10 +7896,9 @@ class ServeHttpServer(
     val themeOptimization: ThemeOptimizationSnapshot?,
     val renderCache: CatalogRenderCacheSnapshot?,
     /**
-     * The metadata above is a **last-known snapshot** of a now-suspended catalog
-     * ([catalogMetaSeen]) rather than a live read, because the session's daemon is idle. Facts a
-     * suspension can't change — trust, provenance, preview count — so it's reported, just marked as
-     * not-live.
+     * The metadata above is a last-known snapshot of a suspended catalog ([catalogMetaSeen]);
+     * trust, provenance and preview count can't change by suspension, so they're reported but
+     * marked not-live.
      */
     val stale: Boolean = false,
   ) {
@@ -9170,48 +7913,29 @@ class ServeHttpServer(
   }
 
   /**
-   * Last-known catalog metadata per session id, captured while the host was resident. A suspended
-   * live catalog can't be read (`peekHost` never resumes, by design — a status poll must not wake
-   * every idle daemon), which used to render it as a blank row: no title, no preview count, and an
-   * empty trust cell **indistinguishable from untrusted**. These facts come from the signed/fetched
-   * delivery branch, not from the daemon, so a suspension doesn't invalidate them — remembering
-   * them keeps `/status` honest without costing a resume.
+   * Last-known catalog metadata per session, captured while resident. `peekHost` never resumes, so
+   * without this a suspended catalog would render as a blank row whose empty trust cell reads as
+   * untrusted. These facts come from the delivery branch, so suspension doesn't invalidate them.
    *
-   * Written on suspension (see the [sessions] listener below) and refreshed on every resident read,
-   * so it tracks a catalog refresh that re-registers a system with new provenance.
+   * Written on suspension (the [sessions] listener below) and refreshed on every resident read.
    */
   private val catalogMetaSeen = ConcurrentHashMap<String, CatalogMeta>()
 
   /**
-   * Where each preview's source lives, per system, so `/usage/<id>` can answer for a **suspended**
-   * catalog — the snapshot [ServeSessionRegistry.peekHost] tells a caller to keep rather than read
-   * absence as a verdict.
+   * Where each preview's source lives, per system, so `/usage/<id>` can answer for a suspended
+   * catalog.
    *
-   * Written and removed **only** by [ServeSessionRegistry.SessionSnapshots], under the registry's
-   * own lock, as part of the detach and retire transitions. That single-writer rule is what makes
-   * it correct rather than merely narrow: a reader sees the session resident (and uses the live
-   * host) or suspended-with-a-snapshot, never the gap between, and a retirement cannot be overtaken
-   * by a slower writer still holding the removed host.
-   *
-   * Two earlier shapes did not hold, and both failed the same way — the storage was the registry's
-   * business but lived outside it. Refreshing this from resident reads gave it a second writer
-   * outside the lock, which is how a retired catalog's entry came back. Publishing it from a
-   * suspend listener only shortened the window, because listeners run after the lock is released.
-   *
-   * Nothing is written while a session is resident, and nothing needs to be: the live host answers
-   * then, and the snapshot is taken from the host being detached, which is fresher than anything a
-   * resident read could have left behind.
+   * Written and removed only by [ServeSessionRegistry.SessionSnapshots] under the registry's lock
+   * during detach and retire, so readers see either the live host or a snapshot, never a gap, and a
+   * retirement can't be overtaken by a slower writer. Nothing is written while resident.
    */
   private val catalogSourceLocationsSeen =
     ConcurrentHashMap<String, Map<String, PlaygroundSeedResolver.Location>>()
 
   /**
-   * The related-link index and its link-facing component labels for each suspended catalog.
-   *
-   * Back-links are derived by walking OTHER catalogs. Most of those are suspended most of the time,
-   * so consulting resident hosts alone made the links disappear after the ten-minute idle window.
-   * Captured and retired atomically beside [catalogSourceLocationsSeen], because these are the same
-   * kind of immutable published-catalog facts and need the same no-gap transition guarantee.
+   * The related-link index and component labels for each suspended catalog, since back-links walk
+   * other catalogs that are usually suspended. Captured and retired atomically beside
+   * [catalogSourceLocationsSeen].
    */
   private val relatedCatalogsSeen = ConcurrentHashMap<String, RelatedCatalog>()
 
@@ -9230,11 +7954,8 @@ class ServeHttpServer(
     val trust: String?,
     val previews: Int?,
     /**
-     * The preview ids themselves, not just the [previews] count — the sitemap lists one URL per
-     * viewer page and has to name them. Remembered here for the same reason everything else in this
-     * snapshot is: `peekHost` never resumes a suspended catalog, so building the sitemap off live
-     * hosts alone would publish only whichever catalogs happened to be warm, and the file would
-     * change shape between two requests a minute apart.
+     * The preview ids, for the sitemap's per-viewer URLs; remembered so the sitemap doesn't depend
+     * on which catalogs are warm.
      */
     val previewIds: List<String>,
     /** Component-card projection used by the home page's cross-catalog command palette. */
@@ -9244,71 +7965,51 @@ class ServeHttpServer(
     val heroPreviewId: String?,
     val heroCrop: ContentCrop?,
     /**
-     * The prebaked front-door thumbnail for [heroPreviewId] — cropped, downscaled and content
-     * hashed once, served off the `/hero/` lane. Captured here (rather than looked up when the home
-     * page renders) because this is where the bundle host that owns the pixels is in hand: a
-     * suspended catalog then keeps its hero exactly like it keeps its trust badge. Null when the
-     * catalog has no hero, or its PNG couldn't be decoded — the card falls back to `/render`.
+     * The prebaked front-door thumbnail for [heroPreviewId], served on `/hero/`. Captured here
+     * where the owning bundle host is in hand, so a suspended catalog keeps its hero. Null when
+     * there's no hero or it couldn't be decoded; the card then uses `/render`.
      */
     val heroImage: ServeHeroImages.Hero?,
     /**
-     * The pixel size of the hero preview's **full** render — what the front door advertises to link
-     * unfurlers, as opposed to the card-sized [heroImage] thumbnail beside it.
-     *
-     * Remembered rather than looked up when the home page renders, for the same reason [heroImage]
-     * is: `peekHost` returns null for a suspended catalog, so a live lookup would silently fall
-     * back to advertising the downscaled thumbnail — the undersized image this stopped advertising
-     * — whenever the featured catalog happened to be idle. Which catalog is featured depends only
-     * on publisher grouping, so that would have been the *usual* state on a quiet server, not an
-     * edge case.
+     * The pixel size of the hero's full render, advertised to unfurlers. Remembered because
+     * `peekHost` is null for an idle catalog, which would otherwise fall back to the undersized
+     * thumbnail.
      */
     val heroRenderSize: Pair<Int, Int>?,
     val darkStage: Boolean,
     /**
-     * The catalog's own web palette ([ServeThemeCss]). Remembered for the same reason the trust
-     * badge and hero are: a **site**'s `/status` and 404 wear this skin, and reading it live meant
-     * the whole hostname reverted to the default palette the moment its daemon went idle. It comes
-     * from the delivery branch, not the daemon, so a suspension cannot invalidate it.
+     * The catalog's web palette ([ServeThemeCss]), remembered so a site's `/status` and 404 keep
+     * its skin while idle. It comes from the delivery branch.
      */
     val webThemeCss: String,
     val degradation: String?,
     val provenance: ServeWeb.CatalogProvenance?,
     /**
-     * The upstream project the catalog's `catalog.json` declares its Kotlin came from
-     * ([ServeBundleHost.catalogSource]) — for an import, the project itself rather than the staging
-     * repository whose delivery branch [provenance] records. Remembered here so the front door can
-     * attribute an import whose registration carried no `importedFrom`; see
-     * [ServeWeb.HomeSystem.catalogSourceRepo].
+     * The upstream project the catalog's `catalog.json` declares ([ServeBundleHost.catalogSource]),
+     * for attributing imports with no `importedFrom`. See [ServeWeb.HomeSystem.catalogSourceRepo].
      */
     val catalogSourceRepo: String?,
     val themeOptimization: ThemeOptimizationSnapshot?,
     val renderCache: CatalogRenderCacheSnapshot?,
     /**
-     * This catalog publishes design references, so the front door can offer it a compare action
-     * ([ServeWeb.HomeSystem.hasReferenceComparison]).
-     *
-     * Remembered here, rather than looked up when the home page renders, for the same reason the
-     * hero and the trust badge are: `peekHost` never resumes a suspended catalog, so a live lookup
-     * would drop the action off every card whose daemon happened to be idle — the usual state on a
-     * quiet server, not an edge case. Design references come from the delivery branch, so a
-     * suspension cannot invalidate the answer.
+     * Whether this catalog publishes design references
+     * ([ServeWeb.HomeSystem.hasReferenceComparison]); remembered so idle catalogs keep their
+     * compare action.
      */
     val hasReferenceComparison: Boolean,
     /**
-     * The sibling system this catalog pairs with, when both halves of the `compareWith` +
-     * `parallel` pairing resolve on this host ([CatalogFacts.compareWithSystem]). Null for every
-     * catalog that declares no pairing, which is most of them.
+     * The sibling system this catalog pairs with when both halves of `compareWith` + `parallel`
+     * resolve ([CatalogFacts.compareWithSystem]). Usually null.
      */
     val compareWithSystem: String? = null,
     /**
-     * The counterpart components named in [compareWithSystem], in that catalog's vocabulary. See
-     * [CatalogFacts.parallelComponentIds]; [homeSystemsFor] resolves them against the sibling.
+     * The counterpart components named in [compareWithSystem], in that catalog's vocabulary
+     * ([CatalogFacts.parallelComponentIds]); [homeSystemsFor] resolves them.
      */
     val parallelComponentIds: Set<String> = emptySet(),
     /**
-     * The design tool those references name ("Figma", …), or null when they name none — a `png`, an
-     * `svg`, an unmapped provider. Only the action's **label**; whether there is an action at all
-     * is [hasReferenceComparison] above.
+     * The design tool the references name ("Figma", …), or null. Label only;
+     * [hasReferenceComparison] decides whether there is an action.
      */
     val designToolLabel: String?,
   )
@@ -9318,21 +8019,15 @@ class ServeHttpServer(
     uiBuilderThumbnails?.nativePreview = uiBuilderNativePreview
     // Snapshot a catalog's facts as its daemon goes idle — the last moment they're readable.
     sessions.addSuspendListener { id, host -> rememberCatalogMeta(id, host) }
-    // A retired catalog's status snapshot goes with it. Without this every published-then-retired
-    // system on a churning host is retained for the life of the process. This one is a listener
-    // rather than a registry transition because [catalogMetaSeen] is also written from resident
-    // status reads, so it has other writers by design and cannot claim the guarantee below; the
-    // eviction is still strictly better than never evicting.
+    // A retired catalog's status snapshot goes with it. A listener rather than a registry
+    // transition because [catalogMetaSeen] also has resident-read writers.
     sessions.addUnregisterListener { id -> catalogMetaSeen.remove(id) }
-    // The source locations ride the registry's own transitions instead — see
-    // [catalogSourceLocationsSeen]. Both halves are pure map operations: no I/O, no blocking, no
-    // re-entry into the registry, which is what the under-lock contract requires.
+    // Source locations ride the registry's own transitions ([catalogSourceLocationsSeen]). Pure map
+    // operations, as the under-lock contract requires.
     sessions.setSessionSnapshots(
       object : ServeSessionRegistry.SessionSnapshots {
         override fun capture(sessionId: String, host: ServeHost) {
-          // Nothing stored for a host with no catalog source — a forked revision session, a plain
-          // module — rather than an empty map per session. The GC discards these anyway, but an
-          // entry that can never answer is not worth holding in the first place.
+          // Nothing stored for a host without a catalog source.
           val locations = sourceLocationsOf(host)
           if (locations.isEmpty()) catalogSourceLocationsSeen.remove(sessionId)
           else catalogSourceLocationsSeen[sessionId] = locations
@@ -9373,10 +8068,8 @@ class ServeHttpServer(
   }
 
   /**
-   * Every preview's source location on [host], as the suspended-catalog snapshot keeps them.
-   *
-   * Runs under the registry lock (see [ServeSessionRegistry.SessionSnapshots]), so it walks the
-   * preview list, builds a map, and does nothing else — no render, no decode, no I/O.
+   * Every preview's source location on [host] for the suspended snapshot. Runs under the registry
+   * lock ([ServeSessionRegistry.SessionSnapshots]), so: walk, build a map, nothing else.
    */
   private fun sourceLocationsOf(host: ServeHost): Map<String, PlaygroundSeedResolver.Location> {
     val bundle = catalogBundleHost(host) ?: return emptyMap()
@@ -9397,39 +8090,23 @@ class ServeHttpServer(
   }
 
   /**
-   * Record [host]'s browse-card facts under [id]. Bundle hosts contribute their richer publishing
-   * metadata; local module sessions still contribute a title, preview count and representative
-   * render so project-wide component browsing can use the same front door.
+   * Record [host]'s browse-card facts under [id]. Bundle hosts contribute richer publishing
+   * metadata; local module sessions still contribute title, preview count and a representative
+   * render.
    *
-   * [progress] governs the two **progress counters** — the theme-optimization and render-cache
-   * snapshots — which are read by `/status` and by nothing else. They are not free:
-   * `themeOptimizationSnapshot` asks the theme cache whether it holds each of the catalog's themed
-   * renders, and every one of those membership tests builds a cache file name through
-   * `String.format`. Across the front door's catalogs that is tens of thousands of formatter parses
-   * per request, and thread dumps of `preview.coo.ee` under load put ~88% of the home index's
-   * server time inside this function, essentially all of it under `themeOptimizationSnapshot`.
-   *
-   * So the callers that do not read them do not pay for them. `homeSystemsFor` builds
-   * [ServeWeb.HomeSystem], which has no progress fields at all, and the global component index
-   * reads only `components`; both pass `progress = false` and carry the remembered values forward
-   * untouched. The status path and the suspend listener pass true — the listener especially, since
-   * that is the last chance to capture a catalog's final counters before its host goes away, and
-   * `/status` renders them for a suspended catalog out of exactly that memory.
-   *
-   * `buildStatusData` re-reads both from the live host anyway, so a `false` here can never make
-   * `/status` show a staler number than it would otherwise: the remembered pair is only ever the
-   * fallback for a catalog whose host is gone.
+   * [progress] controls the two progress counters (theme optimization and render cache), read only
+   * by `/status`. They are expensive (`themeOptimizationSnapshot` builds a cache file name with
+   * `String.format` per themed render), so `homeSystemsFor` and the component index pass `false`
+   * and keep remembered values. The status path and the suspend listener pass true (the last chance
+   * to capture final counters). `buildStatusData` re-reads live values anyway.
    */
   private fun rememberCatalogMeta(id: String, host: ServeHost, progress: Boolean = true) {
     val bundle = catalogBundleHost(host)
     val facts = catalogFactsFor(id, host)
     val remembered = catalogMetaSeen[id]
-    // A LIVE read, deliberately not carried in [CatalogFacts]. `ServeBundleHost.contentCrop`
-    // answers null (or a provisional gutter) *without memoising* while the render PNG or the
-    // component vector is still landing, so that a card starts cropping as soon as they do.
-    // Freezing the first answer for the host's whole life would defeat exactly that retry and
-    // leave the card uncropped until the next catalog refresh. `contentCrop` keeps its own cache
-    // of the decisions it *can* settle, so this stays a map lookup once the files are present.
+    // A live read, not part of [CatalogFacts]: `ServeBundleHost.contentCrop` returns null or a
+    // provisional answer without memoising while files are still landing, so freezing it would
+    // leave the card uncropped. It caches settled decisions itself.
     val heroCrop = facts.heroPreviewId?.let { bundle?.contentCrop(it) }
     catalogMetaSeen[id] =
       CatalogMeta(
@@ -9471,29 +8148,19 @@ class ServeHttpServer(
   }
 
   /**
-   * The half of [CatalogMeta] that is derived by **walking [ServeHost.previews]**, memoised on host
-   * identity.
+   * The part of [CatalogMeta] derived by walking [ServeHost.previews], memoised on host identity.
    *
-   * Every field here is fixed for the life of a host instance: `previews` is an immutable `val` on
-   * each implementation, and design references, the declared hero and the stage surface all come
-   * off the delivery branch rather than the daemon. A catalog refresh installs a *fresh* host, so
-   * host identity is the same invalidation key [ServeHeroImages.heroFor] already uses — and the
-   * weak map lets a retired catalog's entry go with it.
+   * Fixed for a host's life: `previews` is immutable and references, declared hero and stage
+   * surface come from the delivery branch; a refresh installs a fresh host (the same key as
+   * [ServeHeroImages.heroFor]), and the weak map drops retired ones.
    *
-   * Split out because [rememberCatalogMeta] runs on **every** home-index request, once per listed
-   * catalog ([homeSystemsFor]), and these are the expensive members:
-   * [ServeWeb.componentSearchEntries] filters, groups and sorts the whole preview list and then
-   * makes a second grouping pass for duplicate labels; `designToolLabel` walks every preview and
-   * finds nothing at all for a catalog that publishes no design references. Measured on the
-   * deployed server, `/` cost ~590ms of server time for 6.6 KB of gzipped HTML, on every request,
-   * rebuilding this for 27 catalogs whose published contents had not moved.
+   * Split out because [rememberCatalogMeta] runs per listed catalog on every home-index request
+   * ([homeSystemsFor]), and these members are expensive ([ServeWeb.componentSearchEntries],
+   * `designToolLabel`).
    *
-   * Deliberately does **not** cover the members that move while a host is resident — the theme
-   * optimization and render-cache snapshots (progress counters, read by `/status`), the hero's
-   * baked render size, the hero's content crop and the hero thumbnail itself (a catalog fills its
-   * images in after it loads, which is why [ServeHeroImages] memoises a decode failure but never a
-   * missing PNG, and why [ServeBundleHost.contentCrop] memoises only a decision it could settle
-   * against files that were actually present). Those stay live reads above.
+   * Excludes what moves while resident: progress counters, the hero's render size, content crop and
+   * thumbnail (images fill in after load, which is why [ServeHeroImages] and
+   * [ServeBundleHost.contentCrop] memoise only settled answers).
    */
   private class CatalogFacts(
     /** The id this was built for: [darkStage] is resolved per system, so a reuse must match. */
@@ -9506,14 +8173,10 @@ class ServeHttpServer(
     val hasReferenceComparison: Boolean,
     val designToolLabel: String?,
     /**
-     * The sibling SYSTEM this catalog declares itself a parallel rendition of, and whether any of
-     * its components actually name a counterpart in it — the two halves of the `compareWith` +
-     * `parallel` pairing that are fixed for the life of a host.
-     *
-     * The sibling's own residency and TITLE are deliberately not here: whether that catalog is
-     * served right now, and what it calls itself, change without this host changing, and a memo
-     * keyed on host identity would go on naming a neighbour that has since been unregistered. See
-     * [homeSystemsFor], which resolves those two at render.
+     * The sibling system this catalog declares itself a parallel rendition of, and whether any
+     * component names a counterpart — the host-fixed halves of `compareWith` + `parallel`. The
+     * sibling's residency and title change independently and are resolved at render by
+     * [homeSystemsFor].
      */
     val compareWithSystem: String?,
     val parallelComponentIds: Set<String>,
@@ -9547,16 +8210,9 @@ class ServeHttpServer(
       failedRenders = host.previews.count { it.renderFailure != null },
       heroPreviewId = heroId,
       darkStage = darkStage,
-      // The same two reads the catalog landing gates and names its own compare chip with, so the
-      // front door and the landing cannot disagree about whether a catalog compares — or about
-      // what it compares against. Kept apart for the reason they are apart there: references
-      // whose provider names no design tool (`png`, `svg`, an unmapped token) still have a
-      // working `compare?format=reference`, they just get the neutral label.
-      //
-      // Availability is the same condition `comparisonPage` turns the `reference` format on with,
-      // so the action can never deep-link a format that page does not offer. The parity feed's
-      // Figma lane is deliberately NOT a fallback for either (it is on the landing, for the
-      // "design parity" label): only published references put anything behind the route.
+      // The same two reads the landing uses for its compare chip: availability (as `comparisonPage`
+      // enables `reference`) and the tool label, kept separate because provider-less references
+      // still compare. The parity feed's Figma lane is not a fallback for either.
       hasReferenceComparison = host.previews.any { host.designReferencesFor(it.id).isNotEmpty() },
       designToolLabel =
         host.previews.firstNotNullOfOrNull { preview ->
@@ -9564,14 +8220,11 @@ class ServeHttpServer(
             ServeWeb.designToolLabel(it.source.provider)
           }
         },
-      // BOTH halves of the pairing, because half of it means nothing: the catalog names the sibling
-      // system, and a component names the counterpart in it. A `compareWith` that no component
-      // pairs against would put a chip on the card over an empty wall.
+      // Both halves of the pairing; a `compareWith` no component pairs against would put a chip
+      // over an empty wall.
       compareWithSystem = bundle?.compareWithSystem?.takeIf { it.isNotBlank() },
-      // Scoped to components this catalog actually publishes: a mapping for a component dropped
-      // from the manifest names a pairing nothing on either side can draw. Held as the SIBLING's
-      // component ids, because that is the vocabulary a lookup against the sibling's own previews
-      // has to be made in — see [homeSystemsFor].
+      // Only components this catalog publishes, held as the sibling's component ids for lookup
+      // against the sibling's previews ([homeSystemsFor]).
       parallelComponentIds =
         bundle?.parallelByComponentId.orEmpty().let { mapped ->
           val published = host.previews.mapNotNullTo(HashSet()) { it.componentId }
@@ -9581,15 +8234,12 @@ class ServeHttpServer(
   }
 
   /**
-   * One census for the whole server, resampled on a short interval rather than per request — see
-   * [ServeProcessCensus]. Held here because `/status` and `/status.json` are unauthenticated and
-   * uncached on the public deployment, so the traversal's cost is set by whoever is polling.
+   * One process census for the server, resampled on a short interval ([ServeProcessCensus]), since
+   * `/status` is unauthenticated and uncached on the public deployment.
    */
   private val processCensusSampler = ServeProcessCensus()
 
-  /**
-   * Raw status snapshot; the single source both the HTML page and the JSON response project from.
-   */
+  /** Raw status snapshot; the single source for both HTML and JSON. */
   private inner class StatusData(
     val nowMillis: Long,
     val catalogs: List<CatalogStat>,
@@ -9597,23 +8247,18 @@ class ServeHttpServer(
     val failures: List<DaemonStartupLog.Failure>,
     /**
      * The one system this snapshot is about ([ServeSites]), or null for the whole box. Carried
-     * rather than applied only to [catalogs] / [running] because a status page is more than two
-     * lists: the session count and the playground's catalog selector are box-wide reads that would
-     * have kept naming neighbours (and reporting another app's daemons) to a per-site monitor.
+     * because box-wide reads (session count, playground selector) must also be scoped for a
+     * per-site monitor.
      */
     val onlySystem: String? = null,
   ) {
     val uptimeSeconds: Long = ((nowMillis - startedAtMillis) / 1000).coerceAtLeast(0)
 
-    /**
-     * Sessions known to this status view: every registered one for the box, or just this site's (0
-     * or 1 — it is registered, or it has not loaded yet).
-     */
+    /** Sessions known to this view: every registered one, or this site's (0 or 1). */
     val knownSessions: Int =
       if (onlySystem == null) sessions.activeCount()
-      // Registration, not residency: `peekHost` is null for a suspended-but-registered catalog, so
-      // reading it here reported `known: 0` beside an available catalog every time the site's
-      // daemon went idle — a per-site monitor would see its session vanish on a timer.
+      // Registration, not residency: `peekHost` is null for a suspended catalog, which would make
+      // the session vanish whenever it idles.
       else if (sessions.isKnownSession(onlySystem)) 1 else 0
 
     /** The playground's offered catalogs, narrowed to what this view is allowed to name. */
@@ -9625,39 +8270,28 @@ class ServeHttpServer(
     val activeStreams: Int = liveDaemons.sumOf { it.activeStreams }
 
     /**
-     * Cross-catalog optimizer admission, taken once and shared by the JSON and HTML projections so
-     * the two cannot disagree about the same instant. Whole-box only: the counters are server-wide
-     * and a single-system site has no business reading them.
+     * Cross-catalog optimizer admission, taken once for both projections. Whole-box only; omitted
+     * for a site.
      */
     val optimizerAdmission: ThemeOptimizerAdmissionSnapshot? =
       if (onlySystem == null) themeOptimizerStats?.invoke() else null
 
     /**
-     * The catalog blob pool, scoped like [optimizerAdmission] — server-wide counters, so a
-     * single-system site has no business reading them.
-     *
-     * On the page as well as in `/status.json` because the cap is the part that needs watching and
-     * the JSON is not what anyone opens when the box feels slow. A pool pinned at its cap serves
-     * every request from a miss and evicts on every write, which costs render time everywhere while
-     * each individual catalog still looks healthy.
+     * The catalog blob pool, scoped like [optimizerAdmission]. On the page too because a pool
+     * pinned at its cap costs render time everywhere while each catalog looks healthy.
      */
     val catalogCache: CatalogBlobPoolSnapshot? =
       if (onlySystem == null) catalogCacheStats?.invoke() else null
 
-    /**
-     * Sessions holding an open lease — what keeps a session resident. Scoped like `knownSessions`:
-     * a top-level site names only its own.
-     */
+    /** Sessions holding an open lease (what keeps them resident), scoped like `knownSessions`. */
     val leasedSessions: List<String> =
       sessions.leasedSessions().let { held ->
         if (onlySystem == null) held else held.filter { it == onlySystem }
       }
 
     /**
-     * The subset of [leasedSessions] whose holder has been active recently — the ones actually
-     * making the server-wide idle clock read *busy* (#4312). Published beside the full list because
-     * the difference is the diagnosis: leases held with none of them busy is an idle tab keeping a
-     * daemon warm, which is fine; a busy one is someone genuinely being served.
+     * The subset of [leasedSessions] whose holder was recently active, i.e. keeping the idle clock
+     * busy. Leases with none busy are idle tabs keeping a daemon warm.
      */
     val busyLeasedSessions: List<String> =
       sessions.busyLeasedSessions().let { held ->
@@ -9669,15 +8303,9 @@ class ServeHttpServer(
     }
     val catalogLoadFailureCount: Int = catalogs.count { it.loadError != null }
     /**
-     * This container's subprocesses ([ServeProcessCensusSnapshot]) — the page and the JSON read the
-     * same census, so `/status` and `/status.json` cannot disagree about a leak that is running
-     * while they are both being read.
-     *
-     * Box-wide, so a site-scoped snapshot omits it entirely, like every other unattributed
-     * container counter here ([branchFetch], [themeCache], [catalogCache]). A census cannot say
-     * which catalog a JVM or a defunct child belongs to, so publishing it on `m3.preview.coo.ee`
-     * would put another app's leak on this site's `/status.json` and let it trip this site's
-     * monitor.
+     * This container's subprocesses ([ServeProcessCensusSnapshot]), shared by page and JSON.
+     * Box-wide, so omitted for a site like [branchFetch], [themeCache] and [catalogCache]: a census
+     * can't attribute a process to a catalog.
      */
     val processCensus: ServeProcessCensusSnapshot? =
       if (onlySystem == null) processCensusSampler.sample() else null
@@ -9690,9 +8318,8 @@ class ServeHttpServer(
     private fun backendOf(weight: Int): String = if (weight >= 2) "android" else "desktop"
 
     /**
-     * One line of live-lane cadence for the human status page: the fps a viewer actually got, the
-     * median gap behind it, and what a frame costs on the wire. Heartbeats are named separately
-     * because they are the difference between a quiet lane and a stalled one.
+     * One line of live-lane cadence: delivered fps, median gap, per-frame wire cost, and heartbeats
+     * (which distinguish quiet from stalled).
      */
     private fun liveFrameText(stats: LiveFramePerfSnapshot): String = buildString {
       append(stats.achievedFps?.let { "$it fps" } ?: "no frames yet")
@@ -9706,20 +8333,12 @@ class ServeHttpServer(
       "$count $singular${if (count == 1) "" else "s"}"
 
     /**
-     * One line saying whether the theme optimizer's quiet gate is open, and what is holding it shut
-     * when it isn't.
-     *
-     * Worth a row of its own because a shut gate is otherwise indistinguishable from an idle one:
-     * every catalog reports `theme optimization paused` either way, and the counters that would
-     * separate them are server-wide, not per-catalog. The threshold is printed beside the reading
-     * so "closed" always comes with the number it was compared against.
+     * Whether the theme optimizer's quiet gate is open, and what holds it shut — otherwise
+     * indistinguishable from idle. The threshold is printed beside the reading.
      */
     /**
-     * The effective stop/resume thresholds, rendered as the pairs they actually are.
-     *
-     * Stop and resume are printed together per limb because the *gap* is the tuning: a stop of 0.98
-     * against a resume of 0.92 is a band the optimizer's own load crosses, so it flaps, and neither
-     * number alone shows that. `quiet` closes it — a wide band with a 5s quiet still flaps.
+     * The effective stop/resume thresholds as pairs per limb: the gap is the tuning (a narrow band
+     * the optimizer's own load crosses will flap). `quiet` closes it.
      */
     private fun optimizerThresholdText(t: OptimizerPressureThresholds): String =
       listOf(
@@ -9732,10 +8351,8 @@ class ServeHttpServer(
         .joinToString(" · ")
 
     /**
-     * Host and cgroup headroom, shown apart, with the governing one named.
-     *
-     * Only rendered when both are known and they disagree enough to matter; on a bare-metal host
-     * (no cgroup limit) there is one ceiling and the existing reading already says it.
+     * Host and cgroup headroom shown apart, naming the governing one; only when both are known and
+     * differ materially.
      */
     private fun memoryCeilingText(pressure: OptimizerPressureSnapshot): String? {
       val host = pressure.memoryHostAvailableFraction ?: return null
@@ -9746,10 +8363,8 @@ class ServeHttpServer(
     }
 
     /**
-     * `8.0 / 8.0 GB · 100% · 171 evicted` — the cap is the point, so it is never omitted.
-     *
-     * Hit rate is appended only once there have been reads, because `0 hits` on a cold pool is not
-     * the same signal as `0 hits` on a warm one, and the second is the one worth seeing.
+     * `8.0 / 8.0 GB · 100% · 171 evicted` — the cap is always shown. Hit rate only once there have
+     * been reads.
      */
     private fun catalogCacheText(c: CatalogBlobPoolSnapshot): String {
       val fill = if (c.maxBytes > 0) " · ${formatPercent(c.bytes.toDouble() / c.maxBytes)}" else ""
@@ -9774,11 +8389,9 @@ class ServeHttpServer(
 
     private fun optimizerGateText(admission: ThemeOptimizerAdmissionSnapshot): String {
       val needs = "needs ${admission.idleThresholdMillis / 1000}s quiet"
-      // A host whose steady state sits on a stop threshold runs on the starvation cap's bounded
-      // windows rather than on an open gate. Without saying so, `/status` reads as an ordinary
-      // healthy gate that just happens to make very slow progress. Appended rather than returned
-      // early, because the quiet gate still has its own say: a duty cycle answers host pressure,
-      // not "is the server idle".
+      // A host sitting on a stop threshold runs on the starvation cap's bounded windows; say so,
+      // since it otherwise looks like a healthy but slow gate. Appended because the quiet gate
+      // still applies.
       val pressure = admission.pressure
       val cycles = pressure?.dutyCycles ?: 0
       val dutyCycles =
@@ -9788,9 +8401,8 @@ class ServeHttpServer(
           cycles > 0 -> " · ${countLabel(cycles, "duty cycle")}"
           else -> ""
         } +
-          // Residency is the other half of the memory story the gate reads. A box with more
-          // unfinished catalogs than lanes and `0 parked` is one whose daemons are still pinned by
-          // their own backlog — the state that made the reading the gate trips on.
+          // Residency: more unfinished catalogs than lanes with `0 parked` means daemons are pinned
+          // by their own backlog.
           if (admission.hostSuspensions > 0 || admission.hostResumes > 0)
             " · ${admission.hostSuspensions} parked / ${admission.hostResumes} resumed"
           else ""
@@ -9803,9 +8415,8 @@ class ServeHttpServer(
             val why =
               when (admission.idleBlockedBy) {
                 ServeBackgroundWork.IDLE_BLOCKED_BY_SESSION_LEASE ->
-                  // The *busy* holders, not every leaseholder: since #4312 an idle tab's lease
-                  // keeps its session resident without shutting this gate, so naming it here would
-                  // blame the one connection that is not the reason.
+                  // Only busy holders: an idle tab's lease keeps its session resident without
+                  // shutting this gate.
                   if (busyLeasedSessions.isEmpty()) "session lease held"
                   else "session lease held by ${busyLeasedSessions.joinToString(", ")}"
                 ServeBackgroundWork.IDLE_BLOCKED_BY_CATALOG_LOAD -> "catalogs loading"
@@ -9930,11 +8541,8 @@ class ServeHttpServer(
             )
           },
         recentDaemonFailures = failures.map { FailureDto(it.atEpochMillis, it.session, it.reason) },
-        // Omitted on a site host. `/status` there reports on ONE app by design — "a monitor
-        // pointed at the site alerts on the site, and a visitor learns nothing about what else the
-        // box runs" — and these counters are box-wide with no per-system breakdown. Including them
-        // would both fire a site's monitor on a neighbour's throttle and disclose that the
-        // neighbour exists, which is the one thing a top-level site is for.
+        // Omitted on a site host: these counters are box-wide, and including them would fire a
+        // site's monitor on a neighbour and reveal the neighbour.
         branchFetch = if (onlySystem == null) branchFetchStats?.invoke() else null,
         // Box-wide and unattributed per system, so scoped out on a site host for the same reason
         // the branch counters are.
@@ -10051,10 +8659,8 @@ class ServeHttpServer(
                   // neighbouring catalog through a hostname that publishes one app.
                   CatalogSelectorDto(
                     offered = offeredCatalogs(it.offered),
-                    // Omitted rather than carried through when scoped: `resolved` counts how many
-                    // of the BOX's catalogs hold a compile classpath, and there is no per-catalog
-                    // breakdown to narrow it with. Reporting "1 offered, 5 resolved" would be
-                    // internally inconsistent and would leak the neighbour count it exists to hide.
+                    // Omitted when scoped: `resolved` counts box-wide catalogs with no per-catalog
+                    // breakdown, so it would be inconsistent and leak the neighbour count.
                     resolved = if (onlySystem == null) it.resolved else null,
                     limit = it.limit,
                   )
@@ -10087,9 +8693,8 @@ class ServeHttpServer(
     }
 
     /**
-     * [agentGrants] / [agentGrantRequests] are passed in rather than collected here: whether a row
-     * gets a revoke button depends on who is *reading the page*, which is a routing-layer fact this
-     * snapshot has no business knowing.
+     * [agentGrants] / [agentGrantRequests] are passed in because revoke buttons depend on who is
+     * reading the page.
      */
     fun toView(
       agentGrants: List<ServeWeb.StatusAgentGrant> = emptyList(),
@@ -10143,35 +8748,28 @@ class ServeHttpServer(
         )
         add(ServeWeb.Stat("Live daemons running", liveDaemons.size.toString()))
         add(ServeWeb.Stat("Active streams", activeStreams.toString()))
-        // What those streams are actually achieving. "Active streams: 3" says three sockets are
-        // open and nothing about whether they are painting at 15 fps or 0.5 (#4281).
+        // What those streams achieve (fps), which the stream count alone doesn't say.
         liveFrameStats.snapshot(onlySystem)?.let {
           add(ServeWeb.Stat("Live frames", liveFrameText(it)))
         }
-        // The optimizer's *input*, next to the counters that describe its output. Every per-catalog
-        // row already says "theme optimization paused"; none of them says whether that is the box
-        // choosing to be polite or a gate that will never open, and those need different fixes.
+        // The optimizer's input beside its output counters, distinguishing a polite pause from a
+        // gate that will never open.
         optimizerAdmission?.let {
           add(ServeWeb.Stat("Theme optimiser gate", optimizerGateText(it)))
-          // The thresholds that gate was judged against. Without them the row above is a reading
-          // with no scale: "paused · load 2.06 per CPU" is either a gate working or a gate tuned
-          // past usefulness, and the two are indistinguishable on the page. They are set by system
-          // property outside the image, so reading the source does not answer it either.
+          // The thresholds the gate was judged against (set by system property outside the image),
+          // giving the reading a scale.
           it.pressure?.thresholds?.let { t ->
             add(ServeWeb.Stat("Theme optimiser limits", optimizerThresholdText(t)))
           }
-          // Which ceiling the memory limb is actually reading. A container at its own cap on a box
-          // with plenty free reports the same "memory available 0%" as a genuinely full machine,
-          // and the fix differs: raise the cap, or get a bigger host.
+          // Which ceiling the memory limb reads: a container at its cap and a full machine both
+          // show 0% but need different fixes.
           it.pressure?.let { p ->
             memoryCeilingText(p)?.let { text ->
               add(ServeWeb.Stat("Optimiser memory headroom", text))
             }
           }
         }
-        // Fill against the cap, with a meter, because "8.0 GB cached" is only alarming next to an
-        // 8.0 GB ceiling. Evictions are shown beside it: a pool at its cap is not a problem while
-        // it fits, and is a permanent one the moment it does not.
+        // Fill against the cap with a meter, plus evictions.
         catalogCache?.let {
           add(
             ServeWeb.Stat(
@@ -10216,12 +8814,8 @@ class ServeHttpServer(
           )
         )
         add(ServeWeb.Stat("Known sessions", knownSessions.toString()))
-        // Subprocesses, which every other counter on this page is blind to: `Known sessions` and
-        // `Live daemons` count SESSIONS, so a box whose real problem is unreaped children reads as
-        // healthy here. Zombies are called out separately from the live JVMs rather than summed —
-        // they hold a PID and no address space, so one number for both would be a memory estimate
-        // that is wrong in whichever direction the leak is running. See
-        // [ServeProcessCensusSnapshot].
+        // Subprocesses, which session counts miss. Zombies are shown separately from live JVMs
+        // (they hold a PID, no memory). See [ServeProcessCensusSnapshot].
         processCensus?.let { census ->
           add(
             ServeWeb.Stat(
@@ -10234,9 +8828,7 @@ class ServeHttpServer(
                 }
                 census.pidsMax?.let { max -> append(" · ${census.pidsCurrent ?: 0}/$max pids") }
               },
-              // The meter is the PID budget, because that is the ceiling a reaping leak actually
-              // runs into — and an unbounded budget (null `pidsMax`) draws none, since a bar with
-              // no ceiling would imply a headroom nobody set.
+              // The meter is the PID budget; an unbounded budget (null `pidsMax`) draws none.
               census.pidsMax?.let { max ->
                 val used = census.pidsCurrent ?: (census.total.toLong())
                 ServeWeb.Meter(
@@ -10286,9 +8878,7 @@ class ServeHttpServer(
             "Catalog refresh",
             if (catalogRefreshSeconds > 0) "${catalogRefreshSeconds}s" else "disabled",
           ),
-          // "none" is a real answer here, and the one that was previously unobtainable: a box with
-          // no `--catalog-registry` and a box whose registry read failed looked identical from
-          // outside, both simply missing the catalogs they should have been serving.
+          // "none" distinguishes no `--catalog-registry` from a failed registry read.
           ServeWeb.Stat(
             "Catalog registry",
             catalogRegistries().let { registries ->
@@ -10319,9 +8909,8 @@ class ServeHttpServer(
             if (docStore == null) "off"
             else "on (${ServeWeb.humanDuration(docStore.ttlSeconds)} links)",
           ),
-          // Deliberately short: this column is narrow, and a value carrying the gating repository
-          // overruns its own label. Who may upload is on `/status.json`, in the startup log, and in
-          // the refusal an unauthenticated caller gets back.
+          // Short because the column is narrow; who may upload is on `/status.json`, in the startup
+          // log, and in the refusal.
           ServeWeb.Stat(
             "Accept images",
             if (imageStore == null || imageUploadAuth == null) "off"
@@ -10420,15 +9009,11 @@ class ServeHttpServer(
   }
 
   /**
-   * Assemble the status snapshot. Catalog liveness is read purely from
-   * [ServeSessionRegistry.runningDaemons] (a non-resuming snapshot) so a poll never wakes an idle
-   * daemon: a pinned static baked host is always resident (present, no live stream); a live catalog
-   * is present-with-live-stream when its daemon is up and **absent** when suspended. Catalog
-   * metadata (title/trust/provenance) is read via [ServeSessionRegistry.peekHost] — also
-   * non-resuming — so a suspended live catalog is reported from its last-known snapshot
-   * ([catalogMetaSeen], flagged [CatalogStat.stale]) rather than being force-resumed. It is *not*
-   * reported as blank: an empty trust cell reads as "untrusted", which is a different and wrong
-   * claim about a catalog that merely has an idle daemon.
+   * Assemble the status snapshot. Liveness comes from [ServeSessionRegistry.runningDaemons]
+   * (non-resuming): a pinned baked host is always present; a live catalog is present-with-stream
+   * when its daemon is up and absent when suspended. Metadata comes from
+   * [ServeSessionRegistry.peekHost], falling back to [catalogMetaSeen] (flagged
+   * [CatalogStat.stale]) rather than resuming or reporting blank (which would read as untrusted).
    */
   private fun buildStatusData(onlySystem: String? = null): StatusData {
     val allRunning = sessions.runningDaemons()
@@ -10493,19 +9078,14 @@ class ServeHttpServer(
   }
 
   /**
-   * Resolve a list of catalog [ids] into [ServeWeb.HomeSystem] cards for the front-page index.
-   * Reads each resident host without leasing it, falling back to the metadata captured immediately
-   * before a live catalog was suspended. In particular, rendering the front page must not resume
-   * every idle catalog daemon: that made its latency and memory pressure grow with the catalog
-   * count. A catalog with neither a resident host nor a last-known snapshot is skipped rather than
-   * sinking the whole page.
+   * Resolve catalog [ids] into [ServeWeb.HomeSystem] cards without leasing (resident host, else the
+   * snapshot from before suspension), so the front page never resumes idle daemons. Catalogs with
+   * neither are skipped.
    */
   /**
-   * The front-page card for a catalog that is configured but has not loaded yet, or null when it is
-   * not pending. A restart reads catalogs one at a time, so most of a large box's front page used
-   * to vanish for minutes and come back a card at a time; this keeps each one in its place, filed
-   * under the same publisher section, until its load lands. A catalog whose load FAILED is still
-   * skipped: it is not on its way.
+   * The front-page card for a catalog configured but not loaded yet, or null. Startup loads
+   * catalogs one at a time, so this keeps each card in its section until the load lands. A failed
+   * load is skipped.
    */
   private fun loadingHomeSystem(system: String): ServeWeb.HomeSystem? {
     val state = catalogLoads?.snapshot()?.firstOrNull { it.config.system == system } ?: return null
@@ -10551,9 +9131,8 @@ class ServeHttpServer(
         views = views.getValue(system),
         trust = meta.trust,
         sourceRepo = meta.provenance?.repo,
-        // What the catalog says about itself, which survives a registration that lost the
-        // operator's `importedFrom` — an import is then still filed under the upstream owner
-        // instead of under whoever hosts its delivery branch (compose-ai-tools#5012).
+        // The catalog's own declared source, so an import whose registration lost `importedFrom` is
+        // still filed under the upstream owner.
         catalogSourceRepo = meta.catalogSourceRepo,
         // Attribution for an imported catalog: the project it was rendered from, which is neither
         // the serving repo nor anything the catalog's own provenance records.
@@ -10574,33 +9153,16 @@ class ServeHttpServer(
         // Whether the card offers the compare action, and — separately — what it calls it.
         hasReferenceComparison = meta.hasReferenceComparison,
         designToolLabel = meta.designToolLabel,
-        // The paired catalog, named by whatever IT currently calls itself.
+        // The paired catalog named by its current title, resolved here because the sibling's
+        // residency and title change independently of this catalog.
         //
-        // Resolved here rather than remembered beside the pairing, because the two facts have
-        // different lifetimes: that this catalog declares a sibling is fixed for the life of its
-        // host, while whether the sibling is served on this box at all — and under what title — is
-        // a property of a *different* catalog that can be registered, retitled, suspended or
-        // retired without this one changing. Remembering the name would leave a card advertising a
-        // comparison against a neighbour that is no longer here.
-        //
-        // GATED ON THE SAME CONDITION THE DESTINATION NEEDS, which is why the sibling's host is
-        // read rather than its name looked up. `parallelSpecSource` — the walk the compare wall
-        // builds every `format=parallel` row from — resolves to nothing unless the sibling is
-        // RESIDENT (`peekHost`, never `lease`) and publishes one of the counterpart components. A
-        // chip gated on anything weaker deep-links a format the wall then finds empty and silently
-        // replaces with another, which is a prominent front-door link promising a comparison it
-        // cannot show. The catalog landing's own chip has always been gated this way; the card now
-        // agrees with it.
-        //
-        // `peekHost` never resumes a daemon, so the front door still costs no wake-up — only a set
-        // lookup per preview of the paired sibling, and only for the few catalogs that declare one.
+        // Gated on the destination's own condition: `parallelSpecSource` (which builds the wall's
+        // `format=parallel` rows) needs the sibling resident (`peekHost`, never `lease`) and
+        // publishing a counterpart component; anything weaker deep-links an empty format. Matches
+        // the landing's chip. No daemon is woken.
         parallelComparison =
           meta.compareWithSystem?.let { sibling ->
-            // LISTED, first. An unlisted catalog is served at `/<system>/` and deliberately kept
-            // off the front door, and a pairing is not a way around that: naming one here puts its
-            // system id, its title and a working link onto the public home page of the catalog that
-            // happens to point at it. Residency and components say the comparison would WORK; this
-            // says it is one this page is allowed to offer.
+            // Listed first: an unlisted catalog must not appear on the front door via a pairing.
             if (sibling !in listed) return@let null
             val siblingHost = sessions.peekHost(sibling) ?: return@let null
             if (siblingHost.previews.none { it.componentId in meta.parallelComponentIds }) {
@@ -10619,12 +9181,9 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /api/daemons` (query) and `GET /{system}/api/daemons` (path): whether this catalog is
-   * currently backed by a live render server, and how many processes that amounts to.
-   *
-   * Deliberately reads through [ServeSessionRegistry.peekHost], which never resumes a suspended
-   * session. A status probe that woke the daemon it is reporting on would defeat the lazy open it
-   * exists to make visible — the page would create the very process it is asking about.
+   * `GET /api/daemons` and `GET /{system}/api/daemons`: whether this catalog is backed by a live
+   * render server, and how many processes. Reads via [ServeSessionRegistry.peekHost] so the probe
+   * never creates the daemon it reports on.
    */
   private suspend fun RoutingContext.handleDaemonStatus(sessionInPath: Boolean) {
     if (rejectBadToken()) return
@@ -10634,10 +9193,8 @@ class ServeHttpServer(
     val allRunning = sessions.runningDaemons().filter { it.hasLiveStream }
     val dto =
       DaemonStatusDto(
-        // Counted from real subprocesses, not from `daemonStarted`: that is a host-level flag a
-        // static baked bundle inherits as true, and it is already true for a catalog whose only
-        // process is a pooled child. Either would have the page claim a render server that isn't
-        // there.
+        // Counted from real subprocesses, not `daemonStarted`, which a baked bundle inherits as
+        // true and which is true for a pooled child.
         running = (host?.daemonProcessCount ?: 0) > 0,
         instances = host?.daemonProcessCount ?: 0,
         pooled = pools.sumOf { it.open },
@@ -10656,17 +9213,12 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /api/render-runs/{name}`: one preview's publishes, collapsed into runs of identical pixels
-   * ([ServeCatalogRevision.renderRuns]).
+   * `GET /api/render-runs/{name}`: one preview's publishes collapsed into runs of identical pixels
+   * ([ServeCatalogRevision.renderRuns]), over [availableRevisions] — the list the menu draws — so
+   * every `head` is a visible row.
    *
-   * Computed over [availableRevisions] — the very list the menu draws — rather than over the
-   * catalog's full history, so every `head` names a row the reader can actually see. Reading the
-   * two from different lists is how a marker ends up pointing at nothing.
-   *
-   * A branch that could not be asked is a `404`, not an empty list: no runs and "all twelve of
-   * these are identical" are opposite claims, and the viewer must draw nothing rather than the
-   * wrong one. Everything else here fails the same way — no delivery branch, an unknown preview, a
-   * catalog with no revisions at all — because in each case there is no run structure to state.
+   * A branch that can't be asked is a `404`, not an empty list (which would claim all rows are
+   * identical); likewise no delivery branch, an unknown preview, or no revisions.
    */
   private suspend fun RoutingContext.handleRenderRuns(sessionInPath: Boolean) {
     if (rejectBadToken()) return
@@ -10674,30 +9226,15 @@ class ServeHttpServer(
     withLeasedSession(selectedSessionId(sessionInPath)) { renderHost ->
       val host = catalogBundleHost(renderHost)
       val revisions = host?.let { availableRevisions(it, previewId) }.orEmpty()
-      // Every publish below the tip has to be one a generation-time index CONFIRMS carried this
-      // preview. [availableRevisions] fails open when a branch ships neither `preview-index.json`
-      // nor image history, which is right for the menu — an extra link that 404s beats hiding real
-      // history — and wrong here: the window would then reach back past the preview's creation,
-      // where the path feed's creation commit reads as a boundary and every row below it becomes a
-      // trailing run headed by a publish that has no render at all. That row would be marked,
-      // counted as another distinct render, and asked for a thumbnail that cannot exist.
-      //
-      // Not a real cost for a current publisher: preview-index is rolled forward over the ordinary
-      // menu window, and history.json independently confirms every distinct image revision it
-      // contributes. It is the legacy branches — the ones we cannot bound at all — that get no
-      // markers, which is the same answer this lane gives everywhere else it does not know.
+      // Every publish below the tip must be confirmed to carry this preview by a generation-time
+      // index. [availableRevisions] fails open for branches with neither `preview-index.json` nor
+      // image history (right for the menu); here that would create a phantom trailing run before
+      // the preview existed. Legacy branches get no markers.
       val bounded =
         host != null &&
           revisions.drop(1).all { host.revisionContainsPreview(it.commit, previewId) == true }
-      // `renderChangeCommits` is the read that can fail; the rest is arithmetic over it.
-      //
-      // On [Dispatchers.IO] because a cold call goes to the delivery branch, and
-      // `withLeasedSession`
-      // — unlike its `…OrNull` sibling — runs its block on the request coroutine. That fetch
-      // carries
-      // the branch client's 10s connect / 30s read timeouts, so leaving it here would let a handful
-      // of cold menu opens hold Ktor request threads while GitHub is slow and stall unrelated
-      // traffic. Same rule the published-asset lanes already follow.
+      // On [Dispatchers.IO]: `renderChangeCommits` may hit the delivery branch (10s connect / 30s
+      // read), and `withLeasedSession` runs its block on the request coroutine.
       val changed =
         withContext(Dispatchers.IO) {
           host?.renderChangeCommits(previewId, revisions.mapTo(mutableSetOf()) { it.commit })
@@ -10729,52 +9266,26 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /tags/{name}` (query) and `GET /{system}/tags/{name}` (path): one preview's **published**
-   * element tag index — `testTag → {count, bounds, space}` — as
-   * [ServeAnnotationsPayload.encodeTags] writes it.
+   * `GET /tags/{name}` and `GET /{system}/tags/{name}`: one preview's published element tag index
+   * (`testTag → {count, bounds, space}`, as [ServeAnnotationsPayload.encodeTags] writes it).
    *
-   * `.json` is accepted as an **alias** so the path reads like the machine artifact it mirrors; the
-   * bare id answers identically. Resolved by trying the name VERBATIM first and only then the
-   * stripped form, because a preview id is unrestricted path-segment data and may itself end in
-   * `.json` — unconditional suffix removal would answer such a preview with a 404, or worse, with
-   * the index belonging to a different preview whose id is the stripped form. Neither form
-   * re-renders: this reads the catalog's `tags/index.json` through [ServeHost.tagIndexForPreview]
-   * and nothing else, which is exactly why it needs no live-scope gate and can be served from a
-   * static bundle.
+   * `.json` is accepted as an alias; the name is tried verbatim first, since an id may itself end
+   * in `.json`. Reads only the catalog's `tags/index.json` via [ServeHost.tagIndexForPreview], so
+   * it works for static bundles without a live-scope gate. An empty index is `{}`; an unserved
+   * preview is 404.
    *
-   * **An empty index is `{}`, not a 404.** "This preview carries no tags" and "this server cannot
-   * tell you" are different answers, and a consumer that cannot distinguish them has no way to
-   * choose between offering no tag targets and offering none *yet*. A preview this session does not
-   * serve at all is the 404.
-   *
-   * ## What this route does NOT establish
-   *
-   * That the index describes the frame the caller is looking at. It is the *published static*
-   * index, computed in CI over the baked render, and both live host wrappers delegate
-   * [ServeHost.tagIndexForPreview] to their baked host — so an override-bearing or pinned frame is
-   * a different render than the one these bounds were measured on. Tag-derived selection therefore
-   * has to be gated on the frame being the baked one ([ServeWeb.ReferenceComparison.tagSelection],
-   * decided by the page that knows which frame it is showing). Recording bounds from another frame
-   * into an acceptance is worse than having no element gate: it reports an element that never moved
-   * as moved, with a plausible explanation attached.
-   *
-   * That gate is now paired with a **generation** one ([ServeCacheGeneration]): a caller may name
-   * the publish it is asking about, and this route refuses one the catalog has moved on from rather
-   * than answering with today's bounds. It cannot answer for an older publish — the index is read
-   * from the catalog on disk and the branch publishes no per-revision copy — so refusing is the
-   * whole of what it can honestly do, and it is enough: the pair is one publish or there is no
-   * pair.
+   * It doesn't establish that the index describes the caller's frame: it was measured in CI over
+   * the baked render, so tag selection must be gated on the frame being baked
+   * ([ServeWeb.ReferenceComparison.tagSelection]). Paired with a generation check
+   * ([ServeCacheGeneration]): a publish the catalog has moved past is refused rather than answered
+   * with today's bounds.
    */
   private suspend fun RoutingContext.handleTagIndex(sessionInPath: Boolean) {
     if (rejectBadToken() || rejectMalformedGeneration()) return
     val requested = call.parameters["name"].orEmpty()
     withLeasedSession(selectedSessionId(sessionInPath)) { renderHost ->
-      // A comparison page scopes this URL to the publish it was assembled from, and this index is
-      // measured over that publish's baked render. Once the catalog has moved on there is no
-      // answer for the frame the caller is looking at — only today's bounds — and handing those
-      // back is worse than handing back nothing: a selection made from them is persisted as an
-      // acceptance baseline and later reports an element that never moved as moved. Refusing lets
-      // the picker fail closed and the page reload ([ServeCacheGeneration]).
+      // Once the catalog has moved past the requested publish, only today's bounds exist; refusing
+      // lets the picker fail closed and the page reload ([ServeCacheGeneration]).
       val stale = staleGeneration(renderHost)
       if (stale != null) {
         call.respondText(
@@ -10808,28 +9319,15 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /parity/known-differences.json` (query) and `GET /{system}/…` (path): this catalog's
-   * committed known-difference document, **verbatim**.
+   * `GET /parity/known-differences.json` (and `/{system}/…`): the catalog's committed
+   * known-difference document, verbatim.
    *
-   * Text, not a parsed and re-serialised object. `compose-preview-known-differences/v1`'s verdicts
-   * belong to the engine — `document-unreadable`, `document-too-large`, a duplicated id, a schema
-   * token from the future are all answers it must be able to reach — and it can only reach them if
-   * the bytes arrive intact. A host that parsed on the way out would be a third implementation of
-   * the contract with no conformance suite behind it, disagreeing about exactly the cases the
-   * contract spends its length on. See [ServeKnownDifferences].
+   * Text, not re-serialised: `compose-preview-known-differences/v1` verdicts
+   * (`document-unreadable`, `document-too-large`, duplicate ids, future schema tokens) belong to
+   * the engine, which needs the bytes intact. See [ServeKnownDifferences].
    *
-   * **A catalog that publishes none answers 404**, which is the opposite of what `/tags/{name}`
-   * does and deliberately so. There, an empty index is a *legal answer about a preview that
-   * exists*, so `{}` is the truth and a 404 would lose it. Here there is no document at all, and
-   * the only empty-ish body this route could invent — `{}`, or a document with an empty
-   * `acceptances` array — would be a document **this host wrote**, which the engine would then
-   * judge. `{}` is `document-unreadable`, an invented empty document is a clean bill of health, and
-   * neither is a fact about the catalog. So absence is reported as absence and the consumer skips
-   * the evaluation entirely.
-   *
-   * `no-store`, like the tag route and for the same reason: the element gate and the acceptance
-   * gates resolve this against a frame, and a document served from a cache of unknown age is a
-   * verdict about a catalog generation nobody can name.
+   * A catalog with none answers 404 (unlike `/tags/{name}`), since any invented body would be
+   * judged as a document. `no-store`, since the verdict is resolved against a specific frame.
    */
   private suspend fun RoutingContext.handleKnownDifferences(sessionInPath: Boolean) {
     if (rejectBadToken()) return
@@ -10839,9 +9337,8 @@ class ServeHttpServer(
         null -> call.respondText("not found", status = HttpStatusCode.NotFound)
         is ServeKnownDifferences.Document.Text ->
           call.respondText(document.text, ContentType.Application.Json)
-        // Refused from the file's length rather than read, so nothing here has allocated it. 413
-        // rather than a body, because the consumer's verdict is `document-too-large` and handing it
-        // a truncated document to reach that verdict would defeat the point of the ceiling.
+        // Refused by file length before reading; 413 so the consumer reaches `document-too-large`
+        // without a truncated body.
         ServeKnownDifferences.Document.TooLarge ->
           call.respondText(
             "known-differences.json is over the ${ServeKnownDifferences.MAX_DOCUMENT_BYTES}-byte ceiling",
@@ -10852,19 +9349,13 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /parity/known-differences/{path...}` (query) and `GET /{system}/…` (path): one acceptance
-   * artifact, as bytes.
+   * `GET /parity/known-differences/{path...}` (and `/{system}/…`): one acceptance artifact as
+   * bytes.
    *
-   * **The three failures are distinct statuses, not one 404**, because the engine turns each into a
-   * different verdict for the record: `path-not-contained`, `artifact-too-large` and
-   * `artifact-unreadable`. Collapsing them here would leave the browser unable to reach two of the
-   * three, so a traversal and a typo would report identically — and the traversal is the one worth
-   * seeing.
-   *
-   * Bytes rather than an image response the page could put in an `<img>`: the browser engine
-   * decodes this with the same PNG reader the offline run uses, because a canvas decode normalises
-   * every colour type to 8-bit RGBA and so cannot see the mask-encoding rules the contract
-   * requires.
+   * Three distinct failure statuses, since the engine maps them to `path-not-contained`,
+   * `artifact-too-large` and `artifact-unreadable` (a traversal should not look like a typo). Raw
+   * bytes, so the browser decodes with the same PNG reader as the offline run rather than a canvas
+   * that normalises to 8-bit RGBA.
    */
   private suspend fun RoutingContext.handleKnownDifferenceArtifact(sessionInPath: Boolean) {
     if (rejectBadToken()) return
@@ -10907,10 +9398,7 @@ class ServeHttpServer(
     }
   }
 
-  /**
-   * `GET /api/previews` (query) and `GET /{system}/api/previews` (path): the session's preview
-   * JSON.
-   */
+  /** `GET /api/previews` and `GET /{system}/api/previews`: the session's preview JSON. */
   private suspend fun RoutingContext.handleApiPreviews(sessionInPath: Boolean) {
     if (rejectBadToken()) return
     val sessionId = selectedSessionId(sessionInPath)
@@ -10919,9 +9407,9 @@ class ServeHttpServer(
       val dto =
         PreviewsResponse(
           module = renderHost.label,
-          // The compose-ai-tools version that produced this catalog's snapshots. Native clients
-          // must agree with it before substituting their compiled composables for those pixels;
-          // absent provenance fails closed to the snapshots (#4821).
+          // The compose-ai-tools version that produced the snapshots. Native clients must match it
+          // before substituting compiled composables; missing provenance fails closed to the
+          // snapshots.
           catalogVersion = catalogBundleHost(renderHost)?.provenance?.toolVersion,
           // Producer-trust verdict for a bundle/catalog session (signature / branch / provenance /
           // unverified); null for a live daemon-backed module session.
@@ -10996,22 +9484,17 @@ class ServeHttpServer(
         return
       }
 
-    // A session id is only a hint that elicitation may be possible. An unknown, expired or evicted
-    // id — or one sent with a different protocol version than it was negotiated under — does NOT
-    // answer 404/400: the request is served on the stateless JSON path, exactly as it was before
-    // request scopes existed. Idle expiry, eviction and server restarts therefore never break a
-    // client (preview.coo.ee's callers included); at worst they lose elicitation and see the text
-    // fallback every tool keeps.
+    // A session id only hints that elicitation may work. Unknown, expired, evicted or
+    // protocol-mismatched ids are served on the stateless JSON path, not 404/400, so restarts and
+    // eviction never break clients; at worst they lose elicitation.
     val sessionId = call.request.headers[MCP_SESSION_ID_HEADER]
     val requestScope =
       sessionId?.let(requestScopes::find)?.takeIf { protocolVersion == it.protocolVersion }
 
-    // A JSON-RPC response is the second half of a server request previously emitted on another
-    // in-flight POST. It is not a catalog operation and is not put through the preview/live grant
-    // gate: it carries no authority of its own, only a choice among options the eliciting call
-    // offered, and that call acts on it under its own authorization. Its unguessable session id
-    // correlates it, and it must present the same transport credential as the POST that asked, so
-    // a leaked session id alone cannot answer for someone else.
+    // A JSON-RPC response answers a server request emitted on another in-flight POST. It skips the
+    // grant gate: it carries only a choice among the eliciting call's options, which acts under its
+    // own authorization. It's correlated by the unguessable session id and must present the same
+    // transport credential as the asking POST.
     if (request["method"] == null && request["id"] != null) {
       call.response.headers.append(HttpHeaders.CacheControl, "no-store")
       when (requestScopes.acceptResponse(sessionId, request, catalogMcpCredential())) {
@@ -11026,16 +9509,11 @@ class ServeHttpServer(
       return
     }
 
-    // The gate moved BELOW the parse so it can be asked about this particular message. It used to
-    // stand in front of the whole endpoint, which meant a client with no credential could not
-    // complete `initialize` — and therefore could not reach the tool that asks a human for one
-    // either. Discovery and the two access tools are open ([ServeCatalogMcp.requiresGrant] owns
-    // the list, beside the tools themselves); everything that reads a catalog is gated exactly as
-    // before, and an unrecognised method is gated by default.
-    // A grant may also ride the message rather than the call — see
-    // [ServeCatalogMcp.TOKEN_ARGUMENT].
-    // Read once here so the gate in front of the endpoint and the tool behind it judge the same
-    // credential; a token good enough for `preview` at the door is good enough for `live` inside.
+    // The gate sits below the parse so it can judge each message: discovery and the two access
+    // tools are open (listed by [ServeCatalogMcp.requiresGrant]) so a credential-less client can
+    // `initialize` and ask for one; catalog reads are gated, and unknown methods by default.
+    // A grant may also ride the message; see [ServeCatalogMcp.TOKEN_ARGUMENT].
+    // Read once so the endpoint gate and the tool judge the same credential.
     val presentedToken = ServeCatalogMcp.presentedToken(request)
 
     if (ServeCatalogMcp.requiresGrant(request)) {
@@ -11131,9 +9609,8 @@ class ServeHttpServer(
       }
     }
 
-    // A request on a negotiated session may elicit, but the response only becomes an SSE stream
-    // once the call actually sends the client a message. Every call that does not elicit — all of
-    // them today — answers with the same JSON body and headers as the stateless path.
+    // A negotiated session's response becomes SSE only once the call actually sends the client a
+    // message; otherwise it is identical to the stateless path.
     if (requestScope != null && request["id"] != null && acceptsRequestScope) {
       requestScopes.dispatchLazily(
         requestScope,
@@ -11160,9 +9637,9 @@ class ServeHttpServer(
   }
 
   /**
-   * The fetchable PNG a catalog `render_preview` result links to (#1160). Public on purpose — an
-   * `<img>` sends no credential — so the HMAC in the query is the whole authorization: it covers
-   * one resource URI and an expiry, and anything else is a 404 rather than a hint.
+   * The fetchable PNG a catalog `render_preview` result links to. Public (an `<img>` sends no
+   * credential); the query's HMAC over one resource URI and expiry is the whole authorization, and
+   * anything else is 404.
    */
   private suspend fun RoutingContext.handleSignedRenderPng() {
     val mcp = catalogMcp ?: return call.respond(HttpStatusCode.NotFound)
@@ -11221,12 +9698,10 @@ class ServeHttpServer(
   }
 
   /**
-   * The credential material this POST carries on the transport — everything the machine and
-   * UI-builder authorizations can read off the call — as one opaque string, or null when there is
-   * none. An elicitation's answer must present the same material as the call that asked (see
-   * [ServeMcpRequestScopes.acceptResponse]); only a fingerprint of it is kept. A grant presented
-   * in-band ([ServeCatalogMcp.TOKEN_ARGUMENT]) cannot ride a JSON-RPC response, so such a call is
-   * bound by its session id alone.
+   * The credential material this POST carries on the transport, as one opaque string, or null. An
+   * elicitation's answer must present the same material ([ServeMcpRequestScopes.acceptResponse]);
+   * only a fingerprint is kept. In-band grants ([ServeCatalogMcp.TOKEN_ARGUMENT]) can't ride a
+   * response, so such calls bind by session id alone.
    */
   private fun RoutingContext.catalogMcpCredential(): String? {
     val parts =
@@ -11252,9 +9727,8 @@ class ServeHttpServer(
   }
 
   /**
-   * The protocol version a request scope is negotiated under when this `initialize` asks for form
-   * elicitation on a protocol that has it (2025-06-18 and 2025-11-25, where the wire is the same),
-   * or null. 2025-03-26 has no elicitation, so it stays stateless whatever it advertises.
+   * The protocol version a request scope is negotiated under when `initialize` asks for form
+   * elicitation on 2025-06-18 or 2025-11-25 (same wire), else null. 2025-03-26 has no elicitation.
    */
   private fun formElicitationProtocol(request: JsonObject): String? {
     val params = request["params"] as? JsonObject ?: return null
@@ -11288,10 +9762,8 @@ class ServeHttpServer(
     status: HttpStatusCode,
     message: String,
   ) {
-    // `resource_metadata` is what makes this recoverable without a human in the loop: it is the
-    // only place an MCP client is told where discovery starts. Omitting it left the client to
-    // guess, and the guess it makes is an unprompted registration POST — which is why a perfectly
-    // healthy server reported itself as "Dynamic Client Registration rejected (HTTP 404)".
+    // `resource_metadata` tells an MCP client where discovery starts; without it clients guess with
+    // an unprompted registration POST and report a spurious 404.
     call.response.headers.append(
       HttpHeaders.WWWAuthenticate,
       ServeMcpOAuth.challenge(externalOrigin()),
@@ -11317,24 +9789,12 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /api/uses?q=<token>` (query) and `GET /{system}/api/uses?q=<token>` (path): the previews
-   * whose declaration **calls** something matching the token — what the landing filter box answers
-   * `uses:` with.
+   * `GET /api/uses?q=<token>` (and `/{system}/…`): previews whose declaration calls something
+   * matching the token, for the landing's `uses:` filter.
    *
-   * ### Dev mode only, and 404 rather than empty
-   *
-   * Catalog mode is the streamlined component browser: a reader there is looking at a published
-   * design system, and "which previews call `ButtonGroup`" is a question about this repository's
-   * source, not about the system. So the route is withheld in that mode — the same presentation
-   * gate the header switch selects, read through [componentBrowserMode]. It answers 404 rather than
-   * an empty list because those mean different things to the caller, and an empty list would have
-   * the filter quietly claim nothing matched.
-   *
-   * ### Reads, never resumes
-   *
-   * [ServeSessionRegistry.peekHost] for a resident session, and the location snapshot for a
-   * suspended one — the same pair [sourceLocationFor] walks. Typing in a filter box must not stand
-   * a daemon up, and the index needs only the ids and the metadata behind them.
+   * Dev mode only ([componentBrowserMode]), and 404 rather than empty in Catalog mode, since an
+   * empty list would claim nothing matched. Never resumes: uses [ServeSessionRegistry.peekHost] or
+   * the suspended location snapshot, as [sourceLocationFor] does.
    */
   private suspend fun RoutingContext.handleUsesSearch(sessionInPath: Boolean) {
     if (rejectBadToken()) return
@@ -11361,14 +9821,9 @@ class ServeHttpServer(
           return
         }
     val token = call.request.queryParameters["q"].orEmpty()
-    // Off the request thread. A cold catalog's first `uses:` search is up to `maxFiles` network
-    // reads with the fetcher's own timeout on each, and running that inline blocks a thread Ktor
-    // also serves renders on — so a handful of uncached searches could starve routes that have
-    // nothing to do with this one.
+    // Off the request thread: a cold search can be up to `maxFiles` network reads.
     val match = withContext(Dispatchers.IO) { index.match(system, previewIds, token) }
-    // The answer depends on the interface-mode cookie, so it must not be cached across visitors in
-    // one mode and handed to a visitor in the other — the same reason `componentBrowserMode` marks
-    // the HTML it gates.
+    // Depends on the interface-mode cookie, so it must not be cached across modes.
     call.response.headers.append(HttpHeaders.CacheControl, DYNAMIC_RESOURCE_CACHE_CONTROL)
     call.respondText(
       JSON.encodeToString(
@@ -11385,15 +9840,12 @@ class ServeHttpServer(
 
   /**
    * `GET /api/components`: the listed catalogs' component cards for home-page keyboard search.
-   * Reads only resident or remembered metadata, so opening the palette never resumes every catalog
-   * daemon. The browser fetches this lazily and keeps the result for the life of the page.
+   * Reads only resident or remembered metadata, so no daemon is resumed. Fetched lazily and kept
+   * for the page's life.
    */
   /**
-   * The icon service, present exactly when this host authors designs.
-   *
-   * Keyed to `uiBuilderDir` because that is where the cache belongs — beside the assets and the
-   * design state, on the one directory an operator already knows to keep — and because a host that
-   * serves no builder has nobody to draw icons for.
+   * The icon service, present exactly when this host authors designs; its cache lives in
+   * `uiBuilderDir`.
    */
   private val materialSymbolsHttpClient: okhttp3.OkHttpClient by lazy {
     okhttp3.OkHttpClient.Builder()
@@ -11409,13 +9861,9 @@ class ServeHttpServer(
     MaterialSymbolsIcons(
       MaterialSymbolsSource(
         cacheDirectory = File(dir, "material-symbols"),
-        // Bounded, because this runs under a lock every icon request shares: a host that accepts
-        // the connection and then stops sending would otherwise stall every later request behind
-        // it forever, and never reach the 503 the cold-cache path is supposed to answer with.
-        // Bounded in size as well as time, and for the same reason: the digest can only reject
-        // bytes that have already been allocated, so a host answering this URL with an endless
-        // stream — or a captive-portal proxy answering it with a DVD image — would take the
-        // process down before there was anything to verify. Every file has a known exact size.
+        // Bounded in time, since this runs under a lock every icon request shares and a stalled
+        // host would block them forever; and in size, since the digest can only reject bytes
+        // already allocated. Every file has a known exact size.
         fetch = { url, expectedBytes ->
           materialSymbolsHttpClient
             .newCall(okhttp3.Request.Builder().url(url).build())
@@ -11435,11 +9883,8 @@ class ServeHttpServer(
   }
 
   /**
-   * The icon names a face carries, which the picker filters locally as somebody types.
-   *
-   * One fetch per face for the whole list, rather than a request per keystroke: the names are ~79
-   * KB and never change between pins, so the browser caches them and search never waits on a round
-   * trip. Only the outlines of the rows actually on screen are fetched.
+   * The icon names a face carries, filtered locally as the user types. One ~79 KB fetch per face,
+   * cached, rather than a request per keystroke; only visible rows' outlines are fetched.
    */
   private suspend fun RoutingContext.handleIconNames() {
     if (rejectBadToken()) return
@@ -11476,28 +9921,20 @@ class ServeHttpServer(
   }
 
   /**
-   * Turns a font that will not load into a 503 rather than a stack trace.
-   *
-   * The one expected cause is a host that has never fetched the pinned face and cannot reach the
-   * network — an offline machine with a cold cache, which the design names as the cost of keeping
-   * the fonts out of git and out of the distribution. The message says which file it wanted, so
-   * warming the cache by hand is possible.
+   * Turns a font that won't load into a 503 rather than a stack trace. The expected cause is an
+   * offline host with a cold cache; the message names the wanted file so it can be warmed by hand.
    */
   private suspend fun <T> RoutingContext.iconResultOrNull(
     block: () -> IconResult<T>
   ): IconResult<T>? =
     try {
-      // On [Dispatchers.IO]: a cold call downloads 9-15 MB and parses a font, and the source
-      // serialises on one monitor, so leaving this on the request coroutine would let a single slow
-      // first fetch hold Ktor request threads and stall unrelated traffic — bounded by the client's
-      // timeouts, but still for as long as they allow. Same rule the render-history lane follows.
+      // On [Dispatchers.IO]: a cold call downloads 9-15 MB and parses a font under one monitor.
       withContext(Dispatchers.IO) { block() }
     } catch (failure: IllegalStateException) {
       respondIconsFailed(failure)
     } catch (failure: java.io.IOException) {
-      // The documented cold-cache case: an offline host cannot reach the pinned URL, and
-      // `openStream` throws `UnknownHostException` rather than anything this could mistake for a
-      // bad request. Without this arm the one expected failure is a 500.
+      // The documented offline cold-cache case: `openStream` throws `UnknownHostException`; without
+      // this arm it would be a 500.
       respondIconsFailed(failure)
     }
 
@@ -11517,22 +9954,13 @@ class ServeHttpServer(
   }
 
   /**
-   * Outlines and names are immutable for a pin, so they are cacheable — and have to be.
-   *
-   * `no-store` here would quietly cost the design its central claim: the browser transport asks for
-   * `force-cache` precisely so a reload does not refetch every visible grid page, and a store
-   * directive of `no-store` makes that request a no-op. A token-gated host keeps the response out
-   * of shared caches; the bytes are public font data either way, so only the URL is worth
-   * protecting.
+   * Outlines and names are immutable per pin, so cacheable: the browser transport uses
+   * `force-cache`, which `no-store` would defeat. A token-gated host keeps them out of shared
+   * caches.
    */
   /**
-   * Answers an icon route, with the pin as the validator.
-   *
-   * The names route cannot carry `v` on a fresh page load — the client learns the pin *from* this
-   * response — so a URL-versioned cache alone would make it refetch the whole ~79 KB list on every
-   * visit. The pin is exactly what a validator wants, though: it changes when, and only when, the
-   * data behind the answer does. So the response carries it as a strong `ETag`, and a browser that
-   * already has the list spends a conditional request rather than the list.
+   * Answers an icon route with the pin as a strong `ETag`, since the names route can't carry `v` on
+   * a fresh page load and would otherwise refetch ~79 KB every visit.
    */
   private suspend fun RoutingContext.respondIconJson(style: String, body: String) {
     val pin = materialSymbolsIcons?.pin(style)
@@ -11551,9 +9979,7 @@ class ServeHttpServer(
   }
 
   private fun RoutingContext.iconCacheControl(style: String): String {
-    // Only a caller that named the current pin gets an immutable answer: its URL changes when the
-    // pin does, so a year-long cache entry cannot survive a digest bump. A caller that named none —
-    // or a stale one — is answered correctly and told to revalidate.
+    // Only a caller naming the current pin gets an immutable answer; others are told to revalidate.
     val presented = call.request.queryParameters["v"]
     val current = materialSymbolsIcons?.pin(style)
     if (presented.isNullOrEmpty() || current.isNullOrEmpty() || presented != current)
@@ -11568,9 +9994,8 @@ class ServeHttpServer(
 
   private suspend fun RoutingContext.handleGlobalComponents() {
     if (rejectBadToken()) return
-    // This is a front-door-only index. A top-level site has no multi-catalog front door (its root
-    // is the catalog landing), and exposing this constant `/api` route there would both reveal its
-    // neighbouring catalogs and return canonical links that the site's isolation layer rejects.
+    // Front-door-only: on a top-level site this would reveal neighbours and return links the site's
+    // isolation rejects.
     if (siteSystem() != null) {
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return
@@ -11603,9 +10028,8 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /index.json` (query) and `GET /{system}/index.json` (path): the session's previews as a
-   * Storybook stories index ([StorybookCompat.Index]). This is the manifest a downstream visual
-   * tool crawls to enumerate stories and their stable ids.
+   * `GET /index.json` and `GET /{system}/index.json`: the session's previews as a Storybook stories
+   * index ([StorybookCompat.Index]) for visual tools to enumerate stories.
    */
   private suspend fun RoutingContext.handleStorybookIndex(sessionInPath: Boolean) {
     if (rejectBadToken()) return
@@ -11621,23 +10045,17 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /iframe.html?id=<storyId>` (query) and `GET /{system}/iframe.html?id=<storyId>` (path):
-   * render one story in isolation. Answers with a chrome-free HTML page embedding the freshly-
-   * rendered preview — a raster PNG `data:` URI by default ([StorybookCompat.iframePage]), or with
-   * `&format=svg` the figma-svg export as an **inert `<img src="data:image/svg+xml">`**
-   * ([StorybookCompat.iframeSvgPage]): a still-vector, resolution-independent render for
-   * DOM-capture visual tools (Percy/Chromatic/Applitools), kept in the browser's non-scripting
-   * `<img>` mode so an unverified catalog's untrusted SVG can't execute. SVG is daemon-only, so a
-   * static bundle 404s that lane. Honours the same override query params as `/render` (e.g.
-   * `&uiMode=dark`), and load-sheds through the shared render semaphore.
+   * `GET /iframe.html?id=<storyId>` (and `/{system}/…`): render one story in isolation as a
+   * chrome-free HTML page — a PNG `data:` URI by default ([StorybookCompat.iframePage]), or with
+   * `&format=svg` the figma-svg export as an inert `<img src="data:image/svg+xml">`
+   * ([StorybookCompat.iframeSvgPage]) so untrusted SVG can't script. SVG is daemon-only (404 for
+   * static bundles). Honours `/render`'s override params and the shared render semaphore.
    */
   private suspend fun RoutingContext.handleStorybookIframe(sessionInPath: Boolean) {
     if (rejectBadToken()) return
     // Renders unconditionally — there is no baked lane here at all, so every request is live work.
     if (rejectGrantBelowScope(AgentGrantScope.LIVE, api = true)) return
-    // Renders a story unconditionally — there is no baked lane here. A chrome-less frame for
-    // screenshot tools is never an unfurl target (and is robots-disallowed), so a bodyless probe
-    // gets nothing but the render bill.
+    // Always renders (no baked lane), so a bodyless HEAD probe is not worth answering.
     if (rejectHeadProbe()) return
     val sessionId = selectedSessionId(sessionInPath)
     withLeasedSession(sessionId) { renderHost ->
@@ -11667,9 +10085,8 @@ class ServeHttpServer(
       // Reject a themeProvider this catalog never declared instead of quietly rendering the
       // default theme under its name (see ServeOverrides.parse).
       val declaredThemeFqns = renderHost.declaredThemes.map { it.providerFqn }.toSet()
-      // `?format=svg` serves the figma-svg export as an inert svg <img> (vector, for DOM-capture
-      // visual tools); default (png) inlines the raster. SVG is daemon-only, so a static bundle
-      // 404s.
+      // `?format=svg` serves the figma-svg export as an inert `<img>`; default inlines the PNG. SVG
+      // is daemon-only.
       val wantSvg = call.request.queryParameters["format"]?.lowercase() == "svg"
       when (
         val parsed =
@@ -11715,16 +10132,14 @@ class ServeHttpServer(
         )
       }
       RenderOutcome.Busy -> {
-        // The daemon was mid-render; the request backed off in ~DAEMON_BUSY_WAIT rather than pin
-        // this render slot. Fast 503 + Retry-After (a catalog host would have served baked; a bare
-        // bundle host has no baked fallback).
+        // The daemon was busy and the request backed off (~DAEMON_BUSY_WAIT): fast 503 +
+        // Retry-After (a bare bundle host has no baked fallback).
         call.response.headers.append(HttpHeaders.RetryAfter, "2")
         call.respondText("render busy; retry shortly", status = HttpStatusCode.ServiceUnavailable)
       }
       is RenderOutcome.Ok -> {
-        // A story's args ride the same override params, and this lane is consumed by exactly the
-        // tools #3449 is about — BackstopJS / reg-suit style PNG-diffing across arg values. Baked
-        // pixels here would read as "this arg changes nothing".
+        // Story args ride the override params, and this lane serves arg-diffing tools (BackstopJS /
+        // reg-suit), so baked pixels would wrongly show args as no-ops.
         val dropped = droppedOverridesFor(renderHost, outcome.generation, previewId, overrides)
         if (dropped.isNotEmpty() && !acceptsBakedFallback()) {
           refuseDroppedOverrides(renderHost, previewId, dropped, overrides)
@@ -11740,10 +10155,8 @@ class ServeHttpServer(
   }
 
   /**
-   * SVG lane of [handleStorybookIframe]: render the figma-svg export and serve it as an inert svg
-   * `<img>` — a vector render for DOM-capture visual tools, safe even for an untrusted catalog's
-   * SVG (see [StorybookCompat.iframeSvgPage]). Daemon-only, so a static bundle host 404s (like
-   * `/render.svg`).
+   * SVG lane of [handleStorybookIframe]: render the figma-svg export as an inert `<img>`
+   * ([StorybookCompat.iframeSvgPage]). Daemon-only, like `/render.svg`.
    */
   private suspend fun RoutingContext.storybookIframeSvg(
     renderHost: ServeHost,
@@ -11793,22 +10206,17 @@ class ServeHttpServer(
     }
   }
 
-  /**
-   * `GET /bundle.zip` (query) and `GET /{system}/bundle.zip` (path): the session as a portable zip.
-   */
+  /** `GET /bundle.zip` and `GET /{system}/bundle.zip`: the session as a portable zip. */
   private suspend fun RoutingContext.handleBundleZip(sessionInPath: Boolean) {
     if (rejectBadToken()) return
     // Renders every preview in the catalog and packs a zip. Never probed for an unfurl, and the
     // most expensive thing a HEAD could otherwise trigger anonymously.
     if (rejectHeadProbe()) return
-    // …and by the same token the most expensive thing a grant could trigger, so it wants `live`.
-    // Not named in the review that caught the `/render` case, but it is the same rule and the
-    // larger bill: leaving the sibling hole open while closing the named one would be theatre.
+    // The most expensive thing a grant can trigger, so it requires `live`, like override renders.
     if (rejectGrantBelowScope(AgentGrantScope.LIVE, api = true)) return
     withLeasedSession(selectedSessionId(sessionInPath)) { renderHost ->
       // Render the whole module once (cache-backed) into the portable WebEmbed gallery and stream
-      // it
-      // as a zip — the same render output as the live links, downloadable offline.
+      // it as a zip.
       val zip =
         withContext(Dispatchers.IO) {
           val built =
@@ -11858,27 +10266,15 @@ class ServeHttpServer(
 
   /**
    * `GET /usage/{name}` and `GET /{system}/usage/{name}`: the plain-Compose usage code behind one
-   * preview, as JSON, for the viewer's **Source** panel.
+   * preview, as JSON, for the viewer's Source panel. Fetched on first open, since it may cost a
+   * GitHub read.
    *
-   * Its own resource rather than a field on the viewer page, because producing it may cost a GitHub
-   * read on a cold catalog cache or a local source read, and most visitors never open the panel —
-   * the panel fetches on first entry, so a page load pays nothing.
-   *
-   * **No session lease.** This is a source read served from the catalog registry/cache or a trusted
-   * local module root; leasing would stand a render daemon up to answer a question about source
-   * text. Same reasoning as the resolver's own `locate`, which peeks rather than leases.
-   *
-   * 404 covers every "there is nothing to show" case — no resolver, an unknown preview, a catalog
-   * with no recorded source, or source the cleaner declined — so the panel has exactly one branch
-   * to handle and never renders a half-answer.
+   * No session lease: it's a source read from the registry/cache or a trusted local root (like the
+   * resolver's `locate`). 404 for every "nothing to show" case, so the panel has one branch.
    */
   /**
-   * `/usage/<previewId>` for a preview, or null when this host has nothing to serve there — no
-   * source fetcher, a preview whose catalog never recorded a source path, or a session with no
-   * catalog source to resolve against. Checked here so the Source chip is never rendered dead.
-   *
-   * Unlike [playgroundLinkFor] this does **not** require a playground: reading the usage code is
-   * useful on any host that can browse the catalog, and only running it needs a compiler.
+   * `/usage/<previewId>` for a preview, or null when this host has nothing to serve (no fetcher, no
+   * recorded source path, no catalog source). Unlike [playgroundLinkFor], needs no playground.
    */
   private fun RoutingContext.usageLinkFor(
     system: String,
@@ -11891,9 +10287,8 @@ class ServeHttpServer(
       return "$basePath/usage/${WebEscaping.urlEncodeSegment(previewId)}${requestQuerySuffix()}"
     }
     if (playgroundSeeds == null) return null
-    // The same condition the resolver applies rather than a proxy for it: a plain daemon session or
-    // an uploaded bundle can carry a `sourceFile` from its own `previews.json` while having no
-    // catalog source to resolve it against, and the chip would then open on an error.
+    // The resolver's own condition: plain sessions or uploads may carry a `sourceFile` with no
+    // catalog source.
     if (sessions.peekHost(system)?.let { catalogBundleHost(it) }?.catalogSource == null) return null
     return "$basePath/usage/${WebEscaping.urlEncodeSegment(previewId)}${requestQuerySuffix()}"
   }
@@ -11910,10 +10305,8 @@ class ServeHttpServer(
   private suspend fun RoutingContext.handleUsage(sessionInPath: Boolean) {
     if (rejectBadToken()) return
     val sessionId = selectedSessionId(sessionInPath)
-    // Ktor hands route parameters over already decoded, which is why every neighbouring handler
-    // (`handleViewer`, `handleRender`) reads this straight. Decoding a second time turned a `%2B`
-    // inside a legitimately-escaped preview id into a space and a `%2F` into a separator, so the
-    // resolver could not find a preview whose viewer page rendered perfectly.
+    // Ktor already decodes route parameters; decoding again would mangle `%2B` and `%2F` in escaped
+    // ids.
     val previewId = call.parameters["name"]
     if (previewId.isNullOrBlank()) {
       respondNoUsage()
@@ -11924,9 +10317,8 @@ class ServeHttpServer(
     val localSeed = withContext(Dispatchers.IO) { localUsageSeed(sessionId, previewId) }
     val seed =
       localSeed ?: withContext(Dispatchers.IO) { playgroundSeeds?.seed(sessionId, previewId) }
-    // Hosted catalogs retain the usage-only contract: if cleaning declined, their existing GitHub
-    // source link is the honest fallback. A local browse session has no published blob URL, so its
-    // authored file is itself the useful degraded Source experience.
+    // Hosted catalogs fall back to their GitHub source link when cleaning declines; a local session
+    // has no blob URL, so its authored file is the fallback.
     if (seed == null || (!seed.cleaned && localSeed == null)) {
       respondNoUsage()
       return
@@ -11944,9 +10336,8 @@ class ServeHttpServer(
           residue = seed.residue,
           blobUrl = seed.blobUrl,
           playgroundHref = host?.let { playgroundLinkFor(it, sessionId, previewId, sourceFile) },
-          // Derived here rather than in the cleaner: the links are a projection OF the snippet the
-          // cleaner produced, and every other consumer of a seed (the playground handoff, the theme
-          // replay) wants the code without them.
+          // Links are derived here as a projection of the cleaned snippet; other seed consumers
+          // want the code without them.
           apiDocs =
             ApiDocLinks.of(seed.text).map {
               ApiDocLink(
@@ -12016,16 +10407,12 @@ class ServeHttpServer(
     ) { renderHost ->
       val previewId = call.parameters["name"]
       val revisions = catalogRevisions(renderHost, previewId)
-      // Which catalog decides what this page is *about*. Unpinned it is the session's own list;
-      // under a pin it is the revision's own catalog, asked FIRST — the same authority rule the
-      // asset lanes follow, and for the same reason. Asking the tip first looks harmless while a
-      // preview merely moved, but it hands back today's metadata for an id that revision never
-      // published (whose render correctly 404s, so the page would render around a broken image),
-      // and today's component name for a route id that has since moved between components.
+      // Which catalog decides what this page is about: the session's list unpinned, or under a pin
+      // the revision's own catalog first (as the asset lanes do), so a historical page never
+      // borrows today's metadata or component name.
       //
-      // Off the request dispatcher, because a cold lookup fetches that revision's manifests: the
-      // route takes any syntactically valid sha, so leaving it here would let concurrent requests
-      // for distinct shas hold Ktor's request threads through several round trips each.
+      // Off the request dispatcher, since a cold lookup fetches that revision's manifests and any
+      // valid sha is accepted.
       val preview = previewId?.let { id ->
         val host = catalogBundleHost(renderHost)
         val currentPreview = renderHost.previews.firstOrNull { it.id == id }
@@ -12033,29 +10420,21 @@ class ServeHttpServer(
           revisions.pinned?.let { pin ->
             withContext(Dispatchers.IO) { host?.pinnedPreview(pin, id) }
           }
-        // The fallback is for a revision whose catalog could not be READ — never for one that
-        // was read and does not list this id. [ServeBundleHost.pinnedCatalogIsAuthoritative]
-        // tells those apart; without it, "the manifest says no" would quietly become "ask the
-        // tip", which is the failure #3769 removed from the asset lanes.
+        // Fall back only when the revision's catalog couldn't be read, never when it was read and
+        // lacks this id ([ServeBundleHost.pinnedCatalogIsAuthoritative]).
         val revisionAnswers =
           revisions.pinned?.let { pin ->
             withContext(Dispatchers.IO) { host?.pinnedCatalogIsAuthoritative(pin) }
           } == true
         when {
-          // The revision still owns the route. While the id survives, enrich its historical
-          // component identity with the tip's state/props/source metadata; those fields are not in
-          // catalog.json, and dropping them is what made the same variant lose half its label and
-          // toolbar. Keep the revision's componentId when it had one, so a genuine historical move
-          // between components is still represented. A retired id has no current record and uses
-          // the historical placeholder on its own.
+          // The revision owns the route. While the id survives, enrich it with the tip's
+          // state/props/source metadata (absent from catalog.json), keeping the revision's
+          // componentId when it had one. A retired id uses the historical placeholder alone.
           pinnedPreview != null ->
             currentPreview?.copy(
               componentId = pinnedPreview.componentId ?: currentPreview.componentId,
-              // The caption takes NO tip fallback, unlike the fields around it. Those are enriched
-              // from the tip because `catalog.json` does not carry them; the caption it does carry,
-              // so that revision's answer is authoritative including its silence. Falling back
-              // would print today's sentence on a historical page and, for a caption that has since
-              // been rewritten, describe the render on screen in words its publish never used.
+              // The caption takes no tip fallback: `catalog.json` carries it, so the revision's
+              // answer (including absence) is authoritative.
               caption = pinnedPreview.caption,
               theme = pinnedPreview.theme ?: currentPreview.theme,
             ) ?: pinnedPreview
@@ -12065,9 +10444,8 @@ class ServeHttpServer(
       }
       if (preview == null) {
         if (revisions.pinned != null && previewId != null) {
-          // The selected publish answered authoritatively that this id was absent. Keep the 404 —
-          // serving today's preview here would lie about the pin — but retain the revision menu so
-          // a catalog-wide publish that predates this preview is not a navigation dead end.
+          // The pinned publish authoritatively lacks this id: keep the 404 but retain the revision
+          // menu.
           val skin = siteSkin()
           call.respondText(
             ServeWeb.unavailablePreviewRevisionPage(
@@ -12093,56 +10471,42 @@ class ServeHttpServer(
         }
         return@withLeasedSession
       }
-      // Offer the in-browser Wasm tier when this catalog session has a Wasm app registered.
-      // ServeUrls.wasmAppSrc strips the variant to the component slug the Wasm registry keys by,
-      // and
-      // bakes the variant's theme into `uiMode` so the live render opens on the same theme as the
-      // baked snapshot the visitor deep-linked to.
+      // Offer the Wasm tier when this catalog has a Wasm app. ServeUrls.wasmAppSrc strips the
+      // variant to the registry's component slug and bakes its theme into `uiMode` so the live
+      // render matches the snapshot.
       val wasmSrc =
         if (!wasmCatalogs.containsKey(sessionId)) null
         else if (!isPublic && sessionId in privateWasmCatalogs)
           ServeUrls.privateWasmAppSrc(sessionId, preview.id, wasmPrivateAccess())
         else ServeUrls.wasmAppSrc(sessionId, preview.id)
-      // Grant the Wasm iframe its real origin only for a TRUSTED catalog's app — an unverified
-      // catalog's `/wasm/` app stays opaque-origin sandboxed so it can't reach the parent viewer.
-      // Fail-closed: any session without a verifiable trusted verdict gets opaque (false).
+      // Real origin only for a trusted catalog's Wasm app; unverified ones stay opaque-origin.
+      // Fail-closed.
       val wasmSameOrigin =
         catalogBundleHost(renderHost)?.let { it.trust is BundleVerifier.Verdict.Trusted } ?: false
       val origin = externalOrigin()
-      // A pinned page's render URL keeps only the pin; an unpinned one carries the page's own query
-      // plus the generation it was assembled from, so the frame the unfurl card and the issue
-      // report point at is the frame this page drew ([ServeCacheGeneration]). Not scoped under an
-      // override: the URL then names a render made to order, which is `no-store` and belongs to no
-      // publish.
+      // A pinned page's render URL keeps only the pin; an unpinned one carries the page's query
+      // plus its generation, so unfurl and report point at the frame this page drew
+      // ([ServeCacheGeneration]). Not scoped under an override (`no-store`, belongs to no publish).
       //
-      // `requestQuerySuffix()` is the page's RAW query, so this URL also inherits whatever page
-      // state the visitor's link carried. That is deliberate for an override — the card should show
-      // what they are looking at — and harmless for the rest, because the raster lane reads none of
-      // it and its own generation test is scoped to the parameters that actually change pixels.
+      // `requestQuerySuffix()` is the raw query; that's intended for overrides and harmless
+      // otherwise, since the raster lane ignores other params.
       val imageQuerySuffix =
         if (revisions.pinned != null) pinnedRenderQuerySuffix()
         else if (requestCarriesOverrides()) requestQuerySuffix()
         else ServeCacheGeneration.scope(requestQuerySuffix(), catalogGeneration(renderHost))
       val imageUrl =
         "$origin$basePath/render/${WebEscaping.urlEncodeSegment(preview.id)}.png$imageQuerySuffix"
-      // PNG-header read, so the unfurl card carries the render's real size rather than making the
-      // fetcher download it to measure. Also what stops a 300×210 component from claiming a
-      // large-image card it can't fill (see [ServeWeb.twitterCard]).
-      //
-      // Only when the URL carries no overrides. `imageUrl` inherits the page's query suffix, so a
-      // link shared from a viewer with `?device=` / `?widthPx=` / `?orientation=` points at a
-      // re-render whose pixel size is not the baked one — declaring the baked dimensions there
-      // would have the card lay out against a size the image doesn't have. Omitting them is always
-      // safe: the fetcher measures the image itself.
+      // PNG-header read so the unfurl carries real dimensions (and small components don't claim a
+      // large card; see [ServeWeb.twitterCard]). Only without overrides, since `imageUrl` then
+      // names a re-render of unknown size.
       val imageSize =
         if (requestCarriesOverrides()) null else renderHost.bakedRenderSize(preview.id)
       val engagement =
         if (isViewRequest()) incrementPreviewViews(sessionId, preview.id)
         else previewEngagement(sessionId, listOf(preview)).getValue(preview.id)
       val bundleHost = catalogBundleHost(renderHost)
-      // Link the preview to its source file on GitHub, built from the catalog's SOURCE (repo/ref/
-      // module of the Kotlin — NOT the delivery branch) joined with the preview's module-relative
-      // sourceFile. Null when the session has no catalog source or the preview recorded no path.
+      // Link the preview to its source file via the catalog's source (Kotlin repo/ref/module, not
+      // the delivery branch) plus `sourceFile`. Null without either.
       val sourceHref =
         bundleHost
           ?.catalogSource
@@ -12155,37 +10519,20 @@ class ServeHttpServer(
               preview.sourceFile,
             )
           }
-      // The request's override params, split into what this page's controls may open on and what
-      // they must not — see [seedableOverrideParams]. Both halves reach the page: the seeds paint
-      // the markup, the rest is published so the viewer's own URL restore defers on them too.
-      //
-      // Computed here rather than beside the markup it paints, because the report below needs the
-      // same answer: `seeded` is by construction "the overrides this page's picture can be
-      // showing",
-      // which is exactly what a locator may claim.
+      // The request's overrides split into seeds and withheld ([seedableOverrideParams]); both
+      // reach the page. Computed here because the report below needs `seeded` as "what this picture
+      // can be showing".
       val overrideSeeds =
         seedableOverrideParams(renderHost, preview, sessionId, revisions.pinned, wasmSrc)
-      // The prefilled "report an issue" report for the preview on screen, filed against the repo
-      // that owns its Kotlin.
+      // The prefilled "report an issue" for the preview on screen, filed against the repo owning
+      // its Kotlin. Built here because the viewer is where problems are noticed and has every fact
+      // a preview bug needs.
       //
-      // Built here rather than only on the focused comparison. Every fact a *preview* bug turns on
-      // is concrete on this page — which preview, which component, which variant, the overrides in
-      // force, the catalog build it came from, and the PNG at those exact settings — and the viewer
-      // is where someone actually notices a button rendering wrongly.
-      //
-      // Including the design reference, which this page already resolves the same way the parity
-      // dashboard and the "compare" affordance below do. It used to be left null, on the reasoning
-      // that a design reference and a parity score are one page's business — but the two are not
-      // alike, and conflating them cost every report filed from here its place in the index
-      // (#5000): `parity/issues.json` is built from the locator fence, `ServeIssueReport.locator`
-      // returns null without a `referenceId`, and so an issue filed from the viewer — the form on
-      // every preview page and every catalog card — was silently unindexable while its own form
-      // told the reporter their `parity:` label fed that index. Naming the preview's first design
-      // reference asserts nothing about pixels the page is not showing; it says which comparison
-      // the report is about, which is exactly what the locator is for. The *score* stays exclusive
-      // to the comparison, which is the only page that measures one — see `rawScoresPlaceholder`
-      // below, and `referenceUrl`, which stays null because this page has no reference on the
-      // stage to embed.
+      // Includes the preview's first design reference: `ServeIssueReport.locator` returns null
+      // without a `referenceId`, which would leave viewer-filed issues out of `parity/issues.json`.
+      // It identifies the comparison without asserting pixels; the score stays exclusive to the
+      // comparison page (`rawScoresPlaceholder`), and `referenceUrl` stays null with no reference
+      // on stage.
       val reportContext =
         ServeIssueReport.Context(
           repo = ServeIssueReport.repoFor(bundleHost?.catalogSource, bundleHost?.provenance),
@@ -12193,37 +10540,24 @@ class ServeHttpServer(
           previewLabel = preview.label,
           system = sessionId,
           componentId = ServeIssueReport.componentIdFor(preview),
-          // …but not on a PINNED viewer. `?at=<sha>` puts a historical baked artifact on the stage
-          // and `pinnedRenderQuerySuffix` strips every override from the URL beside it, while this
-          // reference mapping — and `revision:`, which names the delivery branch rather than the
-          // pin
-          // — describe the catalog as it is TODAY. A locator built from the two would index an
-          // issue against a comparison the reporter was not looking at, which is worse than no row
-          // at all: the whole point of the block is that identity and pixels name one frame. The
-          // same reasoning already withholds `sourceHref`, `referenceAnnotations`, the override
-          // seeds and the playground link on a pinned page.
+          // …but not on a pinned viewer: the stage is historical while the reference mapping and
+          // `revision:` describe today, so the locator would name a different comparison (as with
+          // `sourceHref`, `referenceAnnotations`, seeds and the playground link).
           referenceId =
             renderHost.designReferencesFor(preview.id).firstOrNull()?.id.takeIf {
               revisions.pinned == null
             },
           variant = ServeIssueReport.variantFor(preview),
-          // The SEEDED map, not the request's raw one. On an accepted baked fallback
-          // (`?fallback=baked`) the render lane answers with pixels that ignored an axis it could
-          // not apply and `respondDroppedOverrides` names what it dropped, so the raw query claims
-          // a frame the picture is not showing. That claim is harmless on a link and fatal in a
-          // locator: the body a visitor with scripting off files — and the one standing in the
-          // field before the first client render — would be indexed under an override the pixels
-          // never used. `seedableOverrideParams` already answers "what can this picture be
-          // showing"; the page's controls open on it, so the client-side `{{overrides}}` pass
-          // collects the same set and the two forms of the body agree.
+          // The seeded map, not the raw query: under `?fallback=baked` the pixels may ignore an
+          // axis (`respondDroppedOverrides`), and a locator must not claim it. The client-side
+          // `{{overrides}}` pass collects the same set.
           overrides = overrideSeeds.seeded,
           sourceUrl = sourceHref,
           catalog = bundleHost?.provenance?.let { "${it.repo}@${it.branch}" },
           toolVersion = bundleHost?.provenance?.toolVersion,
           viewerUrl = ServeIssueReport.withoutToken(externalPageUrl()),
-          // `imageUrl` already carries this page's override suffix, so the report links the render
-          // the visitor is looking at rather than the preview's defaults. Token-stripped, like
-          // every URL that reaches an issue body.
+          // `imageUrl` carries this page's override suffix; token-stripped like every URL in an
+          // issue body.
           renderUrl = ServeIssueReport.withoutToken(imageUrl),
           publicRender = isPublic,
         )
@@ -12231,12 +10565,9 @@ class ServeHttpServer(
         ServeWeb.ReportIssue(
           action = ServeIssueReport.action(reportContext.repo),
           body = ServeIssueReport.body(reportContext),
-          // The template the page's script fills. It carries the overrides placeholder as well as
-          // the render one: this page's controls re-render the frame in place, so the locator's
-          // `overrides:` has to move with them or the identity names the served defaults while the
-          // render URL two lines up names what the reporter dialled in. Both are substituted on one
-          // pass from one source, so they cannot disagree. No `{{rawScores}}`: nothing here
-          // measures parity, and no `{{selection}}`: this page has no element selector.
+          // The template the page's script fills, with both overrides and render placeholders
+          // substituted in one pass so they agree. No `{{rawScores}}` (nothing measured here) and
+          // no `{{selection}}` (no element selector).
           bodyTemplate =
             ServeIssueReport.body(
               reportContext,
@@ -12257,11 +10588,9 @@ class ServeHttpServer(
               restrictedToAllowedUsers = it.isRestrictedToAllowedUsers(),
             )
           }
-      // Project mode's timeline, computed from the local repo rather than fetched from a delivery
-      // branch. Gated on the session having no delivery provenance — exactly the condition that
-      // leaves `historyManifestUrl` null — because a catalog served from a delivery branch already
-      // ships the published manifest, and that, not this box's checkout, is the truth about what it
-      // has rendered. Off the event loop: the first call per refresh window shells out to git.
+      // Project mode's local timeline, only for sessions without delivery provenance (which ship
+      // the published manifest instead). Off the event loop: the first call per refresh window
+      // shells out to git.
       val localHistoryJson =
         projectHistory
           ?.takeIf { catalogBundleHost(renderHost)?.provenance == null }
@@ -12284,39 +10613,27 @@ class ServeHttpServer(
           linkToken(),
           webSessionId,
           canApplyOverrides = renderHost.canApplyOverrides,
-          // Per-preview: a catalog-live host can only re-render an override on a daemon-twinned
-          // preview, so an unaliased (Android-only) variant reports false and its override controls
-          // (knobs, App theme) render disabled/informational rather than enabled-but-dead.
+          // Per-preview: a catalog-live host can only re-render overrides on daemon-twinned
+          // previews, so others get disabled controls.
           canRenderOverrides = renderHost.canRenderOverridesFor(preview.id),
-          // Per-preview too, and for the same reason: the size-override inputs are authored in dp
-          // and converted against this before they go on the wire as px, so a page carrying the
-          // wrong one sends the renderer a frame in the wrong unit.
+          // Per-preview: dp size overrides are converted against this density.
           renderDensity = catalogBundleHost(renderHost)?.renderDensityFor(preview.id),
-          // The knob values THIS request asked for, so the controls open on them rather than on the
-          // preview's declaration — unless this page's picture cannot be showing them, in which
-          // case seeding is the very disagreement the parameter exists to remove, pointed the other
-          // way. See `seedableOverrideParams`.
+          // The knob values this request asked for, unless the picture can't be showing them
+          // ([seedableOverrideParams]).
           requestOverrides = overrideSeeds.seeded,
           // …and the axes it declined, so `hydrateFromUrl` defers on them instead of putting them
           // straight back a frame after load.
           unseededOverrides = overrideSeeds.withheld,
-          // Per-preview: a catalog advertises SVG globally as soon as it carries a `figma/` dir,
-          // but
-          // a preview whose slug has no baked `figma/<slug>.svg` still 404s the `.svg` lane, so
-          // gate
-          // the SVG control on this preview's actual availability rather than the session-wide
-          // flag.
+          // Per-preview: a catalog advertises SVG once it has `figma/`, but a preview without
+          // `figma/<slug>.svg` still 404s.
           hasSvgExport = renderHost.hasSvgExportFor(preview.id),
           hasScrollExport = renderHost.hasScrollExportFor(preview.id),
           executableBundleHref =
             if (executableBundleAvailable)
               "$basePath/bundle/${WebEscaping.urlEncodeSegment(preview.id)}${requestQuerySuffix()}"
             else null,
-          // The inspection layers: the accessibility focus map needs an a11y-capable daemon, the
-          // typography / theme layers a semantics-capturing one. Both are asked per preview, not
-          // session-wide: a catalog host fronts the whole catalog but only its daemon-twinned ids
-          // can be inspected, so an unmapped (Android-only) variant must omit the controls rather
-          // than offer ones whose fetch can only 404.
+          // Inspection layers per preview: a11y needs an a11y-capable daemon, typography/theme a
+          // semantics-capturing one, and only daemon-twinned ids qualify.
           hasA11yOverlay = renderHost.hasA11yOverlayFor(preview.id),
           hasDesignAnnotations = renderHost.hasDesignAnnotationsFor(preview.id),
           // The baked half of the same Typography layer: a published catalog measured it off the
@@ -12324,21 +10641,17 @@ class ServeHttpServer(
           hasPublishedTypography = renderHost.hasPublishedTypographyFor(preview.id),
           hasLiveStream = renderHost.hasLiveStream,
           trust = catalogBundleHost(renderHost)?.let { BundleVerifier.summary(it.trust) },
-          // Per-preview: offer the in-browser Remote Compose canvas lane only when this preview
-          // carries a captured `.rc` document to replay (the browser fetches it from
+          // Per-preview: the Remote Compose canvas lane needs a captured `.rc` (fetched from
           // `/render/<id>.rc`).
           hasRemoteComposeDoc = renderHost.hasRemoteComposeDoc(preview.id),
-          // Per-preview: a server render replays the captured document instead of recomposing, so
-          // the viewer greys the controls [droppedOverridesFor] would answer with a 409. Same host
-          // question that predicate asks, deliberately read here rather than derived from
-          // `hasRemoteComposeDoc` on the client — the two must not drift apart.
+          // Per-preview: a replayed document can't recompose, so the viewer greys controls
+          // [droppedOverridesFor] would 409. Read from the same host question to avoid drift.
           irReplay = isReplayedPreview(renderHost, preview.id),
           // …but a replayed preview can still take a declared theme when the session publishes its
           // colours, so the viewer greys the recomposition-only controls without greying this one.
           replayThemes = applicableThemes(renderHost, preview.id).isNotEmpty(),
-          // Per-preview: the Remote Compose backend selector's enabled lanes. The host advertises
-          // its server/client lanes; the opt-in CMP/Wasm distribution contributes the browser
-          // lane when this preview has an RC document. Empty for a non-RC preview ⇒ no selector.
+          // Per-preview Remote Compose backend lanes: the host's server/client lanes plus the
+          // opt-in CMP/Wasm browser lane when the preview has an RC document. Empty ⇒ no selector.
           enabledRcPlayers =
             buildList {
               // In this server's player vocabulary ([ServeRcPlayerIds]), not compose-ai-tools'
@@ -12348,9 +10661,8 @@ class ServeHttpServer(
                 add(ServeRcPlayerIds.CMP_WASM)
               }
             },
-          // Which of those lanes a *bare* `/render` URL already is, so the viewer can stop naming
-          // it. Empty when the session cannot say — the viewer then keeps naming every lane, which
-          // is what it did before any of this.
+          // Which lane a bare `/render` already is, so the viewer can stop naming it; empty when
+          // unknown.
           bakedRcPlayer =
             renderHost.bakedRcPlayer(preview.id)?.let(ServeRcPlayerIds::ofKind).orEmpty(),
           preferredRcPlayer = preferredRcPlayer,
@@ -12370,16 +10682,10 @@ class ServeHttpServer(
           gesturesRenderable = renderHost.gesturesRenderable,
           // The session's full preview list feeds the left-hand component nav drawer.
           siblings = renderHost.previews,
-          // …and ONE component's worth of it feeds the compare strip under the render: every
-          // variant of the thing on the stage, in catalog order, with the reference and the
-          // published score each of them carries.
-          //
-          // Resolved here rather than in the page because all three answers are the host's.
-          // `componentIdFor` reads the catalog's own component id where there is one and falls
-          // back to a route id parsed out of the preview id — reproducing that fallback in
-          // `ServeWeb` would be a second implementation of a rule with one right answer, and the
-          // strip's `?component=` link has to spell the id exactly as the wall's rows do or it
-          // selects nothing. See `docs/design/COMPARE_NAVIGATION.md`, §3.1.
+          // …and one component's worth feeds the compare strip: every variant in catalog order,
+          // with its reference and published score. Resolved here because `componentIdFor` and
+          // reference lookups are the host's, and the strip's `?component=` must match the wall's
+          // ids. See `docs/design/COMPARE_NAVIGATION.md`, §3.1.
           componentVariants =
             renderHost.previews
               .filter {
@@ -12392,9 +10698,8 @@ class ServeHttpServer(
                   variant = ServeIssueReport.variantFor(variant),
                   referenceId = reference?.id,
                   matchPercent = reference?.match?.percent,
-                  // The sibling's render of this variant, through the same resolver (and the same
-                  // per-request memo) the lane's `parallel` source goes through, so the strip's
-                  // second baseline is the stage's second source cell for cell.
+                  // The sibling's render of this variant through the same resolver and per-request
+                  // memo as the lane's `parallel` source.
                   parallelRenderUrl = parallelSpecSource(renderHost, variant)?.rasterUrl,
                 )
               },
@@ -12402,9 +10707,8 @@ class ServeHttpServer(
           // elsewhere — as named directories in the same drawer subtree the variants live in.
           componentDirectories =
             componentRelatedDirectories(renderHost, preview, sessionId) +
-              // …and the other way round: the components that point AT this one, derived rather
-              // than declared, so a samples catalog imported from upstream needs no mapping of its
-              // own to say what it explains.
+              // …and the components pointing at this one, derived so an imported samples catalog
+              // needs no mapping.
               componentBackLinkDirectories(preview, sessionId),
           // What KIND of catalog this is, as the catalog itself declared it — which decides the
           // shape of the page rather than any detail of it. See [ServeWeb.PageRole].
@@ -12418,9 +10722,7 @@ class ServeHttpServer(
           // is the preview, so without this the page never says which system it is from.
           catalogName =
             ServeWeb.catalogHeading(catalogBundleHost(renderHost)?.title, renderHost.label),
-          // Why this session is snapshot-only, when it is — the banner under the header explains
-          // the
-          // catalog-level reason (no live bundle, unverified, …) alongside the per-control note.
+          // Why this session is snapshot-only, if it is, for the header banner.
           degradations = renderHost.degradations,
           engagement = engagement,
           unfurl =
@@ -12433,35 +10735,24 @@ class ServeHttpServer(
           version = SERVE_VERSION,
           sourceHref = sourceHref,
           reportIssue = reportIssue,
-          // The Figma node this preview is specified by, when the catalog publishes a Figma-backed
-          // design reference for it. Resolved from data the catalog already carries — nothing is
-          // fetched from Figma, here or anywhere else in serve.
+          // The Figma node this preview is specified by, from catalog data; nothing is fetched from
+          // Figma.
           figmaSpec =
             ServeUidReference.spec(renderHost.designReferencesFor(preview.id), basePath).takeIf {
               revisions.pinned == null
             } ?: ServeFigmaSpec.of(renderHost.designReferencesFor(preview.id)),
-          // …and the spec itself, as a lane the viewer can put on the stage beside the players.
-          // First reference, the same precedence [ServeFigmaSpec] uses: a preview with several has
-          // one canonical spec, and the manifest's order is the producer's own. Absent for every
-          // catalog that publishes no references, which omits the lane entirely.
+          // …and the spec as a lane: the first reference, as in [ServeFigmaSpec]. Absent without
+          // references.
           designReference = renderHost.designReferencesFor(preview.id).firstOrNull(),
-          // A parallel catalog maps the same design-kit component. When this preview has no local
-          // reference, reuse the paired sibling's imported spec so Remote Compose can still be
-          // compared directly with Figma instead of losing the design lane entirely.
+          // Without a local reference, reuse the paired sibling's imported spec so Remote Compose
+          // still compares against Figma.
           pairedDesignSource = pairedDesignSpecSource(renderHost, preview),
-          // …and the counterpart in the `compareWith` sibling, when this catalog declares a pairing
-          // and we host the other side of it. A second SOURCE for that same lane rather than a mode
-          // of its own, so the four views are unchanged (issue #4621).
+          // …and the `compareWith` counterpart, as a second source for the same lane.
           parallelSource = parallelSpecSource(renderHost, preview),
-          // Whether this render HAS a counterpart, which is a weaker condition than being able to
-          // put its raster on the stage: the layer diff is joined server-side, so it answers on a
-          // top-level site too, where the sibling's own render is that site's 404.
-          // A counterpart is not yet a layer diff. `handleParallelLayers` 404s when
-          // `ServeParallelLayers.diff` comes back empty, and a kind neither side carries
-          // contributes no layer at all — so two paired catalogs that publish no annotations for
-          // this cell resolve a pairing and still have nothing to compare. Offering the link on the
-          // pairing alone put a route to that 404 on the toolbar, which matters more now the link
-          // is emitted beside the spec diff rather than only in its absence.
+          // Whether this render has a counterpart, weaker than having its raster: the layer diff
+          // works on a top-level site too.
+          // A pairing isn't yet a layer diff: `handleParallelLayers` 404s when
+          // `ServeParallelLayers.diff` is empty, so only link when there are layers.
           parallelLayers =
             resolveParallel(renderHost, preview)?.let { parallel ->
               renderHost.annotationsForPreview(preview.id).isNotEmpty() ||
@@ -12475,9 +10766,7 @@ class ServeHttpServer(
                 .firstOrNull()
                 ?.let { renderHost.annotationsForReference(it.id) }
                 .orEmpty(),
-          // "open in playground" — offered only when this host has the lane AND this preview
-          // records a source path, so the link never lands on a page that opens the generic
-          // sample and quietly ignores what was asked for.
+          // "open in playground", only with the lane and a recorded source path.
           playgroundHref =
             if (revisions.pinned == null)
               playgroundLinkFor(renderHost, sessionId, preview.id, preview.sourceFile)
@@ -12485,22 +10774,18 @@ class ServeHttpServer(
           usageHref = usageLinkFor(sessionId, preview.id, preview.sourceFile, basePath),
           liveAuthPrompt = liveAuthPrompt,
           catalogTitle = catalogBundleHost(renderHost)?.title,
-          // The same heartbeat the grid sends. The viewer needs it at least as much: it is where a
-          // visitor settles on one preview and reads, making no further requests, and where the
-          // theme and knob actions that want a warm daemon are actually taken.
+          // The same heartbeat the grid sends; the viewer is where visitors settle and use
+          // warm-daemon actions.
           presenceUrl = "$basePath/api/presence${requestQuerySuffix()}",
-          // Delivery-branch provenance is what makes a timeline possible: it names the repo and
-          // branch carrying history.json, and the same repo addresses each historical render by
-          // commit. A plain uploaded bundle has none, so both stay null and the strip is omitted.
+          // Delivery-branch provenance names the repo/branch carrying history.json; without it
+          // (uploaded bundle) the strip is omitted.
           historyManifestUrl =
             catalogBundleHost(renderHost)?.provenance?.let {
               ServeUrls.historyManifestUrl(it.repo, it.branch)
             },
           historyRepo = catalogBundleHost(renderHost)?.provenance?.repo,
-          // …and its project-mode twin: the timeline inlined rather than fetched, with its entries
-          // pointing back at this server's `/history/render/` lane. Mutually exclusive with the
-          // pair above by construction — a session has catalog provenance or it has a local repo,
-          // never both.
+          // …and its project-mode twin, inlined and linking to `/history/render/`; mutually
+          // exclusive with the pair above.
           historyInlineJson = localHistoryJson,
           historyLocalRenders = localHistoryJson != null,
           revisions = revisions,
@@ -12523,11 +10808,8 @@ class ServeHttpServer(
           // A top-level site's pages carry their session in the ORIGIN, so same-session links
           // drop the `?session=` the rooted legacy form would add. See [ServeSites].
           sessionInOrigin = siteSystem() != null,
-          // The component drawer's rows, on the same prebaked-thumbnail lane the catalog grid's
-          // cards use and for the same reason: the drawer lists every sibling component at ~40px,
-          // which on the plain `/render` URL is a full-resolution PNG apiece. Same rule as the
-          // grid — bakes from local pixels only, never fetches, since this runs on the request
-          // thread.
+          // Drawer rows use the prebaked-thumbnail lane like the grid; bakes from local pixels
+          // only, never fetches.
           navThumbHash = { id ->
             heroImages
               .gridThumbFor(renderHost, id, catalogBundleHost(renderHost)?.contentCrop(id))
@@ -12543,13 +10825,9 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /history/render/{blob}.png`: one historical render, read out of the local repository by
-   * content sha — what a project-mode timeline chip links to (see [ServeProjectHistory]).
-   *
-   * Content-addressed rather than `<commit>/<path>` addressed, so there is no path to traverse and
-   * no ref to steer: the sha is either one the current timeline names or it is a 404. Deliberately
-   * session-independent — the blob belongs to the repository, not to a session — but registered in
-   * both URL forms so the viewer can link relative to whichever prefix it was served under.
+   * `GET /history/render/{blob}.png`: one historical render from the local repository by content
+   * sha ([ServeProjectHistory]). Content-addressed, so no path traversal or ref steering.
+   * Session-independent, but registered in both URL forms for relative links.
    */
   private suspend fun RoutingContext.handleHistoryRender() {
     if (rejectBadToken()) return
@@ -12570,24 +10848,21 @@ class ServeHttpServer(
   }
 
   /**
-   * The parameters [handleRender] and its lanes read: the query string, or — for a
-   * [handleRenderPost] — the query merged with the request body. Everything that shapes the pixels
-   * reads through here; URL-identity parameters (`at=`, `gen=`, `thumb=`, the token) stay on the
-   * query, because a body is not part of any address a cache or a permalink can key on.
+   * The parameters [handleRender] reads: the query, or for [handleRenderPost] the query merged with
+   * the body. URL-identity parameters (`at=`, `gen=`, `thumb=`, the token) stay on the query, since
+   * a body isn't part of a cacheable address.
    */
   private fun RoutingContext.renderParams(): Parameters =
     call.attributes.getOrNull(RENDER_BODY_PARAMS) ?: call.request.queryParameters
 
   /**
-   * `POST /render/{name}` and `POST /{system}/render/{name}`: [handleRender] with its parameters in
-   * the body, for a knob value no URL can carry (an A2UI document is kilobytes).
+   * `POST /render/{name}` and `POST /{system}/render/{name}`: [handleRender] with parameters in the
+   * body, for knob values too large for a URL.
    *
-   * The body is `application/json` — an object of string / number / boolean values keyed exactly
-   * like the GET query (`{"knob.document": "…", "fontScale": 1.5}`) — or
-   * `application/x-www-form-urlencoded`. It is merged over the query and handed to [handleRender]
-   * unchanged, so the LIVE gate, the product suffixes, the admission and the response are the GET's
-   * own, not a copy of them. Capped at [MAX_RENDER_BODY_BYTES] (413 above), the same bound the
-   * catalog MCP endpoint's `catalog_render_preview` has for the same document.
+   * Body is `application/json` (string/number/boolean values keyed like the query, e.g.
+   * `{"knob.document": "…", "fontScale": 1.5}`) or form-urlencoded, merged over the query, so every
+   * gate and lane is the GET's. Capped at [MAX_RENDER_BODY_BYTES] (413), matching
+   * `catalog_render_preview`.
    */
   private suspend fun RoutingContext.handleRenderPost(sessionInPath: Boolean) {
     // The credential first, so an unauthenticated caller cannot make this server buffer a body.
@@ -12642,9 +10917,8 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /{system}/a2ui`: the A2UI playground — a document editor POSTing to the render route
-   * above. Answers only for a catalog with a [ServeWeb.a2uiDocumentPreview]; any other is a 404,
-   * because a page with nothing to render is not a page.
+   * `GET /{system}/a2ui`: the A2UI playground, a document editor POSTing to the render route. 404
+   * unless the catalog has a [ServeWeb.a2uiDocumentPreview].
    */
   private suspend fun RoutingContext.handleA2uiPlayground(sessionInPath: Boolean) {
     if (rejectBadToken()) return
@@ -12682,67 +10956,39 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /render/{name}` (query) and `GET /{system}/render/{name}` (path): a preview's rendered
-   * bytes — a PNG for `<id>.png` (or no suffix), the figma-svg export for `<id>.svg`, the declared
-   * preview slots as JSON for `<id>.slots`, the merged accessibility products as JSON for
-   * `<id>.a11y`, the typography + theme inspection layers for `<id>.annotations`, or the captured
-   * Remote Compose document for `<id>.rc`. All but `.rc` take the same override query params; SVG
-   * and slots are only produced by a daemon-backed host, and `.rc` only by a bundle host that
-   * carries `ir/` sidecars (each 404s where unavailable).
+   * `GET /render/{name}` and `GET /{system}/render/{name}`: a preview's rendered bytes — PNG for
+   * `<id>.png` (or no suffix), figma-svg for `<id>.svg`, slots JSON for `<id>.slots`, merged
+   * accessibility JSON for `<id>.a11y`, inspection layers for `<id>.annotations`, or the captured
+   * Remote Compose document for `<id>.rc`. All but `.rc` take the override params; SVG and slots
+   * need a daemon, `.rc` a bundle host with `ir/` sidecars (each 404s otherwise).
    */
   private suspend fun RoutingContext.handleRender(sessionInPath: Boolean) {
     if (rejectBadToken() || rejectMalformedPin() || rejectMalformedGeneration()) return
-    // An override or a daemon-only product turns this route from a replay into a **live render**,
-    // which is what `live` means and what a `preview` grant was not given. The two other gates
-    // learned this rule; this one is reached without them, so it has to state it itself.
+    // An override or daemon-only product makes this a live render, which a `preview` grant doesn't
+    // cover. Keyed on the request (override param or non-PNG suffix), not on whether bytes happen
+    // to be baked, so ordinary browsing of a non-resident session still works.
     //
-    // Deliberately keyed on the caller's own request — an override param, a non-PNG suffix — and
-    // not on whether the bytes happen to be baked. A bare `/render/<id>.png` for a preview this
-    // host has no baked copy of is the catalog serving its own content, at the same cost any
-    // anonymous visitor imposes on a public box; refusing that would break ordinary browsing every
-    // time a session was not resident, which is not what anyone approved or withheld.
-    //
-    // A **bare** `?rcPlayer=` is the one override that is not a commission by itself, so it is not
-    // refused here. It names which already-published capture to replay — the rc-compare staging for
-    // cmp-jvm, or the baked PNG when the request names the player that baked it — and the compare
-    // wall points a cell at that lane for every preview it shows, so refusing it up front cost a
-    // `preview` grant the wall it was granted to read. It can still turn into a live render, and
-    // the two places where that happens refuse there instead, where the answer is known rather than
-    // guessed: [renderCmpJvmResponse]'s subprocess below, and a null `cached` in the chain under
-    // it.
-    // Nothing else moves — every other override, and every daemon-only product, is refused here as
-    // before.
+    // A bare `?rcPlayer=` is not refused here: it selects an already-published capture, which the
+    // compare wall uses for every preview. If it would become a live render,
+    // [renderCmpJvmResponse]'s subprocess and a null `cached` below refuse there instead.
     if (
       ((requestCarriesOverrides() && !bareRcPlayerRequest()) || wantsDaemonOnlyRenderProduct()) &&
         rejectGrantBelowScope(AgentGrantScope.LIVE, api = true)
     )
       return
-    // The deferred half of that decision, settled HERE and carried down rather than re-asked.
-    //
-    // Non-null only for a request this gate just let through *because* it is a bare player
-    // selection — so an ordinary override-free browse never carries it, and the lanes below cannot
-    // refuse one. That is deliberate: `bakedRender` is a local-only fast path (it must not trigger
-    // the delivery-branch fetch that would make an image measurable), so a cold catalog answers
-    // null from the `cached` chain and serves the published bytes from `render` instead. Reading a
-    // null `cached` as "about to commission" would have refused exactly that — ordinary browsing on
-    // a catalog whose images have not been pulled yet, which is what this gate has always admitted.
-    //
-    // Settled here, too, rather than re-asked after the lease: `grantBelowScope` answers "no grant,
-    // nothing to say" once a grant expires, so re-asking would *admit* a request whose credential
-    // died while the session was being built.
+    // The deferred half of that decision, settled here: non-null only for a request admitted as a
+    // bare player selection. `bakedRender` is local-only, so a cold catalog's ordinary browse
+    // returns null from `cached` and must still be served. Not re-asked after the lease, since an
+    // expired grant would then read as "no grant" and be admitted.
     val bareRcPlayerBelowLive =
       if (requestCarriesOverrides() && bareRcPlayerRequest()) {
         grantBelowScope(AgentGrantScope.LIVE)
       } else {
         null
       }
-    // A bare `/render/<id>.png` replays a baked file and IS what an unfurler probes for `og:image`,
-    // so it must keep answering HEAD. Everything else on this route reaches a daemon or a bundle
-    // host, and amplifying a bodyless probe into one is the same trade as `/bundle.zip` at smaller
-    // scale: an override turns the replay into a live render, and the non-PNG products
-    // ([DAEMON_ONLY_RENDER_SUFFIXES]) are produced on demand whether or not a query is present.
-    // The override half is keyed on param names rather than a parse — the check has to be cheap,
-    // and erring toward refusing costs a probe nothing (the caller GETs instead).
+    // A bare `/render/<id>.png` replays a baked file and is what unfurlers HEAD for `og:image`, so
+    // it keeps answering HEAD. Overrides and [DAEMON_ONLY_RENDER_SUFFIXES] would turn a bodyless
+    // probe into real work, so those refuse; the override check is by param name to stay cheap.
     if (
       (requestCarriesOverrides() ||
         wantsDaemonOnlyRenderProduct() ||
@@ -12761,11 +11007,8 @@ class ServeHttpServer(
       val wantA11y = rawName.endsWith(".a11y")
       val wantAnnotations = rawName.endsWith(".annotations")
       val wantRcDoc = rawName.endsWith(".rc")
-      // `.rc.json` is the same document as `.rc`, projected. It is a separate lane rather than a
-      // query parameter on the `.rc` one because it is a different media type with a different
-      // audience: `.rc` is bytes for the in-browser player, `.rc.json` is text for a person, a
-      // `diff` in a review, or `jq` in a script. Ordering matters below — `.rc.json` has to come
-      // off the name before `.rc` would strip nothing and `.json` is not a suffix this lane knows.
+      // `.rc.json` is `.rc` projected to text for people and tools. Its suffix must be stripped
+      // before `.rc`.
       val wantRcJson = rawName.endsWith(".rc.json")
       val previewId =
         rawName
@@ -12778,17 +11021,9 @@ class ServeHttpServer(
           .removeSuffix(".rc")
       // `?bg=`: composite the preview's resolved stage into the PNG ([ServeRenderMatte]).
       //
-      // Deliberately NOT an override param, and that is the whole reason it can sit on a permalink.
-      // It changes no pixel the renderer produced — it paints a ground *under* bytes some lane has
-      // already decided on — so it does not turn a replay into a live render, does not escalate the
-      // grant scope, does not make a request "made to order", and leaves a pin or a generation
-      // meaning exactly what it meant. Every lane below therefore keeps its own cache lifetime: the
-      // bytes are a pure function of the bytes it was going to serve anyway, and `bg` is in the
-      // URL.
-      //
-      // A blank value is treated as absent rather than as an error, because that is what an empty
-      // form field or a stripped query leaves behind, and refusing it would break a link over
-      // punctuation.
+      // Not an override param: it paints under bytes a lane already chose, so it doesn't make a
+      // live render, escalate grant scope, or change what a pin or generation means, and each lane
+      // keeps its cache lifetime. A blank value is treated as absent.
       val requestedStage = renderParams()[ServeRenderMatte.PARAM]?.takeIf { it.isNotBlank() }
       val stageMode = ServeRenderMatte.Mode.parse(requestedStage)
       if (requestedStage != null && stageMode == null) {
@@ -12799,16 +11034,10 @@ class ServeHttpServer(
         )
         return@withLeasedSession
       }
-      // Applied on the way out of every lane below that answers with a preview raster, so a stage
-      // asked for on one lane is not silently missing on another. A no-op unless `bg=` was given,
-      // and [ServeRenderMatte.apply] is itself a no-op on anything it cannot stage — a raster this
-      // host has no preview record for, an undecodable image, a capture too large to be worth a
-      // pass — so no lane can fail because of it.
-      //
-      // On [Dispatchers.Default] because it is CPU work — a pass over the frame, some fills, and a
-      // PNG re-encode, measured at 3-18 ms and 5-12 ms respectively on this catalog's renders — and
-      // the request dispatcher's threads are not for that. Small, but every lane here serves images
-      // and the one that does not block is the one that keeps a grid responsive.
+      // Applied on the way out of every raster lane. A no-op without `bg=`, and
+      // [ServeRenderMatte.apply] is itself a no-op on anything it can't stage, so no lane fails
+      // because of it. On [Dispatchers.Default] because it is CPU work (a pass over the frame plus
+      // a PNG re-encode).
       val staged: suspend (ByteArray, Map<String, String>) -> ByteArray = { bytes, overrides ->
         if (stageMode == null) bytes
         else {
@@ -12817,31 +11046,17 @@ class ServeHttpServer(
           else withContext(Dispatchers.Default) { ServeRenderMatte.apply(bytes, stageMode, stage) }
         }
       }
-      // The prebaked grid-thumbnail lane: a catalog card asks for `?thumb=<hash>` and gets a
-      // downscaled copy of its render straight out of memory — no override parse, no admission, no
-      // disk read, no chance of waking a daemon. This is the whole point of the lane: a catalog
-      // page is ~42 cards, and serving each of them a full-resolution PNG is both the page's bulk
-      // and 42 trips through the render machinery.
+      // The prebaked grid-thumbnail lane: `?thumb=<hash>` returns a downscaled copy from memory —
+      // no override parse, admission, disk read or daemon wake.
       //
-      // The hash must match what this host bakes today. A stale URL (the catalog was republished
-      // under the visitor's open tab) simply falls through to the normal render, which is correct
-      // rather than merely safe: the bytes behind a `thumb=` URL never change, which is what makes
-      // the response `immutable`.
+      // The hash must match today's bake; a stale URL falls through to a normal render, so `thumb=`
+      // bytes never change and the response is `immutable`. Only a request asking for nothing else
+      // qualifies; overrides (e.g. the grid's `themeProvider=`), `scroll=` and the cmp-jvm lane go
+      // the normal way.
       //
-      // Only a request that asks for *nothing else* can be answered here. A thumbnail is the base
-      // render at a smaller size, so anything that shapes the pixels — a declared theme or any
-      // other override, a full-page `scroll=` export, the cmp-jvm player lane — has to go the
-      // normal way. Those params ride on the same URL by design (the grid appends `themeProvider=`
-      // to the card's `src` when the visitor picks a theme), so this check is what keeps a themed
-      // render from being answered with an unthemed thumbnail.
-      //
-      // A **stale generation** leaves the lane for the same reason a pin does, and it has to be
-      // asked here rather than inside [plainThumbRequest]: the thumbnail is downscaled from the
-      // catalog on disk, so it is by definition this generation's, and the fast path sits ahead of
-      // the routing that would otherwise fetch the named publish's bytes. Answering would be the
-      // worst shape available — a 200, `immutable`, from a generation the URL says it is not
-      // (#4714 review). A `gen=` naming the generation on disk is no obstacle at all and stays on
-      // the fast path, which is what keeps a scoped card cheap.
+      // A stale generation also leaves the lane (checked here, ahead of the routing that would
+      // fetch that publish), since the thumbnail is today's. A `gen=` naming the generation on disk
+      // stays on the fast path.
       val thumbHash = call.request.queryParameters[ServeHeroImages.THUMB_PARAM]
       if (
         thumbHash != null &&
@@ -12865,51 +11080,33 @@ class ServeHttpServer(
           return@withLeasedSession
         }
       }
-      // A product can be selected by *query* rather than by suffix: `?scroll=long` is a full-page
-      // capture, `?rcPlayer=cmp-jvm` is a different player's raster, `mode=` presents the SVG
-      // export, and any override (`fontScale`, `device`, `knob.…`) asks for pixels rendered to
-      // order. None of those is a published byte, so a **pin** naming one of them is a URL claiming
-      // two contradictory things and is refused below. The generation lane asks a narrower version
-      // of the same question ([madeToOrder]) and reaches the opposite conclusion; both are stated
-      // where they are decided rather than shared, because they are not the same rule.
+      // Products selected by query (`?scroll=long`, `?rcPlayer=cmp-jvm`, `mode=`, any override) are
+      // made to order, so a pin naming one is contradictory and refused below. The generation lane
+      // asks a narrower question ([madeToOrder]); the rules are stated separately because they
+      // differ.
       val onDemand =
         requestCarriesOverrides() ||
           renderParams()["scroll"] != null ||
           renderParams()["rcPlayer"] != null ||
           renderParams()["mode"] != null ||
           ServeExplodedSvg.PARAMS.any { renderParams()[it] != null }
-      // A **pinned** render (`?at=<sha>`): the bytes this preview had at that delivery-branch
-      // commit, read from the branch rather than from the catalog on disk. This is what makes a
-      // published URL a permalink (issue #3723) — see [ServeCatalogRevision].
+      // A pinned render (`?at=<sha>`): this preview's bytes at that delivery-branch commit, read
+      // from the branch — what makes a published URL a permalink ([ServeCatalogRevision]).
       //
-      // It short-circuits ahead of everything below because a pin and a live render are mutually
-      // exclusive by definition: the daemon renders today's code, so honouring an override here
-      // would answer a request for the past with the present. Only the raster product is pinnable
-      // (the branch publishes PNGs, not slot trees or `.rc` documents), and a pin the branch cannot
-      // answer is a 404 rather than a fall-through to the current bytes — silently serving today's
-      // render under a permalink is the exact failure this feature exists to prevent, and it would
-      // be invisible to whoever followed the link.
+      // Short-circuits everything below: a pin and a live render are mutually exclusive. Only
+      // rasters are pinnable, and an unanswerable pin is a 404, never today's bytes.
       val requestedPin =
         ServeCatalogRevision.normalize(call.request.queryParameters[ServeCatalogRevision.PARAM])
-      // The same lane answers a **stale generation** ([ServeCacheGeneration]): a page assembled one
-      // publish ago writes `gen=<that publish>` on the frames it draws, and the frame it needs is
-      // that publish's, not today's. Reconciled here rather than beside the pin because it IS a
-      // read of a published revision — a second mechanism would be a second set of rules about
-      // which trees may be fetched, and the two would eventually disagree. A `gen=` naming the
-      // generation on disk falls through, which is the ordinary browse: it changes nothing but the
-      // response's cache lifetime, decided further down.
+      // The same lane answers a stale generation ([ServeCacheGeneration]): a page from an earlier
+      // publish needs that publish's frame. Reconciled here because it is a revision read with the
+      // same fetch rules. A `gen=` matching disk falls through.
       //
-      // Exactly one thing makes a stale generation step aside: a render **made to order**. An
-      // override, a scroll capture, a player selection, an exploded projection — the visitor asked
-      // for pixels that reflect no published bytes at all, the response is `no-store`, and there is
-      // no pair for a cache to hold wrongly. Refusing there would break the one interaction this
-      // coupling must not cost: turning a knob on a page a refresh overtook.
+      // A stale generation steps aside only for a render made to order (override, scroll capture,
+      // player selection, exploded projection), which is `no-store` anyway, so turning a knob on an
+      // overtaken page still works.
       //
-      // Deliberately NARROWER than the pin's [onDemand] in one place, and the difference is
-      // load-bearing: `mode=` selects a presentation of the SVG export and does nothing whatever on
-      // the raster lane, while it is ordinary page state that a viewer's shared link carries and
-      // that the frame URL inherits. Reading it as "made to order" here would opt the commonest
-      // shared link straight back out of the coupling, with a 200 and no sign of it.
+      // Narrower than [onDemand]: `mode=` only affects the SVG export, and treating it as
+      // made-to-order would opt the commonest shared viewer link out of the coupling.
       val madeToOrder =
         requestCarriesOverrides() ||
           renderParams()["scroll"] != null ||
@@ -12917,13 +11114,9 @@ class ServeHttpServer(
           (wantSvg && renderParams()["mode"] != null) ||
           ServeExplodedSvg.PARAMS.any { renderParams()[it] != null }
       val staleGeneration = if (madeToOrder) null else staleGeneration(renderHost)
-      // A stale generation on a **non-raster product** refuses, exactly as a pin does. These are
-      // the products whose whole purpose is to *describe* the frame — a semantics tree, an a11y
-      // pass, the typography and layout annotations the redline draws and an element selection
-      // records as an acceptance baseline — and the server can only describe today's. Answering
-      // would hand a page from one publish a measurement of another's, which is the corruption this
-      // parameter exists to prevent, arriving through the one door it left open: stepping aside
-      // here was silently the same bug pointing the other way (#4714 review).
+      // A stale generation on a non-raster product refuses, as a pin does: these products describe
+      // the frame (semantics, a11y, annotations used as acceptance baselines), and only today's can
+      // be described.
       if (
         staleGeneration != null &&
           (wantSvg || wantSlots || wantA11y || wantAnnotations || wantRcDoc || wantRcJson)
@@ -12938,11 +11131,8 @@ class ServeHttpServer(
       }
       val pinnedCommit = requestedPin ?: staleGeneration
       if (pinnedCommit != null) {
-        // The non-raster products are made on demand by the daemon — an SVG export, a slot tree,
-        // an a11y or annotation pass, a captured Remote Compose document. The branch publishes
-        // none of them per revision, so there is nothing historical to serve, and *falling through*
-        // would be the worst of the three options: `/render/<id>.svg?at=<sha>` would answer with
-        // today's export under a URL that names an old publish. Refusing says so.
+        // Non-raster products are made on demand and never published per revision, so a pin on them
+        // refuses rather than serving today's export under an old publish's URL.
         if (wantSvg || wantSlots || wantA11y || wantAnnotations || wantRcDoc || wantRcJson) {
           call.respondText(
             "only the baked render is published per revision; drop " +
@@ -12965,44 +11155,30 @@ class ServeHttpServer(
               withContext(Dispatchers.IO) { it.pinnedRender(pinnedCommit, previewId) }
             },
           missing = "no published render for that preview at that revision",
-          // A pin is override-free by construction (`onDemand` refuses one above), so the stage is
-          // resolved against the preview's own frame — which is what a permalink in an issue body
-          // wants: the ground this render was published on.
+          // A pin is override-free (`onDemand` refuses otherwise), so the stage resolves against
+          // the preview's own published frame.
           transform = { staged(it, emptyMap()) },
         )
         return@withLeasedSession
       }
-      // The `.rc` lane serves the captured Remote Compose document bytes verbatim (no override
-      // pass — the in-browser player replays the doc and applies knob edits client-side), so it
-      // short-circuits ahead of the override parse. A host with no `ir/<id>.rc` sidecar (a
-      // daemon-only host, or an unknown id) returns null → 404.
+      // The `.rc` lane serves captured document bytes verbatim (the browser player applies knob
+      // edits), so it short-circuits ahead of the override parse. No `ir/<id>.rc` sidecar → 404.
       if (wantRcDoc || wantRcJson) {
         val bytes = renderHost.remoteComposeDoc(previewId)
-        // A captured document is published catalog content on a public server and a token-gated
-        // response everywhere else, and neither lane was saying so. `no-store` is what
-        // `DYNAMIC_RESOURCE_CACHE_CONTROL` documents for "all token-gated responses": the token can
-        // arrive in the `X-Compose-Preview-Token` header, which no cache keys on, so without this a
-        // shared cache could hand one caller's document to another, or keep serving it after the
-        // grant is revoked.
-        //
-        // Applied to BOTH lanes rather than only the one this change adds. They are the same bytes
-        // from the same read in the same block; marking the projection and leaving the raw document
-        // uncached would be a strictly stranger state than the one being fixed.
+        // `no-store` on both lanes: the token can arrive in the `X-Compose-Preview-Token` header,
+        // which no cache keys on, so a shared cache could otherwise serve one caller's document to
+        // another or after revocation (see `DYNAMIC_RESOURCE_CACHE_CONTROL`).
         val documentCacheControl =
           if (isPublic) STATIC_RESOURCE_CACHE_CONTROL else DYNAMIC_RESOURCE_CACHE_CONTROL
         if (bytes == null) {
           call.respondText("no such remote compose document", status = HttpStatusCode.NotFound)
         } else if (wantRcJson) {
-          // Projected on demand rather than cached beside the document. The projection is a pure
-          // function of bytes already on disk and costs an inflate, and a cached copy is a second
-          // thing that can be stale — `ir/<id>.rc` is rewritten whenever the catalog re-bakes.
+          // Projected on demand (a pure function costing one inflate) rather than cached beside a
+          // document the catalog may rewrite.
           //
-          // A document this server can serve but its linked `remote-core` cannot inflate is a real
-          // state, not a hypothetical: a bundle carries its own Remote Compose coordinates and can
-          // be baked on a newer alpha than the sidecar this server runs (the split-family case
-          // `RemoteComposePairing` names). It is a 422 and not a 500 — the request was well-formed
-          // and the server is healthy; this particular document is the thing that cannot be read,
-          // and the message says which document and why so a catalog owner can act on it.
+          // A bundle may be baked on a newer Remote Compose alpha than this server's `remote-core`
+          // (the split-family case `RemoteComposePairing` names), so an uninflatable document is a
+          // 422 naming the document and reason, not a 500.
           try {
             val projected = projectDocument(bytes)
             call.response.headers.append(HttpHeaders.CacheControl, documentCacheControl)
@@ -13022,25 +11198,17 @@ class ServeHttpServer(
         }
         return@withLeasedSession
       }
-      // A **bare** cmp-jvm raster the parity run already staged, answered before the subprocess is
-      // considered at all. This lane has to be caught here rather than in the `cached` chain below,
-      // because the short-circuit under it returns before the override parse the chain reads — and
-      // spawning a one-shot desktop JVM (measured at ~4.3s) to redraw a document that was already
-      // drawn and published is the same waste the daemon lanes were paying, minus the daemon.
-      //
-      // "Bare" is read straight off the query here, since the parsed overrides do not exist yet: no
-      // override param other than `rcPlayer` may be present. `.svg` is excluded because the staged
-      // artifact is a raster and the structural export is a different product.
+      // A bare cmp-jvm raster the parity run already staged, answered before the subprocess (a
+      // ~4.3s one-shot JVM) is considered. Caught here because the short-circuit below returns
+      // before the override parse the `cached` chain reads. "Bare" is read off the raw query: no
+      // override besides `rcPlayer`. `.svg` is excluded (the staged artifact is a raster).
       if (!wantSvg && !wantSlots && !wantA11y && !wantAnnotations && bareRcPlayerRequest()) {
         val stagedRaster =
           renderHost.publishedRcPlayerRender(previewId, RcPlayerBackend.CMP_JVM).takeIf {
             ServeRcPlayerIds.isCmpJvm(renderParams()["rcPlayer"])
           }
         if (stagedRaster != null) {
-          // Cached exactly like the daemon-backed player lanes below, and for the same reason:
-          // these ARE the published bytes. This path returns before that decision is reached, so
-          // it has to make the same one — otherwise the one player whose staged raster costs a
-          // ~4.3s subprocess to redraw is the one the wall refetches on every view.
+          // Cached like the daemon player lanes, since these are the published bytes.
           markGeneration(
             RenderOutcome.Generation.RC_PUBLISHED.wire,
             if (isPublic) STATIC_RESOURCE_CACHE_CONTROL else PRIVATE_REPLAY_CACHE_CONTROL,
@@ -13049,34 +11217,26 @@ class ServeHttpServer(
           return@withLeasedSession
         }
       }
-      // The cmp-jvm lane renders the captured document server-side with the embedded desktop player
-      // (an isolated subprocess), not through the daemon. It supports both the pixel `.png` and the
-      // structural `.svg` product; slots remain a host/daemon product and continue below.
+      // The cmp-jvm lane renders the captured document with the embedded desktop player in an
+      // isolated subprocess, for `.png` and `.svg`; slots stay a daemon product.
       if (
         !wantSlots &&
           !wantA11y &&
           !wantAnnotations &&
           ServeRcPlayerIds.isCmpJvm(renderParams()["rcPlayer"])
       ) {
-        // Past the staged-raster shortcut above, so this really does spawn the desktop player
-        // (~4.3s of one-shot JVM). That is a commission, not a replay, whatever the query looked
-        // like — the first of the two places the up-front gate defers to.
+        // Past the staged shortcut this spawns the desktop player, so it is a commission — the
+        // first place the up-front gate defers to.
         bareRcPlayerBelowLive?.let {
           respondBelowScope(it, AgentGrantScope.LIVE, api = true)
           return@withLeasedSession
         }
         val format = if (wantSvg) RcJvmServerRenderer.Format.SVG else RcJvmServerRenderer.Format.PNG
         val webMode = wantSvg && renderParams()["mode"]?.lowercase() == "web"
-        // A bare `?rcPlayer=cmp-jvm` raster is the same fixed answer to a fixed URL the staged
-        // shortcut above serves, drawn rather than read: `uiMode` and every `rc.<name>=` seed is an
-        // override param, so a query this predicate calls bare leaves the pixels determined by the
-        // document, the preview's own spec and the deployed player. The subprocess is what makes
-        // caching it matter — the compare wall points a cell at this lane for every row whose
-        // cmp-jvm column the parity run did not stage, and `no-store` redrew every one of them on
-        // each view and each lazy scroll back into view.
-        //
-        // `.svg` keeps `no-store`: the structural export is a different product, and `?mode=web`
-        // rewrites it further without being an override param.
+        // A bare `?rcPlayer=cmp-jvm` raster is a fixed answer to a fixed URL (`uiMode` and
+        // `rc.<name>=` are override params), so cache it; the compare wall requests it for every
+        // unstaged row. `.svg` stays `no-store`, since `?mode=web` rewrites it without being an
+        // override.
         val bareRaster = !wantSvg && bareRcPlayerRequest()
         renderCmpJvmResponse(
           renderHost,
@@ -13092,9 +11252,8 @@ class ServeHttpServer(
         )
         return@withLeasedSession
       }
-      // Forward the fixed render axes plus any dynamic override params (`knob.<key>=…` knobs and
-      // `rc.<name>=…` Remote Compose seeds, neither in SUPPORTED_KEYS) so a live knob / Remote
-      // Compose edit reaches ServeOverrides.parse instead of being silently dropped.
+      // Forward the fixed render axes plus dynamic params (`knob.<key>=…`, `rc.<name>=…`, not in
+      // SUPPORTED_KEYS) so live edits reach ServeOverrides.parse.
       val overrideParams =
         renderParams()
           .entries()
@@ -13125,19 +11284,13 @@ class ServeHttpServer(
           val overrides = parsed.overrides
           val scroll = renderParams()["scroll"]?.lowercase() in setOf("long", "full", "page")
           if (wantSvg) {
-            // `?scroll=long` (or `full`/`page`) asks for the full-page export of a scrolling
-            // preview (compose/figma-svg-long) instead of the viewport-sized one.
-            // `?mode=web` serves a web/document variant: the base64 `@font-face` blocks are swapped
-            // for an external Google Fonts `@import`, so a browser viewing the `.svg` directly
-            // pulls
-            // the faces from Google instead of the SVG carrying their bytes. The default (no
-            // `mode`,
-            // or `mode=figma`) stays fully self-contained — right for `<img>`/Figma import, where
-            // external references don't load.
-            // `?exploded=1` (plus its tilt / spin / gap / depth knobs) is a second rewrite of the
-            // same bytes: the layered export pulled apart into one sheet per composable nesting
-            // level. It composes with `mode=web` and `scroll=long` because all three are
-            // post-processing steps over one render.
+            // `?scroll=long` (or `full`/`page`) requests the full-page export
+            // (compose/figma-svg-long).
+            // `?mode=web` swaps the base64 `@font-face` blocks for a Google Fonts `@import` for
+            // direct browser viewing; the default (or `mode=figma`) stays self-contained for
+            // `<img>`/Figma import.
+            // `?exploded=1` (with tilt / spin / gap / depth) pulls the layered export into one
+            // sheet per nesting level. All three are post-processing over one render and compose.
             val webMode = renderParams()["mode"]?.lowercase() == "web"
             renderSvgResponse(
               renderHost,
@@ -13161,58 +11314,38 @@ class ServeHttpServer(
             renderAnnotationsResponse(renderHost, previewId, overrides, requestedInspectLayers())
             return@withLeasedSession
           }
-          // The render is blocking (renderNow + await); keep it off the request dispatcher. Cap
-          // concurrent renders (default = CPU count) so a small box sheds a storm instead of
-          // thrashing: wait briefly for a slot, else 503 + Retry-After. A null outcome signals the
-          // wait timed out.
-          // Catalog-host theme cache hits are memory reads and must not be rejected merely because
-          // unrelated live renders occupy every global slot. [render] rechecks after admission to
-          // close the race with a render that completes between these two calls.
-          // A full-page request is a distinct daemon data product; a cached viewport PNG cannot
-          // satisfy it even when the preview + overrides key is otherwise identical.
-          // Answerable without entering admission: a completed theme-cache entry, or pixels
-          // already baked on disk. This is what lets a mostly-browsing box stay responsive under
-          // load — otherwise every thumbnail read competes for the same handful of global render
-          // slots as the daemon renders, and a few cold ones (which can take a minute each)
-          // head-of-line block dozens of readers whose answer was a local file, until they 503.
-          // A `?scroll=` request is a distinct full-page product that baked pixels cannot satisfy.
+          // The render blocks (renderNow + await), so keep it off the request dispatcher and cap
+          // concurrent renders (default CPU count): wait briefly for a slot, else 503 +
+          // Retry-After. Null means the wait timed out.
+          // Catalog theme cache hits are memory reads and must not be refused because live renders
+          // hold every slot; [render] rechecks after admission.
+          // A full-page request is a distinct product a cached viewport PNG can't satisfy.
+          // Answer without admission from a completed theme-cache entry or baked pixels on disk, so
+          // readers aren't head-of-line blocked behind cold daemon renders.
+          // A `?scroll=` request can't be satisfied by baked pixels.
           val cached =
             if (scroll) null
             else
               renderHost.cachedRender(previewId, overrides)
-                // BEFORE the baked snapshot, not after. `bakedRender` answers from the preview's
-                // published PNG without consulting the overrides at all, so a host with both local
-                // baked pixels and staged rc-compare rasters would return baked for a bare
-                // `?rcPlayer=…` and never reach this lane, and the request would then be refused
-                // for dropping `rcPlayer` while the very raster it asked for sat unread.
-                //
-                // That argument used to be stated as "those bytes are the *Java* player's capture".
-                // They are not — baked is the androidx-embedded capture — and the correction
-                // matters, because it is exactly the backend for which reaching this lane FIRST was
-                // the bug: see [publishedRcPlayerRender], which now declines androidx-embedded so
-                // it falls through to the baked bytes that are already that player's. The ordering
-                // still holds for every other backend, where baked really is someone else's pixels.
+                // Before the baked snapshot: `bakedRender` ignores overrides, so a bare
+                // `?rcPlayer=…` would otherwise get baked bytes and then be refused for dropping
+                // `rcPlayer`. Baked is the androidx-embedded capture, so [publishedRcPlayerRender]
+                // declines that backend and lets it fall through to baked; for every other backend
+                // the ordering holds.
                 ?: publishedRcPlayerRender(renderHost, previewId, overrides)
                 ?: renderHost.bakedRender(previewId, overrides)
-          // The second place the up-front gate defers to. A null `cached` means no lane answered
-          // from bytes already in hand, so a bare player selection that got this far is asking for
-          // one to be made — refused, using the decision taken at the door.
-          //
-          // Only ever a bare player selection. A null `cached` is NOT by itself a commission:
-          // `bakedRender` deliberately reads only local files, so a catalog whose published image
-          // has not been pulled yet answers null here and `render` below serves it after the fetch.
-          // Refusing on `cached == null` alone would have broken override-free browsing on exactly
-          // those cold catalogs.
+          // The second place the up-front gate defers to: a null `cached` for a bare player
+          // selection means a render must be commissioned, so refuse with the door's decision. A
+          // null `cached` alone isn't a commission — `bakedRender` reads only local files, so cold
+          // catalogs answer null and `render` serves them after fetching.
           if (cached == null) {
             bareRcPlayerBelowLive?.let {
               respondBelowScope(it, AgentGrantScope.LIVE, api = true)
               return@withLeasedSession
             }
           }
-          // A "pure declared-theme render" — the classification the burst lease admits on. Read
-          // from the request rather than the parsed overrides, because an expanded provider is no
-          // longer in them: `themeSeeding.provider` is what the expansion consumed, and the request
-          // was still *only* a theme selection when `themeProvider` was its sole override param.
+          // A pure declared-theme render, the classification the burst lease admits on. Read from
+          // the request, since the expanded provider is no longer in the parsed overrides.
           val pureThemeProvider =
             overrides.themeProvider?.takeIf {
               overrides == PreviewOverrides(themeProvider = it) &&
@@ -13222,10 +11355,8 @@ class ServeHttpServer(
                 overrideParams.keys.all { key -> key == "themeProvider" } &&
                   renderHost.declaredThemes.any { theme -> theme.providerFqn == it }
               }
-          // A preview this catalog has permanently failed to render is answered here, before any
-          // lease or render slot is taken. 409 rather than 503/500: the request will never succeed,
-          // so the page must stop retrying it. Retrying a latched preview is exactly what kept the
-          // grid's workers busy and the daemon's render lock contended.
+          // A preview this catalog has permanently failed to render is answered 409 before any
+          // lease or slot is taken, so the page stops retrying.
           val latchedFailure =
             if (cached == null) renderHost.renderFailureLatch(previewId, overrides) else null
           if (latchedFailure != null) {
@@ -13250,11 +11381,9 @@ class ServeHttpServer(
             return@withLeasedSession
           }
           val leasePermit = (admission as? ThemeRenderLeaseManager.Admission.Admitted)?.permit
-          // A token this manager does not know — released, expired, or minted for another catalog —
-          // is treated exactly like a request that carried none: the render still happens, on the
-          // serial unleased lane. Refusing it instead (what a `429` did) is unrecoverable by the
-          // caller, because no amount of retrying makes a reaped claim valid again, and it stranded
-          // whole themed grids on the previous theme's pixels.
+          // An unknown lease token (released, expired, another catalog's) is treated like none: the
+          // render runs on the serial unleased lane. Refusing would be unrecoverable for the
+          // caller.
           val needsSerialThemePermit =
             cached == null && pureThemeProvider != null && leasePermit == null
           val outcome =
@@ -13294,9 +11423,9 @@ class ServeHttpServer(
               )
             }
             RenderOutcome.Busy -> {
-              // Daemon mid-render; backed off in ~DAEMON_BUSY_WAIT instead of pinning this slot.
-              // Pure catalog-theme requests also use this retry signal: serving baked pixels with
-              // a successful status would leave that thumbnail on the wrong theme permanently.
+              // Daemon busy; backed off after ~DAEMON_BUSY_WAIT. Pure catalog-theme requests also
+              // get this retry signal, since serving baked pixels with a success status would leave
+              // the thumbnail on the wrong theme.
               call.response.headers.append(HttpHeaders.RetryAfter, "2")
               call.respondText(
                 "render busy; retry shortly",
@@ -13304,8 +11433,7 @@ class ServeHttpServer(
               )
             }
             is RenderOutcome.Ok -> {
-              // Baked pixels answering an override-bearing request are pixels that do NOT reflect
-              // the override — byte-identical to the un-overridden snapshot, under a 200 (#3449).
+              // Baked pixels answering an override-bearing request don't reflect the override.
               // Every other generation is a real render keyed by these overrides.
               val dropped =
                 droppedOverridesFor(renderHost, outcome.generation, previewId, overrides)
@@ -13320,86 +11448,43 @@ class ServeHttpServer(
                   outcome.generation,
                 )
               } else {
-                // A BARE `?rcPlayer=` is a fixed answer to a fixed URL, the same way an
-                // override-free browse is: it replays a PUBLISHED `ir/<id>.rc` through a named
-                // player at the preview's own spec, and every axis that would make the pixels
-                // depend on the request — a knob, a theme, a device, a font scale — is another
-                // override param and excluded here by `singleOrNull`.
-                //
-                // It was `no-store`, on the reasoning that an override means "pixels that reflect
-                // no published bytes at all". That is untrue of this one twice over. Once by
-                // construction: [RenderOutcome.Generation.RC_PUBLISHED] IS published bytes, read
-                // off the catalog's rc-compare staging, and its own KDoc says it is answerable
-                // exactly as the baked PNG is — measured on the deployed host, `?rcPlayer=cmp-
-                // android` returns bytes md5-identical to the bare render and was still `no-store`.
-                // And once by cost: the compare wall now points a cell at this lane for every
-                // player a run did not publish, so `no-store` re-renders each of them on every page
-                // view and every lazy scroll back into view, against a serial daemon.
-                //
-                // The staleness this accepts is the one the baked lane already accepts: a redeploy
-                // can change the player, and for up to `max-age` a cache answers with the previous
-                // one. `stale-while-revalidate` bounds it the same way there.
-                // `!scroll` for the same reason [bareRcPlayerRequest] excludes it: `scroll=` is not
-                // an override param, so it would otherwise ride through here — but a full-page
-                // capture skips the published/baked chain entirely (`cached = if (scroll) null`)
-                // and is made to order by the daemon. Nothing about it is a replay of published
-                // bytes, so nothing about it earns the published bytes' lifetime.
+                // A bare `?rcPlayer=` is a fixed answer to a fixed URL: it replays a published
+                // `ir/<id>.rc` through a named player at the preview's own spec, and every
+                // request-dependent axis is another override param (excluded by `singleOrNull`).
+                // [RenderOutcome.Generation.RC_PUBLISHED] is published bytes, and the compare wall
+                // requests these per cell, so it takes the baked lane's lifetime and staleness
+                // bound (`max-age` + `stale-while-revalidate`).
+                // `!scroll`, as in [bareRcPlayerRequest]: a full-page capture is made to order
+                // (`cached = if (scroll) null`).
                 val bareRcPlayer = overrideParams.keys.singleOrNull() == "rcPlayer" && !scroll
                 val bakedBrowse =
                   outcome.generation == RenderOutcome.Generation.BAKED && overrideParams.isEmpty()
-                // A PURE declared-theme selection is a fixed answer to a fixed URL by the same
-                // construction the player carve-out above rests on: the theme is one of the
-                // catalog's own [ServeHost.declaredThemes], named by the request but *defined* by
-                // the catalog, and [pureThemeProvider] is the classification the burst lease
-                // already admits on — every axis that would make the pixels depend on the caller
-                // (`fontScale`, `device`, `knob.…`, an `rc.` seed) is another override param and
-                // excluded there.
-                //
-                // It was `no-store`, which threw away a render the server itself answers from the
-                // catalog theme cache at the network floor: a visitor toggling the chip row paid a
-                // round trip per toggle, including back to a theme they were looking at two
-                // seconds ago. `no-store` also forbids the browser's memory cache, so this was not
-                // a revalidation — it was the whole PNG again.
-                //
-                // `!scroll` for the reason [bareRcPlayerRequest] excludes it: `scroll=` is not an
-                // override param, so a full-page capture would otherwise ride through a query that
-                // reads as bare — and that capture is made to order by the daemon, not a replay.
+                // A pure declared-theme selection is likewise fixed: the theme is defined by the
+                // catalog ([ServeHost.declaredThemes]), and [pureThemeProvider] excludes every
+                // caller-dependent axis. Cacheable so toggling theme chips doesn't refetch the PNG
+                // each time.
+                // `!scroll`, as in [bareRcPlayerRequest].
                 val pureThemeRender = pureThemeProvider != null && !scroll
                 markGeneration(
                   outcome.generation.wire,
-                  // A bare player replay is cacheable on a private box too, as
-                  // [PRIVATE_REPLAY_CACHE_CONTROL] sets out: `private` rather than `public`,
-                  // because the URL carries the operator's token. Everything else a token-gated
-                  // box answers stays `no-store`.
+                  // A bare player replay is cacheable on a private box too
+                  // ([PRIVATE_REPLAY_CACHE_CONTROL]), but `private` since the URL carries the
+                  // token. Everything else on a gated box stays `no-store`.
                   if (!isPublic) {
                     if (bareRcPlayer) PRIVATE_REPLAY_CACHE_CONTROL
                     else DYNAMIC_RESOURCE_CACHE_CONTROL
                   }
-                  // A player selection stops at the short public lifetime and never takes the
-                  // `immutable` one, even on a generation-scoped URL: what these bytes depend on is
-                  // the *deployed player*, and a redeploy that swaps it need not move the catalog's
-                  // generation. `max-age` is the bound on how stale that can get; `immutable` would
-                  // have no bound at all.
+                  // A player selection never takes `immutable`, even generation-scoped: a redeploy
+                  // can change the player without moving the generation.
                   else if (bareRcPlayer) STATIC_RESOURCE_CACHE_CONTROL
                   else if (bakedBrowse) {
-                    // A frame URL that names its generation is content-addressed: these exact
-                    // bytes are what it answers with for as long as it resolves at all, because a
-                    // republish moves the page's generation and therefore the URL. That is what
-                    // lets it take the `immutable` lifetime the other content-addressed lanes take
-                    // — and, more to the point, what stops it outliving the page that drew it.
-                    //
-                    // An unscoped URL keeps the old short public lifetime. It is still the moving
-                    // target it always was; the fix for that is to have the page name a
-                    // generation, not to cache the ambiguity for longer.
+                    // A generation-named frame URL is content-addressed (a republish moves the
+                    // URL), so it takes `immutable`. Unscoped URLs keep the short public lifetime.
                     if (carriesCurrentGeneration(renderHost)) prebakedImageCacheControl(isPublic)
                     else STATIC_RESOURCE_CACHE_CONTROL
                   } else if (pureThemeRender) {
-                    // Scoped to a generation, a themed render is content-addressed the way the
-                    // baked frame beside it is: the pixels are this publish's preview drawn under
-                    // this publish's declared theme, and a republish that moves either moves the
-                    // generation and therefore the URL. Unscoped it keeps the short public
-                    // lifetime, bounded by `max-age` + `stale-while-revalidate` exactly as the
-                    // player lane is.
+                    // Generation-scoped themed renders are content-addressed too; unscoped ones
+                    // keep the short lifetime like the player lane.
                     if (carriesCurrentGeneration(renderHost)) prebakedImageCacheControl(isPublic)
                     else STATIC_RESOURCE_CACHE_CONTROL
                   } else DYNAMIC_RESOURCE_CACHE_CONTROL,
@@ -13418,31 +11503,22 @@ class ServeHttpServer(
   }
 
   /**
-   * The validated overrides a [generation] artifact for [previewId] does **not** reflect — empty
-   * unless the bytes came straight off a published bundle ([RenderOutcome.Generation.BAKED] — no
-   * renderer was involved in this request). Every other generation is a real render keyed by these
-   * overrides, cache hit or not.
+   * The validated overrides a [generation] artifact for [previewId] does not reflect: empty unless
+   * the bytes came straight off a published bundle ([RenderOutcome.Generation.BAKED]). Every other
+   * generation is a real render keyed by these overrides.
    */
   /**
-   * [previewId]'s published render by the player a **bare** `?rcPlayer=` names, as a
-   * [RenderOutcome] for the pre-admission `cached` chain — or null when this request is not that.
+   * [previewId]'s published render by the player a bare `?rcPlayer=` names, as a [RenderOutcome]
+   * for the pre-admission `cached` chain, or null. The offline parity run drew every document with
+   * every player, so these are published bytes.
    *
-   * The catalog's offline parity run already drew every `ir/<id>.rc` document with every player, so
-   * the commonest Remote Compose page view there is — a viewer opening on its default player, with
-   * nothing else selected — is answerable from published bytes. Through the daemon instead,
-   * `?rcPlayer=cmp-jvm` measures ~0.75s on a warm public box, and on a cold one it falls back to
-   * baked pixels and refuses.
+   * The backend matching [ServeHost.bakedRcPlayer] is excluded and answered from baked instead
+   * (androidx-embedded for an ordinary preview, the `RemoteOverridablePreview` default).
    *
-   * The catalog's ordinary baked PNG **can** stand in, because `RemoteOverridablePreview` defaults
-   * to `RemoteComposePlayerKind.EMBEDDED` — so the backend matching the session's own
-   * [ServeHost.bakedRcPlayer] is excluded below and answered from baked instead, which for an
-   * ordinary preview means androidx-embedded.
-   *
-   * "Bare" is the whole safety condition. Any other override — a font scale, a device, a knob, a
-   * theme — asks for pixels the parity run never drew, so the player selection is stripped and what
-   * remains must be something the baked snapshot would itself satisfy
-   * ([CatalogLiveRouting.overridesAffectRender]). Otherwise this returns null and the request
-   * routes to the renderer.
+   * "Bare" is the safety condition: with any other override the player selection is stripped and
+   * what remains must be satisfiable by the baked snapshot
+   * ([CatalogLiveRouting.overridesAffectRender]); otherwise null and the request goes to the
+   * renderer.
    */
   private fun publishedRcPlayerRender(
     renderHost: ServeHost,
@@ -13452,28 +11528,13 @@ class ServeHttpServer(
     val rc = overrides.remoteCompose ?: return null
     val player = rc.player ?: return null
     val backend = RcPlayerBackend.entries.firstOrNull { it.playerKind == player } ?: return null
-    // The player the catalog BAKED with is served from the baked artifact, not from its staged
-    // rc-compare column, and that is the difference between this lane being an optimisation and
-    // being a source of two answers to one question.
-    //
-    // For all but a view-pinned preview that player is [RcPlayerBackend.ANDROIDX_EMBEDDED], because
-    // `RemoteOverridablePreview` defaults to `RemoteComposePlayerKind.EMBEDDED` — but which one it
-    // was is a fact about the session's manifest, so it is asked ([ServeHost.bakedRcPlayer]) rather
-    // than assumed here. The staged `embedded` column is a DIFFERENT
-    // render of the same player: the vendored player under this repo's Robolectric harness, drawn
-    // to be compared against baked rather than to stand in for it, and the committed harness model
-    // measures the two apart (0.03% on `serve-rc-lanes.html`'s first row). Answering the viewer
-    // from it made a bare browse and `?rcPlayer=androidx-embedded` disagree — so an explicit pick,
-    // or a viewer that stopped stamping one, silently changed which artifact you got.
-    //
-    // Falling through to baked is also simply faster than the staged lookup this lane exists to
-    // provide: a local file rather than an index into the published comparison.
-    //
-    // Same reasoning that already sets [RcPlayerBackend.ANDROIDX_VIEW]'s `rcCompareLane` to null.
-    // Every
-    // other backend keeps the shortcut, because for them baked genuinely is another player's
-    // pixels — and on a view-pinned preview that includes androidx-embedded, which then keeps its
-    // staged column instead of being handed the view player's capture under a confident 200.
+    // The player the catalog baked with ([ServeHost.bakedRcPlayer], usually
+    // [RcPlayerBackend.ANDROIDX_EMBEDDED]) is served from the baked artifact, not its staged
+    // rc-compare column: the staged `embedded` column is a different render (the vendored player
+    // under this repo's Robolectric harness) and differs slightly, so a bare browse and an explicit
+    // pick would disagree. Baked is also faster. Same reasoning as
+    // [RcPlayerBackend.ANDROIDX_VIEW]'s null `rcCompareLane`. Other backends keep the shortcut,
+    // including androidx-embedded on a view-pinned preview.
     if (player == renderHost.bakedRcPlayer(previewId)) return null
     // Everything the request asks for beyond "draw it with this player".
     val withoutPlayer =
@@ -13512,10 +11573,8 @@ class ServeHttpServer(
         renderHost.bakedRcPlayer(previewId),
       )
     } else if (renderHost.hasRemoteComposeDoc(previewId)) {
-      // A real render happened — and still could not apply everything, because this preview is
-      // replayed from its captured document rather than recomposed. See
-      // [CatalogLiveRouting.irReplayDroppedOverrideNames] for which axes that costs and why the
-      // list is narrow.
+      // A real render happened but still couldn't apply everything, because this preview is
+      // replayed rather than recomposed; see [CatalogLiveRouting.irReplayDroppedOverrideNames].
       CatalogLiveRouting.irReplayDroppedOverrideNames(
         previewId,
         overrides,
@@ -13527,21 +11586,13 @@ class ServeHttpServer(
     }
 
   /**
-   * The dropped overrides a refusal for [previewId] must call **terminal** — the axes retrying can
-   * never apply, because a replay has no composition to re-run, today or in a minute. Exactly
-   * [CatalogLiveRouting.irReplayDroppedOverrideNames], and empty for a preview that recomposes.
+   * The dropped overrides a refusal for [previewId] must call terminal: axes a replay can never
+   * apply. Exactly [CatalogLiveRouting.irReplayDroppedOverrideNames]; empty for a recomposing
+   * preview.
    *
-   * Terminality is a property of the **axis**, not of the preview, and conflating the two is the
-   * bug this replaced. The old predicate was "does this preview carry a captured document?", which
-   * is true of *every* Remote Compose preview — including the ones whose daemon twin renders the
-   * axis perfectly well. So a transient baked fallback (a cold daemon, a busy one, no free seat) on
-   * e.g. `?rcPlayer=java` was answered `409` + "the override can never apply", when the same URL
-   * against the warm daemon is a `200`. The viewer treats `409` as final, so it gave up on a lane
-   * that was seconds from working, and the message told the visitor something false about it.
-   *
-   * `rcPlayer` is the sharpest case: choosing which player replays the document is precisely what
-   * the replay path reads, so it is never terminal — `IrReplayDroppedOverridesTest` has asserted
-   * that about the predicate all along; only this caller disagreed.
+   * Terminality is per axis, not per preview: a transient baked fallback on e.g. `?rcPlayer=java`
+   * must be retryable (503), since the warm daemon would answer 200 and the viewer treats 409 as
+   * final. `rcPlayer` is never terminal (`IrReplayDroppedOverridesTest`).
    */
   private fun terminalDroppedOverrides(
     renderHost: ServeHost,
@@ -13560,26 +11611,17 @@ class ServeHttpServer(
     }
 
   /**
-   * The declared themes [previewId] can actually be rendered under: all of them when it recomposes,
-   * else only those with a published replay mapping.
-   *
-   * Offering a theme no lane can apply is the failure this filter exists for: the control looks
-   * live, the click 409s, and the visitor is told the preview "can't render live" for a theme the
-   * catalog advertised.
+   * The declared themes [previewId] can render under: all when it recomposes, else only those with
+   * a published replay mapping, so no offered theme 409s.
    */
   private fun applicableThemes(renderHost: ServeHost, previewId: String): List<ServeTheme> =
     if (isReplayedPreview(renderHost, previewId)) renderHost.replayableThemes()
     else renderHost.declaredThemes
 
   /**
-   * The declared themes a **page showing many previews** can offer — the union over its previews,
-   * since one control drives cards of both kinds.
-   *
-   * A union is only honest paired with a per-card gate, and it is [everyThemeApplies] that carries
-   * it: a mixed catalog offering a theme mapped for its replayed cards and a second one that isn't
-   * would otherwise light up every chip on every card, and the unmapped chip would 409 the replayed
-   * ones. Per-theme narrowing isn't expressible per card here, so a replayed card that can't take
-   * the whole offered set is gated out of the control entirely rather than into an error.
+   * The declared themes a multi-preview page can offer: the union over its previews. Honest only
+   * with the per-card gate [everyThemeApplies]: a replayed card that can't take the whole offered
+   * set is gated out of the control.
    */
   private fun applicableThemes(renderHost: ServeHost): List<ServeTheme> =
     if (renderHost.previews.any { !isReplayedPreview(renderHost, it.id) }) {
@@ -13595,17 +11637,15 @@ class ServeHttpServer(
       .containsAll(applicableThemes(renderHost).map { it.providerFqn })
 
   /**
-   * Whether [previewId] is redrawn by **replaying** its captured document rather than by
-   * recomposing. A per-preview fact about the lane, and the axis the theme controls narrow on — not
-   * a statement that a refusal is final, which is [terminalDroppedOverrides]' job.
+   * Whether [previewId] is redrawn by replaying its captured document rather than recomposing. Not
+   * a statement that a refusal is final ([terminalDroppedOverrides] decides that).
    */
   private fun isReplayedPreview(renderHost: ServeHost, previewId: String): Boolean =
     ServeThemeReplay.isReplayed(renderHost, previewId)
 
   /**
-   * [ServeThemeReplay.expand], as a member so the render handlers read the same way they did when
-   * the expansion lived here. The logic moved out because the WebSocket lanes need it too — see
-   * [ServeThemeReplay].
+   * [ServeThemeReplay.expand] as a member; the logic lives in [ServeThemeReplay] because the
+   * WebSocket lanes need it too.
    */
   private fun expandThemeProvider(
     renderHost: ServeHost,
@@ -13614,30 +11654,18 @@ class ServeHttpServer(
   ): ServeThemeReplay.Seeding = ServeThemeReplay.expand(renderHost, previewId, params)
 
   /**
-   * Answer a render whose **validated overrides were not applied** — [bytes] are the preview's
-   * baked artifact, produced without a renderer, while the request asked for [dropped]. Shared by
-   * the PNG and SVG lanes so the two can't drift: a vector read off the delivery branch ignores a
-   * `fontScale` exactly as thoroughly as a baked PNG does.
+   * Answer a render whose validated overrides were not applied: [bytes] are the baked artifact
+   * while the request asked for [dropped]. Shared by the PNG and SVG lanes.
    *
-   * The old behaviour was `200` with those bytes, which is a wrong answer delivered confidently:
-   * the response is indistinguishable from a render where the override genuinely changed nothing,
-   * so a diff bot, a parity check, or an agent iterating on a theme concludes "no visual
-   * difference" for an artifact that was never rendered (#3449). Every override kind agrees here —
-   * `fontScale`, `uiMode`, and `themeProvider` alike — rather than one path 503ing while the
-   * commoner ones quietly returned the snapshot.
-   *
-   * Three outcomes, all naming the dropped params in [DROPPED_OVERRIDES_HEADER] so even a `curl -I`
-   * can tell:
-   * - `?fallback=baked` — the caller explicitly accepted the snapshot (the viewer asks for this
-   *   when it would rather show published pixels than a broken image). 200, plus
-   *   `X-Compose-Preview-Render: baked-fallback`, since the bytes carry no signal of their own.
-   * - the preview HAS a live lane, just not right now (daemon down, cold, no free seat) — 503 +
-   *   `Retry-After`, matching what a pure `themeProvider` request already returned in this state. A
-   *   replayed preview reaches this branch too, for every axis its document can answer: being
-   *   replayed is not by itself a reason retrying won't help (see [refuseDroppedOverrides]).
-   * - the preview has NO live lane at all (a static/untrusted catalog, an unmapped Android-only
-   *   variant), or the request names an axis no replay can ever honour — 409: retrying can't help,
-   *   and the viewer already treats 409 as terminal.
+   * A plain `200` would be indistinguishable from an override that changed nothing, misleading diff
+   * bots, parity checks and agents. Three outcomes, each naming the dropped params in
+   * [DROPPED_OVERRIDES_HEADER]:
+   * - `?fallback=baked`: the caller accepted the snapshot. 200 plus `X-Compose-Preview-Render:
+   *   baked-fallback`.
+   * - a live lane exists but not right now (daemon down, cold, no seat): 503 + `Retry-After`,
+   *   including replayed previews for axes their document can answer ([refuseDroppedOverrides]).
+   * - no live lane at all, or an axis no replay can honour: 409, which the viewer treats as
+   *   terminal.
    */
   private suspend fun RoutingContext.respondDroppedOverrides(
     renderHost: ServeHost,
@@ -13658,15 +11686,9 @@ class ServeHttpServer(
   }
 
   /**
-   * Whether this request selects a Remote Compose player and asks for **nothing else** — read off
-   * the raw query, for the one caller that runs before [ServeOverrides.parse].
-   *
-   * The same condition the parsed-override path applies: anything beyond the player selection wants
-   * pixels the offline parity run never drew, so it must reach the renderer.
-   *
-   * `scroll=` is excluded for the reason `.svg` is: a full-page capture is a **different product**,
-   * which a staged viewport raster cannot answer however bare the rest of the query is. The
-   * parsed-override path already spells that rule out as `cached = if (scroll) null`.
+   * Whether this request selects a Remote Compose player and nothing else, read off the raw query
+   * for the caller that runs before [ServeOverrides.parse]. Anything more needs the renderer.
+   * `scroll=` is excluded like `.svg` (a different product), matching `cached = if (scroll) null`.
    */
   private fun RoutingContext.bareRcPlayerRequest(): Boolean =
     renderParams().entries().none { (key, _) ->
@@ -13678,10 +11700,8 @@ class ServeHttpServer(
     renderParams()[FALLBACK_PARAM]?.lowercase() == FALLBACK_BAKED
 
   /**
-   * Name the un-applied overrides on a response that carries the baked artifact regardless — the
-   * accepted `?fallback=baked`, and the Storybook isolation pages, whose consumers asked for an
-   * HTML wrapper this server has no refusal shape for beyond a status. A no-op when nothing was
-   * dropped, so an honest render carries no stray header.
+   * Name the un-applied overrides on a response that carries the baked artifact anyway (accepted
+   * `?fallback=baked`, and Storybook isolation pages). No-op when nothing was dropped.
    */
   private fun RoutingContext.markDroppedOverrides(dropped: List<String>) {
     if (dropped.isEmpty()) return
@@ -13690,20 +11710,10 @@ class ServeHttpServer(
   }
 
   /**
-   * The refusal half of [respondDroppedOverrides]: 409 when at least one dropped axis is
-   * **terminal**, else 503 when a live lane exists, else 409 because there is no lane at all.
-   *
-   * The terminal test is per-axis ([terminalDroppedOverrides]), not per-preview. It used to be the
-   * latter — "this preview replays a captured document" — which is true of every Remote Compose
-   * preview and so swallowed the 503 branch entirely for them: a cold or busy daemon fell back to
-   * baked pixels, and the visitor was told the override "can never apply" about a lane that answers
-   * `200` once warm. A 409 is final to the viewer, so it stopped retrying a lane that was about to
-   * work.
-   *
-   * One terminal axis decides the whole response even when retryable ones ride along: the request
-   * as written can never be satisfied in full, so `Retry-After` would be an invitation to loop. The
-   * message names the terminal subset rather than everything dropped, so the reason given is about
-   * the axis that is actually hopeless.
+   * The refusal half of [respondDroppedOverrides]: 409 when any dropped axis is terminal
+   * ([terminalDroppedOverrides], per axis), else 503 when a live lane exists, else 409 for no lane.
+   * One terminal axis decides the whole response (retrying can't satisfy it), and the message names
+   * only the terminal axes.
    */
   private suspend fun RoutingContext.refuseDroppedOverrides(
     renderHost: ServeHost,
@@ -13741,10 +11751,9 @@ class ServeHttpServer(
 
   /**
    * cmp-jvm lane of [handleRender]: render the captured document with the embedded desktop player
-   * in an isolated subprocess and respond with [format]. Load-shed through the same
-   * [renderSemaphore] as the daemon lane. 404 when the preview carries no captured doc / render
-   * spec; 503 when the desktop player sidecar isn't installed or the queue is saturated; 500 when
-   * the player could not produce the artifact.
+   * in an isolated subprocess and respond with [format]. Load-shed via [renderSemaphore]. 404
+   * without a captured doc / render spec; 503 when the sidecar isn't installed or the queue is
+   * full; 500 when the player fails.
    */
   private suspend fun RoutingContext.renderCmpJvmResponse(
     renderHost: ServeHost,
@@ -13752,10 +11761,7 @@ class ServeHttpServer(
     format: RcJvmServerRenderer.Format,
     webMode: Boolean,
     sessionId: String,
-    /**
-     * The `?bg=` stage, applied to a raster result. Identity when the request asked for none, and
-     * never applied to the SVG product — a structural export carries no alpha to composite.
-     */
+    /** The `?bg=` stage for a raster result; identity without `bg=`, never applied to SVG. */
     stage: suspend (ByteArray) -> ByteArray = { it },
     /** Lifetime for a successful render — see the call site for which requests earn one. */
     cacheControl: String,
@@ -13766,10 +11772,8 @@ class ServeHttpServer(
       call.respondText("no cmp-jvm render for this preview", status = HttpStatusCode.NotFound)
       return
     }
-    // Apply the live `rc.<name>=…` knob edits the viewer sends, leniently parsed (a malformed seed
-    // drops to the authored default rather than failing the render) — the server-side counterpart
-    // of
-    // the JS lane's in-browser knob application.
+    // Apply live `rc.<name>=…` knob edits, leniently parsed (malformed seeds fall back to the
+    // authored default) — the server counterpart of the JS lane's in-browser knobs.
     val seeds =
       ServeOverrides.rcNamedValueSeeds(
         expandThemeProvider(
@@ -13781,11 +11785,8 @@ class ServeHttpServer(
           )
           .params
       )
-    // `?uiMode=dark` selects the document's dark `ColorTheme` branch. This lane replays stored
-    // `.rc`
-    // bytes rather than waking the daemon, so the mode is a *player* setting here — it is the only
-    // thing `uiMode` can mean for an already-captured document, and without it a dark request would
-    // silently render the light branch.
+    // `?uiMode=dark` selects the document's dark `ColorTheme` branch; for a replayed document it is
+    // a player setting.
     val theme =
       cmpJvmRenderTheme(
         renderParams()["uiMode"],
@@ -13799,8 +11800,8 @@ class ServeHttpServer(
   }
 
   /**
-   * Render [doc] with the embedded desktop player under the render semaphore and answer with the
-   * result — the shared tail of a catalog preview's cmp-jvm lane and a shared document's.
+   * Render [doc] with the embedded desktop player under the render semaphore — the shared tail of
+   * the catalog cmp-jvm lane and shared documents.
    */
   private suspend fun RoutingContext.respondCmpJvmRender(
     doc: ByteArray,
@@ -13863,10 +11864,9 @@ class ServeHttpServer(
   }
 
   /**
-   * The server-side players a `/d/<id>` page may offer this caller: the embedded desktop player
-   * (cmp-jvm) when it is installed, and each Android player ([DOC_DAEMON_PLAYERS]) a resident
-   * catalog's daemon can draw a carried document with ([docRcDonor]). All behind the same gate
-   * [handleDocRender] applies, so the page never offers a lane that would answer 401 or 403.
+   * The server-side players a `/d/<id>` page may offer: the embedded desktop player (cmp-jvm) when
+   * installed, and each Android player ([DOC_DAEMON_PLAYERS]) a resident catalog daemon can draw
+   * with ([docRcDonor]). Behind the same gate as [handleDocRender].
    */
   private fun RoutingContext.docServerPlayers(
     doc: ServeDocStore.Doc
@@ -13888,19 +11888,14 @@ class ServeHttpServer(
   private data class DocRcDonor(val sessionId: String, val previewId: String)
 
   /**
-   * A preview, in a session already resident on this host, whose daemon can draw a carried document
-   * with [backend]: it replays a captured Remote Compose document (so its daemon carries the replay
-   * connector and the players), renders overrides live, and has [backend] enabled.
+   * A preview in an already-resident session whose daemon can draw a carried document with
+   * [backend]: it replays captured Remote Compose documents, renders overrides live, and has
+   * [backend] enabled.
    *
-   * The donor only lends its daemon. compose-preview-daemon 3.15.0 replays
-   * `overrides.remoteCompose.documentBase64` in place of the preview's own content, so the preview
-   * picks the sandbox and the player set, never the pixels; and compose-ai-tools 2.37.0 keys the
-   * render cache on the document, so two documents through one donor never share an entry.
-   *
-   * Resident sessions with a running daemon only ([ServeSessionRegistry.peekHost],
-   * [ServeHost.daemonStarted]): a shared document must never be the reason this host forks a
-   * catalog or boots a daemon it was not already running. [respondDocDaemonRender] re-checks under
-   * its lease, since the session can be suspended between this peek and that lease.
+   * The donor only lends its daemon: the daemon replays `overrides.remoteCompose.documentBase64` in
+   * place of the preview's content, and the render cache is keyed on the document. Resident running
+   * daemons only ([ServeSessionRegistry.peekHost], [ServeHost.daemonStarted]), so a shared document
+   * never boots one; [respondDocDaemonRender] re-checks under its lease.
    */
   private fun docRcDonor(backend: RcPlayerBackend): DocRcDonor? {
     for (sessionId in sessions.knownSessionIds()) {
@@ -13924,10 +11919,8 @@ class ServeHttpServer(
 
   /**
    * Whether [call] may spend a render worker on a shared document. Stricter than the live-render
-   * gate, which waves everyone through on a public host with no GitHub auth: `--accept-docs` takes
-   * anonymous uploads there, and its contract is that an anonymous document is only stored and
-   * played in the browser. So a real credential is required — a `live` grant, a GitHub sign-in, or
-   * the host token a non-public host already demanded at [rejectBadToken].
+   * gate: anonymous `--accept-docs` uploads are only stored and played in the browser, so a `live`
+   * grant, GitHub sign-in, or the host token is required.
    */
   private fun mayRenderDocServerSide(call: ApplicationCall): Boolean {
     agentGrantFor(call)?.let {
@@ -13940,11 +11933,9 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /d/{id}/render.png?rcPlayer=cmp-jvm`: a shared Remote Compose document drawn by a
-   * server-side player. Needs a real credential ([mayRenderDocServerSide]) — never anonymous, even
-   * on a public host: unlike the page and its raw bytes, this spends a render worker on someone
-   * else's document. Sized from the document's own header, at `?density=` (default 1); `?uiMode=`
-   * and `rc.<name>=` seeds as on `/render`.
+   * `GET /d/{id}/render.png?rcPlayer=cmp-jvm`: a shared Remote Compose document drawn server-side.
+   * Needs a real credential ([mayRenderDocServerSide]) even on a public host. Sized from the
+   * document header at `?density=` (default 1); `?uiMode=` and `rc.<name>=` as on `/render`.
    */
   private suspend fun RoutingContext.handleDocRender(store: ServeDocStore) {
     // A bodyless probe would still take a render worker: Ktor's AutoHeadResponse runs this handler.
@@ -14011,9 +12002,8 @@ class ServeHttpServer(
 
   /**
    * The Android half of [handleDocRender]: [doc] drawn by [player] on a resident catalog's daemon
-   * ([docRcDonor]), carried to it as `overrides.remoteCompose.documentBase64` at the document's own
-   * size. Only a fresh render answers: a baked or published image is the donor preview's pixels,
-   * never this document's, so those are refused rather than served under a 200.
+   * ([docRcDonor]) via `overrides.remoteCompose.documentBase64`. Only a fresh render answers; baked
+   * or published images are the donor's pixels, so they are refused.
    */
   private suspend fun RoutingContext.respondDocDaemonRender(
     doc: ServeDocStore.Doc,
@@ -14118,71 +12108,44 @@ class ServeHttpServer(
   }
 
   /**
-   * Whether *this* request is a signed-in one — it presented a valid session cookie. The input that
-   * decides between [SIGNED_IN_PAGE_CACHE_CONTROL] and [ANON_PAGE_CACHE_CONTROL], and the reason
-   * both cache-control helpers are request-scoped rather than server-scoped: "this server has auth
-   * configured" is not the same claim as "this response is personal", and only the second one
-   * justifies refusing to store it.
+   * Whether this request presented a valid session cookie, choosing between
+   * [SIGNED_IN_PAGE_CACHE_CONTROL] and [ANON_PAGE_CACHE_CONTROL]. Request-scoped because only a
+   * personal response justifies refusing to store it.
    */
   /**
-   * Whether this request should count as somebody *looking at* the page.
-   *
-   * False for a HEAD. [io.ktor.server.plugins.autohead.AutoHeadResponse] answers a HEAD by running
-   * the GET pipeline and discarding the body, so without this the view tallies would count the
-   * probe an unfurler sends before it fetches — and then count the fetch too, double-counting every
-   * shared link and inflating the numbers with traffic that never rendered a pixel for anyone.
+   * Whether this request counts as a view. False for HEAD:
+   * [io.ktor.server.plugins.autohead.AutoHeadResponse] runs the GET pipeline, so unfurler probes
+   * would double-count.
    */
   private fun RoutingContext.isViewRequest(): Boolean = call.request.local.method != HttpMethod.Head
 
   /**
-   * Refuse a `HEAD` on a lane whose GET handler does real work, answering `405` + `Allow: GET`
-   * instead. True when the request was refused and the caller must return.
+   * Refuse `HEAD` on a lane whose GET does real work, answering `405` + `Allow: GET`; true when
+   * refused.
    *
-   * [io.ktor.server.plugins.autohead.AutoHeadResponse] answers a HEAD by running the **whole** GET
-   * handler and discarding the body, which is exactly right for a page or a baked PNG and exactly
-   * wrong here. `HEAD /bundle.zip` would render every preview in the catalog and pack the zip only
-   * to throw it away, so on a public host an unauthenticated `curl -I` — or a link checker, or an
-   * uptime monitor — could cold-start a catalog's daemons and burn its render capacity repeatedly
-   * while downloading nothing.
-   *
-   * Scoped to the work lanes, deliberately not applied by default: the whole point of installing
-   * the plugin is that an unfurler's probe of a page and its `og:image` succeeds, and both of those
-   * are a map lookup or a file read. A caller that wants the bytes can still GET; nothing shares
-   * links to a zip and expects a card.
+   * [io.ktor.server.plugins.autohead.AutoHeadResponse] runs the whole GET handler, so `HEAD
+   * /bundle.zip` would render every preview and discard the zip, letting anonymous probes burn
+   * render capacity. Applied only to work lanes; pages and baked PNGs keep answering HEAD for
+   * unfurlers.
    */
   /**
-   * Whether the request's query names any render override (`fontScale`, `device`, `themeProvider`,
-   * `knob.<key>`, …) — i.e. whether the response could be anything other than the published pixels.
-   *
-   * Deliberately the cheap key-level test rather than [ServeOverrides.parse]: both callers only
-   * need "could this differ from the bake?", and both of them fail safe when it over-reports. A
-   * render that would have replayed baked pixels anyway refuses a HEAD (the caller GETs, costing
-   * nothing), and an unfurl card omits dimensions it could have declared (the fetcher measures the
-   * image).
+   * Whether the query names any render override (`fontScale`, `device`, `themeProvider`,
+   * `knob.<key>`, …). A cheap key-level test rather than [ServeOverrides.parse]; both callers fail
+   * safe on over-reporting.
    */
   private fun RoutingContext.requestCarriesOverrides(): Boolean =
     renderParams().entries().any { (key, _) -> ServeOverrides.isOverrideParam(key) }
 
   /**
-   * The `/render/{name}` suffixes that are **never** a baked replay: the figma-svg export, the slot
-   * / accessibility / annotation products (all daemon-produced), and the captured Remote Compose
-   * document (bundle-host, read per request). Only `<id>.png` — or no suffix — serves published
-   * bytes off disk.
+   * `/render/{name}` suffixes that are never a baked replay: figma-svg, the slot / accessibility /
+   * annotation products, and the captured Remote Compose document. Only `<id>.png` (or no suffix)
+   * serves published bytes.
    */
   /**
-   * Project [bytes], refusing a document too large to be one.
-   *
-   * The `.rc` lane hands back bytes it has already read; this one additionally holds the parsed
-   * operation graph and the expanded JSON response, all three at once and each larger than the
-   * input. An uploaded bundle may carry up to 100 MB of extracted content, so without a bound a
-   * public caller could pick the largest `ir/<id>.rc` in one and ask for it repeatedly.
-   *
-   * [MAX_PROJECTABLE_DOCUMENT_BYTES] is generous against reality rather than against the upload
-   * limit: a captured sticker is kilobytes — across wear-m3-catalog's 719-document sheet the
-   * largest is well under a megabyte — so 8 MB leaves real documents untouched while still refusing
-   * the shape this guards against. Reported as the same 422 an uninflatable document gets, because
-   * it is the same statement: this particular document is not one this lane will read, and the
-   * message says which and why.
+   * Project [bytes], refusing a document too large to be one. The projection holds the parsed graph
+   * and expanded JSON at once, and an uploaded bundle may carry up to 100 MB.
+   * [MAX_PROJECTABLE_DOCUMENT_BYTES] (8 MB) is far above real captured documents. Reported as the
+   * same 422 as an uninflatable document.
    */
   private fun projectDocument(bytes: ByteArray): String {
     if (bytes.size > maxProjectableDocumentBytes) {
@@ -14195,16 +12158,13 @@ class ServeHttpServer(
   }
 
   private val DAEMON_ONLY_RENDER_SUFFIXES =
-    // `.rc.json` sits beside `.rc` rather than being covered by it: `endsWith(".rc")` is false for
-    // it, so leaving it out classified the projection lane as a replay of baked bytes and sent a
-    // HEAD probe for it down a different admission path from the identical `.rc` request.
+    // `.rc.json` doesn't end with `.rc`, so it must be listed explicitly.
     listOf(".svg", ".slots", ".a11y", ".annotations", ".rc", ".rc.json")
 
   /**
-   * Whether `/render/{name}` names one of [DAEMON_ONLY_RENDER_SUFFIXES] — i.e. a product this route
-   * has to *make*, with or without a query string. Without this, an override-free `HEAD
-   * /{system}/render/{id}.svg` still ran the full handler, took the render semaphore and possibly
-   * started a daemon, purely to have the body discarded.
+   * Whether `/render/{name}` names one of [DAEMON_ONLY_RENDER_SUFFIXES], a product this route must
+   * make even without a query, so an override-free HEAD doesn't take the semaphore or start a
+   * daemon.
    */
   private fun RoutingContext.wantsDaemonOnlyRenderProduct(): Boolean {
     val name = call.parameters["name"] ?: return false
@@ -14212,30 +12172,20 @@ class ServeHttpServer(
   }
 
   /**
-   * Whether a bare `/render/{name}` can be answered from published bytes alone — the only case
-   * where replaying the GET pipeline for a HEAD is free.
-   *
-   * "It ends in `.png`" is not enough. A plain [ServeRenderHost] has no bake at all, and a
-   * catalog's **deferred** previews ([ServeHost.liveOnlyPreviewIds]) are published without one, so
-   * those go to the daemon even with no query string — the probe would take the render semaphore
-   * and start a daemon purely to have the body discarded. [ServeHost.bakedRenderSize] answers
-   * exactly this question for the cost of a PNG header read, and is null for both.
-   *
-   * Also requires the session to be **resident**: [ServeSessionRegistry.peekHost] never resumes, so
-   * a probe for a suspended catalog is refused rather than waking it. Both refusals are safe for
-   * the unfurl case — an image fetcher issues a GET, and the page URLs an unfurler probes do not
-   * come through this route.
+   * Whether a bare `/render/{name}` can be answered from published bytes alone, so a HEAD costs
+   * nothing. A `.png` suffix isn't enough: a plain [ServeRenderHost] has no bake and deferred
+   * previews ([ServeHost.liveOnlyPreviewIds]) are published without one.
+   * [ServeHost.bakedRenderSize] answers this from a PNG header and is null for both. Also requires
+   * a resident session ([ServeSessionRegistry.peekHost]). Refusals are safe: unfurlers fetch images
+   * with GET.
    */
   private fun RoutingContext.renderWouldReplayBakedBytes(sessionInPath: Boolean): Boolean {
     // Only a HEAD pays for this lookup; a GET is going to do the work regardless.
     if (call.request.local.method != HttpMethod.Head) return true
-    // A pinned render answers HEAD, which it did not before, and the reason it now can is that the
-    // lane became admission-bounded: a probe costs at most one permitted branch read, and the GET
-    // that follows it is served from the cache that read filled. Refusing was the wrong trade — an
-    // unfurler probes an `og:image` before fetching it, so a blanket 405 dropped the preview card
-    // on exactly the historical links this feature exists to share.
-    // Free when the bytes are already resident; otherwise one permitted branch read, which is the
-    // same thing the GET behind the probe would spend and which the cache then serves.
+    // A pinned render answers HEAD: the lane is admission-bounded, so a probe costs at most one
+    // permitted branch read, which the following GET reuses from cache; unfurlers probe `og:image`
+    // first.
+    // Free when the bytes are resident.
     if (call.request.queryParameters[ServeCatalogRevision.PARAM] != null) return true
     val name = call.parameters["name"]?.removeSuffix(".png") ?: return false
     val host = sessions.peekHost(selectedSessionId(sessionInPath)) ?: return false
@@ -14245,26 +12195,16 @@ class ServeHttpServer(
   /**
    * Serve one published animated capture.
    *
-   * The extension is read off the request and matched against the closed set the host accepts, then
-   * passed to it so the lookup and the `Content-Type` are decided by the same string. Anything else
-   * — an unknown suffix, an id the catalog never declared — is a flat 404: this route reaches bytes
-   * fetched from a delivery branch, so it must never be able to serve them under a type the
-   * requester chose.
+   * The extension is matched against the host's closed set and passed through, so lookup and
+   * `Content-Type` agree; anything else (unknown suffix or undeclared id) is a 404, so the
+   * requester can't choose the served type.
    *
-   * Leased, NOT peeked. [ServeSessionRegistry.peekHost] never resumes a suspended session, so
-   * peeking here answered 404 for every catalog the idle timer had put to sleep — which on a
-   * long-running server is most of them, most of the time. The fixtures never caught it because a
-   * test registers its catalog `pinned = true` and a pinned session is never suspended; the failure
-   * only exists once an idle clock does. The lease is the same one `/render` takes for the sibling
-   * still, and it costs no render seat: a capture is read off the staged branch asset, so what
-   * resuming buys is the host that owns the bytes, not a daemon.
+   * Leased, not peeked: [ServeSessionRegistry.peekHost] never resumes, which would 404 every idle
+   * catalog. The lease is the same `/render` takes and costs no render seat; the capture is read
+   * off the staged branch asset.
    */
   private suspend fun RoutingContext.handleMotion(sessionInPath: Boolean) {
-    // Token-gated like every sibling asset lane. `/render` has always opened with this and the
-    // motion lane never did — harmless-looking while the route was only reachable at
-    // `/{system}/motion/…`, and not harmless at all: on a token-gated box that spelling was already
-    // servable to an unauthenticated caller, and rooting the segment for site hosts would have
-    // widened it to a second URL rather than introducing it.
+    // Token-gated like every sibling asset lane.
     if (rejectBadToken()) return
     if (rejectHeadProbe()) return
     val name = call.parameters["name"].orEmpty()
@@ -14280,18 +12220,9 @@ class ServeHttpServer(
       } ?: BranchFetch.NotFound
     val bytes = outcome.bytesOrNull
     if (bytes == null) {
-      // A capture the catalog never published is a 404 and always was. A capture the delivery
-      // branch is currently refusing us is NOT — answering 404 there tells the reader the recording
-      // does not exist, which is what "The recorded interaction could not be loaded" meant for both
-      // cases and what made diagnosing this lane a manual exercise. 503 with `Retry-After` says the
-      // true thing to a browser, a monitor and a person reading a log alike.
-      //
-      // And a capture past the transport's envelope is a third thing again: it exists, it is not
-      // coming, and asking again will not shrink it. `TooLarge` carries no bytes and is not
-      // transient, so it lands in neither branch above by default — 404 for a file the branch is
-      // holding, which is the absence-versus-refusal confusion this block exists to end, arriving
-      // through the outcome added to end it elsewhere. 413 is the answer the rest of this server
-      // already gives for a body past a ceiling.
+      // An unpublished capture is 404. One the delivery branch is currently refusing is 503 with
+      // `Retry-After`, not 404. One past the transport's size envelope (`TooLarge`) is 413, as for
+      // any body past a ceiling.
       if (outcome is BranchFetch.TooLarge) {
         call.respondText(outcome.summary, status = HttpStatusCode.PayloadTooLarge)
         return
@@ -14307,17 +12238,9 @@ class ServeHttpServer(
       }
       return
     }
-    // Revalidated, NOT `immutable` — and the distinction is the whole point of this block.
-    //
-    // Every other user of [prebakedImageCacheControl] is content-addressed: its URL carries the
-    // bytes' own hash, which is what earns the year-long `immutable` promise that what the URL
-    // names can never change. A capture's URL is derived from the STICKER it accompanies
-    // (`motion/switch-on/ideal__default__dark.apng`), so a re-publish replaces the recording behind
-    // the same path — and a client that watched the old one would have been told to keep it for a
-    // year with nothing to revalidate against.
-    //
-    // The ETag is what makes revalidating cheap enough to be the right answer here rather than a
-    // compromise: a capture is many frames, so a 304 saves far more on this route than on a still.
+    // Revalidated, not `immutable`: unlike other users of [prebakedImageCacheControl], a capture's
+    // URL derives from its sticker path, so a re-publish replaces bytes at the same URL. The ETag
+    // makes revalidation cheap (304s save a lot on many-frame captures).
     val etag = "\"" + motionEtag(bytes) + "\""
     call.response.headers.append(
       HttpHeaders.CacheControl,
@@ -14332,9 +12255,8 @@ class ServeHttpServer(
   }
 
   /**
-   * The `Retry-After` a refused capture advertises: what the branch host itself asked for when it
-   * said so, else a short default. Clamped to the same ceiling the fetch policy honours, so the
-   * header can never promise a wait longer than the server would itself wait.
+   * The `Retry-After` for a refused capture: the branch host's own value, else a short default,
+   * clamped to the fetch policy's ceiling.
    */
   private fun motionRetryAfterSeconds(outcome: BranchFetch): Long {
     val asked =
@@ -14370,20 +12292,13 @@ class ServeHttpServer(
   private fun RoutingContext.pageCacheControl(): String = call.pageCacheControl()
 
   /**
-   * The **major sections** of a design page, for the catalog sidebar's Pages tree.
+   * The major sections of a design page for the sidebar's Pages tree: its Figma `COMPONENT_SET`s,
+   * not the hundreds of concrete components.
    *
-   * A specimen sheet's grouping nodes — Figma `COMPONENT_SET`s — are what a reader means by its
-   * sections: the `Shape` page's grid of shapes, the `Buttons` page's rows of button families.
-   * Every other node on the sheet is one concrete component, and there are hundreds of them;
-   * listing those in a sidebar would rebuild the wall of rows the pane exists to avoid.
-   *
-   * Two guards, both about the sheet being third-party data:
-   * - **Unnamed sets are dropped.** `name` is free text and may be blank; a row with no label is a
-   *   row a reader cannot choose, and it would still cost a line.
-   * - **Capped.** A manifest may carry up to `MAX_NODES_PER_PAGE` nodes and nothing says how many
-   *   of them are sets. The cap keeps one hostile (or merely enormous) page from turning the
-   *   sidebar into the thing it replaced; past it the page's own row still leads to the whole
-   *   sheet, which is where every section is anyway.
+   * Third-party data, so:
+   * - unnamed sets are dropped (blank `name` can't be chosen);
+   * - capped, since a manifest may carry up to `MAX_NODES_PER_PAGE` nodes; past the cap the page
+   *   row still leads to the whole sheet.
    */
   private fun designPageSections(page: DesignPage): List<ServeWeb.PageSection> =
     page.nodes
@@ -14396,15 +12311,13 @@ class ServeHttpServer(
   private fun prebakedImageCacheControl(): String = prebakedImageCacheControl(isPublic)
 
   /**
-   * SVG lane of [handleRender]: load-shed like the PNG lane, then respond the figma-svg bytes. When
-   * [scroll] is set, serves the full-page (`compose/figma-svg-long`) export of a scrolling preview
-   * instead of the viewport-sized one.
+   * SVG lane of [handleRender]: load-shed like the PNG lane, then respond the figma-svg bytes; with
+   * [scroll], the full-page (`compose/figma-svg-long`) export.
    */
   /**
-   * The exploded-view options this request asks for, or null when it didn't ask. Reading them off
-   * the raw query (rather than through `ServeOverrides`) is deliberate: like `mode=web`, these
-   * describe how the produced SVG is *presented*, not what gets rendered, so they must not join the
-   * override set that decides cache identity or gets reported as "dropped".
+   * The exploded-view options this request asks for, or null. Read off the raw query because, like
+   * `mode=web`, they describe presentation, so they must not affect override cache identity or be
+   * reported as dropped.
    */
   private fun RoutingContext.explodedOptions(): ExplodedSvg.Options? {
     val params = { key: String -> renderParams()[key] }
@@ -14428,20 +12341,14 @@ class ServeHttpServer(
             val produced =
               when {
                 scroll -> renderHost.renderScrollSvg(previewId, overrides)
-                // Web mode routes through the host's web variant: a catalog-backed host links its
-                // raster crops to their published branch files instead of embedding them (the
-                // default host keeps the self-contained bytes). The font-`@import` rewrite below
+                // Web mode uses the host's web variant: a catalog host links raster crops to
+                // published branch files rather than embedding them. The font `@import` rewrite
                 // applies either way.
                 webMode -> renderHost.renderSvgForWeb(previewId, overrides)
                 else -> renderHost.renderSvg(previewId, overrides)
               }
-            // Both post-render rewrites run with the permit still held. The `mode=web` one is a
-            // regex pass over a string, but the exploded projection parses the whole SVG into a
-            // DOM, structurally copies it once per sheet and re-serializes — comparable to a
-            // render on a large catalog export. Outside the semaphore, a public host could be
-            // asked for a hundred different `explodeTilt=` values at once and would run all of
-            // them in parallel, which is precisely what this route's load shedding exists to
-            // prevent. Inside it, the burst queues like any other render and sheds with a 503.
+            // Both rewrites run with the permit held: the exploded projection parses, copies and
+            // re-serializes the SVG, comparable to a render, so it must queue and shed like one.
             if (produced is SvgOutcome.Ok && (webMode || exploded != null)) {
               var text = produced.svg.toString(Charsets.UTF_8)
               if (webMode) text = webModeSvg(text)
@@ -14462,18 +12369,13 @@ class ServeHttpServer(
         )
       }
       is SvgOutcome.Ok -> {
-        // The render host produces the self-contained (embedded) SVG and caches it; the web and
-        // exploded variants are per-response rewrites of those bytes, so every mode shares one
-        // render + cache. Both were already applied above, inside the semaphore — web mode first,
-        // since it rewrites the `@font-face` block the exploded view then carries through
-        // untouched, whereas the reverse order would have it hunting for that block inside a
-        // reserialized document.
+        // The host renders and caches the self-contained SVG; web and exploded variants are
+        // per-response rewrites, already applied above in that order (web first, since it rewrites
+        // the `@font-face` block the exploded view carries through).
         val svg = outcome.svg
         val contentType = ContentType.parse(ComposeFigmaSvgProduct.MEDIA_TYPE_SVG)
-        // The vector lane drops overrides exactly like the PNG one: a `figma/<slug>.svg` read off
-        // the delivery branch was drawn at the preview's discovery-time axes, so serving it for a
-        // `?fontScale=2.0` export is the same silent wrong answer (#3449). `?scroll=long` is
-        // daemon-only (a bundle has no full-page vector), so it never lands here baked.
+        // The vector lane drops overrides like the PNG one: a branch `figma/<slug>.svg` was drawn
+        // at discovery-time axes. `?scroll=long` is daemon-only, so never baked here.
         val dropped = droppedOverridesFor(renderHost, outcome.generation, previewId, overrides)
         if (dropped.isNotEmpty()) {
           respondDroppedOverrides(
@@ -14530,10 +12432,9 @@ class ServeHttpServer(
   }
 
   /**
-   * Accessibility lane of [handleRender]: load-shed like the PNG lane, then respond the merged
-   * `a11y/hierarchy` + `a11y/atf` + `a11y/touchTargets` JSON the viewer's overlay + legend read.
-   * Like the slots lane this can force a daemon re-render (the products are only written by an
-   * `a11y`-mode render), so it goes through the same render admission.
+   * Accessibility lane of [handleRender]: respond the merged `a11y/hierarchy` + `a11y/atf` +
+   * `a11y/touchTargets` JSON. Like slots it may force an `a11y`-mode daemon render, so it uses
+   * render admission.
    */
   private suspend fun RoutingContext.renderA11yResponse(
     renderHost: ServeHost,
@@ -14568,30 +12469,18 @@ class ServeHttpServer(
   }
 
   /**
-   * Respond one inspection payload — `<id>.a11y` or `<id>.annotations` — with the same validators
-   * and lifetime the rest of this route carries.
+   * Respond one inspection payload (`<id>.a11y` or `<id>.annotations`) with the route's validators
+   * and lifetime, since `cp-inspect-layers` only caches per page.
    *
-   * A bare `respondBytes` here (no `Cache-Control`, no `ETag`, no `Last-Modified`) costs a refetch
-   * per navigation: `cp-inspect-layers` keeps only a per-page in-memory map keyed on the frame URL,
-   * so every navigation into an `?inspect=` link refetches a payload that has not moved, with
-   * nothing to revalidate against.
+   * A strong `ETag` always (payloads are small and deterministic). Lifetime follows the raster
+   * lanes:
+   * - overrides: made-to-order, [DYNAMIC_RESOURCE_CACHE_CONTROL];
+   * - naming the generation on disk: content-addressed, `immutable` ([carriesCurrentGeneration],
+   *   [prebakedImageCacheControl]);
+   * - otherwise the short public lifetime with `stale-while-revalidate`
+   *   ([STATIC_RESOURCE_CACHE_CONTROL]).
    *
-   * The `ETag` is unconditional and strong: these payloads are deterministic and a couple of
-   * kilobytes at most, so hashing one costs nothing next to the request it saves, and it gives even
-   * an unscoped URL a 304 instead of a full refetch.
-   *
-   * The lifetime follows the rule the raster lanes already state, for the same reasons:
-   * - a request carrying overrides names inspection of made-to-order pixels, which reflect no
-   *   published bytes and belong in nobody's cache ([DYNAMIC_RESOURCE_CACHE_CONTROL]);
-   * - a request naming the generation on disk is content-addressed — a republish moves the
-   *   generation and therefore the URL — so it takes the `immutable` lifetime
-   *   ([carriesCurrentGeneration], [prebakedImageCacheControl]);
-   * - anything else is the moving target an unscoped URL always is, and gets the short public
-   *   lifetime with `stale-while-revalidate` ([STATIC_RESOURCE_CACHE_CONTROL]), which the `ETag`
-   *   lets end in a 304.
-   *
-   * A private (token-gated) box never caches any of it, exactly as [prebakedImageCacheControl]
-   * decides for the hero lane.
+   * A token-gated box never caches any of it.
    */
   private suspend fun RoutingContext.respondInspectionJson(renderHost: ServeHost, json: ByteArray) {
     val etag = contentEtag(json)
@@ -14613,17 +12502,13 @@ class ServeHttpServer(
 
   /**
    * Design-annotation lane of [handleRender]: load-shed like the PNG lane, then respond the
-   * typography + theme inspection layers the viewer draws over the frame.
+   * typography + theme layers.
    */
   /**
-   * The inspect layers this `.annotations` request will actually draw (`?layers=typography,theme`),
-   * or null when it named none — which means all of them, and is what every pre-`layers=` client
-   * and every hand-typed URL still says.
-   *
-   * NOT an override param ([ServeOverrides.isOverrideParam] is an allowlist and this is not on it),
-   * and deliberately so: it selects among projections of one frame rather than changing the pixels,
-   * so it must not turn a cacheable published replay into a `no-store` made-to-order render. It
-   * does change the response body on the published lane, which the content ETag already covers.
+   * The inspect layers this `.annotations` request draws (`?layers=typography,theme`), or null for
+   * all. Not an override param ([ServeOverrides.isOverrideParam] is an allowlist): it selects
+   * projections of one frame, so it must not make a published replay `no-store`; the content ETag
+   * covers the body change.
    */
   private fun RoutingContext.requestedInspectLayers(): Set<String>? =
     AnnotationKind.parseLayers(renderParams()["layers"])
@@ -14663,18 +12548,16 @@ class ServeHttpServer(
   }
 
   /**
-   * The persistent frame lane, shared by `WS /ws/{name}` (query `?session=`) and `WS
-   * /{system}/ws/{name}` (path — the `{system}` segment IS the session). Token is checked
-   * post-handshake (can't 404 after upgrade) — a bad token closes immediately.
+   * The persistent frame lane for `WS /ws/{name}` (`?session=`) and `WS /{system}/ws/{name}`. The
+   * token is checked post-handshake; a bad one closes immediately.
    */
   private suspend fun DefaultWebSocketServerSession.serveStreamLane() {
     if (!call.isAuthorizedCall()) {
       close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "unauthorized"))
       return
     }
-    // Same rule as [rejectMissingGithubAuth], restated because a socket can't be redirected to a
-    // sign-in — and in the same order, for the same reason: a presented grant is judged on its own
-    // scope whether or not this box configures GitHub auth.
+    // Same rule as [rejectMissingGithubAuth], restated because a socket can't redirect to sign-in;
+    // a presented grant is judged on its scope regardless of GitHub auth.
     val socketGrant = agentGrantFor(call)
     if (socketGrant != null) {
       if (!socketGrant.allows(AgentGrantScope.LIVE)) {
@@ -14692,34 +12575,22 @@ class ServeHttpServer(
         ?: call.siteSystem()
         ?: call.request.queryParameters["session"]
         ?: defaultSessionId
-    // Reserve live-seat permits BEFORE opening the session: leasing resumes a suspended/forked
-    // host,
-    // which spawns the JVM render daemon, so a post-lease check would let an over-budget burst
-    // spawn
-    // the very daemons this budget bounds. A known-static (pinned bundle/catalog) session takes no
-    // permit (weight 0); a daemon-backed one charges its backend weight (desktop 1, Android
-    // heavier),
-    // read from the session state without opening the daemon. A lazily-forked session (e.g.
-    // --revisions), unregistered until its build runs, defaults to weight 1 — a desktop-cost
-    // daemon.
+    // Reserve live-seat permits before leasing, since leasing resumes the host and spawns the
+    // daemon the budget bounds. Static sessions take weight 0; daemon-backed ones their backend
+    // weight from session state; lazily-forked unregistered sessions (e.g. --revisions) default to
+    // 1.
     val weight = if (sessions.isKnownStatic(sessionId)) 0 else sessions.liveSeatWeight(sessionId)
-    // The reservation happens before the lease, so a bogus id reaches the budget too. A refusal for
-    // a session the registry doesn't have is counted separately rather than as demand: an
-    // inflatable counter is not evidence, but a `--revisions` session is legitimately unknown until
-    // its first lease builds it, so the number is kept rather than dropped.
+    // A refusal for an unknown session is counted separately: not evidence of demand, but
+    // `--revisions` sessions are legitimately unknown until built.
     val seatTicket = liveSeats.acquire(weight, verified = sessions.isKnownSession(sessionId))
     if (seatTicket == null) {
       close(CloseReason(1013.toShort(), "live preview at capacity — try again shortly"))
       return
     }
     try {
-      // Lease (not just acquire) the tenant for the socket's whole life: a fallback-lane socket
-      // opens
-      // no stream, so without a lease the reaper could close its host mid-connection.
-      //
-      // `connection = true`: this is the one hold that outlives any unit of work, so it is the one
-      // that has to earn its "busy" from activity rather than from being open (#4312). Every other
-      // caller takes the default request-scoped lease, which counts as busy until it is released.
+      // Lease the tenant for the socket's life, since a fallback-lane socket opens no stream and
+      // the reaper could close its host. `connection = true` makes this lease count as busy only on
+      // activity; request-scoped leases count as busy until released.
       val lease = withContext(Dispatchers.IO) { sessions.lease(sessionId, connection = true) }
       if (lease == null) {
         close(CloseReason(CloseReason.Codes.CANNOT_ACCEPT, "no such session"))
@@ -14743,9 +12614,8 @@ class ServeHttpServer(
             .let { ServeWeb.SystemDisplay.normalizeOverrideParams(sessionId, it) }
         // Non-suspending hand-off to the socket; drop frames a slow client can't keep up with.
         val send: (String) -> Unit = { text -> outgoing.trySend(Frame.Text(text)) }
-        // Optional stream tuning: codec (WebP is ~30–60% smaller; the daemon downgrades to PNG if
-        // it
-        // can't encode WebP) and an fps cap.
+        // Optional stream tuning: codec (WebP is ~30–60% smaller; the daemon falls back to PNG) and
+        // an fps cap.
         val codec =
           when (call.request.queryParameters["codec"]?.lowercase()) {
             "webp" -> StreamCodec.WEBP
@@ -14753,10 +12623,9 @@ class ServeHttpServer(
             else -> null
           }
         val maxFps = call.request.queryParameters["maxFps"]?.toIntOrNull()?.takeIf { it > 0 }
-        // Prefer the daemon's live stream lane (frames pushed, input dispatched); fall back to the
-        // snapshot re-render lane when the backend doesn't support streaming. Capture the live
-        // lane's original failure so the snapshot session can explain why input isn't live. The
-        // callback fires synchronously inside tryStart (before it returns), so a plain var is safe.
+        // Prefer the daemon's live stream lane; fall back to the snapshot re-render lane when
+        // streaming isn't supported, keeping the live lane's failure to explain why input isn't
+        // live. The callback fires synchronously inside tryStart, so a plain var is safe.
         var liveUnavailableReason: String? = null
         val live =
           withContext(Dispatchers.IO) {
@@ -14778,22 +12647,16 @@ class ServeHttpServer(
             for (frame in incoming) {
               if (frame is Frame.Text) {
                 val text = frame.readText()
-                // The lease keeps the session resident for the socket's whole life; THIS is what
-                // says someone is using it (#4312). Without it an open-but-untouched tab reads as
-                // "being served" forever and holds the theme optimizer's quiet gate shut.
+                // The lease keeps the session resident; this marks it as in use, so an untouched
+                // tab doesn't hold the optimizer's quiet gate shut forever.
                 lease.touch()
                 withContext(Dispatchers.IO) { live.onClientMessage(text) }
               }
             }
           } finally {
-            // `NonCancellable`, because the whole point of this close is to run when the socket
-            // dies — and a socket dying cancels this coroutine, which would make a plain
-            // `withContext` throw on entry and skip the close entirely. A leaked live stream keeps
-            // `activeStreamCount()` above zero, and the reaper never suspends a session with an
-            // open stream, so the daemon and its live seat stay held for the life of the process.
-            //
-            // Unlike `Lease.close` this one genuinely blocks (it tears a render stream down), so
-            // it keeps its IO dispatch rather than being called inline.
+            // `NonCancellable`: the socket dying cancels this coroutine, and a plain `withContext`
+            // would skip the close. A leaked stream keeps `activeStreamCount()` above zero, pinning
+            // the daemon and its live seat. Unlike `Lease.close` this blocks, so it stays on IO.
             withContext(Dispatchers.IO + NonCancellable) { live.close() }
           }
         } else {
@@ -14825,14 +12688,12 @@ class ServeHttpServer(
   }
 
   /**
-   * Token gate: respond 404 (not 401 — don't confirm the server to a scanner) and return true when
-   * the request's `?token=` / `X-Compose-Preview-Token` doesn't match and it carries no browse
-   * cookie ([ServeBrowseCookie]) minted from the same token. Constant-time compare.
+   * Token gate: respond 404 (not 401, to avoid confirming the server) and return true when neither
+   * `?token=` / `X-Compose-Preview-Token` matches nor a browse cookie ([ServeBrowseCookie]) minted
+   * from the token is present. Constant-time compare.
    *
-   * A live **agent grant** ([ServeAgentGrantStore]) presented in the same place is the other way to
-   * pass, at [AgentGrantScope.PREVIEW] — the lowest rung, which every grant carries. That is the
-   * whole integration: an agent presents its bearer exactly where the operator token goes, and no
-   * route learns anything new.
+   * A live agent grant ([ServeAgentGrantStore]) presented in the same place also passes, at
+   * [AgentGrantScope.PREVIEW].
    */
   private suspend fun RoutingContext.rejectBadToken(): Boolean {
     if (callIsAuthorized()) return false
@@ -14841,9 +12702,8 @@ class ServeHttpServer(
   }
 
   /**
-   * Whether this call may see the server at all — the operator token, a public box, or a live agent
-   * grant. Split out of [rejectBadToken] because the site-404 interceptor asks the same question
-   * before routing, and two copies of an authorisation rule is one copy too many.
+   * Whether this call may see the server at all (operator token, public box, or live grant). Shared
+   * with the site-404 interceptor.
    */
   private fun RoutingContext.callIsAuthorized(): Boolean = call.isAuthorizedCall()
 
@@ -14855,33 +12715,20 @@ class ServeHttpServer(
   }
 
   /**
-   * The operator's own browse token, under a name that makes its two legitimate uses obvious: an
-   * authorisation compare, or a deliberate decision to put the operator's own credential into a
-   * page. The second is almost never what a handler wants — see [linkToken], which is why this is
-   * spelled differently from the constructor parameter rather than shadowing it.
+   * The operator's browse token, named for its two legitimate uses: an authorisation compare, or
+   * deliberately embedding the operator's credential. Pages almost always want [linkToken] instead.
    */
   private val serverToken: String = token
 
   /**
-   * The credential to thread into the links, form actions and asset `src`s of a page this request
-   * is about to be answered with.
+   * The credential to thread into the links, form actions and asset `src`s of this request's page.
    *
-   * This exists because of a hole the agent-grant lane would otherwise open. On a token-gated
-   * server every generated link carries `?token=<the operator's own token>` — that is simply how
-   * the UI stays navigable. So the moment a grant could load *any* HTML page, it would read the
-   * operator's permanent, unscoped, unrevocable credential straight out of the markup: an agent
-   * handed twenty minutes of `preview` would walk away with the keys to the box, which is precisely
-   * the trade this whole feature exists to abolish.
+   * On a gated server links carry `?token=`, so a grant holder loading any page would otherwise
+   * read the operator's permanent credential from the markup. A live-grant caller gets links with
+   * their own grant token; once exchanged for [ServeAgentGrantCookie], clean links. Everyone else
+   * gets [serverToken]. `--public` puts no operator token in links.
    *
-   * The fix is to stop treating "the server's token" and "the token this page's links should carry"
-   * as the same thing. A caller presenting a live grant gets pages wired with **their own** grant
-   * token — which passes every gate they are entitled to pass, so the UI is fully navigable. Once a
-   * browser has exchanged that token for [ServeAgentGrantCookie], its links are clean instead.
-   * Everyone else gets [serverToken] exactly as before. A `--public` server puts no operator token
-   * in its links at all.
-   *
-   * See also [isAuthorizedAccessParam], the one place a credential arrives in a *path* segment
-   * rather than a query string, which has to accept the same two answers.
+   * See [isAuthorizedAccessParam] for the path-segment form, which accepts the same two answers.
    */
   private fun RoutingContext.linkToken(): String = call.linkToken()
 
@@ -14896,9 +12743,8 @@ class ServeHttpServer(
   }
 
   /**
-   * Whether this call presents the browse cookie ([ServeBrowseCookie]) — a browser that exchanged
-   * its `?token=` link for the cookie. Such a browser needs no token in the links it is served, so
-   * [linkToken] answers empty for it and the pages it reads stay clean.
+   * Whether this call presents the browse cookie ([ServeBrowseCookie]); such a browser needs no
+   * token in links, so [linkToken] answers empty.
    */
   private fun ApplicationCall.browsesByCookie(): Boolean =
     !isPublic && ServeBrowseCookie.presents(this, serverToken)
@@ -14928,9 +12774,8 @@ class ServeHttpServer(
   private fun RoutingContext.linksCarryToken(): Boolean = !isPublic && linkToken().isNotEmpty()
 
   /**
-   * The `{access}` segment of a `/wasm-private/…` URL embedded in this call's page: the caller's
-   * own grant token, as [linkToken] would give it, or else a value derived from the operator token
-   * — never the operator token itself.
+   * The `{access}` segment of a `/wasm-private/…` URL on this call's page: the caller's grant token
+   * as [linkToken] gives it, else a value derived from (never equal to) the operator token.
    */
   private fun RoutingContext.wasmPrivateAccess(): String {
     val grant = agentGrantFor(call)
@@ -14943,10 +12788,8 @@ class ServeHttpServer(
   }
 
   /**
-   * Whether a credential arriving as a **path** segment (`/wasm-private/{access}/…`) is one this
-   * server accepts. The operator's token, or a live grant that reaches [AgentGrantScope.PREVIEW] —
-   * the same two answers [linkToken] can produce, because the page that builds these URLs embeds
-   * whichever one its reader presented.
+   * Whether a path-segment credential (`/wasm-private/{access}/…`) is accepted: the operator's
+   * token or a live grant reaching [AgentGrantScope.PREVIEW], matching [linkToken].
    */
   private fun isAuthorizedAccessParam(call: ApplicationCall, value: String?): Boolean =
     ServeUrls.tokensMatch(ServeBrowseCookie.wasmAccess(serverToken), value) ||
@@ -14955,26 +12798,16 @@ class ServeHttpServer(
       agentGrants?.grantForWasmCredential(value)?.allows(AgentGrantScope.PREVIEW) == true
 
   /**
-   * The live grant this call presents, or null — resolved **once per request** and remembered.
+   * The live grant this call presents, or null — resolved once per request and remembered.
    *
-   * Every gate asks this question independently: [rejectBadToken] to decide whether the caller may
-   * see the server at all, then whichever scope gate the route runs. Resolving separately each time
-   * meant a grant could be live for the first question and gone for the second, and the gates fail
-   * in *opposite* directions on that: the token gate refuses an absent grant, while a scope gate
-   * reads absent as "no grant presented, nothing to say" and waves the request through. So a grant
-   * expiring in the microseconds between two gates did not tighten the request, it **widened** it —
-   * past a scope check it had already been admitted through the door for. `handleRender` had that
-   * shape on `main`, and so does every other route pairing a token gate with a scope gate.
+   * Every gate asks independently, and they fail in opposite directions: the token gate refuses an
+   * absent grant, while a scope gate reads absence as "nothing to say". Resolving per gate let a
+   * grant expiring between gates widen the request. Resolving once means a grant revoked
+   * mid-request is honoured for that request (the usual contract); the live socket resolves once at
+   * setup ([socketGrant]).
    *
-   * Resolving once removes the window rather than narrowing it. The cost is that a grant revoked
-   * *during* a request stays honoured for the rest of that request, which is the ordinary
-   * authenticate-once-per-request contract and is what every gate already assumed it had. Nothing
-   * re-reads this expecting freshness: the one long-lived caller, the live-lane socket, resolves
-   * its grant once at connection setup ([socketGrant]) and never asks again.
-   *
-   * Reads the same two places the operator token is read from, plus `Authorization: Bearer` — an
-   * agent's HTTP client reaches for that header without being told to — and the derived HttpOnly
-   * browser cookie. The cookie is tried last so an explicit live grant still decides the request.
+   * Reads the token's two locations plus `Authorization: Bearer` and the derived HttpOnly browser
+   * cookie, tried last so an explicit grant decides.
    */
   private fun agentGrantFor(call: ApplicationCall): ServeAgentGrantStore.Grant? =
     call.attributes
@@ -14985,11 +12818,8 @@ class ServeHttpServer(
   private class ResolvedAgentGrant(val grant: ServeAgentGrantStore.Grant?)
 
   /**
-   * One request's cross-catalog pairings. See [resolveParallel].
-   *
-   * A host is keyed by identity rather than by its system slug: a request may hold more than one
-   * (the wall's own and its sibling's), and a slug is a name the registry resolves rather than a
-   * property of the object in hand.
+   * One request's cross-catalog pairings ([resolveParallel]), keyed by host identity since a
+   * request may hold several hosts.
    */
   private data class ParallelPairingKey(val host: ServeHost, val previewId: String)
 
@@ -15006,13 +12836,9 @@ class ServeHttpServer(
   }
 
   /**
-   * One request's INVERSE `related` indexes — "which catalog points at this component, and from
-   * which of its own components".
-   *
-   * Memoised for the length of the request for the same reason the parallel pairings are: a page
-   * asks the question once, but the index is built by walking a whole catalog's declarations, and a
-   * page that asked twice would walk it twice. Scoped to one `ApplicationCall`, so a catalog that
-   * reloads between requests is never answered from a previous request's walk.
+   * One request's inverse `related` indexes (which catalog points at this component, and from which
+   * of its components), memoised per `ApplicationCall` since building one walks a whole catalog's
+   * declarations.
    */
   private class RelatedInverses {
     private val indexes = HashMap<Pair<String, String>, Map<String, List<String>>>()
@@ -15029,10 +12855,9 @@ class ServeHttpServer(
   }
 
   /**
-   * The page a grant link gets instead of a silent identity switch, when this browser already acts
-   * as a different live grant. `Keep` is the clean URL (no token, no cookie change); `Switch` is a
-   * same-origin POST to [ServeAgentGrants.SWITCH_PATH]. The bearer is written into this one
-   * `no-store` page's form, never into a link, so it does not leak through history or `Referer`.
+   * The page a grant link gets when this browser already acts as a different live grant. `Keep` is
+   * the clean URL; `Switch` is a same-origin POST to [ServeAgentGrants.SWITCH_PATH]. The bearer
+   * goes only into this `no-store` page's form, never a link.
    */
   private suspend fun respondAgentGrantSwitchConfirmation(
     call: ApplicationCall,
@@ -15061,8 +12886,8 @@ class ServeHttpServer(
   }
 
   /**
-   * `POST /agent-access/switch` — the person confirmed replacing this browser's grant. Accepted
-   * only from a page this server served, only for a live grant, and never over a human identity.
+   * `POST /agent-access/switch`: replace this browser's grant. Only from this server's page, only
+   * for a live grant, never over a human identity.
    */
   private suspend fun RoutingContext.handleAgentGrantSwitch(store: ServeAgentGrantStore) {
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
@@ -15091,21 +12916,17 @@ class ServeHttpServer(
 
   private fun resolveAgentGrant(call: ApplicationCall): ServeAgentGrantStore.Grant? {
     val store = agentGrants ?: return null
-    // An ambient browser grant must not reduce a request that also carries the operator's standing
-    // credential. In particular, live/playground and ingest gates inspect the resolved grant to
-    // enforce its narrower scope, so resolving the cookie here would turn full operator authority
-    // into whichever short-lived grant happened to be exchanged earlier in this browser.
+    // An ambient browser grant must not reduce a request that also carries the operator's
+    // credential, or scope gates would narrow operator authority to an old grant.
     if (call.presentsOperatorCredential()) return null
     val bearer =
       call.request.headers[HttpHeaders.Authorization]
         ?.takeIf { it.startsWith(BEARER_PREFIX, ignoreCase = true) }
         ?.substring(BEARER_PREFIX.length)
         ?.trim()
-    // Each source is resolved **independently** rather than by precedence. A single `?:` chain
-    // meant an unrelated `Authorization: Bearer` shadowed a real grant sitting in `?token=` — which
-    // is exactly the shape `share-preview --mechanism serve` sends: the host credential in the
-    // query, a GitHub token in the bearer for the upload's own gate. First source that resolves to
-    // a live grant wins; one carrying something else simply does not answer.
+    // Each source is resolved independently rather than by precedence, so an unrelated
+    // `Authorization: Bearer` (e.g. `share-preview --mechanism serve`'s GitHub token) can't shadow
+    // a grant in `?token=`. The first that resolves to a live grant wins.
     val explicitlyPresented =
       sequenceOf(
           call.request.headers[TOKEN_HEADER],
@@ -15114,27 +12935,17 @@ class ServeHttpServer(
         )
         .firstNotNullOfOrNull { store.grantForToken(it) }
     if (explicitlyPresented != null) return explicitlyPresented
-    // A person's signed-in browser identity also outranks an ambient grant cookie. An explicit
-    // cpat above remains explicit, while merely having exchanged one in this browser cannot make
-    // later work look like the grant holder's after the person signs in.
+    // A signed-in browser identity outranks an ambient grant cookie; an explicit cpat above still
+    // wins.
     if (githubAuth?.currentSignedInLogin(call) != null) return null
     return ServeAgentGrantCookie.grant(call, store, browserHosts)
   }
 
   /**
-   * The token gate for the **ingest** lanes — `POST /bundles/{name}`, `POST /docs`. Identical to
-   * [rejectBadToken] except that an agent grant never satisfies it.
-   *
-   * The consent page tells a human that `preview` means "browse this server's catalogs and their
-   * rendered previews". On a box that also opted into the ingest lanes, a `preview` grant would
-   * have satisfied every `rejectBadToken()` on the server — including these — so an agent granted
-   * read access could publish a document or replace a named runtime bundle. That is a mutation
-   * nobody agreed to, and no wording on the page would have made it agreeable.
-   *
-   * Rather than growing a fourth scope for it, these lanes simply stay outside the grant system:
-   * they are for a client contributing content to someone else's box, which is the operator's
-   * business and not a capability an agent should be able to be *given* by this flow at all. The
-   * image lane already works this way for its own reasons — it wants a real GitHub credential.
+   * The token gate for the ingest lanes (`POST /bundles/{name}`, `POST /docs`): [rejectBadToken]
+   * except that agent grants never satisfy it. A `preview` grant means browsing, not publishing
+   * content, so these lanes stay outside the grant system (the image lane requires a GitHub
+   * credential for its own reasons).
    */
   private suspend fun RoutingContext.rejectBadTokenForIngest(): Boolean {
     val provided = call.request.queryParameters["token"] ?: call.request.headers[TOKEN_HEADER]
@@ -15147,9 +12958,8 @@ class ServeHttpServer(
   private suspend fun RoutingContext.handleWasmAsset(privateRoute: Boolean) {
     val system = call.parameters["system"]
 
-    // The first packaged frontend was registered as a fake `preview-ui` catalog. Keep saved URLs
-    // useful, but canonicalise them immediately: the catalog belongs in the path just as it does
-    // on every existing HTTP surface (`/<system>/api`, `/<system>/render`, ...).
+    // The first packaged frontend was registered as a fake `preview-ui` catalog; keep old URLs
+    // working but redirect to the canonical catalog-in-path form.
     if (!privateRoute && system == LEGACY_WASM_UI_SYSTEM) {
       val targetSystem =
         call.request.queryParameters["session"]?.takeIf(sessions::isKnownSession)
@@ -15224,12 +13034,9 @@ class ServeHttpServer(
   }
 
   /**
-   * Whether a path segment can name a design rather than an asset.
-   *
-   * The same path-safe shape the New design dialog validates, which allows a `.`, minus anything
-   * carrying a static-asset extension. Without that exclusion a mistyped `uiBuilder.mjs` would
-   * answer `200 text/html` instead of `404`, and a module loader would report the confusion three
-   * layers away from the typo. Leading alphanumeric, so `..` never reaches the shell branch.
+   * Whether a path segment can name a design rather than an asset: the New design dialog's
+   * path-safe shape (which allows `.`), minus static-asset extensions, so `uiBuilder.mjs` typos 404
+   * instead of returning HTML. Leading alphanumeric, so `..` never reaches the shell.
    */
   private fun isUiBuilderDesignSegment(segment: String): Boolean =
     UI_BUILDER_DESIGN_SEGMENT.matches(segment) &&
@@ -15254,9 +13061,8 @@ class ServeHttpServer(
     }
     val version = call.parameters["version"].orEmpty()
     val rest = call.parameters.getAll("path").orEmpty().filter { it.isNotEmpty() }
-    // A catalog served under the id `v` would otherwise be shadowed by this route and unreachable.
-    // Absurd as an id, and exactly the kind of thing that is absurd until somebody does it, so the
-    // catalog wins and simply gets no versioned URLs rather than a 404 nobody can explain.
+    // A catalog with id `v` would be shadowed by this route, so the catalog wins and just gets no
+    // versioned URLs.
     if (UI_BUILDER_VERSION_SEGMENT in uiBuilderCatalogs) {
       serveUiBuilderPath(dir, listOf(UI_BUILDER_VERSION_SEGMENT, version) + rest)
       return
@@ -15267,16 +13073,13 @@ class ServeHttpServer(
   /**
    * One bundle, reachable unversioned or under a content prefix.
    *
-   * The prefix goes on the **directory**, not on each filename, because nothing in the bundle can
-   * be rewritten: `index.html` names `uiBuilder.mjs` relatively, that module fetches `skiko.wasm`
-   * and `uiBuilder.wasm` relative to its own URL, and all of it is emitted by the Kotlin/Wasm
-   * build. Moving the whole tree under `/ui-builder/v/<digest>/` carries every one of those
-   * relative references with it, with no string surgery on generated output.
+   * The prefix goes on the directory because the Kotlin/Wasm build's relative references
+   * (`index.html` → `uiBuilder.mjs` → `skiko.wasm`, `uiBuilder.wasm`) can't be rewritten;
+   * `/ui-builder/v/<digest>/` carries them all.
    *
-   * [version] null means the request arrived at the unversioned path. The entry document then
-   * redirects to the current prefix — that redirect is the one revalidated response, and it is what
-   * a rollout changes. A non-entry file stays served here, uncached, so a URL somebody already
-   * holds keeps working.
+   * Null [version] means the unversioned path: the entry document redirects to the current prefix
+   * (the one revalidated response a rollout changes), while other files are served uncached so held
+   * URLs keep working.
    */
   private suspend fun RoutingContext.serveUiBuilderPath(
     dir: File,
@@ -15290,13 +13093,10 @@ class ServeHttpServer(
     }
     val assetSegments = if (scopedCatalog == null) segments else segments.drop(1)
     if (version != null) {
-      // The versioned prefix carries assets only. The document keeps its own URL because the app
-      // reads the design id back out of `location.pathname` — moving it under a prefix would make
-      // `parts[1]` the digest, and every design URL a different design.
-      //
-      // Only one bundle exists on disk, so a prefix naming another version has nothing to serve.
-      // Answering with the current bytes would make an immutable URL return two different files
-      // over its life, which is the one promise the prefix exists to keep.
+      // The versioned prefix carries assets only: the app reads the design id from
+      // `location.pathname`, so the document keeps its URL.
+      // Only one bundle is on disk, so a prefix naming another version 404s rather than making an
+      // immutable URL serve two different files.
       if (assetSegments.isEmpty() || version != uiBuilderBundleVersion) {
         call.respondText("not found", status = HttpStatusCode.NotFound)
         return
@@ -15313,10 +13113,9 @@ class ServeHttpServer(
         return
       }
     } else if (assetSegments.size == 1 && isUiBuilderDesignSegment(assetSegments[0])) {
-      // The canonical design URL. The shell is not design data, so serve it for every path-shaped
-      // id. That makes a creator's POST/303/GET handoff independent of how the browser presents
-      // its credential. It also cannot become an existence oracle: an unknown id gets the same
-      // shell, while the authenticated design API decides whether any document is readable.
+      // The canonical design URL. The shell is not design data, so it is served for every
+      // path-shaped id; this keeps the create POST/303/GET handoff independent of how the
+      // credential is presented and avoids an existence oracle. The design API decides readability.
       if (!File(dir, assetSegments[0]).isFile) {
         if (call.request.path().endsWith("/")) {
           val suffix = call.request.queryString().let { if (it.isEmpty()) "" else "?$it" }
@@ -15334,13 +13133,11 @@ class ServeHttpServer(
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return
     }
-    // The builder's service worker, when the bundle ships one. Its own headers rather than the
-    // asset contract below: a worker script is revalidated on every navigation, never immutable,
-    // and it may only claim the whole `/ui-builder/` scope if the server says so.
+    // The builder's service worker, with its own headers: revalidated on every navigation, never
+    // immutable, and allowed the whole `/ui-builder/` scope only if the server says so.
     if (assetSegments == listOf(UI_BUILDER_SERVICE_WORKER)) {
-      // Only at `/ui-builder/ui-builder-sw.js`. The worker's URL is its identity across releases
-      // (its bytes change every release, its address never does), so a copy under the versioned
-      // prefix or a catalog prefix would register a second worker beside the real one.
+      // Only at `/ui-builder/ui-builder-sw.js`: the worker's URL is its identity across releases,
+      // so a copy elsewhere would register a second worker.
       if (version != null || scopedCatalog != null) {
         call.respondText("not found", status = HttpStatusCode.NotFound)
       } else {
@@ -15353,8 +13150,7 @@ class ServeHttpServer(
       respondUiBuilderShell(dir, file)
       return
     }
-    // The gzip copy when the browser takes gzip and the copy is ready; the file itself otherwise,
-    // which is what every request got before the copies existed. See
+    // The gzip copy when accepted and ready, else the file itself. See
     // [UiBuilderPrecompressedAssets].
     val gzipped =
       if (
@@ -15379,7 +13175,7 @@ class ServeHttpServer(
       return
     }
     // Streamed from disk rather than read into a heap array: `uiBuilder.wasm` alone is tens of
-    // megabytes, and a burst of cold loads used to hold one copy of it per request in memory.
+    // megabytes, and cold-load bursts would hold one copy per request.
     if (gzipped != null) {
       call.respond(GzipEncodedContent(LocalFileContent(gzipped, wasmContentType(file.name))))
     } else {
@@ -15388,17 +13184,13 @@ class ServeHttpServer(
   }
 
   /**
-   * `ui-builder-sw.js` at the bundle root — the builder's offline shell cache, which the
-   * compose-ui-builder bundle ships from the release that introduces it (an older pinned bundle has
-   * none, and the route simply 404s through the ordinary missing-file path above).
+   * `ui-builder-sw.js` at the bundle root: the builder's offline shell cache (older bundles lack it
+   * and 404).
    *
    * Served only at the unversioned `/ui-builder/ui-builder-sw.js`, uncached: a worker is identified
-   * by its script URL, which must stay put while its bytes change every release, and it is the one
-   * file whose freshness decides whether a rollout reaches anyone — the versioned prefix's
-   * `immutable` contract must never apply to it. Its default scope is its own directory,
-   * `/ui-builder/`; `Service-Worker-Allowed` says the same explicitly, so the catalog pages,
-   * `/api/` and the WebSockets are outside it either way. Like every bundle asset it is ungated,
-   * because the browser fetches a worker's updates without the page's credential.
+   * by its URL and its freshness decides whether a rollout reaches anyone. Scope is `/ui-builder/`
+   * (also stated via `Service-Worker-Allowed`), so catalog pages, `/api/` and WebSockets are
+   * outside it. Ungated, since workers update without the page's credential.
    */
   private suspend fun RoutingContext.respondUiBuilderServiceWorker(file: File) {
     val etag = "\"${file.length().toString(16)}-${file.lastModified().toString(16)}\""
@@ -15416,18 +13208,10 @@ class ServeHttpServer(
   private val uiBuilderPrecompressed = UiBuilderPrecompressedAssets()
 
   /**
-   * A digest of the builder bundle's contents, used as its immutable URL prefix.
-   *
-   * Content, not `lastModified`. The bundle is baked into the deploy image, and an image rebuild
-   * rewrites timestamps whether or not a byte changed — so an mtime digest would retire every
-   * viewer's cached 44 MB on a redeploy that shipped the identical builder. Reading the tree costs
-   * one pass, and `by lazy` spends it on the first request rather than on every server's startup,
-   * including the ones with no builder at all.
-   *
-   * Path and length are mixed in alongside the bytes so a rename, or two files swapping contents,
-   * is a different bundle. Files are visited in sorted order because a filesystem's own order is
-   * not a promise, and a digest that depended on it would differ between two hosts serving the same
-   * bytes.
+   * A content digest of the builder bundle, used as its immutable URL prefix. Content rather than
+   * `lastModified`, since image rebuilds rewrite timestamps. Computed lazily on first request. Path
+   * and length are mixed in (so renames and swaps change it) and files are visited in sorted order
+   * for host independence.
    */
   private val uiBuilderBundleVersion: String by lazy {
     val dir = uiBuilderDir ?: return@lazy "none"
@@ -15455,12 +13239,9 @@ class ServeHttpServer(
   }
 
   /**
-   * The builder's app shell, with its asset references pointed at the versioned prefix.
-   *
-   * Same `no-cache` contract as before: the shell is small, and it is the one document a rollout
-   * has to be able to change. The ETag folds in the bundle version because the body now depends on
-   * it — a byte-identical `index.html` serves a different shell once anything else in the tree
-   * changes, and a length-and-mtime ETag alone would call those two responses the same.
+   * The builder's app shell with asset references pointed at the versioned prefix. `no-cache`,
+   * since it is the document a rollout must change; the ETag folds in the bundle version because
+   * the body depends on it.
    */
   private suspend fun RoutingContext.respondUiBuilderShell(
     dir: File,
@@ -15490,9 +13271,8 @@ class ServeHttpServer(
       call.respond(HttpStatusCode.NotModified)
       return
     }
-    // The shell comes first on every cold open, a moment before the browser asks for the Wasm it
-    // names, so starting the bundle's gzip copies here gives them that head start. Only the first
-    // call does anything.
+    // Start the gzip copies on the first shell request, just before the browser asks for the Wasm.
+    // Only the first call does anything.
     uiBuilderPrecompressed.warm(dir)
     val html = withContext(Dispatchers.IO) { index.readText() }
     call.respondBytes(
@@ -15503,17 +13283,16 @@ class ServeHttpServer(
   }
 
   /**
-   * Where the editor's pages live, as a `<meta>` the page reads: `/` on the rooted builder host,
-   * and nothing elsewhere, so every other host serves byte-identical shells and the editor keeps
-   * its `/ui-builder/` default. See [UI_BUILDER_BASE_PATH_META].
+   * Where the editor's pages live, as a `<meta>`: `/` on the rooted builder host, nothing elsewhere
+   * (the editor keeps its `/ui-builder/` default). See [UI_BUILDER_BASE_PATH_META].
    */
   private fun uiBuilderBasePathTag(call: ApplicationCall): String =
     if (isUiBuilderRootCall(call)) "<meta name=\"$UI_BUILDER_BASE_PATH_META\" content=\"/\">"
     else ""
 
   /**
-   * The catalog-owned cutover flag for the editor's new-design chooser, as a `<meta>` the page
-   * reads; nothing at `none`, so a deployment that has not flipped it serves byte-identical shells.
+   * The catalog-owned cutover flag for the editor's new-design chooser, as a `<meta>`; nothing at
+   * `none`.
    */
   private fun uiBuilderCatalogOwnershipTag(): String =
     uiBuilderSeeds.ownership
@@ -15526,14 +13305,9 @@ class ServeHttpServer(
       .orEmpty()
 
   /**
-   * The `<title>` and unfurl tags for the builder's shell: `(title, meta tags)`.
-   *
-   * A **public** design unfurls as itself — its title, and its own picture as the image, the same
-   * thumbnail its card on the designs page shows. The question is asked as the anonymous reader
-   * rather than as the caller, because that is who fetches an unfurl, and a private design must not
-   * lend its title to a card just because its owner is the one pasting the link. Everything else —
-   * the editor's home, and any design that is not public — unfurls as the UI builder itself, with a
-   * drawn card, and says nothing about the design.
+   * The `<title>` and unfurl tags for the builder shell: `(title, meta tags)`. A public design
+   * unfurls as itself (title and thumbnail), judged as the anonymous reader an unfurler is;
+   * everything else unfurls as the UI builder with a drawn card.
    */
   private suspend fun RoutingContext.uiBuilderShellHead(designId: String?): Pair<String?, String> {
     val origin = externalOrigin()
@@ -15628,19 +13402,13 @@ class ServeHttpServer(
   }
 
   /**
-   * Rewrites the shell's relative references to `/ui-builder/v/<version>/…`.
+   * Rewrites the shell's relative references to `/ui-builder/v/<version>/…`. Making the shell's one
+   * reference absolute carries the whole relative chain (`uiBuilder.mjs` → `uiBuilder.wasm` →
+   * `skiko.mjs` → `skiko.wasm`) into the immutable prefix without touching build output.
    *
-   * Rewriting the shell rather than moving the document is what lets the bundle be cached immutably
-   * at all. The shell names `uiBuilder.mjs` relative to the document, that module resolves
-   * `./uiBuilder.wasm` against `import.meta.url`, the Wasm imports `./skiko.mjs`, and `skiko.mjs`
-   * resolves `skiko.wasm` the same way — so making the one reference in the shell absolute and
-   * versioned carries the whole 44 MB chain into the immutable prefix, without touching a byte the
-   * Kotlin/Wasm build emitted.
-   *
-   * Two forms, which is what the generated shell contains: an attribute value
-   * (`src="uiBuilder.mjs"`) and an import-map target (`"./js-joda.esm.js"`). A reference is
-   * rewritten only when it resolves to a real file inside the bundle, so an absolute URL, a bare
-   * module specifier and a dead link all pass through as the build wrote them.
+   * Two forms appear in the generated shell: attribute values (`src="uiBuilder.mjs"`) and
+   * import-map targets (`"./js-joda.esm.js"`). Only references resolving to a real bundle file are
+   * rewritten.
    */
   private fun versionUiBuilderShellReferences(dir: File, html: String, version: String): String {
     val base = dir.canonicalFile.toPath()
@@ -15657,10 +13425,8 @@ class ServeHttpServer(
         val replacement = versioned(match.groupValues[2]) ?: return@replace match.value
         "${match.groupValues[1]}=\"$replacement\""
       }
-      // HTML does not require the quotes, and a shell that omits them would otherwise keep every
-      // asset on the unversioned path — caching silently defeated, with nothing failing to say so.
-      // Runs second: the quoted form is already rewritten and its `"` is excluded here, so a value
-      // is never rewritten twice.
+      // Unquoted attribute values too, or such assets would silently stay unversioned. Runs second,
+      // and quoted values are excluded, so nothing is rewritten twice.
       .replace(Regex("""\b(src|href)=([^\s>"']+)""")) { match ->
         val replacement = versioned(match.groupValues[2]) ?: return@replace match.value
         "${match.groupValues[1]}=$replacement"
@@ -15672,12 +13438,8 @@ class ServeHttpServer(
   }
 
   /**
-   * Refuse a design creation in the shape the caller can read: the styled explanation
-   * ([ServeWeb.accessDeniedPage]) for a browser, the one-line `text/plain` [plain] for everything
-   * else. The status is the same either way — this changes the body, never the answer.
-   *
-   * "A browser" is `Accept: text/html`, which a form submission always sends and `fetch`/curl
-   * effectively never do, so no API client is handed a page it would have to parse out of.
+   * Refuse a design creation in a shape the caller can read: [ServeWeb.accessDeniedPage] for a
+   * browser (`Accept: text/html`), plain text [plain] otherwise. Same status either way.
    */
   private suspend fun RoutingContext.respondUiBuilderDenied(
     status: HttpStatusCode,
@@ -15711,18 +13473,12 @@ class ServeHttpServer(
   }
 
   /**
-   * `POST /ui-builder/designs` — create one design, then `303` to its permalink.
+   * `POST /ui-builder/designs`: create one design, then `303` to its permalink.
    *
-   * Plain `application/x-www-form-urlencoded`, because the point is that a browser can submit it
-   * without any script and follow the redirect on its own: POST/Redirect/GET, so the design's URL
-   * is the one left in the address bar and history, and reloading it re-opens rather than
-   * re-creates. The server seeds the document ([UiBuilderNewDesignSeed]) rather than accepting one,
-   * so the form carries intent — an id, a template, optional state variables — and not a payload a
-   * caller could shape into something the catalog does not serve. A caller that does want to hand
-   * over a whole document has `PUT /api/ui-builder/v1/designs/{id}`.
-   *
-   * Creating never overwrites: an id that already exists is answered with the same `303`, which is
-   * what "open or create" meant when this was a GET, minus the mutation-on-navigation.
+   * Form-urlencoded so a browser can submit it without script (POST/Redirect/GET). The server seeds
+   * the document ([UiBuilderNewDesignSeed]) from intent (id, template, optional state variables)
+   * rather than accepting a payload; whole documents go through `PUT
+   * /api/ui-builder/v1/designs/{id}`. Never overwrites: an existing id gets the same `303`.
    */
   private suspend fun RoutingContext.handleUiBuilderCreate() {
     val dir = uiBuilderDir
@@ -15740,9 +13496,8 @@ class ServeHttpServer(
         call.respondText(e.message.orEmpty(), status = HttpStatusCode.BadRequest)
         return
       }
-    // `start` is one control carrying both halves of one choice — *a blank Wear screen* — because
-    // the Designs page has no script with which to repopulate a second `<select>` when the first
-    // one changes. `catalog` and `template` remain exactly as they were for every other caller.
+    // `start` carries catalog and template as one choice, since the page has no script to
+    // repopulate a second select. `catalog` and `template` still work for other callers.
     val start = form["start"].orEmpty().trim().takeIf { it.contains('|') }
     val catalog =
       start?.substringBefore('|')
@@ -15759,10 +13514,8 @@ class ServeHttpServer(
       when (val decision = authorization.authorize(call, UiBuilderRouteCapability.WRITE)) {
         is UiBuilderAuthorizationDecision.Authorized -> decision.actor
         UiBuilderAuthorizationDecision.Missing -> {
-          // The header is for the script; the body is for whoever submitted the form. A browser
-          // that followed a `<form method="post">` here renders whatever comes back, so a bare
-          // "authentication is required" is a page with no way forward — see
-          // [ServeWeb.accessDeniedPage].
+          // The header is for scripts; the body for a browser that submitted the form
+          // ([ServeWeb.accessDeniedPage]).
           call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
           respondUiBuilderDenied(
             HttpStatusCode.Unauthorized,
@@ -15825,9 +13578,7 @@ class ServeHttpServer(
     when (outcome) {
       is ServeUiBuilderCreate.Outcome.Created,
       is ServeUiBuilderCreate.Outcome.AlreadyExists -> {
-        // 303, not 302: the method the browser follows with must be GET. A 302 leaves that to the
-        // client's discretion, and re-POSTing a create on a reload is the exact thing this route
-        // exists to stop.
+        // 303, not 302, so the browser follows with GET and a reload never re-POSTs.
         call.response.headers.append(
           HttpHeaders.Location,
           uiBuilderPermalink(designId, call.request.queryParameters),
@@ -15840,21 +13591,12 @@ class ServeHttpServer(
   }
 
   /**
-   * `POST /ui-builder/designs/copy` — start from a design that already exists, then `303` to the
-   * copy's permalink.
+   * `POST /ui-builder/designs/copy`: start from an existing design, then `303` to the copy.
    *
-   * The starting point most designs actually have is another design, and until this route the only
-   * way to take one was to rebuild it node by node: the New design form seeds from a template, and
-   * nothing at all seeded from a design. What the copy is, precisely, is the source's *current
-   * committed document* installed under a new id at revision zero — its own history, its own access
-   * list, its own comments. The source is opened, never written: a copy is a read of one design and
-   * a create of another.
-   *
-   * The source is read **as the caller**, so this grants nothing: a design this actor may not open
-   * cannot be copied here any more than it can be opened, and the refusal is the service's own.
-   * Installing goes through [ServeUiBuilderCreate.install], which is the same path a published
-   * library design is opened by — so an id that is taken is left alone rather than overwritten, and
-   * a catalog this host does not author is refused before anything is stored.
+   * The copy is the source's current committed document under a new id at revision zero, with its
+   * own history, access list and comments; the source is only read. Read as the caller, so it
+   * grants nothing. Installed via [ServeUiBuilderCreate.install] (like opening a library design):
+   * taken ids are left alone, and catalogs this host doesn't author are refused before storing.
    */
   private suspend fun RoutingContext.handleUiBuilderCopy() {
     val dir = uiBuilderDir
@@ -15911,9 +13653,7 @@ class ServeHttpServer(
           return
         }
       }
-    // A new design, not a second copy of the old one's identity: revision zero because nothing has
-    // been done to it here, and the timestamps cleared because this document was created now. The
-    // title says where it came from, so a grid of thumbnails does not grow two identical captions.
+    // A new design: revision zero, timestamps cleared, and a title saying where it came from.
     val copy =
       source.copy(
         id = designId,
@@ -15947,12 +13687,9 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /ui-builder/{designId}/history` — the design's retained revisions, newest first, each with
-   * its picture, who made it and when, and what this reader may do with it.
-   *
-   * Read is all it takes to look; restoring needs the design's own WRITE action, and forking needs
-   * the host's write capability (a fork is a new design, owned by whoever forks it). Both are forms
-   * that POST and redirect back here, so a refresh never repeats one.
+   * `GET /ui-builder/{designId}/history`: retained revisions newest first, with picture, author,
+   * time, and what this reader may do. Read access suffices to look; restore needs the design's
+   * WRITE action, fork the host's write capability. Both POST and redirect back.
    */
   private suspend fun RoutingContext.handleUiBuilderHistory() {
     val (actor, designId) = uiBuilderAccessTarget(UiBuilderRouteCapability.READ) ?: return
@@ -16107,9 +13844,8 @@ class ServeHttpServer(
   }
 
   /**
-   * `POST /ui-builder/{designId}/history/{revision}/fork` — a new design from one revision of this
-   * one, owned by whoever forks it, then `303` to it. The revision is read as the caller, so a fork
-   * grants nothing: a design this actor may not open cannot be forked either.
+   * `POST /ui-builder/{designId}/history/{revision}/fork`: a new design from one revision, owned by
+   * the forker, then `303` to it. Read as the caller, so it grants nothing.
    */
   private suspend fun RoutingContext.handleUiBuilderFork() {
     val dir = uiBuilderDir
@@ -16180,23 +13916,12 @@ class ServeHttpServer(
   }
 
   /**
-   * `POST /ui-builder/{designId}/delete` — remove one design, then `303` back to the index.
+   * `POST /ui-builder/{designId}/delete`: remove one design, then `303` back to the index. The page
+   * route to the owner-only [UiBuilderServiceRequest.DeleteDesign] (no grantee may delete).
    *
-   * Deleting a design used to be the operator's move alone: `DELETE /admin/ui-builder/designs/{id}`
-   * behind the admin token, which meant a person could fill a host with their own experiments and
-   * had no way to clear one away. The service has always had the owner-scoped answer
-   * ([UiBuilderServiceRequest.DeleteDesign], owner only, not a grantee however wide its grant) and
-   * only the MCP tools could reach it. This is that request, reached from the page the designs are
-   * listed on.
-   *
-   * The sidecars go with it, exactly as the admin path and the MCP tool sweep them: an overlay, a
-   * comment board or a links record left behind is inherited by whatever takes the id next. A
-   * failure there is logged rather than reported — the design is already gone, and telling the
-   * caller otherwise invites a retry of something that cannot be retried.
-   *
-   * `confirm=delete` is required, because the body is the only thing standing between a stray
-   * re-POST of a form and somebody's work; the page asks for it behind a disclosure that says what
-   * is about to be lost.
+   * Sidecars (overlay, comments, links) are swept as the admin path and MCP tool do, so the next
+   * holder of the id inherits nothing; failures there are logged, since the design is already gone.
+   * `confirm=delete` is required to stop a stray re-POST.
    */
   private suspend fun RoutingContext.handleUiBuilderDelete() {
     if (!isSameOriginFormSubmission()) {
@@ -16321,12 +14046,8 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /ui-builder/{designId}/access` — the sharing page for one design.
-   *
-   * Owner-only, and that is the service's decision rather than this route's: `GetDesignAccess` is
-   * refused for anyone else, so a visitor who merely has the design open is told the same thing a
-   * stranger is. What the route adds is the part a person needs — their own actor id, so they can
-   * see which identity the answer was given to, and a form.
+   * `GET /ui-builder/{designId}/access`: the sharing page for one design. Owner-only by the
+   * service's decision (`GetDesignAccess`); the route adds the reader's own actor id and a form.
    */
   private suspend fun RoutingContext.handleUiBuilderAccess() {
     val (actor, designId) = uiBuilderAccessTarget(UiBuilderRouteCapability.READ) ?: return
@@ -16411,9 +14132,8 @@ class ServeHttpServer(
     } while (cursor != null)
 
     val tokenQuery = agentGrantTokenQuery()
-    // Whether this reader may create at all, asked once: the create and copy forms and every
-    // Duplicate control on the page are the same capability, and offering a form the POST would
-    // refuse is worse than not offering it.
+    // Whether this reader may create at all, asked once: the create/copy forms and every Duplicate
+    // control share the capability.
     val mayCreate =
       authorization.authorize(call, UiBuilderRouteCapability.WRITE) is
         UiBuilderAuthorizationDecision.Authorized
@@ -16552,11 +14272,8 @@ class ServeHttpServer(
   }
 
   /**
-   * The catalogs the New design form offers, and the starting points each one seeds.
-   *
-   * Read from [UiBuilderNewDesignSeed] rather than restated, so the form cannot offer a template
-   * the create route would then refuse; the labels are this surface's own, because the seed names
-   * ids and a person picks a thing.
+   * The catalogs the New design form offers and their starting points, read from
+   * [UiBuilderNewDesignSeed] so the form can't offer a template the create route refuses.
    */
   private fun uiBuilderNewDesignOptions(): List<ServeWeb.UiBuilderNewDesignOption> =
     uiBuilderCatalogs.sorted().map { catalog ->
@@ -16579,12 +14296,9 @@ class ServeHttpServer(
     }
 
   /**
-   * `POST /ui-builder/{designId}/access` — share it, take the sharing back, or make it public or
-   * private.
-   *
-   * A change answers `303` to the access page, which re-reads the list and shows what changed from
-   * a fixed template in the query — POST, redirect, GET — so a reload repeats the message and not
-   * the change. A refusal is answered with the page directly, since there is nothing to repeat.
+   * `POST /ui-builder/{designId}/access`: share, unshare, or make public/private. A change answers
+   * `303` to the access page with a fixed notice (POST/redirect/GET); a refusal renders the page
+   * directly.
    */
   private suspend fun RoutingContext.handleUiBuilderAccessUpdate() {
     if (!isSameOriginFormSubmission()) {
@@ -16670,10 +14384,8 @@ class ServeHttpServer(
               DesignAccessActionV1.WRITE,
               DesignAccessActionV1.EXPORT,
             )
-          // A viewer exports too: the exported Kotlin is a rendering of the design they are
-          // already looking at, and withholding it makes a shared design useless to the one
-          // audience it was shared with. Neither role carries `manageAccess` or `delete`, so
-          // being shared with never becomes the power to share on.
+          // Viewers can export too (the Kotlin is a rendering of what they already see). Neither
+          // role carries `manageAccess` or `delete`, so being shared with never lets one share on.
           else listOf(DesignAccessActionV1.READ, DesignAccessActionV1.EXPORT),
         )
     val updated =
@@ -16705,8 +14417,8 @@ class ServeHttpServer(
   }
 
   /**
-   * `303` back to this design's access page with [notice] in the query, keeping whatever else the
-   * page was reached with (a `?token=`, a catalog): POST, redirect, GET.
+   * `303` back to this design's access page with [notice] in the query, keeping `?token=` and
+   * catalog.
    */
   private suspend fun RoutingContext.redirectToAccessPage(notice: List<Pair<String, String>>) {
     val kept =
@@ -16726,8 +14438,7 @@ class ServeHttpServer(
   }
 
   /**
-   * The two things both access routes need: who is asking, and which design — or null once the
-   * refusal has been written.
+   * Who is asking and which design, for both access routes; null once a refusal has been written.
    */
   private suspend fun RoutingContext.uiBuilderAccessTarget(
     capability: UiBuilderRouteCapability
@@ -16846,13 +14557,10 @@ class ServeHttpServer(
   }
 
   /**
-   * Whether a form POST came from a page this server served.
-   *
-   * A form POST is the one request shape a hostile page can aim at this server with the reader's
-   * credentials attached, so the mutating form routes refuse unless the browser says it came from
-   * here. Both headers are absent on a non-browser client (curl, a script), which is not a
-   * cross-site request and is left alone; a browser that omits `Origin` on a same-origin POST still
-   * sends `Sec-Fetch-Site: same-origin`.
+   * Whether a form POST came from a page this server served. Mutating form routes refuse otherwise,
+   * since a hostile page can aim a form here with the reader's credentials. Non-browser clients
+   * send neither header and are left alone; a same-origin POST without `Origin` still sends
+   * `Sec-Fetch-Site: same-origin`.
    */
   private fun RoutingContext.isSameOriginFormSubmission(): Boolean {
     val fetchSite = call.request.headers["Sec-Fetch-Site"]
@@ -16860,9 +14568,8 @@ class ServeHttpServer(
     return when {
       fetchSite != null -> fetchSite == "same-origin" || fetchSite == "none"
       origin != null ->
-        // `Origin` is scheme://host[:port]; `Host` is the host[:port] this request was addressed
-        // to. Comparing the authorities is what "did this form come from this server?" means
-        // behind a proxy that terminates TLS, where the schemes legitimately differ.
+        // Compare authorities (`Origin`'s host[:port] vs `Host`), since schemes differ behind a
+        // TLS-terminating proxy.
         call.request.headers[HttpHeaders.Host]?.let {
           origin.substringAfter("://").equals(it, ignoreCase = true)
         } == true
@@ -16891,9 +14598,9 @@ class ServeHttpServer(
       catalogUiBuilderRuntimeAsset(runtimeId, emptyList())?.let { (bytes, etag) ->
         ServeUiBuilderRuntimeAssets.Asset(bytes, etag)
       }
-    // Runtime ids are global immutable identities. A configured runtime and a catalog runtime may
-    // share one only when their verified manifests are identical; choosing configured precedence
-    // would make a catalog descriptor's integrity point at different executable bytes.
+    // Runtime ids are global immutable identities: configured and catalog runtimes may share one
+    // only with identical verified manifests, or a catalog descriptor's integrity would point at
+    // different bytes.
     val collision =
       configuredManifest != null &&
         catalogManifest != null &&
@@ -16928,19 +14635,13 @@ class ServeHttpServer(
   // ------------------------------------------------------------ agent grants
 
   /**
-   * The live-grant rows for `/status`, each with its revoke seal — shown **only** to an approver,
-   * and only the rows that approver manages ([ServeAgentGrants.Approver.manages]): every grant for
-   * the operator, the ones they approved themselves for a signed-in visitor on a `--public` box.
-   *
-   * A row names logins (the purpose of a request opened for oneself, the approver), so a reader who
-   * is not an approver — including a grant-bearing agent, which passes the token gate — gets no
-   * rows at all; [agentGrantHiddenCount] is what they are told instead. Nothing here ever carries a
-   * token: [ServeAgentGrantStore.Grant.fingerprint] is the only form of one this page knows.
+   * The live-grant rows for `/status` with their revoke seals, shown only to an approver and only
+   * for grants they manage ([ServeAgentGrants.Approver.manages]). Rows name logins, so others
+   * (including grant-bearing agents) see only [agentGrantHiddenCount]. Never a token; only
+   * [ServeAgentGrantStore.Grant.fingerprint].
    */
   private fun RoutingContext.agentGrantStatusRows(): List<ServeWeb.StatusAgentGrant> {
-    // A top-level site's `/status` reports on THAT app only — every other box-wide field is already
-    // filtered out of it. Grants belong to the box, not to a catalog, so on a site host they are
-    // omitted rather than filtered: there is no per-site subset of them to show.
+    // On a top-level site grants are omitted (they belong to the box, not a catalog).
     if (siteSystem() != null) return emptyList()
     val store = agentGrants ?: return emptyList()
     val approver = agentGrantApprover(store) ?: return emptyList()
@@ -16964,8 +14665,8 @@ class ServeHttpServer(
   }
 
   /**
-   * How many live grants this `/status` reader is not shown a row for — a count and nothing more,
-   * the same number `/status.json` already publishes as `agentAccess.activeGrants`.
+   * How many live grants this reader isn't shown — the same number `/status.json` publishes as
+   * `agentAccess.activeGrants`.
    */
   private fun RoutingContext.agentGrantHiddenCount(shown: Int): Int {
     if (siteSystem() != null) return 0
@@ -16974,15 +14675,10 @@ class ServeHttpServer(
   }
 
   /**
-   * Requests still waiting on a human — shown **only to an approver**, because this table is a list
-   * of decisions to make and a "Review →" link straight into the approval page. A signed-in visitor
-   * on a `--public` box is shown only the requests they opened for themselves
-   * ([ServeAgentGrants.Approver.sees]); an agent's request reaches them through the link the agent
-   * printed, not through this table.
-   *
-   * It also solves the token-gated box's awkward moment: the agent's printed link has no `?token=`,
-   * so an operator can instead reach the request from the `/status` they already have open with the
-   * token in the URL, verification code and all.
+   * Requests waiting on a human, shown only to an approver (a signed-in `--public` visitor sees
+   * only their own; [ServeAgentGrants.Approver.sees]). On a token-gated box this also lets the
+   * operator reach a request from their tokened `/status`, since the agent's printed link lacks
+   * `?token=`.
    */
   private fun RoutingContext.agentGrantRequestRows(): List<ServeWeb.StatusAgentRequest> {
     if (siteSystem() != null) return emptyList()
@@ -17005,17 +14701,13 @@ class ServeHttpServer(
   }
 
   /**
-   * `POST /agent-access/request` — an agent, holding nothing, asks for access.
-   *
-   * Ungated by design and therefore the most exposed route on the box, so what it can actually do
-   * is kept deliberately small: it parks one bounded entry in a bounded map and returns two random
-   * strings. It reads no session, touches no daemon, and confers nothing — a human still has to act
-   * before any credential exists.
+   * `POST /agent-access/request`: an agent holding nothing asks for access. Ungated and so the most
+   * exposed route: it parks one bounded entry and returns two random strings, touching no session
+   * or daemon and conferring nothing.
    */
   /**
-   * The per-process seal on the approval form. Constructed here rather than injected because it has
-   * no configuration and no lifetime beyond this server: a restart drops every grant request, so
-   * seals minted before it have nothing left to protect.
+   * The per-process seal on the approval form. No configuration; a restart drops every request, so
+   * older seals protect nothing.
    */
   private val agentGrantCsrf = ServeAgentGrants.Csrf()
 
@@ -17064,33 +14756,27 @@ class ServeHttpServer(
   }
 
   /**
-   * Open one access request and describe it, for whichever surface asked — the `/agent-access`
-   * route or the catalog MCP's `request_access` tool. Shared so the two cannot answer the same
-   * question with different fields; the caller owns rate limiting and how a refusal is reported.
-   *
-   * Null when the store is at its pending-request ceiling.
+   * Open one access request and describe it, shared by the `/agent-access` route and the catalog
+   * MCP's `request_access` tool. The caller owns rate limiting and refusal reporting. Null at the
+   * pending-request ceiling.
    */
   private fun RoutingContext.openAgentGrantRequest(
     store: ServeAgentGrantStore,
     parsed: ServeAgentGrants.OpenRequest,
   ): ServeAgentGrants.OpenResponse? {
     val scope = AgentGrantScope.parse(parsed.scope) ?: AgentGrantScope.DEFAULT_REQUEST
-    // Unknown names are dropped rather than refused — see [OpenRequest.capabilities]. What this
-    // box would OFFER is decided when the approval page renders (selectable vs withheld, with the
-    // reason), and what it MINTS is clamped at approval; the request itself carries the whole ask,
-    // so the human sees what was wanted and what this box will not give.
+    // Unknown capability names are dropped, not refused ([OpenRequest.capabilities]). The approval
+    // page decides what is offered and approval clamps what is minted; the request keeps the whole
+    // ask.
     val capabilities = parsed.capabilities.mapNotNull { AgentGrantCapability.parse(it) }.toSet()
     val ttl = parsed.ttlSeconds.takeIf { it > 0 } ?: ServeAgentGrantStore.DEFAULT_GRANT_TTL_SECONDS
     val request =
       store.openRequest(
         label = parsed.label,
-        // The address, not a name the caller chose: the approval page's "who is asking" must be
-        // something the asker cannot write. The label right above it is theirs to write, and is
-        // presented as such.
-        // The SAME trusted-forwarding policy the rate limiter uses, not the raw socket peer.
-        // Behind a reverse proxy the peer is the proxy, so "Asked from" showed Caddy's address
-        // for every request on the one deployment where the line matters — a signal the approver
-        // is meant to weigh, reading identically for the agent that asked and for anyone else.
+        // The address, not a caller-chosen name, for "who is asking"; the label above is the
+        // caller's.
+        // The same trusted-forwarding policy as the rate limiter, not the raw peer (which is the
+        // proxy behind Caddy).
         client = clientAddress(),
         requestedScope = scope,
         requestedTtlSeconds = ttl,
@@ -17115,18 +14801,14 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET`/`POST /ui-builder/request-access` — a signed-in reader, member or guest, asks for
-   * UI-builder edit access **for themselves**.
+   * `GET`/`POST /ui-builder/request-access`: a signed-in reader asks for UI-builder edit access for
+   * themselves.
    *
-   * The request is opened here, from the session, rather than through the JSON
-   * [ServeAgentGrants.REQUEST_PATH]: that route is ungated and cookie-blind by design, and a
-   * request that names its requester has to be one nobody else can open in their name. So the
-   * requester is read off the verified session, the form carries a seal minted for that login, and
-   * a cross-site POST — which arrives without the `SameSite=Lax` cookie anyway — fails the seal
-   * too.
-   *
-   * Nothing is handed to the browser to hold. An approval is carried by the requester's own session
-   * ([ServeAgentGrantStore.activeGrantForRequester]); the device secret is simply never collected.
+   * Opened here from the verified session rather than via the ungated, cookie-blind
+   * [ServeAgentGrants.REQUEST_PATH], so nobody can request in another's name; the form carries a
+   * seal minted for that login, which a cross-site POST also fails. Approval is carried by the
+   * requester's session ([ServeAgentGrantStore.activeGrantForRequester]); no device secret is
+   * collected.
    */
   private suspend fun RoutingContext.handleUiBuilderRequestAccess(
     store: ServeAgentGrantStore,
@@ -17147,9 +14829,8 @@ class ServeHttpServer(
       }
     val active = store.activeGrantForRequester(requester)
     val form = if (submit) call.receiveFormParameters() else null
-    // The design the request is for, when it was asked for from one: `?design=` on the link the
-    // designs page draws, carried through the form as a hidden field. Refused rather than dropped
-    // when malformed, because dropping it would turn a request for one design into one for all.
+    // The design the request is for (`?design=`, carried as a hidden field). Malformed values are
+    // refused, since dropping one would widen the request to all designs.
     val designParam =
       (if (form != null) form["design"]?.firstOrNull() else call.request.queryParameters["design"])
         ?.takeIf { it.isNotEmpty() }
@@ -17270,12 +14951,9 @@ class ServeHttpServer(
   }
 
   /**
-   * `POST /agent-access/poll` — the agent collects the outcome, proving possession of the device
-   * secret it was issued.
-   *
-   * Every negative answer is a 200 with a status field rather than an HTTP error, because "not yet"
-   * is the expected case and a poller should not have to distinguish a pending grant from a broken
-   * server by status code. An unknown id and a wrong secret give the same answer, deliberately.
+   * `POST /agent-access/poll`: the agent collects the outcome with its device secret. Negative
+   * answers are 200 with a status field ("not yet" is expected). Unknown id and wrong secret answer
+   * identically.
    */
   private suspend fun RoutingContext.handleAgentGrantPoll(store: ServeAgentGrantStore) {
     val permit = acquireAgentGrantPermit() ?: return
@@ -17306,24 +14984,14 @@ class ServeHttpServer(
   }
 
   /**
-   * One poll outcome, described the same way for the `/agent-access/poll` route and the catalog
-   * MCP's `poll_access` tool. Shared for the reason [openAgentGrantRequest] is: a client that
-   * bootstraps through MCP and one that curls the route must not have to learn two vocabularies for
-   * "not yet".
+   * One poll outcome, shared by `/agent-access/poll` and the catalog MCP's `poll_access`, so both
+   * speak one vocabulary.
    */
   /**
-   * [pollAgentGrant], held open for up to [waitSeconds] (clamped) while the answer is still
-   * `pending`.
-   *
-   * Implemented as a short re-read loop rather than a signal the store fires: the store is a plain
-   * synchronized map with no coroutine machinery, and a tick a quarter of a second long makes an
-   * approval feel immediate to the human who just clicked while costing a handful of uncontended
-   * lock acquisitions over a whole wait. The alternative — a `CompletableDeferred` per pending
-   * request, completed by `approve`/`deny` — is a lower-latency, higher-coupling shape worth
-   * reaching for only if the tick ever shows up in a profile.
-   *
-   * Waiting does NOT re-charge the rate limiter: the caller holds one permit for the whole wait,
-   * which is the point. It is the same budget an interval poller spends much faster.
+   * [pollAgentGrant], held open up to [waitSeconds] (clamped) while `pending`. A quarter-second
+   * re-read loop over the synchronized store rather than a per-request `CompletableDeferred`;
+   * switch only if it shows in a profile. Waiting holds one rate-limit permit rather than
+   * re-charging.
    */
   private suspend fun pollAgentGrantAwaiting(
     store: ServeAgentGrantStore,
@@ -17333,9 +15001,8 @@ class ServeHttpServer(
   ): ServeAgentGrants.PollResponse {
     val immediate = pollAgentGrant(store, requestId, deviceSecret)
     val wait = waitSeconds.coerceIn(0, ServeAgentGrants.MAX_POLL_WAIT_SECONDS)
-    // Only `pending` is worth waiting on. `unknown` in particular must answer at once: it is what a
-    // wrong device secret gets, and holding those open would turn a guess into a way to occupy a
-    // connection.
+    // Only `pending` is worth waiting on; `unknown` (also a wrong secret) answers at once so
+    // guesses can't occupy connections.
     if (wait <= 0 || immediate.status != ServeAgentGrants.PollResponse.PENDING) return immediate
     val deadline = System.currentTimeMillis() + wait * 1000
     while (System.currentTimeMillis() < deadline) {
@@ -17391,11 +15058,9 @@ class ServeHttpServer(
     }
 
   /**
-   * The grant flow as the catalog MCP's two access tools see it.
-   *
-   * Both legs are charged to the SAME per-address budget the `/agent-access/…` routes use, so
-   * bootstrapping through MCP is not a way around the limiter — it is the same door. A throttled
-   * call answers null, which the MCP layer turns into a tool error rather than a dead session.
+   * The grant flow as the catalog MCP's access tools see it, charged to the same per-address budget
+   * as the `/agent-access/…` routes. A throttled call answers null, which MCP turns into a tool
+   * error.
    */
   private fun RoutingContext.catalogMcpAgentAccess(
     store: ServeAgentGrantStore
@@ -17446,11 +15111,8 @@ class ServeHttpServer(
     }
 
   /**
-   * `GET /agent-access/whoami` — what the presented bearer is, without echoing it.
-   *
-   * Exists so an agent can answer "do I still have access, and for how long?" without provoking a
-   * 404 from a real lane and guessing at what it meant. A caller with no (or a dead) grant gets a
-   * 200 with `active: false`, because that is an answer rather than an error.
+   * `GET /agent-access/whoami`: what the presented bearer is, without echoing it. No (or a dead)
+   * grant gets 200 with `active: false`.
    */
   private suspend fun RoutingContext.handleAgentGrantWhoami(store: ServeAgentGrantStore) {
     val grant = agentGrantFor(call)
@@ -17482,10 +15144,8 @@ class ServeHttpServer(
   }
 
   /**
-   * The best classification available for whatever credential this request carried, reading the
-   * same three sources [resolveAgentGrant] does. "Best" rather than "first" because those sources
-   * are independent: a request may carry an unrelated bearer beside a real grant, so the most
-   * informative state across them is the honest answer.
+   * The best classification across the three sources [resolveAgentGrant] reads; they are
+   * independent, so report the most informative state.
    */
   private fun RoutingContext.presentedTokenState(
     store: ServeAgentGrantStore
@@ -17546,10 +15206,9 @@ class ServeHttpServer(
   }
 
   /**
-   * `POST /agent-access/{grantId}/revoke` — the `/status` page's revoke button. Requires an
-   * approver identity, exactly like approving does; a grant may not revoke another grant. On a
-   * `--public` box a signed-in visitor may revoke only a grant they approved themselves — the same
-   * rows [agentGrantStatusRows] shows them — and anything else answers exactly like an unknown id.
+   * `POST /agent-access/{grantId}/revoke`: the `/status` revoke button. Requires an approver
+   * identity; a grant can't revoke another. On `--public` a signed-in visitor may revoke only
+   * grants they approved ([agentGrantStatusRows]); anything else answers like an unknown id.
    */
   private suspend fun RoutingContext.handleAgentGrantRevokeFromStatus(store: ServeAgentGrantStore) {
     val approver = agentGrantApprover(store)
@@ -17576,10 +15235,8 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /agent-access/{requestId}` — the approval page.
-   *
-   * Ordered authenticate-then-resolve: an anonymous caller learns nothing about whether the id is
-   * real, which matters because this URL is going to be pasted into places that log it.
+   * `GET /agent-access/{requestId}`: the approval page. Authenticate before resolving, so an
+   * anonymous caller learns nothing about whether the id exists.
    */
   private suspend fun RoutingContext.handleAgentGrantPage(store: ServeAgentGrantStore) {
     val approver = agentGrantApprover(store)
@@ -17588,9 +15245,8 @@ class ServeHttpServer(
       return
     }
     val request = store.request(call.parameters["requestId"])
-    // Where the decision form lands once it has done its work (POST, redirect, GET): the outcome is
-    // read back from the store rather than rendered by the POST, so a refresh re-reads it instead
-    // of re-submitting a decision that has already been made.
+    // Where the decision form lands (POST/redirect/GET); the outcome is read back from the store,
+    // so a refresh doesn't resubmit.
     if (request != null && respondAgentGrantOutcome(store, request)) return
     if (request == null || request.state != ServeAgentGrantStore.Request.State.PENDING) {
       respondAgentGrantNotice(
@@ -17611,11 +15267,8 @@ class ServeHttpServer(
         approver,
         store.maxCapabilities,
       )
-    // Named separately from the scope's withheld list because the reason differs and the page says
-    // so: a capability the agent asked for that this approver may not pass on. The cause splits
-    // once more, because the two remedies read differently — a capability the approver does not
-    // hold is about the approver, while one this box's ceiling excludes is an operator flag, and
-    // the page names it rather than leaving the approver to intuit that no tick could help.
+    // Capabilities withheld by the approver's own holdings vs by this box's ceiling (an operator
+    // flag) are named separately, since the remedies differ.
     val withheldCapabilities =
       request.requestedCapabilities.filterNot { it in selectableCapabilities }
     val storeNarrowedCapabilities = withheldCapabilities.filterNot { it in store.maxCapabilities }
@@ -17664,8 +15317,8 @@ class ServeHttpServer(
   }
 
   /**
-   * The designs [request] names, each with the title [approver] knows it by — read as the approver,
-   * so a design they cannot see is shown by its id alone and the page confirms nothing about it.
+   * The designs [request] names, titled as [approver] sees them; designs they can't see show only
+   * the id.
    */
   private suspend fun requestedDesigns(
     request: ServeAgentGrantStore.Request,
@@ -17687,14 +15340,9 @@ class ServeHttpServer(
   }
 
   /**
-   * `POST /agent-access/{requestId}` — the decision.
-   *
-   * Three locks, and the comment is here because each one alone has a hole. `SameSite=Lax` stops a
-   * cross-site form post from carrying the session cookie, but says nothing about a token-gated box
-   * where the credential rides in the URL. The `?token=` stops a stranger, but not a page the
-   * operator was tricked into opening from a bookmark that has it. The CSRF seal binds the POST to
-   * this request, this approver, and this action, and is the one that does not depend on anything
-   * outside this process.
+   * `POST /agent-access/{requestId}`: the decision. Three locks, each covering another's hole:
+   * `SameSite=Lax` blocks cross-site cookie posts but not URL tokens; `?token=` stops strangers but
+   * not a tricked operator; the CSRF seal binds the POST to this request, approver and action.
    */
   private suspend fun RoutingContext.handleAgentGrantDecision(store: ServeAgentGrantStore) {
     val approver = agentGrantApprover(store)
@@ -17720,9 +15368,8 @@ class ServeHttpServer(
       return
     }
     if (deny) {
-      // The return value matters: two operators can hold the page at once, and if one approved
-      // first this denial does nothing. Saying "nothing was granted" there would hand the second
-      // operator an explicit assurance that is false while the bearer is live.
+      // Check the return value: if another operator approved first, saying "nothing was granted"
+      // would be false.
       if (store.deny(requestId, approver.name)) {
         // An OAuth client is owed the refusal on its own redirect URI — RFC 6749 §4.1.2.1 — rather
         // than being left to time out while the human reads a page it will never see.
@@ -17750,20 +15397,16 @@ class ServeHttpServer(
       }
       return
     }
-    // The approver's ticks, capped again here rather than trusted: the form is client-side state
-    // and the store clamps to the request and this box's ceiling regardless, but refusing to *ask*
-    // for something outside the approver's own ceiling keeps the audit line honest about what was
-    // actually chosen.
-    // The page posts ONE value (a radio — see [ServeWeb.agentGrantApprovalPage] for why it is not a
-    // set of checkboxes), but `maxOrNull` is kept rather than `single()`: the form is client state,
-    // and a caller that posts several is asking for the highest, which the ceilings then clamp.
+    // The approver's ticks are capped again here: the store clamps regardless, but this keeps the
+    // audit line honest.
+    // The page posts one radio value ([ServeWeb.agentGrantApprovalPage]), but `maxOrNull` handles
+    // several, clamped by the ceilings.
     val ticked =
       form["scope"].orEmpty().mapNotNull { AgentGrantScope.parse(it) }.maxOrNull()
         ?: AgentGrantScope.PREVIEW
     val chosen = minOf(ticked, approver.ceiling)
-    // Capabilities ARE checkboxes — they are independent, so a box per capability describes the
-    // outcome honestly (the scopes' radio is the opposite case, see above). Absent means unticked
-    // means not granted, which is why nothing here defaults to the request.
+    // Capabilities are independent checkboxes; absent means not granted, so nothing defaults to the
+    // request.
     val tickedCapabilities =
       form["capability"].orEmpty().mapNotNull { AgentGrantCapability.parse(it) }.toSet()
     val chosenCapabilities = tickedCapabilities intersect approver.capabilityCeiling
@@ -17823,9 +15466,8 @@ class ServeHttpServer(
       )
       return
     }
-    // The OAuth return leg. The grant is already minted and the page below would be a perfectly
-    // good end to the device flow; what an OAuth client needs instead is the browser it opened to
-    // come back with the code, so it can redeem the same grant without a human relaying anything.
+    // The OAuth return leg: send the browser back with the code so the client can redeem the same
+    // grant.
     mcpOAuth.forRequest(requestId)?.let { authorization ->
       call.respondRedirect(
         ServeMcpOAuth.redirectWithCode(
@@ -17839,9 +15481,7 @@ class ServeHttpServer(
     redirectToAgentGrantOutcome(requestId)
   }
 
-  /**
-   * `303` back to the approval link, which now shows the outcome — see [respondAgentGrantOutcome].
-   */
+  /** `303` back to the approval link, which now shows the outcome ([respondAgentGrantOutcome]). */
   private suspend fun RoutingContext.redirectToAgentGrantOutcome(requestId: String) {
     call.response.headers.append(
       HttpHeaders.Location,
@@ -17851,18 +15491,15 @@ class ServeHttpServer(
   }
 
   /**
-   * The approval link, once the request has been decided: what was granted (while the grant lives)
-   * or that it was declined. False for a pending request — the caller draws the form — and for an
-   * approval whose grant has since expired or been revoked, which is "nothing to approve" again.
+   * The approval link once decided: what was granted (while live) or that it was declined. False
+   * when pending or the grant has since expired/been revoked.
    */
   private suspend fun RoutingContext.respondAgentGrantOutcome(
     store: ServeAgentGrantStore,
     request: ServeAgentGrantStore.Request,
   ): Boolean {
-    // A browser can revisit this link after approval in another tab, or after an interrupted
-    // callback navigation. Finish the OAuth return leg while its code is still outstanding;
-    // displaying a device-flow success page here leaves the OAuth client waiting indefinitely.
-    // Redeeming the code removes this binding, so a completed exchange is never replayed.
+    // Revisiting after approval (another tab, interrupted callback) completes the OAuth return leg
+    // while its code is outstanding. Redeeming removes the binding, so it never replays.
     mcpOAuth.forRequest(request.id)?.let { authorization ->
       when (request.state) {
         ServeAgentGrantStore.Request.State.PENDING -> Unit
@@ -17932,11 +15569,8 @@ class ServeHttpServer(
     }
   }
 
-  // ---------------------------------------------------------- OAuth façade
-  //
-  // Seven routes that add no authority of their own. See [ServeMcpOAuth] for why they exist at
-  // all: an MCP client that meets a 401 follows one fixed script, and before these it fell off
-  // that script at the first step and reported a registration failure it could not explain.
+  // OAuth façade: seven routes adding no authority of their own, so MCP clients following the fixed
+  // 401 script can complete it ([ServeMcpOAuth]).
 
   /** RFC 9728: what protects `/mcp`, and which server issues tokens for it. */
   private suspend fun RoutingContext.respondProtectedResourceMetadata(store: ServeAgentGrantStore) {
@@ -17978,12 +15612,9 @@ class ServeHttpServer(
   }
 
   /**
-   * RFC 7591 dynamic client registration.
-   *
-   * Ungated and rate limited, exactly like `POST /agent-access/request` and for the same reason:
-   * the caller has no credential yet, and this confers none. A `client_id` here is a handle for
-   * correlating an authorization with the redirect URIs it may use — a human still has to approve
-   * before anything exists to bear.
+   * RFC 7591 dynamic client registration. Ungated and rate limited like `POST
+   * /agent-access/request`: it confers nothing, and a `client_id` only correlates an authorization
+   * with its redirect URIs.
    */
   private suspend fun RoutingContext.handleOAuthRegister() {
     val permit = acquireAgentGrantPermit() ?: return
@@ -18014,9 +15645,8 @@ class ServeHttpServer(
           )
           return
         }
-      // A public client with no redirect URI has nowhere to receive a code, so there is no
-      // authorization it could ever complete. Refusing here names the problem; accepting would
-      // defer it to a later `invalid_request` the client cannot connect to its registration.
+      // A public client with no redirect URI can never complete an authorization, so refuse now
+      // with a clear reason.
       if (parsed.redirectUris.isEmpty()) {
         respondOAuthError(
           HttpStatusCode.BadRequest,
@@ -18062,19 +15692,13 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /oauth/authorize` — the human's leg.
-   *
-   * This does not render an approval page of its own. It opens an ordinary grant request and
-   * **redirects to the one that already exists**, so there is exactly one page on this server where
-   * access is granted, with one set of approver ceilings and one audit line. The only thing the
-   * OAuth exchange adds is a note that this request has somewhere to return to when it resolves.
+   * `GET /oauth/authorize`: the human's leg. Opens an ordinary grant request and redirects to the
+   * existing approval page, so there is one place access is granted, with one set of ceilings and
+   * one audit line. OAuth only adds where to return.
    */
   private suspend fun RoutingContext.handleOAuthAuthorize(store: ServeAgentGrantStore) {
-    // Charged to the same per-address budget as its two siblings, which it had been missing. This
-    // is the endpoint of the three that creates the most state — a row in the grant store AND one
-    // in the OAuth pending map — and, like `POST /agent-access/request`, it is reachable with no
-    // credential at all. The map ceilings bound the damage either way; the budget is what stops one
-    // caller spending those ceilings on everybody else's behalf.
+    // Charged to the same per-address budget as its siblings: it creates the most state (a grant
+    // request and an OAuth pending entry) with no credential.
     val permit = acquireAgentGrantPermit() ?: return
     try {
       authorizeThroughApprovalPage(store)
@@ -18170,12 +15794,9 @@ class ServeHttpServer(
   }
 
   /**
-   * `POST /oauth/token` — the client's leg.
-   *
-   * Ungated in the OAuth sense (these are public clients, `token_endpoint_auth_method=none`), and
-   * the proof is the PKCE verifier: without it a stolen code is inert. What comes back is the
-   * grant's own token, not a new credential — same string the device poll returns, same expiry,
-   * same revocation from the status page.
+   * `POST /oauth/token`: the client's leg. Public clients (`token_endpoint_auth_method=none`),
+   * proven by the PKCE verifier. Returns the grant's own token — same string, expiry and revocation
+   * as the device poll.
    */
   private suspend fun RoutingContext.handleOAuthToken(store: ServeAgentGrantStore) {
     val permit = acquireAgentGrantPermit() ?: return
@@ -18239,9 +15860,8 @@ class ServeHttpServer(
         )
         return
       }
-      // The decision itself. A pending request means the human has not acted yet — which is not an
-      // error the client can fix by retrying this code, since redeeming consumed it, so it is told
-      // to start over rather than left polling something that will never change.
+      // Still pending: the code was consumed by redeeming, so tell the client to start over rather
+      // than retry.
       val request = store.request(authorization.requestId)
       val grant =
         when (request?.state) {
@@ -18276,18 +15896,10 @@ class ServeHttpServer(
   }
 
   /**
-   * `grant_type=refresh_token` — renew **within** the session a human already approved.
-   *
-   * The bound is the grant itself, which is what makes this safe to have at all in a design whose
-   * central promise is that no credential outlives a decision. This mints nothing and extends
-   * nothing: it looks the grant up, and if it is still live it hands back the same bearer with
-   * whatever life it has left. A revoked or lapsed grant refuses here in the same instant it
-   * refuses everywhere else, and takes its refresh tokens with it.
-   *
-   * What it buys is the case that had no answer before: a client that lost its access token
-   * mid-session — a restart, a rotation, a dropped cache — had to interrupt a person for permission
-   * it had already been given, and a headless or cloud client with no browser to be interrupted in
-   * simply stopped there.
+   * `grant_type=refresh_token`: renew within the human-approved session. Mints and extends nothing:
+   * if the grant is still live, return the same bearer with its remaining life; a revoked or lapsed
+   * grant refuses and its refresh tokens die with it. Lets a client that lost its token mid-session
+   * recover without re-asking a person.
    */
   private suspend fun RoutingContext.refreshOAuthToken(
     store: ServeAgentGrantStore,
@@ -18348,27 +15960,21 @@ class ServeHttpServer(
   }
 
   /**
-   * Who is approving, or null when this call carries no operator identity.
-   *
-   * An **agent grant is never an approver**, and that falls out of the two checks rather than
-   * needing its own: a GitHub session lives in a cookie an agent has no way to hold, and the
-   * operator branch compares against `--token` specifically, which no minted bearer can equal.
+   * Who is approving, or null without an operator identity. An agent grant is never an approver:
+   * GitHub sessions are cookies agents can't hold, and the token branch compares against `--token`
+   * only.
    */
   private fun RoutingContext.agentGrantApprover(
     store: ServeAgentGrantStore
   ): ServeAgentGrants.Approver? {
-    // The server's own front door comes FIRST, and a GitHub session is not a substitute for it.
-    // On a **private** box that also configures OAuth, checking only the session would have let any
-    // GitHub account the (by default empty) `--github-auth-users` allowlist accepts open a request
-    // and approve it themselves — minting a grant into a server whose browse token they never had.
-    // A private box's approver must hold that token; a `--public` box has no such door to pass.
+    // The server's front door first: on a private box with OAuth, a GitHub session alone would let
+    // any allowed account approve its own request without the browse token. A `--public` box has no
+    // such door.
     val provided = call.request.queryParameters["token"] ?: call.request.headers[TOKEN_HEADER]
     if (!isPublic && !ServeUrls.tokensMatch(serverToken, provided) && !call.browsesByCookie()) {
       return null
     }
-    // …and then the identity, when there is one to have. Note neither branch can be satisfied by an
-    // agent grant: a GitHub session lives in a cookie no agent holds, and the token compare above
-    // is against `--token` specifically, which no minted bearer can equal. So a grant can never
+    // …then the identity. Neither branch can be satisfied by an agent grant, so a grant can never
     // approve or revoke another.
     val auth = githubAuth
     if (auth != null) {
@@ -18379,9 +15985,8 @@ class ServeHttpServer(
         auth.hasImageRepositoryAccess(call),
         store.maxScope,
         store.maxCapabilities,
-        // On a `--public` box any signed-in visitor approves, so being one says nothing about the
-        // rest of the box. The `--token` holder and a configured UI-builder administrator still
-        // answer for all of it; on a private box every approver has already shown the token.
+        // On `--public` any signed-in visitor approves but only for their own; the `--token` holder
+        // and configured UI-builder administrators answer for the whole box.
         administers =
           !isPublic ||
             (serverToken.isNotBlank() && ServeUrls.tokensMatch(serverToken, provided)) ||
@@ -18393,16 +15998,13 @@ class ServeHttpServer(
   }
 
   /**
-   * What to tell someone who reached an approval route without an operator identity: the GitHub
-   * sign-in when there is one to offer, and otherwise the plain truth about the token — the person
-   * on the other end of this link is the operator, so telling them how to present the credential
-   * they already have is help, not disclosure.
+   * What to tell someone reaching an approval route without an operator identity: the GitHub
+   * sign-in if available, else how to present the token (they are the operator, so this is help,
+   * not disclosure).
    */
   private suspend fun RoutingContext.respondAgentGrantSignIn() {
-    // A private box wants BOTH the browse token and an identity. Sending a visitor to OAuth when
-    // the *token* is what is missing produces a loop: the callback returns to the same tokenless
-    // URL, which asks for OAuth again, forever. So a missing front door is answered with
-    // instructions, and only a genuinely-missing session is answered with a sign-in.
+    // A private box needs both token and identity; sending a tokenless visitor to OAuth would loop,
+    // so a missing token gets instructions and only a missing session gets sign-in.
     val provided = call.request.queryParameters["token"] ?: call.request.headers[TOKEN_HEADER]
     val hasFrontDoor =
       isPublic || ServeUrls.tokensMatch(serverToken, provided) || call.browsesByCookie()
@@ -18449,9 +16051,8 @@ class ServeHttpServer(
   }
 
   /**
-   * The `?token=…` an approval page's own links and form must carry forward on a token-gated box,
-   * echoing back exactly what this request presented rather than the configured value — so a page
-   * reached without one never mints one into its markup.
+   * The `?token=…` an approval page's links and form carry forward on a gated box: exactly what
+   * this request presented, never the configured value.
    */
   private fun RoutingContext.agentGrantTokenQuery(): String {
     if (isPublic) return ""
@@ -18460,13 +16061,10 @@ class ServeHttpServer(
     return "?token=" + WebEscaping.urlEncodeSegment(provided)
   }
 
+  /** Charge an ungated grant route against its caller's address budget (no identity exists yet). */
   /**
-   * Charge an ungated grant route against its caller's address budget. Address, not identity: these
-   * are the two routes reached *before* the caller has one.
-   */
-  /**
-   * The same budget [acquireAgentGrantPermit] charges, without answering the call itself — for the
-   * MCP tools, where "too fast" is a tool error inside a 200 rather than an HTTP 429.
+   * The same budget as [acquireAgentGrantPermit] without answering the call, for MCP tools where
+   * "too fast" is a tool error.
    */
   private fun RoutingContext.tryAgentGrantPermit(): ServeRateLimiter.Decision.Admitted? {
     val limiter = agentGrantLimiter ?: return ServeRateLimiter.Decision.Admitted {}
@@ -18490,10 +16088,8 @@ class ServeHttpServer(
   }
 
   /**
-   * Read one `application/x-www-form-urlencoded` field. Parsed here rather than through Ktor's
-   * content negotiation because these forms are three fields drawn by this server for this server,
-   * and the body cap is the point: a form post is not a place an unauthenticated caller should be
-   * able to hand this process a megabyte.
+   * Read one form-urlencoded field. Parsed by hand because these forms are tiny and server-drawn,
+   * and the body cap matters for unauthenticated callers.
    */
   private suspend fun ApplicationCall.receiveFormField(name: String): String? =
     receiveFormParameters()[name]?.firstOrNull()
@@ -18506,12 +16102,9 @@ class ServeHttpServer(
   }
 
   private suspend fun RoutingContext.rejectMissingGithubAuth(api: Boolean = false): Boolean {
-    // A presented grant is judged on its own scope FIRST, and independently of whether GitHub auth
-    // exists. That order is the whole point. Written the other way round — `githubAuth ?: return
-    // false` first — a private box with no OAuth configured let every grant through this gate
-    // unread, so a `preview` grant opened live daemon sessions the human never agreed to. The gate
-    // is "is this caller allowed to run this lane", and for a grant holder the answer comes from
-    // the grant, on every deployment shape.
+    // A presented grant is judged on its own scope first, regardless of GitHub auth: checking
+    // `githubAuth` first would let every grant through on a box without OAuth, letting `preview`
+    // grants open live sessions.
     if (rejectGrantBelowScope(AgentGrantScope.LIVE, api)) return true
     if (agentGrantFor(call) != null) return false
     val auth = githubAuth ?: return false
@@ -18525,12 +16118,9 @@ class ServeHttpServer(
   }
 
   /**
-   * Refuse a presented grant that does not reach [required], whatever else the request carries.
-   *
-   * Returns false — "nothing to say" — both when no grant was presented (the caller falls through
-   * to its ordinary human gate) and when the grant is good enough. Only a grant that is *present
-   * and too small* answers here, and it answers 403 rather than a sign-in redirect: an agent has no
-   * browser to be redirected in, and its remedy is to ask for a wider grant, not to sign in.
+   * Refuse a presented grant that doesn't reach [required]. Returns false both when no grant was
+   * presented (fall through to the human gate) and when it suffices. A too-small grant gets 403,
+   * not a sign-in redirect: an agent's remedy is a wider grant.
    */
   private suspend fun RoutingContext.rejectGrantBelowScope(
     required: AgentGrantScope,
@@ -18542,13 +16132,9 @@ class ServeHttpServer(
   }
 
   /**
-   * The presented grant, when there is one and it does **not** reach [required]; null when no grant
-   * was presented or the one presented is good enough.
-   *
-   * Split out of [rejectGrantBelowScope] so a caller can decide the question at one point and act
-   * on it at another. That matters wherever the refusal is deferred: re-asking later would answer
-   * "no grant, nothing to say" for a grant that expired in between, turning a refusal into an
-   * admission at exactly the moment the credential stopped being valid.
+   * The presented grant when it doesn't reach [required]; null when absent or sufficient. Split out
+   * so deferred refusals decide once, since re-asking later would read an expired grant as "no
+   * grant" and admit the request.
    */
   private fun RoutingContext.grantBelowScope(
     required: AgentGrantScope
@@ -18571,10 +16157,8 @@ class ServeHttpServer(
   }
 
   private suspend fun RoutingContext.rejectMissingGithubRepoAccess(api: Boolean = false): Boolean {
-    // Scope first, and independently of GitHub auth — see [rejectMissingGithubAuth] for why the
-    // other order was a hole. `playground` is never in a default grant and can only be approved by
-    // someone holding repository access themselves, so a grant that reaches it means a human with
-    // this exact right said yes.
+    // Scope first, independent of GitHub auth ([rejectMissingGithubAuth]). `playground` is never
+    // default and only approvable by someone with repository access themselves.
     if (rejectGrantBelowScope(AgentGrantScope.PLAYGROUND, api)) return true
     if (agentGrantFor(call) != null) return false
     val auth = githubAuth ?: return false
@@ -18603,10 +16187,7 @@ class ServeHttpServer(
   }
 
   companion object {
-    /**
-     * Per-call memo for [agentGrantFor]. Scoped to one `ApplicationCall`, so it lives and dies with
-     * the request and carries nothing between them.
-     */
+    /** Per-call memo for [agentGrantFor], scoped to one `ApplicationCall`. */
     private val RESOLVED_AGENT_GRANT = AttributeKey<ResolvedAgentGrant>("composeai.agentGrant")
 
     /** A `POST /render/{name}`'s query merged with its body; see [renderParams]. */
@@ -18616,9 +16197,9 @@ class ServeHttpServer(
     internal const val MAX_RENDER_BODY_BYTES: Long = 1024L * 1024
 
     /**
-     * A render body's JSON object as query-shaped params, or null when it is not an object of
-     * scalars. A number or boolean is spelled as the GET query would spell it, so
-     * [ServeOverrides.parse] types it exactly as it does `?knob.count=3`.
+     * A render body's JSON object as query-shaped params, or null unless it is an object of
+     * scalars. Numbers and booleans are spelled as the query would, so [ServeOverrides.parse] types
+     * them identically.
      */
     internal fun renderBodyJson(text: String): Map<String, String>? {
       val obj =
@@ -18685,19 +16266,15 @@ class ServeHttpServer(
       }
 
     /**
-     * How many sections one page contributes to the sidebar tree. Above the number of grouping
-     * nodes on the kit's densest sheet, and far below anything that would make the Pages pane the
-     * wall of rows it replaced.
+     * Max sections per page in the sidebar tree: above the kit's densest sheet, well below a wall
+     * of rows.
      */
     const val MAX_PAGE_SECTIONS = 24
 
     /**
-     * Extensions the motion route serves, and the type each is served as. A closed map rather than
-     * a suffix-to-mime derivation: the key set IS the allowlist, so one place decides both "may
-     * this be served" and "as what", and the two cannot drift apart.
-     *
-     * APNG is deliberately `image/apng`, not `image/png`. Both decode, but the distinction is what
-     * tells a browser — and a reader saving the file — that there is more here than one frame.
+     * Extensions the motion route serves and their types. The key set is the allowlist, so "may
+     * this be served" and "as what" can't drift. APNG is `image/apng` (not `image/png`) to signal
+     * more than one frame.
      */
     val MOTION_CONTENT_TYPES: Map<String, String> =
       linkedMapOf(".apng" to "image/apng", ".gif" to "image/gif")
@@ -18710,7 +16287,7 @@ class ServeHttpServer(
 
     /**
      * On `GET /images/capability`: `public` when anyone can open this host's pages, `private` when
-     * it is token-gated. Read by `serve-web/src/report/ui.ts`.
+     * token-gated. Read by `serve-web/src/report/ui.ts`.
      */
     const val CAPTURE_SCOPE_HEADER: String = "X-Compose-Preview-Capture-Scope"
 
@@ -18718,20 +16295,15 @@ class ServeHttpServer(
     private const val BEARER_PREFIX: String = "Bearer "
 
     /**
-     * Body cap for the agent-grant routes. Two of them are ungated, and every legitimate body here
-     * is a JSON object with three short fields or a three-field form — so the cap is set at what
-     * those need with room to spare, and anything larger is a caller doing something else.
+     * Body cap for the agent-grant routes (two are ungated); every legitimate body is a small JSON
+     * object or three-field form.
      */
     private const val MAX_AGENT_GRANT_BYTES = 8L * 1024
 
     /**
-     * `application/x-www-form-urlencoded` → name → values, `+` decoded as a space.
-     *
-     * Hand-rolled rather than routed through Ktor's `receiveParameters` for one reason: the body is
-     * already read under [readCapped], and re-reading it through content negotiation would mean
-     * buffering an uncapped body first. A malformed pair is skipped rather than failing the parse —
-     * the fields that matter are then simply absent, and every caller here treats absent as
-     * invalid.
+     * Form-urlencoded → name → values, `+` as space. Hand-rolled because the body was already read
+     * under [readCapped]; Ktor's `receiveParameters` would buffer an uncapped body. Malformed pairs
+     * are skipped; callers treat absent fields as invalid.
      */
     internal fun parseFormBody(body: String): Map<String, List<String>> {
       val out = LinkedHashMap<String, MutableList<String>>()
@@ -18760,10 +16332,9 @@ class ServeHttpServer(
     const val GENERATION_HEADER: String = "X-Compose-Preview-Generation"
 
     /**
-     * How a `/render` response relates to what was asked for, when that needs saying at all. Only
-     * value today: [RENDER_BAKED_FALLBACK] — the caller asked for an override, accepted a baked
-     * snapshot via `?fallback=baked`, and these pixels do not reflect it. Absent on an ordinary
-     * render (see [GENERATION_HEADER] for how the pixels were produced).
+     * How a `/render` response relates to the request, when that needs saying. Only value:
+     * [RENDER_BAKED_FALLBACK] (an accepted `?fallback=baked` snapshot not reflecting the override).
+     * Absent on ordinary renders; see [GENERATION_HEADER].
      */
     const val RENDER_HEADER: String = "X-Compose-Preview-Render"
 
@@ -18771,25 +16342,23 @@ class ServeHttpServer(
     const val RENDER_BAKED_FALLBACK: String = "baked-fallback"
 
     /**
-     * Comma-separated names of the validated override params a `/render` response does NOT reflect
-     * (`fontScale,uiMode`, `knob.label`, …). Present on the refusals *and* on an accepted
-     * `?fallback=baked` 200, because the pixels themselves carry no signal.
+     * Comma-separated validated override params a `/render` response does not reflect
+     * (`fontScale,uiMode`, `knob.label`, …). Present on refusals and on an accepted
+     * `?fallback=baked` 200.
      */
     const val DROPPED_OVERRIDES_HEADER: String = "X-Compose-Preview-Dropped-Overrides"
 
     /**
-     * `?fallback=baked` — opt in to the un-overridden snapshot instead of a refusal when the live
-     * render lane can't honour the request. Not an override param (never reaches
-     * [ServeOverrides.parse]).
+     * `?fallback=baked`: accept the un-overridden snapshot instead of a refusal when the live lane
+     * can't honour the request. Not an override param.
      */
     const val FALLBACK_PARAM: String = "fallback"
 
     const val FALLBACK_BAKED: String = "baked"
 
     /**
-     * `?chrome=catalog|dev` — a permalink that pins the Catalog / Dev presentation for one request,
-     * outranking the visitor's remembered mode ([ServeWeb.INTERFACE_MODE_COOKIE]). See
-     * `componentBrowserMode`.
+     * `?chrome=catalog|dev`: a permalink pinning the presentation for one request, outranking
+     * [ServeWeb.INTERFACE_MODE_COOKIE]. See `componentBrowserMode`.
      */
     const val CHROME_PARAM: String = "chrome"
 
@@ -18833,90 +16402,48 @@ class ServeHttpServer(
     /** Launchers truncate a `short_name` past about a dozen characters. */
     private const val SHORT_NAME_MAX = 12
 
-    /**
-     * A year, and `immutable` so a reload does not revalidate either.
-     *
-     * Safe only because the URL carries the bundle's content digest: the bytes behind one of these
-     * paths cannot change, so there is nothing for a revalidation to discover.
-     */
+    /** A year, `immutable`: safe only because the URL carries the bundle's content digest. */
     private const val UI_BUILDER_IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
     /**
-     * [STATIC_RESOURCE_CACHE_CONTROL]'s lifetime for a **bare player replay** on a box that is not
-     * `--public`.
-     *
-     * A bare `?rcPlayer=` is a fixed answer to a fixed URL wherever it is served: it replays a
-     * published `ir/<id>.rc` through a named player at the preview's own spec, and every axis that
-     * would make the pixels depend on the request is another override param the "bare" test
-     * excludes. That is as true of a private box as of a public one — what differs is *who* may
-     * hold the bytes. These URLs carry `?token=`, so `private` keeps them out of every shared cache
-     * while still letting the visitor's own browser answer the second request.
-     *
-     * The alternative is what this replaced: `no-store`, which forbids even the browser's memory
-     * cache. The compare wall points a cell at this lane for every player a run did not publish, so
-     * on a catalog the size of `remote-m3` that was a full re-render and a full PNG transfer for
-     * every cell, on every page view and every lazy scroll back into view — against a serial render
-     * lane, and for bytes the visitor had just been shown.
-     *
-     * Same staleness bound the public lane accepts: what these bytes depend on is the *deployed
-     * player*, and a redeploy that swaps it need not move the catalog's generation, so `max-age`
-     * bounds how stale a replay can get and nothing here ever takes `immutable`.
+     * [STATIC_RESOURCE_CACHE_CONTROL]'s lifetime for a bare player replay on a non-`--public` box.
+     * A bare `?rcPlayer=` is a fixed answer to a fixed URL (see the public lane), but these URLs
+     * carry `?token=`, so `private` keeps them out of shared caches while the visitor's browser can
+     * reuse them. Same staleness bound as public: the deployed player can change without moving the
+     * generation, so never `immutable`.
      */
     private const val PRIVATE_REPLAY_CACHE_CONTROL =
       "private, max-age=300, stale-while-revalidate=3600"
 
     /**
-     * Caching for HTML whose body depends on *who is asking* — every page on a server with
-     * `--github-auth-*` configured, because they all render the sign-in chip (signed out → "Sign
-     * in"; signed in → the visitor's login), and some render more besides (the live-preview auth
-     * prompt, the issue-reporter's "filed as @you" tooltip).
+     * Caching for HTML whose body depends on who is asking — every page on a `--github-auth-*`
+     * server, since all render the sign-in chip.
      *
-     * It cannot be [STATIC_PAGE_CACHE_CONTROL]. `public` licenses the CDN in front of the deployed
-     * server to store one visitor's HTML and hand it to the next, so a signed-in visitor's login
-     * leaks to strangers and a stranger's signed-out page comes back to them. And even with no
-     * shared cache at all, `max-age=60, stale-while-revalidate=300` means the *browser's own* cache
-     * replays the pre-sign-in HTML for a minute — served stale for five more while it revalidates
-     * behind the scenes — so returning from the GitHub callback to a page visited moments earlier
-     * paints it signed-out. That is the "it says I'm logged out until I hit refresh" report: a
-     * reload revalidates, which is why the state looks right the moment you ask for it again.
-     *
-     * `no-store` rather than `no-cache` on purpose: these pages carry no ETag, so a revalidation
-     * costs a full re-render anyway, and `no-store` additionally keeps the signed-out HTML out of
-     * the back/forward cache, where a plain Back would otherwise resurrect it.
+     * Not [STATIC_PAGE_CACHE_CONTROL]: `public` would let a CDN serve one visitor's login to
+     * others, and even browser-only `max-age=60, stale-while-revalidate=300` would show a
+     * signed-out page after returning from the OAuth callback. `no-store` rather than `no-cache`:
+     * no ETag means revalidation costs a full render anyway, and it also keeps signed-out HTML out
+     * of the back/forward cache.
      */
     internal const val SIGNED_IN_PAGE_CACHE_CONTROL = "private, no-store"
 
     /**
-     * Caching for a page on a GitHub-auth server that the request proves is **not** personal — no
-     * session cookie, so the HTML is the signed-out rendering every anonymous visitor gets.
+     * Caching for a page on a GitHub-auth server that the request proves is not personal (no
+     * session cookie).
      *
-     * [SIGNED_IN_PAGE_CACHE_CONTROL] used to cover this case too, and `no-store` on an anonymous
-     * public page is a stronger claim than the page deserves: it tells every intermediary and every
-     * link-preview service that this response must not be retained at all, which is a poor thing to
-     * say about a page whose whole purpose is to be shared into a chat and unfurled.
-     *
-     * `max-age=0` keeps the *browser* exactly where `no-store` had it — every visit revalidates, so
-     * the sign-in chip can never be replayed stale, which is the regression the constant above
-     * exists to prevent. `s-maxage` licenses only shared caches, and only in combination with the
-     * `Vary: Cookie` that [markGeneration] appends alongside this value: a request carrying a
-     * session key is a different cache entry and never reaches these bytes. Deliberately no
-     * `stale-while-revalidate` — that is precisely the directive that would let a browser paint the
-     * pre-sign-in HTML after the visitor has signed in.
-     *
-     * One thing `no-store` did that this doesn't: block the back/forward cache. A visitor who signs
-     * in and then presses Back can see the signed-out chrome until they reload. That is a cosmetic
-     * wart for the few who sign in, traded against every shared link on the server being storable.
+     * `max-age=0` makes the browser revalidate every visit, so the chip never replays stale.
+     * `s-maxage` licenses shared caches only together with the `Vary: Cookie` [markGeneration]
+     * appends, so sessioned requests never reach these bytes. No `stale-while-revalidate`, which
+     * would show pre-sign-in HTML. Unlike `no-store`, back/forward cache may briefly show
+     * signed-out chrome after sign-in — accepted so shared links are storable.
      */
     internal const val ANON_PAGE_CACHE_CONTROL = "public, max-age=0, s-maxage=300, must-revalidate"
 
     /**
-     * Caching for an assembled HTML page. Public and auth-free ⇒ short edge caching; a token-gated
-     * or signed-in response is personal and is not stored at all; an anonymous page on an auth
-     * server is public bytes that shared caches may keep ([ANON_PAGE_CACHE_CONTROL]).
-     *
-     * [signedIn] is only consulted when auth is configured *and* the server is public. A
-     * token-gated host stays on `no-store` whoever is asking: its URLs carry a credential, and
-     * "nobody is signed in" says nothing about whether the response may be stored.
+     * Caching for an assembled HTML page: public and auth-free ⇒ short edge caching; token-gated or
+     * signed-in ⇒ not stored; anonymous on an auth server ⇒ [ANON_PAGE_CACHE_CONTROL]. [signedIn]
+     * matters only when auth is configured and the server is public; a gated host's URLs carry a
+     * credential, so it stays `no-store`.
      */
     internal fun pageCacheControl(
       githubAuthConfigured: Boolean,
@@ -18931,10 +16458,7 @@ class ServeHttpServer(
       }
 
     /**
-     * The viewer page follows [pageCacheControl]. It used to drop to `no-store` only for a
-     * *live-streaming* preview under GitHub auth, on the theory that the live lane was the only
-     * personalised thing on the page — but the sign-in chip is on every viewer, live or not, so the
-     * non-live viewer was being cached with one visitor's identity baked in.
+     * The viewer page follows [pageCacheControl]: the sign-in chip is on every viewer, live or not.
      */
     internal fun viewerCacheControl(
       githubAuthConfigured: Boolean,
@@ -18949,9 +16473,8 @@ class ServeHttpServer(
     private const val RC_PLAYER_RESOURCE = "/rc-player/bundle.js"
 
     /**
-     * The Android players a shared `/d/<id>` document can be drawn with, on a resident catalog's
-     * daemon ([docRcDonor]). The default the capture bakes through first, as the viewer orders
-     * them.
+     * The Android players a shared `/d/<id>` document can be drawn with on a resident catalog's
+     * daemon ([docRcDonor]), default first, in viewer order.
      */
     private val DOC_DAEMON_PLAYERS: List<RcPlayerBackend> =
       listOf(
@@ -18967,58 +16490,41 @@ class ServeHttpServer(
     private const val DOC_RENDER_MAX_PX = 4096
 
     /**
-     * A vendored browser player bundle baked into the CLI jar: its bytes plus a content-hash ETag.
-     * The bundles are fixed at build time, so a strong hash makes conditional requests cheap (a 304
-     * after the cache window instead of re-downloading hundreds of KB) and stays stable across
-     * restarts and replicas. [bytes] is empty when the resource is somehow absent (a broken jar) —
-     * the route then 404s instead of serving nothing.
+     * A vendored browser player bundle from the CLI jar: bytes plus a content-hash ETag (stable
+     * across restarts and replicas, cheap 304s). Empty [bytes] (a broken jar) makes the route 404.
      */
     internal class PlayerAsset(val bytes: ByteArray, val etag: String)
 
     private val playerAssets = java.util.concurrent.ConcurrentHashMap<String, PlayerAsset>()
 
     /**
-     * The send-pipeline phase that stamps an `ETag` on an assembled HTML page, inserted before
-     * `ContentEncoding` so it reads the page rather than a gzip frame of it. See its interceptor.
+     * The send-pipeline phase that stamps an `ETag` on assembled HTML, before `ContentEncoding` so
+     * it hashes the page rather than gzip.
      */
     private val HTML_ENTITY_TAG_PHASE = PipelinePhase("HtmlEntityTag")
 
     /**
-     * The body of a `304`: no bytes, and every header already staged on the response — the
-     * `Cache-Control`, the `Vary`, the `ETag` — still delivered, which is exactly what a
-     * revalidating cache is asking to be told.
+     * The body of a `304`: no bytes, with the staged `Cache-Control`, `Vary` and `ETag` headers
+     * still delivered.
      */
     private object NotModifiedResponse : OutgoingContent.NoContent() {
       override val status: HttpStatusCode = HttpStatusCode.NotModified
     }
 
-    /**
-     * The one element an assembled page's `ETag` is computed WITHOUT — see
-     * [ServeWeb.VOLATILE_ATTR].
-     */
+    /** The element an assembled page's `ETag` excludes; see [ServeWeb.VOLATILE_ATTR]. */
     private val VOLATILE_MARKUP = Regex("<span ${ServeWeb.VOLATILE_ATTR}>[^<]*</span>")
 
     /**
-     * A strong ETag for an assembled page: [contentEtag] over the markup with every volatile
-     * element elided.
-     *
-     * Hashing the delivered bytes outright looks more honest and is useless here. The one run that
-     * moves between two otherwise byte-identical renderings is the visit tally, and the request
-     * that revalidates a page is itself the visit that bumps it — so a body hash turns over on
-     * every navigation and no page a visitor returns to ever answers `304`. Eliding it costs a
-     * count at most one `max-age` stale, which is what a shared cache serving under `s-maxage=300`
-     * has always handed anonymous visitors anyway.
-     *
-     * Everything a page's meaning depends on is still hashed, so a `304` remains a true statement
-     * about the page.
+     * A strong ETag for an assembled page: [contentEtag] over the markup with volatile elements
+     * elided. Hashing raw bytes would change on every visit (the visit tally), so no page would
+     * ever 304; the cost is a count up to one `max-age` stale. Everything meaningful is still
+     * hashed.
      */
     internal fun pageEntityTag(html: String): String =
       contentEtag(VOLATILE_MARKUP.replace(html, "").encodeToByteArray())
 
     /**
-     * Whether an `If-None-Match` names [etag]. A list, `*`, and a tag some intermediary weakened to
-     * `W/"…"` all count: the question a revalidation asks is "do you still have these bytes", and
-     * answering `200` to a client that plainly does is the round trip the header exists to avoid.
+     * Whether an `If-None-Match` names [etag]: a list, `*`, and a `W/"…"`-weakened tag all count.
      */
     internal fun ifNoneMatchHits(header: String?, etag: String): Boolean {
       val value = header?.trim() ?: return false
@@ -19027,9 +16533,8 @@ class ServeHttpServer(
     }
 
     /**
-     * A strong ETag over exactly [bytes] — size and a SHA-256 prefix, the same shape [playerAsset]
-     * builds for a vendored bundle. Used where a response body is produced per request rather than
-     * loaded once, so there is no natural hash to reach for.
+     * A strong ETag over exactly [bytes] (size and SHA-256 prefix, as [playerAsset] builds), for
+     * per-request bodies.
      */
     internal fun contentEtag(bytes: ByteArray): String {
       val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
@@ -19067,8 +16572,8 @@ class ServeHttpServer(
     private val MAX_DOC_BYTES: Long = ServeDocStore.DEFAULT_MAX_DOC_BYTES.toLong()
 
     /**
-     * Request-body ceiling on `POST /images`, enforced as the body streams in — the store's own
-     * per-image cap is the same number, but it only sees bytes that were already buffered.
+     * Request-body ceiling on `POST /images`, enforced while streaming; the store's per-image cap
+     * only sees buffered bytes.
      */
     private val MAX_IMAGE_BYTES: Long = ServeImageStore.DEFAULT_MAX_IMAGE_BYTES.toLong()
 
@@ -19084,23 +16589,16 @@ class ServeHttpServer(
       }
 
     /**
-     * How long the readiness prober waits between failed render attempts before retrying (short, so
-     * a daemon that's still warming latches `ready` promptly once it can render). Only matters
-     * while the latch is cold; the loop exits on first success.
+     * Delay between failed readiness render attempts; short so a warming daemon latches promptly.
      */
     private const val READINESS_PROBE_RETRY_MILLIS = 2000L
 
-    /**
-     * How many recent failures a bug report carries. An issue body is read by a human: a server
-     * that has been failing all week has hundreds, and the tail repeats the head. `/status` keeps
-     * the full window.
-     */
+    /** How many recent failures a bug report carries; `/status` keeps the full window. */
     private const val BUG_REPORT_FAILURE_LIMIT = 8
 
     /**
-     * Authorisation decision for a request: open when [isPublic], otherwise the [provided] token
-     * must match [token] (constant-time). Pure so the gate is unit-testable without standing up the
-     * server. A bad/absent token in non-public mode is rejected (the caller 404s for obscurity).
+     * Authorisation decision for a request: open when [isPublic], otherwise [provided] must match
+     * [token] (constant-time). Pure for unit testing. Rejection means the caller 404s.
      */
     fun isAuthorized(token: String, provided: String?, isPublic: Boolean): Boolean =
       isPublic || ServeUrls.tokensMatch(token, provided)
@@ -19117,18 +16615,15 @@ class ServeHttpServer(
     private const val LEGACY_WASM_UI_SYSTEM = "preview-ui"
 
     /**
-     * Caching for the `/hero/` lane. The file name is the content hash, so the bytes behind a URL
-     * are fixed for all time — `immutable` tells the browser not to even revalidate, which is what
-     * makes a repeat visit to the front door paint its imagery with zero requests. A republished
-     * catalog changes the hash, hence the URL, so there is nothing to invalidate.
+     * Caching for `/hero/`: the file name is the content hash, so `immutable` and repeat visits
+     * make no requests. A republish changes the URL.
      */
     private const val HERO_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
     /**
-     * A published capture. Public and cacheable by a shared proxy for a few minutes, but always
-     * revalidated by the client, because this route's URL is derived from the sticker the capture
-     * accompanies rather than from its bytes — see [handleMotion]. On a token-gated catalog the
-     * bytes follow the same `no-store` policy as every other private response.
+     * A published capture: shared-cacheable for a few minutes but always revalidated, since the URL
+     * derives from the sticker, not the bytes ([handleMotion]). Token-gated catalogs use
+     * `no-store`.
      */
     internal const val MOTION_CACHE_CONTROL = "public, max-age=0, s-maxage=300, must-revalidate"
 
@@ -19140,10 +16635,9 @@ class ServeHttpServer(
         .take(16)
 
     /**
-     * Caching for the site icons ([ServeSiteIcon]). Public on every server, token-gated or not:
-     * these are drawn from the build's own chrome and carry nothing a token protects — and a
-     * favicon request doesn't present the token anyway. A day rather than `immutable`, because
-     * unlike the hashed lanes these live at well-known paths whose bytes change across a deploy.
+     * Caching for site icons ([ServeSiteIcon]): public on every server (no protected content, and
+     * favicon requests carry no token). A day, not `immutable`, since well-known paths change
+     * across deploys.
      */
     private const val SITE_ICON_CACHE_CONTROL = "public, max-age=86400"
 
@@ -19154,34 +16648,23 @@ class ServeHttpServer(
     private const val DEFAULT_OPTIMIZER_PAUSE_MINUTES = 30L
 
     /**
-     * Longest pause the route will take. A pause is a *deferral*, not a disable — turning the cache
-     * off for good is `--no-theme-optimization`, which survives a restart and is visible in the
-     * config rather than as an unexplained quiet server days later.
+     * Longest pause allowed. A pause defers; disabling for good is `--no-theme-optimization`, which
+     * is visible in config.
      */
     private const val MAX_OPTIMIZER_PAUSE_MINUTES = 24L * 60L
 
     /**
-     * Caching for the prebaked image lanes: `/hero/` and `?thumb=` on the render lane.
-     *
-     * Content-addressed and therefore `immutable` — but only on a **public** server. On a
-     * token-gated one those URLs carry the bearer token, and `public, immutable` would license a
-     * shared proxy to keep the pixels for a year and hand them to anyone presenting the URL, long
-     * after the token was revoked. Private catalog imagery is exactly what the token exists to
-     * gate, so it follows the same `no-store` policy as every other private response
-     * ([pageCacheControl]). The ETag is still sent; a private response simply isn't stored to
-     * revalidate against.
-     *
-     * Pure, like [isAuthorized], so the policy is unit-testable without standing up a server.
+     * Caching for the prebaked image lanes (`/hero/` and `?thumb=`): content-addressed and
+     * `immutable`, but only on a public server. On a token-gated one the URLs carry the token, so
+     * `no-store` like other private responses ([pageCacheControl]); the ETag is still sent. Pure,
+     * like [isAuthorized].
      */
     internal fun prebakedImageCacheControl(isPublic: Boolean): String =
       if (isPublic) HERO_CACHE_CONTROL else DYNAMIC_RESOURCE_CACHE_CONTROL
 
     private val JSON = Json { encodeDefaults = true }
 
-    /**
-     * A compact human duration for the status page (`3d 4h`, `12m 5s`, `42s`). Deterministic given
-     * [seconds], so a fixture that passes fixed inputs renders a stable golden.
-     */
+    /** A compact human duration (`3d 4h`, `12m 5s`, `42s`); deterministic for stable goldens. */
     internal fun formatDuration(seconds: Long): String {
       val s = seconds.coerceAtLeast(0)
       val d = s / 86_400
@@ -19207,9 +16690,8 @@ class ServeHttpServer(
     }
 
     /**
-     * Content type for a Wasm-app asset by extension. `application/wasm` matters: the browser's
-     * `WebAssembly.instantiateStreaming` rejects a wasm served as `octet-stream`. `.mjs`/`.js` must
-     * be a JS type so the ES-module loader runs.
+     * Content type for a Wasm-app asset. `application/wasm` is required by
+     * `WebAssembly.instantiateStreaming`; `.mjs`/`.js` need a JS type for the module loader.
      */
     internal fun wasmContentType(name: String): ContentType =
       when {
@@ -19243,10 +16725,9 @@ class ServeHttpServer(
     }
 
     /**
-     * Pick a bindable port: try [requested], then increment up to [range] times when it's taken.
-     * Probes with a short-lived [ServerSocket] on the target host; there's a small TOCTOU window
-     * before Ktor binds, acceptable for a developer-facing local server. Falls back to an ephemeral
-     * port (0 → OS-assigned) if nothing in the range is free.
+     * Pick a bindable port: try [requested], then increment up to [range] times. Probes with a
+     * short-lived [ServerSocket]; the TOCTOU window before Ktor binds is acceptable for a local dev
+     * server. Falls back to an ephemeral port.
      */
     private fun pickPort(host: String, requested: Int, range: Int): Int {
       val bindAddr = if (host == ServeUrls.ALL_INTERFACES) null else InetAddress.getByName(host)
@@ -19272,8 +16753,8 @@ private data class VersionResponse(
   /** The host CLI's released version ([SERVE_VERSION]). */
   val version: String,
   /**
-   * The schema id the `/api/previews` + page surface speaks, so a client can feature-detect. `v3`
-   * adds the catalog snapshot provenance used to gate native substitutions.
+   * The schema id the `/api/previews` + page surface speaks, for feature detection. `v3` adds the
+   * catalog snapshot provenance that gates native substitution.
    */
   val serveSchema: String = "compose-preview-serve/v3",
   /** True when the box serves token-free (public preview server); false for a token-gated serve. */
@@ -19290,10 +16771,9 @@ private data class CatalogMcpAuthorizationResponse(
 )
 
 /**
- * `GET /status.json` (and `GET /status?format=json`): the machine-readable server-status snapshot a
- * monitor or a Home Assistant REST sensor polls. Flat-ish on purpose so `status` and the grouped
- * counts (`catalogs`, `daemons`) map cleanly onto sensor states/attributes; the detail lives in the
- * `catalogList` / `runningServers` / `recentDaemonFailures` arrays.
+ * `GET /status.json` (and `?format=json`): the machine-readable status snapshot for monitors / Home
+ * Assistant. Flat-ish so `status` and the grouped counts (`catalogs`, `daemons`) map to sensor
+ * states; detail is in `catalogList` / `runningServers` / `recentDaemonFailures`.
  */
 @Serializable
 private data class StatusResponse(
@@ -19313,93 +16793,63 @@ private data class StatusResponse(
   val runningServers: List<RunningServerDto>,
   val recentDaemonFailures: List<FailureDto>,
   /**
-   * Delivery-branch read counters ([BranchFetchSnapshot]). Null until this server has read a branch
-   * at all. Additive on `compose-preview-serve/status/v1`.
-   *
-   * This is what makes "is GitHub rate-limiting us?" a question you answer by looking rather than
-   * by reproducing it with `curl` — `throttled` climbing while `notFound` holds still is a rate
-   * limit, and `notFound` on its own is the ordinary case of a catalog declaring an asset a given
-   * revision never published.
+   * Delivery-branch read counters ([BranchFetchSnapshot]); null until a branch has been read.
+   * Additive on `compose-preview-serve/status/v1`. `throttled` climbing while `notFound` holds is a
+   * rate limit; `notFound` alone is normal.
    */
   val branchFetch: BranchFetchSnapshot? = null,
   /**
-   * Cross-catalog optimizer admission ([ThemeOptimizerAdmissionSnapshot]).
-   *
-   * Sits beside the per-catalog `catalogList[].themeOptimization` rows and answers what those
-   * cannot: how many passes are *inside* the door versus parked at it. A box where every catalog
-   * reports "running" and nothing progresses looks identical, per catalog, to a box doing fine.
+   * Cross-catalog optimizer admission ([ThemeOptimizerAdmissionSnapshot]): how many passes are
+   * inside the door versus parked — invisible from per-catalog rows.
    */
   val themeOptimizer: ThemeOptimizerAdmissionSnapshot? = null,
   /**
-   * The theme cache's disk tier ([ThemeCacheStoreSnapshot]), or null when it is memory-only.
-   *
-   * Answers the question the per-catalog rows could not: whether warming is *accumulating*. A box
-   * whose `cached` counts keep returning to zero and whose `themeCache` is absent is not slow — it
-   * is starting over, which is what m3-catalog did 7-10 times a day before this existed.
+   * The theme cache's disk tier ([ThemeCacheStoreSnapshot]), or null when memory-only. Shows
+   * whether warming accumulates or restarts from zero.
    */
   val themeCache: ThemeCacheStoreSnapshot? = null,
   /**
-   * The catalog blob cache ([CatalogBlobPoolSnapshot]), or null on a server that publishes no
-   * catalogs.
+   * The catalog blob cache ([CatalogBlobPoolSnapshot]), or null without catalogs.
    *
-   * Read `persistenceConfigured` and `adopted` first — but read them for what they are. The first
-   * says only that an operator named a directory, which is not proof the storage outlives the
-   * container: `--catalog-cache-dir /var/cache/x` inside an image with no volume there is
-   * configured and just as ephemeral. `adopted` is the evidence — blobs found at open, so non-zero
-   * after a restart is the pool actually having survived one.
+   * `persistenceConfigured` only means a directory was named (it may not be a volume); `adopted`
+   * (blobs found at open) is the evidence the pool survived a restart.
    *
-   * `hits` here is the **aggregate** across all three lanes the pool serves — small assets, the
-   * executable bundles, and the content-addressed resource pool — while `branchFetch.cached` counts
-   * only the small-asset subset. So `hits` is normally the larger of the two and the gap is the
-   * executable tier; they are not the same number, and reading them as one would make a healthy
-   * warm start look inconsistent. What says the feature is working is either of them climbing while
-   * `branchFetch.attempted` flattens across a restart.
+   * `hits` aggregates all three lanes (small assets, executable bundles, the resource pool), while
+   * `branchFetch.cached` counts only small assets, so `hits` is normally larger. Success shows as
+   * either climbing while `branchFetch.attempted` flattens across a restart.
    *
-   * `blobs`/`bytes` against `maxBytes` says whether the sweeper is keeping up — both are published
-   * by the last sweep rather than censused per request, so they lag a write by at most one sweep
-   * interval. `corrupt` above zero says a volume is losing bytes, since every blob is named by its
-   * own digest and re-verified on read.
+   * `blobs`/`bytes` vs `maxBytes` shows whether the sweeper keeps up (published per sweep).
+   * `corrupt` above zero means a volume is losing bytes.
    */
   val catalogCache: CatalogBlobPoolSnapshot? = null,
   /**
-   * Server-wide render-latency roll-up across the running live daemons (see
-   * [RenderPerfSnapshot.aggregate] — counts sum, `firstRenderMs` is the worst first render,
-   * percentiles stay per-daemon). Null when no live daemon is up or none has stats yet. Additive on
-   * `compose-preview-serve/status/v1`; per-daemon detail is on `runningServers[].renderStats`.
+   * Server-wide render-latency roll-up across running live daemons ([RenderPerfSnapshot.aggregate]:
+   * counts sum, `firstRenderMs` is the worst, percentiles per daemon). Null without stats. Additive
+   * on `compose-preview-serve/status/v1`; per-daemon detail in `runningServers[].renderStats`.
    */
   val renderStats: RenderPerfSnapshot? = null,
   /**
-   * Live-lane frame counters across every open stream socket ([LiveFramePerfSnapshot]) — achieved
-   * fps, the painted/heartbeat split, and payload bytes. Null until a live socket has opened.
-   * Additive on `compose-preview-serve/status/v1`, like [renderStats], and beside it deliberately:
-   * `renderStats` measures `/render` round-trips and cannot see streamed frames at all.
+   * Live-lane frame counters across open stream sockets ([LiveFramePerfSnapshot]): fps,
+   * painted/heartbeat split, payload bytes. Null until a socket opens. Additive; `renderStats`
+   * can't see streamed frames.
    */
   val liveFrames: LiveFramePerfSnapshot? = null,
   /**
-   * Playground lane health, or null when the lane isn't wired. Additive on
-   * `compose-preview-serve/status/v1`, like [renderStats]. See [PlaygroundHealth] for why each
-   * field is here — in short, the playground can be half-up in several ways that were previously
-   * invisible without shell access to the box.
+   * Playground lane health, or null when not wired. Additive on `compose-preview-serve/status/v1`.
+   * See [PlaygroundHealth].
    */
   val playground: PlaygroundDto? = null,
   /**
-   * Agent access grants, or null when the lane isn't enabled. Additive on
-   * `compose-preview-serve/status/v1`, like [renderStats] and [playground].
-   *
-   * Counts and fingerprints only. A monitor should be able to alert on "an agent grant is live on
-   * the production box" without the alerting pipeline becoming somewhere a credential is stored.
+   * Agent access grants, or null when disabled. Additive. Counts and fingerprints only, so alerting
+   * pipelines never store credentials.
    */
   val agentAccess: AgentAccessDto? = null,
   /** Aggregate UI-builder pressure counters. Owner and document identifiers are never included. */
   val uiBuilder: UiBuilderDto? = null,
   /**
-   * This container's process census ([ServeProcessCensusSnapshot]), or null off Linux.
-   *
-   * The one field here that is an alert rather than a gauge is `zombies`: the server spawns render
-   * daemons, compile jails and UI-builder renderers as subprocesses, and every other count on this
-   * response is session-level, so an unreaped-child leak was previously invisible without `docker
-   * exec … ps`. See the snapshot's own doc for the measured incident. Additive on
-   * `compose-preview-serve/status/v1`.
+   * This container's process census ([ServeProcessCensusSnapshot]), or null off Linux. `zombies` is
+   * the alert: render daemons, compile jails and UI-builder renderers are subprocesses, and every
+   * other count is session-level. Additive on `compose-preview-serve/status/v1`.
    */
   val processes: ServeProcessCensusSnapshot? = null,
 )
@@ -19424,25 +16874,17 @@ private data class UiBuilderDto(
   val unusableDesigns: Int = 0,
   val degradedDesigns: Int = 0,
   /**
-   * Stored designs re-pinned to the served catalog reference as they loaded, and the CLASS of the
-   * exception that stopped the rewrite being written when one did.
-   *
-   * Both are how an operator sees whether a source flip has converged on disk. The count is
-   * non-zero on the first start after the flip and zero afterwards; a count that stays non-zero, or
-   * a failure, means the stored files are still on the old pin.
-   *
-   * The exception's message is deliberately not here. This response is unauthenticated on a
-   * `--public` host and the store names the design and the absolute state path in its own messages;
-   * the class name says which layer refused without saying whose design it was.
+   * Stored designs re-pinned to the served catalog reference on load, and the class of the
+   * exception that stopped a rewrite being written, if any. Shows whether a source flip has
+   * converged on disk (non-zero once after the flip, then zero). Only the class, not the message:
+   * this is unauthenticated on `--public`, and messages name designs and state paths.
    */
   val rePinnedDesigns: Int = 0,
   val rePinPersistenceFailure: String? = null,
   /**
-   * Durable state bytes against the ceiling a save is refused at, and the percentage between them.
-   *
-   * Null when the storage bounds nothing, so a status reader can tell "not measured" apart from a
-   * measured 0%. The percentage is carried rather than left to be computed because it is the number
-   * an alert gets written against, and two readers dividing it two ways is how thresholds drift.
+   * Durable state bytes against the save-refusal ceiling, and the percentage. Null when unbounded,
+   * so "not measured" differs from 0%. The percentage is carried so alert thresholds don't drift
+   * between readers.
    */
   val storageBytes: Long? = null,
   val storageMaximumBytes: Long? = null,
@@ -19479,8 +16921,8 @@ private data class PlaygroundDto(
   /** Which admission posture let the lane serve (the gate's own words). */
   val admittedBy: String,
   /**
-   * False when only the compile engine is up (`--compile-engine`): the UI builder compiles through
-   * it, and `/playground`, the run route and `/pg/` are not mounted.
+   * False when only the compile engine is up (`--compile-engine`): `/playground`, the run route and
+   * `/pg/` aren't mounted.
    */
   val publicSurface: Boolean = true,
   val sandbox: SandboxDto,
@@ -19515,8 +16957,8 @@ private data class RateLimitDto(
   /** Callers holding a compile permit right now. */
   val activeCallers: Int,
   /**
-   * Distinct callers the limiter is tracking. A number pinned near its cap on a public host is the
-   * signature of a key-space spray, not of an audience.
+   * Distinct callers the limiter tracks; pinned near its cap on a public host suggests a key-space
+   * spray.
    */
   val trackedCallers: Int,
 )
@@ -19524,15 +16966,13 @@ private data class RateLimitDto(
 @Serializable
 private data class CatalogSelectorDto(
   /**
-   * Catalogs the selector offers right now. Empty on a freshly started host (nothing has loaded
-   * yet) and on one whose catalogs all declare a backend this host cannot render — `modes` and the
-   * startup log tell those apart.
+   * Catalogs the selector offers now. Empty on a fresh host or when every catalog needs a backend
+   * this host can't render; `modes` and the startup log distinguish them.
    */
   val offered: List<String>,
   /**
-   * How many of them hold a resolved compile classpath, against [limit]. Null on a
-   * [ServeSites]-scoped status: the count is box-wide with no per-catalog breakdown, so a scoped
-   * response omits it rather than pairing a filtered [offered] with a total that contradicts it.
+   * How many hold a resolved compile classpath, against [limit]. Null on a [ServeSites]-scoped
+   * status, since the count is box-wide.
    */
   val resolved: Int? = null,
   /** `--playground-catalog-limit`; at [resolved] == this, a run naming a new catalog is refused. */
@@ -19543,14 +16983,13 @@ private data class CatalogSelectorDto(
 private data class SandboxDto(
   val profile: String,
   /**
-   * False ⇒ `none`: no jail, and **no `-Xmx`, CPU cap, or hard TTL on snippet JVMs either**. On a
-   * host with a large cgroup limit that matters — an uncapped JVM sizes its default max heap at a
-   * quarter of the limit.
+   * False ⇒ `none`: no jail, and no `-Xmx`, CPU cap or hard TTL on snippet JVMs — an uncapped JVM
+   * takes a quarter of a large cgroup limit as max heap.
    */
   val active: Boolean,
   /**
-   * True ⇒ the configured jail could not launch on this host and was dropped; the JVM caps still
-   * apply but the snippet is not contained. Look at `probe.detail` for why it couldn't launch.
+   * True ⇒ the configured jail couldn't launch and was dropped; JVM caps still apply but the
+   * snippet isn't contained. See `probe.detail`.
    */
   val jailDropped: Boolean = false,
   val memoryMb: Int,
@@ -19592,10 +17031,8 @@ private data class CatalogSummaryDto(
 )
 
 /**
- * The spare Android sandbox workers ([ServeSpareSandboxes]): what is warm and waiting, what is
- * still booting, and — the figures that say whether the pool is earning its memory — how many
- * daemon launches adopted spares, how many reaped daemons handed theirs back, and how many launches
- * went cold because nothing warm matched.
+ * The spare Android sandbox workers ([ServeSpareSandboxes]): warm, booting, and whether the pool
+ * earns its memory (spares adopted, returned by reaped daemons, and cold launches with no match).
  */
 @Serializable
 private data class SpareSandboxesDto(
@@ -19620,42 +17057,32 @@ private data class DaemonSummaryDto(
   val liveSeatsAvailable: Int,
   val liveSeatsUnbounded: Boolean,
   /**
-   * The slice of [liveSeatsTotal] only the per-preview daemon lane may draw on, and how much of it
-   * is free. Published because its absence is exactly what made a total starvation invisible: with
-   * every general permit held by resident catalog daemons, `liveSeatsAvailable` read `0 / 8` and
-   * `liveSeatRefusals` read `0` (the background path never counted one), while every
-   * supplement-module preview on the box answered `503 render busy` forever.
+   * The slice of [liveSeatsTotal] reserved for the per-preview daemon lane, and how much is free.
+   * Published because without it, resident catalog daemons holding every general permit starved
+   * that lane invisibly.
    */
   val perPreviewSeatsTotal: Int = 0,
   val perPreviewSeatsAvailable: Int = 0,
   /**
-   * Live sessions turned away for want of seats since startup, monotonic. A counter rather than a
-   * gauge because a refusal is an event: [liveSeatsAvailable] beside it is a level, and on a
-   * lightly-used box sampling that level almost never coincides with the pressure. Zero over a long
-   * uptime is the evidence that the seat budget is comfortable; a climbing figure is what would
-   * justify raising it, or evicting an idle daemon in favour of an active one.
+   * Live sessions refused for want of seats since startup (monotonic). A counter because refusals
+   * are events a sampled gauge misses; zero over long uptime means the budget is comfortable.
    */
   val liveSeatRefusals: Long = 0,
   /**
-   * Refusals for a session id the registry did not have — see
-   * [LiveSeatLimiter.unverifiedRefusalCount]. Kept apart from [liveSeatRefusals] because anyone can
-   * generate these against a public box, while on a `--revisions` box they are genuine
-   * first-request demand.
+   * Refusals for a session id the registry didn't have ([LiveSeatLimiter.unverifiedRefusalCount]);
+   * separate because anyone can generate them on a public box, though on `--revisions` they are
+   * real demand.
    */
   val liveSeatRefusalsUnverified: Long = 0,
   /**
-   * Sessions holding an open lease — see [ServeSessionRegistry.leasedSessions].
-   *
-   * Non-empty means those sessions are held resident: their daemons will not be suspended and the
-   * `--exit-when-idle` watchdog will not fire. Normally short-lived (a WebSocket, an in-flight
-   * asset fetch); an entry that persists across polls on a box serving no traffic is either an open
-   * browser tab or a leaked lease, and [busyLeasedSessions] tells those two apart.
+   * Sessions holding an open lease ([ServeSessionRegistry.leasedSessions]), which keeps them
+   * resident and blocks `--exit-when-idle`. Usually short-lived; one persisting on an idle box is
+   * an open tab or a leaked lease, which [busyLeasedSessions] distinguishes.
    */
   val leasedSessions: List<String> = emptyList(),
   /**
-   * The holders among [leasedSessions] that have been active recently — see
-   * [ServeSessionRegistry.busyLeasedSessions]. Non-empty is what makes the server-wide idle clock
-   * read *busy*, which is the state that stands the theme optimizer down.
+   * The recently active holders among [leasedSessions] ([ServeSessionRegistry.busyLeasedSessions]);
+   * non-empty makes the idle clock read busy and stands the theme optimizer down.
    */
   val busyLeasedSessions: List<String> = emptyList(),
   /** Null when the server keeps no spare sandbox workers (`--spare-sandboxes 0`). */
@@ -19663,12 +17090,9 @@ private data class DaemonSummaryDto(
 )
 
 /**
- * One `--catalog-registry` nomination, as the status surface reports it.
- *
- * Public because it reaches [ServeHttpServer]'s constructor. Deliberately carries the latest read's
- * OUTCOME and not just the nomination: "nominated `yschimke/compose-preview-imports`" alone cannot
- * distinguish a registry contributing nothing because the document is unreachable from one
- * contributing nothing because it is empty, and those need opposite fixes.
+ * One `--catalog-registry` nomination as status reports it. Public because it reaches
+ * [ServeHttpServer]'s constructor. Carries the latest read's outcome so an unreachable registry and
+ * an empty one are distinguishable.
  */
 @Serializable
 public data class CatalogRegistryStatus(
@@ -19676,13 +17100,9 @@ public data class CatalogRegistryStatus(
   val repo: String,
   /** The explicitly nominated `@ref`. Null ⇒ the default ref candidates were tried in order. */
   val ref: String? = null,
-  /**
-   * Systems this registry contributes now — its last clean document, read at boot or by the sync.
-   */
+  /** Systems this registry contributes now, from its last clean document. */
   val catalogs: Int = 0,
-  /**
-   * The contributed system ids, so a reader can see WHICH catalogs a registry is responsible for.
-   */
+  /** The contributed system ids. */
   val systems: List<String> = emptyList(),
   /** Why the read produced nothing, when it did. Null on a successful read. */
   val error: String? = null,
@@ -19703,10 +17123,7 @@ private data class ConfigDto(
   val acceptImages: Boolean = false,
   /** TTL of an uploaded image link in seconds; `0` when the image lane is off. */
   val imageTtlSeconds: Long = 0,
-  /**
-   * The repository an uploader must have access to. Non-null exactly when [acceptImages] is set —
-   * the lane cannot start without one, so this doubles as the answer to "gated on what?".
-   */
+  /** The repository uploaders must access; non-null exactly when [acceptImages] is set. */
   val imageUploadRepository: String? = null,
   /** Live uploaded images, and what they occupy — the lane's whole footprint is heap. */
   val imagesHeld: Int = 0,
@@ -19714,14 +17131,12 @@ private data class ConfigDto(
   /** Catalog auto-refresh interval; `0` ⇒ disabled. */
   val catalogRefreshSeconds: Long,
   /**
-   * The `--catalog-registry` nominations and what each contributes now. Empty list ⇒ no nomination;
-   * a nomination with `catalogs: 0` and a non-null `error` ⇒ nominated but unreadable. The two are
-   * worth telling apart, which is the whole reason this is here.
+   * The `--catalog-registry` nominations and their contributions. Empty ⇒ none nominated;
+   * `catalogs: 0` with an `error` ⇒ nominated but unreadable.
    */
   val catalogRegistries: List<CatalogRegistryStatus> = emptyList(),
   /**
-   * Catalog-owned UI-builder catalogs this box cannot serve fully, with why (left out, or served
-   * with templates that do not read). Empty when every owned catalog composes.
+   * Catalog-owned UI-builder catalogs this box can't fully serve, with why. Empty when all compose.
    */
   val uiBuilderCatalogProblems: Map<String, String> = emptyMap(),
   val maxConcurrentRenders: Int,
@@ -19735,10 +17150,9 @@ private data class CatalogDto(
   val listed: Boolean,
   val title: String? = null,
   /**
-   * [BundleVerifier.summary] verdict. For a suspended live catalog this is the last-known verdict
-   * (with [metaStale] set) — null means genuinely unknown: a non-catalog session, or a catalog this
-   * server has not yet had resident. Never read a null as "untrusted"; the verdict string
-   * `unverified` is what says that.
+   * [BundleVerifier.summary] verdict. For a suspended live catalog, the last-known verdict (with
+   * [metaStale]). Null means unknown (non-catalog session, or never resident) — never "untrusted";
+   * `unverified` says that.
    */
   val trust: String? = null,
   val previews: Int? = null,
@@ -19761,11 +17175,9 @@ private data class CatalogDto(
   /** Canonical catalog path (`/<id>/`). */
   val path: String,
   /**
-   * This row's `title`/`trust`/`previews`/`degradation`/provenance are a **last-known snapshot**
-   * taken while the catalog was resident, not a live read — its daemon is idle and `/status` never
-   * resumes one. The facts are branch-derived, so a suspension doesn't invalidate them; a monitor
-   * that wants only live-read rows can filter on this. Additive on
-   * `compose-preview-serve/status/v1`.
+   * This row's `title`/`trust`/`previews`/`degradation`/provenance are a last-known snapshot (the
+   * daemon is idle and `/status` never resumes it). Branch-derived, so still valid; monitors
+   * wanting live rows can filter on this. Additive on `compose-preview-serve/status/v1`.
    */
   val metaStale: Boolean = false,
   /** `pending`, `loaded`, `failed`, or `stale` (last good copy + latest refresh error). */
@@ -19789,14 +17201,14 @@ private data class RunningServerDto(
   val activeStreams: Int,
   val uptimeSeconds: Long? = null,
   /**
-   * Serve-side render-latency counters for this daemon's live lane ([RenderPerfSnapshot]) — cold vs
-   * warm counts, first-render latency, and recent p50/p95. Null while no render has been attempted,
-   * or for hosts without a measurable live lane.
+   * Serve-side render-latency counters for this daemon's live lane ([RenderPerfSnapshot]): cold vs
+   * warm counts, first-render latency, recent p50/p95. Null before any render or without a
+   * measurable lane.
    */
   val renderStats: RenderPerfSnapshot? = null,
   /**
-   * This catalog's live-lane frame counters — the per-daemon companion to [activeStreams], which
-   * says how many sockets are open but nothing about what they are achieving. Null until one has.
+   * This catalog's live-lane frame counters, complementing [activeStreams]. Null until a socket has
+   * streamed.
    */
   val liveFrames: LiveFramePerfSnapshot? = null,
   /** Child daemon pools owned by this server, e.g. per-preview bundles for trusted catalogs. */
@@ -19809,9 +17221,8 @@ private data class FailureDto(val atEpochMillis: Long, val session: String, val 
 @Serializable
 private data class UsesResponse(
   /**
-   * False when the catalog could not be indexed at all — no parser sidecar, no source metadata, or
-   * no fetcher on this host. Distinct from an empty [ids], which means the index ran and nothing
-   * calls the token.
+   * False when the catalog couldn't be indexed (no parser sidecar, source metadata or fetcher).
+   * Distinct from an empty [ids].
    */
   val available: Boolean,
   /**
@@ -19826,23 +17237,21 @@ private data class PreviewsResponse(
   val schema: String = "compose-preview-serve/v3",
   val module: String,
   /**
-   * The compose-ai-tools version that produced this catalog's published snapshots, from
-   * `catalog.json`'s `renderer`. A client with a compiled native catalog may substitute it only
-   * when its own version agrees exactly; null means the server cannot vouch for parity and the
-   * snapshot remains authoritative. Added in `compose-preview-serve/v3`.
+   * The compose-ai-tools version that produced this catalog's snapshots (`catalog.json`'s
+   * `renderer`). A client may substitute a compiled native catalog only on an exact match; null
+   * means the snapshot stays authoritative. Added in `compose-preview-serve/v3`.
    */
   val catalogVersion: String? = null,
   /**
-   * Producer-trust verdict for this session ([BundleVerifier.summary]) — `signature:<keyId>`,
+   * Producer-trust verdict for this session ([BundleVerifier.summary]): `signature:<keyId>`,
    * `branch:<repo>@<branch>`, `provenance:<id>`, or `unverified`. Null for a live daemon-backed
-   * module (trust applies to detached bundles/catalogs, not the operator's own served module).
+   * module.
    */
   val trust: String? = null,
   /**
-   * Why this session is snapshot-only, when it is — an interactive/live lane the viewer would
-   * otherwise offer is unavailable and the server fell back to baked PNGs (e.g. the catalog
-   * publishes no `liveBundle`). Empty for a fully-live session. Each entry carries a stable [code]
-   * plus a human [detail]. Additive since `compose-preview-serve/v2`. See [ServeDegradation].
+   * Why this session is snapshot-only, if it is (e.g. no `liveBundle`); empty when fully live. Each
+   * entry has a stable [code] and a human [detail]. Additive since `compose-preview-serve/v2`. See
+   * [ServeDegradation].
    */
   val degradations: List<DegradationDto> = emptyList(),
   /** Aggregate landing-page visits for this catalog/app. */
@@ -19853,13 +17262,9 @@ private data class PreviewsResponse(
 @Serializable private data class DegradationDto(val code: String, val detail: String)
 
 /**
- * `GET /<system>/parity?format=json`: the design-parity dashboard as data.
- *
- * Same numbers the HTML page shows, so a CI check can gate on `coverage.percent` or on
- * `drift`/`gaps` being empty without scraping a page. Deliberately the *derived* view rather than a
- * passthrough of the published `activity.json`: the coverage half doesn't exist in that file (the
- * server computes it live), and the preview ids here have already been filtered to ones this
- * session actually serves.
+ * `GET /<system>/parity?format=json`: the design-parity dashboard as data, the same numbers as the
+ * HTML, so CI can gate on `coverage.percent` or empty `drift`/`gaps`. The derived view, not
+ * `activity.json`: coverage is computed live and preview ids are filtered to those served.
  */
 @Serializable
 private data class ParityResponse(
@@ -19997,55 +17402,38 @@ private data class PreviewDto(
   val label: String,
   val modes: List<String>,
   /**
-   * The author-declared editable knobs this preview exposes (`compose/overrides`) — key, type,
-   * label, default/current value, and repeat index. Lets a programmatic client (the Figma plugin's
-   * override editor) present the controls without scraping the viewer HTML. Empty when the preview
-   * declares none (or the host doesn't carry them). Additive since `compose-preview-serve/v2`.
+   * The author-declared editable knobs (`compose/overrides`): key, type, label, default/current
+   * value, repeat index, for programmatic clients like the Figma plugin. Empty when none. Additive
+   * since `compose-preview-serve/v2`.
    */
   val overrides: List<PreviewOverrideDeclaration> = emptyList(),
   /**
-   * The Remote Compose named-value knobs this preview declared (`compose/remotecompose`) — name +
-   * typed author default (float / dp / int / string / bool / color). The auto-capture counterpart
-   * of [overrides]: a programmatic client renders a control per entry and writes an edit back
-   * through the `rc.<name>=<kind>:<value>` render param. Empty when the preview binds no named
-   * values through the declaring `rememberOverridableRemote*` wrappers (or the host doesn't carry
-   * them). Additive since `compose-preview-serve/v2`.
+   * The Remote Compose named-value knobs (`compose/remotecompose`): name and typed author default.
+   * Clients write edits back via `rc.<name>=<kind>:<value>`. Empty when none are bound through
+   * `rememberOverridableRemote*`. Additive since `compose-preview-serve/v2`.
    */
   val remoteComposeKnobs: List<RemoteComposeKnobDeclaration> = emptyList(),
   /** True when `/spatial/<id>/scene.json` is available for WebGL/WebXR presentation. */
   val spatial: Boolean = false,
   /**
-   * True when this preview is **live-only**: the catalog declares it (`deferred[]`) but publishes
-   * no baked PNG for it, so every render is produced on demand by the session's live daemon. A
-   * client can badge it and expect a slower, daemon-backed first render; false (the default) is
-   * every ordinary baked preview. Additive since `compose-preview-serve/v2`.
+   * True when this preview is live-only: declared (`deferred[]`) without a baked PNG, so every
+   * render is on demand. Additive since `compose-preview-serve/v2`.
    */
   val liveOnly: Boolean = false,
   /** Number of viewer page opens for this preview since this server process started. */
   val views: Long = 0,
   /**
-   * True when this preview publishes a Remote Compose document, fetchable verbatim at `GET
-   * /{system}/render/{id}.rc`.
-   *
-   * Not derivable from anything else on this DTO: `modes` describes how the *pixels* are produced,
-   * and a `snapshot` preview from a Remote Compose catalog carries an `ir/<id>.rc` sidecar while an
-   * otherwise identical one from a Jetpack Compose catalog does not. A client that wants the
-   * document rather than the raster — the UI builder's Remote Compose palette, an offline player
-   * harness — had to fetch `.rc` for every preview and treat 404 as "no", which is a request per
-   * preview to learn something the host already knows. Additive since `compose-preview-serve/v3`;
-   * false is both the default and the honest answer for a daemon-only host.
+   * True when this preview publishes a Remote Compose document at `GET /{system}/render/{id}.rc`.
+   * Not derivable from `modes` (which describes pixel production), and saves clients a probe per
+   * preview. Additive since `compose-preview-serve/v3`; false for a daemon-only host.
    */
   val remoteCompose: Boolean = false,
 )
 
 /**
  * `GET /{system}/api/render-runs/{previewId}`: this preview's published revisions collapsed into
- * stretches that share their pixels, so the viewer can mark which of them actually differ.
- *
- * Its own lane rather than a field on the viewer page for one reason: it costs a delivery-branch
- * read, and the question is only asked when a reader opens the revision menu. Answering it during
- * page render would put a network round trip in front of every preview page to decorate a control
- * most visits never open.
+ * stretches sharing pixels. A separate lane because it costs a delivery-branch read, needed only
+ * when the revision menu opens.
  */
 @Serializable
 private data class RenderRunsResponse(
@@ -20094,9 +17482,8 @@ private data class AdminCatalogDto(
   /** The front-page section heading this catalog is published under; null ⇒ grouped by owner. */
   val group: String? = null,
   /**
-   * Startup fetch order, highest first ([ServeCatalogsConfig.Entry.loadPriority]). Reported so a
-   * deployment reconcile can see what the box will actually load first on its next boot, rather
-   * than having to read the box's `catalogs.json`.
+   * Startup fetch order, highest first ([ServeCatalogsConfig.Entry.loadPriority]), so a reconcile
+   * can see the next boot's load order.
    */
   val loadPriority: Int = 0,
   /** `pending` / `loaded` / `failed` / `stale` ([CatalogLoadTracker.State.loadState]). */
@@ -20111,8 +17498,8 @@ private data class AdminCatalogsResponse(
 )
 
 /**
- * The result of an admin mutation. [warning] is set when the catalog is serving but the change
- * couldn't be written back to `catalogs.json` — it will not survive a restart.
+ * The result of an admin mutation. [warning] is set when the catalog serves but the change couldn't
+ * be written to `catalogs.json` (it won't survive a restart).
  */
 @Serializable
 private data class AdminCatalogResult(
@@ -20139,8 +17526,8 @@ private data class AdminGroupsResponse(
 )
 
 /**
- * `POST /admin/onboard`'s body: the GitHub project URL, plus the presentation choices that apply to
- * every catalog it turns out to deliver.
+ * `POST /admin/onboard`'s body: the GitHub project URL plus presentation choices applied to every
+ * delivered catalog.
  */
 @Serializable
 private data class AdminOnboardRequest(
@@ -20229,18 +17616,13 @@ private data class AdminUiBuilderDesignDto(
   val createdAtEpochMillis: Long,
   val updatedAtEpochMillis: Long,
   val activeSubscribers: Int,
-  /**
-   * Why the host cannot serve this design, or null when it serves it normally. Additive to the v1
-   * schema: a client that does not know the field sees exactly what it saw before.
-   */
+  /** Why the host can't serve this design, or null. Additive to v1. */
   val unusableReason: String? = null,
   /** Why this still-editable design has lost catalog vocabulary, if it has. */
   val degradedReason: String? = null,
   /**
-   * Whether this design's document can still be produced, and so whether download and repair are
-   * offered. False only for a quarantine where the stored files themselves would not read, which is
-   * the case where retiring it is the only move an operator has. Additive, and true by default: a
-   * client that does not know the field behaves exactly as it did.
+   * Whether this design's document can still be produced (download and repair offered). False only
+   * when the stored files won't read, leaving retirement. Additive; defaults true.
    */
   val documentAvailable: Boolean = true,
 )
@@ -20252,11 +17634,8 @@ private data class AdminUiBuilderDesignsResponse(
 )
 
 /**
- * The actor a design opened from a catalog's library is created as.
- *
- * A fixed operator identity rather than the admin's own: opening a published design is an act of
- * the host, and the design's owner should read as the host for everyone who then collaborates on
- * it, not as whichever operator happened to press the button.
+ * The actor a design opened from a catalog library is created as: a fixed host identity, so the
+ * owner reads as the host rather than whichever operator clicked.
  */
 private const val ADMIN_LIBRARY_ACTOR: String = "operator:library"
 
@@ -20272,11 +17651,7 @@ private data class AdminUiBuilderLibraryDto(
 @Serializable
 private data class AdminUiBuilderLibraryResponse(
   val schema: String = "compose-preview-serve/admin-ui-builder-library/v1",
-  /**
-   * Which catalogs were looked in, so an empty list is legible: no catalogs searched is a host
-   * serving none, while catalogs searched and no designs found is a host whose projects publish
-   * none.
-   */
+  /** Which catalogs were searched, so "none searched" and "none found" are distinguishable. */
   val catalogsSearched: List<String> = emptyList(),
   val designs: List<AdminUiBuilderLibraryDto> = emptyList(),
 )
@@ -20286,9 +17661,8 @@ private data class AdminUiBuilderLibraryResponse(
 private data class AdminUiBuilderLibraryOpenResult(val designId: String, val status: String)
 
 /**
- * The result of `DELETE /admin/ui-builder/actors/{actorId}`.
- *
- * [ownedDesigns] were left as they are: a design keeps an owner, so those are the operator's call.
+ * The result of `DELETE /admin/ui-builder/actors/{actorId}`. [ownedDesigns] are left alone;
+ * reassigning them is the operator's call.
  */
 @Serializable
 private data class AdminUiBuilderActorErasureResult(
@@ -20304,11 +17678,8 @@ private data class AdminUiBuilderActorErasureResult(
 private data class AdminUiBuilderDesignResult(val designId: String, val status: String)
 
 /**
- * The result of a repairing `PUT /admin/ui-builder/designs/{designId}/document`.
- *
- * Its own shape rather than a nullable field on [AdminUiBuilderDesignResult]: an optional
- * `"revision": null` would appear on every delete response too, changing bytes a client already
- * parses for the sake of a field only a repair ever fills in.
+ * The result of a repairing `PUT /admin/ui-builder/designs/{designId}/document`. Its own shape so
+ * delete responses don't gain a `"revision": null` field.
  */
 @Serializable
 private data class AdminUiBuilderRepairResult(
@@ -20342,8 +17713,8 @@ private data class AdminEditorResult(
 )
 
 /**
- * `GET /admin/ui-builder/config`. [environment] is what the `SERVE_UI_BUILDER_*` variables alone
- * give, [serving] what this process runs, and [next] what the next start runs from [configured].
+ * `GET /admin/ui-builder/config`: [environment] (from `SERVE_UI_BUILDER_*` alone), [serving], and
+ * [next] (from [configured]).
  */
 @Serializable
 private data class AdminUiBuilderSettingsResponse(
@@ -20357,8 +17728,8 @@ private data class AdminUiBuilderSettingsResponse(
   /** Each shadowed catalog's report, as this process composed it. */
   val shadow: Map<String, ServeUiBuilderShadowReportDto> = emptyMap(),
   /**
-   * Each catalog-owned catalog this process cannot serve fully, with why. An owned catalog has no
-   * built-in fallback, so a publish that does not compose leaves it out until it republishes.
+   * Each catalog-owned catalog this process can't fully serve, with why. Owned catalogs have no
+   * fallback, so a non-composing publish is left out until republished.
    */
   val unavailable: Map<String, String> = emptyMap(),
 )
@@ -20374,8 +17745,8 @@ private data class AdminUiBuilderSettingsResult(
 )
 
 /**
- * `GET /admin/settings`. [configured] is `settings.json` as stored; each of [settings] says what is
- * serving, where it came from, and what the next start changes.
+ * `GET /admin/settings`: [configured] is `settings.json` as stored; each of [settings] says what's
+ * serving, its source, and what the next start changes.
  */
 @Serializable
 private data class AdminSettingsResponse(
@@ -20388,9 +17759,8 @@ private data class AdminSettingsResponse(
 )
 
 /**
- * The result of `PUT`/`DELETE /admin/settings`: the settings [applied] live, those [pending] the
- * next start, and those [overridden] by the environment (so not applying at all until the `.env`
- * line goes).
+ * The result of `PUT`/`DELETE /admin/settings`: settings [applied] live, [pending] the next start,
+ * and [overridden] by the environment until the `.env` line goes.
  */
 @Serializable
 private data class AdminSettingsResult(
@@ -20410,8 +17780,8 @@ private data class AdminSitesResponse(
 )
 
 /**
- * The result of a site mutation. [warning] is set when the hostname is in force on the running
- * server but couldn't be written back to catalogs.json — it will not survive a restart.
+ * The result of a site mutation. [warning] is set when the hostname is live but couldn't be written
+ * to catalogs.json (it won't survive a restart).
  */
 @Serializable
 private data class AdminSiteResult(
@@ -20424,10 +17794,7 @@ private data class AdminSiteResult(
 /** One trusted branch on `GET /admin/trust`. */
 @Serializable private data class AdminTrustBranchDto(val repo: String, val branch: String)
 
-/**
- * One pinned key on `GET /admin/trust` — id and label only. The key material stays in the
- * operator's producers.json rather than being echoed back over the network.
- */
+/** One pinned key on `GET /admin/trust`: id and label only, never key material. */
 @Serializable private data class AdminTrustKeyDto(val keyId: String, val name: String? = null)
 
 @Serializable
@@ -20439,8 +17806,8 @@ private data class AdminTrustResponse(
 )
 
 /**
- * The result of a trust mutation. [warning] is set when the change is in force on the running
- * server but couldn't be written back to producers.json — it will not survive a restart.
+ * The result of a trust mutation. [warning] is set when the change is live but couldn't be written
+ * to producers.json (it won't survive a restart).
  */
 @Serializable
 private data class AdminTrustResult(
@@ -20470,9 +17837,8 @@ private data class DocAcceptedResponse(
 )
 
 /**
- * What `POST /images` answers with. Two URL fields on purpose: [path] for a client that wants to
- * address this host itself, and [url] — absolute, built from the forwarded origin — for the case
- * the lane exists for, where the string is about to be pasted somewhere this server is a stranger.
+ * What `POST /images` answers: [path] for addressing this host, and [url] (absolute, from the
+ * forwarded origin) for pasting elsewhere.
  */
 @Serializable
 private data class ImageAcceptedResponse(
@@ -20511,19 +17877,14 @@ private data class BundleAcceptedResponse(
   val path: String,
   /**
    * Producer-trust verdict for the upload ([BundleVerifier.summary]): `signature:<keyId>`,
-   * `branch:<repo>@<branch>`, `provenance:<id>`, or `unverified`. The data tiers serve either way;
-   * this tells the uploader whether the server would treat the bundle as trusted.
+   * `branch:<repo>@<branch>`, `provenance:<id>`, or `unverified`. Data tiers serve either way.
    */
   val trust: String,
 )
 
 /**
- * Reply from the per-catalog theme-cache admin routes.
- *
- * [entries] is what `regenerate` queued — zero is a legitimate answer for a catalog with no
- * persistent cache, or one already fully re-rendered. [dropped] reports whether `drop` actually
- * took the bytes: false means the generation write lock was held by a render publishing at that
- * moment, so the caller should retry rather than believe the store is empty.
+ * Reply from the per-catalog theme-cache admin routes. [entries] is what `regenerate` queued (zero
+ * is legitimate). [dropped] false means a render held the generation write lock; retry.
  */
 @Serializable
 private data class ThemeCacheActionDto(
@@ -20532,9 +17893,8 @@ private data class ThemeCacheActionDto(
   val entries: Int = 0,
   val dropped: Boolean? = null,
   /**
-   * Whether `regenerate` actually queued anything. False with a 409 means it could not: theme
-   * optimization is switched off for this deployment, so no pass would ever work the queue, or the
-   * mark could not be written to the volume and a restart would forget it.
+   * Whether `regenerate` queued anything. False with a 409: theme optimization is off, or the mark
+   * couldn't be persisted.
    */
   val queued: Boolean? = null,
 )

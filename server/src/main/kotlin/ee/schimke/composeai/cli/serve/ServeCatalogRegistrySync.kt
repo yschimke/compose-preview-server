@@ -5,25 +5,18 @@ import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 
 /**
- * Keeps a running server's catalog set in step with its nominated **registry projects**
- * ([ServeCatalogRegistry]), so a merged registry change takes effect without a restart. Each pass:
- * - registers a newly listed system (not via [ServeCatalogAdmin.register]: registry entries are
- *   derived state and must not be written into the operator's `catalogs.json`);
- * - retires a system no longer listed, but only if this sync put it there;
- * - re-publishes a system whose entry changed (`importedFrom`, `listed`, `group`, `loadPriority`),
- *   again only if this sync owns it.
- *
- * A registry that fails to fetch contributes and retires nothing that pass: only a document that
- * read cleanly and no longer names a system retires it.
+ * Keeps a running server's catalog set in step with its nominated registry projects
+ * ([ServeCatalogRegistry]), without a restart. Each pass registers newly listed systems (not via
+ * [ServeCatalogAdmin.register]: registry entries are derived state, not written into
+ * `catalogs.json`), and retires or re-publishes changed systems only if this sync owns them. A
+ * registry that fails to fetch retires nothing that pass.
  *
  * @param repos the nominated registry projects, in `--catalog-registry` order.
- * @param read fetch + normalise one registry's document, reporting why through its second argument;
- *   null ⇒ unreadable this pass.
- * @param tracked the systems the box currently serves or is configured to serve — the
- *   [CatalogLoadTracker], read per pass rather than captured, so an admin publish between ticks is
- *   seen.
- * @param publish register one newly-listed catalog: add it to the tracker and fetch it. Returns the
- *   failure reason, or null on success.
+ * @param read fetch and normalise one registry's document, reporting why through its second
+ *   argument; null ⇒ unreadable this pass.
+ * @param tracked the systems the box serves or is configured to serve, read per pass so an admin
+ *   publish between ticks is seen.
+ * @param publish register one newly listed catalog; returns the failure reason, or null.
  * @param retire drop a catalog this sync published and the registry no longer lists.
  * @param intervalMillis poll cadence; the first tick fires one interval after [start].
  */
@@ -42,30 +35,21 @@ class ServeCatalogRegistrySync(
 ) : AutoCloseable {
 
   /**
-   * The systems this sync is responsible for — seeded with the startup fold-in's, added to on a
-   * publish, removed on a retire.
-   *
-   * Ownership is what makes withdrawal safe. Without it the only available test would be "the
-   * registry doesn't list it", which is true of every catalog on the box, including the ones the
-   * operator spent a config edit naming.
+   * The systems this sync owns: seeded at startup, added on publish, removed on retire. Ownership
+   * is what makes withdrawal safe; "unlisted" alone is true of every operator-configured catalog
+   * too.
    */
   private val owned = java.util.Collections.synchronizedSet(linkedSetOf<String>())
 
   /**
-   * What was published for each owned system, so a changed entry is recognisable.
-   *
-   * A fingerprint rather than the entry: only the fields that reach the registration matter, and
-   * comparing whole entries would re-publish on a cosmetic edit elsewhere in the document.
+   * A fingerprint of what each owned system was published as, so a changed entry is recognisable
+   * without re-publishing on cosmetic edits.
    */
   private val publishedAs = java.util.Collections.synchronizedMap(HashMap<String, String>())
 
   /**
-   * Which registry repository each owned system came from, so a pass that cannot read one registry
-   * can still vouch for that registry's catalogs.
-   *
-   * Withdrawal diffs [owned] against everything listed on this pass. Without this, a pass where one
-   * registry read cleanly and another failed would find the failed registry's catalogs unlisted and
-   * retire them — the "silence is not a withdrawal" rule held only when EVERY read failed.
+   * Which registry each owned system came from, so a pass that can't read one registry doesn't
+   * retire that registry's catalogs while others read cleanly.
    */
   private val ownerRepo = java.util.Collections.synchronizedMap(HashMap<String, String>())
 
@@ -90,18 +74,10 @@ class ServeCatalogRegistrySync(
   }
 
   /**
-   * Record the entries the startup fold-in already registered from [contribution], **with** what
-   * they were registered as.
-   *
-   * The fingerprint is the half that used to be missing. Adopting only the system names left
-   * [publishedAs] empty, so the first pass found every boot-loaded catalog "changed" — nothing ever
-   * equals an absent fingerprint — and retired and re-published the lot. On preview.coo.ee that
-   * re-publish failed for two imports after a restart, and they served a 404 for a refresh interval
-   * until the next pass put them back, from a registry document that had not changed at all.
-   *
-   * [entries] is the subset the boot actually took from this registry: an entry the operator's own
-   * configuration (or an earlier registry) already claimed was never registered from here, so
-   * adopting it would hand the sync a catalog it must not re-point or withdraw.
+   * Record the entries the startup fold-in registered from [contribution], with their fingerprints;
+   * without them the first pass would see every boot-loaded catalog as changed and re-publish it.
+   * [entries] excludes ones the operator's config or an earlier registry already claimed, which the
+   * sync must not touch.
    */
   fun adopt(
     contribution: ServeCatalogRegistry.Contribution,
@@ -118,13 +94,8 @@ class ServeCatalogRegistrySync(
   fun ownedSystems(): Set<String> = synchronized(owned) { owned.toSet() }
 
   /**
-   * One nomination as the most recent pass saw it.
-   *
-   * [contribution] is the last document that read **cleanly**, kept across a failed read: a pass
-   * that cannot read the registry retires nothing, so the catalogs that document named are still
-   * served and still the registry's. [error] is the most recent read's problem, null when it
-   * succeeded — so a transient outage shows on `/status` without making the registry's catalogs
-   * look like nobody's.
+   * One nomination as the latest pass saw it. [contribution] is the last clean document, kept
+   * across failed reads (which retire nothing); [error] is the latest read's problem, or null.
    */
   data class LastRead(val contribution: ServeCatalogRegistry.Contribution?, val error: String?)
 
@@ -170,24 +141,15 @@ class ServeCatalogRegistrySync(
       for (entry in contribution.entries) {
         listed += entry.system
         val fingerprint = fingerprintOf(contribution, entry)
-        // Three states, and only the middle one is new:
-        //   not registered at all      -> publish
-        //   registered by THIS sync, changed -> retire and re-publish
-        //   registered by anyone else, or unchanged -> leave alone
-        //
-        // The ownership test is the same one that makes retirement safe, and it matters more here:
-        // a catalog the operator named in catalogs.json wins over a registry entry by design, so
-        // re-pointing it because a registry document changed would silently overrule the config
-        // file. A registry may correct its OWN entries and nothing else.
+        // Not registered → publish; registered by this sync and changed → retire and re-publish;
+        // otherwise leave alone. A registry may correct only its own entries, never overrule
+        // `catalogs.json`.
         val registered = entry.system in known
         val mine = entry.system in owned
         if (registered && (!mine || publishedAs[entry.system] == fingerprint)) continue
         if (registered) {
-          // Retire first: `publish` adds to the tracker and fetches, and re-adding a system that is
-          // already there is not defined to update it. This is the same retire-then-republish the
-          // config reconcile uses to re-point a catalog, and it carries the same window — if the
-          // publish below fails the catalog is briefly unpublished, which the next pass repairs
-          // because it is no longer in `known`.
+          // Retire first: re-adding a tracked system isn't defined to update it. If the publish
+          // fails the catalog is briefly unpublished and the next pass repairs it.
           retire(entry.system)
           onLog("serve: catalog ${entry.system} changed in registry $repo — re-publishing")
         }
@@ -199,16 +161,14 @@ class ServeCatalogRegistrySync(
           if (!registered) onLog("serve: catalog ${entry.system} imported from registry $repo")
         } else {
           publishedAs.remove(entry.system)
-          // Left unowned and unlisted-from, so the next pass tries again. An import whose delivery
-          // branch hasn't been built yet is the ordinary case here, not an error: the registry
-          // entry lands with the PR and the branch appears when the build finishes.
+          // Left unowned so the next pass retries; usually the import's delivery branch isn't built
+          // yet.
           onLog("serve: catalog ${entry.system} from registry $repo not available yet: $failure")
         }
       }
     }
-    // Only withdraw against a pass that actually read something. A registry that 404'd or timed
-    // out has said nothing about its catalogs, and treating silence as a retirement would empty
-    // the box on the first outage.
+    // Only withdraw after a pass that read something: silence from a failed fetch is not a
+    // retirement.
     if (!readAny) return
     val gone = synchronized(owned) { owned.filterNot { it in listed } }
     for (system in gone) {
@@ -226,19 +186,14 @@ class ServeCatalogRegistrySync(
 }
 
 /**
- * The `/status` row for one nomination: what the registry contributes **now**.
+ * The `/status` row for one nomination: what the registry contributes now. [live] (the sync's
+ * latest read) wins when present; the boot read answers only before the first pass or when the box
+ * never syncs. Reporting the boot snapshot made `publish-config-to-box.sh --prune` retire catalogs
+ * published after boot.
  *
- * [live] is the sync's latest read ([ServeCatalogRegistrySync.lastRead]) and wins when present; the
- * boot read is the answer only before the first pass, or on a box that never syncs (refresh
- * interval ≤ 0). Reporting the boot snapshot forever was the bug: a catalog the sync published
- * after boot was missing from `systems`, and `publish-config-to-box.sh --prune` — which keeps
- * exactly the registry's `systems` — retired it as stale.
- *
- * `systems` is the registry's whole nominated list from its last clean document, not the subset
- * this box has managed to publish. The prune needs "what the registry nominates": an entry whose
- * branch is not built yet is still the registry's, and one the operator's config also names is
- * listed here as it always was (the config keeps it either way). If the latest read failed, the
- * last clean document still stands — the sync retired nothing on that pass — and [error] says why.
+ * `systems` is the registry's whole nominated list from its last clean document, not just what this
+ * box published, since the prune needs everything the registry nominates. On a failed read the last
+ * clean document stands and [error] says why.
  */
 fun catalogRegistryStatus(
   nomination: ServeCatalogRegistry.Nomination,

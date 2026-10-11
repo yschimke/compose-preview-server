@@ -6,17 +6,10 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * The component subtree's **directories** — the named groups under a component that are not more of
- * its renders: its recorded interactions, the catalogs that are about it.
- *
- * The drawer's subtree used to hold exactly one kind of row, a primary-axis variant, and everything
- * else a component reaches invented its own affordance somewhere else on the page. A recording was
- * a chip on the stage, which a reader can only find by already being on the page it is on; a sample
- * in another catalog had nowhere at all. These tests hold the shape that gives both one home:
- * variants stay the flat list they were, and anything else hangs under a named head with a count.
- *
- * What they do NOT assert is placement — which directories a page ends up with is the handler's
- * answer ([ServeHttpServer.componentRelatedDirectories]) and the producers' business.
+ * The component subtree's directories: named groups under a component that are not its renders
+ * (recorded interactions, catalogs about it). Variants stay a flat list; anything else hangs under
+ * a named head with a count. Which directories a page gets is
+ * [ServeHttpServer.componentRelatedDirectories]'s concern, not asserted here.
  */
 class ServeComponentDirectoriesTest {
 
@@ -34,10 +27,8 @@ class ServeComponentDirectoriesTest {
     preview("button__ideal__pressed__light", "Button · Pressed", state = "pressed")
 
   /**
-   * A component with [n] baked states, which is what it takes to get variant ROWS out of the
-   * subtree — the same fixture shape [ServeViewerDisclosuresTest] uses. Two renders alone do not
-   * make a state axis the tree will list, so a directory test that wants variants beside it has to
-   * ask for three.
+   * A component with [n] baked states; the tree only lists variant rows from three, as in
+   * [ServeViewerDisclosuresTest].
    */
   private fun states(n: Int): List<ServePreview> =
     (0 until n).map { i ->
@@ -88,9 +79,7 @@ class ServeComponentDirectoriesTest {
 
   @Test
   fun `a directory does not inflate the component's render count`() {
-    // The count on the component row answers "how many renders of this are there". A recording is
-    // not a render of it and a sample is another catalog's component, so folding either into that
-    // number would leave it meaning nothing in particular. Three renders ⇒ 3, with or without.
+    // The component row's count is renders only; recordings and samples are not renders of it.
     val renders = states(3)
     val without = tree(viewer(renders.first(), renders))
     val with = tree(viewer(renders.first(), renders, listOf(samples)))
@@ -103,9 +92,7 @@ class ServeComponentDirectoriesTest {
 
   @Test
   fun `the subtree is drawn for a component that has no second render but has a directory`() {
-    // Without directories this returns "" — a tree of one node is its own title. With one it has
-    // something to show, which is the case of a component that never varies and is called by five
-    // samples.
+    // A single-node tree normally renders nothing, but with a directory it has something to show.
     val alone = viewer(default, listOf(default))
     assertFalse(alone.contains("cp-axes-tree"), "no variants and no directories ⇒ no subtree")
     val withSamples = viewer(default, listOf(default), listOf(samples))
@@ -138,15 +125,8 @@ class ServeComponentDirectoriesTest {
 
   @Test
   fun `a capture on a listed variant is reachable from the component's own page`() {
-    // The discovery this exists for: a capture belongs to the preview that took it, so one declared
-    // on a variant is invisible from the default page unless the directory reaches across renders.
-    //
-    // It reaches across the renders the TREE lists, which is a narrowing of what this test used to
-    // assert ("every render of the component"). That version was written against a two-render
-    // fixture the tree lists no variants for at all, so it pinned a row hanging off a render
-    // nothing
-    // else on the page navigates to — and the same union produced 64 rows on a real component. The
-    // half worth keeping is this one, and a listed variant is what it takes to show it.
+    // A capture belongs to the preview that took it, so the directory reaches across the renders
+    // the tree lists (not every render, which produced dozens of rows on real components).
     val renders = states(3)
     val recorded =
       renders[1].copy(motion = listOf(ServeMotion("press", caption = "Press and release")))
@@ -162,11 +142,8 @@ class ServeComponentDirectoriesTest {
 
   @Test
   fun `captures spread across renders are named by the render, not by the capture`() {
-    // The defect this pins, measured on the live server: `EdgeButton` published one caption-less
-    // capture on each of its renders, and the directory drew 64 rows every one of which read
-    // "Animation". A capture's title identifies it only within ONE render's set — caption-less
-    // means "Animation" in every set there is — so across renders the render is what varies and the
-    // render is what the row must say.
+    // A caption-less capture is "Animation" in every render's set, so across renders the row must
+    // name the render.
     val renders =
       states(3).map { p -> p.copy(motion = listOf(ServeMotion("m-${p.id}", kind = "animation"))) }
     val subtree = tree(viewer(renders.first(), renders))
@@ -181,9 +158,7 @@ class ServeComponentDirectoriesTest {
 
   @Test
   fun `captures on one render keep their own titles`() {
-    // The other half of the same rule: with nothing else varying, the capture's title is the most
-    // informative thing a row can say, and naming the render instead would print one component name
-    // twice.
+    // With nothing else varying, the capture's title is the informative label.
     val recorded =
       preview(
         "button__ideal__default__light",
@@ -201,10 +176,7 @@ class ServeComponentDirectoriesTest {
 
   @Test
   fun `the motion directory follows the tree's renders, not every render of the component`() {
-    // [primaryVariants] already decided which renders are worth navigating to; a directory that
-    // unioned every sibling re-added the matrix that decision exists to keep out. A render the tree
-    // does not list contributes no row — unless it is the one on screen, which the tree always
-    // contains and so must this.
+    // Renders the tree doesn't list contribute no rows, except the one on screen.
     val listed = states(2)
     val unlisted =
       preview(

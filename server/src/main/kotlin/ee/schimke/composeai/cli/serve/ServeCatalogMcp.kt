@@ -40,26 +40,22 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
 /**
- * MCP 2025-06-18 surface aggregating every served catalog.
- *
- * Transport is owned by [ServeHttpServer]; this class owns only MCP lifecycle messages and the
- * catalog-facing resources/tools. It shares the HTTP server's render semaphore, so a remote agent
- * cannot open a second, unmetered render lane beside the browser routes.
+ * MCP 2025-06-18 surface aggregating every served catalog. [ServeHttpServer] owns the transport;
+ * this class owns lifecycle messages and catalog resources/tools. Shares the HTTP render semaphore,
+ * so agents can't open a second, unmetered render lane.
  */
 class ServeCatalogMcp(
   private val sessions: ServeSessionRegistry,
   private val renderSemaphore: Semaphore,
   private val renderQueueWaitSeconds: Long = 2,
   /**
-   * Project mode's locally-derived timeline, when this server was started against a checkout. Null
-   * on a hosted box, where the published manifest on the delivery branch — not this process — is
-   * the truth about what a catalog has rendered. See [historyJson].
+   * Project mode's locally derived timeline; null on a hosted box, where the published manifest is
+   * authoritative. See [historyJson].
    */
   private val projectHistory: ServeProjectHistory? = null,
   /**
-   * The UI-builder door, when this box serves one. Null leaves the surface exactly as it was: the
-   * tools are absent from `tools/list` rather than present and failing, so a client discovers what
-   * this server can actually do.
+   * The UI-builder door, or null, in which case its tools are absent from `tools/list` rather than
+   * failing.
    */
   private val uiBuilder: ServeUiBuilderMcp? = null,
   /** Whether this box can also compile a design natively; see [ServeUiBuilderMcp.RENDER_NATIVE]. */
@@ -67,29 +63,25 @@ class ServeCatalogMcp(
   /** Wall clock for [signResourceLink] expiry; a seam so tests can age a signed link. */
   private val nowMillis: () -> Long = System::currentTimeMillis,
   /**
-   * This box's public origin, when it has one. A render result carries a fetchable signed PNG URL
-   * only when this answers (#1160); the local server has no public origin and keeps `data:`.
+   * This box's public origin. Render results carry a signed PNG URL only when set (#1160);
+   * otherwise `data:`.
    */
   private val publicOrigin: () -> String? = { null },
   /**
-   * Catalogs this box is configured to serve that have not loaded yet. After a restart the catalogs
-   * register one by one over several minutes; until they all have, a listing is partial and a
-   * request for a configured catalog would otherwise read "no such catalog" (compose-ag-plugin#64).
+   * Configured catalogs not loaded yet, so after a restart a request for one isn't answered "no
+   * such catalog".
    */
   private val pendingCatalogs: () -> List<String> = { emptyList() },
 ) {
   /**
-   * Per-process key for short-lived signed resource links. A restart drops it, exactly as a restart
-   * drops every grant, so a signed link never outlives the process that minted it.
+   * Per-process key for short-lived signed resource links; a restart invalidates them, like grants.
    */
   private val resourceLinkKey: ByteArray = ByteArray(32).also { SecureRandom().nextBytes(it) }
 
   /**
-   * The pictures `ui_builder_view` has handed out as signed links, by the random id in their URI.
-   *
-   * A view is drawn for one actor from state that actor may read, so it cannot be re-rendered from
-   * the link the way a catalog preview is — the link carries no grant. It is kept instead, for the
-   * link's lifetime, and bounded by count so a burst of views cannot hold the heap.
+   * Pictures `ui_builder_view` handed out as signed links, by the random id in their URI. A view is
+   * drawn for one actor and can't be re-rendered from a grant-less link, so it is kept for the
+   * link's lifetime, count-bounded.
    */
   private val viewImages =
     object : LinkedHashMap<String, Pair<ByteArray, Long>>(16, 0.75f, true) {
@@ -101,8 +93,8 @@ class ServeCatalogMcp(
   data class Reply(val body: JsonObject?, val accepted: Boolean = false)
 
   /**
-   * Request-scoped client interaction available only on a negotiated Streamable HTTP session.
-   * Stateless JSON callers keep [Unsupported], so every tool must retain a complete text fallback.
+   * Request-scoped client interaction, only on a negotiated Streamable HTTP session. Stateless
+   * callers keep [Unsupported], so every tool needs a complete text fallback.
    */
   interface ClientInteraction {
     val formElicitationSupported: Boolean
@@ -114,8 +106,9 @@ class ServeCatalogMcp(
     ): FormElicitationResult?
 
     /**
-     * Whether the client declared OpenAI form elicitation (`extensions["openai/elicitation"].form`)
-     * on this session; see [ServeOpenAiForms]. Independent of [formElicitationSupported].
+     * Whether the client declared OpenAI form elicitation
+     * (`extensions["openai/elicitation"].form`); see [ServeOpenAiForms]. Independent of
+     * [formElicitationSupported].
      */
     val openAiFormsSupported: Boolean
       get() = false
@@ -128,9 +121,8 @@ class ServeCatalogMcp(
     ): OpenAiFormElicitation = OpenAiFormElicitation.Unsupported
 
     /**
-     * This interaction, except that an accepted answer is dropped — read as no answer at all —
-     * unless [stillAuthorized] holds when it arrives. Declines and cancels pass through: they write
-     * nothing either way.
+     * This interaction, but an accepted answer is dropped unless [stillAuthorized] holds on
+     * arrival. Declines and cancels pass through, since they write nothing.
      */
     fun reauthorizedOnAccept(stillAuthorized: () -> Boolean): ClientInteraction {
       if (!formElicitationSupported && !openAiFormsSupported) return this
@@ -193,13 +185,9 @@ class ServeCatalogMcp(
   )
 
   /**
-   * The grant flow, as much of it as an MCP client needs and no more.
-   *
-   * Kept as a seam rather than a store reference so this class stays free of HTTP, rate limits and
-   * the request's own address: each method answers with the SAME JSON body the matching
-   * `/agent-access/…` route returns, so the two surfaces cannot drift into describing one flow two
-   * ways. Null means the box is throttling — a tool error, not an exception, because a client that
-   * asked too fast should be told to wait rather than handed a broken session.
+   * The grant flow, as much as an MCP client needs. A seam rather than a store reference so this
+   * class stays free of HTTP and rate limits; each method returns the same JSON as the matching
+   * `/agent-access/…` route. Null means throttled: a tool error, not an exception.
    */
   interface AgentAccess {
     suspend fun open(
@@ -224,24 +212,22 @@ class ServeCatalogMcp(
   private data class PreviewTarget(val catalog: String, val previewId: String)
 
   /**
-   * [liveAuthorization] stays last so a caller can pass it as a trailing lambda; [access] is the
-   * optional one, absent on a box that issues no grants.
+   * [liveAuthorization] stays last for trailing-lambda use; [access] is absent on boxes without
+   * grants.
    */
   suspend fun handle(
     request: JsonObject,
     access: AgentAccess? = null,
     /**
-     * A bounded request-scoped interaction channel. It is deliberately optional until a tool opts
-     * into elicitation; merely adding transport support must not alter stateless call behaviour.
+     * Optional request-scoped interaction channel; transport support alone must not change
+     * stateless behaviour.
      */
     clientInteraction: ClientInteraction = ClientInteraction.Unsupported,
     /**
-     * The UI-builder capability check for this particular request, asked of the transport because
-     * only it holds the call the credential arrived on. Defaults to refusing, so a caller that
-     * forgets to pass one cannot accidentally open the builder to an unauthenticated agent.
-     *
-     * The second argument is the token this message presented in-band ([TOKEN_ARGUMENT]), which the
-     * transport cannot see for itself — it is inside the body this class parses.
+     * The UI-builder capability check for this request, asked of the transport (which holds the
+     * credential). Defaults to refusing, so a forgetful caller can't open the builder
+     * unauthenticated. The second argument is the in-band token ([TOKEN_ARGUMENT]) the transport
+     * can't see.
      */
     uiBuilderAuthorization: (UiBuilderRouteCapability, String?) -> UiBuilderAuthorizationDecision =
       { _, _ ->
@@ -348,10 +334,9 @@ class ServeCatalogMcp(
   }
 
   /**
-   * This endpoint is stateless, so the capabilities a client declares in `initialize` are not
-   * remembered for its later `tools/call`. The handshake's own instructions carry the decision
-   * instead: a client that declared URL elicitation is told to use it for the access grant, and
-   * every other client is told to keep the text flow (show approveUrl and userCode in chat).
+   * The endpoint is stateless, so `initialize` capabilities aren't remembered; the handshake's
+   * instructions tell URL-elicitation clients to use it for access and others to keep the text
+   * flow.
    */
   private fun accessElicitationInstruction(initializeParams: JsonObject): String {
     val elicitation =
@@ -366,12 +351,10 @@ class ServeCatalogMcp(
   }
 
   /**
-   * Honours a per-request capability declaration on `tools/call` (`params._meta`, the stateless
-   * shape [CLIENT_CAPABILITIES_META] names). When one is present it decides `poll_access`'s URL
-   * mode outright: a client that declared URL elicitation gets it without asking, and one that
-   * declared capabilities without it keeps the text result even if `urlMode` was passed, since a
-   * -32042 error it cannot show would strand the access request. Absent a declaration the explicit
-   * `urlMode` argument stands.
+   * Honours a per-request capability declaration on `tools/call` (`params._meta`,
+   * [CLIENT_CAPABILITIES_META]). When present it decides `poll_access`'s URL mode outright (a
+   * -32042 the client can't show would strand the request); otherwise the explicit `urlMode`
+   * argument stands.
    */
   private fun withDeclaredUrlElicitation(params: JsonObject): JsonObject {
     if ((params["name"] as? JsonPrimitive)?.contentOrNull != "poll_access") return params
@@ -490,14 +473,10 @@ class ServeCatalogMcp(
   private data class ReviewTarget(val designId: String, val nodeId: String?)
 
   /**
-   * `review-design`'s design, from `designUrl` (#1120) or the older `designId`.
-   *
-   * The URL is the one a person copies from the builder's address bar: `/ui-builder/<designId>`,
-   * optionally catalog-prefixed (`/ui-builder/<catalog>/<designId>`, the old permalink this server
-   * redirects) and optionally carrying `?node=<nodeId>`. Only the id and the node leave this
-   * function; the URL itself never reaches the prompt text, so a query credential pasted along with
-   * it goes nowhere. A URL naming another origin than this box's public one is refused: the same id
-   * here would be a different design, and reviewing it would report on the wrong document.
+   * `review-design`'s design, from `designUrl` (#1120) or the older `designId`. Accepts
+   * `/ui-builder/[<catalog>/]<designId>[?node=<nodeId>]`; only id and node are kept, so a pasted
+   * query credential goes nowhere. A URL for another origin is refused, since the same id there is
+   * a different design.
    */
   private fun JsonObject.reviewTarget(): ReviewTarget {
     val url = optionalString("designUrl")
@@ -803,9 +782,8 @@ class ServeCatalogMcp(
       return withStructuredContent(name, it)
     }
     val result = catalogTool(name, foldUriOverrides(name, args), liveAuthorization, access)
-    // A caller that authorized in-band cannot attach its token to a host's own `resources/read`
-    // of a returned link. Sign each override-bearing link so that one exact render stays readable
-    // for a few minutes without the token ever entering the URI.
+    // An in-band-authorized caller can't attach its token to a host's own `resources/read` of a
+    // returned link, so sign each override-bearing link for a few minutes instead.
     return if (presented != null) signResourceLinks(result) else result
   }
 
@@ -986,9 +964,8 @@ class ServeCatalogMcp(
         }
       )
       add(ServeLibraryMcp.resourceDescriptor())
-      // The UI-builder shapes, beside the viewer: static, public, and what an agent authoring a
-      // document or a mutation batch needs before its first call rather than after its first
-      // refusal.
+      // UI-builder schemas, static and public, so an agent has them before its first call rather
+      // than after a refusal.
       if (uiBuilder != null) {
         UiBuilderJsonSchemas.served.forEach { schema ->
           add(
@@ -1092,16 +1069,10 @@ class ServeCatalogMcp(
   }
 
   /**
-   * The cross-product of [axes] over one preview, rendered cell by cell.
-   *
-   * Exists because comparing axes is the common agent task and the per-cell alternative is a round
-   * trip each: probing eight axes over this endpoint took twenty sequential `render_preview` calls,
-   * every one of them a fresh catalog lease and a fresh permit acquisition. Here the cells share
-   * the lease, and each still takes the render permit individually so the matrix competes with
-   * browser traffic on equal terms rather than reserving the renderer for itself.
-   *
-   * The base `overrides` (if any) are the floor every cell starts from; an axis value with the same
-   * key wins for that cell, so a caller can pin `uiMode=dark` once and vary `fontScale` over it.
+   * The cross-product of [axes] over one preview, rendered cell by cell under one shared lease
+   * (instead of many `render_preview` round trips). Each cell still takes the render permit,
+   * competing fairly with browser traffic. Base `overrides` apply to every cell; an axis value with
+   * the same key wins.
    */
   private suspend fun matrixResult(
     host: ServeHost,
@@ -1145,10 +1116,9 @@ class ServeCatalogMcp(
 
     val knobKinds = ServeOverrides.declaredKnobKinds(preview)
     val uri = resourceUri(catalog, preview.id)
-    // On a host with a public origin the pixels leave the text: each cell gets a signed https link
-    // (re-rendered on fetch from its own override-bearing URI, so nothing is held), the viewer gets
-    // the bytes in `_meta`, which the model never reads, and a chat surface gets one numbered
-    // contact sheet — a Slack message carries at most five attachments, and a matrix is up to 24.
+    // With a public origin, pixels leave the text: each cell gets a signed re-renderable https
+    // link, the viewer gets bytes in `_meta`, and chat surfaces get one numbered contact sheet
+    // (Slack allows five attachments; a matrix is up to 24).
     val linked = observe == "png" && publicOrigin() != null
     val cellPngs = mutableListOf<ByteArray>()
     val cellLabels = mutableListOf<String>()
@@ -1199,9 +1169,7 @@ class ServeCatalogMcp(
       }
     }
 
-    // Distinct hashes over the whole matrix: the one number that says whether these axes actually
-    // move the pixels. All-identical means the axes are inert for this preview, which is the
-    // question the twenty-call version was being used to answer.
+    // Distinct hashes across the matrix: all-identical means the axes don't affect this preview.
     val distinct =
       rendered.mapNotNull { it.jsonObject["sha256"]?.jsonPrimitive?.contentOrNull }.toSet().size
     val sheet =
@@ -1250,31 +1218,18 @@ class ServeCatalogMcp(
   }
 
   /**
-   * The `device` override's accepted vocabulary, resolved from the render lane's own catalog.
-   *
-   * Geometry is not authored here — every value comes from [DeviceDimensions.resolve], the same
-   * call the render path makes when it decides what a `@Preview(device = …)` produces, so a name
-   * listed here is a frame the backend will actually render. The tool exists because an
-   * unrecognised device name is *not* an error on the render path: it falls through to the default
-   * frame, which from the caller's side is indistinguishable from a device that renders identically
-   * to the default.
+   * The `device` override's vocabulary, resolved through [DeviceDimensions.resolve] (the render
+   * path's own call). Exists because an unknown device name silently falls back to the default
+   * frame.
    */
   /**
-   * One preview's render timeline, in whichever of the three shapes this deployment can honestly
-   * produce. The `mode` field says which, because the three are not interchangeable and an agent
-   * that cannot tell them apart would read "no versions" as "nothing ever changed".
-   *
-   * - `published` — the catalog came from a delivery branch, so the timeline it *has* is the
-   *   `history.json` published on that branch. This server does not proxy it: the manifest is a
-   *   whole-catalog document on a public host, the browser viewer fetches it directly for the same
-   *   reason, and a server-side copy would be a cache with its own staleness against a branch that
-   *   moves independently of this process. So the fetchable URL is returned instead, alongside the
-   *   template for addressing any single historical render.
-   * - `local` — project mode, where the timeline is derived from the checkout's own delivery-branch
-   *   commits and served inline, with each version addressable through this server's
-   *   `/history/render/<blob>.png` lane.
-   * - `none` — an uploaded bundle with neither. Reported as a reason rather than an empty list,
-   *   which would read as a preview that has never changed.
+   * One preview's render timeline, with `mode` saying which shape, so "no versions" isn't misread
+   * as "never changed":
+   * - `published`: the catalog's `history.json` on its delivery branch, returned as a URL (not
+   *   proxied, to avoid a stale copy) plus a per-render URL template;
+   * - `local`: project mode, derived from the checkout and served inline via
+   *   `/history/render/<blob>.png`;
+   * - `none`: an uploaded bundle with neither, reported with a reason.
    */
   private suspend fun historyJson(
     host: ServeHost,
@@ -1292,10 +1247,8 @@ class ServeCatalogMcp(
     if (provenance != null) {
       val manifestUrl = ServeUrls.historyManifestUrl(provenance.repo, provenance.branch)
       val bundle = bundleHost(host)
-      // The catalog load already fetched and parsed `history.json` from the same immutable tree as
-      // `catalog.json`, so the timeline is in memory and pinned to the catalog being served. Where
-      // it is, answer with the preview's own slice rather than sending the caller to fetch a
-      // whole-catalog document for one row: measured at 1 MB to read 497 bytes on `m3-catalog`.
+      // The load already parsed `history.json` from the served tree, so answer with this preview's
+      // slice rather than a ~1 MB whole-catalog document.
       val timeline = bundle?.indexedTimeline(previewId)
       return JsonObject(
         base +
@@ -1397,11 +1350,8 @@ class ServeCatalogMcp(
   }
 
   /**
-   * The manifest's versions, each with the absolute URL that serves those exact bytes.
-   *
-   * `raw.githubusercontent.com/<repo>/<commit>/<path>` is what makes a timeline viewable at all:
-   * the delivery branch carries only the *current* bytes at its tip, while the raw host serves any
-   * commit. Built here so a caller never has to join `commit` to `path` itself.
+   * The manifest's versions, each with the `raw.githubusercontent.com/<repo>/<commit>/<path>` URL
+   * serving those bytes (the branch tip carries only current bytes).
    */
   private fun versionsJson(
     timeline: PreviewHistoryManifest.PreviewTimeline,
@@ -1426,9 +1376,8 @@ class ServeCatalogMcp(
   }
 
   /**
-   * One version of a preview's render, in whichever mode produced it. `blob` is the content id
-   * project mode addresses by; `commit` is what the published lane addresses by; both are present
-   * in the manifest, so a caller can key on either.
+   * One version of a render: `blob` is project mode's address, `commit` the published lane's; both
+   * are present.
    */
   private data class HistoryVersion(
     val commit: String,
@@ -1445,10 +1394,8 @@ class ServeCatalogMcp(
   )
 
   /**
-   * The timeline behind [previewId], flattened for the diff and read lanes.
-   *
-   * Same precedence as [historyJson]: a catalog fetched from a delivery branch has already
-   * published what it rendered, so its manifest wins over whatever a local checkout holds.
+   * The timeline behind [previewId] for the diff and read lanes, with [historyJson]'s precedence
+   * (published manifest over local checkout).
    */
   private suspend fun historyView(host: ServeHost, previewId: String): HistoryView? {
     val bundle = bundleHost(host)
@@ -1492,14 +1439,9 @@ class ServeCatalogMcp(
   }
 
   /**
-   * Compare two of a preview's renders.
-   *
-   * A **metadata** diff, deliberately: the manifest's versions are already collapsed distinct
-   * renders, so "did the bytes change" is answered by the blob ids alone and needs no image fetch
-   * on either side. `history_read` is there for the pixels when a caller actually wants them.
-   *
-   * With no `from`/`to` this compares the two newest versions, which is the question that gets
-   * asked: did the last publish move this preview?
+   * Compare two of a preview's renders as a metadata diff: versions are already distinct renders,
+   * so blob ids answer "did the bytes change" with no image fetch (`history_read` gets pixels).
+   * Defaults to the two newest.
    */
   private suspend fun diffHistoryResult(args: JsonObject): JsonObject {
     val target = args.previewTarget()
@@ -1567,12 +1509,9 @@ class ServeCatalogMcp(
   }
 
   /**
-   * One historical render's bytes, through this server.
-   *
-   * `preview` scope rather than `live`, matching the HTTP permalink lane: this replays bytes that
-   * were already published, and commissions no render. It is still bounded — the published lane
-   * goes through [ServeBundleHost]'s pinned-fetch permit and its miss cache, and the local lane
-   * only ever serves blobs the timeline already names.
+   * One historical render's bytes. `preview` scope since it replays published bytes and commissions
+   * no render; still bounded by [ServeBundleHost]'s pinned-fetch permit and miss cache, or limited
+   * to blobs the local timeline names.
    */
   private suspend fun readHistoryResult(args: JsonObject): JsonObject {
     val target = args.previewTarget()
@@ -1655,19 +1594,10 @@ class ServeCatalogMcp(
   }
 
   /**
-   * Compare two previews' semantics by **authored testTag**, not by positional ref.
-   *
-   * The identity choice is the whole design, and it is [ServeSemanticsTags]': a `SemanticsRefs` ref
-   * indexes siblings that share an anchor, so `r/role:Button[0]` means "the first Button under this
-   * parent" and inserting a Button ahead of it silently retargets the same string at different
-   * pixels — a diff built on refs reports "unchanged" for exactly the edit a reader most needs to
-   * see. A `testTag` is authored, so it either survives an edit or stops resolving, and both are
-   * reported here.
-   *
-   * Reads the `tags` index off each side's annotations payload rather than re-walking the tree:
-   * that index is already the wire contract [ServeAnnotationsPayload] publishes, including its
-   * `count` (how many nodes carry the tag — a tag is only a usable identity while exactly one does)
-   * and its explicitly-named coordinate space.
+   * Compare two previews' semantics by authored testTag, not positional ref ([ServeSemanticsTags]):
+   * refs retarget when siblings are inserted, while a tag survives an edit or stops resolving.
+   * Reads the `tags` index from each side's [ServeAnnotationsPayload], including `count` (a tag is
+   * an identity only while exactly one node carries it).
    */
   /** The two previews `diff_semantics` compares, validated before any grant check. */
   private fun diffSemanticsTargets(args: JsonObject): Pair<PreviewTarget, PreviewTarget> {
@@ -1714,9 +1644,8 @@ class ServeCatalogMcp(
               )
             }
             if (countA != countB) {
-              // A count change is an ambiguity appearing or disappearing, which is a different
-              // event from a move and is worth naming separately: a tag carried by two nodes is no
-              // longer an identity anything can resolve.
+              // A count change (ambiguity appearing or disappearing) is reported separately from a
+              // move.
               put(
                 "count",
                 buildJsonObject {
@@ -1852,11 +1781,8 @@ class ServeCatalogMcp(
     val rendered = renderPng(host, previewId, overrides)
     val png = rendered.png
     if (observe == "png") {
-      // An override-free browse keeps the bare image it has always returned. An override-bearing
-      // one gets the provenance block beside the pixels, because pixels alone cannot answer the
-      // question that actually matters to the caller: did my override reach the renderer? Two
-      // different overrides can produce byte-identical output either because both applied and
-      // neither moved anything, or because a baked lane answered and ignored them both.
+      // Override-bearing renders get a provenance block, since identical pixels can mean the
+      // overrides applied and changed nothing or that a baked lane ignored them.
       val renderedUri = resourceUriWithOverrides(uri, rawOverrides)
       val signed = signedImage(renderedUri)
       val imageUrl = listOfNotNull(signed?.let { imageUrlLinkContent(it.first) })
@@ -1936,12 +1862,8 @@ class ServeCatalogMcp(
   }
 
   /**
-   * What answered this request, and whether the overrides asked for reached it.
-   *
-   * [RenderOutcome.Generation] is already threaded through the host for exactly this purpose — a
-   * `baked` generation means no renderer ran and the request's overrides are NOT reflected in the
-   * bytes — but the MCP lane used to drop it on the floor, leaving a caller unable to tell an
-   * override that applied and changed nothing from one that was never honoured.
+   * What answered this request and whether the requested overrides reached it
+   * ([RenderOutcome.Generation]; `baked` means no renderer ran).
    */
   private fun provenance(
     rendered: Rendered,
@@ -1995,12 +1917,9 @@ class ServeCatalogMcp(
   }
 
   /**
-   * The `compose/figma-svg` counterpart of [renderPng], returned as SVG source rather than a base64
-   * `image` block: the bytes are XML, and an `image/svg+xml` image block is symmetric with PNG but
-   * renders in almost no MCP client, while the source is what a vector consumer wants.
-   *
-   * Shares [withRenderPermit] with the raster lane so SVG cannot become a second, unmetered render
-   * path — the same reason the PNG lane holds the HTTP server's semaphore.
+   * The `compose/figma-svg` counterpart of [renderPng], returned as SVG source (SVG image blocks
+   * render in almost no MCP client). Shares [withRenderPermit], so it isn't an unmetered render
+   * path.
    */
   private suspend fun renderSvg(
     host: ServeHost,
@@ -2024,12 +1943,9 @@ class ServeCatalogMcp(
   }
 
   /**
-   * The **full-page** counterparts of [renderSvg] and [renderPng] — `compose/figma-svg-long` and
-   * `render/scroll/long`, the whole scrollable screen rather than the viewport crop.
-   *
-   * Gated on [ServeHost.hasScrollExportFor] for the same reason the vector lane is gated on
-   * `hasSvgExportFor`: the tall re-render needs a daemon, so a static bundle has no scroll producer
-   * and its `NotFound` would otherwise read as "no such preview".
+   * Full-page lanes (`compose/figma-svg-long`, `render/scroll/long`), gated on
+   * [ServeHost.hasScrollExportFor]: they need a daemon, and a static bundle's `NotFound` would read
+   * as "no such preview".
    */
   private fun requireScroll(host: ServeHost, previewId: String) {
     if (!host.hasScrollExportFor(previewId)) {
@@ -2086,12 +2002,9 @@ class ServeCatalogMcp(
   private fun parseOverrides(preview: ServePreview, raw: JsonObject?): PreviewOverrides {
     if (raw == null || raw.isEmpty()) return PreviewOverrides()
     val params = raw.mapValues { (_, value) -> value.asOverrideString() }
-    // Unknown keys are REFUSED here, unlike on `GET /render` where they are ignored so a URL may
-    // carry a cache-buster or an analytics tag beside the axes. An MCP `overrides` object has no
-    // such passengers: every key in it was typed on purpose, so a key this server does not consume
-    // is a caller error, and silently dropping it produces a render that answers a different
-    // question than the one asked — indistinguishable, from the outside, from an override that
-    // applied and changed nothing.
+    // Unknown keys are refused here (unlike `GET /render`, which tolerates cache-busters): every
+    // MCP override key was typed on purpose, and silently dropping one answers a different
+    // question.
     val unknown = params.keys.filterNot(ServeOverrides::isOverrideParam).sorted()
     if (unknown.isNotEmpty()) {
       throw McpRequestException(
@@ -2109,16 +2022,9 @@ class ServeCatalogMcp(
   }
 
   /**
-   * The refusal [parseOverrides] states for unknown keys, applied to knobs (#1277).
-   *
-   * `knob.` passes [ServeOverrides.isOverrideParam] whatever follows it, and the renderer drops a
-   * knob the preview never declared, or a value it cannot read as the declared type — so
-   * `knob.nope` or `knob.checked: "maybe"` rendered the default and reported `overridesApplied:
-   * true`. That is the render "that answers a different question than the one asked" the refusal
-   * exists for, so each knob is checked here against the preview's own declarations
-   * ([ServeOverrides.declaredKnobKinds], the map the renderer parses with), and a mismatch names
-   * what the preview does declare. A kind this layer does not know how to read is passed through
-   * for the renderer to judge.
+   * The same refusal applied to knobs (#1277): the renderer silently drops undeclared knobs and
+   * unparseable values, so each is checked against [ServeOverrides.declaredKnobKinds] and a
+   * mismatch names what the preview declares. Unknown kinds pass through to the renderer.
    */
   private fun refuseUndeclaredKnobs(
     preview: ServePreview,
@@ -2237,10 +2143,8 @@ class ServeCatalogMcp(
   }
 
   /**
-   * The catalogs for `catalog_library`: every one by its registry label and preview count, and only
-   * `projectId`'s previews (leased on request). Listing every resident catalog's previews made an
-   * argument-less call return megabytes (yschimke/compose-ag-plugin#64); the library app loads one
-   * catalog's previews when it is opened.
+   * Catalogs for `catalog_library`: every one by label and count, but previews only for `projectId`
+   * (listing all returned megabytes).
    */
   private suspend fun libraryCatalogs(args: JsonObject): List<ServeLibraryMcp.Catalog> {
     val selected = args.optionalString("projectId")
@@ -2287,10 +2191,8 @@ class ServeCatalogMcp(
   }
 
   /**
-   * One page of a `list_previews` answer. A whole catalog used to come back at once: m3-catalog's
-   * 4,108 previews are 2.7 M characters, which a client refuses outright (compose-ag-plugin#64).
-   * [query] narrows by id or label before paging, which is how an agent after one component finds
-   * it without reading the catalog.
+   * One page of `list_previews` (a whole large catalog is too big for clients). [query] narrows by
+   * id or label before paging.
    */
   private data class PreviewPage(val query: String?, val offset: Int, val limit: Int) {
     fun matches(preview: ServePreview): Boolean =
@@ -2407,17 +2309,13 @@ class ServeCatalogMcp(
     put("uri", resourceUri(catalog, preview.id))
     put("modes", JsonArray(preview.modes.map { JsonPrimitive(it.wire) }))
     put("dataProductKinds", JsonArray(preview.dataProductKinds.sorted().map(::JsonPrimitive)))
-    // Advertised beside `dataProductKinds` for the same reason that is: `observe=svg` exists per
-    // preview, not per catalog, so without this an agent can only discover the vector lane by
-    // asking for it and reading the refusal.
+    // Advertised per preview so an agent needn't discover the vector lane by refusal.
     put("svgAvailable", host.hasSvgExportFor(preview.id))
     put("scrollAvailable", host.hasScrollExportFor(preview.id))
     preview.state?.let { put("state", it) }
     preview.theme?.let { put("theme", it) }
-    // The declared `previewOverride*` knobs, by the wire key `render_preview` takes as
-    // `knob.<key>`. Omitted when there are none, which is most previews. This is how a client
-    // finds the preview that takes a given document — `a2ui render` picks the one declaring a
-    // string `document` knob — without a second call per preview.
+    // Declared `previewOverride*` knobs by their `knob.<key>` wire key, so a client can find e.g.
+    // the preview with a `document` knob without extra calls. Omitted when none.
     if (preview.overrides.isNotEmpty()) {
       put(
         "knobs",
@@ -2505,10 +2403,9 @@ class ServeCatalogMcp(
   }
 
   /**
-   * Folds `?overrides=` from a returned `resource_link` back into the call, so replaying a link
-   * renders the state it names instead of silently answering with defaults. A tool that takes no
-   * overrides refuses such a URI; an explicit `overrides` argument that disagrees is refused too.
-   * `diff_semantics` folds its `other.uri` into `otherOverrides` the same way.
+   * Fold `?overrides=` from a returned `resource_link` back into the call so replaying a link
+   * renders that state. Tools without overrides refuse such a URI, as does a disagreeing explicit
+   * `overrides`. `diff_semantics` folds `other.uri` likewise.
    */
   private fun foldUriOverrides(name: String, args: JsonObject): JsonObject {
     val folded = foldOne(name, args, "overrides")
@@ -2579,9 +2476,8 @@ class ServeCatalogMcp(
   }
 
   /**
-   * `<uri>&exp=<epoch seconds>&sig=<HMAC-SHA256>` over the unsigned URI and its expiry. The
-   * signature authorizes exactly one thing — reading that preview in that override state until
-   * [SIGNED_RESOURCE_TTL_SECONDS] pass — and carries no part of the grant token.
+   * `<uri>&exp=<epoch seconds>&sig=<HMAC-SHA256>`: authorizes reading exactly that preview state
+   * until [SIGNED_RESOURCE_TTL_SECONDS] pass, carrying no part of the grant token.
    */
   internal fun signResourceUri(uri: String): String {
     val unsigned = unsignedResourceUri(uri)
@@ -2591,9 +2487,8 @@ class ServeCatalogMcp(
   }
 
   /**
-   * `<origin>/mcp/render.png?uri=<resource uri>&exp=…&sig=…`, or null when this box has no public
-   * origin. The signature covers the resource URI (overrides included) and the expiry, so the link
-   * grants exactly one render for [SIGNED_RESOURCE_TTL_SECONDS] and no part of the grant token.
+   * `<origin>/mcp/render.png?uri=…&exp=…&sig=…`, or null without a public origin; grants exactly
+   * one render for [SIGNED_RESOURCE_TTL_SECONDS].
    */
   private fun signedImageUrl(resourceUri: String): String? = signedImage(resourceUri)?.first
 
@@ -2608,9 +2503,9 @@ class ServeCatalogMcp(
   }
 
   /**
-   * The chat-surface fallback for pixels that cannot be replayed from a resource URI: the bytes are
-   * kept for the link's lifetime ([signedViewUrl]) and offered as an https `resource_link` plus one
-   * line of text. Empty on a box with no public origin, where the image block is all there is.
+   * Chat fallback for pixels that can't be replayed from a resource URI: bytes kept for the link's
+   * lifetime ([signedViewUrl]) and offered as an https `resource_link` plus a line of text. Empty
+   * without a public origin.
    */
   private fun keptImageFallback(png: ByteArray): List<JsonObject> {
     val (url, expiry) = signedViewUrl(png) ?: return emptyList()
@@ -2618,8 +2513,8 @@ class ServeCatalogMcp(
   }
 
   /**
-   * The PNG behind a [signedImageUrl], or null when the signature is bad or expired. Same lane as a
-   * signed `resources/read`: the catalog is leased and the render takes a permit as usual.
+   * The PNG behind a [signedImageUrl], or null for a bad or expired signature. Leases the catalog
+   * and takes a render permit as usual.
    */
   suspend fun signedImagePng(resourceUri: String, expiry: Long, signature: String): ByteArray? {
     if (nowMillis() / 1000 > expiry) return null
@@ -2732,14 +2627,9 @@ class ServeCatalogMcp(
   }
 
   /**
-   * The one catalog a per-catalog listing reads. A server holding a single catalog answers for it;
-   * otherwise the caller must name one (#1162).
-   *
-   * Listing every catalog here used to lease each in turn — resuming a suspended one reopens its
-   * host — and then serialise thousands of previews: 38 catalogs, m3-catalog alone 4,108 previews,
-   * well past three minutes, which a client reports only as its own timeout. The refusal costs one
-   * registry read, and it names the ids and the local server, because an agent that reached for
-   * this without a catalog was usually after its own project's previews.
+   * The one catalog a per-catalog listing reads: the only one, or the one the caller names (#1162).
+   * Listing all would resume every suspended host and serialise thousands of previews; the refusal
+   * names the ids and the local server.
    */
   private fun requireCatalog(tool: String, args: JsonObject): String {
     args.optionalString("catalog")?.let {
@@ -2763,11 +2653,8 @@ class ServeCatalogMcp(
   private class CatalogView(val label: String, val previews: List<ServePreview>?)
 
   /**
-   * [catalog]'s label and previews as the registry already holds them: the resident host, else the
-   * retained state of a suspended one. Never leases, so an enumeration across every catalog
-   * (list_projects, status, resources/list, list-all-documentation) cannot wake each idle daemon in
-   * turn — the same rule the `/status` page keeps. Null previews means the registry holds neither;
-   * the catalog is still listed by id.
+   * [catalog]'s label and previews as the registry holds them (resident host, else retained state),
+   * never leasing, so enumerations don't wake idle daemons. Null previews: listed by id only.
    */
   private fun peekCatalog(catalog: String): CatalogView {
     sessions.peekHost(catalog)?.let {
@@ -2792,11 +2679,9 @@ class ServeCatalogMcp(
   }
 
   /**
-   * Whether `render_preview` should answer with the published snapshot instead of refusing: no live
-   * grant was presented, and the call asks for nothing a snapshot cannot give (no overrides, no
-   * observation other than the picture). Agents reach for `render_preview` to look at a library
-   * component before they think of `resources/read`; every eval run on compose-ag-plugin#64 spent
-   * three calls on the refusal before reading the same bytes.
+   * Whether `render_preview` should serve the published snapshot instead of refusing: no live
+   * grant, and nothing a snapshot can't give (no overrides, picture only). Agents try
+   * `render_preview` before `resources/read`.
    */
   private fun servesPublishedSnapshot(
     args: JsonObject,
@@ -2849,14 +2734,9 @@ class ServeCatalogMcp(
   }
 
   /**
-   * One UI-builder tool, or null when the name belongs to the catalog surface.
-   *
-   * The capability check happens here rather than inside [ServeUiBuilderMcp] because the credential
-   * is normally a property of the transport's call, not of the JSON-RPC message — the same reason
-   * the HTTP routes authorize before they map. [TOKEN_ARGUMENT] is the one exception, and it is
-   * resolved by the same authorization the call is: what arrives here either way is a decision. A
-   * missing grant is a tool error rather than a transport status: the agent asked a question this
-   * surface understands and is being told it may not.
+   * One UI-builder tool, or null for a catalog-surface name. Authorized here because the credential
+   * belongs to the transport's call, like the HTTP routes ([TOKEN_ARGUMENT] is resolved the same
+   * way). A missing grant is a tool error, not a transport status.
    */
   private suspend fun uiBuilderTool(
     name: String,
@@ -2920,10 +2800,8 @@ class ServeCatalogMcp(
   }
 
   /**
-   * `ui_builder_view`'s reply: the JSON as text, the picture as a signed https link a host can put
-   * in an `<img>`, and — when asked, or when this box has no public origin to link to — the bytes
-   * as an image block. The base64 never travels in the text, where it would be spent from an
-   * agent's context as characters rather than seen as a picture.
+   * `ui_builder_view`'s reply: JSON as text, the picture as a signed https link, and image bytes
+   * when asked or without a public origin. Base64 never goes in the text.
    */
   internal fun uiBuilderViewResult(text: String, inline: Boolean): JsonObject {
     val reply =
@@ -2978,9 +2856,8 @@ class ServeCatalogMcp(
   }
 
   /**
-   * `ui_builder_guidelines_prompt`'s reply: the request as JSON text with each picture's `dataUrl`
-   * taken out, then the pictures as image blocks in the order the user message numbers them, so an
-   * agent hands its model the same text and the same pictures and spends no context on base64.
+   * `ui_builder_guidelines_prompt`'s reply: the request JSON with each `dataUrl` removed, then the
+   * pictures as image blocks in the user message's order.
    */
   internal fun uiBuilderGuidelinesPromptResult(text: String): JsonObject {
     val reply =
@@ -2992,9 +2869,8 @@ class ServeCatalogMcp(
     }
     val described =
       JsonObject(reply + ("pictures" to JsonArray(pictures.map { JsonObject(it - "dataUrl") })))
-    // Pictures the server could not attach this time — still drawing into its cache, or drawn at
-    // the wrong size — said in a text block of their own, so an agent asks again rather than
-    // judging without them.
+    // Pictures not attached this time (still drawing, or wrong size) get their own text block so
+    // the agent asks again.
     val missing =
       (reply["provenance"] as? JsonArray)
         .orEmpty()
@@ -3040,14 +2916,10 @@ class ServeCatalogMcp(
   }
 
   /**
-   * Keeps the UI-builder protocol reply as a text fallback while giving MCP App hosts an ordinary
-   * image block for the two calls that can carry a PNG. The text fallback omits both the binary
-   * field represented by that block. The native render's short-lived playground capability stays in
-   * the ordinary MCP reply because clients use it to open the promised live preview stream; static
-   * packagers are responsible for applying their credential-free transport contract before
-   * serializing a result into a bounded URL fragment. The viewer intentionally only understands MCP
-   * content blocks; making it know every UI-builder response schema would couple a reusable viewer
-   * to a second protocol. Without this adapter, successful renders appear as base64 text.
+   * Keeps the UI-builder reply as a text fallback while giving MCP App hosts an image block for the
+   * two PNG-carrying calls (the text omits the binary). The native render's playground capability
+   * stays in the reply for live preview. The viewer understands only MCP content blocks, not every
+   * UI-builder schema.
    */
   internal fun uiBuilderToolResult(name: String, text: String): JsonObject {
     val png = uiBuilderPng(name, text)
@@ -3162,12 +3034,9 @@ class ServeCatalogMcp(
   }
 
   /**
-   * The `outputSchema` every advertised tool declares: always an object, because that is what
-   * `structuredContent` is. A reply this server encodes from a class of its own gets that class's
-   * generated schema ([ServeUiBuilderMcp.VIEW], [ServeUiBuilderMcp.VALIDATE]); a legacy array reply
-   * gets the wrapper [withStructuredContent] puts it in; a render declares the `imageUrl` it adds;
-   * and every other tool, whose JSON is a protocol envelope or a per-lane shape, is an open object
-   * — which an image-only reply's empty `structuredContent` also satisfies.
+   * The `outputSchema` every tool declares, always an object: a class-encoded reply gets its
+   * generated schema ([ServeUiBuilderMcp.VIEW], [ServeUiBuilderMcp.VALIDATE]), legacy arrays their
+   * wrapper ([withStructuredContent]), renders their `imageUrl`, and the rest an open object.
    */
   private fun outputSchema(name: String): JsonObject =
     when (name) {
@@ -3219,13 +3088,10 @@ class ServeCatalogMcp(
   }
 
   /**
-   * MCP output schemas validate `structuredContent`, not the backwards-compatible text block.
-   * Preserve that text for existing clients while exposing the same JSON object to typed clients.
-   * Legacy array results are wrapped under the field their output schema declares, and a batched
-   * story call aggregates every JSON observation instead of dropping all but the first. Image-only
-   * and non-JSON text results keep their primary payload in `content` and carry an empty object. A
-   * result that already has structure of its own — a render's `imageUrl`, a library listing — keeps
-   * it, beside whatever its JSON text says.
+   * Output schemas validate `structuredContent`, so mirror the JSON there while keeping the text
+   * block. Legacy arrays are wrapped under their declared field; batched story calls aggregate
+   * every observation; image-only and non-JSON results carry an empty object; existing structure is
+   * kept.
    */
   private fun withStructuredContent(name: String, result: JsonObject): JsonObject {
     if (result["isError"]?.jsonPrimitive?.booleanOrNull == true) return result
@@ -3258,12 +3124,9 @@ class ServeCatalogMcp(
   }
 
   /**
-   * Adds the in-band credential to a gated tool's input schema.
-   *
-   * Declared rather than merely tolerated because several of these schemas set
-   * `additionalProperties: false`, and because a model only passes an argument it can see. The two
-   * access tools are skipped: they are the ones a caller reaches *without* a credential, and
-   * offering to carry one there would only invite a token that does not exist yet.
+   * Adds the in-band credential to a gated tool's input schema, since some schemas forbid extra
+   * properties and models only pass visible arguments. Skipped on the two access tools, used before
+   * a token exists.
    */
   /** Cosmetic, explicitly reported identity. Never grants access or changes authorization. */
   private fun withAgentIdentity(name: String, schema: JsonObject): JsonObject {
@@ -3357,10 +3220,8 @@ class ServeCatalogMcp(
   }
 
   /**
-   * The image as one line of text, for hosts that show a person only text — a Slack thread, where
-   * the agent replies in mrkdwn and has no MCP App, viewer or image block to hand on (rule R1: the
-   * agent sees what the person sees). A bare https URL, which Slack links and unfurls as written,
-   * and nothing else: no base64, no `file://`, no grant.
+   * The image as one line of text for text-only hosts like Slack: a bare https URL, nothing else
+   * (no base64, `file://` or grant).
    */
   private fun chatImageText(url: String, expiresAtEpochSeconds: Long): JsonObject =
     textContent(
@@ -3462,9 +3323,9 @@ class ServeCatalogMcp(
     const val MCP_PROTOCOL_VERSION = "2025-06-18"
     const val MCP_PROTOCOL_VERSION_2025_03 = "2025-03-26"
     /**
-     * The revision that defines URL-mode elicitation and the -32042 error `poll_access` returns.
-     * 2026-07-28 is not negotiated: this hand-rolled endpoint has not been checked against it, and
-     * the MCP Kotlin SDK this repository pins (0.15.0) knows nothing newer than 2025-11-25.
+     * The revision defining URL-mode elicitation and `poll_access`'s -32042. 2026-07-28 isn't
+     * negotiated: unverified here, and the pinned MCP Kotlin SDK (0.15.0) knows nothing past
+     * 2025-11-25.
      */
     const val MCP_PROTOCOL_VERSION_2025_11 = "2025-11-25"
     val SUPPORTED_PROTOCOL_VERSIONS =
@@ -3480,9 +3341,8 @@ class ServeCatalogMcp(
     private const val INTERNAL_ERROR = -32603
     private const val MAX_STORIES_PER_CALL = 16
     /**
-     * Cells one `render_matrix` call may commission. Each is a full render under the shared permit,
-     * so this bounds what a single MCP message can cost the box — the same reason
-     * [MAX_STORIES_PER_CALL] exists, applied to a product rather than a list.
+     * Cells one `render_matrix` call may commission, bounding what one message can cost (like
+     * [MAX_STORIES_PER_CALL]).
      */
     private const val MAX_MATRIX_CELLS = 24
 
@@ -3556,43 +3416,27 @@ class ServeCatalogMcp(
       "Too many access requests from this address just now — wait a minute and try again."
 
     /**
-     * JSON-RPC methods any caller may send, credential or not.
-     *
-     * Discovery only: what protocol this speaks, whether it is alive, and what it can be asked to
-     * do. None of them reads a catalog, renders anything, or names a preview — [listResources] and
-     * every catalog tool stay behind the gate. The reason to open these at all is that a client
-     * which cannot complete `initialize` cannot reach the tool that asks for a credential either,
-     * so an agent with no token has nowhere to start but out-of-band `curl`.
+     * JSON-RPC methods any caller may send. Discovery only, so a tokenless agent can reach the tool
+     * that requests a credential; nothing here reads a catalog.
      */
     /**
-     * Methods answered before any credential is looked at.
-     *
-     * Deliberately only the methods that disclose nothing about this host's catalogs. Prompts are
-     * static workflow text; opening their discovery is necessary because prompt requests cannot
-     * carry the token returned by the in-session grant flow. `resources/list` is NOT here even
-     * though a client calls it during its opening handshake and a `401` there is what makes the
-     * whole server read as "needs authentication": that listing enumerates real previews, and
-     * ungating the *method* would skip the scope check entirely and serve it on a token-gated box.
-     * The fix for the handshake belongs one layer down, where [ServeMachineAuthorization] knows
-     * whether this box publishes anonymously — on a `--public` box `preview` scope is satisfied by
-     * presenting nothing, so this answers; on a private box it still refuses.
+     * Methods answered before any credential is examined; none disclose this host's catalogs.
+     * Prompts are static text, and prompt requests can't carry an in-session token.
+     * `resources/list` is deliberately excluded (it enumerates previews);
+     * [ServeMachineAuthorization] instead admits it on a `--public` box where `preview` scope needs
+     * no credential.
      */
     private val UNGATED_METHODS =
       setOf("initialize", "ping", "tools/list", "prompts/list", "prompts/get")
 
     private const val URL_ELICITATION_REQUIRED = -32042
 
-    /**
-     * Tools callable without a grant — the two that exist to obtain one. Everything else in [tools]
-     * answers about this host's catalogs and needs at least `preview` scope.
-     */
+    /** The two tools that obtain a grant; every other tool needs at least `preview` scope. */
     private val UNGATED_TOOLS = setOf("request_access", "poll_access")
 
     /**
-     * Prefix on the hosted catalog's data tools, so a client that also runs the local
-     * `compose-preview` server (which has `render_preview`, `list_previews`, ...) never sees two
-     * tools with one name (#1105). The access tools, `status`, the Storybook aliases and the
-     * `ui_builder_*` tools already have distinct names and keep them.
+     * Prefix on the hosted catalog's data tools so they never clash with the local
+     * `compose-preview` server's tool names (#1105).
      */
     private const val CATALOG_PREFIX = "catalog_"
 
@@ -3624,25 +3468,11 @@ class ServeCatalogMcp(
     /**
      * The argument a gated tool call carries its grant token in.
      *
-     * ### Why the credential may also ride the message
-     *
-     * Everywhere else on this server the credential is a property of the HTTP call, and that is
-     * still the preferred place: it is where a browser session, an operator token and an OAuth
-     * bearer all live, and it keeps a secret out of the transcript a model reasons over.
-     *
-     * It is unreachable for one caller, and that caller is the whole point of `request_access`. An
-     * MCP client fixes its request headers when it connects; an agent that completes the device
-     * flow *mid-session* receives the token as a tool result, in a place from which it cannot reach
-     * its own transport. Before this, such an agent could ask for access, watch a human approve it,
-     * hold a valid token — and still be refused by every gated tool until someone edited an
-     * `mcp.json` and restarted the session. The flow worked and was useless, which is the failure
-     * [docs/design/AGENT_ACCESS_GRANTS.md] means when it says nothing is configured client-side.
-     *
-     * So a gated tool accepts the token as an argument too. It buys exactly one thing the header
-     * cannot: escalation inside the session that asked for it, on any MCP client, without waiting
-     * for one to grow mid-session re-authentication. It is checked by the same
-     * [ServeMachineAuthorization], against the same grant store, for the same short lifetime — no
-     * new authority, only a second door into the one that exists.
+     * The HTTP credential is still preferred (it keeps secrets out of the transcript), but an agent
+     * completing `request_access` mid-session receives its token as a tool result and can't change
+     * its transport headers. Accepting the token as an argument lets it escalate within that
+     * session on any client. Checked by the same [ServeMachineAuthorization] against the same grant
+     * store: a second door, not new authority. See docs/design/AGENT_ACCESS_GRANTS.md.
      */
     const val TOKEN_ARGUMENT = "token"
 
@@ -3654,13 +3484,9 @@ class ServeCatalogMcp(
         "approved during this session is used in it. Prefer the header where you control it."
 
     /**
-     * The grant token this message presents in-band, if any.
-     *
-     * Read by the transport as well as by [callTool], so the gate in front of the endpoint and the
-     * operation behind it agree about what was presented. Tool calls carry the token in
-     * `params.arguments`; resource reads carry it in the standard extensible `params._meta` object
-     * because MCP's read request has no arguments object. Blank is treated as absent: a client
-     * templating an unset environment variable sends `""`, and that is nothing, not a bad token.
+     * The grant token presented in-band, if any; read by both the transport and [callTool] so they
+     * agree. Tool calls use `params.arguments`; resource reads use `params._meta` (no arguments
+     * object). Blank is absent (an unset template variable).
      */
     fun presentedToken(request: JsonObject): String? {
       val params = request["params"] as? JsonObject ?: return null
@@ -3690,12 +3516,8 @@ class ServeCatalogMcp(
       (arguments[TOKEN_ARGUMENT] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
 
     /**
-     * Whether this message must present a grant before it is handled.
-     *
-     * Lives here, beside the tools it speaks for, so the transport does not have to keep its own
-     * copy of the list — a second list is how a tool added on one side becomes reachable
-     * unauthenticated on the other. Anything unrecognised is gated: a method or tool name this
-     * version has never heard of is not a thing to open by default.
+     * Whether this message must present a grant. Kept beside the tools so the transport needs no
+     * second list; anything unrecognised is gated.
      */
     fun requiresGrant(request: JsonObject): Boolean {
       val method = (request["method"] as? JsonPrimitive)?.contentOrNull ?: return true

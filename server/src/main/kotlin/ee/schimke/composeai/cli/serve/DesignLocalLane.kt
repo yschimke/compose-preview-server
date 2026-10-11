@@ -13,33 +13,17 @@ import java.util.concurrent.atomic.AtomicLong
 import okio.Path.Companion.toPath
 
 /**
- * Compiling and rendering a design **in this process**, so a broken render can be stepped through.
+ * Compiling and rendering a design in this process, so a broken render can be stepped through.
+ * `design render` asks a server, whose deliberately lossy reply can't be debugged: e.g. `exception:
+ * null` + `image: null` looks identical for a missing sidecar, a timeout and a throw.
  *
- * ## Why the mode exists
- *
- * `design render` asks a server, and a server is exactly the thing under suspicion when a render
- * misbehaves: its reply is deliberately lossy, so the failure cannot be taken anywhere it can be
- * debugged. Two bugs paid for this. One was found by hand — fetching a document and its uploaded
- * PNGs through `/mcp`, writing a throwaway JUnit test, standing up a throwaway Gradle project to
- * resolve the catalog's jars, and driving `kotlin-compiler-embeddable` to reproduce an `Unresolved
- * reference 'graphics'` ([#544](https://github.com/yschimke/compose-preview-server/issues/544)).
- * The other was not found at all: `exception: null` + `image: null` + a valid preview id is the
- * identical observable for a missing sidecar, a render that timed out and a render that threw, and
- * the reason only ever reached the server's log
- * ([#481](https://github.com/yschimke/compose-preview-server/issues/481)).
- *
- * So this is a seam, not a reimplementation. [DesignLocalCompileLane] wires the **same**
+ * A seam, not a reimplementation: [DesignLocalCompileLane] wires the same
  * [ScreenGeneratorComposeExportExecutor] → [UiBuilderGeneratedPreviewAdapter] →
- * [PlaygroundCompileService] → daemon path the server drives through [ServeUiBuilderNativePreview];
- * a lane that merely resembled the server's would be unable to reproduce the server's bugs, which
- * is the one job it has.
+ * [PlaygroundCompileService] → daemon path as [ServeUiBuilderNativePreview], so it reproduces the
+ * server's bugs.
  *
- * ## Being chattier than the wire is correct here
- *
- * The HTTP surface answers a client and keeps its reasons to itself. This one answers the person
- * holding the failure, so [describe] reports what was actually built — the classpath it resolved,
- * the daemon opener it got, the record it read — beside the reason a frame is missing. Those three
- * facts are what #481 needed and could not have.
+ * Unlike the HTTP surface, [describe] reports what was actually built (classpath, daemon opener,
+ * record) beside the reason a frame is missing.
  */
 internal interface DesignLocalLane {
 
@@ -68,9 +52,8 @@ internal interface DesignLocalLane {
     data class Rendered(val png: ByteArray) : Frame
 
     /**
-     * The design compiled (or did not) and no picture came back. [reason] is [noFrameReason]'s —
-     * the compiler's own diagnostics, the exception, or the honest "this host's renderer produced
-     * no frame" — which is precisely what the wire reply drops.
+     * The design compiled (or not) and no picture came back. [reason] is [noFrameReason]'s: the
+     * diagnostics, exception, or "no frame" that the wire reply drops.
      */
     data class NoFrame(val reason: String) : Frame
 
@@ -79,27 +62,16 @@ internal interface DesignLocalLane {
 }
 
 /**
- * The base64 payload of a rendered frame, whichever of the two shapes the render lane hands back.
- *
- * `PlaygroundRunResponse.image` is a **data URL**: the playground page assigns it straight to an
- * `<img>`'s `src`, and `RemoteNativeRenderProofTest` reaches for the payload with
- * `substringAfter(',')` on the same field the MCP tool republishes. [DesignLocalCompileLane] was
- * the one reader that decoded it whole, so a render that compiled, drew and came back ended as "the
- * render lane's frame is not valid base64" — the daemon did every part of its job and the one
- * artifact `--local` exists to produce was dropped at the last step over a prefix.
- *
- * Both spellings are accepted rather than only the one observed. The field is named `imageBase64`
- * where the MCP tool publishes it, so a producer that one day sends the bare payload that name
- * promises must not break this lane in the other direction.
+ * The base64 payload of a rendered frame. `PlaygroundRunResponse.image` is a data URL (the
+ * playground assigns it to an `<img>` `src`); a bare payload, as the MCP tool's `imageBase64` name
+ * suggests, is accepted too.
  */
 internal fun renderedFrameBase64(image: String): String =
   if (image.startsWith("data:")) image.substringAfter(',', missingDelimiterValue = "") else image
 
 /**
- * The production [DesignLocalLane]: a bundle on disk, this process, and no server anywhere.
- *
- * Everything is resolved lazily and remembered, because [describe] is only useful once it can
- * report what was really built — asking before a render would report intentions.
+ * The production [DesignLocalLane]: a bundle on disk, this process, no server. Resolved lazily and
+ * remembered, so [describe] reports what was really built.
  */
 internal class DesignLocalCompileLane(
   /** The catalog bundle the design is compiled against; its manifest picks the daemon. */
@@ -111,12 +83,8 @@ internal class DesignLocalCompileLane(
   private val workRoot: File,
   private val log: (String) -> Unit,
   /**
-   * No jail by default, unlike the server's lane.
-   *
-   * The sandbox exists because a served playground compiles a **stranger's** snippet. Here the
-   * document is one the operator handed this process on their own machine, from their own shell,
-   * and a jail would only stand between them and the failure they are trying to read. The daemon
-   * still runs as its own subprocess, so a render that hangs is still killable.
+   * No jail by default: the document is the operator's own, on their machine, and a jail would only
+   * hide the failure. The daemon is still a killable subprocess.
    */
   private val sandbox: PlaygroundSandbox =
     PlaygroundSandbox(profile = PlaygroundSandbox.Profile.NONE),
@@ -176,9 +144,7 @@ internal class DesignLocalCompileLane(
     }
     val service =
       PlaygroundCompileService(
-        // One bundle, one mode: the manifest already decided which daemon draws this, so a request
-        // for the other one is a wiring bug rather than a catalog choice. Named rather than
-        // ignored, so the refusal says which mode this bundle is.
+        // One bundle, one mode: a request for the other mode is a wiring bug, refused by name.
         catalogClasspath = { requested, _ -> classpath.takeIf { requested == mode } },
         compiler = compiler,
         discoverer = PlaygroundPreviewDiscoverer(),
@@ -186,9 +152,8 @@ internal class DesignLocalCompileLane(
         newWorkDir = {
           File(workRoot, "snippet-${snippets.incrementAndGet()}").absolutePath.toPath()
         },
-        // A null renderer is not fatal to the compile, exactly as on the server — and it is one of
-        // the three states [describe] reports. It is the frameless response with no reason; a
-        // render that threw carries the daemon's cause as the response's `exception`.
+        // A null renderer isn't fatal to the compile, as on the server; it is one of the states
+        // [describe] reports.
         renderFirstFrameWithReason = { snippet ->
           renderer?.renderFrame(snippet) ?: PlaygroundFirstFrame(null)
         },
@@ -196,17 +161,12 @@ internal class DesignLocalCompileLane(
     val adapter = UiBuilderGeneratedPreviewAdapter(service)
     ServeUiBuilderNativePreview(
       executor = executor,
-      // Every design compiles against the one bundle this invocation named. The server maps a
-      // builder catalog id to a served catalog because it serves several; here the operator has
-      // already made that choice by naming a file, and silently refusing a design whose catalog id
-      // does not match the bundle's would be second-guessing it.
+      // Every design compiles against the bundle the operator named; the server's catalog mapping
+      // doesn't apply.
       nativeTarget = { UiBuilderNativeTarget(catalog = CATALOG, confType = confType) },
       compile = { generated ->
-        // `true`, for a different reason than the server's: there is no capability to check
-        // because there is no actor — the document came from this shell, and the Kotlin came from
-        // `ScreenGenerator` against the component record rather than from anything the document
-        // could write. A local `--document` is trusted exactly as much as the file the operator
-        // chose to run.
+        // `true` because there is no actor to check: the document came from this shell and the
+        // Kotlin from `ScreenGenerator`, trusted as much as the file the operator chose to run.
         adapter.compile(generated, isSecurityChecked = true)
       },
     )
@@ -294,11 +254,8 @@ internal class DesignLocalCompileLane(
     const val ANDROID_BACKEND: String = "android"
 
     /**
-     * The one catalog target this lane offers.
-     *
-     * `PlaygroundRunRequest.catalog` has to name something and there is exactly one thing to name:
-     * the bundle the caller passed. A design's own catalog id is deliberately not used — it names a
-     * catalog on a *server*, and this lane has none.
+     * The one catalog target this lane offers: the bundle the caller passed. A design's own catalog
+     * id names a server catalog, and there is none here.
      */
     const val CATALOG: String = "local"
 

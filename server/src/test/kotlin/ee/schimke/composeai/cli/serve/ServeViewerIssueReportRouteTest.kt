@@ -14,20 +14,11 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 /**
- * End-to-end check that the **viewer** offers the per-preview "report an issue" affordance, on a
- * real embedded [ServeHttpServer].
- *
- * Deliberately a route test rather than a fixture assertion. `ServeWebFixtureTest` builds its
- * goldens by calling [ServeWeb.viewerPage] directly with a `reportIssue` of its own, so the golden
- * kept showing the affordance for the whole period the HTTP handler was passing `reportIssue =
- * null` — a page nobody was serving. Only a request through the real route can tell "the renderer
- * can draw this" apart from "the server actually wires it".
- *
- * The body's shape is covered by [ServeIssueReportTest]; what is checked here is the wiring: that
- * the form is emitted, that it targets the repo owning the preview's Kotlin, that it carries the
- * overrides on screen, that it names the preview's design reference so the filed issue reaches the
- * parity index, and that the parity SCORE — the one reference-scoped fact this page cannot honestly
- * state — stays off it.
+ * End-to-end check that the viewer offers the per-preview "report an issue" form through the real
+ * route, since `ServeWebFixtureTest` calls [ServeWeb.viewerPage] directly and cannot see whether
+ * the handler wires it. Body shape is [ServeIssueReportTest]'s; this checks the form is emitted,
+ * targets the repo owning the Kotlin, carries the overrides and design reference, and omits the
+ * parity score.
  */
 class ServeViewerIssueReportRouteTest {
 
@@ -40,10 +31,8 @@ class ServeViewerIssueReportRouteTest {
     label: String,
     previewIds: List<String>,
     /**
-     * Whether this host can answer a `?at=<sha>` pin — it needs a delivery-branch read seam.
-     *
-     * Off by default so every existing case keeps exactly the host it had: turning pins on adds the
-     * revision chrome to the page, and these assertions are about the report body.
+     * Whether this host can answer a `?at=<sha>` pin (needs a delivery-branch read seam). Off by
+     * default so other cases don't get the revision chrome.
      */
     pinnable: Boolean = false,
   ): ServeBundleHost {
@@ -57,8 +46,7 @@ class ServeViewerIssueReportRouteTest {
           "\"$id\":{\"componentId\":\"Button/Filled\"}"
         }
       )
-    // A design reference for the first preview, so the focused comparison this catalog can serve
-    // is a real pair rather than a 404 — which is what the report filed from it is about (#4765).
+    // A design reference for the first preview, so the focused comparison is a real pair.
     File(dir, "references").apply { mkdirs() }
     File(dir, "references/button.png").writeBytes(png())
     File(dir, "references/index.json")
@@ -88,9 +76,8 @@ class ServeViewerIssueReportRouteTest {
       dir,
       label = label,
       title = "Compose Material 3",
-      // Source and delivery deliberately live in DIFFERENT repos, so the assertions can tell
-      // "filed against the repo that owns the Kotlin" apart from both the delivery repo and
-      // [ServeIssueReport.FALLBACK_REPO] — all three would otherwise be the same string.
+      // Source and delivery live in different repos so the assertions can tell the source repo from
+      // the delivery repo and [ServeIssueReport.FALLBACK_REPO].
       catalogSource =
         ServeWeb.CatalogSource(
           repo = "example/design-catalog",
@@ -147,11 +134,8 @@ class ServeViewerIssueReportRouteTest {
   }
 
   /**
-   * The prefilled issue body out of the page's hidden input, unescaped.
-   *
-   * Asserted against rather than against the whole document, because these pages *draw* the same
-   * URLs the report quotes: a comparison shows its reference in a panel, so "the page mentions that
-   * URL" would pass whether or not the report carries it.
+   * The prefilled issue body from the page's hidden input, unescaped. Asserting on the body rather
+   * than the page, because the page itself shows the same URLs.
    */
   private fun reportBody(html: String): String =
     html
@@ -168,8 +152,7 @@ class ServeViewerIssueReportRouteTest {
     server = newServer()
     val (code, body) = get("/compose-m3/p/button-filled")
     assertEquals(200, code)
-    // Named for the tracker it goes to, not "report an issue" — the server has a second report a
-    // click away in the footer, and the two used to be told apart only by where they sat.
+    // Named for its tracker, to distinguish it from the footer's server bug report.
     assertTrue(body.contains("report a catalog issue"), body)
     assertTrue(
       body.contains("action=\"https://github.com/example/design-catalog/issues/new\""),
@@ -216,10 +199,8 @@ class ServeViewerIssueReportRouteTest {
 
   @Test
   fun `a report filed from the comparison names both panels, not just the render`() {
-    // #4765. The comparison's subject is a design reference and a render disagreeing, so a report
-    // from it carries both — here in the link form, because a loopback host is not reachable by
-    // GitHub's camo proxy ([ServeIssueReport.isEmbeddable]); the embedded form is
-    // [ServeIssueReportTest]'s.
+    // A comparison report carries both the reference and the render — here as links, since a
+    // loopback host is not reachable by GitHub's camo proxy ([ServeIssueReport.isEmbeddable]).
     server = newServer()
     val (code, html) = get("/compose-m3/compare/button-filled")
     assertEquals(200, code)
@@ -252,10 +233,9 @@ class ServeViewerIssueReportRouteTest {
 
   @Test
   fun `a report filed from the viewer carries a parity locator`() {
-    // #5000. `parity/issues.json` is built from this fence, so a viewer report without one is
-    // filed, labelled `parity:`, and silently absent from the index — while the form beside it
-    // tells the reporter their label feeds that index. Every field is concrete on this page: the
-    // reference is the preview's own, resolved the way the comparison link beside it resolves one.
+    // `parity/issues.json` is built from this fence, so a viewer report without one would be
+    // labelled `parity:` yet missing from the index. The reference resolves as the comparison link
+    // beside it does.
     server = newServer()
     val body = reportBody(get("/compose-m3/p/button-filled").second)
     assertTrue(body.contains("```${ServeIssueReport.LOCATOR_FENCE}"), body)
@@ -278,11 +258,9 @@ class ServeViewerIssueReportRouteTest {
 
   @Test
   fun `an accepted baked fallback records only the overrides the pixels could have used`() {
-    // `?fallback=baked` says "serve the published snapshot even though it ignores my override".
-    // The render lane then answers with pixels that applied none of it and names what it dropped,
-    // and `seedableOverrideParams` withholds those axes from the controls for the same reason. A
-    // locator built from the RAW query would claim a frame the picture is not showing — and this is
-    // the body a visitor with scripting off files, so no later substitution corrects it.
+    // With `?fallback=baked` the render applies none of the dropped overrides, so the locator must
+    // not claim them either; this is the body a scripting-off visitor files, so nothing corrects it
+    // later.
     server = newServer()
     val body = reportBody(get("/compose-m3/p/button-filled?uiMode=dark&fallback=baked").second)
     assertTrue(body.contains("```${ServeIssueReport.LOCATOR_FENCE}"), body)
@@ -292,9 +270,8 @@ class ServeViewerIssueReportRouteTest {
 
   @Test
   fun `the viewer's template leaves the overrides for its own script to fill`() {
-    // The controls re-render the frame in place, so the served overrides stop describing it the
-    // moment a knob moves. The template hands that one value to the page, next to `{{render}}` —
-    // both filled on one pass, so the identity and the pixels name one frame.
+    // The controls re-render in place, so the template hands the overrides to the page beside
+    // `{{render}}`, filled on one pass so identity and pixels name one frame.
     server = newServer()
     val (_, html) = get("/compose-m3/p/button-filled")
     val template =
@@ -305,12 +282,8 @@ class ServeViewerIssueReportRouteTest {
 
   @Test
   fun `a pinned viewer files no locator, because its identity would describe another frame`() {
-    // `?at=<sha>` puts a historical baked artifact on the stage, while the reference mapping and
-    // the
-    // `revision:` line describe the catalog as it is today — so a locator built from the two would
-    // index the issue against a comparison the reporter was not looking at. No row is better than a
-    // wrong one, and the page already withholds its source link, its reference annotations, its
-    // override seeds and its playground link on the same reasoning.
+    // `?at=<sha>` shows a historical artifact while the reference mapping and `revision:` describe
+    // the catalog today, so a locator would index the wrong comparison. No row beats a wrong one.
     server = newServer(pinnable = true)
     val (code, html) =
       get("/compose-m3/p/button-filled?at=0123456789abcdef0123456789abcdef01234567")
@@ -330,9 +303,8 @@ class ServeViewerIssueReportRouteTest {
 
   @Test
   fun `the parity score stays on the comparison, which is the page that measures one`() {
-    // The viewer's always-available number is a render-fidelity measurement against the generated
-    // SVG, unrelated to the design reference — so a `Raw comparison` row here would either be
-    // filed with the placeholder verbatim or with a plausible, mislabelled number feeding an index.
+    // The viewer's number is a render-fidelity score against generated SVG, not the design
+    // reference, so a `Raw comparison` row would be mislabelled or a verbatim placeholder.
     server = newServer()
     val (_, body) = get("/compose-m3/p/button-filled")
     assertTrue(body.contains("cp-report-body"), body)

@@ -44,14 +44,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.junit.jupiter.api.io.TempDir
 
 /**
- * `GET /api/ui-builder/v1/designs/{id}/component-drift`, over the wire the editor uses.
- *
- * The checker's own rules are unit-tested next door. What cannot be unit-tested is the claim the
- * route makes: that it is authorised **twice** — the route capability decides who may use the
- * builder, and the design's own access control, enforced by the snapshot request rather than
- * re-implemented here, decides who may read this design — and that a design the caller cannot open
- * is indistinguishable from one that does not exist. Both of those are wiring, and both fail
- * silently against a mock.
+ * `GET /api/ui-builder/v1/designs/{id}/component-drift` over the editor's wire. Checks wiring that
+ * fails silently against mocks: double authorisation (route capability, then the design's access
+ * control via the snapshot request), and an unopenable design looking exactly like a missing one.
  */
 class ServeUiBuilderComponentDriftRoutesTest {
   @TempDir lateinit var stateDirectory: Path
@@ -90,9 +85,8 @@ class ServeUiBuilderComponentDriftRoutesTest {
     assertEquals("unchanged", row["state"]!!.jsonPrimitive.content)
     assertEquals(COMPONENT_KEY, row["componentKey"]!!.jsonPrimitive.content)
     assertEquals(SYSTEM, row["system"]!!.jsonPrimitive.content)
-    // The naming rule lives on the server and is published, so a client need not re-derive it — a
-    // second copy of it could disagree, and the disagreement would be an Issues row selecting
-    // nothing.
+    // The server publishes the palette id so clients don't re-derive (and disagree on) the naming
+    // rule.
     assertEquals("project/$COMPONENT_KEY", row["paletteId"]!!.jsonPrimitive.content)
     // Nothing to show: the evidence field is for the claim that something changed.
     assertNull(row["currentDigest"])
@@ -124,9 +118,7 @@ class ServeUiBuilderComponentDriftRoutesTest {
     val server = start()
     createDesign(server, importedDigest = publishedDigest())
 
-    // Named by the index and unreadable: a broken publish or a half-written branch, which must not
-    // read as a deletion — somebody told their component was removed would go looking for a symbol
-    // that is still there.
+    // An indexed but unreadable symbol file (broken publish) must not read as a deletion.
     File(components, "$COMPONENT_KEY.json").writeText("{ not a document")
     assertEquals(
       "unusable",
@@ -148,9 +140,7 @@ class ServeUiBuilderComponentDriftRoutesTest {
     val server = start()
     createDesign(server, importedDigest = publishedDigest())
 
-    // The index itself, not the symbol file: a half-written index or a branch that is briefly
-    // unreachable used to read out here as "the project deleted your component", because the
-    // library flattened a failed read into an empty list of published components.
+    // A half-written or unreachable index must not read as "the project deleted your component".
     File(components, "index.json").writeText("{ not an index")
 
     assertEquals(
@@ -159,12 +149,7 @@ class ServeUiBuilderComponentDriftRoutesTest {
     )
   }
 
-  /**
-   * A refusal that is not about access keeps its own status.
-   *
-   * `CATALOG_UNAVAILABLE` is retryable and says so; answering it with the 404 above would tell an
-   * owner their own design does not exist because a base catalog is down.
-   */
+  /** A non-access refusal keeps its status: `CATALOG_UNAVAILABLE` is retryable, not a 404. */
   @Test
   fun `a service refusal that is not about access is not a missing design`() {
     publish(title = "Contribution cell")
@@ -189,10 +174,8 @@ class ServeUiBuilderComponentDriftRoutesTest {
     val server = start()
     createDesign(server, importedDigest = publishedDigest())
 
-    // The index parses and its other entries are fine; only this one is refused, for a file name
-    // that cannot be joined onto a fetch URL. The project is still publishing the component — the
-    // entry is broken — so this is `unusable`. It read as `withdrawn` before, because a dropped
-    // entry is indistinguishable from an absent one once the index is a plain list.
+    // Only this index entry is refused (its file name can't be joined onto a fetch URL), so the
+    // component is `unusable`, not `withdrawn`.
     File(components, "index.json")
       .writeText(
         """{"schema":"${ServeUiBuilderComponentLibrary.INDEX_SCHEMA}",
@@ -216,13 +199,7 @@ class ServeUiBuilderComponentDriftRoutesTest {
     assertEquals(emptyList(), drift(server, OPERATOR_TOKEN))
   }
 
-  /**
-   * An editor opened at `?revision=` is showing what that revision imported.
-   *
-   * Reporting against head there is answering a question nobody asked: a component the pinned
-   * revision holds and head no longer does would simply be missing from the report, and the panel
-   * would go quiet about a design that has genuinely drifted.
-   */
+  /** At `?revision=` the report is against what that revision imported, not head. */
   @Test
   fun `a pinned revision is reported against that revision, not the head`() {
     publish(title = "Contribution cell")
@@ -259,10 +236,8 @@ class ServeUiBuilderComponentDriftRoutesTest {
   }
 
   /**
-   * A design this actor may not open answers exactly as one that does not exist.
-   *
-   * Not a nicety: distinguishing them would turn a read capability into a way of enumerating the
-   * design ids a host holds.
+   * An unopenable design answers exactly as a nonexistent one, so a read capability cannot
+   * enumerate ids.
    */
   @Test
   fun `a design the caller cannot read is a design that does not exist`() {

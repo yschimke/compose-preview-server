@@ -4,28 +4,15 @@ import java.io.File
 import kotlinx.serialization.Serializable
 
 /**
- * A census of the processes this server's own container is running, read straight out of `/proc`.
+ * A census of the processes in this server's container, read from `/proc`. The server spawns render
+ * daemons, compile jails and renderers as subprocesses, and `/status`'s session-level counters
+ * can't show a box drowning in unreaped children (one deployment reached 2099 `[java] <defunct>`
+ * children near its memory limit while reporting `status: ok`).
  *
- * Exists because the server spawns render daemons, playground compile jails and UI-builder
- * renderers as **subprocesses**, and until now `/status` could not see them at all. The counters it
- * did publish are all session-level — `daemons.running` counts sessions, not processes, and the
- * README has to warn operators not to multiply it by a memory estimate — so a box whose real
- * problem was hundreds of unreaped children looked, from `/status`, exactly like a healthy one.
- * Diagnosing that needed `docker exec … ps`, which is precisely the shell access a status endpoint
- * exists to remove the need for.
+ * [zombies] is the field to alert on: a healthy box sits at zero. [liveJava] is the memory-relevant
+ * count; zombies hold a PID but no memory, so never add the two.
  *
- * The measured case: `preview.coo.ee` sat at 99.98% of its 40 GiB container limit with **2099
- * `[java] <defunct>` children**, all parented to PID 1, accumulating at ~157/hour across 13 hours
- * of uptime, against an unbounded container PID budget. `/status` reported `daemons.running: 18`
- * and `status: ok` throughout.
- *
- * [zombies] is therefore the field to alert on: a healthy box reaps children as they exit and sits
- * at zero, so any sustained non-zero reading is a leak rather than a busy moment. [liveJava] is the
- * memory-relevant count — zombies hold a PID and no address space, so the two must never be added
- * together or read as one number.
- *
- * Linux-only by construction (`/proc`). [read] answers null anywhere it cannot see a `/proc`, which
- * keeps a developer's macOS `serve` free of a permanently empty status section.
+ * Linux-only; [read] returns null without `/proc` (e.g. macOS).
  */
 @Serializable
 data class ServeProcessCensusSnapshot(
@@ -47,9 +34,8 @@ data class ServeProcessCensusSnapshot(
   /** The cgroup's current PID count, when readable. Null outside a PID-limited cgroup. */
   val pidsCurrent: Long? = null,
   /**
-   * The cgroup's PID ceiling, when one is set. Null when the cgroup reports `max` (unbounded) —
-   * which is itself worth seeing, because an unbounded budget is what lets a reaping leak run until
-   * the host runs out of PIDs rather than until this container does.
+   * The cgroup's PID ceiling, or null when it reports `max` (unbounded), which lets a reaping leak
+   * exhaust the host's PIDs rather than the container's.
    */
   val pidsMax: Long? = null,
 ) {
@@ -58,11 +44,8 @@ data class ServeProcessCensusSnapshot(
     private const val MAX_ZOMBIE_COMMANDS = 5
 
     /**
-     * Census `/proc` now, or null where there is none (macOS, Windows) — see the class doc.
-     *
-     * Per-pid failures are swallowed individually: a process that exits between the directory
-     * listing and its own `stat` read is the normal case, not an error, and must not lose the whole
-     * census.
+     * Census `/proc` now, or null where there is none. Per-pid failures are swallowed: a process
+     * exiting mid-census is normal.
      */
     fun read(
       procDir: File = File("/proc"),
@@ -106,18 +89,9 @@ data class ServeProcessCensusSnapshot(
     }
 
     /**
-     * A cgroup PID counter, or null when absent or reporting the literal `max`.
-     *
-     * Both layouts are read, because this repository already supports both: the deployment
-     * entrypoint reads `cpu.max` then `cpu/cpu.cfs_quota_us`, and `memory.max` then
-     * `memory/memory.limit_in_bytes`, for exactly the hosts this would otherwise skip. Under cgroup
-     * v1 the PID controller is mounted at `pids/`, so reading only the v2 path answers null on a v1
-     * host with a perfectly finite budget — and the PID meter, which is the whole point of
-     * publishing these two, silently disappears on the hosts most likely to be old enough to have
-     * an unbounded one.
-     *
-     * v2 is tried first because that is what the measured deployment runs; a host with both sees
-     * the unified hierarchy, which is the one its kernel is actually enforcing.
+     * A cgroup PID counter, or null when absent or `max`. Tries v2 first (what the kernel enforces
+     * when both exist), then v1's `pids/`, matching how the deployment entrypoint reads both
+     * layouts for CPU and memory.
      */
     private fun readCgroupCount(cgroupDir: File, name: String): Long? =
       readLongOrNull(File(cgroupDir, name)) ?: readLongOrNull(File(File(cgroupDir, "pids"), name))
@@ -133,19 +107,10 @@ data class ServeProcessCensusSnapshot(
 }
 
 /**
- * A [ServeProcessCensusSnapshot] resampled at most once per [intervalMillis], shared by every
- * caller.
- *
- * `/status` and `/status.json` are unauthenticated on the public deployment and are not cached, and
- * a census opens and reads one `stat` file per PID. At the size this feature exists to diagnose —
- * 2099 defunct children — an ordinary monitor polling every few seconds turns that into thousands
- * of filesystem operations per request, and concurrent callers multiply it, on a box whose problem
- * is already that it has too many processes. The diagnostic loses nothing to a few seconds of
- * staleness: the measured leak accumulated at ~157 children an hour, so a reading taken up to
- * [intervalMillis] ago names the same number.
- *
- * The walk happens under the lock rather than beside it, so a burst of concurrent requests produces
- * one traversal that they all read, instead of one traversal each.
+ * A [ServeProcessCensusSnapshot] resampled at most once per [intervalMillis], shared by all
+ * callers. `/status` is unauthenticated and uncached, and a census reads one file per PID, so on a
+ * box with thousands of processes frequent polling would add load; a few seconds of staleness costs
+ * nothing. The walk runs under the lock so concurrent requests share one traversal.
  */
 class ServeProcessCensus(
   private val intervalMillis: Long = DEFAULT_INTERVAL_MILLIS,

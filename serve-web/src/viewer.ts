@@ -1,16 +1,9 @@
 import { trackInteraction } from "./analyticsClient.js";
 // The preview viewer: the stage, its lanes, and every control that changes what is on it.
 //
-// Ported from the last hand-written `assets/*.js`. It is still one long imperative module rather
-// than a Vue element, and deliberately so: the viewer renders NO markup of its own. Every control
-// on the page is server-rendered by `ServeWeb.viewerPage`, and this file is behaviour over that
-// markup — the same shape `format-compare.js` kept when it became generated. A `render()` that
-// returned nothing would be ceremony, and moving the markup into a template would be a rewrite of
-// the server page, not a port of this file.
-//
-// What the move buys is the type check and the seam: the DOM-free decisions now come in through
-// `viewer/rules.js` as ordinary imports, each with a test file beside it, instead of through the
-// `window.cpViewerQuery` handle that existed only because this file used to live in another build.
+// Imperative rather than a Vue element on purpose: every control is server-rendered by
+// `ServeWeb.viewerPage`, and this file is behaviour over that markup. DOM-free decisions live in
+// `viewer/rules.js`, each with its own tests.
 
 // Types only: the player bundle is script-injected at runtime, never imported.
 import { renderRequest } from "./viewer/renderRequest.js";
@@ -59,20 +52,10 @@ import {
 
 // Typed handles onto the server-rendered markup this file drives.
 //
-// `must` is for the handles a viewer page ALWAYS renders and this file has always used unguarded —
-// the stage image, its canvas, the status line. It asserts rather than checks because a guard would
-// invent a fallback path that has never run: without these the page is not a viewer at all, and the
-// hand-written file threw on first use just the same. `may` is for everything a particular preview
-// may not offer — a Wasm lane, a design spec, a motion capture — and every caller of those already
-// guards. Keeping the two apart is the point: the `| null` is what keeps those guards honest, and
-// collapsing them either way would lose a real distinction the page makes.
-//
-// Inside a lane, a `may` handle is asserted with `!` — `wasmFrame!.contentWindow`, `specImg!.src`.
-// That is not a shortcut around the guard, it is the lane's own precondition: the server emits a
-// lane's elements as a SET, so `#cp-wasm` exists on exactly the pages `#cp-wasm-toggle` does, and
-// every one of those bodies is already behind `wasmActive()` or the `if (wasmToggle)` wiring. The
-// compiler cannot read that fact off `wasmActive()`, and re-guarding each use would add a second,
-// never-taken branch per line — noise that also reads as though the pairing were in doubt.
+// `must` is for handles every viewer page renders (stage image, canvas, status line): it asserts,
+// since without them the page is not a viewer. `may` is for lane-specific handles, and its `| null`
+// keeps callers' guards honest. Inside a lane a `may` handle is asserted with `!`: the server emits
+// a lane's elements as a set, and those bodies already sit behind the lane's guard.
 function must<T extends HTMLElement>(id: string): T {
     return document.getElementById(id) as T;
 }
@@ -99,11 +82,8 @@ function ticks(selector: string): NodeListOf<HTMLInputElement> {
 }
 
 /**
- * A control's value as every override map here wants it.
- *
- * A checkbox reports its tick as the string the daemon parses; everything else reports its text.
- * The `instanceof` is what keeps that honest — a `<select>` knob has no `checked` at all, and its
- * `type` ("select-one") could never have matched anyway.
+ * A control's value as every override map here wants it: a checkbox's tick as the string the daemon
+ * parses, otherwise its text.
  */
 function controlValue(el: Control): string {
     if (el instanceof HTMLInputElement && el.type === "checkbox")
@@ -112,25 +92,17 @@ function controlValue(el: Control): string {
 }
 
 /**
- * A `/render` the server refused, carried through the promise chain as an Error so the single
- * `.catch` below decides what to say and whether to ask again.
- *
- * `cpFailure` is attached for EVERY non-ok response, not only the dropped-overrides refusal it
- * used to be limited to. That limit was the bug: the refusal the public server actually returns
- * under load — `503 render busy; retry shortly` + `Retry-After: 2` — carries no such header, so it
- * fell past the retry machinery into "render failed for this preview" despite the server having
- * said, twice, that it was worth asking again.
+ * A `/render` the server refused, carried as an Error so the single `.catch` below decides what to
+ * say and whether to retry. `cpFailure` is attached for every non-ok response, including the `503`
+ * + `Retry-After` refusal a busy server returns.
  */
 interface SnapshotFailureError extends Error {
     cpFailure?: rules.SnapshotFailure;
 }
 
 /**
- * The `/usage/<id>` payload, mirroring `UsageSnippetResponse` in `ServeHttpServer.kt`.
- *
- * Every field is optional here, unlike on the server: this is JSON off the wire, and the lane is
- * built to degrade — an older server, or a snippet the catalog could not derive, still renders the
- * panel with its note rather than throwing on a missing key.
+ * The `/usage/<id>` payload, mirroring `UsageSnippetResponse` in `ServeHttpServer.kt`. Fields are
+ * optional so an older server or an underivable snippet degrades to the panel's note.
  */
 interface UsageSnippet {
     text?: string;
@@ -178,11 +150,9 @@ interface InputMessage {
 }
 
 /**
- * A pointer the live lane is tracking between its press and its release.
- *
- * `moved` is what turns a tap into a drag: the press is deferred until the first movement, so a
- * tap with no drag becomes a single `click` — which is the daemon's fast path, rendering between
- * press and release where a batched down+up can race `Modifier.clickable`.
+ * A pointer the live lane is tracking between press and release. `moved` turns a tap into a drag:
+ * the press is deferred until the first move, so a plain tap becomes a single `click` (the daemon's
+ * fast path, which avoids racing `Modifier.clickable` with a batched down+up).
  */
 interface PointerState {
     x: number;
@@ -198,15 +168,10 @@ const canvas = must<HTMLCanvasElement>("cp-canvas");
 const status = must<HTMLElement>("cp-status");
 const errorBox = may<HTMLElement>("cp-error");
 const live = must<HTMLInputElement>("cp-live");
-// Tall previews used to size the stage from their full width-constrained height, which could
-// push the rest of the viewer several screens below the fold. Default to a viewport-bounded
-// contain fit; "Fit width" deliberately restores the old unconstrained-height presentation.
-// The snapshot remains the geometry source for Live/Wasm, so re-pin an active overlay after
-// changing modes.
-// ONE button, not a Fit screen / Fit width pair: this is a two-state axis with a default, which
-// is what `aria-pressed` on a single toggle expresses — the label names the non-default state
-// ("Fit width") and pressed-ness says whether it is on. A two-button group spends twice the bar
-// width to say the same thing, and always shows one button that does nothing when clicked.
+// Default to a viewport-bounded contain fit; "Fit width" restores unconstrained height. The
+// snapshot remains the geometry source for Live/Wasm, so re-pin an active overlay after changing
+// modes. One `aria-pressed` toggle rather than a two-button group: it is a two-state axis with a
+// default.
 const zoomToggle = document.querySelector<HTMLButtonElement>(".cp-zoom-toggle");
 const backdropFile = may<HTMLInputElement>("cp-backdrop-file");
 const backdropClear = may<HTMLButtonElement>("cp-backdrop-clear");
@@ -247,21 +212,16 @@ if (backdropFile) {
     });
 }
 if (backdropClear) backdropClear.addEventListener("click", clearBackdrop);
-// "Fit screen" means the WHOLE preview is on screen, so the cap is whatever the viewport has
-// left BELOW the chrome above the stage — measured, not a fixed 72vh guess. The guess was wrong
-// in both directions: on the viewer, where the title block and two control rows sit above the
-// stage, 72vh reached past the fold and cut the render off; on a short window it left the image
-// taller than the space it had. Floored at 320px so a very short window still shows a usable
-// stage rather than a sliver, and re-measured on resize.
+// "Fit screen" means the whole preview is on screen: cap at the viewport height measured below the
+// chrome above the stage. Floored at 320px so a short window still shows a usable stage;
+// re-measured on resize.
 function fitCap() {
     if (!stage) return "72vh";
     var top = stage.getBoundingClientRect().top + (window.scrollY || 0);
     return rules.fitCap(top, window.innerHeight);
 }
-// The cap last written to the stage, so a re-measure that lands on the same answer can do
-// nothing. That is what keeps the observer below off a feedback loop: applying a cap resizes
-// the image, which resizes the container being observed, which re-measures — and stops there,
-// because the second measurement matches the first.
+// The cap last written to the stage, so a re-measure with the same answer is a no-op. That stops
+// the resize observer below from looping.
 var appliedFitCap: string | null = null;
 function applyZoom(rawMode: string | null) {
     var mode = rules.zoomMode(rawMode);
@@ -270,22 +230,15 @@ function applyZoom(rawMode: string | null) {
     img.style.maxHeight = maxHeight;
     var rcZoomCanvas = may<HTMLCanvasElement>("cp-rc-canvas");
     if (rcZoomCanvas) rcZoomCanvas.style.maxHeight = maxHeight;
-    // The spec lane paints into its own <img>, so the zoom limit has to reach it too — a
-    // phone-shaped imported reference would otherwise blow the stage past the 72vh Fit-screen
-    // cap the render it is being compared against obeys. Looked up rather than closed over:
-    // applyZoom("fit") runs at page load, before the lane's own declarations.
+    // The spec lane paints into its own <img>, so the Fit-screen cap must reach it too. Looked up
+    // rather than closed over: applyZoom("fit") runs at page load, before the lane's declarations.
     var specZoomImg = may<HTMLImageElement>("cp-spec-img");
     if (specZoomImg) specZoomImg.style.maxHeight = maxHeight;
-    // The motion lane paints into its own <img> too, so the cap has to reach it for the same
-    // reason: a tall capture would otherwise ignore Fit screen and push the card past the fold —
-    // and unlike a still, it would do so while animating. Looked up rather than closed over,
-    // exactly as the spec image is: applyZoom("fit") runs before the lane's own declarations.
+    // Same for the motion lane's <img>.
     var motionZoomImg = may<HTMLImageElement>("cp-motion-img");
     if (motionZoomImg) motionZoomImg.style.maxHeight = maxHeight;
-    // …and the canvas the decoded frames are painted on, which is the path a capture actually
-    // takes. The cap goes on the canvas rather than on its wrapper because the transport under it
-    // is not part of what "fit the render to the screen" is capping — a bar whose height came out
-    // of the picture's budget would shrink the picture by its own size.
+    // ...and the canvas decoded frames are painted on. The cap goes on the canvas, not its wrapper,
+    // so the transport bar's height does not come out of the picture's budget.
     var motionZoomCanvas = may<HTMLCanvasElement>("cp-motion-canvas");
     if (motionZoomCanvas) motionZoomCanvas.style.maxHeight = maxHeight;
     root.setAttribute("data-zoom", mode);
@@ -302,9 +255,8 @@ function applyZoom(rawMode: string | null) {
 if (zoomToggle) {
     zoomToggle.addEventListener("click", function () {
         applyZoom(root.getAttribute("data-zoom") === "width" ? "fit" : "width");
-        // A discrete choice about how the render is framed, and one a refresh used to undo: a long
-        // page read at Fit width reopened capped to the viewport's height. `refit()` on a resize
-        // deliberately does NOT come through here — it re-measures the fit cap rather than choosing.
+        // A discrete framing choice, so it is persisted to the URL. `refit()` on resize
+        // deliberately does not come through here.
         urlPush = true;
         syncUrl();
     });
@@ -318,35 +270,18 @@ function refit() {
     applyZoom("fit");
 }
 window.addEventListener("resize", refit);
-// A resize is not the only thing that invalidates the cap: fitCap() measures from the stage's
-// TOP, so anything inserted above the stage moves it down and shortens the space it has. The
-// render-history menu does exactly that — <cp-history-menu> fetches its manifest and inserts
-// `.cp-history` between the toolbar and the stage well after this first ran — and a DOM
-// insertion fires no `resize`, so a delivery-backed viewer kept a cap measured for a stage that
-// had since moved, pushing a tall history strip's preview back below the fold.
-//
-// Observed rather than called back from the history builder: the cap is invalidated by the
-// stage MOVING, whoever moved it, and an observer catches the next thing to grow above the
-// stage without that code having to know this cap exists.
-//
-// The observed box is the BODY, not the stage or its parent. ResizeObserver reports size, not
-// position, and the strip is inserted after `.cp-viewer-bar` — a sibling of `.cp-viewer`, so
-// the stage's own container merely moves down and never changes size. Only an ancestor
-// containing both the insertion point and the stage grows, and the body is the one element
-// guaranteed to be that for any future insertion too.
+// Re-measure when the stage moves, not just on resize: fitCap() measures from the stage's top, and
+// content inserted above it later (e.g. the render-history strip) fires no `resize`. The body is
+// observed because ResizeObserver reports size, not position, and only an ancestor of both the
+// insertion point and the stage grows.
 if (typeof ResizeObserver === "function" && document.body) {
     new ResizeObserver(function () {
-        // Coalesce to a frame: an insertion can fire the observer mid-layout, and measuring then
-        // reads geometry the browser is still settling.
+        // Coalesce to a frame: the observer can fire mid-layout.
         window.requestAnimationFrame(refit);
     }).observe(document.body);
 }
-// Surface a mode-activation failure visibly, instead of leaving a stale frame that reads as a
-// (wrong) render. Every lane routes its failure here — a dead Live stream, a Wasm app that
-// never boots, a /render that errors — so "can't activate this mode" is never silent.
-// Activation state for a lane that hasn't painted yet, surfaced on the stage's backend badge
-// (see backendBadgeScript) instead of the controls footer — a "connecting…" nobody scrolls to
-// isn't feedback. Pass null to clear.
+// Surface a mode-activation failure (dead Live stream, Wasm that never boots, failed /render) on
+// the stage's backend badge rather than leaving a stale frame. Pass null to clear.
 function setPending(label: string | null) {
     if (label) root.setAttribute("data-pending", label);
     else root.removeAttribute("data-pending");
@@ -377,76 +312,54 @@ function liveCloseReason(ev: CloseEvent | null) {
     if (ev && ev.reason) return "Live preview unavailable: " + ev.reason;
     return "Live preview couldn't connect — the live stream may be unavailable on this server.";
 }
-// Whether the snapshot lane is static (baked PNGs, no /render re-render) — the explicit signal
-// for the wasm auto-enable below. NOT `live.disabled`: a trusted-catalog live session serves
-// static snapshots yet leaves the Live toggle enabled, so `live.disabled` no longer implies
-// "static".
+// Whether the snapshot lane is static (baked PNGs, no /render re-render). Not `live.disabled`: a
+// trusted-catalog live session serves static snapshots yet leaves Live enabled.
 var staticSnapshot = root.getAttribute("data-static-snapshot") === "true";
 // Whether an override-bearing /render returns fresh pixels even on a static snapshot lane (a
 // trusted-catalog live session: its carried daemon re-renders author-declared knob edits on
 // demand). When true, a knob edit re-points the snapshot /render URL rather than sitting dead.
 var canRenderOverrides =
     root.getAttribute("data-can-render-overrides") === "true";
-// The delivery-branch commit this page is pinned to, when it is a historical permalink
-// (`?at=<sha>`). Every render URL built here carries it, so the stage, the export links and Copy
-// PNG all read the same publish — a page where only some of those were pinned would be worse
-// than one that wasn't pinned at all. Validated rather than trusted: it is DOM text that ends up
-// in a request URL, and only a sha shape can reach one.
+// The delivery-branch commit this page is pinned to (`?at=<sha>`). Every render URL here carries it
+// so the stage, export links and Copy PNG read the same publish. Validated to a sha shape because
+// it is DOM text that ends up in a request URL.
 var pinnedAt = (root.getAttribute("data-pinned-at") || "").toLowerCase();
 if (!/^[0-9a-f]{7,40}$/.test(pinnedAt)) pinnedAt = "";
-// The delivery-branch publish this page was assembled from, which its frame URL is scoped to so a
-// refresh cannot pair this page's published typography, score and redline with the next publish's
-// pixels. Empty for a session with no delivery branch. Same shape rule as the pin: it reaches the
-// server as `gen=` and resolves through the same branch read, so a ref must not get through here
-// either.
+// The delivery-branch publish this page was assembled from; frame URLs are scoped to it so a
+// refresh cannot mix this page's metadata with the next publish's pixels. Empty without a delivery
+// branch. Same shape validation as the pin (it reaches the server as `gen=`).
 var generation = (root.getAttribute("data-generation") || "").toLowerCase();
 if (!/^[0-9a-f]{7,40}$/.test(generation)) generation = "";
 var previewId = root.getAttribute("data-preview-id") || "";
-// The session path prefix ("/<system>") when this viewer is served under a path — it sits at
-// "<base>/p/<id>", so stripping the trailing "/p/<id>" recovers the base ("" for the root
-// mount / legacy ?session= form). /render + /ws requests are prefixed with it so they hit the
-// same session without needing ?session= threaded through.
+// The session path prefix ("/<system>"), recovered by stripping the trailing "/p/<id>" ("" for the
+// root mount / ?session= form). /render and /ws requests are prefixed with it.
 var base = location.pathname.replace(/\/p\/[^/]*\/?$/, "");
 var token = new URLSearchParams(location.search).get("token") || "";
 // Carry the tenant through follow-up requests so a non-default ?session= stays on its module.
 var session = new URLSearchParams(location.search).get("session") || "";
-// Hydrating the controls from the page URL's params — the knobs this used to do inline, plus
-// every display axis — now happens in one place (hydrateFromUrl, at the bottom of this file),
-// because Back/Forward needs to run exactly the same restore. It still lands before the first
-// render, so a deep link (or a copied "Direct links — overrides applied" URL) opens with those
-// values already set and carries them through whichever transport is live.
-// The selects + text input are opt-in (empty value = "use the preview's default"). The font
-// scale slider has no empty state, so it's gated separately: we only send fontScale once the
-// user moves it (fontScaleTouched), otherwise the slider's standing 1.0 would override a
-// preview's declared default font scale and the first render wouldn't match the thumbnail.
-// No "background" here: the viewer no longer offers a Background override — the viewer bar's
-// Transparent toggle is the single background affordance, and the panel select that used to sit
-// beside it read as its duplicate. `/render?background=clear` still strips a preview's authored
-// background for the authoring lanes (CLI, exports, the VS Code extension); the viewer simply
-// does not drive it.
+// URL hydration of the controls happens in hydrateFromUrl (bottom of this file) so Back/Forward
+// runs the same restore; it lands before the first render.
+//
+// The selects and text input are opt-in (empty = preview default). Font scale has no empty state,
+// so it is only sent once touched (fontScaleTouched); otherwise 1.0 would override a preview's
+// declared font scale. There is no background override here: the Transparent toggle is the viewer's
+// only background control.
 var fields = ["device", "localeTag", "orientation"];
 const fs = may<HTMLInputElement>("cp-fontScale");
 const fsVal = may<HTMLElement>("cp-fontScale-val");
 var fontScaleTouched = false;
 var ws: WebSocket | null = null;
 const themeChoice = may<HTMLSelectElement>("cp-theme");
-// The two lanes that put a FIXED frame on the stage: the spec lane's imported raster, and a
-// finished motion recording. Neither is re-pointed by an override, so `syncServerControls`
-// disables every control that would re-render — but the frame underneath was still produced with
-// whatever was picked before the lane opened, so the choices themselves are NOT moot. Read off
-// `data-mode` rather than the mode radios so it is safe to call during module init, before the
-// lane's own elements are declared.
-//
-// One predicate, two consumers: what `syncServerControls` disables and what `activeThemeChoice`
-// still lets ride the URL are the same set of lanes, and they must not be able to drift.
+// The lanes that put a fixed frame on the stage (spec raster, finished motion recording). Overrides
+// do not re-point them, but the frame was produced with the prior picks, so those still matter.
+// Read off `data-mode` so it is safe during module init. Shared by `syncServerControls` and
+// `activeThemeChoice` so the two cannot drift.
 function onFixedFrameLane(): boolean {
     var mode = root.getAttribute("data-mode") || "";
     return mode === "spec" || mode === "motion";
 }
-// The theme this preview is baked in, as the server named it (`data-default-theme`), or "" on a
-// catalog that publishes no theme for it. Read from the DOM on each call rather than captured at
-// module init: it is a server-set attribute nothing rewrites, and a stale copy is one more thing
-// that could disagree with the select beside it.
+// The theme this preview is baked in (`data-default-theme`), or "". Read on each call so it cannot
+// disagree with the select.
 function defaultThemeValue() {
     return (
         (themeChoice && themeChoice.getAttribute("data-default-theme")) || ""
@@ -469,11 +382,9 @@ function chosenUiMode() {
 function chosenThemeProvider() {
     return rules.chosenThemeProvider(activeThemeChoice());
 }
-// The Theme bar: the visible face of #cp-theme, which is in the DOM but visually removed. The
-// chips carry the select's own option values, so driving one from the other is a straight
-// assignment plus the `change` every existing lane already listens for — no second code path
-// for themed rendering, and none of the enabled-state logic below is duplicated: syncThemeBar
-// simply mirrors what syncServerControls has just decided about the select and its options.
+// The Theme bar: the visible face of the visually hidden #cp-theme. Chips carry the select's option
+// values, so a click is an assignment plus `change`; syncThemeBar mirrors whatever
+// syncServerControls decided for the select.
 const themeBarBtns = document.querySelectorAll<HTMLButtonElement>(
     ".cp-theme-bar .cp-theme-btn",
 );
@@ -485,8 +396,7 @@ function themeOptionFor(value: string | null): HTMLOptionElement | null {
     return null;
 }
 function syncThemeBar() {
-    // Captured, not read through the `var` in the callback: this is where the narrowing the guard
-    // above establishes has to survive into a nested function.
+    // Captured so the guard's narrowing survives into the nested function.
     const select = themeChoice;
     if (!select) return;
     themeBarBtns.forEach(function (b) {
@@ -501,39 +411,26 @@ function syncThemeBar() {
         b.setAttribute("aria-pressed", state.pressed ? "true" : "false");
     });
 }
-// Record the pick without firing the select's `change` — `change` is what starts a render, and
-// not starting one is the entire point of following the link. The destination reads this same
-// catalog-scoped key on arrival: with the previous value still stored it would press the wrong
-// chip, and on an untagged id (where a remembered choice IS applied) it would re-override the
-// render the navigation just avoided.
+// Record the pick without firing `change` (which would start a render, the thing following the link
+// avoids). The destination reads this catalog-scoped key on arrival.
 function rememberThemeChoice(value: string) {
-    // A private window or blocked site data: the pick is not remembered, which costs the
-    // destination its pressed chip and nothing else. Never a reason not to navigate.
+    // Storage blocked: the destination just loses its pressed chip. Never a reason not to navigate.
     writeThemeMemory(
         themeChoice?.getAttribute("data-theme-storage-key") || "",
         value,
     );
 }
-// A chip whose mode this catalog already baked as its own card carries `data-theme-href`, and
-// following it beats overriding this one: the twin's pixels are on disk, so the page loads from
-// the baked sticker instead of waiting on a daemon re-render of the identical picture
-// (compose-ai-tools#4997), and the card it lands on brings its own annotations, parity references
-// and axes rather than describing a frame it is no longer showing.
-//
-// Only while the frame is otherwise UNMODIFIED, which is the whole safety condition. Navigating
-// discards the visitor's edits — knobs, font scale, locale, size — the way every other link out of
-// this page does, and silently throwing away work someone has done is worse than a render they
-// have already shown they are willing to wait for. So a page carrying any other override keeps the
-// in-place behaviour, and only plain browsing (the case that was paying for it) takes the link.
+// A chip whose mode the catalog already baked as its own card carries `data-theme-href`; following
+// it loads baked pixels instead of waiting on a daemon re-render, and lands on a card with its own
+// annotations. Only while the frame is otherwise unedited: navigating discards knobs, font scale,
+// locale and size edits, so an edited page keeps the in-place override.
 function themeTwinHref(b: HTMLButtonElement): string | null {
     const href = b.getAttribute("data-theme-href");
     if (!href) return null;
     return frameIsUnedited() ? href : null;
 }
-// Whether the frame on screen is the preview as published, bar the theme axis itself — the same
-// question `query()` answers when it decides whether this page's URL may stay on the baked
-// snapshot, asked with the same predicates so the two cannot disagree about what counts as an
-// edit. A knob still at its declared default is not one.
+// Whether the frame is the preview as published, apart from the theme axis. Uses the same
+// predicates as `query()` so the two agree on what counts as an edit.
 function frameIsUnedited(): boolean {
     const o = overrides();
     for (const key of Object.keys(o)) {
@@ -601,15 +498,10 @@ function cancelSnapshotLoading() {
     setSnapshotLoading(false);
 }
 
-// Size overrides (the Fixed / Max / Min / Within modes). Which query params carry the numbers
-// is chosen by the mode: Fixed pins the frame via widthPx/heightPx; Max / Min / Within are
-// wrapped-axis bounds (maxWidthPx / minWidthPx …). Blank inputs are omitted, so one axis can be
-// bounded without the other. Server-side only (a daemon re-measures) — the inputs are
-// disabled on a static snapshot like Device/Orientation, so it never emits them.
-//
-// The inputs are authored in dp (the Compose unit); the wire stays in px like every other
-// override, so a dp value is multiplied by the backend's render density before it's sent (and
-// the copyable /render URL stays px-consistent). data-render-density carries the factor.
+// Size overrides (Fixed / Max / Min / Within). Fixed pins widthPx/heightPx; the others are wrapped-
+// axis bounds (maxWidthPx / minWidthPx …). Blank inputs are omitted. Server-side only, so disabled
+// on a static snapshot. Inputs are dp; the wire is px, so values are multiplied by
+// data-render-density.
 var renderDensity =
     parseFloat(root.getAttribute("data-render-density") || "") || 2;
 // dp (string from the input) → a positive integer px value, or null when blank/non-positive.
@@ -640,34 +532,24 @@ function overrides(): Overrides {
     Object.keys(size).forEach(function (k) {
         o[k] = size[k];
     });
-    // Overlay toggles (touchOverlay). Their id is "cp-<key>", so the daemon key is the
-    // id minus the prefix. Collected HERE, in the map query() serializes, rather than only in
-    // liveOverrides(): the daemon renders these on the ordinary render path, so they belong on the
-    // page URL, the export links, and the live socket's connect query — which is what makes a
-    // ticked box arrive with `stream/start` instead of a second setOverrides that restarts the
-    // stream a frame later. Only a CHECKED overlay is sent: every consumer re-parses this whole
-    // map, so an absent key already means "off", and omitting the false ones keeps
-    // `&touchOverlay=false` out of every link.
+    // Overlay toggles (id "cp-<key>"; the key is the id minus the prefix). Collected in the map
+    // query() serializes so they reach the page URL, export links and the live socket's connect
+    // query, arriving with `stream/start` rather than a second setOverrides. Only checked overlays
+    // are sent: an absent key already means off.
     ticks(".cp-overlay").forEach(function (el) {
         if (el.disabled || !el.checked) return;
         o[el.id.replace(/^cp-/, "")] = "true";
     });
     return o;
 }
-// A knob control's declared kind (`string` / `int` / `float` / `bool` / `color`), from the row
-// the server rendered. Only the empty-value rules in the collectors below consult it — everything
-// else sends the control's text verbatim and lets the server type it from the same declaration.
-// Defaults to `string`, which is what an undeclared knob parses as server-side.
+// A knob control's declared kind, from the server-rendered row. Only the empty-value rules below
+// use it. Defaults to `string`, matching the server.
 function knobKind(el: Control) {
     return el.getAttribute("data-knob-kind") || "string";
 }
-// The live-stream override map: the display fields PLUS the author-declared knob values as
-// `knob.<key>=<value>` entries (the daemon's setOverrides parses the same map /render does,
-// typing each from the preview's declaration). Kept separate from overrides() so query() and
-// the Wasm patch — which append/ignore knobs their own way — are unaffected; without this a
-// knob edit during an active Live (stream) would send only the display fields and the daemon
-// would reset the others to their defaults. Unlike query(), every knob is sent (not just
-// changed ones) for exactly that reason, so defaults are not filtered here.
+// The live-stream override map: display fields plus every knob as `knob.<key>=<value>`. Separate
+// from overrides() because setOverrides replaces the daemon's whole map, so every knob (not just
+// changed ones) must be sent or the rest reset to defaults.
 function liveOverrides() {
     var o = overrides();
     controls(".cp-knob").forEach(function (el) {
@@ -675,10 +557,8 @@ function liveOverrides() {
         var key = el.getAttribute("data-knob-key");
         if (!key) return;
         var val = controlValue(el);
-        // An empty STRING knob is a real value (a cleared label, or a variant seeded to ""), so it
-        // is sent; the server keeps it for a string knob and skips it for a kind that can't parse
-        // it. An emptied number field has nothing to send, and this map REPLACES the daemon's whole
-        // override bag, so sending `knob.count=` would be indistinguishable from clearing it.
+        // An empty string knob is a real value, so it is sent. An emptied number field is skipped:
+        // this map replaces the whole override bag, so `knob.count=` would read as clearing it.
         if (val === "" && knobKind(el) !== "string") return;
         o["knob." + key] = val;
     });
@@ -693,10 +573,7 @@ function liveOverrides() {
         if (val === "") return;
         o["rc." + name] = kind + ":" + val;
     });
-    // (The overlay toggles are collected by overrides() above, not here — they ride the URL and
-    // the connect query like the display fields do.)
-    // App-declared theme (themeProvider = provider FQN). Only when a theme is picked and the
-    // control is live; "(default)" (empty) leaves the daemon on the preview's own wrapper.
+    // App-declared theme (themeProvider = provider FQN), only when picked and the control is live.
     var tp = chosenThemeProvider();
     if (tp) o["themeProvider"] = tp;
     // Detected-feature: keyboard focus. Checked ⇒ focus the first focusable + draw the overlay
@@ -707,20 +584,19 @@ function liveOverrides() {
     // (gestures=true). Android-daemon-only, so skipped when disabled.
     var gc = may<HTMLInputElement>("cp-gestures");
     if (gc && !gc.disabled && gc.checked) o["gestures"] = "true";
-    // Detected-feature: FIRE a one-handed gesture (gestureInvoke=<kind>). Read once and cleared —
-    // an invocation is an event, so the render after it must not repeat the gesture.
+    // Detected-feature: fire a one-handed gesture (gestureInvoke=<kind>). Read once and cleared, so
+    // the next render does not repeat it.
     var gi = takeGestureInvoke();
     if (gi) o["gestureInvoke"] = gi;
-    // setOverrides REPLACES the stream's entire override map. Keep an explicit server-side player
-    // in that replacement, especially when it is the page default; otherwise the connect URL
-    // selects it and the first onopen replay immediately clears it back to the baked player.
+    // setOverrides replaces the stream's whole override map, so keep an explicit server-side player
+    // in it (even the page default); otherwise the first onopen replay clears it back to the baked
+    // player.
     var livePlayer = rules.serverPlayerParam(rcPlayerBackend, !!rcPlayerPicked);
     if (livePlayer) o.rcPlayer = livePlayer;
     return o;
 }
-// Renderer-picker state (the #cp-lane-select combo). `rcPlayerBackend` is the current Remote
-// Compose player and `rcPlayerPicked` gates whether it rides the render URL. It is also true for a
-// default that differs from the player the server's bare URL already produces.
+// Renderer-picker state (#cp-lane-select). `rcPlayerPicked` gates whether `rcPlayerBackend` rides
+// the render URL; also true for a default that differs from what the bare URL produces.
 const laneSelect = may<HTMLSelectElement>("cp-lane-select");
 // The design-spec lane's own chip, beside the combo rather than inside it (see ServeWeb's
 // specChipHtml). Present only when this preview carries an imported reference.
@@ -730,11 +606,9 @@ const specChip = may<HTMLButtonElement>("cp-spec-chip");
 var rcDefaultBackend = laneSelect
     ? rules.normalizeRcPlayer(laneSelect.getAttribute("data-rc-default"))
     : "";
-// The player a BARE `/render` URL already produces, as the server reports it
-// (`ServeHost.bakedRcPlayer`). Empty when the session cannot name one — a non-Remote-Compose
-// preview, or a server that predates the attribute — and everything then names itself, as before.
-// A capture record, so an older server's `cmp-android` / `java` reads as the AndroidX embedded /
-// view player it meant then.
+// The player a bare `/render` URL already produces (`ServeHost.bakedRcPlayer`); empty when the
+// session cannot name one. Read as a capture record so an older server's `cmp-android` / `java`
+// maps to the player it meant.
 var rcBakedPlayer = laneSelect
     ? rules.normalizeBakedPlayer(
           laneSelect.getAttribute("data-rc-baked-player"),
@@ -747,28 +621,18 @@ var rcPlayerPicked = rules.backendRequiresRenderParam(
     rcDefaultBackend,
     rcBakedPlayer,
 );
-// Reconcile the picker (the combo's value AND the chip's label) with the active lane. Hoisted
-// (the real impl is assigned in the picker block below) so the common mode-transition path
-// (enterMode) can call it whenever the viewer leaves a lane through ANY control — not only a
-// pick — so the combo can't keep naming a renderer that Live / SVG has taken off the stage. A
-// no-op stub for a single-lane preview (no combo present).
+// Reconcile the picker (combo value and chip label) with the active lane. Hoisted so enterMode can
+// call it whenever the viewer leaves a lane through any control. A no-op for a single-lane preview.
 var syncLaneSelect = function () {};
 /**
- * The render lane's whole override map, as the controls stand right now.
- *
- * Split out of [query] rather than derived from the URL it builds, because a second consumer needs
- * the map and not the query: the report form's `compose-parity-locator/v1` block carries
- * `overrides:` as canonical JSON, and its identity has to name the same frame the body's render
- * link does. Re-parsing that link would mean re-deriving which of its parameters are overrides —
- * `token`, `session`, `at` and `gen` are not — and a second rule for that is a second thing to get
- * wrong. One collector, two serialisations.
+ * The render lane's whole override map, as the controls stand right now. Split out of [query]
+ * because the report form's `compose-parity-locator/v1` block needs the map itself, and must name
+ * the same frame as the body's render link: one collector, two serialisations.
  */
 function renderOverrides(): Overrides {
     var o = overrides();
-    // Author-declared knobs: knob.<key>=<value>. The server infers the type from the preview's
-    // declaration, so no <kind>: prefix. A knob still at its declared default is omitted — that
-    // keeps the URL on the instant baked snapshot (any knob.* param routes a published catalog
-    // to the daemon for a fresh re-render); only an actually-changed knob is sent.
+    // Author-declared knobs: knob.<key>=<value> (the server types it from the declaration). A knob
+    // at its declared default is omitted so the URL stays on the baked snapshot.
     controls(".cp-knob").forEach(function (el) {
         if (el.disabled) return;
         var key = el.getAttribute("data-knob-key");
@@ -784,9 +648,8 @@ function renderOverrides(): Overrides {
             return;
         o["knob." + key] = val;
     });
-    // Remote Compose knobs: rc.<name>=<kind>:<value>. The <kind>: prefix types the seed
-    // (color:%23AARRGGBB, int:…, bool:true, …). A knob still at its declared default is omitted
-    // so the URL stays on the instant baked snapshot until it's actually changed.
+    // Remote Compose knobs: rc.<name>=<kind>:<value>; the kind prefix types the seed. Omitted at
+    // the declared default.
     controls(".cp-rc-knob").forEach(function (el) {
         if (el.disabled) return;
         var name = el.getAttribute("data-rc-name");
@@ -797,9 +660,8 @@ function renderOverrides(): Overrides {
             return;
         o["rc." + name] = rules.rcKnobValue(kind, val);
     });
-    // App-declared theme (themeProvider = provider FQN). Routes to the daemon like a knob; a
-    // published catalog re-renders on demand. Omitted at "(default)" so the URL stays on the
-    // instant baked snapshot until a theme is actually chosen.
+    // App-declared theme (themeProvider = provider FQN). Omitted at "(default)" so the URL stays on
+    // the baked snapshot.
     var tp = chosenThemeProvider();
     if (tp) o.themeProvider = tp;
     // Detected-feature: keyboard focus (focus=0). Routes to the daemon like a knob; omitted when
@@ -814,12 +676,9 @@ function renderOverrides(): Overrides {
     // `takeGestureInvoke`.
     var gi = takeGestureInvoke();
     if (gi) o.gestureInvoke = gi;
-    // Remote Compose render backend: a server-side player selection rides the render as
-    // rcPlayer=<id>. Emitted for a visitor pick or a server-side default the bare URL does not
-    // already produce, and only for a server-side lane — androidx-view / androidx-embedded /
-    // cmp-android render through the daemon, cmp-jvm through its isolated desktop subprocess (all
-    // PNG lanes). The camaelon-js canvas replays the doc in-browser (no server render), so it never
-    // sends the param, and an unpicked default stays on the instant baked snapshot.
+    // Remote Compose render backend as rcPlayer=<id>, sent for a visitor pick or a server-side
+    // default the bare URL does not already produce, and only for a server-side (PNG) lane. The
+    // camaelon-js canvas replays in-browser, so it never sends the param.
     var serverPlayer = rules.serverPlayerParam(
         rcPlayerBackend,
         !!rcPlayerPicked,
@@ -828,37 +687,25 @@ function renderOverrides(): Overrides {
     return o;
 }
 function query() {
-    // Public routes are open, so a page that arrived without a token stays token-free — only
-    // carry token= when this page's own URL had one (a token-gated box).
+    // Only carry token= when this page's own URL had one; public routes stay token-free.
     var parts: string[] = [];
     if (token) parts.push("token=" + encodeURIComponent(token));
     if (session) parts.push("session=" + encodeURIComponent(session));
-    // The pin rides with the request rather than being applied per route server-side, because the
-    // server cannot tell the viewer's own snapshot request from any other /render call. A pinned
-    // page has every re-rendering control disabled, so the overrides below are empty in practice —
-    // the pin is what this URL is for.
+    // The pin rides with the request because the server cannot tell the viewer's snapshot request
+    // from any other /render call. A pinned page disables re-rendering controls, so overrides are
+    // empty.
     if (pinnedAt) parts.push("at=" + encodeURIComponent(pinnedAt));
     // Everything pushed from here on is an override of some kind, which is exactly what decides
     // whether this URL may name a generation — see `rules.generationEmitted` below.
     var beforeOverrides = parts.length;
     var o = renderOverrides();
     Object.keys(o).forEach(function (k) {
-        // The KEY is encoded too, not just the value. The display axes are fixed literals, but a
-        // `knob.<key>` or `rc.<name>` carries an author-declared string, and a `&`, `=` or `%` in
-        // one splits this URL into parameters nobody wrote — the render then applies a different
-        // override from the one the locator's JSON names, so the report identifies a frame other
-        // than the pixels it links. That is the exact mismatch the block exists to prevent, arriving
-        // through the query rather than through the map.
-        //
-        // Byte-identical to the per-family `"knob." + encodeURIComponent(key)` this replaced:
-        // `encodeURIComponent` leaves `.` alone, so a well-formed key encodes to itself and only an
-        // author string carrying a delimiter changes — which is the case being fixed.
+        // Encode the key too: `knob.<key>` / `rc.<name>` carry author strings, and an unencoded
+        // `&`, `=` or `%` would split the URL into overrides that differ from the locator's JSON.
         parts.push(encodeURIComponent(k) + "=" + encodeURIComponent(o[k]));
     });
-    // The cache generation, last, and only on the URL that is actually a published frame: every
-    // lane above omits itself while it sits at its default precisely so this URL stays on the baked
-    // snapshot, which makes "nothing was pushed" the same question as "is this the published
-    // frame".
+    // The cache generation, last, and only when nothing was pushed: every lane omits itself at its
+    // default, so "no overrides" means "this is the published frame".
     if (
         rules.generationEmitted(
             generation,
@@ -872,14 +719,9 @@ function query() {
 // "Full page (scroll)" appends `scroll=long` to both snapshot formats. The server routes SVG to
 // compose/figma-svg-long and PNG to render/scroll/long.
 const scrollLong = may<HTMLInputElement>("cp-scroll-long");
-// The exploded 3D view (`?exploded=1` on the SVG lane): the layered figma-svg tilted back and
-// pulled apart into one sheet per visible drawing level. It is a *presentation* of the
-// vector export, so it rides only the `.svg` extension — appending it to the raster PNG lane
-// would silently do nothing, and the toggle turns SVG on rather than offering the combination.
-//
-// Every knob lands in the URL, which is the whole reason the projection is server-side: the
-// angle someone tuned is part of the link they copy, the SVG they download, and the picture a
-// reviewer sees in a PR — not client state that dies with the tab.
+// The exploded 3D view (`?exploded=1` on the SVG lane): the layered figma-svg tilted and split into
+// one sheet per drawing level. It only applies to `.svg`, so the toggle turns SVG on. Every knob
+// lands in the URL (hence server-side): the angle is part of the copied link and downloaded SVG.
 const explodeToggle = may<HTMLButtonElement>("cp-explode-toggle");
 var EXPLODE_KNOBS = [
     ["cp-explode-tilt", "explodeTilt"],
@@ -892,25 +734,15 @@ function explodeOn() {
         explodeToggle && explodeToggle.getAttribute("aria-pressed") === "true"
     );
 }
-// The same boolean forms `ServeExplodedSvg.enabled` accepts, so a hand-typed or bookmarked
-// `?exploded=on` opens the view the render endpoint would serve for that URL — rather than
-// showing the flat PNG and then dropping the parameter on the next sync, which is what a
-// stricter reading here produced.
+// The same boolean forms `ServeExplodedSvg.enabled` accepts, so a hand-typed `?exploded=on` opens
+// the view the render endpoint would serve.
 function explodeParamOn(raw: string | null) {
     return rules.explodeParamOn(raw);
 }
-// A server-side Remote Compose player pick cannot survive the exploded view, so entering it
-// releases the pick rather than hiding it. `rcPlayer=cmp-jvm` is a renderer choice, not a mode,
-// so it outlives a return to the static lane — and the server routes it to the desktop player's
-// own subprocess *before* it ever looks at `exploded=`, leaving the chip pressed over an
-// untouched flat SVG. There is nothing to explode there either way: that lane renders a Remote
-// Compose document, which carries none of the `<g id="…">` composable nesting this view splits
-// on.
-//
-// Resetting the STATE rather than filtering `rcPlayer` out of the request string is the whole
-// point: the string is copied into the page URL by syncUrl() and read back by the lane picker's
-// label, so a filtered request left the address bar and the "current renderer" chip both naming
-// a player that is no longer drawing anything.
+// A server-side Remote Compose player pick cannot survive the exploded view: the server routes
+// `rcPlayer=cmp-jvm` to the desktop player before it looks at `exploded=`, and an RC document has
+// no composable `<g id>` nesting to split anyway. Reset the state rather than filtering the request
+// string, because syncUrl() and the picker label read the state.
 function dropRcPlayerPick() {
     if (!rcPlayerPicked && rcPlayerBackend === rcDefaultBackend) return;
     rcPlayerPicked = rules.backendRequiresRenderParam(
@@ -920,9 +752,8 @@ function dropRcPlayerPick() {
     rcPlayerBackend = rcDefaultBackend;
     if (typeof syncLaneSelect === "function") syncLaneSelect();
 }
-// Whether pressing 3D is what turned the vector lane on. Leaving 3D then hands the lane back
-// rather than stranding the visitor on a flat SVG they never asked for — but only in that case:
-// someone who was already reading the SVG and exploded it should get their SVG back, not a PNG.
+// Whether pressing 3D turned the vector lane on; if so, leaving 3D hands the lane back. Someone who
+// was already on SVG keeps it.
 var explodeEnabledSvg = false;
 // The knobs as plain values, for the rules next door to decide on.
 function explodeKnobValues() {
@@ -935,9 +766,8 @@ function explodeKnobValues() {
         };
     });
 }
-// Just the exploded parameters, for `syncUrl` — the page's own address is written from the same
-// helper the render URL uses, so the address bar, the copied link and the fetched bytes can never
-// disagree about the angle on screen.
+// Just the exploded parameters, for `syncUrl`; shared with the render URL so the address bar,
+// copied link and fetched bytes agree.
 function explodeQuery() {
     return rules.explodeParams(explodeKnobValues()).join("&");
 }
@@ -948,11 +778,9 @@ function withSnapshotFormat(ext: string, qs: string) {
         knobs: explodeKnobValues(),
     });
 }
-// Called once the snapshot request has SETTLED, whichever way it went — pixels decoded, or a
-// failure that leaves the stage without them. The bookmarked-mode bootstrap waits on this: it
-// used to wait on the <img>'s own load/error, which a failed render never fires (no src is ever
-// assigned), so a deep link into an interactive lane sat on the snapshot for the full 8s timeout.
-// A refusal is a settled snapshot too, and one the Wasm/live lane may well be able to honour.
+// Called once the snapshot request has settled (decoded or failed). The bookmarked-mode bootstrap
+// waits on this rather than the <img> load/error, which a failed render never fires. A refusal is
+// settled too, and the Wasm/live lane may be able to honour it.
 var onSnapshotSettled: (() => void) | null = null;
 function snapshotSettled() {
     var fn = onSnapshotSettled;
@@ -961,25 +789,13 @@ function snapshotSettled() {
         fn();
     }
 }
-// A non-terminal refusal (503 / 429 + `Retry-After`) means the render lane exists and is merely
-// cold, busy, or out of seats — a cold Android daemon is tens of seconds, and it recovers on its
-// own. The page used to print "retry shortly" and then do nothing, leaving a deep link or the
-// viewer's own default player lane stuck on an error until the visitor touched a control or
-// reloaded. So the advice is now carried out: a bounded, server-paced retry.
+// Cancels a coalesced continuous-control edit that has not started its render yet. Forward-declared
+// because that control is wired far below; a no-op until then.
 //
-// WHICH refusals reach this is decided in `viewer/snapshotRetry.js`, on the status. It used to be
-// decided here, on the presence of the dropped-overrides header, which meant the busiest refusal
-// the public server issues could not reach the retry it was explicitly asking for.
-//
-// Bounded because the alternative is a page that hammers a struggling box forever, and because a
-// lane that has not come up after this long is better reported than silently retried. The counter
-// is per *attempt sequence*, not per page: any control change starts a new render and resets it,
-// which is also what stops a queued retry from painting over a newer request — `snapshotGen` has
-// already moved on and the guard at the top of the handler drops it.
-// Cancels a coalesced continuous-control edit that has not started its render yet. A forward
-// declaration because the control it belongs to is wired much further down, long after
-// `refreshSnapshot` is defined; a no-op until then, which is exactly right for a page with no
-// pending edit.
+// A non-terminal refusal (503 / 429 + `Retry-After`) means the lane is cold or busy and will
+// recover, so the page retries, bounded and server-paced. Which refusals qualify is decided in
+// `viewer/snapshotRetry.js` on the status. The counter is per attempt sequence: any control change
+// starts a new render, resets it, and moves `snapshotGen` so a queued retry cannot paint over it.
 var cancelPendingContinuousEdit: () => void = function () {};
 var SNAPSHOT_RETRY_LIMIT = 4;
 var snapshotRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -992,11 +808,9 @@ function cancelSnapshotRetry() {
 function refreshSnapshot(isRetry?: boolean) {
     if (!isRetry) snapshotRetries = 0;
     cancelSnapshotRetry();
-    // A render is happening NOW, so a coalesced control edit still waiting to start one is
-    // redundant: this render reads the same controls that edit was queued to re-read. Without
-    // this, nudging the slider and then clicking a lane chip inside the debounce window spent two
-    // renders on one state. Calling it from the timer's own callback is a no-op — the wrapper
-    // clears its timer before invoking us — so a coalesced edit still renders exactly once.
+    // A render is starting now, so a coalesced edit still waiting would be redundant (it re-reads
+    // the same controls). From the timer's own callback this is a no-op, so the edit renders
+    // exactly once.
     cancelPendingContinuousEdit();
     status.textContent = "rendering…";
     var gen = ++snapshotGen;
@@ -1010,19 +824,15 @@ function refreshSnapshot(isRetry?: boolean) {
     );
     var url = request.url;
     var requestedExt = snapshotExt;
-    // Override-bearing renders are deliberately `no-store`. Preloading with `new Image()` and
-    // then assigning the same URL to the visible image therefore performs two server renders,
-    // and the second one can race the first through the daemon's shared override state. Fetch the
-    // bytes once and hand the resulting blob URL to the image instead. This also keeps the current
-    // frame visible until the replacement has decoded.
+    // Override-bearing renders are `no-store`, so preloading via `new Image()` then assigning the
+    // same URL would render twice and race the daemon's shared override state. Fetch once and hand
+    // the blob URL to the image; this also keeps the current frame visible until the replacement
+    // decodes.
     fetch(url, request.init)
         .then(function (response) {
             if (!response.ok) {
-                // Everything the refusal told us, read once and handed to the rules next door.
-                // `X-Compose-Preview-Dropped-Overrides` means the server would have had to answer
-                // an override with pixels that ignore it, so it refused instead and named the
-                // params it dropped (#3449) — that shapes the sentence the visitor reads. The
-                // STATUS decides whether to ask again, for that refusal and every other one.
+                // `X-Compose-Preview-Dropped-Overrides` names params the server refused to ignore;
+                // it shapes the message. The status decides whether to retry.
                 var after = parseInt(
                     response.headers.get("Retry-After") || "",
                     10,
@@ -1054,21 +864,18 @@ function refreshSnapshot(isRetry?: boolean) {
                 var previous = img.getAttribute("data-cp-blob");
                 img.src = objectUrl;
                 img.setAttribute("data-cp-blob", objectUrl);
-                // The blob URL is opaque — it says nothing about which render produced the pixels on
-                // screen. Record the /render URL we actually fetched so the visible frame's provenance
-                // stays inspectable: which format, which knobs, which lane. `#cp-url-png` / `#cp-url-svg`
-                // track the *current controls*, which is not the same thing — they update the instant a
-                // knob moves, while this only lands once the matching bytes have decoded. That gap is
-                // exactly what the serve-lanes e2e asserts on.
+                // The blob URL is opaque, so record the /render URL actually fetched as the frame's
+                // provenance. Unlike `#cp-url-png` / `#cp-url-svg` (which track the controls
+                // immediately), this lands only once the matching bytes decode; the serve-lanes e2e
+                // asserts on that gap.
                 img.setAttribute("data-cp-src", url);
                 if (previous) URL.revokeObjectURL(previous);
                 status.textContent = "";
                 setSnapshotLoading(false);
                 clearModeError();
                 syncSpecBaseline();
-                // The frame is on the stage NOW, so this is the moment the report may describe it.
-                // Every other caller runs from a control change, when the controls have moved ahead
-                // of the image and the gate above declines.
+                // The frame is on the stage now, so the report may describe it. Other callers run
+                // from control changes, where the gate declines.
                 refreshReportLink();
                 snapshotSettled();
             };
@@ -1087,9 +894,7 @@ function refreshSnapshot(isRetry?: boolean) {
         .catch(function (e: SnapshotFailureError) {
             if (gen !== snapshotGen) return;
             setSnapshotLoading(false);
-            // A throw with no `cpFailure` never reached the server (a dropped connection, a
-            // rejected fetch). Status 0 is terminal by the rules next door, which is the same
-            // answer this branch always gave it.
+            // A throw with no `cpFailure` never reached the server; status 0 is terminal.
             var failure: rules.SnapshotFailure = (e && e.cpFailure) || {
                 status: 0,
                 dropped: "",
@@ -1121,10 +926,8 @@ function refreshSnapshot(isRetry?: boolean) {
         });
     refreshLinks();
 }
-// The copyable direct-link panel: rebuild the absolute /render URLs (PNG + optional SVG) from
-// the current controls so a copied/downloaded link reproduces exactly what's on screen. Built
-// on location.origin so the link is absolute (curl-able / shareable), and kept in sync on
-// every control or knob change — even the ones that don't re-render the snapshot themselves.
+// The copyable direct-link panel: absolute /render URLs (PNG + optional SVG) rebuilt from the
+// current controls on every change, so a copied link reproduces what's on screen.
 function renderUrl(ext: string) {
     var qs = withSnapshotFormat(ext, query());
     return (
@@ -1136,18 +939,11 @@ function renderUrl(ext: string) {
         (qs ? "?" + qs : "")
     );
 }
-// Whether the stage is showing the render the PUBLISHED design-spec score was measured against.
-//
-// The catalog bakes that score against its own snapshot — default theme, declared knob defaults,
-// no detected features. Every control here omits itself from `query()` while it sits at that
-// default, precisely so the URL stays on the baked snapshot, which makes the render URL a direct
-// reading of whether anything has moved: strip the link-only params and whatever is left is a
-// deviation from what was scored.
-//
-// It matters because the design reference does NOT move with the render. A spec is imported once,
-// not re-exported per theme, so choosing a theme changes one side of the comparison and not the
-// other. The baked number then describes a frame that is no longer on the stage — and the spec
-// lane, scoring what IS on the stage, disagrees with the chip by ten points or more.
+// Whether the stage shows the render the published design-spec score was measured against (default
+// theme, declared knob defaults, no detected features). Since every control omits itself from
+// `query()` at its default, the render URL minus link-only params answers this directly. It matters
+// because the design reference does not move with the render, so the baked number no longer
+// describes a changed frame.
 function specAtBaseline() {
     return rules.specAtPublishedBaseline(
         root.getAttribute("data-mode") || "snapshot",
@@ -1155,9 +951,8 @@ function specAtBaseline() {
         img.getAttribute("data-cp-src"),
     );
 }
-// The inline theme bootstrap publishes the initial value before viewer-components.js upgrades
-// the spec element. Keep both the stage attribute and the installed element current from here on:
-// the attribute serves reconnects, while the push updates the existing install immediately.
+// The inline theme bootstrap publishes the initial value before the spec element upgrades. Keep
+// both the stage attribute (for reconnects) and the installed element current from here on.
 function syncSpecBaseline() {
     var at = specAtBaseline();
     root.setAttribute("data-spec-baseline", at ? "1" : "0");
@@ -1167,14 +962,11 @@ function syncSpecBaseline() {
 function withMode(url: string, mode: string) {
     return url + (url.indexOf("?") >= 0 ? "&" : "?") + "mode=" + mode;
 }
-// [skipUrlSync] refreshes the copyable links WITHOUT touching history. Only one caller wants it:
-// a path that is about to hand the URL to a lane transition, where syncing first would replace
-// the entry the visitor came from moments before that transition pushes a new one — spending the
-// previous state to write an intermediate nobody asked for. See `onKnobEdited`.
+// [skipUrlSync] refreshes the links without touching history, for a caller about to push a lane
+// transition (syncing first would replace the entry the visitor came from). See `onKnobEdited`.
 function refreshLinks(skipUrlSync?: boolean) {
-    // The page's own URL is kept in step with the controls for the same reason the direct links
-    // are: what's on screen should be something you can bookmark or hand to someone. Every path
-    // that changes viewer state already refreshes the links, so this one call covers all of them.
+    // Keep the page URL in step with the controls so the screen is bookmarkable. Every
+    // state-changing path refreshes the links, so this one call covers them all.
     if (!skipUrlSync) syncUrl();
     [
         ["png", ".png"],
@@ -1185,11 +977,9 @@ function refreshLinks(skipUrlSync?: boolean) {
         var embed = renderUrl(pair[1]);
         var dl = may<HTMLAnchorElement>("cp-dl-" + pair[0]);
         if (pair[1] === ".svg") {
-            // Copy URL yields the web/document variant (`?mode=web` → external Google Fonts
-            // @import), so opening the copied link in a browser pulls the faces from Google. Copy
-            // SVG and the download stay on the embedded variant (self-contained — right for pasting
-            // into Figma or an <img>, where external refs don't load); the button reads it from
-            // data-embed-url.
+            // Copy URL yields the web variant (`?mode=web`, external Google Fonts @import) for
+            // browsers. Copy SVG and the download use the self-contained embedded variant (from
+            // data-embed-url) for Figma or <img>.
             field.value = withMode(embed, "web");
             field.setAttribute("data-embed-url", embed);
             if (dl) dl.href = embed;
@@ -1202,44 +992,28 @@ function refreshLinks(skipUrlSync?: boolean) {
     syncSpecBaseline();
     refreshReportLink();
 }
-// Keep the "report an issue" report pointed at what is on screen. The server filled the form's
-// hidden `body` for the settings the page was served at (so this works with JS off); the
-// template it carries names the render URL as `{{render}}` and, inside its
-// `compose-parity-locator/v1` block, the override map as `{{overrides}}`. Both are filled here
-// from the state the controls are in, so a report filed after fiddling with the knobs shows the
-// render that prompted it AND is indexed against the frame it shows. The token is stripped for
-// the same reason the server strips it: an issue body is public, a session token is a capability.
+// Keep the "report an issue" form pointed at what is on screen. The server fills the hidden `body`
+// for the served settings (works with JS off); its template names `{{render}}` and, in the
+// `compose-parity-locator/v1` block, `{{overrides}}`, both filled here from the current controls.
+// The token is stripped: an issue body is public, a session token is a capability.
 //
-// Handed to `reportBody` rather than assigned here. The field has other producers on this page —
-// `<cp-report-classification>` and `<cp-report-scope>`, the latter of which only exists now that
-// this page's template carries a locator — and the last plain `body.value = …` to run would drop
-// whatever the others had contributed. That store composes from the template every time, so each
-// producer supplies its own fragment and none can clobber another.
-//
-// Note it writes an INPUT VALUE, never an href: the affordance is a GET form whose action is a
-// server-rendered literal, so no page-derived string ever reaches a navigation sink. The browser
-// does the query encoding on submit, which is why the substituted URL goes in raw here.
+// Goes through `reportBody` because other producers (`<cp-report-classification>`,
+// `<cp-report-scope>`) also write the field; the store recomposes from the template so none
+// clobbers another. It writes an input value, never an href, so no page-derived string reaches a
+// navigation sink.
 function refreshReportLink() {
     var body = may<HTMLInputElement>("cp-report-body");
     var field = may<HTMLInputElement>("cp-url-png");
     if (!body || !field || !field.value) return;
-    // Whether this lane's pixels are the ones `data-cp-src` names. Live, Wasm and the Remote
-    // Compose players paint into a canvas or an iframe and apply overrides in place, so the stage
-    // image is a stale bystander there and no gate below can speak for what is on screen.
+    // Whether this lane's pixels are the ones `data-cp-src` names. Live, Wasm and the RC players
+    // paint into a canvas/iframe, so the stage image is stale there.
     var mayName = rules.reportMayCarryLocator(
         root.getAttribute("data-mode") || "snapshot",
     );
-    // Only while the frame ON SCREEN is the one the controls are asking for. The controls and the
-    // copyable links run ahead of the image by a fetch and a decode, so recomposing on every change
-    // would let a reporter who submits inside that window — or after the render failed — file a
-    // locator and a render link for a frame nobody saw. Skipping leaves the field holding the body
-    // that described the previous frame, which is the frame still on the stage; the next landed
-    // frame calls this again. See `viewer/reportFrame.ts`, and D4 in the workflow doc.
-    //
-    // Checked only where the frame is knowable. On an interactive lane the recomposition below has
-    // to happen REGARDLESS, because its job there is to take the locator away: skipping would leave
-    // whatever block the field last held — the served one, or one composed on the way in — standing
-    // over pixels nobody can vouch for.
+    // Only while the frame on screen is the one the controls ask for: controls run ahead of the
+    // image by a fetch and decode, so skipping keeps the body describing the frame still on stage.
+    // See `viewer/reportFrame.ts`. On an interactive lane recompose regardless, to remove the
+    // locator.
     if (
         mayName &&
         !rules.reportFollowsDisplayedFrame(
@@ -1249,8 +1023,8 @@ function refreshReportLink() {
     )
         return;
     if (!reportBody.attach(body)) return;
-    // One pass, one source: the identity the locator states and the pixels the body links are
-    // read off the same controls at the same instant, so they cannot describe two frames.
+    // One pass: the locator's identity and the body's render link are read off the same controls at
+    // once.
     reportBody.set({
         render: stripToken(field.value),
         overrides: renderOverrides(),
@@ -1319,10 +1093,8 @@ function updateSvgMatch() {
         },
     );
 }
-// Copy the /render URL of the current view. The URL itself lives in the `#cp-url-<ext>` field
-// (kept off-screen — nobody reads a 200-character absolute URL), so this is what puts it on the
-// clipboard; the field is still selected as the execCommand fallback's requirement, and the
-// button reports back in its own label rather than flashing a control the visitor can't see.
+// Copy the /render URL from the off-screen `#cp-url-<ext>` field. The field is still selected for
+// the execCommand fallback; the button reports in its own label.
 document.querySelectorAll<HTMLElement>(".cp-copyurl").forEach(function (btn) {
     btn.addEventListener("click", function () {
         var field = may<HTMLInputElement>(
@@ -1358,11 +1130,9 @@ document.querySelectorAll<HTMLElement>(".cp-copyurl").forEach(function (btn) {
         }
     });
 });
-// "Copy PNG" / "Copy SVG": fetch the current /render artefact and put it on the clipboard —
-// PNG as real image/png bytes (falling back to a base64 data: URI), SVG as markup verbatim — so
-// it can be pasted straight into an issue, editor, or prompt without downloading a file. Uses
-// the same live cp-url-<ext> field the URL Copy button reads, so the copied artefact matches the
-// on-screen overrides.
+// "Copy PNG" / "Copy SVG": fetch the current /render artefact (PNG as image/png bytes, falling back
+// to a base64 data: URI; SVG as markup) from the same cp-url-<ext> field, so it matches on-screen
+// overrides.
 document.querySelectorAll<HTMLElement>(".cp-copyimg").forEach(function (btn) {
     btn.addEventListener("click", function () {
         var field = may<HTMLInputElement>(
@@ -1384,36 +1154,24 @@ document.querySelectorAll<HTMLElement>(".cp-copyimg").forEach(function (btn) {
             return;
         }
         btn.textContent = "Copying…";
-        // Copy SVG targets the EMBEDDED variant (data-embed-url) — the field itself holds the
-        // web-mode URL for Copy URL, but a copied SVG is usually pasted into Figma / an editor,
-        // which needs the fonts baked in, not an external @import.
-        //
-        // PNG has one variant and one CHOICE: the copy follows the stage the visitor is looking
-        // at. On the solid stage (the default) it copies the render composited onto its resolved
-        // ground, because the thing a copied PNG is pasted into — an issue, a doc, a chat — has a
-        // white page and no stage of its own, and a dark-first catalog's sticker lands there as a
-        // blank rectangle otherwise. Flip the header's Transparent toggle and it copies the raw
-        // alpha, which is what a paste into Figma wants. Neither is a hidden default: the page is
-        // already showing which one you will get.
+        // Copy SVG uses the embedded variant (data-embed-url) so pasted SVG has fonts baked in.
+        // Copy PNG follows the stage: on the solid stage it composites onto the resolved ground
+        // (paste targets have a white page, where a dark-first sticker would vanish); with
+        // Transparent on it copies raw alpha.
         var src =
             (ext === ".svg" && field.getAttribute("data-embed-url")) ||
             (ext === ".png" && !isTransparent()
                 ? withStage(field.value)
                 : field.value);
-        // fetch() resolves even on a non-2xx render (503 saturated, 400 bad override, 404 a
-        // preview that can't export that lane), so guard on r.ok — otherwise the error body,
-        // not the artefact, would land on the clipboard and still report "Copied".
+        // fetch() resolves on non-2xx too; guard on r.ok so an error body never lands on the
+        // clipboard.
         var okOrThrow = function (r: Response) {
             if (!r.ok) throw new Error("render " + r.status);
             return r;
         };
-        // PNG: hand the clipboard the real image/png bytes when the browser has ClipboardItem, so
-        // pasting into a GitHub issue (or a doc, or a chat) lands the picture — which is what makes
-        // "Copy PNG → paste into the bug report" a one-keystroke screenshot. The blob goes in as a
-        // *promise* because Safari requires the ClipboardItem to be constructed synchronously inside
-        // the click; awaiting the fetch first would lose the user gesture. Anything that can't do it
-        // — no ClipboardItem, a denied permission, a non-image response — falls through to the
-        // original base64 data: URI text, which still pastes into an editor or a prompt.
+        // PNG: give the clipboard real image/png bytes when ClipboardItem exists. The blob is
+        // passed as a promise because Safari requires the ClipboardItem to be constructed
+        // synchronously in the click. Anything that fails falls back to base64 data: URI text.
         var copyAsText = function () {
             if (!navigator.clipboard.writeText) {
                 reset("No clipboard");
@@ -1486,33 +1244,25 @@ installWebShare(function () {
     if (!field || !field.value) return null;
     return isTransparent() ? field.value : withStage(field.value);
 });
-// --- Live frame painting.
-//
-// Frames land on `frameQueue` and are drained one per animation frame, never straight from the
-// socket handler. Two watermarks keep the stage moving forwards: the queue drops anything at or
-// below the last frame it released, and `paintedSeq` drops anything whose decode resolved out of
-// order. Without the second one a heavier frame N can still be decoding when a lighter N+1
-// resolves, then paint over it and sit there for a whole tick — see `live/framePainter.ts`.
+// Live frame painting. Frames land on `frameQueue` and drain one per animation frame. Two
+// watermarks keep the stage moving forward: the queue drops frames at or below the last released,
+// and `paintedSeq` drops decodes that resolve out of order. See `live/framePainter.ts`.
 var frameQueue = new FrameQueue();
 var paintedSeq = -1;
 var frameLoopRunning = false;
 var frameLoopGeneration = 0;
 
 /**
- * Begin painting for a freshly-opened socket. Called once per connection, so it resets the
- * per-stream state unconditionally: a reconnect restarts `seq` at 0, and the previous stream's
- * floor would otherwise reject every frame of the new one.
+ * Begin painting for a freshly-opened socket. Resets per-stream state: a reconnect restarts `seq`
+ * at 0, which the previous floor would reject.
  */
 function startFrameLoop() {
     frameQueue = new FrameQueue();
     paintedSeq = -1;
     if (frameLoopRunning) return;
     frameLoopRunning = true;
-    // Each start owns a generation, so a stop immediately followed by a start cannot leave two
-    // pumps racing: the previous chain's next tick sees a generation that is no longer current and
-    // retires. Without it, `stopFrameLoop` + `startFrameLoop` inside one animation frame would let
-    // the already-scheduled tick observe the flag back at true and keep pumping alongside the new
-    // one — two chains draining one queue, each stealing frames from the other.
+    // Each start owns a generation, so a stop+start within one animation frame retires the old
+    // chain instead of leaving two pumps draining one queue.
     frameLoopGeneration++;
     var generation = frameLoopGeneration;
     pumpFrames({
@@ -1543,20 +1293,16 @@ function decodeAndPaint(frame: ServeFrame) {
                 return;
             }
             paintedSeq = frame.seq;
-            // ImageBitmap.close() releases the decoded storage and browsers then report zero for
-            // its dimensions. Cache them while the bitmap is live: reading width/height after the
-            // close made every changed-aspect live frame fall back to filling the baked snapshot
-            // box, which visually cropped/squashed wrap-content animations.
+            // ImageBitmap.close() zeroes the reported dimensions, so cache them while the bitmap is
+            // live.
             liveW = bitmap.width;
             liveH = bitmap.height;
             canvas.width = liveW;
             canvas.height = liveH;
             canvas.getContext("2d")!.drawImage(bitmap, 0, 0);
             bitmap.close();
-            // A <canvas> stretches its buffer to fill its CSS box, so a daemon frame whose aspect
-            // differs from the pinned snapshot box would squish. Cache the buffer dims and re-fit
-            // the element (contain, centred) so the frame letterboxes within the snapshot
-            // footprint instead of distorting to fill it.
+            // A <canvas> stretches its buffer to its CSS box; re-fit (contain, centred) so a frame
+            // with a different aspect letterboxes instead of distorting.
             fitLiveCanvas();
         },
         function () {
@@ -1564,9 +1310,9 @@ function decodeAndPaint(frame: ServeFrame) {
         },
     );
 }
-// --- Live input forwarding (no-op on the snapshot lane). Coordinates are image-natural
-// pixels; pointer events are grouped by pointerId so Compose's gesture pipeline tracks drags
-// and multi-touch. Keys map to Android KEYCODE_* decimal strings (the daemon's wire format).
+// Live input forwarding (no-op on the snapshot lane). Coordinates are image-natural pixels; pointer
+// events are grouped by pointerId for drags and multi-touch. Keys map to Android KEYCODE_* decimal
+// strings.
 function liveActive(): boolean {
     return !!(ws && ws.readyState === 1 && canvas.width);
 }
@@ -1583,11 +1329,8 @@ function pixel(ev: MouseEvent) {
         y: Math.round(((ev.clientY - rect.top) / rect.height) * canvas.height),
     };
 }
-// Per-pointer state. The pointerDown is *deferred* until the first move so a tap with no drag
-// becomes a single `click` (matching the daemon's CLICK fast-path, which renders between press
-// and release — a batched down+up can race Modifier.clickable). pointermove is coalesced to one
-// send per pointerId per animation frame, so a fast drag doesn't flood the lane and concurrent
-// fingers don't overwrite each other (multi-touch).
+// Per-pointer state. pointerDown is deferred until the first move so a tap becomes a single `click`
+// (see PointerState). pointermove is coalesced to one send per pointerId per animation frame.
 var pointers: Record<string, PointerState> = {};
 var pendingMoves: Record<string, InputMessage> = {};
 var moveScheduled = false;
@@ -1607,9 +1350,8 @@ canvas.addEventListener("pointerdown", function (ev) {
     try {
         canvas.setPointerCapture(ev.pointerId);
     } catch (e) {}
-    // The device class travels with every event of this gesture. Compose treats a mouse drag and
-    // a finger drag as different gestures — only the mouse one drags out a text selection — so
-    // forwarding a real mouse as touch made selection impossible on the live lane.
+    // The device class travels with every event: Compose treats mouse and finger drags differently
+    // (only a mouse drag selects text).
     pointers[ev.pointerId] = {
         x: p.x,
         y: p.y,
@@ -1690,17 +1432,14 @@ canvas.addEventListener(
     },
     { passive: false },
 );
-// Keyboard: focus the canvas (tabindex) to type. Maps the common keys to Android keycodes;
-// unmapped keys are dropped (the daemon ignores codes outside its translation table anyway).
+// Keyboard: focus the canvas to type. Unmapped keys are dropped.
 canvas.tabIndex = 0;
-// The keycode/text pair moved to `cli/serve-web/src/viewer/keyInput.ts`. Both halves matter and
-// conflating them is a shipped bug: a keycode names a PHYSICAL KEY, so sending only that made the
-// arrows and Backspace work while nothing could ever be typed.
+// See `viewer/keyInput.ts`: a keycode names a physical key, so text must be sent alongside it or
+// nothing can be typed.
 function keyInput(kind: string, ev: KeyboardEvent) {
     if (!liveActive()) return;
-    // Carried on the release too, not just the press: a backend that suppresses the physical key
-    // event for a focused text field (so the character isn't typed twice) needs to suppress both
-    // halves, or the composition sees an unpaired key-up.
+    // Carried on the release too, so a backend that suppresses the key event for a focused text
+    // field can suppress both halves.
     var message = rules.keyMessage(ev);
     if (!message) return;
     var code = message.code;
@@ -1728,28 +1467,24 @@ function openStream() {
             canvas.getContext("2d")!.drawImage(img, 0, 0);
         } catch (e) {}
     }
-    // Mount the canvas as an absolute overlay on the snapshot's slot — the same fixed box the
-    // Wasm tier locks to. The img stays in flow (visibility:hidden keeps its slot), so the stage
-    // geometry is defined once by the snapshot and a live frame whose pixel dims differ from the
-    // baked PNG scales into this box instead of resizing the stage (the frame painter only touches
-    // the buffer, never the layout). Input mapping reads the buffer size, so it's unaffected.
+    // Mount the canvas as an absolute overlay on the snapshot's slot (the same box the Wasm tier
+    // uses). The img stays in flow (visibility:hidden), so stage geometry is defined by the
+    // snapshot and a differently-sized live frame scales into it.
     canvas.classList.add("cp-canvas-live");
     positionOverlay(canvas);
     img.style.visibility = "hidden";
     canvas.hidden = false;
     setPending("connecting…");
     var proto = location.protocol === "https:" ? "wss:" : "ws:";
-    // Request WebP frames (smaller; the browser decodes them via the data URL, and the daemon
-    // downgrades to PNG when it can't encode WebP — each frame carries its actual codec).
+    // Request WebP frames; the daemon downgrades to PNG when it can't encode WebP (each frame
+    // carries its codec).
     var qs = query();
     // Track whether the stream ever delivered a frame: a close/error *before* the first frame is
     // a failed activation (surface it), whereas a close *after* frames is just a normal teardown.
     var liveGotFrame = false;
-    // Hold the socket in a per-activation local as well as `ws`, and gate every callback on
-    // `ws === sock`. Toggling Live off and straight back on opens a replacement before the old
-    // socket's close event is delivered, and that stale callback would otherwise clear the NEW
-    // connection's pending badge (its own liveGotFrame is true, so it skips the error branch)
-    // and null out `ws` — orphaning the live socket the input/override senders reach for.
+    // Hold the socket in a per-activation local and gate every callback on `ws === sock`: toggling
+    // Live off and on opens a replacement before the old close event arrives, and that stale
+    // callback would otherwise clear the new connection's badge and null `ws`.
     var sock = new WebSocket(
         proto +
             "//" +
@@ -1764,15 +1499,12 @@ function openStream() {
     wakeHold.hold("live", true);
     startFrameLoop();
     sock.onopen = function () {
-        // A tab hidden during the connecting window has never told the server so — every stream
-        // starts visible daemon-side — and no `visibilitychange` is coming until it is looked at
-        // again. State it once the socket can carry it.
+        // Every stream starts visible daemon-side, so report a tab hidden during connecting once
+        // the socket can carry it.
         if (document.hidden) sock.send(visibilityMessage(false));
-        // The connect URL seeds only query()'s fields — the display axes, the overlays, and changed
-        // knobs — so every knob, and anything toggled during the connecting window, isn't in it.
-        // Replay the full live override map once the socket is ready so the daemon reflects the
-        // exact current control state, including a control changed before onopen whose change event
-        // the readyState guard dropped.
+        // The connect URL seeds only query()'s fields (display axes, overlays, changed knobs).
+        // Replay the full live override map once open, including changes the readyState guard
+        // dropped before onopen.
         sock.send(
             JSON.stringify({
                 type: "setOverrides",
@@ -1821,10 +1553,8 @@ function openStream() {
         }
     };
 }
-// A backgrounded tab is still a held daemon session rendering four frames a second into a canvas
-// nobody can see. Tell the server, and it throttles the render loop (not just the emit) down to a
-// keyframe a second; coming back repaints immediately from the keyframe it flags on resume, so the
-// stream is never torn down and never blanks.
+// A backgrounded tab is still rendering into an invisible canvas: tell the server, which throttles
+// to a keyframe a second and repaints on resume without tearing the stream down.
 document.addEventListener("visibilitychange", function () {
     var socket = ws;
     if (!socket || socket.readyState !== 1) return;
@@ -1832,8 +1562,7 @@ document.addEventListener("visibilitychange", function () {
 });
 function closeStream() {
     root.setAttribute("data-mode", "snapshot");
-    // Drop any frame still queued or mid-decode, and reset both watermarks: a reconnect starts a
-    // fresh stream whose `seq` restarts at 0, which the old floor would otherwise reject wholesale.
+    // Drop queued/mid-decode frames and reset both watermarks: a reconnect restarts `seq` at 0.
     stopFrameLoop();
     // Toggling Live off mid-connect must not leave the badge stuck on "connecting…".
     setPending(null);
@@ -1856,26 +1585,22 @@ function closeStream() {
     img.style.removeProperty("visibility");
     img.hidden = false;
 }
-// --- Wasm tier (the in-browser CMP app, mounted in a sandboxed iframe). Only wired when the
-// session carries a Wasm app (data-wasm-src present). Theme/font-scale/locale re-point the
-// iframe's ?uiMode/?fontScale/?localeTag (device/orientation are server-render-only).
+// Wasm tier: the in-browser CMP app in a sandboxed iframe, wired only when data-wasm-src is
+// present. Theme / font scale / locale re-point the iframe's query; device and orientation are
+// server-only.
 const wasmFrame = may<HTMLIFrameElement>("cp-wasm");
 const wasmToggle = may<HTMLInputElement>("cp-wasm-toggle");
 var wasmSrc = root.getAttribute("data-wasm-src") || "";
-// Set once the app has painted its first frame (its "cp-wasm-ready" message). Until then a
-// control change re-points ?query (initial load); after, it posts an override patch so the
-// app recomposes in place instead of reloading the whole ~20 MB Wasm bundle.
+// Set once the app signals "cp-wasm-ready". Before that a control change re-points the query;
+// after, it posts an override patch so the app recomposes in place instead of reloading the bundle.
 var wasmReady = false;
-// Boot watchdog: if the app never signals "cp-wasm-ready" (bundle 404, Wasm/GL failure, …),
-// surface a visible error instead of leaving the stage stuck on "loading Wasm…" forever.
+// Boot watchdog: surface an error if the app never signals ready.
 var wasmBootTimer: ReturnType<typeof setTimeout> | null = null;
 function wasmBaseSrc() {
     if (!wasmSrc) return "";
-    // The src comes from a server-set data- attribute, but resolve it against our own origin and
-    // refuse anything not same-origin http(s) anyway — so a `javascript:`/`data:` URL can never
-    // reach the iframe even if the attribute were ever mis-set (defuses DOM-text-as-HTML). The
-    // query is left as the server baked it (the variant's default theme) — session overrides
-    // never go in it, so it stays the app's clean base to revert to when a control is cleared.
+    // Resolve the server-set src against our origin and refuse anything not same-origin http(s), so
+    // a `javascript:` / `data:` URL can never reach the iframe. The query stays as baked (the
+    // variant's default theme) so it is the clean base to revert to.
     var u;
     try {
         u = new URL(wasmSrc, location.origin);
@@ -1885,20 +1610,15 @@ function wasmBaseSrc() {
     if (u.origin !== location.origin) return "";
     return u.href;
 }
-// NOTE: the font prefetch lives in the app's own index.html (it starts the manifest+font
-// fetches at document load, in parallel with the Wasm boot), not on this page. That's where
-// it belongs regardless of the sandbox: it must be in flight before the iframe navigates, and
-// the app is the one that consumes the promises. (Historically the iframe was opaque-origin
-// with its own cache partition, so a page-side preload was also unreusable and fetched every
-// font twice; with allow-same-origin the partition is shared, but the app-side prefetch is
-// still the right home, so keep page-side preloads out — see the ServeWebFixtureTest guard.)
-// The override patch (theme / font scale / locale) the running app merges over its baked base —
-// a bare `a=b&c=d` query. An absent key falls back to the app's baked default (e.g. cleared
-// Theme → the variant's uiMode). Device / orientation are server-render-only, so not forwarded.
-// The stage checkerboard's tile origin in the iframe's own CSS-px coordinates. The app can't
-// render a transparent surface, so it paints this same pattern itself; handing it the phase
-// makes the in-canvas cells continue the page's cells exactly (the stylesheet positions the
-// 16px tile at 50% of the stage's padding box; the iframe sits at style.left/top within it).
+// The font prefetch lives in the app's own index.html, not on this page: it must be in flight
+// before the iframe navigates, and the app consumes it. Keep page-side preloads out
+// (ServeWebFixtureTest guards this).
+//
+// The override patch (theme / font scale / locale) the running app merges over its baked base, as a
+// bare `a=b&c=d` query. An absent key falls back to the app's default.
+//
+// The stage checkerboard's tile origin in the iframe's CSS-px coordinates. The app can't render
+// transparency, so it paints the same pattern; the phase makes its cells continue the page's.
 function wasmBgPhase() {
     var left = parseFloat(wasmFrame!.style.left) || 0;
     var top = parseFloat(wasmFrame!.style.top) || 0;
@@ -1906,12 +1626,9 @@ function wasmBgPhase() {
     var y = (stage.clientHeight - 16) / 2 - top;
     return x.toFixed(2) + "," + y.toFixed(2);
 }
-// The stage's own backdrop, handed to the Wasm app so the sticker sits on the same thing it
-// sits on in the snapshot. The app can't render a transparent surface, so it paints *something*
-// behind the component either way: without this it always painted the checkerboard, which
-// appeared out of nowhere the moment Wasm was enabled on the solid (default) stage. In the
-// page's Transparent mode there is no solid colour to send — the app continues the checkerboard
-// itself, positioned by `bgPhase`.
+// The stage's backdrop, handed to the Wasm app so the sticker sits on the same ground as in the
+// snapshot (the app can't render transparency). In Transparent mode there is no colour to send; the
+// app continues the checkerboard, positioned by `bgPhase`.
 function wasmStageBg() {
     if (document.documentElement.classList.contains("cp-bg-transparent"))
         return "checker";
@@ -1938,31 +1655,22 @@ function wasmOverridePatch() {
         parts.push("fontScale=" + encodeURIComponent(fs.value));
     parts.push("bgPhase=" + encodeURIComponent(wasmBgPhase()));
     parts.push("stageBg=" + encodeURIComponent(wasmStageBg()));
-    // Author-declared knobs also apply in the browser: the wasm catalog seeds its
-    // `catalogOverride*` from these `knob.<key>` params.
+    // Author-declared knobs also apply in the browser: the wasm catalog seeds `catalogOverride*`
+    // from these `knob.<key>` params.
     //
-    // Compared against the AUTHOR DEFAULT, not against `data-knob-initial` as query() does — and
-    // that difference is the whole point. A `@OverrideVariant` sticker (the unchecked checkbox, the
-    // disabled button) opens with its knob already seeded away from the author default, so
-    // `val === initial` holds and an initial-based filter would send nothing. The PNG lane can
-    // afford that because the baked capture already carries the seed; the Wasm tier has no baked
-    // artifact — it mounts the live component from `?id=<slug>`, and `wasmAppSrc` strips the
-    // variant axis off the id — so an unsent seed silently mounts the PRIMARY (a checked checkbox,
-    // an enabled button) under a sticker that says otherwise. A knob genuinely at its author
-    // default is still omitted, so an ordinary sticker is unchanged.
+    // Compared against the author default, not `data-knob-initial` as query() does: an
+    // `@OverrideVariant` sticker opens with its knob already seeded away from the default, and the
+    // Wasm tier has no baked artifact (`wasmAppSrc` strips the variant axis), so an unsent seed
+    // would mount the primary variant instead.
     controls(".cp-knob").forEach(function (el) {
         if (el.disabled) return;
         var key = el.getAttribute("data-knob-key");
         if (!key) return;
         var val = controlValue(el);
-        // See liveOverrides(): "" is a value for a string knob and a no-op for every other kind.
-        // This one matters most — an @OverrideVariant seeding `label=` opens the control empty, and
-        // wasmAppSrc has already stripped the variant axis off the id, so dropping the seed here
-        // mounts the PRIMARY under a sticker that says otherwise, with no baked artifact to fall
-        // back on.
+        // See liveOverrides(): "" is a value for a string knob only. Dropping an @OverrideVariant
+        // `label=` seed here would mount the primary variant.
         if (val === "" && knobKind(el) !== "string") return;
-        // Older pages carry no `data-knob-default`; fall back to the initial so they behave as before
-        // rather than sending every knob.
+        // Pages without `data-knob-default` fall back to the initial value.
         var authorDefault = el.getAttribute("data-knob-default");
         if (authorDefault === null)
             authorDefault = el.getAttribute("data-knob-initial") || "";
@@ -1982,24 +1690,15 @@ function wasmInitialSrc() {
     return patch ? base + "#" + patch : base;
 }
 /**
- * Whether the stage's <img> is showing an actual decoded render, rather than merely occupying a
- * box.
- *
- * A src-less (or failed) <img> still HAS a box — browsers give it a small alt-text placeholder,
- * ~104×20 — so `getBoundingClientRect()` alone cannot tell "the snapshot is on the stage" from
- * "nothing has landed yet". An overlay sized to that placeholder is what a blank Catalog preview
- * looked like: a 104×20 Wasm iframe pinned mid-stage, with the app inside it correctly
- * contain-fitting a component into 104×20.
+ * Whether the stage's <img> shows an actual decoded render. A src-less or failed <img> still has a
+ * small alt-text box (~104×20), so `getBoundingClientRect()` alone cannot tell.
  */
 function snapshotPainted(): boolean {
     return img.naturalWidth > 0 && img.naturalHeight > 0;
 }
-// Pixel parity: lay an absolute overlay ([el] — the Wasm iframe or the live canvas) exactly
-// over the snapshot's rendered box, so switching to it shouldn't move anything. Both the Wasm
-// app (contain-fitting the same sticker geometry the snapshot baked) and the daemon (the same
-// preview re-rendered) fill this box, so the three transports share one geometry.
-// Falls back to the stage's content box whenever there is no painted snapshot to mirror — a
-// render that 404'd, or one that has not landed yet.
+// Pixel parity: lay an absolute overlay ([el], the Wasm iframe or live canvas) exactly over the
+// snapshot's rendered box so switching transports moves nothing. Falls back to the stage's content
+// box when there is no painted snapshot.
 function positionOverlay(el: HTMLElement) {
     var sr = stage.getBoundingClientRect();
     var r = img.getBoundingClientRect();
@@ -2020,13 +1719,9 @@ function positionOverlay(el: HTMLElement) {
 function positionWasmFrame() {
     positionOverlay(wasmFrame!);
 }
-// The live canvas can't just fill the snapshot box like the Wasm frame does: a <canvas>
-// stretches its buffer to its CSS box, so pinning a differently-shaped daemon frame to the
-// snapshot's rect squished the render. Fit the frame (contain) inside that rect, centred — it
-// letterboxes within the snapshot footprint (so the stage still never resizes, the property
-// the pinned box was introduced for) instead of distorting. liveW/liveH cache the current
-// buffer so a window resize re-fits; unset (before the first frame, when the buffer is seeded
-// from the same-aspect snapshot) it fills the box exactly, matching positionOverlay.
+// The live canvas is contain-fitted and centred inside the snapshot rect rather than filling it (a
+// <canvas> would stretch a differently-shaped frame). liveW/liveH cache the buffer for re-fit on
+// resize; unset (before the first frame) it fills the box like positionOverlay.
 var liveW = 0;
 var liveH = 0;
 function fitLiveCanvas() {
@@ -2056,9 +1751,8 @@ function fitLiveCanvas() {
     canvas.style.width = w + "px";
     canvas.style.height = h + "px";
 }
-// Swap the stage from the snapshot to the (already-painted) Wasm frame. The snapshot keeps
-// its layout slot (visibility, not display) so the stage geometry — and the overlay tracking
-// it — never shifts.
+// Swap the stage from the snapshot to the already-painted Wasm frame. The snapshot keeps its layout
+// slot (visibility, not display) so geometry never shifts.
 function revealWasm() {
     if (!wasmActive() || wasmReady) return;
     wasmReady = true;
@@ -2077,15 +1771,12 @@ function revealWasm() {
         wasmFrame!.contentWindow.postMessage(patch, "*");
 }
 function openWasm() {
-    // No-op without a Wasm app (wasmFrame absent): enterMode() calls this unconditionally, but a
-    // non-Wasm daemon/static session has no iframe to drive. Guard so touching it can't throw.
+    // No-op without a Wasm iframe; enterMode() calls this unconditionally.
     if (!wasmFrame) return;
-    // Wasm and the daemon stream are mutually exclusive; the mode switch (enterMode) tears the
-    // stream down before opening Wasm, so there's nothing extra to close here.
+    // Wasm and the daemon stream are exclusive; enterMode already tore the stream down.
     root.setAttribute("data-mode", "wasm");
     canvas.hidden = true;
-    // Keep the snapshot visible while the app loads; the iframe mounts over it at opacity 0
-    // and only fades in on the app's first-frame signal — no blank/white flash.
+    // Keep the snapshot visible while the app loads; the iframe fades in on its first-frame signal.
     positionWasmFrame();
     wasmFrame.hidden = false;
     wasmReady = false;
@@ -2101,8 +1792,7 @@ function openWasm() {
     }, 20000);
 }
 function closeWasm() {
-    // No Wasm iframe (non-Wasm session) ⇒ nothing to tear down; enterMode() still calls this
-    // unconditionally when switching to Live/PNG, so guard against the null frame.
+    // No Wasm iframe means nothing to tear down; enterMode() calls this unconditionally.
     if (!wasmFrame) return;
     root.setAttribute("data-mode", "snapshot");
     wasmReady = false;
@@ -2121,25 +1811,15 @@ function wasmActive() {
     return !!(wasmToggle && wasmToggle.checked);
 }
 
-// ---- Design spec lane -------------------------------------------------------------------
-// The imported design reference (design-parity's Figma/PNG spec for this exact preview id),
-// shown on the same stage as the render so "what the code draws" and "what the design says"
-// occupy the same pixels and can be flipped between. Present only when the served catalog
-// published a reference — every other session finds no elements here and the lane is inert.
-//
-// Nothing is fetched from Figma: the src is this server's own `/reference/<id>.png`, carried on
-// the lane element by the server. It is assigned on first entry rather than at page load, so a
-// visitor who never opens the lane never pays for the bytes.
+// Design spec lane: the imported design reference for this preview, shown on the same stage as the
+// render so the two can be flipped between. Inert unless the catalog published a reference. The src
+// is the server's `/reference/<id>.png`, assigned on first entry so it costs nothing until opened.
 const specLane = may<HTMLElement>("cp-spec-lane");
 const specImg = may<HTMLImageElement>("cp-spec-img");
 const specToggle = may<HTMLInputElement>("cp-spec-toggle");
-// WHICH source the lane is comparing against. The four views are instruments over a pair of
-// images and do not care where the second one came from, so a second comparison is a second source
-// here rather than a mode of its own (issue #4621).
-//
-// The buttons are the source of truth, exactly as `motionOptions` is for the motion lane: a lane
-// with ONE source renders no picker at all and falls back to the carrier's own `data-spec-src`, so
-// there is one code path rather than a special case for the common catalog.
+// Which source the lane compares against; a second comparison is a second source, not a mode. The
+// buttons are the source of truth; a single-source lane renders no picker and falls back to the
+// carrier's `data-spec-src`.
 const specSourceGroup = may<HTMLElement>("cp-spec-sources");
 var specSourceButtons: HTMLButtonElement[] = specSourceGroup
     ? Array.prototype.slice.call(
@@ -2183,15 +1863,9 @@ function specSourceButton(id: string): HTMLButtonElement | null {
     return null;
 }
 /**
- * The source the PRIMARY chip stands for: the picker's first button, or null when there is no
- * picker at all.
- *
- * Not `KIT_SOURCE`. `ServeWeb` builds the peer chips as `specSources.drop(1)`, so the primary chip
- * is whatever `specSources.first()` happens to be — and on a catalog that declares a `compareWith`
- * pairing but publishes no design reference, that first source is `parallel`. Such a lane also
- * emits its picker despite holding a single source (the `size < 2` collapse is overridden by
- * `parallelOnly`), so `specPressedId()` there reports `parallel` rather than nothing. Testing for
- * the kit would leave that catalog's only comparison chip reading unpressed with its own lane open.
+ * The source the primary chip stands for: the picker's first button, or null with no picker. Not
+ * `KIT_SOURCE`: the primary chip is `specSources.first()`, which on a `compareWith`-only catalog is
+ * `parallel`.
  */
 function specPrimaryId(): string | null {
     if (specSourceButtons.length === 0) return null;
@@ -2206,19 +1880,13 @@ function specPrimaryOnStage(): boolean {
 function specSourceParam(): string {
     return sourceParam(specSourceList(), specPressedId());
 }
-// The compare strip under the render carries BOTH baselines per row (`data-cp-strip-source`) and
-// shows the one the section names — see `comparisonStripHtml`. The picker is the strip's source of
-// truth, so the strip follows every press the picker takes, whether or not the lane is on the
-// stage: a strip that flipped back to the kit the moment the lane closed would describe a
-// comparison the visitor had just stopped making, and one that ignored the picker described a
-// comparison they were not making at all.
+// The compare strip carries both baselines per row (`data-cp-strip-source`) and shows the one the
+// picker names, following every press whether or not the lane is open. See `comparisonStripHtml`.
 const specStrip = may<HTMLElement>("cp-compare-strip");
 
-// The strip compares images from different producers. A design/Remote Compose frame commonly has
-// the same 344×353 card inside a 454×400 transparent canvas while the Wear render is already
-// tightly cropped to 344×353. `object-fit: contain` fits those CANVASES and therefore displays
-// identical content at different scales. Measure and fit the visible pixels, just as the design
-// page's render swap does, so the row compares content at one scale without stretching either side.
+// Strip images come from different producers (e.g. a card in a transparent canvas vs a tightly
+// cropped render), so `object-fit: contain` would show them at different scales. Measure and fit
+// the visible ink instead, like the design page's render swap.
 const stripInk = new WeakMap<HTMLImageElement, InkBounds | null>();
 function fitStripImage(image: HTMLImageElement) {
     var shot = image.closest<HTMLElement>(".cp-strip-shot");
@@ -2251,10 +1919,8 @@ fitStripImages();
 if (specStrip && typeof ResizeObserver === "function")
     new ResizeObserver(fitStripImages).observe(specStrip);
 
-// One score per resting-bar source, for the preview already on the stage. This is deliberately NOT
-// the strip's seventeen rows: those would turn one viewer visit into 34 eager image decodes. The
-// two top-level answers cost only the two references plus the current render the page already has,
-// and `format-compare.js` is already present for the comparison lane.
+// One score per resting-bar source, for the preview on stage. Not per strip row, which would mean
+// dozens of eager decodes.
 var previewScoreGeneration = 0;
 var previewScoreKey = "";
 function comparisonChipFor(source: SpecSource): HTMLButtonElement | null {
@@ -2287,13 +1953,12 @@ function preScoreComparisonChips(atBaseline: boolean) {
         restorePreviewScoreChips();
         return;
     }
-    // The lane owns its own live readout and chip while open; a background result must never race
-    // it and repaint a resting verdict over the pair currently being inspected.
+    // While open, the lane owns its readout and chip; a background result must not repaint over it.
     if (specActive() || !img.complete || !img.naturalWidth) return;
     const api = compareApi();
-    // The candidate is already decoded on the stage. Re-loading its `/render` URL is not merely a
-    // redundant decode: no-store override renders can hit the daemon again and race the frame the
-    // visitor is actually looking at. Key by that frame's URL, but score the element itself.
+    // Score the already-decoded stage image rather than reloading its `/render` URL: a no-store
+    // override render could hit the daemon again and race the visible frame. Keyed by that frame's
+    // URL.
     const actual = img.currentSrc || img.src;
     const sources = specSourceList();
     if (!api || !actual || !sources.length) return;
@@ -2301,15 +1966,13 @@ function preScoreComparisonChips(atBaseline: boolean) {
     if (key === previewScoreKey) return;
     previewScoreKey = key;
     const generation = ++previewScoreGeneration;
-    // Share the already-decoded candidate across the sources. Calling `scoreImageUrls` for each
-    // chip would request the same render once per button, which is exactly the hidden cost this
-    // small surface is meant to avoid.
+    // Share the decoded candidate across sources rather than requesting the render once per chip.
     const actualImage = Promise.resolve(img);
     for (const source of sources) {
         const chip = comparisonChipFor(source);
         if (!chip) continue;
-        // A catalog-published kit score is already the cheaper, authoritative answer. The live
-        // work is for sources (and catalogs) that did not publish one.
+        // A catalog-published kit score is the cheaper, authoritative answer; live scoring is for
+        // sources without one.
         if (
             chip.hasAttribute("data-spec-match") &&
             !chip.hasAttribute("data-cp-preview-score")
@@ -2348,30 +2011,14 @@ function syncSpecStrip() {
     var active = activeSource(specSourceList(), specPressedId());
     if (!active) return;
     specStrip.setAttribute("data-cp-strip-source", active.id);
-    // The newly revealed baseline may have been `display:none` when its image decoded, which gives
-    // it no box to fit against. Refit after layout includes that column.
+    // The revealed baseline may have decoded while `display:none`; refit after layout.
     requestAnimationFrame(fitStripImages);
-    // …and the rows have to lead where the strip is pointing. Each one links to another variant of
-    // the same component, and `comparisonStripHtml` writes that destination with the credential
-    // query alone — so clicking the next variant off a strip showing the SIBLING's renders opened
-    // it on the kit. The reader is then comparing against a different reference from the one they
-    // were reading a moment ago, having asked for nothing but "the next variant".
+    // Point each row's link at the source the strip is showing, so clicking the next variant keeps
+    // the same reference. Done client-side because the pick is not known to the server.
     //
-    // Written here rather than server-side because the pick is not a fact the server has: the strip
-    // follows every press (`pickSpecSource` calls this), and the destinations follow with it.
-    //
-    // `active.id` and not `sourceParam()`. That helper answers what THIS page's address bar should
-    // say, and its rule — the first source is the default, so say nothing — is a fact about this
-    // page. A row leads to a different variant, which resolves `?specSource=` against its own
-    // picker: a variant offering only the sibling makes `parallel` its default, so the shorthand
-    // would write nothing, and a destination offering both would then open on the kit. The strip
-    // would be showing one reference and sending the reader to another, which is the bug this
-    // block exists to fix, one page along.
-    //
-    // Naming the source outright is safe in the other direction too. `sourceForParam` falls back to
-    // the destination's default for a source it does not offer, and a value that turns out to be
-    // that page's default is dropped by its first `syncUrl` — so a redundant parameter costs a
-    // moment in the address bar and never a wrong pairing.
+    // Uses `active.id`, not `sourceParam()`: that helper omits this page's default, but the
+    // destination resolves `?specSource=` against its own picker, whose default may differ. An
+    // unoffered or redundant value is safely dropped by the destination.
     const activeId = active.id;
     specStrip
         .querySelectorAll<HTMLAnchorElement>("a.cp-strip-name")
@@ -2389,15 +2036,11 @@ function specSrcRaw(): string {
 }
 var specSrc = specSrcRaw();
 var specLoaded = false; // the raster is requested once per source, on the lane's entry
-// …and the failure handler is bound once for the LIFE of the element, not once per request.
-// `specLoaded` is cleared on every source switch so the new source's raster is fetched, and
-// binding beside that fetch added a listener each time — after two switches a single failed load
-// reported the same error three times.
+// Bind the failure handler once for the element's life; binding per request (each source switch)
+// reported one failure several times.
 var specErrorBound = false;
-// Same treatment as the Wasm iframe's src (see wasmBaseSrc): the URL comes from a server-set
-// data- attribute, but it is resolved against our own origin and refused unless it stays on it,
-// so a `javascript:`/`data:` URL can never reach the stage even if the attribute were ever
-// mis-set — which is also what defuses the DOM-text-as-HTML rule for this assignment.
+// Same origin check as the Wasm iframe src (see wasmBaseSrc): never let a `javascript:` / `data:`
+// URL reach the stage.
 function specRasterSrc() {
     if (!specSrc) return "";
     var u;
@@ -2413,14 +2056,9 @@ function specAvailable() {
     return !!(specImg && specRasterSrc());
 }
 /**
- * The picked source, in the shape `<cp-spec-compare>` needs to put it on the stage.
- *
- * The raster goes through [specRasterSrc] rather than straight off the button, so the comparison
- * canvases are handed the same origin-checked URL the `<img>` is — one guard, one answer, and a
- * `data-spec-src` that somehow arrived off-origin cannot reach a canvas by the side door.
- *
- * A lane with no picker reports the kit: a catalog that declares no `compareWith` pairing has only
- * ever compared against its imported reference, and this must not tell the element otherwise.
+ * The picked source, in the shape `<cp-spec-compare>` needs. The raster goes through
+ * [specRasterSrc] so canvases get the same origin-checked URL as the `<img>`. A lane with no picker
+ * reports the kit.
  */
 /** Whether the panel beside the render is the imported spec rather than a sibling's render. */
 function specSourceIsSpec() {
@@ -2446,8 +2084,8 @@ function specActive() {
 function openSpec() {
     if (!specAvailable()) return;
     root.setAttribute("data-mode", "spec");
-    // The snapshot is taken out of flow (not merely hidden) exactly like the RC canvas lane, so
-    // the stage sizes to the spec raster instead of stacking two images.
+    // Out of flow (not merely hidden), like the RC canvas lane, so the stage sizes to the spec
+    // raster.
     img.style.display = "none";
     canvas.hidden = true;
     specImg!.hidden = false;
@@ -2463,10 +2101,8 @@ function openSpec() {
         // of an origin-checked URL.
         specImg!.src = specRasterSrc();
     }
-    // What this panel is, when it is not a specification. `openSpec` owns the status line and is the
-    // one path into the stage — including the source switch, which re-enters through here — so the
-    // note is stated at the end of entry rather than by the switch, which would have it cleared one
-    // line later.
+    // What this panel is when it is not a specification. Set at the end of `openSpec` (the one path
+    // into the stage, source switches included) so it is not cleared right after.
     if (status)
         status.textContent = sourceNote(
             activeSource(specSourceList(), specPressedId()),
@@ -2479,13 +2115,9 @@ function openSpec() {
         window.cpSpecCompare.open(specActualUrl(), specSourceState());
 }
 /**
- * Switch which source the lane compares against.
- *
- * Everything downstream is rebuilt rather than patched: the raster is re-requested (a new pair is a
- * new image, and `specLoaded` is what guards the ONE request per source), and the comparison is
- * re-opened so the normalisation pass runs again. Re-opening is what keeps diff/triptych/slider in
- * one pixel space — the two sources can differ in scale, and a cached normalisation from the old
- * pair would line the new one up against the wrong geometry.
+ * Switch which source the lane compares against. Everything is rebuilt rather than patched: the
+ * raster is re-requested and the comparison re-opened so normalisation runs again for the new pair,
+ * keeping diff/triptych/slider in one pixel space.
  */
 function pickSpecSource(button: HTMLButtonElement | null): boolean {
     if (!button) return false;
@@ -2508,13 +2140,11 @@ function pickSpecSource(button: HTMLButtonElement | null): boolean {
     if (!specImg) return true;
     specLoaded = false;
     if (root.getAttribute("data-mode") !== "spec") return true;
-    // Re-enter the lane on the new pair. `openSpec` owns the request and the compare handshake, so
-    // the switch has one path into the stage rather than a second copy of it.
+    // Re-enter the lane on the new pair via `openSpec`, the single path into the stage.
     specImg.hidden = false;
     openSpec();
-    // The stage's own hint reads off the source too — "not a render" is false of a paired
-    // catalog's render — and nothing else on this path reconciles it: a source switch is not a
-    // lane transition, so `enterMode` never runs.
+    // The stage hint depends on the source too, and a source switch is not a lane transition, so
+    // `enterMode` won't reconcile it.
     updateLiveToggle();
     return true;
 }
@@ -2527,32 +2157,24 @@ function closeSpec() {
     if (specSourceGroup) specSourceGroup.hidden = true;
     img.style.removeProperty("display");
     img.hidden = false;
-    // `<cp-spec-compare>` restores the kit chip's baked/plain label as it closes. Invalidate the
-    // resting score, but let refreshSnapshot's decoded frame refill it: fetching here would request
-    // the same no-store render twice and let the two daemon renders race each other.
+    // `<cp-spec-compare>` restores the kit chip's label on close. Invalidate the resting score but
+    // let refreshSnapshot's decoded frame refill it; fetching here would race two no-store renders.
     previewScoreGeneration++;
     previewScoreKey = "";
 }
-// One listener per button, bound once. The buttons are server-rendered and never replaced, so this
-// needs no delegation and no re-binding.
+// Bound once; the buttons are server-rendered and never replaced.
 specSourceButtons.forEach(function (button) {
     button.addEventListener("click", function () {
-        // A press is a discrete choice, and the one this page used to forget: `?specSource=` is
-        // what makes the pair on the stage (and the strip under it) survive a refresh, and pushing
-        // rather than replacing is what lets Back return to the source the visitor came from.
+        // A press is a discrete choice: persist `?specSource=` so the pair survives refresh, and
+        // push so Back returns to the previous source.
         if (!pickSpecSource(button)) return;
         urlPush = true;
         syncUrl();
     });
 });
-// ---- The Motion lane -------------------------------------------------------------------------
-// The recorded interaction for this preview, on the stage in place of the still.
-//
-// Two things set this lane apart from every other one here, and both point the same way: nothing
-// until asked. The capture is tens to hundreds of frames against one PNG, and an APNG/GIF starts
-// playing the moment it decodes — so assigning `src` IS starting playback. The src is therefore
-// written on the lane's FIRST ENTRY and never at page load, which is what makes "selectable, not
-// default" true of the bytes and not merely of the pixels.
+// Motion lane: the recorded interaction for this preview, in place of the still. A capture is far
+// heavier than a PNG and an APNG/GIF plays on decode, so the src is written on first entry, never
+// at page load.
 const motionImg = may<HTMLImageElement>("cp-motion-img");
 const motionChip = may<HTMLButtonElement>("cp-motion-chip");
 const motionToggle = may<HTMLInputElement>("cp-motion-toggle");
@@ -2563,8 +2185,7 @@ var motionOptions: HTMLOptionElement[] = motionSelect
     ? Array.prototype.slice.call(motionSelect.options)
     : [];
 var motionErrorBound = false;
-// The options are the lane's source of truth, so a preview with ONE capture still renders one
-// (its menu merely hidden) and this has a single code path rather than a special case.
+// The options are the lane's source of truth; a single capture still renders one (menu hidden).
 function motionPicked(): HTMLOptionElement | null {
     if (!motionSelect) return null;
     return (
@@ -2573,9 +2194,8 @@ function motionPicked(): HTMLOptionElement | null {
         null
     );
 }
-// The same origin check the spec raster and the Wasm frame get, for the same reason: the URL
-// arrives on a server-set data- attribute, so it is resolved against our own origin and refused
-// unless it stays on it — which is also what defuses the DOM-text-as-HTML rule for the write.
+// Same origin check as the spec raster and Wasm frame: the URL comes from a server-set data-
+// attribute.
 function motionSrcOf(option: HTMLElement | null) {
     var raw = option ? option.getAttribute("data-motion-src") || "" : "";
     if (!raw) return "";
@@ -2597,9 +2217,8 @@ function motionPickedId() {
     return option ? option.value : "";
 }
 /**
- * Select a named capture, if this preview published one. Used by URL hydration: a shared
- * `?mode=motion&motion=<id>` link has to open on the recording that was shared, and an id this
- * preview does not carry is ignored rather than blanking the lane.
+ * Select a named capture if this preview published one (URL hydration of
+ * `?mode=motion&motion=<id>`). Unknown ids are ignored rather than blanking the lane.
  */
 function pickMotion(id: string) {
     if (!id || !motionSelect) return false;
@@ -2610,30 +2229,16 @@ function pickMotion(id: string) {
     motionSelect.value = id;
     return true;
 }
-// The radio, not `data-mode` — exactly as specActive() and sourceActive() do, and for the same
-// reason: on a URL restore the radio is checked before the transition paints, so reading the
-// stage attribute here would report the lane inactive while the page was entering it.
+// The radio, not `data-mode` (like specActive()/sourceActive()): on URL restore the radio is
+// checked before the transition paints.
 function motionActive() {
     return !!(motionToggle && motionToggle.checked);
 }
-// ---- The Motion transport ---------------------------------------------------------------------
-// Play once, show where playback is, scrub to a frame, change speed.
-//
-// None of that is possible while the browser owns playback. An animated `<img>` plays what the file
-// says to play: our captures are written with an infinite loop count, so a recording that toggles a
-// switch on and then off runs on → off → on → off with no seam — the reader cannot tell a
-// transition from its own reverse, cannot stop on the frame they care about, and cannot slow a
-// 300ms spring down enough to see its overshoot.
-//
-// So the viewer decodes the capture itself, with `ImageDecoder` (WebCodecs), and paints frame N
-// onto a canvas on its own clock. `viewer/motionPlayback.ts` holds every decision about where the
-// playhead is and what the controls do to it — this is the part that talks to the decoder, the
-// canvas and the DOM.
-//
-// The `<img>` stays as the fallback for a browser without `ImageDecoder`, or a capture it declines
-// to decode: a looping capture with no transport beats no capture at all. Which path a page took is
-// visible rather than silent — the transport row only appears when the frames are genuinely
-// addressable.
+// Motion transport: play once, show position, scrub, change speed. An animated `<img>` loops
+// forever and can't be paused or slowed, so the viewer decodes the capture with `ImageDecoder`
+// (WebCodecs) and paints frames on its own clock. Decisions live in `viewer/motionPlayback.ts`;
+// this is the decoder / canvas / DOM glue. The `<img>` remains the fallback when `ImageDecoder` is
+// missing or declines the capture; the transport row only appears when frames are addressable.
 interface MotionVideoFrame {
     duration: number | null;
     displayWidth: number;
@@ -2675,19 +2280,15 @@ var motionPlayback: rules.PlaybackState = {
     playing: false,
     rate: rules.DEFAULT_RATE,
 };
-// Which capture the in-flight load is for. A reader who picks a second recording while the first is
-// still arriving must not have the first one paint over it when it lands, and the decoded bytes of
-// an abandoned load must not become the timeline of the one now on screen.
+// Which capture the in-flight load is for, so an abandoned load cannot paint over a newer pick.
 var motionLoadToken = 0;
 var motionRaf = 0;
 var motionLastTs = 0;
 var motionDrawnFrame = -1;
-// One decode in flight at a time. The clock ticks at the display's rate and a capture at 0.25× can
-// hold one frame across a dozen of those ticks; queueing a decode per tick would pile up work whose
-// result is stale before it resolves.
+// One decode in flight at a time; per-tick queueing would pile up stale work at slow speeds.
 var motionDecodeBusy = false;
-// The latest frame requested while a decode is in flight. Scrubbing stops the animation clock, so
-// dropping that request would otherwise leave the canvas on the old frame indefinitely.
+// The latest frame requested during an in-flight decode; scrubbing stops the clock, so dropping it
+// would leave the canvas stale.
 var motionPendingFrame = -1;
 var motionActiveSrc = "";
 function motionDecoderCtor(): MotionDecoderCtor | null {
@@ -2734,9 +2335,8 @@ function paintMotion() {
 function drawMotionFrame(index: number) {
     if (!motionDecoder || !motionCanvas) return;
     if (motionDecodeBusy) {
-        // Latest intent wins even when it returns to the frame still on the canvas. The in-flight
-        // decode will replace that canvas, so keeping an older pending frame would leave the
-        // picture out of step with the scrubber once both decodes complete.
+        // Latest intent wins even when it returns to the frame on the canvas, since the in-flight
+        // decode will replace that canvas.
         motionPendingFrame = index;
         return;
     }
@@ -2748,9 +2348,8 @@ function drawMotionFrame(index: number) {
         .decode({ frameIndex: index, completeFramesOnly: true })
         .then(function (result) {
             motionDecodeBusy = false;
-            // The load this decode belongs to may have been abandoned while it was in flight —
-            // another capture picked, or the lane left. Painting it now would put one recording's
-            // frames on another's timeline.
+            // The load may have been abandoned mid-decode (another pick, or lane left); don't paint
+            // it.
             if (token !== motionLoadToken || decoder !== motionDecoder) {
                 result.image.close();
                 return;
@@ -2764,8 +2363,7 @@ function drawMotionFrame(index: number) {
                     0,
                 );
             }
-            // Closing is not optional: a `VideoFrame` holds a decoded surface until it is released,
-            // and a capture is hundreds of them.
+            // Must close: a `VideoFrame` holds a decoded surface until released.
             result.image.close();
             motionDrawnFrame = index;
             var pending = motionPendingFrame;
@@ -2776,9 +2374,8 @@ function drawMotionFrame(index: number) {
         .catch(function () {
             motionDecodeBusy = false;
             if (token !== motionLoadToken || decoder !== motionDecoder) return;
-            // Frame zero proved the capture loadable, but a damaged or unsupported later frame is
-            // still a decoder failure. Hand the same capture back to the browser's image decoder
-            // instead of leaving a stale canvas under a readout for a frame that never painted.
+            // A later frame failed to decode; hand the capture back to the browser's image decoder
+            // rather than leaving a stale canvas.
             motionFallbackToImage(motionActiveSrc);
         });
 }
@@ -2798,13 +2395,11 @@ function syncMotionTransport() {
     var frame = rules.frameAt(motionTimeline, motionPlayback.positionMs);
     if (motionScrub) {
         motionScrub.max = String(Math.max(0, motionTimeline.frameCount - 1));
-        // Only when it differs: writing `value` while the reader is dragging the thumb fights them
-        // for it, and the clock is paused during a scrub anyway.
+        // Only when it differs: writing `value` mid-drag fights the user.
         if (motionScrub.value !== String(frame))
             motionScrub.value = String(frame);
         motionScrub.setAttribute("aria-valuetext", motionReadout());
-        // The filled part of the track. A CSS variable rather than a second element, so the fill
-        // and the thumb cannot disagree about where playback is.
+        // The filled part of the track, as a CSS variable so fill and thumb cannot disagree.
         motionScrub.style.setProperty(
             "--cp-motion-progress",
             `${Math.round(rules.progress(motionTimeline, motionPlayback.positionMs) * 100)}%`,
@@ -2825,11 +2420,8 @@ function motionFallbackToImage(src: string) {
     if (motionImg.getAttribute("src") !== src) motionImg.src = src;
 }
 /**
- * Fetch and decode the picked capture, then play it once.
- *
- * The bytes are requested here and nowhere else — entering the lane is still what costs the
- * network, exactly as it was when this assigned an `<img>` src. What changed is that the response
- * goes to a decoder we drive rather than to an element that plays it at us.
+ * Fetch and decode the picked capture, then play it once. Entering the lane is still what costs the
+ * network.
  */
 function loadMotion(src: string) {
     var token = ++motionLoadToken;
@@ -2857,9 +2449,8 @@ function loadMotion(src: string) {
                 type: body.type,
                 preferAnimation: true,
             });
-            // `completed`, not just `tracks.ready`: the frame count of a track is only final once
-            // the whole buffer has been read, and a timeline built from a partial count would put
-            // the end of the capture in the middle of the bar.
+            // Wait for `completed`, not just `tracks.ready`: the frame count is only final once the
+            // buffer is fully read.
             return Promise.all([decoder.tracks.ready, decoder.completed]).then(
                 function () {
                     return decoder
@@ -2882,11 +2473,9 @@ function loadMotion(src: string) {
             }
             var track = loaded.decoder.tracks.selectedTrack;
             var frameCount = Math.max(1, (track && track.frameCount) || 1);
-            // Microseconds on the frame, milliseconds on the timeline. A capture published by this
-            // project holds every frame for the same interval (both encoders write one delay onto
-            // all of them), so frame 0's duration is the whole cadence; a decoder that reports
-            // none — or a still typed as an animation — falls back to 60fps rather than to a
-            // timeline of length zero, which would divide by nothing on the very first tick.
+            // Microseconds on the frame, milliseconds on the timeline. This project's encoders use
+            // one delay for every frame, so frame 0's duration is the cadence; with none reported
+            // fall back to 60fps rather than a zero-length timeline.
             var durationMs = loaded.first.duration
                 ? loaded.first.duration / 1000
                 : 16;
@@ -2899,9 +2488,8 @@ function loadMotion(src: string) {
                 frameDurationMs: Math.max(1, durationMs),
             };
             motionDrawnFrame = -1;
-            // A single-frame capture is a still with a transport bolted on. Play it, show it, and
-            // keep the controls: the reader learns it is one frame from the readout rather than
-            // from a control row that silently differs from every other capture's.
+            // A single-frame capture still gets the transport, so it behaves like every other
+            // capture.
             motionPlayback = {
                 positionMs: 0,
                 playing: !motionPrefersStill() && frameCount > 1,
@@ -2916,9 +2504,8 @@ function loadMotion(src: string) {
         })
         .catch(function () {
             if (token !== motionLoadToken) return;
-            // Decoding is the better path, not the only one. A browser without `ImageDecoder`, a
-            // format it declines, or a capture that 404s all land here; the first two still have a
-            // capture to show, and the third raises the lane's existing error through the `<img>`.
+            // No `ImageDecoder`, an unsupported format, or a 404 lands here; the `<img>` shows the
+            // first two and raises the lane's error for the third.
             motionFallbackToImage(src);
         });
 }
@@ -2937,21 +2524,12 @@ function playMotion() {
     var option = motionPicked();
     var src = motionSrcOf(option);
     if (!src) return;
-    // One capture failing must not condemn the rest. The error overlay is shared across lanes and
-    // is raised by this lane's own `error` handler, so without this a picker click away from a
-    // missing artifact would load the replacement successfully and leave the previous failure's
-    // message sitting over it. Cleared on the way IN, so the message survives until something is
-    // actually done about it.
+    // Clear a previous capture's error on the way in, so a successful pick doesn't sit under a
+    // stale message.
     clearModeError();
-    // The detail: what the annotation actually said about this recording, printed once it is the
-    // one on the stage. The menu carries only the caption's opening clause, so this is where the
-    // rest of it lands — and it is per-pick rather than all at once, which is the whole trade the
-    // menu buys (N captions across the bar became one, beside the frames they describe).
-    //
-    // The server omits `data-motion-detail` when the caption is already the whole title, so a
-    // short caption prints once, not twice beside its own menu entry. With the menu hidden — the
-    // single-capture case — the title is on nothing else on the row, so the readout stands in for
-    // it rather than leaving the frames unnamed.
+    // The full caption for this recording, shown once it is on stage; the menu carries only the
+    // opening clause. The server omits `data-motion-detail` when the caption is the whole title.
+    // With the menu hidden (single capture) the readout names the frames.
     if (motionCaption) {
         var detail = option
             ? option.getAttribute("data-motion-detail") || ""
@@ -2959,17 +2537,13 @@ function playMotion() {
         motionCaption.textContent =
             detail || (motionOptions.length > 1 || !option ? "" : option.text);
     }
-    // Every entry, and every pick, starts the capture from the top. `loadMotion` re-fetches rather
-    // than resuming, which is what "play it again" has to mean when the reader has just chosen a
-    // different recording — and re-entering the lane on the same one is a request to watch it, not
-    // to be handed the last frame they left it on.
+    // Every entry and pick starts the capture from the top.
     loadMotion(src);
 }
 function openMotion() {
     if (!motionAvailable()) return;
     root.setAttribute("data-mode", "motion");
-    // Out of flow rather than merely hidden, like the spec and Source lanes: the stage sizes to the
-    // capture instead of reserving the still's box underneath it.
+    // Out of flow, like the spec and Source lanes, so the stage sizes to the capture.
     img.style.display = "none";
     canvas.hidden = true;
     if (motionLane) motionLane.hidden = false;
@@ -2984,33 +2558,25 @@ function openMotion() {
 }
 function closeMotion() {
     if (!motionImg) return;
-    // `data-mode`, not motionActive(): by the time a transition calls this, the radio for the lane
-    // being ENTERED is already checked, so the flag would say we are not on Motion and the stage
-    // would keep its attribute. The same split the spec and Source lanes make.
+    // `data-mode`, not motionActive(): during a transition the entered lane's radio is already
+    // checked.
     if (root.getAttribute("data-mode") === "motion")
         root.setAttribute("data-mode", "snapshot");
     motionImg.hidden = true;
     if (motionLane) motionLane.hidden = true;
     if (motionPlayerBox) motionPlayerBox.hidden = true;
     if (motionTransport) motionTransport.hidden = true;
-    // Both halves of "stop": the clock and the decoder for the canvas path, the `src` for the
-    // fallback. Left as they were, a hidden capture would keep playing for the rest of the visit —
-    // invisible, and still decoding — which is exactly what the `<img>` did before it was dropped.
-    // The in-flight load is abandoned too: bumping the token is what stops a fetch that is already
-    // out from painting into a lane nobody is looking at.
+    // Stop both the canvas path (clock and decoder) and the `<img>` fallback, and bump the token so
+    // an in-flight fetch cannot paint into a hidden lane.
     motionLoadToken++;
     releaseMotionDecoder();
     motionImg.removeAttribute("src");
     img.style.removeProperty("display");
     img.hidden = false;
 }
-// ---- The Source lane -------------------------------------------------------------------------
-// The usage code behind this card, on the stage in place of the render.
-//
-// Not a renderer, so not an option in the renderer combo — a chip of its own, exactly like the
-// design-spec chip beside it and for the same reason. The snippet is fetched from `/usage/<id>`
-// on FIRST ENTRY, never at page load: deriving it costs the server a GitHub read on a cold cache,
-// and most visitors to a preview never open this.
+// Source lane: the usage code behind this card, in place of the render. A chip of its own (like the
+// spec chip), not a renderer option. The snippet is fetched from `/usage/<id>` on first entry only,
+// since deriving it can cost the server a GitHub read.
 const sourceChip = may<HTMLButtonElement>("cp-source-chip");
 const sourcePanel = may<HTMLElement>("cp-source-panel");
 const sourceToggle = may<HTMLInputElement>("cp-source-toggle");
@@ -3022,21 +2588,16 @@ var pendingSourceData: UsageSnippet | null | undefined;
 function sourceAvailable() {
     return !!(sourceChip && sourcePanel && usageSrc());
 }
-// The SIDE lane: a samples catalog's page, where the code stands beside the render rather than
-// behind a chip that swaps it out. Server-set, from the catalog's own declared role — see
-// `ServeWeb.PageRole`. It changes three things about the lane below and nothing else: the panel
-// opens at load, the render stays on the stage beside it, and closing is a no-op.
+// The side lane (a samples catalog page, server-set from `ServeWeb.PageRole`): the panel opens at
+// load, the render stays on stage beside it, and closing is a no-op.
 function sideSourceLane() {
     return root.getAttribute("data-source-lane") === "side";
 }
-// The radio, not `data-mode` — exactly as specActive() does. On a URL restore the radio is
-// checked before the transition paints, so reading the stage attribute here would report the
-// lane as inactive while the page was in the middle of entering it.
+// The radio, not `data-mode`, as in specActive(): on URL restore the radio is checked first.
 function sourceActive() {
     return !!(sourceToggle && sourceToggle.checked);
 }
-// Same origin check the spec raster and the Wasm frame get: the URL arrives on a server-set
-// data- attribute, and is refused unless it resolves onto our own origin.
+// Same origin check as the spec raster and the Wasm frame.
 function usageSrc() {
     var raw = sourceChip ? sourceChip.getAttribute("data-usage-src") || "" : "";
     if (!raw) return "";
@@ -3051,13 +2612,10 @@ function usageSrc() {
 }
 function openSource() {
     if (!sourceAvailable()) return;
-    // On the side lane the render is not being replaced, so neither the mode nor the image moves:
-    // `data-mode` still says which lane the STAGE is in (snapshot, live, motion…), and claiming
-    // "source" here would take the snapshot off a page whose whole point is the pair.
+    // On the side lane the render is not replaced, so `data-mode` keeps naming the stage's lane.
     if (!sideSourceLane()) {
         root.setAttribute("data-mode", "source");
-        // Out of flow rather than merely hidden, like the spec lane: the stage sizes to the panel
-        // instead of reserving the render's box underneath it.
+        // Out of flow, like the spec lane, so the stage sizes to the panel.
         img.style.display = "none";
         canvas.hidden = true;
     }
@@ -3076,16 +2634,14 @@ function openSource() {
                 return r.ok ? r.json() : Promise.reject(r.status);
             })
             .then(function (data: UsageSnippet | null) {
-                // Do not initialise CodeMirror in a display:none panel: it caches fallback
-                // dimensions and reopens with a broken gutter. Keep the payload until Source is
-                // visible again, then paint and measure it in-flow.
+                // Don't initialise CodeMirror in a display:none panel (it caches bad dimensions);
+                // defer until visible.
                 if (sourcePanel!.hidden) pendingSourceData = data;
                 else renderSource(data);
             })
             .catch(function () {
-                // A cleaner that declined, or a catalog whose source moved, answers 404 — which is a
-                // real answer and not an error to shout about. The `source` link in the provenance row
-                // still reaches the preview's own Kotlin, so say that rather than leaving a blank panel.
+                // A 404 (cleaner declined, or source moved) is a real answer; point at the
+                // provenance row's `source` link instead of leaving a blank panel.
                 sourceLoaded = false;
                 renderSourceMessage(
                     "The usage source for this preview could not be derived. The \u201csource\u201d link " +
@@ -3096,12 +2652,10 @@ function openSource() {
 }
 function closeSource() {
     if (!sourcePanel) return;
-    // Nothing to close on the side lane — the panel is part of the page there, not a lane someone
-    // entered. Returning early also keeps a mode transition from hiding it on the way past.
+    // On the side lane the panel is part of the page, so there is nothing to close.
     if (sideSourceLane()) return;
-    // `data-mode`, not sourceActive(): by the time a transition calls this the radio for the lane
-    // being entered is already checked, so the flag would say we are not on Source and the stage
-    // would keep its attribute. Same split the spec lane makes for the same reason.
+    // `data-mode`, not sourceActive(): during a transition the entered lane's radio is already
+    // checked.
     if (root.getAttribute("data-mode") === "source")
         root.setAttribute("data-mode", "snapshot");
     sourcePanel.hidden = true;
@@ -3128,18 +2682,14 @@ function codeMirrorStylesReady() {
     return !!(link && link.sheet);
 }
 /**
- * Paints the fetched snippet.
- *
- * Every node here is created and filled through `textContent`, never through innerHTML: the
- * payload is Kotlin source read from a catalog's repository, so it is exactly the kind of content
- * that must never be parsed as markup.
+ * Paints the fetched snippet. Every node is filled through `textContent`, never innerHTML: the
+ * payload is repository source.
  */
 function renderSource(data: UsageSnippet | null) {
     if (!sourcePanel) return;
     sourcePanel.textContent = "";
-    // Says what this is, and — when the catalog has not declared what its own helpers mean — is
-    // honest that what follows still carries them. The playground's seed note makes the same
-    // distinction; the two must not disagree about the same snippet.
+    // Says what this is and, when the catalog has not declared its helpers, that they remain in the
+    // snippet. Must agree with the playground's seed note.
     var note = document.createElement("p");
     note.className = "cp-source-note";
     if (data && data.scaffoldsDeclared === false) {
@@ -3164,10 +2714,9 @@ function renderSource(data: UsageSnippet | null) {
     code.textContent = sourceText;
     pre.appendChild(code);
     sourcePanel.appendChild(pre);
-    // Upgrade the already-readable <pre> only after CodeMirror has successfully initialised. The
-    // asset is optional by design: a blocked/failed script costs line numbers and Kotlin colours,
-    // never the source itself. The read-only instance uses the exact `text/x-kotlin` clike grammar
-    // the playground editor does, so the two surfaces colour the same code the same way.
+    // Upgrade the readable <pre> only once CodeMirror initialises; the asset is optional (a failed
+    // load costs only line numbers and colours). Uses the same `text/x-kotlin` grammar as the
+    // playground.
     var selectionTarget: HTMLElement = code;
     if (window.CodeMirror && codeMirrorStylesReady()) {
         var mirrorHost = document.createElement("div");
@@ -3202,16 +2751,14 @@ function renderSource(data: UsageSnippet | null) {
                 copy.textContent = "Copy";
             }, 1500);
         };
-        // The Clipboard API needs a secure context, which a serve host reached over plain HTTP on a
-        // LAN address is not. The fallback SELECTS the code rather than only telling the visitor to
-        // press a shortcut: an instruction to press ⌘C with nothing selected copies whatever else
-        // happened to be, and names the wrong key on every non-Mac platform besides.
+        // The Clipboard API needs a secure context (a LAN host over HTTP is not one). The fallback
+        // selects the code rather than telling the visitor to press a shortcut with nothing
+        // selected.
         var fallback = function () {
             try {
                 var range = document.createRange();
-                // CodeMirror tokenises into spans; selecting its code body preserves the source's
-                // visible line breaks without including the line-number gutter. The plain <code>
-                // is the same target when the optional highlighter did not load.
+                // Select CodeMirror's code body (keeps line breaks, excludes the gutter), or the
+                // plain <code>.
                 var visibleCode =
                     selectionTarget.querySelector<HTMLElement>(
                         ".CodeMirror-code",
@@ -3220,9 +2767,7 @@ function renderSource(data: UsageSnippet | null) {
                 var sel = window.getSelection();
                 sel!.removeAllRanges();
                 sel!.addRange(range);
-                // Deprecated, and still the only synchronous copy an insecure context has. When it
-                // works the visitor needs no shortcut at all; when it does not, the text is at least
-                // selected and ready for one.
+                // Deprecated, but the only synchronous copy in an insecure context.
                 if (document.execCommand && document.execCommand("copy")) {
                     sel!.removeAllRanges();
                     done();
@@ -3245,8 +2790,7 @@ function renderSource(data: UsageSnippet | null) {
         }
     });
     actions.appendChild(copy);
-    // Onward to the editor, but only where this host can actually compile the catalog — the
-    // server decides that and sends a href or nothing, so the panel never offers a dead run.
+    // Link to the editor only when the server sent a href (it can compile the catalog).
     if (data && data.playgroundHref) {
         var run = document.createElement("a");
         run.className = "cp-format-link";
@@ -3266,15 +2810,9 @@ function renderSource(data: UsageSnippet | null) {
     renderApiDocs(data);
 }
 /**
- * The **API reference** list under the snippet: every platform symbol the code above uses, linked
- * to its KDoc page on `developer.android.com` (issue #4331).
- *
- * It lives here rather than in a lane of its own because the reference pages cannot be shown in
- * one: `developer.android.com` refuses to be framed, so a tab could only ever hold links \u2014 and
- * links belong beside the code that names them, where the reader has just met the symbol.
- *
- * The server sends only the pages it resolved and nothing else, so an empty (or absent, on an
- * older server) list renders no heading at all rather than an empty section.
+ * The API reference list under the snippet: each platform symbol used, linked to its KDoc on
+ * `developer.android.com`. Links rather than a lane because that site refuses framing. An empty or
+ * absent list renders no heading.
  */
 function renderApiDocs(data: UsageSnippet | null) {
     if (!sourcePanel) return;
@@ -3305,31 +2843,16 @@ function renderApiDocs(data: UsageSnippet | null) {
     sourcePanel.appendChild(section);
 }
 /**
- * The render the spec is compared against: the exact bytes that were on the stage when we can
- * name them, and a fresh `/render` URL when we cannot.
+ * The render the spec is compared against: the stage's blob when it is that frame, else a fresh
+ * `/render` URL.
  *
- * Reusing the blob costs no second render — an override-bearing render is `no-store`, so
- * re-fetching the same URL renders again and can race the daemon's shared override state (see
- * refreshSnapshot) — and it guarantees the comparison is against the pixels the visitor was
- * actually looking at rather than a re-run that might land differently.
- *
- * But the blob is only THAT frame when the visitor arrived from the static raster lane. Two cases
- * where it is a stale bystander instead, and both must fall back to asking the server:
- *
- *  - **An interactive lane.** Live, Wasm and the Remote Compose players paint into a canvas or an
- *    iframe while `#cp-img` still holds the snapshot fetched at page load. Worse, those lanes
- *    apply overrides in place (the daemon takes `setOverrides` over the socket; the Wasm app
- *    applies them in the browser) without ever re-pointing `/render` — so a theme or locale
- *    changed in Live mode leaves the blob describing the state BEFORE that change. Comparing it
- *    would score a frame the visitor never saw. `enterMode` records the outgoing lane before
- *    tearing it down, which is the only moment that fact is still knowable.
- *  - **The SVG toggle.** The blob then holds a vector document whose intrinsic size a `<canvas>`
- *    may not be able to resolve. `data-cp-src` names the `/render` URL that produced the blob, so
- *    its extension is the direct evidence of what those bytes are.
- *
- * The fallback is the PNG of the *current* controls, which is what the server would draw for the
- * state the visitor is in — and if it cannot honour those overrides it refuses, and the
- * comparison honestly reports itself unavailable rather than scoring the wrong frame.
+ * Reusing the blob avoids a second no-store render racing the daemon, and compares exactly what the
+ * visitor saw. It is stale in two cases:
+ * - An interactive lane (Live, Wasm, RC players) applies overrides in place without re-pointing
+ *   `/render`, so `#cp-img` still holds the old snapshot. `enterMode` records the outgoing lane.
+ * - The SVG toggle: the blob is a vector document a `<canvas>` may not size; `data-cp-src`'s
+ *   extension tells. The fallback is the PNG for the current controls; if the server can't honour
+ *   them it refuses and the comparison reports itself unavailable.
  */
 function specActualUrl() {
     var blob = img.getAttribute("data-cp-blob");
@@ -3339,11 +2862,9 @@ function specActualUrl() {
     return renderUrl(".png");
 }
 
-// ---- In-browser Remote Compose canvas lane ----------------------------------------------
-// When this preview carries a captured `.rc` document, the "RC (browser)" toggle paints it with
-// the vendored player (RC.RcdPlayer) into #cp-rc-canvas — no daemon — and Remote Compose knob
-// edits apply live via setNamed*Override + repaint (onRcKnobChanged) instead of a /render
-// round-trip. Opt-in like Live / Wasm, so the default PNG snapshot is untouched.
+// In-browser Remote Compose canvas lane: paints a captured `.rc` document with the vendored player
+// (RC.RcdPlayer) into #cp-rc-canvas with no daemon; RC knob edits apply via setNamed*Override +
+// repaint. Opt-in like Live / Wasm.
 const rcCanvasEl = may<HTMLCanvasElement>("cp-rc-canvas");
 const rcToggle = may<HTMLInputElement>("cp-rc-toggle");
 const rcWasmFrame = may<HTMLIFrameElement>("cp-rc-wasm");
@@ -3365,8 +2886,8 @@ function rcActive() {
 function rcWasmActive() {
     return !!(rcWasmToggle && rcWasmToggle.checked);
 }
-// Lazy-load the shared player bundle once (a constant, session-independent path); queue callers
-// while it loads so a fast re-open can't inject the script twice.
+// Lazy-load the shared player bundle once; queue callers while it loads so it is never injected
+// twice.
 function ensureRcScript(cb: (ok: boolean) => void) {
     if (rcScriptState === 2 || window.RC) {
         rcScriptState = 2;
@@ -3396,8 +2917,8 @@ function ensureRcScript(cb: (ok: boolean) => void) {
     };
     document.head.appendChild(s);
 }
-// The `.rc` document URL — the same `base` + token/session as the snapshot, but no override qs
-// (the lane serves the document verbatim; knob edits apply client-side).
+// The `.rc` document URL: same `base` + token/session as the snapshot, no override query (knobs
+// apply client-side).
 function rcDocUrl() {
     var parts: string[] = [];
     if (token) parts.push("token=" + encodeURIComponent(token));
@@ -3420,9 +2941,8 @@ function parseRcColor(v: string) {
     var n = parseInt(h, 16);
     return isNaN(n) ? null : n >>> 0;
 }
-// Push every Remote Compose knob's current value onto the player's context, then repaint. Names
-// are USER:-domain-qualified (the connector registers author knobs under USER:), matching the
-// document's named variables; kinds mirror query()'s rc.<name>=<kind>:<value> typing.
+// Push every RC knob's value onto the player context, then repaint. Names are USER:-qualified to
+// match the document's named variables; kinds mirror query()'s rc.<name>=<kind>:<value>.
 function applyRcOverrides() {
     const ctx = rcCtx;
     if (!ctx) return;
@@ -3446,9 +2966,8 @@ function applyRcOverrides() {
                 if (!isNaN(n) && ctx.setNamedIntegerOverride)
                     ctx.setNamedIntegerOverride(qn, n);
             } else if (kind === "bool" || kind === "boolean") {
-                // The player's setNamedBooleanOverride only records the value — it doesn't touch the
-                // render state — so route booleans through the integer setter as 1/0, matching the
-                // daemon's BooleanValue → user-local-integer mapping.
+                // The player's setNamedBooleanOverride only records the value, so route booleans
+                // through the integer setter as 1/0, matching the daemon's mapping.
                 if (ctx.setNamedIntegerOverride) {
                     ctx.setNamedIntegerOverride(qn, val === "true" ? 1 : 0);
                 }
@@ -3473,11 +2992,9 @@ function openRc() {
             return;
         }
         if (!rcActive()) return; // toggled away while the script loaded
-        // The page registers the vendored faces the player's generic-family stacks name
-        // (`/rc-fonts/fonts.css`), but `@font-face` is lazy and canvas neither triggers a load nor
-        // repaints when one finishes — so an unawaited first paint draws this document in the
-        // *viewer's* own `sans-serif`, at different metrics, with no Medium weight. Load the faces
-        // alongside the fetch: they're jar-local and cached, so this costs a frame at most.
+        // `@font-face` is lazy and canvas neither triggers a load nor repaints when one finishes,
+        // so await the vendored faces (`/rc-fonts/fonts.css`) alongside the fetch; otherwise the
+        // first paint uses the viewer's own sans-serif.
         var rcFonts = window.cpRcFonts
             ? window.cpRcFonts.ready()
             : Promise.resolve();
@@ -3491,11 +3008,9 @@ function openRc() {
             .then(function (settled) {
                 var buf = settled[1];
                 if (!rcActive()) return null;
-                // Size the canvas to the preview's real pixel dimensions BEFORE loading: the player
-                // derives the document viewport from the canvas's current size at load time, and a
-                // resize afterwards can't recover it. The baked snapshot <img> carries those
-                // dimensions (rendered at the same density), so a non-default-shaped preview fills
-                // the canvas instead of being letterboxed into the 300×150 default.
+                // Size the canvas to the preview's real pixel dimensions before loading: the player
+                // derives the document viewport from the canvas size at load time. The baked
+                // snapshot carries those dimensions.
                 var w = img.naturalWidth || 0,
                     h = img.naturalHeight || 0;
                 if (w > 0 && h > 0) {
@@ -3519,8 +3034,8 @@ function openRc() {
             });
     });
 }
-// Swap the stage from the snapshot to the painted canvas. The snapshot is removed from flow
-// (display:none) so the stage takes the document's own size rather than stacking both.
+// Swap the stage to the painted canvas; the snapshot goes display:none so the stage takes the
+// document's size.
 function revealRc() {
     if (!rcActive() || rcReady) return;
     rcReady = true;
@@ -3538,9 +3053,8 @@ function closeRc() {
     img.hidden = false;
 }
 
-// AndroidX-conformant Compose Multiplatform/Wasm RC lane. This is an isolated app rather than
-// another implementation hidden behind the legacy canvas API: it receives the document URL and
-// explicitly announces its first rendered frame.
+// AndroidX-conformant CMP/Wasm RC lane: an isolated app that receives the document URL and
+// announces its first rendered frame.
 function positionRcWasmFrame() {
     if (rcWasmFrame) positionOverlay(rcWasmFrame);
 }
@@ -3632,8 +3146,8 @@ if (rcWasmFrame) {
             (e.data.type === "cp-rc-host-action" ||
                 e.data.type === "cp-rc-host-named-action")
         ) {
-            // The viewer never executes an action payload. It exposes the validated event to an
-            // embedding host and leaves policy/navigation to that host.
+            // The viewer never executes an action payload; it exposes the validated event to an
+            // embedding host.
             window.dispatchEvent(
                 new CustomEvent(e.data.type, { detail: e.data }),
             );
@@ -3651,15 +3165,14 @@ function onControlsChanged() {
     // Keep the copyable direct links current no matter which transport handles the change.
     refreshLinks();
     if (rcWasmActive()) {
-        // Remote Compose currently consumes only Day/Night at this boundary. The control is the
-        // only wasm-honoured field enabled in this lane, so reload the isolated player with the
-        // new theme query while retaining the same tokened document URL.
+        // Remote Compose only consumes Day/Night here, so reload the isolated player with the new
+        // theme query and the same tokened document URL.
         openRcWasm();
         return;
     }
     if (wasmActive()) {
-        // Recompose in place once the app is up; before it's ready, re-point the initial src (the
-        // fragment carries the overrides) — the load handler re-syncs the final state either way.
+        // Recompose in place once the app is up; before that, re-point the initial src (the
+        // fragment carries the overrides).
         if (wasmReady && wasmFrame!.contentWindow) {
             wasmFrame!.contentWindow.postMessage(wasmOverridePatch(), "*");
         } else {
@@ -3676,19 +3189,15 @@ function onControlsChanged() {
         );
         return;
     }
-    // Not in an interactive lane. Whenever the server can produce a fresh overridden render — a
-    // live daemon session (!staticSnapshot) OR a published catalog whose carried daemon
-    // re-renders on demand (canRenderOverrides) — just re-point /render. This is what lets Size,
-    // Locale, Device, … take effect for a CMP catalog while still showing static snapshots, so
-    // the controls aren't dead until a live stream is opened.
+    // Not in an interactive lane. Whenever the server can produce a fresh overridden render (a live
+    // daemon session, or a catalog whose carried daemon re-renders on demand), re-point /render.
     if (!staticSnapshot || canRenderOverrides) {
         refreshSnapshot();
         return;
     }
-    // Pure static published catalog whose only interactive lane is the in-browser app: the
-    // wasm-honoured controls (day/night, font scale, locale) can only apply in the browser, so
-    // auto-enable the Wasm tier and let it apply the change, instead of a dead /render the
-    // catalog can't serve. (Size/Device stay disabled here — the Wasm app can't honour them.)
+    // A purely static catalog whose only interactive lane is the in-browser app: the wasm-honoured
+    // controls can only apply there, so auto-enable Wasm instead of a /render the catalog can't
+    // serve.
     if (wasmToggle) {
         setMode("wasm");
         return;
@@ -3696,27 +3205,20 @@ function onControlsChanged() {
     refreshSnapshot();
 }
 
-// The single Static⇄Live toggle drives these transports. "live" opens the daemon stream,
-// "wasm" mounts the in-browser app, "png" (the default) is the static snapshot. closeStream /
-// closeWasm are idempotent, so a switch safely tears down both regardless of the prior state.
-// The static lane additionally honours the SVG format toggle: the same <img>, pointed at the
-// vector `/render/<id>.svg` instead of the raster `.png`. A live lane (stream / wasm) is raster
-// frames, so entering it clears SVG.
+// The Static/Live toggle drives these transports: "live" (daemon stream), "wasm" (in-browser app),
+// "png" (static snapshot, default). closeStream / closeWasm are idempotent. The static lane also
+// honours the SVG toggle (same <img>, `.svg`); entering a live lane clears SVG.
 const svgToggle = may<HTMLButtonElement>("cp-svg-toggle");
 function svgOn() {
     return !!(svgToggle && svgToggle.getAttribute("aria-pressed") === "true");
 }
-// Leaving the static lane drops BOTH vector affordances together: a live stream / Wasm app /
-// Remote Compose canvas produces raster frames, and an exploded view of a frame that no longer
-// exists is a pressed chip describing nothing. Kept as one call so a future lane can't clear the
-// SVG chip and forget this one.
+// Leaving the static lane drops both vector affordances (SVG and exploded) together; live lanes
+// produce raster frames.
 function dropVectorModes() {
     if (svgToggle) svgToggle.setAttribute("aria-pressed", "false");
     clearExploded();
 }
-// Un-press the 3D chip and re-sync its controls. Shared by every path that leaves the vector
-// lane — the interactive lanes above, and the SVG chip being switched off — so a future lane
-// can't drop one and forget the other.
+// Un-press the 3D chip and re-sync its controls; shared by every path out of the vector lane.
 function clearExploded() {
     if (!explodeToggle || !explodeOn()) return;
     explodeToggle.setAttribute("aria-pressed", "false");
@@ -3724,33 +3226,25 @@ function clearExploded() {
     syncExplodeControls();
     explodeEnabledSvg = false;
 }
-// The stage lane the current transition is leaving, latched by enterMode before it tears that
-// lane down. Read by specActualUrl, which cannot otherwise tell whether the snapshot <img> holds
-// the frame the visitor was looking at. Starts on the snapshot, which is what the page opens on.
+// The lane the current transition is leaving, latched by enterMode before teardown. Read by
+// specActualUrl to know whether the snapshot <img> holds what the visitor saw.
 var outgoingStage = "snapshot";
 function enterMode(m: string) {
     if (m !== root.getAttribute("data-mode")) {
         trackInteraction("renderer_changed", { mode: m });
     }
-    // A lane switch is a discrete choice, so the URL sync it ends up triggering pushes a history
-    // entry rather than replacing one — Back returns to the lane the visitor came from. Set here
-    // rather than on each control because every transition (radio, Live/Wasm/RC toggle, or an
-    // auto-enable) passes through this function.
+    // A lane switch is a discrete choice, so its URL sync pushes a history entry. Set here because
+    // every transition passes through this function.
     urlPush = true;
-    // The lane being LEFT, read before any close() below tears it down. The spec lane's comparison
-    // needs it: whether the snapshot <img> holds the frame the visitor was actually looking at
-    // depends entirely on which lane they are arriving from (see specActualUrl).
+    // Read before any close() below tears the lane down (see specActualUrl).
     outgoingStage = root.getAttribute("data-mode") || "snapshot";
     // A mode switch always clears a prior lane's error; the new lane re-raises its own if it fails.
     clearModeError();
-    // The spec lane is closed by EVERY other transition (it has no per-branch close call below),
-    // so leaving it always restores the snapshot <img> to the stage.
+    // Every other transition closes the spec lane, restoring the snapshot <img>.
     if (m !== "spec") closeSpec();
-    // Closed by EVERY other transition, exactly as the spec lane is: leaving Source always puts the
-    // render back on the stage, whichever control the visitor left by.
+    // Likewise for Source.
     if (m !== "source") closeSource();
-    // Closed by EVERY other transition, exactly as those two are — and here that is also what stops
-    // the capture playing on behind a lane the visitor has already moved to.
+    // Likewise for Motion, which also stops the capture playing in the background.
     if (m !== "motion") closeMotion();
     if (m === "live") {
         cancelSnapshotLoading();
@@ -3785,11 +3279,9 @@ function enterMode(m: string) {
         closeRc();
         openRcWasm();
     } else if (m === "source") {
-        // Reading the code is not a render either: same treatment as the spec lane — cancel any
-        // in-flight snapshot, leave every interactive lane, and put the panel on the stage. Going
-        // through the branch rather than returning early keeps the transition in the one path that
-        // reconciles the picker, the chips and the URL, so `?mode=source` is bookmarkable and Back
-        // returns to the lane the visitor came from.
+        // Source is not a render: cancel any in-flight snapshot, leave interactive lanes and show
+        // the panel. Going through this branch keeps the picker, chips and URL reconciled, so
+        // `?mode=source` is bookmarkable.
         cancelSnapshotLoading();
         snapshotExt = ".png";
         dropVectorModes();
@@ -3799,10 +3291,7 @@ function enterMode(m: string) {
         closeRcWasm();
         openSource();
     } else if (m === "motion") {
-        // Playing the capture is not a render either: cancel any in-flight snapshot, drop every
-        // interactive lane, and put the recording on the stage. Going through the branch rather than
-        // returning early keeps the transition in the one path that reconciles the picker, the chips
-        // and the URL, so `?mode=motion` is bookmarkable and Back returns to the lane behind it.
+        // Same for Motion (`?mode=motion`).
         cancelSnapshotLoading();
         snapshotExt = ".png";
         dropVectorModes();
@@ -3812,8 +3301,7 @@ function enterMode(m: string) {
         closeRcWasm();
         openMotion();
     } else if (m === "spec") {
-        // Looking at the spec is not a render: cancel any in-flight snapshot, drop every interactive
-        // lane, and paint the imported reference instead. Nothing is re-requested on the way in.
+        // Same for the spec lane; nothing is re-requested on the way in.
         cancelSnapshotLoading();
         snapshotExt = ".png";
         dropVectorModes();
@@ -3823,9 +3311,9 @@ function enterMode(m: string) {
         closeRcWasm();
         openSpec();
     } else {
-        // Browser RC lanes deliberately clear the server-side pick while they paint. Returning to
-        // the static lane must restore a non-baked default before query() renders it; otherwise
-        // the chip names one player while the absent rcPlayer parameter silently selects another.
+        // Browser RC lanes clear the server-side pick while they paint. Returning to the static
+        // lane must restore a non-baked default before query() runs, or the chip and the rendered
+        // player disagree.
         var restoredPlayer = rules.restoreStaticPlayer(
             {
                 defaultBackend: rcDefaultBackend,
@@ -3846,16 +3334,12 @@ function enterMode(m: string) {
     }
     syncOverlayToggles();
     syncServerControls();
-    // Every lane transition passes through here, so the picker is re-reconciled whether the
-    // viewer entered/left a lane via the combo or via the Live / SVG / snapshot controls. It runs
-    // BEFORE updateLiveToggle(), which reads the combo's value for the chip's label.
+    // Re-reconcile the picker on every transition. Runs before updateLiveToggle(), which reads the
+    // combo's value.
     syncLaneSelect();
     updateLiveToggle();
-    // Render the static lane AFTER syncServerControls() has reconciled the daemon-only controls
-    // for the new lane. Returning from Wasm this re-enables the `.cp-rc-knob` inputs first, so
-    // query() includes an rc.* value edited before the Wasm detour in the first snapshot render
-    // (and its direct links) instead of skipping the still-disabled control. The live/wasm lanes
-    // drive their own render (openStream / openWasm), so only the static lane renders here.
+    // Render the static lane after syncServerControls() has re-enabled controls for it, so an rc.*
+    // value edited during a Wasm detour is included. Live/wasm lanes render themselves.
     if (
         m !== "live" &&
         m !== "wasm" &&
@@ -3866,42 +3350,27 @@ function enterMode(m: string) {
         m !== "motion"
     )
         refreshSnapshot();
-    // The interactive lanes drive their own render and never reach refreshLinks, so the URL would
-    // still describe the snapshot the visitor just left — the chosen lane unbookmarkable until
-    // some unrelated control moved, and the pending push landing on that edit instead. Sync here
-    // so every transition writes `?mode=` at the moment it happens. (The snapshot branch already
-    // synced via refreshSnapshot; this second call is a no-op replace with identical values.)
+    // The interactive lanes drive their own render and never reach refreshLinks, so sync here so
+    // every transition writes `?mode=` immediately. (For the snapshot branch this is a no-op replace.)
     else {
         syncUrl();
         syncSpecBaseline();
     }
 }
-// SVG format toggle: swap the static snapshot between raster and vector. Pressing it while a
-// live lane is active drops back to the static vector render; pressing it in the static lane
-// swaps the extension in place.
+// SVG format toggle: swap the static snapshot between raster and vector. From a live lane it drops
+// back to the static vector render; in the static lane it swaps the extension in place.
 if (svgToggle) {
     svgToggle.addEventListener("click", function () {
         var turnOn = !svgOn();
         svgToggle.setAttribute("aria-pressed", turnOn ? "true" : "false");
-        // The vector lane is a lane, and until now the only lane with no name in the address bar:
-        // a refresh of a page someone was reading as SVG served the PNG back. Both branches below
-        // end in a sync (through `refreshSnapshot` or through `enterMode`), so this only has to
-        // say that the sync is a push.
+        // The vector lane is a lane too, so make the sync (via refreshSnapshot or enterMode) a
+        // push.
         urlPush = true;
-        // Every non-static lane has to be LEFT before the vector snapshot can own the stage —
-        // otherwise the badge flips to SVG and a hidden snapshot reloads underneath a canvas /
-        // iframe / spec image that is still on screen, with its chip still pressed. The daemon and
-        // Wasm lanes were already routed this way; the RC canvas, the RC/Wasm frame and the spec
-        // lane are the same case.
-        // The exploded view is a view OF the vector export, so leaving the vector lane leaves it
-        // too. Without this the 3D chip stayed pressed over a flat PNG, its sliders stayed live, and
-        // the copied/downloaded SVG stayed exploded while the stage showed something else — three
-        // controls describing a frame that is no longer on screen.
+        // Every non-static lane has to be left before the vector snapshot can own the stage, or a
+        // hidden snapshot reloads under a canvas / iframe / spec image that is still showing.
+        // Leaving the vector lane also leaves the exploded view, which is a view of it.
         if (!turnOn) clearExploded();
-        // `sourceActive()` belongs in this list for exactly the reason the others do: openSource()
-        // takes the snapshot <img> out of flow, and only closeSource() puts it back. Flipping
-        // `data-mode` straight to "svg" hid the panel (its CSS is mode-scoped) without restoring the
-        // image — a blank stage under a still-checked Source radio.
+        // `sourceActive()` too: only closeSource() puts the snapshot <img> back in flow.
         if (
             turnOn &&
             (live.checked ||
@@ -3920,10 +3389,8 @@ if (svgToggle) {
         }
     });
 }
-// The exploded 3D toggle. It is a *view of the vector export*, so pressing it implies the SVG
-// lane: from anywhere else the viewer switches to the static vector snapshot on the way in,
-// exactly as the SVG toggle does, rather than presenting a control that quietly does nothing on
-// a raster frame.
+// The exploded 3D toggle. It is a view of the vector export, so pressing it from elsewhere switches
+// to the static SVG lane first.
 if (explodeToggle) {
     explodeToggle.addEventListener("click", function () {
         var turnOn = !explodeOn();
@@ -3933,9 +3400,8 @@ if (explodeToggle) {
         urlPush = true;
         if (turnOn) dropRcPlayerPick();
         if (turnOn && svgToggle && !svgOn()) {
-            // Turning SVG on is itself a lane change; let its handler drive the render so there is
-            // exactly one request, with `exploded=1` already folded in by withSnapshotFormat.
-            // Remembered so leaving 3D can hand the lane back (see explodeEnabledSvg).
+            // Turning SVG on is a lane change; let its handler make the single request (with
+            // `exploded=1` folded in). Remembered so leaving 3D can hand the lane back.
             explodeEnabledSvg = true;
             svgToggle.click();
             return;
@@ -3944,8 +3410,8 @@ if (explodeToggle) {
         refreshSnapshot();
     });
 }
-// The angle / separation / depth knobs. Continuous drags leave `urlPush` false, so tuning the
-// view replaces one history entry instead of burying the page under fifty.
+// The angle / separation / depth knobs. Continuous drags leave `urlPush` false so they replace one
+// history entry.
 EXPLODE_KNOBS.forEach(function (pair) {
     var el = may<HTMLInputElement>(pair[0]);
     if (!el) return;
@@ -3954,8 +3420,7 @@ EXPLODE_KNOBS.forEach(function (pair) {
         if (explodeOn()) scheduleExplodeRender();
     });
 });
-// The knobs only mean anything while the view is on, and a slider that renders nothing reads as
-// broken; grey them out instead.
+// Grey the knobs out while the view is off.
 function syncExplodeControls() {
     var on = explodeOn();
     EXPLODE_KNOBS.forEach(function (pair) {
@@ -3968,9 +3433,7 @@ function updateExplodeReadout(el: HTMLInputElement) {
     if (out)
         out.textContent = el.value + (el.getAttribute("data-cp-unit") || "");
 }
-// Dragging a slider fires `input` per pixel of travel. Each one is a fetch of a re-projected
-// SVG — cheap on the server (no re-render, just a rewrite of cached bytes) but not free on the
-// wire, so coalesce a drag into one request per frame-ish.
+// Coalesce slider `input` events into roughly one re-projection request per frame.
 var explodeTimer: ReturnType<typeof setTimeout> | null = null;
 function scheduleExplodeRender() {
     if (explodeTimer) clearTimeout(explodeTimer);
@@ -3985,12 +3448,10 @@ if (scrollLong) {
         refreshSnapshot();
     });
 }
-// The overlay toggles (touchOverlay) are rendered by the daemon, so they're enabled
-// whenever the daemon lane is REACHABLE — not only while it's the active mode. Ticking one from
-// the static snapshot switches into Live Compose (see onOverlayChanged), which is what the
-// visitor meant; greying them out until "Live preview" was clicked made the group look broken.
-// They stay disabled only when the lane genuinely can't be entered (the transport radio is
-// disabled — e.g. the stream is behind sign-in). Called on every mode transition.
+// Overlay toggles (touchOverlay) are rendered by the daemon, so they are enabled whenever the
+// daemon lane is reachable; ticking one from the static snapshot switches into Live (see
+// onOverlayChanged). Disabled only when the lane can't be entered (e.g. behind sign-in). Called on
+// every transition.
 const overlayToggles =
     document.querySelectorAll<HTMLInputElement>(".cp-overlay");
 function syncOverlayToggles() {
@@ -3999,15 +3460,11 @@ function syncOverlayToggles() {
         el.disabled = !on;
     });
 }
-// Enable/disable the display controls to match what the active session can actually render.
-// A server-render control (Size / Device / Orientation) takes effect whenever the
-// server can produce a fresh overridden render: a live daemon session (!staticSnapshot), a
-// catalog whose carried daemon re-renders on demand (canRenderOverrides), or an active live
-// stream. The wasm-honoured trio (Day/Night / Locale / Font scale) additionally applies in the
-// in-browser app, so it's also enabled whenever a Wasm app backs the session. This is what
-// makes "most override modes" live for a CMP catalog (compose-m3) instead of greyed out until
-// a stream is opened; the server-rendered markup already reflects this, and this keeps it in
-// sync across mode transitions.
+// Enable/disable display controls to match what the active session can render. Server-render
+// controls (Size / Device / Orientation) apply whenever the server can re-render (live daemon,
+// carried daemon, or active stream). The wasm-honoured trio (Day/Night / Locale / Font scale) is
+// also enabled when a Wasm app backs the session. Mirrors the server-rendered markup across
+// transitions.
 var serverOnlyControlIds = [
     "device",
     "orientation",
@@ -4021,29 +3478,18 @@ var serverOnlyControlIds = [
 ];
 var wasmHonouredControlIds = ["localeTag", "fontScale"];
 var alwaysDark = root.getAttribute("data-always-dark") === "1";
-// This preview is redrawn by replaying a captured Remote Compose document, never by re-running
-// the composable that authored it. A control whose only route to the pixels is a fresh
-// composition is therefore dead: the server refuses it with a 409 rather than answering with
-// unchanged pixels, so leaving it live invites the visitor to drag a slider into an error.
-//
-// NOT everything is dead — this is the narrow set, matching the server's
-// `CatalogLiveRouting.irReplayDroppedOverrideNames`:
-//  * Day/Night and Font scale STAY LIVE. A document can defer both to the host and resolve them
-//    at paint time (the player's default text size scales by `Configuration.fontScale`, and it
-//    derives its paint theme from `Configuration.isNightModeActive()`), so a document that reads
-//    them genuinely responds. One that baked absolute sizes and colours silently won't — that is
-//    authored behaviour, and not ours to grey out.
-//  * Remote Compose knobs stay live except the string-valued ones, and only in the server lane —
-//    see the `.cp-rc-knob` pass below.
+// This preview is redrawn by replaying a captured Remote Compose document, not by re-running the
+// composable, so controls that need a fresh composition are dead (the server refuses them with
+// 409). The narrow set matches `CatalogLiveRouting.irReplayDroppedOverrideNames`:
+// - Day/Night and Font scale stay live: a document can resolve both from the host at paint time.
+// - RC knobs stay live except string-valued ones, and only in the server lane (see `.cp-rc-knob`
+//   below).
 var irReplay = root.getAttribute("data-ir-replay") === "1";
-// A replayed preview whose session publishes its declared themes as named colour values. The
-// server rewrites `?themeProvider=` into those seeds, so the provider options work here even
-// though nothing else `irReplay` disables does — those still need a composition.
+// A replayed preview whose session publishes declared themes as named colour values; the server
+// rewrites `?themeProvider=` into those seeds, so provider options work here.
 var replayThemes = root.getAttribute("data-replay-themes") === "1";
-// Force [el] off for the IR-replay reason, tagging it so the visitor gets the "why" on hover
-// rather than a control that is merely dead. Only ever *adds* the disable — every call site
-// assigns `el.disabled` from its own lane logic immediately before, so the not-dead branch just
-// restores the authored title and leaves that decision alone.
+// Force [el] off for the IR-replay reason, with a hover explanation. Only ever adds the disable:
+// callers assign `el.disabled` from their own lane logic just before.
 function gateForIrReplay(el: Control | null, dead: boolean, why: string) {
     if (!el) return;
     if (dead) {
@@ -4063,33 +3509,17 @@ var IR_WHY_RC_STRING =
     "Not applied on the server lane — the Remote Compose player does not honour string " +
     "overrides on a replayed document. Switch to the JS player to edit it.";
 function syncServerControls() {
-    // The in-browser Wasm lane only honours the wasm-honoured trio (uiMode/locale/fontScale) +
-    // knobs (see wasmOverridePatch); size/device/orientation and the app-theme
-    // selector re-point /render, which the iframe ignores. So while Wasm is the active lane they
-    // are dead — disable them (even on a catalog that can otherwise re-render) and restore them
-    // when the lane leaves Wasm. Called on every mode transition, so the states track the lane.
+    // The Wasm lane only honours the wasm-honoured trio + knobs (see wasmOverridePatch); size /
+    // device / orientation / app theme re-point /render, which the iframe ignores, so disable them
+    // while Wasm is active.
     var onWasm = wasmActive();
-    // The RC canvas lane, like Wasm, honours only its own overrides (the Remote Compose knobs,
-    // applied client-side): size/device/locale/theme all re-point /render, which the painted
-    // canvas ignores. So it's as "dead" for the server + wasm-honoured controls as the Wasm lane.
+    // The RC canvas lane likewise honours only its own (client-side) RC knobs.
     var onRcCanvas = rcActive();
     var onRcWasm = rcWasmActive();
     var onRc = onRcCanvas || onRcWasm;
-    // The two lanes that put a FIXED frame on the stage — an imported raster, or a finished
-    // recording. Neither is re-pointed by an override, so every control that would re-render is as
-    // dead here as it is in the Wasm / RC canvas lanes: left enabled, editing one re-renders the
-    // HIDDEN snapshot underneath, or flips a static catalog into Wasm, while what is on screen goes
-    // on saying something else.
-    //
-    // ONE predicate, consumed by every override family below. It was briefly `onSpec` plus a
-    // motion-only addition on two of them, which is the worst of both: the theme select and the
-    // Remote Compose knobs stayed live over a recording while the code read as though the lane were
-    // gated. If a family is dead on a fixed frame it is dead on both lanes, and it says so here.
-    //
-    // Shared with `activeThemeChoice`, which needs the same answer to decide that a disabled theme
-    // select still names the theme the frozen frame was rendered with. Both read `data-mode`, so
-    // "which lane froze the controls" has a single definition — the radios and the attribute are
-    // set by the same transition, and two copies of this could disagree during one.
+    // Lanes with a fixed frame (imported raster, finished recording): no override re-points them,
+    // so every re-rendering control is dead here, as in Wasm / RC canvas. One predicate for every
+    // family below, shared with `activeThemeChoice` via `onFixedFrameLane`.
     var onFixedFrame = onFixedFrameLane();
     var canServerRender =
         !onWasm &&
@@ -4100,9 +3530,8 @@ function syncServerControls() {
         var el = may<Control>("cp-" + id);
         if (el) el.disabled = !canServerRender;
     });
-    // The wasm-honoured trio stays live in the in-browser Wasm lane (the app applies it), so it's
-    // enabled whenever the server can render OR a Wasm app backs the session — but not in the RC
-    // canvas lane, which doesn't map them onto the document.
+    // The wasm-honoured trio stays live in the Wasm lane, so enable it when the server can render
+    // or a Wasm app backs the session, but not in the RC canvas lane.
     wasmHonouredControlIds.forEach(function (id) {
         var el = may<Control>("cp-" + id);
         if (el)
@@ -4113,29 +3542,24 @@ function syncServerControls() {
                     (wasmSrc && !onRc && !onFixedFrame) ||
                     (id === "uiMode" && onRcWasm)
                 );
-        // Locale is the one member of this trio a replayed document cannot express: `stringResource`
-        // resolved to a literal at capture, and `RemoteContext` carries no locale among its system
-        // variables, so there is nothing for the host to supply. Dead in every lane that replays the
-        // document; still live in a genuine CMP/Wasm app lane, which runs a real composition.
-        // Font scale deliberately stays untouched — see the `irReplay` note above.
+        // Locale is the one member a replayed document cannot express (`stringResource` resolved at
+        // capture, no locale system variable), so it is dead in every replay lane; live in a real
+        // CMP/Wasm app.
         if (id === "localeTag")
             gateForIrReplay(el, irReplay && !onWasm, IR_WHY_RECOMPOSE);
     });
-    // Day/Night options work in Wasm; declared provider options need the daemon. Keep the unified
-    // select usable whenever at least one kind can work, and gate its individual option families.
+    // Day/Night options work in Wasm; provider options need the daemon. Keep the select usable when
+    // either can work and gate each option family.
     if (themeChoice) {
         var hasDeclaredThemes =
             themeChoice.getAttribute("data-has-declared-themes") === "true";
-        // This preview's SUBJECT is a theme (@FixedTheme, or a Themes-section specimen). Both axes
-        // are off: `theme:<provider>` redraws it under another theme, and Day/Night is a `uiMode`
-        // override that re-renders it in the opposite mode rather than navigating to the baked
-        // sibling. Recomputed here rather than left to the server's `disabled` attribute, because
-        // this block reassigns `themeChoice.disabled` outright and would otherwise re-enable it.
+        // This preview's subject is a theme (@FixedTheme or a Themes specimen), so both axes are
+        // off. Recomputed here because this block reassigns `themeChoice.disabled` and would
+        // otherwise re-enable it.
         var fixedTheme =
             themeChoice.getAttribute("data-fixed-theme") === "true";
-        // `!irReplay`: a declared provider theme substitutes a wrapper composable around the preview,
-        // which needs a composition to wrap. Day/Night is NOT gated the same way — the player can
-        // derive its paint theme from the host at draw time, so that axis stays offered.
+        // `!irReplay`: a provider theme wraps the preview in a composable, which needs a
+        // composition. Day/Night stays offered (the player derives it at draw time).
         var canProviderTheme =
             !fixedTheme &&
             hasDeclaredThemes &&
@@ -4144,8 +3568,8 @@ function syncServerControls() {
             !onFixedFrame &&
             (!irReplay || replayThemes) &&
             (!staticSnapshot || canRenderOverrides);
-        // Wear has no day/night axis, but Night (Default) must remain selectable when provider
-        // themes are offered so the visitor can clear a chosen provider and return to the app.
+        // Wear has no day/night axis, but Night (Default) must stay selectable when provider themes
+        // are offered so a chosen provider can be cleared.
         var canDefaultTheme =
             !fixedTheme &&
             !onRc &&
@@ -4160,13 +3584,10 @@ function syncServerControls() {
         });
         themeChoice.disabled = !canDefaultTheme && !canProviderTheme;
     }
-    // The bar is the select's visible face, so it is reconciled from the same pass that just
-    // decided what the select and each of its options may offer in this lane.
+    // The bar mirrors the select, so reconcile it in the same pass.
     syncThemeBar();
-    // Remote Compose knobs are LIVE in the RC canvas lane — an edit applies client-side via
-    // setNamed*Override + repaint (onRcKnobChanged), no daemon needed — so enable them whenever
-    // that lane is active. The CMP/Wasm lane applies the same typed values while reloading its
-    // isolated document; outside either browser RC lane they're gated on server rendering.
+    // RC knobs are live in the RC canvas lane (applied client-side) and the CMP/Wasm lane (applied
+    // on reload); elsewhere they need server rendering.
     controls(".cp-rc-knob").forEach(function (el) {
         var onBrowserRc = rcActive() || rcWasmActive();
         el.disabled = onBrowserRc
@@ -4174,25 +3595,18 @@ function syncServerControls() {
             : onWasm ||
               onFixedFrame ||
               !(!staticSnapshot || canRenderOverrides);
-        // A *string* seed doesn't land on the server lane: the Android player's
-        // `setUserLocalString` reaches `RemoteComposeState.overrideData` and stops there, so the
-        // render comes back unchanged (the server reports it dropped). The browser RC lanes drive a
-        // different player and apply it client-side, so the control stays live there — which is why
-        // this gates on the lane rather than on the preview.
+        // A string seed doesn't land on the server lane: the Android player's `setUserLocalString`
+        // stops at `RemoteComposeState.overrideData`, so the render is unchanged. Browser RC lanes
+        // apply it, hence gating on the lane.
         if ((el.getAttribute("data-rc-kind") || "string") === "string") {
             gateForIrReplay(el, irReplay && !onBrowserRc, IR_WHY_RC_STRING);
         }
     });
-    // Author-declared knobs are seeded into a composition by the daemon's named-override planner.
-    // No composition, nothing to seed — dead in every lane but a real CMP/Wasm app, which mounts
-    // the live component and honours them.
-    //
-    // Unlike every other control here these have no lane-derived enabled state to fall back on:
-    // nothing re-synced them across transitions before this, so their base is whatever the server
-    // rendered (`disabled` when neither a re-render nor a Wasm app can honour an edit). Record that
-    // once and restore it on each pass — `gateForIrReplay` only ever *adds* the disable, so without
-    // a base assignment a knob switched off for the snapshot lane would stay off after entering
-    // Wasm, and `wasmOverridePatch()` skips disabled knobs, so the edit would never reach the app.
+    // Author-declared knobs are seeded into a composition by the daemon's named-override planner,
+    // so they are dead in every replay lane except a real CMP/Wasm app. Their base enabled state is
+    // the server-rendered `disabled`, recorded once and restored each pass; since `gateForIrReplay`
+    // only adds the disable, without a base a knob disabled for the snapshot lane would stay off in
+    // Wasm (and `wasmOverridePatch()` skips disabled knobs).
     controls(".cp-knob").forEach(function (el) {
         if (!el.hasAttribute("data-base-disabled")) {
             el.setAttribute("data-base-disabled", el.disabled ? "1" : "0");
@@ -4202,8 +3616,7 @@ function syncServerControls() {
         gateForIrReplay(el, irReplay && !onWasm, IR_WHY_RECOMPOSE);
     });
 }
-// Programmatic switch (the live toggle, or a wasm-only control auto-enabling Wasm): tick the
-// hidden mode radio so its state is consistent, then run the transition.
+// Programmatic switch: tick the hidden mode radio, then run the transition.
 function setMode(m: string) {
     var radioId =
         m === "live"
@@ -4233,29 +3646,21 @@ Array.prototype.forEach.call(
         });
     },
 );
-// The primary chip. It does two jobs at once, which is what lets one control replace the row of
-// per-lane chips this page used to carry: it NAMES the renderer currently on the stage
-// ("AndroidX View", "Camaelon JS", "Figma spec", "Live") and its status dot says whether that
-// render is interactive, and clicking it TOGGLES interactivity — into the best live lane this
-// session offers (the daemon stream when present, else the in-browser Wasm app), and back out to
-// the static snapshot.
-// Overrides still take effect while static (a catalog re-renders /render on demand), so the
-// toggle is specifically about *interacting* with the running composition — clicking, scrolling,
-// typing. The corner backend badge flips its icon/accent to match (see backendBadgeScript).
+// The primary chip names the renderer on stage ("AndroidX View", "Camaelon JS", "Figma spec",
+// "Live"), its dot says whether it is interactive, and clicking toggles into the best live lane
+// (daemon stream, else Wasm) and back to the static snapshot. Overrides still apply while static;
+// the toggle is about interacting. The corner backend badge matches (see backendBadgeScript).
 const liveToggle = may<HTMLButtonElement>("cp-live-toggle");
 const liveToggleLabel = may<HTMLElement>("cp-live-toggle-label");
-// The chip's second half: the label names the lane it is ON, this names the lane a click goes TO.
-// See ServeWeb's `liveToggleVerb` for why the naming job is split in two rather than folded into
-// one string. Present only on a preview with a live lane to enter.
+// The chip's second half: the label names the current lane, this names where a click goes. See
+// ServeWeb's `liveToggleVerb`.
 const liveToggleVerb = may<HTMLElement>("cp-live-toggle-verb");
-// The invitation ON the stage — the affordance the toolbar chip cannot be, because a visitor
-// looking at the picture is not looking at the toolbar. Present only when there is a lane to enter;
-// `updateLiveToggle()` decides when it actually shows.
+// The invitation on the stage itself, for visitors looking at the picture rather than the toolbar.
+// `updateLiveToggle()` decides when it shows.
 const stageLiveHint = may<HTMLElement>("cp-stage-live-hint");
 // Present only when GitHub auth is the one thing blocking the daemon lane (see ServeWeb's
-// liveSignInLink). Deliberately not `#cp-live-toggle` — it's a link, so the toggle's
-// `.disabled` / `aria-pressed` handling must not touch it — which is why it's looked up
-// separately here rather than inferred from `liveToggle`.
+// liveSignInLink). A link, not `#cp-live-toggle`, so the toggle's disabled / aria-pressed handling
+// must not touch it.
 const liveSignIn = may<HTMLAnchorElement>("cp-live-signin");
 const modeHint = may<HTMLElement>("cp-mode-hint");
 // The lane decisions live in `cli/serve-web/src/viewer/laneState.ts`.
@@ -4268,10 +3673,8 @@ function liveTransportAvailable() {
 function bestLiveMode() {
     return rules.bestLiveMode(liveOffer());
 }
-// Every lane that paints a *running* composition rather than a finished image: the daemon
-// stream, the in-browser Wasm app, and both Remote Compose player lanes (which replay the
-// document client-side). This is what the status dot reports, so picking "JS" from the combo
-// lights the same indicator that clicking into Live does — they are the same claim.
+// Lanes painting a running composition (daemon stream, Wasm app, both RC player lanes). This is
+// what the status dot reports.
 function laneFlags() {
     return {
         rcWasm: rcWasmActive(),
@@ -4284,9 +3687,8 @@ function laneFlags() {
 function anyInteractive() {
     return rules.anyInteractive(laneFlags());
 }
-// The lane the picker is (or would be) sitting on, in the combo's own value space. A daemon
-// stream is not one of the offered renderers — it is the live form of whichever one is picked —
-// so it deliberately falls through to the static player lane the toggle will return to.
+// The lane the picker is (or would be) on, in the combo's value space. The daemon stream is the
+// live form of the picked renderer, so it falls through to the static player lane.
 function currentLaneValue() {
     return rules.currentLaneValue(laneFlags(), {
         defaultBackend: rcDefaultBackend || "",
@@ -4294,15 +3696,12 @@ function currentLaneValue() {
         picked: !!rcPlayerPicked,
     });
 }
-// What the chip calls the current lane. "Live" while the daemon stream is up (that lane IS the
-// live form of whichever renderer is picked, and the picked one is a click away again); other-
-// wise the matching option's own label, so the chip and the combo can never name a lane two
-// different things. With no combo at all the chip is the only control on the row and names the
-// state the stage is in ("Snapshot"), leaving its verb to name the switch out of it — see
-// ServeWeb's `primaryLaneLabel`, which is where that word is chosen.
-// The renderer the chip returns to when the current lane isn't one of the combo's own — today
-// that means the design spec, which is a chip of its own. Server-rendered from the same
-// `primaryLaneLabel` the chip opens on, so a preview with no combo to read has a name too.
+// What the chip calls the current lane: "Live" while the daemon stream is up, otherwise the
+// matching option's label so chip and combo agree. With no combo it names the stage's state
+// ("Snapshot"); see ServeWeb's `primaryLaneLabel`.
+//
+// The renderer the chip returns to when the current lane isn't one of the combo's (the design
+// spec). Server-rendered from `primaryLaneLabel`.
 function defaultLaneLabel() {
     return (
         (liveToggle && liveToggle.getAttribute("data-default-lane-label")) ||
@@ -4324,9 +3723,8 @@ function laneLabelText() {
         defaultLabel: defaultLaneLabel(),
     });
 }
-// Whether a click on the stage enters the live lane right now. The chip's verb, the hint badge and
-// the stage's own click handler all ask this one question, so an invitation is never shown over a
-// stage that would ignore it — and never withheld from a stage that would take it.
+// Whether a click on the stage enters the live lane now. The chip's verb, the hint badge and the
+// stage click handler all ask this, so they cannot disagree.
 function liveInvited() {
     return rules.liveInviteAvailable({
         interactive: anyInteractive(),
@@ -4338,44 +3736,35 @@ function updateLiveToggle() {
     var interactive = anyInteractive();
     if (liveToggle) {
         liveToggle.setAttribute("aria-pressed", interactive ? "true" : "false");
-        // Enabled when there is a live lane to enter — or when an interactive lane is already on the
-        // stage, which is the only way back out of a Remote Compose player lane the combo entered.
+        // Enabled when there is a live lane to enter, or an interactive lane on stage (the only way
+        // out of an RC player lane the combo entered).
         liveToggle.disabled = !liveTransportAvailable() && !interactive;
     }
     if (liveToggleLabel) liveToggleLabel.textContent = laneLabelText();
-    // The spec chip is a toggle, so it reports the lane's state the same way the Live chip does.
-    // Driven from here rather than from its own click handler so every route out of the lane (the
-    // Live chip, a combo pick, an SVG swap, Back/Forward) un-presses it too.
+    // The spec chip reports the lane's state; driven from here so every route out un-presses it.
     if (specChip) {
         var onSpecLane = specActive();
         var specState = rules.laneChip({
             onLane: onSpecLane,
             available: specAvailable(),
         });
-        // Pressed reports WHICH source is on the stage, not merely that the lane is open. The peer
-        // chips beside this one are its equals now, and the picker they drive is hidden until the
-        // lane is up — so a toolbar that lit "Figma" while the sibling's render was showing named
-        // the wrong reference in the one place a reader would look to check it. A lane with a
-        // single source has no pressed id and no peers, and reads exactly as it always did.
+        // Pressed reports which source is on the stage, not merely that the lane is open, so only
+        // the chip for the visible reference lights up.
         var primaryOnStage = specPrimaryOnStage();
         specChip.setAttribute(
             "aria-pressed",
             specState.pressed && primaryOnStage ? "true" : "false",
         );
         specChip.disabled = specState.disabled;
-        // The title has to follow the same fact the pressed state does. A chip reading unpressed
-        // while claiming "Showing the imported design spec — click to return to the render" states
-        // the lane it is not on AND offers the one action it no longer takes: with a sibling on the
-        // stage this chip selects its own source rather than closing the lane.
+        // The title follows the pressed state: with a sibling on stage this chip selects its own
+        // source rather than closing the lane.
         specChip.title =
             onSpecLane && primaryOnStage
                 ? "Showing the imported design spec — click to return to the render"
                 : specChip.getAttribute("data-spec-chip-tip") || specChip.title;
     }
-    // …and the peer chips follow the same source, so exactly one of the group ever reads pressed.
-    // Queried here rather than closed over: this runs before the chips are collected for their
-    // click handlers further down the file, and the group is two elements on the pages that have
-    // one at all.
+    // Peer chips follow the same source so exactly one reads pressed. Queried here because this
+    // runs before the chips are collected further down.
     var peers = document.querySelectorAll<HTMLButtonElement>(
         "[data-cp-spec-open-source]",
     );
@@ -4390,8 +3779,7 @@ function updateLiveToggle() {
                 : "false",
         );
     }
-    // The Source chip reports its lane the same way, and from the same place, so every route out
-    // of it (the Live chip, a combo pick, the spec chip, Back/Forward) un-presses it too.
+    // Same for the Source chip.
     if (sourceChip) {
         var onSourceLane = sourceActive();
         sourceChip.setAttribute(
@@ -4404,8 +3792,7 @@ function updateLiveToggle() {
             : sourceChip.getAttribute("data-source-chip-tip") ||
               sourceChip.title;
     }
-    // The Motion chip reports its lane the same way, and from the same place, so every route out
-    // of it (the Live chip, a combo pick, the spec or Source chip, Back/Forward) un-presses it too.
+    // Same for the Motion chip.
     if (motionChip) {
         var onMotionLane = motionActive();
         motionChip.setAttribute(
@@ -4418,11 +3805,9 @@ function updateLiveToggle() {
             : motionChip.getAttribute("data-motion-chip-tip") ||
               motionChip.title;
     }
-    // …and the tooltip, from the same state. The chip's meaning inverts as the visitor moves
-    // through the lanes — on the static snapshot a click enters Live, on an interactive lane it
-    // exits back to the snapshot — so a fixed `title` would end up describing the opposite of what
-    // the control now does. The sign-in case never reaches here (that affordance is an <a> with no
-    // `#cp-live-toggle` id, so `liveToggle` is null), which is why its wording isn't repeated.
+    // The tooltip inverts with the chip's meaning (enter Live from static, exit to snapshot from an
+    // interactive lane). The sign-in case never reaches here: that affordance is an <a>, so
+    // `liveToggle` is null.
     if (liveToggle) {
         liveToggle.title = interactive
             ? "Interactive — click to return to the static snapshot"
@@ -4430,10 +3815,8 @@ function updateLiveToggle() {
               ? "Static snapshot — click for the live, interactive preview"
               : "Static snapshot — this session has no live lane to switch to";
     }
-    // The chip's verb, from the same state as its tooltip — it points at the lane a click LEAVES
-    // for, so it has to invert with the chip rather than sit on the label the server rendered.
-    // Blank (and out of the layout) whenever there is nowhere to go: a chip disabled for want of a
-    // live lane must not keep advertising one.
+    // The chip's verb names the lane a click goes to; blank (and out of layout) when there is
+    // nowhere to go.
     if (liveToggleVerb) {
         var verb = interactive
             ? "▸ Snapshot"
@@ -4443,9 +3826,8 @@ function updateLiveToggle() {
         liveToggleVerb.textContent = verb;
         liveToggleVerb.hidden = !verb;
     }
-    // …and the stage's invitation, from the one predicate the stage's own click handler obeys. The
-    // attribute sits on the viewer root because the hint and the snapshot's `cursor: pointer` are
-    // two elements the same fact has to reach.
+    // The stage invitation, from the same predicate as the stage click handler. Set on the viewer
+    // root because the hint and the snapshot's `cursor: pointer` both need it.
     var invited = liveInvited();
     if (root) root.setAttribute("data-live-invite", invited ? "true" : "false");
     if (stageLiveHint) stageLiveHint.hidden = !invited;
@@ -4479,8 +3861,8 @@ function updateLiveToggle() {
 }
 if (liveToggle) {
     liveToggle.addEventListener("click", function () {
-        // Toggling off returns to the static snapshot, which for a Remote Compose preview means the
-        // server-side player the combo will show — there is no static form of the JS canvas lane.
+        // Toggling off returns to the static snapshot, which for RC means the server-side player
+        // the combo shows; the JS canvas lane has no static form.
         if (anyInteractive()) {
             setMode("png");
         } else {
@@ -4489,24 +3871,12 @@ if (liveToggle) {
         }
     });
 }
-// The stage itself is the second way into the live lane — and the discoverable one. A visitor
-// reading a preview is looking at the picture, not at the toolbar, so the picture is where the
-// affordance has to be; the hint badge above says so and this is what makes the promise true.
-//
-// SINGLE click, not double. The grid spends the long-press gesture on this because a card is a
-// link and a tap has to keep navigating; nothing competes for a click on the viewer's stage, and
-// VS Code's focus mode (docs/daemon/INTERACTIVE.md § 3) already enters live on a single click. A
-// double-click requirement would be exactly as undiscoverable as the toolbar-only chip this
-// replaces.
-//
-// There is no keyboard path here on purpose: the chip is a real button in the tab order and does
-// the same thing, so making the image focusable would add a second stop announcing the same
-// control. Leaving live is the chip's job too — once the daemon is streaming, the canvas is on
-// top of this image and owns every pointer event.
+// The stage itself is the discoverable way into the live lane. Single click (a card in the grid
+// uses long-press because a tap navigates; nothing competes here). No keyboard path: the chip is
+// already a button in the tab order. Once streaming, the canvas sits on top and owns pointer
+// events.
 {
-    // Where the pointer went down, so a DRAG doesn't become an entry. Zoom/pan and text selection
-    // both end in a `click` on the image, and a gesture that meant "drag" must not be read as
-    // "switch lanes" — the same slop discipline the grid's long press uses.
+    // Where the pointer went down, so a drag (zoom/pan, text selection) isn't read as an entry.
     var stageInvitePress: { x: number; y: number } | null = null;
     img.addEventListener("pointerdown", function (event) {
         stageInvitePress = event.isPrimary
@@ -4516,8 +3886,7 @@ if (liveToggle) {
     img.addEventListener("click", function (event) {
         var press = stageInvitePress;
         stageInvitePress = null;
-        // Modified and non-primary clicks belong to the browser (open in new tab, context menu,
-        // extend selection) — an unmodified left click is the gesture being offered.
+        // Modified and non-primary clicks belong to the browser.
         if (
             event.button !== 0 ||
             event.ctrlKey ||
@@ -4539,21 +3908,13 @@ if (liveToggle) {
         if (mode) setMode(mode);
     });
 }
-// The design-spec chip: in and straight back out of the spec lane, no menu in between. Leaving
-// returns to the static snapshot — the same place the Live chip returns to — rather than to
-// whichever interactive lane was up before, because the spec is entered to compare against the
-// *render*, and that is the lane the comparison views (Diff / Triptych / Slider) draw from.
-// The comparison group's OTHER sources, on the resting bar beside the kit's chip.
+// The design-spec chip toggles in and out of the spec lane; leaving returns to the static snapshot,
+// the lane the comparison views draw from.
 //
-// Each one is a way INTO the lane on its own source. The picker inside the lane is still what
-// switches between them once it is up; these are what make a second source discoverable at all,
-// since that picker ships hidden until the kit's chip is pressed.
-//
-// Order matters, and it is the opposite of the obvious one. `pickSpecSource` presses the source and
-// updates `specSrc`, then returns early while the page is not on the spec lane — so pressing FIRST
-// and entering SECOND means `setMode("spec")` opens directly on the requested pair. Entering first
-// would open on the kit and then re-request, which is a visible flash of the wrong panel and a
-// wasted raster.
+// The comparison group's other sources, on the resting bar beside the kit chip: each enters the
+// lane on its own source (the in-lane picker is hidden until then). Press first, enter second:
+// `pickSpecSource` returns early off the lane, so `setMode("spec")` then opens directly on the
+// requested pair without flashing the kit.
 var specPeerChips: HTMLButtonElement[] = Array.prototype.slice.call(
     document.querySelectorAll<HTMLButtonElement>("[data-cp-spec-open-source]"),
 );
@@ -4562,9 +3923,8 @@ for (var pi = 0; pi < specPeerChips.length; pi++) {
         chip.addEventListener("click", function () {
             if (!specAvailable()) return;
             var wanted = chip.getAttribute("data-cp-spec-open-source") || "";
-            // Every comparison chip is a toggle. The kit chip already returned to the render when
-            // pressed on its own source; the peer used to select itself again, which was a no-op
-            // and left the only apparent way out labelled "Figma".
+            // Every comparison chip is a toggle: pressing the source already on stage returns to
+            // the render.
             if (closesSource(specActive(), specPressedId(), wanted)) {
                 setMode("png");
                 return;
@@ -4580,8 +3940,7 @@ for (var pi = 0; pi < specPeerChips.length; pi++) {
             if (!target) return;
             var changed = pickSpecSource(target);
             if (!specActive()) setMode("spec");
-            // Already on the lane: `enterMode` is not run, so the sync it would have done is
-            // done here — the same push a press on the in-lane picker makes.
+            // Already on the lane: `enterMode` won't run, so make its push here.
             else if (changed) {
                 urlPush = true;
                 syncUrl();
@@ -4591,38 +3950,21 @@ for (var pi = 0; pi < specPeerChips.length; pi++) {
 }
 if (specChip) {
     specChip.addEventListener("click", function () {
-        // Leaving the lane is what this chip does when its OWN source is the one on the stage.
-        // With a sibling showing, the chip reads unpressed, and a control that reads unpressed
-        // must select rather than dismiss: closing the comparison there made the visibly inactive
-        // chip do the one thing its appearance ruled out, and made it disagree with the peer chip
-        // beside it, which selects.
+        // Leave the lane only when this chip's own source is on stage; with a sibling showing, the
+        // unpressed chip selects rather than dismisses.
         if (specActive() && specPrimaryOnStage()) setMode("png");
         else if (specAvailable()) {
-            // No entry view is requested here any more (#4376). The chip used to ask for Diff,
-            // because the chip STATES the divergence ("Figma 96.3%") and a number like that raises
-            // exactly one question — where? — which the spec-on-the-stage view the lane opened on
-            // answered another click away. The lane's own default is Triptych now, which answers it
-            // on arrival AND keeps the two frames the diff was taken from beside it, so the chip
-            // has nothing left to override: see DEFAULT_VIEW in `spec/views.ts`. A URL that names a
-            // view still wins over that default, exactly as it won over the chip's request.
-            //
-            // The SOURCE, though, this chip does own. It names the imported kit — "Figma 96.3%" —
-            // while the picker keeps whatever was pressed last, so a reader who tried a sibling,
-            // left the lane, and came back through this chip was shown the SIBLING's render under
-            // a chip that said Figma: the wrong reference, silently, which is the one thing a
-            // comparison must not get wrong. Press the kit first and enter second, the same order
-            // the peer chips use and for the same reason — `pickSpecSource` returns early off the
-            // lane, so `setMode` opens directly on the requested pair instead of flashing the old
-            // one. A no-op when the kit is already pressed, and when the lane has one source and
-            // therefore no picker at all.
+            // The lane's default view (Triptych; see DEFAULT_VIEW in `spec/views.ts`) applies; a
+            // URL-named view still wins. This chip does own the source: it names the kit, so press
+            // the kit first and enter second (as the peer chips do) so it never shows a sibling's
+            // render under a "Figma" label. A no-op when the kit is already pressed or the lane has
+            // one source.
             var primaryId = specPrimaryId();
             var changed = primaryId
                 ? pickSpecSource(specSourceButton(primaryId))
                 : false;
             if (!specActive()) setMode("spec");
-            // Already on the lane with a sibling showing: `enterMode` does not run, so the push
-            // it would have made is made here — the same one a press on the in-lane picker makes,
-            // and the same one the peer chips make on this path.
+            // Already on the lane with a sibling showing: `enterMode` won't run, so push here.
             else if (changed) {
                 urlPush = true;
                 syncUrl();
@@ -4630,13 +3972,9 @@ if (specChip) {
         }
     });
 }
-// The Source chip: in and straight back out, like the spec chip. Leaving returns to the static
-// snapshot rather than to whichever interactive lane was up, for the same reason — the code is
-// read against the *render*, and that is the lane it was entered from.
-//
-// On the SIDE lane the chip is not a lane toggle at all — the panel is already open beside the
-// render — so it scrolls the code into view instead, which is what a reader on a phone (where the
-// two columns have wrapped into one) is actually asking for when they press it.
+// The Source chip toggles in and out like the spec chip, returning to the static snapshot. On the
+// side lane the panel is already open, so it scrolls the code into view instead (useful on narrow
+// screens).
 if (sourceChip) {
     sourceChip.addEventListener("click", function () {
         if (sideSourceLane()) {
@@ -4645,37 +3983,28 @@ if (sourceChip) {
         else if (sourceAvailable()) setMode("source");
     });
 }
-// …and on that lane the code is fetched at LOAD rather than on first entry. The usual rule — never
-// pay for a GitHub read most visitors do not want — is the opposite way round here: on a samples
-// page every visitor wants the code, because it is what they came to read.
+// On the side lane the code is fetched at load: every visitor to a samples page wants it.
 if (sideSourceLane()) openSource();
-// The Motion chip: in and straight back out, like the spec and Source chips, and leaving returns
-// to the static snapshot for the same reason — the recording is watched against the *still*, and
-// that is the lane it was entered from.
+// The Motion chip toggles like the spec and Source chips, returning to the static snapshot.
 if (motionChip) {
     motionChip.addEventListener("click", function () {
         if (motionActive()) setMode("png");
         else if (motionAvailable()) setMode("motion");
     });
 }
-// The per-capture menu, shown only when a preview published more than one. Switching while the
-// lane is up swaps the capture in place rather than leaving and re-entering: the visitor is
-// changing WHICH recording they are watching, not which lane they are in, so it is not a mode
-// transition and does not belong in the history stack.
+// The per-capture menu, shown only with more than one capture. Switching swaps the capture in
+// place; it is not a mode transition.
 if (motionSelect) {
     motionSelect.addEventListener("change", function () {
         if (motionActive()) {
             playMotion();
-            // Replaces rather than pushes: switching recording inside the lane is not a lane change,
-            // so it belongs in the address without burying the page the visitor arrived from under a
-            // Back entry per pick. `urlPush` is left false, which is exactly what replace means here.
+            // Replace rather than push: switching recording is not a lane change.
             syncUrl();
         } else setMode("motion");
     });
 }
-// The transport. Every button hands the current playhead to `viewer/motionPlayback.ts` and paints
-// whatever comes back — the decisions (play from the end restarts, scrubbing pauses, the clock
-// stops on the last frame) live there with tests, and this file only starts and stops the clock.
+// The transport. Each button hands the playhead to `viewer/motionPlayback.ts` (where the decisions
+// live, with tests) and paints the result; this file only starts and stops the clock.
 if (motionPlayBtn) {
     motionPlayBtn.addEventListener("click", function () {
         motionPlayback = rules.toggle(motionPlayback, motionTimeline);
@@ -4692,8 +4021,7 @@ if (motionReplayBtn) {
     });
 }
 if (motionScrub) {
-    // `input`, not `change`: the frames have to follow the thumb while it is being dragged, which
-    // is the entire point of scrubbing a recording rather than typing a frame number at it.
+    // `input`, not `change`: frames follow the thumb while dragging.
     motionScrub.addEventListener("input", function () {
         stopMotionClock();
         motionPlayback = rules.seek(
@@ -4706,9 +4034,7 @@ if (motionScrub) {
 }
 if (motionRateSelect) {
     motionRateSelect.addEventListener("change", function () {
-        // Rate only. Changing speed mid-pass must not move the playhead or restart anything — the
-        // reader is asking to watch the SAME moment more slowly, and losing their place would be
-        // the opposite of that.
+        // Rate only: changing speed must not move the playhead.
         motionPlayback = {
             ...motionPlayback,
             rate: rules.normaliseRate(motionRateSelect!.value),
@@ -4716,32 +4042,22 @@ if (motionRateSelect) {
         syncMotionTransport();
     });
 }
-// ---- The renderer combo box ------------------------------------------------------------------
-// One `<select>` holding every lane this preview can be drawn by: the Remote Compose players
-// (`rc:camaelon-js` paints client-side via setMode("rc"), `rc:cmp-wasm` in its own frame, and
-// `androidx-view` / `androidx-embedded` / `cmp-android` / `cmp-jvm` re-render the PNG server-side
-// with rcPlayer=<id>, see query()), the in-browser Wasm app, and the imported design spec. Its
-// value tracks the active lane however the lane was entered — a pick, the Live toggle, an SVG
-// swap, or Back/Forward.
+// The renderer combo: one `<select>` with every lane this preview can be drawn by: the RC players
+// (`rc:camaelon-js` client-side via setMode("rc"), `rc:cmp-wasm` in its own frame, and
+// `androidx-view` / `androidx-embedded` / `cmp-android` / `cmp-jvm` server-side via rcPlayer=<id>),
+// the Wasm app, and the design spec. Its value tracks the active lane however it was entered.
 if (laneSelect) {
-    // Assign the hoisted stub with the real reconciler (see the declaration before query()).
-    // The combo is a command menu ("switch renderer"), not a state field — the chip beside it holds
-    // the state — so reconciling it means returning it to its placeholder. Doing that here rather
-    // than in the change handler covers every route out of a lane (the Live toggle, an SVG swap,
-    // Back/Forward), not just a pick.
-    //
-    // …except where there is no chip. Catalog mode drops it along with the Live control, which
-    // makes this menu the only thing on the page that could report the renderer in use, so there it
-    // holds the selection instead. `data-lane-state` is set by the server precisely when the chip
-    // was omitted, so the two can't disagree about which of the two shapes this control is in.
+    // The real reconciler for the hoisted stub. The combo is a command menu, not a state field (the
+    // chip beside it holds state), so reconciling returns it to its placeholder on every route out
+    // of a lane. Except in catalog mode, which drops the chip: there the menu holds the selection.
+    // The server sets `data-lane-state` exactly when the chip is omitted.
     var laneHoldsState = laneSelect.getAttribute("data-lane-state") === "1";
     syncLaneSelect = function () {
         if (!laneHoldsState) {
             laneSelect.value = "";
             return;
         }
-        // Only a lane the menu actually offers: a value it has no option for would blank the
-        // control, which is worse than the placeholder it replaced.
+        // Only a value the menu offers; an unknown one would blank the control.
         var lane = currentLaneValue();
         var offered = Array.prototype.some.call(
             laneSelect.options,
@@ -4756,10 +4072,8 @@ if (laneSelect) {
         if (value.indexOf("rc:") === 0) {
             var wire = rules.normalizeRcPlayer(value.substring(3));
             if (wire === rules.RC_PLAYER.camaelonJs) {
-                // The client canvas lane. Leave the server pick untouched so returning to a server-side
-                // player restores it. setMode("rc") (via enterMode) closes any Live/Wasm lane, opens the
-                // canvas, and re-syncs the picker; if the canvas is already up there is nothing to do
-                // but reconcile.
+                // The client canvas lane. Leave the server pick untouched so returning to a
+                // server-side player restores it.
                 rcPlayerPicked = false;
                 if (!rcActive()) setMode("rc");
                 else syncLaneSelect();
@@ -4768,12 +4082,9 @@ if (laneSelect) {
                 if (!rcWasmActive()) setMode("rc-wasm");
                 else syncLaneSelect();
             } else {
-                // A server-side player. Record the pick FIRST so the single static-lane render carries
-                // rcPlayer=<wire>, then transition to the static snapshot exactly once for EVERY other
-                // lane — js canvas, Live, or Wasm. setMode("png") → enterMode("png") closes them all and
-                // renders the snapshot once (no racing double render). Without this a pick made while
-                // Live/Wasm was active only reloaded the hidden <img> and left the interactive renderer
-                // on screen under a combo naming something else.
+                // A server-side player. Record the pick first so the single static-lane render
+                // carries rcPlayer=<wire>, then setMode("png") closes any other lane and renders
+                // once.
                 rcPlayerBackend = wire;
                 rcPlayerPicked = true;
                 setMode("png");
@@ -4790,21 +4101,17 @@ if (laneSelect) {
     });
     syncLaneSelect();
 }
-// Keep the live canvas overlay tracking the snapshot's slot when the page reflows (the Wasm
-// overlay has its own resize hook below; this covers a live session with no Wasm app).
+// Keep the live canvas overlay on the snapshot's slot on reflow (Wasm has its own hook below).
 window.addEventListener("resize", function () {
     if (live && live.checked && !canvas.hidden) fitLiveCanvas();
     if (rcWasmActive()) positionRcWasmFrame();
 });
-// Re-pin the active overlay whenever the snapshot image itself loads — its first render, or a
-// re-render at a new size. positionOverlay/fitLiveCanvas measure `img.getBoundingClientRect()`,
-// which only becomes final once the new bytes are decoded, so without this an overlay picked
-// (e.g. Live selected before the first /render lands) or a re-rendered snapshot kept the stale
-// box until the next window resize (issue #2359).
+// Re-pin the active overlay whenever the snapshot loads: positionOverlay/fitLiveCanvas measure the
+// img, which is only final once new bytes decode.
 img.addEventListener("load", function () {
     if (live && live.checked && !canvas.hidden) fitLiveCanvas();
-    // Mirror the Wasm resize handler: the checkerboard phase moves with the overlay box, so
-    // re-hand the patch (which carries bgPhase) to a ready app — not just reposition the frame.
+    // The checkerboard phase moves with the overlay, so re-send the patch (with bgPhase) to a ready
+    // app.
     if (wasmActive()) {
         positionWasmFrame();
         if (wasmReady && wasmFrame!.contentWindow) {
@@ -4814,16 +4121,14 @@ img.addEventListener("load", function () {
     if (rcWasmActive()) positionRcWasmFrame();
 });
 if (wasmToggle) {
-    // The app posts "cp-wasm-ready" once its first frame is on the canvas — the swap signal.
-    // Match on source (the known frame's contentWindow), not e.origin — robust regardless of
-    // the frame's origin, and the payload is a fixed string so there's no data surface.
+    // The app posts "cp-wasm-ready" once its first frame is on the canvas. Match on source (the
+    // frame's contentWindow), not e.origin; the payload is a fixed string.
     window.addEventListener("message", function (e) {
         if (e.source !== wasmFrame!.contentWindow || e.data !== "cp-wasm-ready")
             return;
         revealWasm();
     });
-    // Fallback for an app build that predates the ready signal: reveal a beat after the
-    // document's load event rather than holding the snapshot forever.
+    // Fallback for app builds without the ready signal: reveal shortly after load.
     wasmFrame!.addEventListener("load", function () {
         setTimeout(function () {
             revealWasm();
@@ -4838,10 +4143,8 @@ if (wasmToggle) {
             wasmFrame!.contentWindow.postMessage(wasmOverridePatch(), "*");
         }
     });
-    // The page's Transparent toggle (owned by <cp-bg-toggle> in viewer-components.js, which flips
-    // `cp-bg-transparent` on <html>) changes what the stage paints — and the app mirrors that
-    // backdrop, so it has to hear about it. Watching the class beats reaching across to that
-    // script's click handler: the stage also changes with the render theme, and both land here.
+    // The Transparent toggle (<cp-bg-toggle>, flipping `cp-bg-transparent` on <html>) and the
+    // render theme change the stage backdrop, which the app mirrors; watch the class.
     if (typeof MutationObserver === "function") {
         new MutationObserver(function () {
             if (!wasmActive() || !wasmReady || !wasmFrame!.contentWindow)
@@ -4853,24 +4156,15 @@ if (wasmToggle) {
         });
     }
 }
-// The font-scale slider is the control this coalescing exists for. Sixteen stops, one `input`
-// per stop, and on a session that can re-render every one of them was a `/render` the daemon had
-// to serialise — so a single drag issued fifteen renders, the server refused most of them with a
-// retryable 503, and whichever refusal happened to land last is what the stage kept. The readout
-// still updates on every event (the number under the visitor's thumb must track it); only the
-// render waits for the drag to stop.
+// Coalesce continuous edits (font-scale slider, typed sizes): each step would otherwise issue a
+// `/render`, most of which a busy daemon refuses with 503. The readout still updates on every
+// event.
 const scheduleControlsChanged = debounced(
     onControlsChanged,
     CONTINUOUS_EDIT_DEBOUNCE_MS,
 );
-// One edit of a continuous control. What DESCRIBES the controls happens now; what RENDERS them
-// waits for the drag to stop.
-//
-// The split is the point. The address bar, the copyable /render links and the spec baseline all
-// report what the controls currently say, so they follow the thumb with no delay — debouncing
-// `onControlsChanged` wholesale would have put a 200ms lag on the URL of a page whose whole
-// premise is that its address describes what you are looking at. Only the transport dispatch is
-// coalesced, and `onControlsChanged` re-runs this same sync when it fires.
+// One edit of a continuous control: the URL, copyable links and spec baseline update now; only the
+// render waits for the drag to stop (`onControlsChanged` re-runs the same sync when it fires).
 cancelPendingContinuousEdit = scheduleControlsChanged.cancel;
 function onContinuousControlEdit() {
     refreshLinks();
@@ -4887,8 +4181,8 @@ fields.forEach(function (f) {
     var el = document.getElementById("cp-" + f);
     if (el) el.addEventListener("change", onControlsChanged);
 });
-// Size mode: show only the input rows the chosen mode uses (Within shows both min + max), then
-// re-render. The number inputs re-render on "input" (live typing) like the locale field.
+// Size mode: show only the input rows the chosen mode uses (Within shows min + max), then
+// re-render.
 const sizeMode = may<HTMLSelectElement>("cp-sizeMode");
 if (sizeMode) {
     var syncSizeRows = function () {
@@ -4917,20 +4211,15 @@ if (sizeMode) {
         "cp-maxH",
     ].forEach(function (id) {
         var el = document.getElementById(id);
-        // Typed, so `input` arrives per keystroke: "1280" was four renders of three widths
-        // nobody asked for. Same coalescing as the slider, same reason.
+        // Typed, so `input` fires per keystroke; coalesce like the slider.
         if (el) el.addEventListener("input", onContinuousControlEdit);
     });
 }
-// Overlay toggles are daemon-rendered: on the live lane they push a fresh setOverrides through
-// the open stream; off it, ticking one ENTERS the live lane rather than doing nothing — the
-// ticked box is already part of openStream()'s initial overrides, so the overlay is on in the
-// first frame. They get their own handler rather than onControlsChanged so a toggle mid connect
-// (ws not yet readyState 1) can't fall through to the snapshot / wasm-auto-enable branches — an
-// overlay never applies to a baked PNG or the in-browser tier.
+// Overlay toggles are daemon-rendered: on the live lane they push setOverrides; off it, ticking one
+// enters the live lane (already part of openStream()'s initial overrides). A separate handler so a
+// toggle mid-connect can't fall through to the snapshot / wasm branches.
 function onOverlayChanged() {
-    // Overlays are part of overrides(), so the page URL and the export links have to be re-synced
-    // like any other control — otherwise the ticked box is unshareable and Back can't restore it.
+    // Overlays are part of overrides(), so re-sync the page URL and export links.
     refreshLinks();
     if (live && live.checked) {
         if (ws && ws.readyState === 1) {
@@ -4943,8 +4232,7 @@ function onOverlayChanged() {
         }
         return;
     }
-    // Not on the daemon lane yet. Only a *check* starts it: unticking an already-off overlay from
-    // the snapshot lane shouldn't drag the visitor into Live Compose.
+    // Only a check starts Live; unticking from the snapshot lane must not.
     if (anyOverlayChecked() && live && !live.disabled) setMode("live");
 }
 function anyOverlayChecked() {
@@ -4955,19 +4243,13 @@ function anyOverlayChecked() {
 Array.prototype.forEach.call(overlayToggles, function (el) {
     el.addEventListener("change", onOverlayChanged);
 });
-// Author-declared **named knobs** (label, count, colour, …) re-render on edit (text/number
-// debounce via "input", toggles "change"). Unlike the app-theme selector and detected-feature
-// toggles below, these ARE honoured by the in-browser Wasm tier (its `catalogOverride*` seeds
-// from the `knob.<key>` patch), so a knob edit drives whichever transport is live: the Wasm
-// iframe when it's active (or auto-enable it on a static published catalog), the daemon stream
-// when Live is up, or a `/render` snapshot when the session can re-render.
-// A closed value-set knob (`previewOverrideChoice`) renders as a <select>, and a <select> silently
-// drops an assignment it has no option for — `.value` becomes "". That matters because "" is a
-// REAL value for a string knob (a cleared label, a variant seeded empty), so it would be sent as
-// `knob.<key>=` rather than ignored: opening `?knob.size=xxl` would render the wrong override
-// instead of the stale one it names. The server already keeps an unknown *baked* value by adding
-// it as an option; this is the same courtesy for a value that only ever existed in the URL — a
-// hand-written link, or one from before a value was renamed.
+// Named knobs re-render on edit (text/number via "input", toggles via "change"). Unlike the
+// app-theme selector and feature toggles, the Wasm tier honours them, so an edit drives whichever
+// transport is live.
+//
+// A closed value-set knob renders as a <select>, which turns an unknown assigned value into "", and
+// "" is a real string-knob value. So add a URL-only value (hand-written, or since renamed) as an
+// option, as the server does for an unknown baked value.
 function adoptChoiceValue(el: Control, value: string) {
     if (!(el instanceof HTMLSelectElement) || value === "") return;
     for (var i = 0; i < el.options.length; i++)
@@ -4977,28 +4259,21 @@ function adoptChoiceValue(el: Control, value: string) {
     option.textContent = value;
     el.insertBefore(option, el.firstChild);
 }
-// Which transport will carry a knob edit. Resolved BEFORE the URL sync rather than inline in the
-// dispatch below, because the answer decides who owns the history entry — see [discrete] in
-// onKnobEdited.
+// Which transport will carry a knob edit, resolved before the URL sync because it decides who owns
+// the history entry (see onKnobEdited).
 function knobRoute() {
     if (wasmActive()) return "wasm";
     if (live.checked && ws && ws.readyState === 1) return "live";
     if (canRenderOverrides) return "snapshot";
-    // A published catalog can't re-render on the server, but its in-browser app can apply the
-    // knob — auto-enable the Wasm tier and let its load carry the edit (wasmInitialSrc bakes the
-    // patch into the fragment), mirroring the display-axis auto-enable in onControlsChanged.
+    // A published catalog can't re-render server-side but its in-browser app can: auto-enable Wasm
+    // and let its load carry the edit (wasmInitialSrc bakes the patch into the fragment).
     if (staticSnapshot && wasmToggle) return "enable-wasm";
     return "none";
 }
-// [discrete] marks an edit that earns its own history entry (a value picked from a closed set),
-// as opposed to a continuous one (typing a label) that replaces.
-//
-// The `enable-wasm` route writes no history here at all — not a push, and not the replace a
-// non-discrete edit would otherwise do. That path ends in `setMode("wasm")`, and `enterMode`
-// syncs with a push of its own for the lane change. Doing anything here first spends the entry
-// the visitor came from on an intermediate `choice + png` state — one that cannot apply the
-// choice it names — and Back then lands on that instead of on the previous choice. Suppressing
-// only the push is not enough: the replace clobbers the same entry just as thoroughly.
+// [discrete] marks an edit that earns its own history entry (a closed-set pick); continuous edits
+// replace. The `enable-wasm` route writes no history here at all: `enterMode` pushes for the lane
+// change, and a push or replace here would spend the visitor's previous entry on an intermediate
+// state.
 function onKnobEdited(discrete: boolean) {
     var route = knobRoute();
     if (discrete && route !== "enable-wasm") urlPush = true;
@@ -5028,18 +4303,14 @@ controls(".cp-knob").forEach(function (el) {
     el.addEventListener(
         el.type === "checkbox" ? "change" : "input",
         function () {
-            // A closed value-set knob renders as a <select>, and picking from it is a DISCRETE choice —
-            // like a lane switch or a theme pick — so it earns a history entry and Back returns to the
-            // previously chosen value. A typed knob stays continuous and replaces instead, or one edit
-            // of a label would bury the page under an entry per keystroke. See `urlPush`.
+            // Picking from a closed-set <select> is discrete (own history entry); typing stays
+            // continuous.
             onKnobEdited(el.tagName === "SELECT");
         },
     );
 });
-// The app-theme selector and detected-feature toggles route ONLY through the server daemon —
-// an app-declared theme provider is a server-side wrapper, and focus/gesture overlays are
-// daemon-rendered, neither of which the in-browser tier can produce — so they use a
-// daemon-only handler and never the wasm path.
+// The app-theme selector and feature toggles route only through the server daemon (provider themes
+// and focus/gesture overlays are server-side), never the wasm path.
 function onKnobChanged() {
     refreshLinks();
     if (live.checked && ws && ws.readyState === 1) {
@@ -5062,18 +4333,13 @@ if (themeChoice)
         if (chosenThemeProvider()) onKnobChanged();
         else onControlsChanged();
     });
-// Detected-feature toggles (Keyboard focus) re-render on the daemon like a knob — same routing,
-// never the wasm auto-enable path.
+// Detected-feature toggles re-render on the daemon like a knob.
 controls(".cp-feature").forEach(function (el) {
     el.addEventListener("change", onKnobChanged);
 });
 // The gesture a click asked to fire, consumed by whichever override builder runs for this render.
-//
-// Read-once on purpose (issue #5102). A gesture invocation is an EVENT — the daemon runs the
-// preview's handler once composition settles — so leaving it set would re-fire it on the next
-// theme change, knob edit or reload, and a "dismiss" that keeps happening is not a preview anyone
-// can read. Clearing here rather than after `onKnobChanged()` returns keeps the read and the clear
-// in one place, so an async render path cannot lose the value between them.
+// Read-once: an invocation is an event, so it must not re-fire on the next theme change, knob edit
+// or reload. Cleared at the read so an async render path cannot lose it.
 function takeGestureInvoke(): string {
     var holder = may<HTMLInputElement>("cp-gesture-invoke");
     if (!holder) return "";
@@ -5081,8 +4347,7 @@ function takeGestureInvoke(): string {
     holder.value = "";
     return value;
 }
-// Fire a gesture: stash the kind and re-render through the same daemon routing the feature toggles
-// use. Disabled with them — a session that cannot apply overrides cannot invoke a handler either.
+// Fire a gesture: stash the kind and re-render via the feature-toggle routing. Disabled with them.
 document
     .querySelectorAll<HTMLButtonElement>(".cp-gesture-invoke")
     .forEach(function (el) {
@@ -5114,21 +4379,12 @@ controls(".cp-rc-knob").forEach(function (el) {
         onRcKnobChanged,
     );
 });
-// ——— Address-bar state ————————————————————————————————————————————————————————————————————
+// Address-bar state. The page URL mirrors the controls using the /render override names, so the
+// viewer URL and the copyable render URL describe the same state. Only owned params are touched
+// (never `token` / `session`), and a control at its default removes its param.
 //
-// The viewer's controls already produce a shareable /render URL; until now the *page* URL said
-// nothing about them, so a bookmark of "this preview, Dynamic Dark, RTL, font scale 1.3"
-// reopened on the preview's defaults. The params are exactly the /render override names, so the
-// viewer URL and the copyable render URL describe the same state and a param learned from one
-// works in the other.
-//
-// Only the params below are ours: `token` / `session` (and anything else the server put on the
-// URL) are never touched, and a control returning to its default *removes* its param rather
-// than pinning a redundant value, so an untouched viewer keeps the clean URL it was opened
-// with.
-// Which parameters the viewer manages lives in `cli/serve-web/src/viewer/ownedParams.ts`.
-// `cpUrlState.sync` DROPS any owned parameter the caller does not supply, so over-claiming
-// deletes someone else's parameter on the next edit and under-claiming leaves a stale one behind.
+// Owned params live in `viewer/ownedParams.ts`. `cpUrlState.sync` drops any owned param the caller
+// does not supply, so over-claiming deletes another's param and under-claiming leaves stale ones.
 function ownsUrlParam(name: string) {
     return rules.ownsUrlParam(name);
 }
@@ -5138,21 +4394,13 @@ function currentMode() {
     );
     return checked ? checked.value : "png";
 }
-// Set before a discrete choice (a lane switch, a theme pick) so the sync it triggers PUSHES a
-// history entry — Back then returns to the previous lane/theme. Continuous edits (a slider, a
-// typed knob) leave it false and replace instead, so one drag can't bury the catalog page under
-// fifty entries. Consumed by the first sync that follows.
+// Set before a discrete choice (lane switch, theme pick) so the next sync pushes a history entry.
+// Continuous edits leave it false and replace. Consumed by the first sync that follows.
 var urlPush = false;
-// The query string as of the last moment the page and the address bar were reconciled — written by
-// the two functions that do the reconciling and by nothing else, so a Back/Forward restore can ask
-// what actually MOVED rather than assuming everything did (`rules.restoredInPlace`).
-//
-// Only these two, because only these two put the page and the URL in agreement: `syncUrl` writes
-// the controls out, `hydrateFromUrl` reads an entry in. A component that rewrites the URL on its
-// own — `InspectLayers` replacing `inspect`, `spec-compare.js` pushing `specView` — leaves this
-// STALE, and deliberately so: a stale value can only make the diff name more parameters than moved,
-// which spends a dispatch the page did not need. The opposite mistake, naming fewer, would skip one
-// it did.
+// The query string as of the last reconcile between page and address bar, so a Back/Forward restore
+// can ask what actually moved (`rules.restoredInPlace`). Written only by `syncUrl` and
+// `hydrateFromUrl`; components that rewrite the URL themselves leave it stale, which can only cause
+// an unneeded dispatch, never a skipped one.
 var reconciledSearch = location.search;
 function syncUrl() {
     var push = urlPush;
@@ -5162,19 +4410,14 @@ function syncUrl() {
     new URLSearchParams(query()).forEach(function (value, name) {
         if (ownsUrlParam(name)) values[name] = value;
     });
-    // A pinned frame cannot apply a theme override, but the page still carries the selection that
-    // led into revision history. Keep that descriptive state in the address bar while query()
-    // deliberately omits it from /render (which must request only the published PNG). Without
-    // this, the first unrelated URL sync stripped themeProvider and made revision scrubbing forget
-    // the visitor's theme even though the disabled Theme control plainly explains it is unapplied.
+    // A pinned frame cannot apply a theme override, but keep the selection in the address bar
+    // (query() omits it from /render) so revision scrubbing doesn't forget the visitor's theme.
     if (pinnedAt) {
         var pinnedParams = new URLSearchParams(location.search);
         var pinnedDefault = defaultThemeValue();
         ["themeProvider", "uiMode"].forEach(function (name) {
             var value = pinnedParams.get(name);
-            // …but not a `uiMode` that merely spells out the baked theme. Carrying that forward
-            // would re-pin, on every sync, exactly the redundant parameter the rest of this
-            // function exists to drop.
+            // ...but not a `uiMode` that merely spells out the baked theme.
             if (
                 value &&
                 (name !== "uiMode" || rules.pinsTheme(value, pinnedDefault))
@@ -5183,9 +4426,7 @@ function syncUrl() {
         });
     }
     if (scrollLong && scrollLong.checked) values.scroll = "long";
-    // The exploded view and its knobs, written from the same helper the render URL uses so the
-    // page's own address, the copied link and the fetched bytes can never disagree about the
-    // angle on screen.
+    // Written from the same helper the render URL uses, so address, copied link and bytes agree.
     if (explodeOn()) {
         new URLSearchParams(explodeQuery()).forEach(function (value, name) {
             values[name] = value;
@@ -5193,37 +4434,25 @@ function syncUrl() {
     }
     var mode = currentMode();
     if (mode !== "png") values.mode = mode;
-    // The vector lane, but never alongside `exploded` — the 3D view IS a view of the vector export
-    // and turns the lane on by itself, so naming both would pin a parameter that the other one
-    // already implies and that the way back out of 3D has to reason about (see `explodeEnabledSvg`
-    // in `hydrateFromUrl`).
+    // The vector lane, but never alongside `exploded`, which implies it (see `explodeEnabledSvg`).
     if (svgOn() && !explodeOn()) values.svg = "1";
-    // How the render is framed. Only the departure from the default is written: `fit` is what
-    // every page opens on, and pinning it would put a parameter on every copied link.
+    // Only the departure from the default `fit` is written.
     if (rules.zoomMode(root.getAttribute("data-zoom")) === "width")
         values.zoom = "width";
     var sizeModeEl = may<HTMLSelectElement>("cp-sizeMode");
     if (sizeModeEl && sizeModeEl.value) values.sizeMode = sizeModeEl.value;
-    // The spec lane's comparison view (diff / triptych / slider). Re-emitted on every sync because
-    // `sync` drops any owned param the values don't supply — spec-compare.js pushes it the moment
-    // it is picked, and this is what stops the next knob edit from clearing it again. Only while
-    // the lane is actually up: `?specView=` on a page showing a render describes nothing.
-    // `viewParam` — not a literal — decides what may go unsaid, so the omitted view is whichever
-    // one the lane opens on rather than whichever one it opened on in 2025 (#4376).
+    // The spec lane's comparison view. Re-emitted on every sync because `sync` drops owned params
+    // not supplied (spec-compare.js pushes it on pick). Only while the lane is up. `viewParam`
+    // decides what the default (omitted) view is.
     var specView = window.cpSpecCompare
         ? viewParam(window.cpSpecCompare.view())
         : "";
     if (mode === "spec" && specView) values.specView = specView;
-    // Which source that pair (and the strip under the render) is taken against. Unlike the view
-    // it is NOT gated on the lane: the picker keeps its press when the lane closes and the strip
-    // keeps following it, so the parameter describes the page in every mode. `sourceParam` — not a
-    // literal — decides what may go unsaid: the default is whichever source the server pressed.
+    // The source the pair and strip are taken against. Not gated on the lane: the picker and strip
+    // keep it when the lane closes. `sourceParam` omits the server's default.
     var specSource = specSourceParam();
     if (specSource) values.specSource = specSource;
-    // Which recording is playing, on the same terms: only while the lane is up (`?motion=` beside a
-    // render describes nothing), and only past the first, which is what the lane opens on anyway.
-    // Without it a multi-capture preview's shared link always restored the FIRST capture, so the
-    // page someone sent was not the page they were looking at.
+    // Which recording is playing: only while the lane is up, and only past the first (the default).
     if (mode === "motion" && motionOptions.length > 1) {
         var pickedMotion = motionPickedId();
         if (pickedMotion && motionPicked() !== motionOptions[0])
@@ -5231,9 +4460,8 @@ function syncUrl() {
     }
     window.cpUrlState.sync(values, ownsUrlParam, !push);
     reconciledSearch = location.search;
-    // Revision destinations are server-rendered, but the visitor can choose a theme without a
-    // navigation. Keep every revision/current link aligned with that live URL state so entering or
-    // leaving a pin never drops the selection the Theme chip describes.
+    // Revision links are server-rendered, but a theme can change without navigation; keep them
+    // aligned with the live URL state.
     document
         .querySelectorAll<HTMLAnchorElement>(".cp-revision, .cp-pinned-current")
         .forEach(function (link) {
@@ -5246,9 +4474,8 @@ function syncUrl() {
             link.href = destination.href;
         });
 }
-// What the controls hold when the URL names nothing — captured after the server markup and the
-// sticky-theme script have had their say, so Back out of a choice restores the page as it first
-// opened rather than whatever the tab's remembered theme was last written with.
+// What the controls hold when the URL names nothing, captured after the server markup and the
+// sticky-theme script, so Back out of a choice restores the page as first opened.
 var initialTheme = themeChoice ? themeChoice.value : "";
 var initialThemeActive = themeChoice
     ? themeChoice.getAttribute("data-theme-active")
@@ -5264,11 +4491,8 @@ function setSizeInput(id: string, px: string | null) {
 // does NOT carry has to reset its control — leaving the live value would make the restored page
 // disagree with its own URL.
 /**
- * Whether [mode] names a lane this page can actually be put into — an offered, enabled mode radio.
- *
- * The same test the bookmarked-mode guard applies at the bottom of this file, and for the same
- * reason: `?mode=` is what a URL asked for, not what the page will show. A stale or hand-shared
- * mode naming a lane this session does not offer leaves the snapshot on screen.
+ * Whether [mode] names a lane this page can enter (an offered, enabled mode radio). `?mode=` is a
+ * request; an unavailable lane leaves the snapshot on screen.
  */
 function laneIsEnterable(mode: string | null): boolean {
     if (!mode) return false;
@@ -5289,10 +4513,8 @@ function hydrateFromUrl(popped: boolean) {
         if (fsVal) fsVal.textContent = scale ? fs.value : "default";
     }
     if (scrollLong) scrollLong.checked = q.get("scroll") === "long";
-    // The exploded view restores from the URL like every other axis, so a shared
-    // `?exploded=1&explodeTilt=40` link opens on the picture it names and Back/Forward walks the
-    // angles someone tried. A knob the entry doesn't carry resets to its authored default rather
-    // than keeping the live value, which would leave the page disagreeing with its own address.
+    // The exploded view restores from the URL like every other axis. A knob the entry doesn't carry
+    // resets to its authored default.
     if (explodeToggle) {
         var explodeWanted = explodeParamOn(q.get("exploded"));
         explodeToggle.setAttribute(
@@ -5303,58 +4525,45 @@ function hydrateFromUrl(popped: boolean) {
         EXPLODE_KNOBS.forEach(function (pair) {
             var el = may<HTMLInputElement>(pair[0]);
             if (!el) return;
-            // Validate before assigning. `<input type="range">` runs the browser's value-sanitization
-            // algorithm on whatever it is given, and a value it can't parse — a stale
-            // `?explodeTilt=nope`, or one outside min..max — lands on the range's MIDPOINT, not on the
-            // authored default. The next refresh would then render a camera nobody asked for and
-            // rewrite the shared URL to match it, which is the opposite of the documented fallback.
+            // Validate before assigning: `<input type="range">` sanitizes an unparseable value to
+            // its midpoint, not the authored default, which would then be rewritten into the shared
+            // URL.
             var raw = q.get(pair[1]);
             var num = raw === null || raw === "" ? NaN : Number(raw);
             if (isFinite(num)) {
-                // Finite but out of range is CLAMPED, not rejected — `ExplodedSvg` clamps the angles and
-                // the separation it is handed, so `?explodeTilt=76` renders at 75° from the endpoint and
-                // must open at 75° here too rather than snapping to the default and rewriting the URL
-                // out from under whoever shared it.
+                // Finite but out of range is clamped, matching `ExplodedSvg`, so `?explodeTilt=76`
+                // opens at 75°.
                 var min = parseFloat(el.getAttribute("min") || "");
                 var max = parseFloat(el.getAttribute("max") || "");
                 if (!isNaN(min) && num < min) num = min;
                 if (!isNaN(max) && num > max) num = max;
                 el.value = String(num);
             } else {
-                // Only a value the browser cannot parse falls back. Assigning it raw would be worse than
-                // useless: `<input type="range">` sanitizes an unparseable value to its MIDPOINT, so a
-                // stale `?explodeTilt=nope` rendered a camera nobody asked for.
+                // Only an unparseable value falls back to the default (see above).
                 el.value = el.getAttribute("data-cp-default") || el.value;
             }
             updateExplodeReadout(el);
         });
         syncExplodeControls();
-        // `?exploded=1` names a view of the VECTOR export, and the SVG lane has no URL param of its
-        // own (it is a format toggle, not a mode) — so the exploded param is what puts the page on
-        // `.svg`. Doing it here rather than at bootstrap covers Back/Forward too, and running before
-        // the first refreshSnapshot means a shared exploded link fetches the exploded SVG once
-        // instead of painting the flat PNG and replacing it. Leaving the view does NOT force the
-        // vector lane back off: the visitor may have been reading the plain SVG before they exploded
-        // it, and that is the state Back should return them to.
+        // `?exploded=1` names a view of the vector export, and SVG has no URL param of its own, so
+        // this puts the page on `.svg`. Done here (not at bootstrap) to cover Back/Forward, and
+        // before the first refreshSnapshot so the exploded SVG is fetched once. Leaving the view
+        // does not force SVG off.
         if (explodeWanted && svgToggle && !svgOn()) {
             explodeEnabledSvg = true;
             svgToggle.setAttribute("aria-pressed", "true");
             snapshotExt = ".svg";
             root.setAttribute("data-mode", "svg");
         } else if (!explodeWanted && explodeEnabledSvg && svgToggle) {
-            // Back out of an entry that 3D created: the vector lane has no URL parameter of its own,
-            // so without this the restored page keeps the SVG that 3D switched it to and shows a flat
-            // vector render the visitor never chose. Only when 3D is what turned it on.
+            // Back out of an entry 3D created: turn the SVG lane back off, but only if 3D turned it
+            // on.
             explodeEnabledSvg = false;
             svgToggle.setAttribute("aria-pressed", "false");
             snapshotExt = ".png";
             root.setAttribute("data-mode", "snapshot");
         }
     }
-    // The vector lane on its own, after the 3D block above has had its say: `exploded=1` turns the
-    // lane on by itself and remembers that it did, so an entry carrying both must not leave the
-    // toggle pressed by two owners. A restored entry that names neither puts the raster back,
-    // which is what makes Back out of the SVG lane land on the PNG the visitor came from.
+    // The vector lane on its own, after the 3D block: an entry naming neither puts the raster back.
     if (svgToggle && !explodeOn()) {
         var wantSvg = q.get("svg") === "1";
         if (wantSvg !== svgOn()) {
@@ -5363,16 +4572,13 @@ function hydrateFromUrl(popped: boolean) {
             root.setAttribute("data-mode", wantSvg ? "svg" : "snapshot");
         }
     }
-    // …and the framing. Applied on the first pass too (the load-time `applyZoom("fit")` runs
-    // before this), so a shared `?zoom=width` link opens at full width rather than snapping to it.
+    // Applied on the first pass too, so `?zoom=width` opens at full width.
     applyZoom(rules.zoomMode(q.get("zoom")));
     ["focus", "gestures"].forEach(function (f) {
         var el = may<HTMLInputElement>("cp-" + f);
         if (el) el.checked = q.get(f) !== null;
     });
-    // Overlays ride the URL now that they're collected outside the live lane, so a shared
-    // `?touchOverlay=true&mode=live` link opens with the box already ticked (and Back restores it).
-    // Only `true` is ever written, so presence-with-that-value is the whole state.
+    // Overlays ride the URL; only `true` is ever written.
     ticks(".cp-overlay").forEach(function (el) {
         el.checked = q.get(el.id.replace(/^cp-/, "")) === "true";
     });
@@ -5387,13 +4593,9 @@ function hydrateFromUrl(popped: boolean) {
         setSizeInput("cp-maxH", q.get("maxHeightPx"));
         if (typeof syncSizeRows === "function") syncSizeRows();
     }
-    // The axes this page will not let the URL drive, because its image did not apply them — scoped
-    // to the lane this pass is restoring INTO, and to the control family that lane forwards.
-    // Withholding describes what the server sent, so it binds the server-rendered lanes and, on an
-    // in-browser one, still binds the half of the controls that lane cannot reach. Read per pass,
-    // not captured, because Back/Forward can land on an entry in a different lane. `mode` is a
-    // REQUEST, so it only counts when the lane can actually be entered — same radio the
-    // bookmarked-mode guard consults at the bottom of this file.
+    // The axes this page won't let the URL drive because its image did not apply them, scoped to
+    // the lane this pass restores into and the controls that lane forwards. Read per pass
+    // (Back/Forward can change lane). `mode` only counts when the lane can be entered.
     var wantedLane = q.get("mode");
     var unseeded = effectiveUnseeded(
         unseededOverrides(root),
@@ -5431,9 +4633,8 @@ function hydrateFromUrl(popped: boolean) {
             el.checked = isChecked(value);
         else el.value = value;
     });
-    // The theme select is seeded (from the URL first, then this tab's remembered choice) by the
-    // sticky script before this file runs, so the initial pass must not touch it. A Back/Forward
-    // pass owns it: the entry's theme, or the one the page opened with when it names none.
+    // The sticky script seeds the theme select before this file runs, so the initial pass leaves it
+    // alone. Back/Forward owns it: the entry's theme, or the page's opening one.
     if (popped && themeChoice) {
         var provider = q.get("themeProvider");
         var uiMode = q.get("uiMode");
@@ -5447,10 +4648,7 @@ function hydrateFromUrl(popped: boolean) {
             if (choice && o.value === choice) offered = true;
         });
         themeChoice.value = (offered ? choice : initialTheme) || "";
-        // Restoring an entry whose theme IS the baked default restores "nobody has picked", not a
-        // pick that happens to agree with the default — otherwise stepping Back through a
-        // dark→light round trip lands on a page that reads as pinned and drops the spec baseline
-        // all over again, this time with no parameter left in the URL to explain it.
+        // Restoring the baked-default theme restores "nobody has picked", not a pinned pick.
         themeChoice.setAttribute(
             "data-theme-active",
             offered
@@ -5460,27 +4658,15 @@ function hydrateFromUrl(popped: boolean) {
                 : initialThemeActive || "0",
         );
         syncThemeBar();
-        // …and the page around the stage, when the Page theme setting says to follow the choice.
-        // Setting `.value` fires no `change`, so the sticky script's handler — which is what keeps
-        // the chrome in step when a theme is PICKED — never runs on this path. Without this, going
-        // Back from Dark to a Light entry re-rendered the preview light inside a page still pinned
-        // dark. The same call the format-comparison pop handler already makes.
-        //
-        // The ACTIVE choice, not the displayed one. A viewer opened with no theme in the URL and
-        // none remembered shows the preview's baked default while `data-theme-active="0"` says
-        // nobody chose it, and the chrome correctly follows the OS. Restoring that entry re-sets
-        // the attribute to "0" above, so passing `.value` here would pin the page to a baked mode
-        // the visitor never picked — the one state Back is supposed to return them to.
-        // `activeThemeChoice()` yields "" for it, which paints neither class and hands the page
-        // back to `prefers-color-scheme`.
+        // ...and the page chrome, when the Page theme setting follows the choice. Setting `.value`
+        // fires no `change`, so call it here (as the format-comparison pop handler does). Pass the
+        // active choice, not the displayed one: with `data-theme-active="0"` it is "", handing the
+        // page back to `prefers-color-scheme`.
         if (window.cpPageTheme) window.cpPageTheme.follow(activeThemeChoice());
     }
-    // The Remote Compose player pick already rode the URL as `rcPlayer=<id>` (query() emits it,
-    // URL_STATE_PARAMS owns it) but nothing ever read it back, so a shared `?rcPlayer=cmp-jvm`
-    // link opened on the default player under a combo naming it — the link described a render the
-    // page wasn't showing. Restore it here, from the offered options only, so an unknown or
-    // unavailable id falls back to this preview's default rather than pinning a dead param. A
-    // legacy spelling (`java`, `embedded`, `js`, `rcplayer-*`) restores the player it named.
+    // Restore `rcPlayer=<id>` from the offered options only, so an unknown id falls back to the
+    // default. Legacy spellings (`java`, `embedded`, `js`, `rcplayer-*`) restore the player they
+    // named.
     if (rcDefaultBackend) {
         var wantedPlayer = q.get("rcPlayer")
             ? rules.normalizeRcPlayer(q.get("rcPlayer"))
@@ -5498,27 +4684,21 @@ function hydrateFromUrl(popped: boolean) {
         rcPlayerBackend =
             (playerOffered ? wantedPlayer : rcDefaultBackend) || "";
     }
-    // Restore the picked source FIRST, for the reason the peer chips press before they enter:
-    // `pickSpecSource` returns early while the page is not on the lane, so a bookmarked
-    // `?mode=spec&specSource=parallel` opens straight onto the paired render rather than on the
-    // kit and then re-requesting. On Back/Forward the lane may already be up, and then the pick
-    // re-enters it on the restored pair. A URL naming no source (or one this lane does not offer)
-    // presses the default, which is also what clears a stale press on the way Back.
+    // Restore the picked source before entering the lane (as the peer chips do), so
+    // `?mode=spec&specSource=parallel` opens directly on that pair. On Back/Forward with the lane
+    // up, the pick re-enters it. No or unknown source presses the default.
     if (specSourceButtons.length)
         pickSpecSource(
             specSourceButton(
                 sourceForParam(specSourceList(), q.get("specSource") || ""),
             ),
         );
-    // Restore the spec lane's comparison view before the lane itself is entered (the bookmarked
-    // `?mode=spec` lands at the very bottom of this file), so a shared
-    // `?mode=spec&specView=slider` link opens on the wipe rather than flashing the plain spec.
+    // Restore the comparison view before the lane is entered (at the bottom of this file), so
+    // `?mode=spec&specView=slider` opens on the wipe.
     if (window.cpSpecCompare)
         window.cpSpecCompare.hydrate(q.get("specView") || "");
-    // Same ordering, same reason: the bookmarked `?mode=motion` is applied at the very bottom of
-    // this file, so selecting the named capture first is what makes openMotion() request the shared
-    // recording instead of loading the first one and swapping a moment later. A URL that names no
-    // capture falls back to the first, which is where the lane opens.
+    // Same ordering: select the named capture before `?mode=motion` is applied, so openMotion()
+    // loads it directly. No capture named falls back to the first.
     if (motionSelect && !pickMotion(q.get("motion") || ""))
         motionSelect.selectedIndex = 0;
     syncLaneSelect();
@@ -5526,19 +4706,15 @@ function hydrateFromUrl(popped: boolean) {
     reconciledSearch = location.search;
 }
 hydrateFromUrl(false);
-// The strip's baseline is server-rendered from the same default the picker is; this reconciles
-// the two when hydration pressed something else.
+// Reconcile the server-rendered strip baseline when hydration pressed another source.
 syncSpecStrip();
-// Read the bookmarked lane NOW, before the first refreshSnapshot's sync clears a param no
-// control is holding yet. It is applied at the very bottom of this file, once the snapshot every
-// lane falls back to has been requested.
+// Read the bookmarked lane now, before the first sync clears a param no control holds yet. Applied
+// at the bottom of this file, after the fallback snapshot has been requested.
 var initialUrlMode = new URLSearchParams(location.search).get("mode") || "";
 if (window.cpUrlState) {
     window.cpUrlState.onPop(function () {
-        // The vector lane is a snapshot FORMAT rather than an override, so the paths below cannot
-        // see that it moved: `onControlsChanged` re-renders for a fresh override, and a fully
-        // static published catalog does not re-render at all. Read across the restore and ask for
-        // the frame directly when the entry named a different format.
+        // The vector lane is a snapshot format, not an override, so the paths below can't see it
+        // moved; request the frame directly when the format changed.
         var wasSvg = svgOn();
         var wasSearch = reconciledSearch;
         hydrateFromUrl(true);
@@ -5549,47 +4725,30 @@ if (window.cpUrlState) {
         // whichever transport is already up. Either way nothing reloads.
         if (wanted !== mode) setMode(wanted);
         else if (svgMoved) refreshSnapshot();
-        // Same lane, and Motion is the one where that still means something changed: it carries no
-        // overrides for onControlsChanged() to push and no transport to push them over, but a
-        // restored entry can name a different capture. hydrateFromUrl() has already pressed that
-        // button, so without this the picker would describe a recording that is not on screen.
+        // Same lane, but Motion can still change capture, which hydrateFromUrl() already pressed;
+        // play it.
         else if (wanted === "motion") playMotion();
-        // …and an entry that moved only the axes hydration finishes by itself is DONE. Sending it
-        // through the render controls anyway is not the harmless no-op it looks like: with no
-        // daemon and no re-renderable catalog, `onControlsChanged` falls back to `setMode("wasm")`,
-        // so undoing Fit width or stepping back to a previous spec source left the lane, mounted
-        // the Wasm app and pushed an entry of its own — Back moving the page FORWARD. The links are
-        // still refreshed, on the same terms as every other path through this handler.
+        // An entry that moved only axes hydration finishes itself is done. Routing it through the
+        // render controls is not a no-op: without a re-renderable session `onControlsChanged` falls
+        // back to `setMode("wasm")`, pushing a new entry (Back moving forward). Links are still
+        // refreshed.
         else if (rules.restoredInPlace(wasSearch, location.search))
             refreshLinks();
         else onControlsChanged();
     });
 }
-// Reconcile the control enabled-state + the toggle's initial look with the session's
-// capabilities (matches the server-rendered markup; keeps them in sync after hydration).
+// Reconcile control enabled-state and the toggle's look with the session's capabilities after
+// hydration.
 syncServerControls();
 syncOverlayToggles();
 updateLiveToggle();
-// Before the first snapshot goes out, so a deep link that already names a theme never paints the
-// baked verdict — not even for the one frame it would take refreshLinks() to correct it.
+// Before the first snapshot, so a deep link naming a theme never paints the baked verdict.
 syncSpecBaseline();
 refreshSnapshot();
-// A bookmarked `?mode=live` / `wasm` / `rc` opens in that lane — but only once the initial
-// snapshot has LANDED, not merely been requested.
-//
-// The stage's <img> is emitted with no src: the refreshSnapshot() above is the only thing that
-// will ever put pixels in it. Entering an interactive lane cancels any in-flight snapshot
-// (cancelSnapshotLoading bumps the generation), so switching immediately would discard that one
-// render and leave a cold bookmarked load looking at an empty stage behind a lane that may take
-// seconds to paint — or that fails and shows an activation error over nothing. Waiting for the
-// frame first makes the bookmark land in exactly the state a visitor reaches by loading the page
-// and clicking the toggle, which is the whole claim.
-//
-// Bounded, because the snapshot may never settle: a render that errors sets no src (so neither
-// event fires) and one that hangs would strand the bookmark on the snapshot lane forever.
-// A mode this session doesn't offer (no daemon, no Wasm app) is ignored rather than entering a
-// lane whose control is absent or disabled — the page stays on the snapshot and the param clears
-// on the next sync.
+// A bookmarked `?mode=live` / `wasm` / `rc` opens in that lane, but only once the initial snapshot
+// has landed: entering an interactive lane cancels the in-flight snapshot, which would leave an
+// empty stage behind a lane that may be slow or fail. Bounded, since a failed or hung render may
+// never settle. A mode this session doesn't offer is ignored; the param clears on the next sync.
 (function () {
     var wanted = initialUrlMode;
     if (!wanted || wanted === "png" || wanted === currentMode()) return;
@@ -5607,10 +4766,9 @@ refreshSnapshot();
     }
     img.addEventListener("load", enterBookmarkedMode);
     img.addEventListener("error", enterBookmarkedMode);
-    // A snapshot that FAILS assigns no src, so neither <img> event fires. Settling on the request
-    // itself (see snapshotSettled) enters the bookmarked lane immediately instead of after the
-    // timeout below — which matters for a link like `?mode=wasm&fontScale=2.0` on a baked-only
-    // session: the snapshot is refused (#3449), but the in-browser Wasm lane can apply the override.
+    // A failed snapshot assigns no src, so settle on the request itself (see snapshotSettled)
+    // rather than waiting for the timeout. E.g. `?mode=wasm&fontScale=2.0` on a baked-only session:
+    // the snapshot is refused, but Wasm can apply the override.
     onSnapshotSettled = enterBookmarkedMode;
     setTimeout(enterBookmarkedMode, 8000);
 })();

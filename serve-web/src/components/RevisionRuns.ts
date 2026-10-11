@@ -1,22 +1,7 @@
-// `<cp-revision-runs>` — mini render thumbnails in the viewer's Revision menu, one per distinct
-// look, so a reader can see at a glance which of a preview's publishes actually differ.
-//
-// The menu lists every publish of the catalog, which is not the same list as "the versions of THIS
-// preview": a delivery branch is regenerated on every catalog change, so a preview can sit through
-// ten consecutive publishes without a pixel moving and the menu will still offer ten rows that all
-// open the same image. This element marks the top row of each stretch that shares its bytes and
-// leaves the rest unmarked, which turns the wall of dates into "these two are different, and here
-// is what each one looks like".
-//
-// It DECORATES server-rendered markup rather than owning it. The rows, their hrefs and their order
-// are the revision menu's business and are already correct; adding a second renderer for them would
-// mean two places that must agree about which row is pinned. So the server emits the rows and this
-// hangs an image on the ones the server also told it are run heads — and when the fetch fails the
-// menu is exactly what it was before, which is a working control.
-//
-// Lazy on purpose: the answer costs a delivery-branch read, and most visits never open this menu.
-// Nothing is fetched until the disclosure is opened, and the result is kept for the life of the
-// page.
+// `<cp-revision-runs>` — thumbnails in the viewer's Revision menu marking the head of each run of
+// publishes that render identically, so a reader sees which publishes actually differ. Decorates
+// the server-rendered rows rather than owning them, so a failed fetch leaves a working menu. Lazy:
+// nothing is fetched until the disclosure opens, and the result is kept for the page's life.
 
 import { h, type VNode } from "../vue.js";
 import { customElement } from "../controllerElement.js";
@@ -44,11 +29,8 @@ export class RevisionRuns extends VueElement {
     }
 
     /**
-     * Watch the enclosing disclosure and answer its first opening.
-     *
-     * `toggle` rather than a click handler on the summary: a `<details>` can also be opened by
-     * find-in-page, by a keyboard activation, or by the browser restoring its state, and only the
-     * event covers all of them.
+     * Answer the disclosure's first opening via `toggle`, which also covers find-in-page, keyboard
+     * activation and state restoration.
      */
     private install(): void {
         if (!this.isConnected) return;
@@ -73,11 +55,8 @@ export class RevisionRuns extends VueElement {
         if (!template) return;
         const payload = this.inline() ?? (await this.fetched());
         if (!payload) return;
-        // ONE window check, before anything is claimed, and deliberately ahead of the split below.
-        // Putting it inside the marker path would leave the single-run branch unguarded — and that
-        // branch makes the boldest claim of the two ("All N publishes render identically"), so a
-        // page whose catalog republished under it would state the strongest possible falsehood
-        // about a list of rows the answer was never about.
+        // One window check before anything is claimed, guarding both branches — especially the
+        // single-run claim ("All N publishes render identically").
         if (!this.describesThisPage(payload)) return;
         const view = runsViewOf(payload, template);
         if (view) {
@@ -107,11 +86,8 @@ export class RevisionRuns extends VueElement {
     }
 
     /**
-     * Whether [payload] is about the rows on this page.
-     *
-     * The menu is fetched lazily, so a catalog that republished since the page was rendered answers
-     * over a newer window: its newest publish is a row this list does not have. The newest row is a
-     * run head by construction, so comparing those two shas is the whole check.
+     * Whether [payload] is about this page's rows: a catalog that republished since render answers
+     * over a newer window. The newest row is always a run head, so comparing those shas suffices.
      */
     private describesThisPage(payload: RenderRunsPayload): boolean {
         const newest = this.rows()[0]?.getAttribute("data-revision");
@@ -119,12 +95,8 @@ export class RevisionRuns extends VueElement {
     }
 
     /**
-     * An INLINE payload, so a fixture (and any offline viewer) draws the markers without reaching
-     * the runs lane.
-     *
-     * Same reasoning as `<cp-history-menu>`'s: without it the preview-harness capture of this menu
-     * would look identical whether the markers work or the whole feature is deleted, which is no
-     * visual coverage at all.
+     * An inline payload so fixtures and offline viewers draw the markers without the runs lane,
+     * giving the harness capture real coverage.
      */
     private inline(): RenderRunsPayload | null {
         const node = document.getElementById("cp-revision-runs-data");
@@ -147,9 +119,7 @@ export class RevisionRuns extends VueElement {
             const response = await fetch(runsUrl, {
                 credentials: "same-origin",
             });
-            // A 404 is the honest answer for a catalog whose branch could not be asked, and for one
-            // with no delivery branch at all. Neither is worth saying anything about: the menu is
-            // already a working control without this.
+            // A 404 means no branch could be asked or none exists; the menu works without this.
             if (!response.ok) return null;
             return (await response.json()) as RenderRunsPayload | null;
         } catch {
@@ -158,11 +128,8 @@ export class RevisionRuns extends VueElement {
     }
 
     /**
-     * Hang a thumbnail on each run head.
-     *
-     * Rows are matched by `data-revision`, the delivery sha the server stamps on every row, rather
-     * than by parsing `?at=` out of the href — the *current* row deliberately carries no pin, so
-     * href-parsing would silently never mark the one row that is always a run head.
+     * Hang a thumbnail on each run head, matched by the row's `data-revision` sha rather than
+     * parsing `?at=` (the current row carries no pin).
      */
     private decorate(view: RunsView): void {
         const list =
@@ -171,9 +138,8 @@ export class RevisionRuns extends VueElement {
             );
         const rows = this.rows();
         if (!list || !rows.length) return;
-        // Marks the list as decorated, which is what lets the stylesheet indent the rows that are
-        // NOT run heads. Absence of `data-run-head` cannot carry that on its own: it is equally the
-        // state of every row before the fetch lands, and of a menu whose fetch never succeeded.
+        // Marks the list decorated so the stylesheet can indent non-head rows; a missing
+        // `data-run-head` alone can't distinguish "not yet fetched".
         list.setAttribute("data-runs", "on");
         let seen = 0;
         for (const row of rows) {

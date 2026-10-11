@@ -1,32 +1,11 @@
-// The Model Context Protocol server — `compose-preview mcp serve`, as its own module in this
-// repository.
+// The Model Context Protocol server (`compose-preview mcp serve`) as its own module. It lives here
+// per `docs/design/REPOSITORY_LAYERS.md`: it runs a Ktor server for the UI-builder Streamable HTTP
+// endpoint, which makes it layer 2. Its layer-1 dependencies (`daemon-core`, `render-session-api`,
+// `daemon-client`, `render-matrix`) are published coordinates across the repository boundary.
 //
-// **This module moved here**, from compose-ai-tools, and the reason is the layer rule itself:
-// `docs/design/REPOSITORY_LAYERS.md` places a module by *does it need an HTTP server, a browser,
-// or the UI builder to do its job?*, and this one runs a Ktor server for the UI-builder Streamable
-// HTTP endpoint plus everything the MCP Kotlin SDK's server brings with it. compose-ai-tools#5176
-// decided that against the alternative — writing the rule a carve-out saying MCP is "a transport
-// for the CLI, not a preview surface" — because a rule with an exception in it is a weaker rule,
-// and the exception would be the thing the next module argues from.
-//
-// What that costs, stated rather than discovered later: the agent entry point now lives in the
-// repository that owns the web UI, and what this module uses from layer 1 — `daemon-core`,
-// `render-session-api`, `daemon-client`, `render-matrix` — is published surface across a
-// repository boundary instead of a project dependency. That is the same trade `serve` made in
-// the other direction, and it is why the CLI's offline `render-matrix` command was lifted OUT of
-// `:mcp` into
-// its own coordinate first (compose-ai-tools#5188): nothing that leaves for layer 2 may be
-// something layer 1 still calls.
-//
-// Package note: the sources keep `ee.schimke.composeai.mcp`, exactly as `:server` kept
-// `ee.schimke.composeai.cli.serve` when it moved. The rename is a separately reviewed change in
-// both repositories, and keeping it is what makes this move source-compatible — a reader diffs
-// the two trees and sees no edits at all.
-//
-// Artifact-name change, deliberate, the `:render-host` lesson applied in the other direction: it
-// published as `ee.schimke.composeai:mcp` from compose-ai-tools and now ships in the
-// `compose-preview-mcp` distribution from here. The old coordinate stays resolvable at its final
-// 1.x for anyone pinned to it; this repository publishes no replacement Maven coordinate.
+// Sources keep the `ee.schimke.composeai.mcp` package (a rename is separate). It ships in the
+// `compose-preview-mcp` distribution; the old `ee.schimke.composeai:mcp` coordinate stays at its
+// last 1.x and no replacement Maven coordinate is published.
 plugins {
   application
   alias(libs.plugins.kotlin.jvm)
@@ -36,10 +15,8 @@ plugins {
 
 group = "ee.schimke.composeai"
 
-// The name this module's artifacts carry, which is not the Gradle project's. `archivesName` needs
-// it, and the release asset `compose-preview mcp serve` fetches is
-// `compose-preview-mcp-<version>.tar.gz` — the Gradle project is `:mcp`, so anything derived from
-// the project name would get `mcp`.
+// The artifact name (the Gradle project is `:mcp`); `compose-preview mcp serve` fetches
+// `compose-preview-mcp-<version>.tar.gz`.
 val publishedArtifactId = "compose-preview-mcp"
 
 kotlin {
@@ -52,9 +29,8 @@ kotlin {
 
 ktfmt { googleStyle() }
 
-// Same derivation as `:server` — `PLUGIN_VERSION` in CI, a patch-bumped SNAPSHOT off
-// `.release-please-manifest.json` locally. This module ships in lockstep with the server, so it
-// reads the same manifest rather than carrying a version line of its own.
+// Same derivation as `:server` (`PLUGIN_VERSION` in CI, a patch-bumped SNAPSHOT from
+// `.release-please-manifest.json` locally); ships in lockstep with the server.
 version =
   providers.environmentVariable("PLUGIN_VERSION").orNull
     ?: run {
@@ -71,11 +47,8 @@ application {
   mainClass.set("ee.schimke.composeai.mcp.DaemonMcpMain")
 }
 
-// The version this module reports in the MCP `initialize` handshake's `serverInfo.version`. Same
-// shape as `:server`'s `generateServeVersionResource` for `SERVE_VERSION`: both derive from
-// `project.version`, generated into a resource this module's own classloader reads at runtime
-// (`McpVersion.kt`), rather than the `"v0"` / `"v1"` literals a client's `initialize` used to see
-// regardless of which release was actually running.
+// The version reported in `initialize`'s `serverInfo.version`, generated into a resource read by
+// `McpVersion.kt` (like `:server`'s `generateServeVersionResource`).
 val generateMcpVersionResource =
   tasks.register("generateMcpVersionResource") {
     val outputDir = layout.buildDirectory.dir("generated/mcp-version-resource")
@@ -91,11 +64,10 @@ val generateMcpVersionResource =
 
 sourceSets.main.get().resources.srcDir(generateMcpVersionResource)
 
-// The `.rc` viewer MCP App (`mcp-app/rc-viewer.html`, issue #1237) inlines the TypeScript Remote
-// Compose player when it is served. It is the same bundle `:server` serves: rc-players'
-// `remote-compose-player-js-dist` from Central with `server/src/rc-player/inert-custom-host.js`
-// appended, because the viewer plays documents it did not write. Resolved here rather than taken
-// from `:server`, which would be a project dependency for one file.
+// The `.rc` viewer MCP App (`mcp-app/rc-viewer.html`) inlines the TypeScript Remote Compose player:
+// the same bundle `:server` serves (`remote-compose-player-js-dist` plus
+// `server/src/rc-player/inert-custom-host.js`), resolved here to avoid a project dependency for one
+// file.
 val rcPlayerJsDist =
   configurations.create("rcPlayerJsDist") {
     description = "The TypeScript Remote Compose player's browser bundle."
@@ -127,20 +99,14 @@ val stageRcViewerPlayer =
 
 sourceSets.main.get().resources.srcDir(stageRcViewerPlayer)
 
-// `archiveExtension = "tar.gz"` keeps the in-archive root as `compose-preview-mcp-<version>/`
-// rather than leaking `.tar.gz` into the directory name. Carried over from compose-ai-tools,
-// where the GitHub Release artifact this produces is what `compose-preview mcp serve` runs.
+// `tar.gz` keeps the archive root as `compose-preview-mcp-<version>/`.
 tasks.named<Tar>("distTar") {
   archiveExtension.set("tar.gz")
   compression = Compression.GZIP
 }
 
-// The same Java floor `:server`'s distribution carries, for the same launcher and the same reason:
-// `compose-preview mcp serve` execs `bin/compose-preview-mcp`, which resolves `java` from
-// `JAVA_HOME`/`PATH` and does not inherit the CLI's JVM. `:server`'s build file has the argument,
-// including why this is a file rather than a flag the start script answers; it is repeated here
-// rather than shared because the two distributions are assembled independently and a launcher must
-// find the file beside whichever binary it resolved.
+// The same Java floor `:server`'s distribution carries (see its build file for why it's a file).
+// Repeated rather than shared because each launcher looks beside the binary it resolved.
 val writeDistributionJavaMin =
   tasks.register("writeDistributionJavaMin") {
     description = "Write the distribution's Java floor for a launcher to preflight."
@@ -163,17 +129,12 @@ val writeDistributionJavaMin =
     }
   }
 
-// The UI-builder editor archive, for `design_open` (compose-ui-builder#364). Its MCP App shell is
-// the `ui://compose-ui-builder/editor` resource, and its Wasm, scripts, fonts and catalogs are
-// served from a loopback origin (`UiBuilderAssetOrigin`). The same coordinate `:server` unpacks,
-// resolved the same way: artifact-only from the release's ivy repository, or the included build's
-// `:ui-builder-web` under `-PcomposeUiBuilderDir`.
-//
-// Shipped as the ZIP, not unpacked. The server reads entries straight out of it, so the install
-// grows by the archive (~12 MB) rather than by what it unpacks to (~45 MB). The name is fixed, so
-// the runtime finds it without knowing the version; the version it serves under is the one the
-// archive's own manifest declares. An archive whose manifest has no `mcpApp` (3.69.0 and older)
-// ships inert: the tool is not registered.
+// The UI-builder editor archive, for `design_open`: its MCP App shell is
+// `ui://compose-ui-builder/editor`, with assets served from a loopback origin
+// (`UiBuilderAssetOrigin`). Resolved like `:server`'s (artifact-only from the release ivy repo, or
+// `:ui-builder-web` under `-PcomposeUiBuilderDir`). Shipped as the ZIP and read in place (~12 MB vs
+// ~45 MB unpacked) under a fixed name; the served version comes from the archive's manifest. An
+// archive without `mcpApp` ships inert.
 val uiBuilderWeb =
   configurations.create("uiBuilderWeb") {
     description = "Immutable Compose/Wasm UI-builder frontend archive, for design_open."
@@ -203,28 +164,18 @@ dependencies {
   implementation(libs.kotlinx.coroutines.core)
   implementation(libs.kotlinx.serialization.json)
   implementation(libs.mcp.kotlin.sdk.server)
-  // CIO hosts the optional remote UI-builder Streamable HTTP endpoint. The MCP SDK owns the
-  // protocol route (POST/GET/DELETE + SSE); this module only supplies the engine and auth bridge.
-  // It is also the dependency that makes this module layer 2 rather than layer 1.
+  // CIO hosts the optional remote UI-builder Streamable HTTP endpoint (the MCP SDK owns the
+  // protocol route); this dependency is what makes the module layer 2.
   implementation(libs.ktor.server.cio)
   // Okio-based file IO (`SystemFileSystem`) for descriptor reads + PNG/video byte reads.
   implementation(libs.composeai.common.io)
   implementation(libs.composeai.agent.grant.protocol)
   implementation(libs.composeai.ui.builder.protocol)
 
-  // `api` for the three that appear on this module's own public surface:
-  // `SupervisedDaemon.session` is a `RenderSession`, `SupervisedDaemon.client` is a
-  // `DaemonClient`, `DaemonSupervisor` takes a
-  // `DaemonClientFactory`, and the protocol message types are all over the tool implementations.
-  // `api` records that these types are part of this module's signatures rather than implementation
-  // details, even though the module now ships only inside its standalone distribution.
-  //
-  // Project dependencies became published coordinates in the move. That is the cost the layer rule
-  // charges for putting this module on the right side of the boundary, and it is why the version
-  // pin below matters: this module is compiled against a compose-ai-tools RELEASE, not against its
-  // main branch, so an API it needs must be in a release before it can be used here.
-  // The upstream coordinates below carry no version of their own; these platforms supply them.
-  // See the BOM block in the catalog for why.
+  // `api` for types on this module's public surface (`RenderSession`, `DaemonClient`,
+  // `DaemonClientFactory`, protocol messages). Compiled against a compose-ai-tools release, so an
+  // API must be released before it's usable here. Versions come from these platforms (see the
+  // catalog's BOM block).
   api(platform(libs.composeai.tools.bom))
   api(platform(libs.composeai.contracts.bom))
   api(platform(libs.composeai.daemon.bom))
@@ -251,22 +202,19 @@ dependencies {
   testImplementation(libs.ktor.server.test.host)
 }
 
-// JUnit 4, deliberately, unlike `:server`'s JUnit 5. These tests came with the module and assert
-// through Truth; converting ~1.5k lines of assertions is a separate change from moving them, and
-// doing both at once makes the move unreviewable — the lesson `PREVIEW_SERVER_SPLIT.md` records
-// from `:bundle-format`.
+// JUnit 4 (unlike `:server`'s JUnit 5): these tests use Truth, and converting them is a separate
+// change.
 tasks.withType<Test>().configureEach {
-  // Opt-in real-mode: `-Pmcp.real=true` flips the JUnit `Assume` gate in `RealMcpEndToEndTest`. The
-  // optional `-Pmcp.workdir=<path>` lets out-of-tree runs point the test at a different checkout;
-  // it defaults to the test's own working directory.
+  // `-Pmcp.real=true` enables `RealMcpEndToEndTest`; `-Pmcp.workdir=<path>` points it at another
+  // checkout (default: the test's working directory).
   val mcpReal = providers.gradleProperty("mcp.real").orNull == "true"
   systemProperty("composeai.mcp.real", mcpReal.toString())
   providers.gradleProperty("mcp.workdir").orNull?.let {
     systemProperty("composeai.mcp.workdir", it)
   }
-  // Opt-in edit→render loop on a real Android fixture (`EditLoopIntegrationTest`, issue #1174):
-  // `-Pmcp.editLoop=true`. It copies `src/editLoopFixture` and this build's Gradle wrapper, and
-  // always writes its timings and work records to the report file, which CI uploads.
+  // `-Pmcp.editLoop=true` runs `EditLoopIntegrationTest` on a real Android fixture (copies
+  // `src/editLoopFixture` and the wrapper) and writes timings and work records to the report CI
+  // uploads.
   val editLoop = providers.gradleProperty("mcp.editLoop").orNull == "true"
   systemProperty("composeai.mcp.editLoop", editLoop.toString())
   if (editLoop) {
@@ -288,12 +236,9 @@ tasks.withType<Test>().configureEach {
   )
 }
 
-// Boundary check, ported with the module: `:mcp` must NOT pull `gradle-tooling-api`, directly or
-// transitively. It mattered in compose-ai-tools because the cold-shell gradle invocation behind
-// `mcp install` / `mcp doctor` lives in the CLI and routes through `:gradle-preview-driver`, and it
-// matters MORE here: AGENTS.md and the layer rule both say the Tooling API stays off this
-// repository's floor entirely, and a server that needs a local Gradle build asks compose-ai-tools
-// for one across a process boundary.
+// `:mcp` must not pull `gradle-tooling-api`, directly or transitively: the Tooling API stays off
+// this repository (AGENTS.md, the layer rule); a server needing a Gradle build asks
+// compose-ai-tools across a process boundary.
 abstract class CheckMcpToolingApiBoundary : DefaultTask() {
   @get:org.gradle.api.tasks.Classpath abstract val runtimeClasspath: ConfigurableFileCollection
 
@@ -320,9 +265,7 @@ val checkMcpToolingApiBoundary =
     runtimeClasspath.from(configurations.named("runtimeClasspath"))
   }
 
-// `check` for anyone running it, and `test` because that is what CI actually invokes — the same
-// pairing the task carried in compose-ai-tools, where `check` was never run by any workflow and the
-// guard had therefore never executed.
+// Also on `test`, because that is what CI runs.
 tasks.named("check") { dependsOn(checkMcpToolingApiBoundary) }
 
 tasks.named("test") { finalizedBy(checkMcpToolingApiBoundary) }

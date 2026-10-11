@@ -28,26 +28,18 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 
 /**
- * The comment routes: read the discussion, say something, resolve a thread, watch for replies.
+ * The comment routes: read the discussion, post, resolve a thread, watch for replies. Plain REST
+ * plus one socket, since the released `UiBuilderRequestV1` union has no such requests and comments
+ * are deliberately not part of the design document (see [ServeUiBuilderCommentStore]).
  *
- * Plain REST plus one socket, rather than protocol requests, for the reason the reference routes
- * already give: the released `UiBuilderRequestV1` union has no request for any of this, and adding
- * one means releasing `ui-builder-protocol` — to carry something that deliberately is not part of
- * the design document (see [ServeUiBuilderCommentStore]).
+ * **Authorised twice, on purpose:** the route capability gates UI-builder use, then every request
+ * reads the design through the service as that actor, so the design's own access control decides.
+ * Without the second check, a write-capable actor could post into designs they can't open and
+ * enumerate design ids.
  *
- * **Authorised twice, on purpose**, exactly as the reference routes are. The route capability
- * decides whether this caller may use the UI-builder at all, and then every request reads the
- * design *through the service, as that actor*, so the design's own access control decides whether
- * there is a design here to discuss. Without the second check, an actor holding a write capability
- * could post into a design they cannot open and enumerate which design ids exist by watching which
- * writes succeeded.
- *
- * ### Two ways to watch, one feed
- *
- * [UI_BUILDER_COMMENTS_UPDATES_PATH] is a socket, for a page that is open.
- * [UI_BUILDER_COMMENTS_WATCH_PATH] is a long poll, for a client that cannot hold one — an agent
- * between tool calls, a script, a `curl` in a loop. Both are [ServeUiBuilderCommentStore.subscribe]
- * underneath, so neither can learn about a comment the other does not.
+ * [UI_BUILDER_COMMENTS_UPDATES_PATH] is a socket for an open page; [UI_BUILDER_COMMENTS_WATCH_PATH]
+ * is a long poll for agents and scripts. Both sit on [ServeUiBuilderCommentStore.subscribe], so
+ * they can't disagree.
  */
 internal fun Route.installUiBuilderCommentRoutes(
   service: UiBuilderServicePort,
@@ -58,9 +50,7 @@ internal fun Route.installUiBuilderCommentRoutes(
     val actor =
       call.authorizedCommentActor(service, authorization, UiBuilderRouteCapability.READ)
         ?: return@get
-    // An empty board rather than a 404: "nobody has commented yet" is the answer, and a design
-    // with no discussion is not a design that is missing. The reference route says the opposite
-    // because there an empty record and no record are genuinely different states.
+    // An empty board, not a 404: no discussion yet is not a missing design.
     call.respondBoard(
       actor.shape(withContext(Dispatchers.IO) { store.readOrEmpty(actor.designId) })
     )
@@ -111,13 +101,9 @@ internal fun Route.installUiBuilderCommentRoutes(
   }
 
   /**
-   * "I have read this", for one thread or for the whole board.
-   *
-   * Separate from resolution on purpose, and the reason is in
-   * [ServeUiBuilderCommentStore.acknowledge]: an actor that has read a comment but not yet acted on
-   * it either stays silent, which is invisible, or resolves, which is a claim about the question
-   * that is not true yet. This is the third thing to say, it is per actor, and it is what empties
-   * the notice an agent's tool replies carry.
+   * "I have read this", for one thread or the whole board. Distinct from resolution (see
+   * [ServeUiBuilderCommentStore.acknowledge]); per actor, and it clears the notice in an agent's
+   * tool replies.
    */
   post(UI_BUILDER_COMMENTS_ACKNOWLEDGEMENT_PATH) {
     val actor =
@@ -146,12 +132,7 @@ internal fun Route.installUiBuilderCommentRoutes(
     call.respondAcknowledgement(store, actor, threadId)
   }
 
-  /**
-   * An emoji on one comment, added or taken back.
-   *
-   * One route for both directions rather than a `DELETE` carrying a body, because the thing a
-   * client has is a chip it toggles.
-   */
+  /** An emoji on one comment, added or removed: one route, since the client toggles a chip. */
   post(UI_BUILDER_COMMENT_REACTION_PATH) {
     val actor =
       call.authorizedCommentActor(
@@ -207,11 +188,8 @@ internal fun Route.installUiBuilderCommentRoutes(
   }
 
   /**
-   * The long poll: answer once the discussion has moved past `afterSequence`, or say nothing.
-   *
-   * 204 on timeout rather than an empty board, so a caller that loops on this cannot mistake "no
-   * news" for "the discussion was emptied". The wait is bounded by [MAX_COMMENT_WAIT_SECONDS] so a
-   * client cannot pin a request thread here indefinitely.
+   * The long poll: answer once the discussion moves past `afterSequence`, else 204 (never an empty
+   * board, which would read as "emptied"). Bounded by [MAX_COMMENT_WAIT_SECONDS].
    */
   get(UI_BUILDER_COMMENTS_WATCH_PATH) {
     val actor =
@@ -232,12 +210,9 @@ internal fun Route.installUiBuilderCommentRoutes(
   }
 
   /**
-   * The socket: every accepted write on this design, as the whole board.
-   *
-   * Server-push only, like the design's own updates socket — a reply is posted over the
-   * authenticated HTTP route, so nothing a client sends here needs reading. The current board is
-   * sent on connect when it is already past the client's cursor, so a page that opens does not have
-   * to fetch and subscribe and reconcile the two.
+   * The socket: every accepted write on this design, as the whole board. Server-push only (replies
+   * go over the authenticated HTTP route). The current board is sent on connect when it is past the
+   * client's cursor.
    */
   webSocket(UI_BUILDER_COMMENTS_UPDATES_PATH) {
     val designId = call.parameters["designId"].orEmpty()
@@ -337,11 +312,9 @@ private suspend fun ApplicationCall.authorizedCommentActor(
   authorization: ServeUiBuilderAuthorization,
   capability: UiBuilderRouteCapability,
   /**
-   * Whether a person signed in with GitHub who may only *read* the design may still take part in
-   * its conversation — post, react, mark as read. A guest on a box that restricts writing to an org
-   * is exactly that person: it can see the design, and saying something about it is not changing
-   * it. Never the anonymous reader of a public box, and never an agent grant that carries only
-   * read: a comment speaks for someone, and an agent's reach is what its grant says.
+   * Whether a GitHub-signed-in, read-only viewer may still post, react and mark as read: commenting
+   * isn't changing the design. Never the anonymous reader of a public box, nor a read-only agent
+   * grant: a comment speaks for someone.
    */
   signedInReadersMayTakePart: Boolean = false,
 ): CommentActor? {
@@ -484,10 +457,8 @@ internal const val DEFAULT_COMMENT_WAIT_SECONDS: Long = 25
 internal const val MAX_COMMENT_WAIT_SECONDS: Long = 120
 
 /**
- * Enough room for a burst of replies, and small because the payload is the whole board.
- *
- * A subscriber that falls this far behind is closed rather than buffered: it can reconnect and be
- * told the current state in one frame, which is cheaper than replaying a queue it no longer needs.
+ * Room for a burst of replies; small because each payload is the whole board. A subscriber this far
+ * behind is closed and can reconnect for the current state in one frame.
  */
 private const val COMMENT_SOCKET_BUFFER = 32
 

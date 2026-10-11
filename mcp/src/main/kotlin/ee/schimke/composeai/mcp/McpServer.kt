@@ -72,10 +72,7 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-/**
- * Transport-agnostic session surface. The concrete stdio implementation now comes from the official
- * Kotlin MCP SDK; daemon orchestration only needs this notification surface.
- */
+/** Transport-agnostic session surface; the stdio implementation comes from the Kotlin MCP SDK. */
 interface Session {
   /** Sends `notifications/resources/updated` for [uri]. */
   fun notifyResourceUpdated(uri: String)
@@ -87,8 +84,8 @@ interface Session {
   fun notifyToolListChanged()
 
   /**
-   * Sends a `notifications/progress` for the request identified by [token]. No-op when the client
-   * didn't opt in or sent a token shape the SDK cannot represent.
+   * Sends `notifications/progress` for [token]. No-op when the client didn't opt in or sent a token
+   * shape the SDK cannot represent.
    */
   fun notifyProgress(
     token: JsonElement,
@@ -106,10 +103,7 @@ class McpSession(
   private val output: OutputStream,
   private val configure: (ServerSession) -> Unit,
   private val onClose: () -> Unit,
-  /**
-   * The `initialize` result's `instructions` for the connecting client's `clientInfo.name`; null
-   * sends none.
-   */
+  /** `initialize` instructions for the client's `clientInfo.name`; null sends none. */
   private val instructions: (clientName: String?) -> String? = { null },
 ) : Closeable, Session {
   private val closed = CompletableFuture<Unit>()
@@ -119,18 +113,12 @@ class McpSession(
         {
           try {
             runBlocking(Dispatchers.IO) {
-              // Build the session ourselves and install our request handlers BEFORE connecting the
-              // transport. `Server.createSession` connects the transport — and so starts draining
-              // client messages — *inside* the call, before it returns the session for us to
-              // configure. Installing handlers after that leaves a race window: an early
-              // `tools/call` (e.g. a client that pipelines initialize → initialized →
-              // register_project) can be answered by the SDK's default tools/call handler, which
-              // looks up an empty registry (we manage tools ourselves and never `addTool`) and
-              // replies "Tool <name> not found". Constructing the ServerSession directly lets us
-              // set every handler first, then connect, so no request is ever served by the SDK
-              // defaults. ServerSession's constructor wires up initialize/ping/logging itself.
-              // The third argument is the initialize `instructions`, not a session id (#1163);
-              // the per-client text replaces it in [wrapInitialize].
+              // Build the session and install handlers BEFORE connecting the transport:
+              // `Server.createSession` starts draining messages inside the call, so a pipelined
+              // `tools/call` could hit the SDK's default handler (empty registry → "Tool not
+              // found"). The ServerSession constructor wires initialize/ping/logging itself; its
+              // third argument is the initialize `instructions`, replaced per-client in
+              // [wrapInitialize].
               val session = ServerSession(serverInfo, options, instructions(null))
               sdkSession = session
               wrapInitialize(session)
@@ -165,9 +153,9 @@ class McpSession(
   }
 
   /**
-   * Routes `initialize` through the SDK's own handler, which records the client's capabilities and
-   * version, then logs the client to stderr and swaps in the instructions for that client (#1109).
-   * The SDK takes the instructions once, at construction, before any client is known.
+   * Routes `initialize` through the SDK's handler (which records client capabilities), then logs
+   * the client and swaps in that client's instructions — the SDK only takes them once, at
+   * construction.
    */
   private fun wrapInitialize(session: ServerSession) {
     val method = Method.Defined.Initialize.value
@@ -247,11 +235,9 @@ class McpSession(
   }
 
   /**
-   * Ask through a typed MCP form when this client supports form elicitation: it declared
-   * `elicitation.form`, or declared a bare `elicitation: {}` (the pre-2025-11 shape, which means
-   * form). A URL-only client is never sent a form. [FormElicitation.Unsupported] tells the caller
-   * to use its complete text fallback; a timeout is reported separately so the caller can say the
-   * question went unanswered instead of silently re-asking.
+   * Ask through a typed MCP form when the client supports form elicitation (`elicitation.form`, or
+   * a bare pre-2025-11 `elicitation: {}`). [FormElicitation.Unsupported] means use the text
+   * fallback; a timeout is reported separately so the caller can say the question went unanswered.
    */
   suspend fun elicitForm(
     message: String,
@@ -276,8 +262,8 @@ class McpSession(
     get() = OpenAiForms.supportsForms(sdkSession?.clientCapabilities)
 
   /**
-   * Ask through an OpenAI extended form (`openai/elicitation/create`, #1240). Same outcomes as
-   * [elicitForm]; [FormElicitation.Unsupported] when the client did not declare the extension.
+   * Ask through an OpenAI extended form (`openai/elicitation/create`). Same outcomes as
+   * [elicitForm].
    */
   suspend fun elicitOpenAiForm(
     message: String,
@@ -287,8 +273,7 @@ class McpSession(
 
   /**
    * True when the client declared the MCP Apps extension (`io.modelcontextprotocol/ui`, under
-   * `capabilities.extensions`, or `experimental` for earlier hosts): it renders the viewer, so a
-   * result without an image leaves the viewer empty.
+   * `capabilities.extensions`, or `experimental` for earlier hosts).
    */
   val supportsMcpApps: Boolean
     get() {
@@ -302,8 +287,8 @@ class McpSession(
     get() = sdkSession?.clientVersion?.name
 
   /**
-   * Local directories the client offers as MCP roots. Empty when the client declared no `roots`
-   * capability, did not answer in time, or offered only non-`file:` roots.
+   * Local directories the client offers as MCP roots. Empty when it declared no `roots` capability,
+   * timed out, or offered only non-`file:` roots.
    */
   suspend fun rootDirectories(timeoutMs: Long = ROOTS_TIMEOUT_MS): List<File> {
     val session = sdkSession ?: return emptyList()
@@ -328,8 +313,8 @@ class McpSession(
     const val ROOTS_TIMEOUT_MS = 5_000L
 
     /**
-     * A person answering a form needs longer than the SDK's 60-second request default; a shorter
-     * bound would silently fall back while their dialog is still open.
+     * Longer than the SDK's 60 s default so a person still filling in a form is not silently
+     * skipped.
      */
     const val DEFAULT_ELICITATION_TIMEOUT_MS = 5 * 60_000L
   }
@@ -426,9 +411,8 @@ internal fun installComposePreviewHandlers(
     }
   }
   sdkSession.setRequestHandler<CallToolRequest>(Method.Defined.ToolsCall) { request, _ ->
-    // The request's `_meta` rides in the coroutine context, so a tool that needs a host-injected
-    // key (OpenAI's `openai/resource.path`, see [OpenAiRequestMeta]) reads it without every tool
-    // signature growing a parameter.
+    // The request's `_meta` rides in the coroutine context so tools can read host-injected keys
+    // ([OpenAiRequestMeta]) without a parameter.
     withContext(OpenAiRequestMeta(request.meta?.json)) {
         callTool(request.name, request.arguments, request.meta?.json?.get("progressToken"))
       }
@@ -453,9 +437,8 @@ internal fun installComposePreviewHandlers(
 }
 
 /**
- * [extensions] are server capability extensions such as OpenAI's `openai/settings` (#1242). They go
- * out twice, as the spec's `capabilities.extensions` and the legacy `capabilities.experimental`,
- * because MCP `2025-11-25` and earlier hosts read the latter.
+ * [extensions] go out both as `capabilities.extensions` and the legacy `capabilities.experimental`,
+ * which MCP `2025-11-25` and earlier hosts read.
  */
 internal fun composePreviewServerOptions(
   extensions: Map<String, JsonObject> = emptyMap()
@@ -544,10 +527,7 @@ private fun JsonElement.toRequestId(): RequestId? =
     else -> null
   }
 
-/**
- * Convenience: plain text response — every tool that just confirms an action ("watched", "ok") uses
- * this.
- */
+/** Plain text result, for tools that just confirm an action. */
 fun textCallToolResult(text: String): CallToolResult =
   CallToolResult(content = listOf(ContentBlock.Text(text)))
 
@@ -556,11 +536,10 @@ fun pngCallToolResult(bytesBase64: String): CallToolResult =
   CallToolResult(content = listOf(ContentBlock.Image(data = bytesBase64, mimeType = "image/png")))
 
 /**
- * This result with `structuredContent`, for a tool that declares an `outputSchema`: a client that
- * reads a tool's schema may refuse a successful result that carries no structure. A result with its
- * own structure, and an error, are returned unchanged; otherwise every JSON-object text block is
- * merged in order (a later key wins), so the structure is exactly what the text says, and an image-
- * or prose-only result carries an empty object.
+ * Adds `structuredContent` for a tool with an `outputSchema`, since some clients refuse a result
+ * without it. Results with their own structure, and errors, are unchanged; otherwise JSON-object
+ * text blocks are merged in order (later keys win), and image/prose-only results get an empty
+ * object.
  */
 internal fun CallToolResult.withJsonTextStructure(): CallToolResult {
   if (isError == true || structuredContent != null) return this

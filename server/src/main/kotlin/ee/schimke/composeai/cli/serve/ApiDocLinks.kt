@@ -1,23 +1,20 @@
 package ee.schimke.composeai.cli.serve
 
 /**
- * The **API reference links** behind a usage snippet: every `androidx.` / `android.` symbol the
- * cleaned Compose code uses, resolved to its KDoc page on `developer.android.com`.
+ * API reference links behind a usage snippet: every `androidx.` / `android.` symbol the cleaned
+ * code uses, resolved to its `developer.android.com` KDoc page. The snippet rather than the
+ * preview, because [PlaygroundSourceCleaner] already pruned its imports to what the code touches.
  *
- * The snippet rather than the preview, because [PlaygroundSourceCleaner] has already pruned its
- * imports to exactly what the code touches; those imports plus [QUALIFIED] are the render's API.
- *
- * A composable's page is `<pkg>/<Name>.composable` and anything else's is `<pkg>/<Name>` (the other
- * 404s), so [linkFor] infers the kind from use:
- * - a qualifier, annotation or type ⇒ the declaration page;
- * - outside a Compose namespace ([composableNamespace]) ⇒ the declaration page;
- * - called in statement position (preceded by `{`, `}`, `)`, `;`, `->` or the start, not by `=`,
- *   `,` or `(`) ⇒ the composable page;
- * - anything else (a bare property such as `CircleShape`) ⇒ no link.
+ * A composable's page is `<pkg>/<Name>.composable` and anything else's `<pkg>/<Name>`, so [linkFor]
+ * infers the kind from use:
+ * - a qualifier, annotation or type ⇒ declaration page;
+ * - outside a Compose namespace ([composableNamespace]) ⇒ declaration page;
+ * - called in statement position (after `{`, `}`, `)`, `;`, `->` or the start; not after `=`, `,`
+ *   or `(`) ⇒ composable page;
+ * - anything else (a bare property like `CircleShape`) ⇒ no link.
  *
  * Comments and strings are blanked first ([blankCommentsAndStrings]). Non-Android packages,
- * lower-case leaves, `Local…` locals and the icon packs have no page and are dropped.
- * `ApiDocLinksTest` pins these shapes; measured against every live catalog with zero 404s.
+ * lower-case leaves, `Local…` locals and icon packs have no page. Pinned by `ApiDocLinksTest`.
  */
 internal object ApiDocLinks {
 
@@ -31,12 +28,9 @@ internal object ApiDocLinks {
   private const val STRING_FILL = '0'
 
   /**
-   * Packages that publish **value types only** — no top-level composable has ever lived in them.
-   *
-   * Named because the statement-position rule cannot see through an if/else expression or a `map {
-   * a -> Offset(…) }` lambda: both put a constructor call exactly where a composable call would
-   * sit. Rather than teach the scanner Kotlin's expression grammar for two cases, the four packages
-   * whose whole contents are `Color` / `Offset` / `Dp` / `TextStyle`-shaped values say so.
+   * Packages of value types only (`Color`, `Offset`, `Dp`, `TextStyle`-shaped), named because the
+   * statement-position rule can't see through if/else expressions or `map { … }` lambdas, where
+   * constructors sit where composables would.
    */
   private val VALUE_PACKAGES =
     listOf(
@@ -47,9 +41,8 @@ internal object ApiDocLinks {
     )
 
   /**
-   * Trailing lambdas whose body is a **value**, not a composition. The constructor call in
-   * `remember { MutableInteractionSource() }` sits exactly where the `{` would otherwise mark a
-   * composable one.
+   * Trailing lambdas whose body is a value (`remember { MutableInteractionSource() }`), not a
+   * composition.
    */
   private val VALUE_LAMBDAS =
     setOf(
@@ -63,9 +56,8 @@ internal object ApiDocLinks {
     )
 
   /**
-   * One resolved symbol: the [name] the snippet writes (an `as` alias, where it renamed one), the
-   * [fqn] it imports, whether it resolved as a composable (which picks the page shape), and the
-   * [url] to open.
+   * One resolved symbol: the [name] the snippet writes (alias included), the imported [fqn],
+   * whether it resolved as a composable (picking the page shape), and the [url].
    */
   data class Link(val name: String, val fqn: String, val composable: Boolean, val url: String)
 
@@ -73,13 +65,9 @@ internal object ApiDocLinks {
     Regex("""^\s*import\s+([A-Za-z_][A-Za-z0-9_.]*)\s*(?:as\s+([A-Za-z_][A-Za-z0-9_]*))?\s*$""")
 
   /**
-   * A platform API written out in full in the body — lower-case package segments and **one**
-   * capitalised type.
-   *
-   * One, not a chain: `androidx.compose.ui.graphics.Color.Transparent` is a member read off
-   * `Color`, and taking both capitalised segments asks the site for a nested type that does not
-   * exist. An import is the opposite case and keeps its whole chain, because an import line names
-   * the type exactly — including a genuinely nested one like `LayoutElementBuilders.Box`.
+   * A fully qualified platform API in the body: lower-case package segments and exactly one
+   * capitalised type, since `….Color.Transparent` is a member of `Color`, not a nested type.
+   * Imports keep their whole chain because they name the type exactly.
    */
   private val QUALIFIED =
     Regex(
@@ -87,15 +75,8 @@ internal object ApiDocLinks {
     )
 
   /**
-   * The reference links for [snippet] — composables first, then declarations, each group in the
-   * order the code first names them.
-   *
-   * That ordering is what puts the component the preview is *about* at the head of the list: the
-   * outermost composable call is the first one written, and the annotations decorating it
-   * (`@Preview`, `@Composable`) sort behind every component they annotate.
-   *
-   * Empty for a snippet with no documented imports, which is the whole answer for a catalog built
-   * out of its own helpers.
+   * Reference links for [snippet]: composables first, then declarations, each in first-use order,
+   * which puts the component the preview is about at the head. Empty when nothing is documented.
    */
   fun of(snippet: String): List<Link> {
     val body = StringBuilder()
@@ -115,20 +96,14 @@ internal object ApiDocLinks {
       body.append(if (keep) line else "").append('\n')
     }
     val code = blankCommentsAndStrings(body.toString())
-    // Fully-qualified uses, which carry no import at all. Not an edge case: the cleaner's
-    // `MATERIAL3_SYSTEM_THEME` rewrite deliberately emits
-    // `androidx.compose.material3.MaterialTheme(...)` and prunes the import, so a catalog whose
-    // theme wrapper goes through it would otherwise be missing the most prominent API on the card.
-    // Here the spelling the code uses IS the qualified name, which every rule below matches on
-    // just as it matches a simple one.
+    // Fully qualified uses carry no import; the cleaner's `MATERIAL3_SYSTEM_THEME` rewrite emits
+    // `androidx.compose.material3.MaterialTheme(...)` exactly this way.
     for (match in QUALIFIED.findAll(code)) {
       candidates += match.groupValues[1] to match.groupValues[1]
     }
     return candidates
       .mapNotNull { (spelling, fqn) -> linkFor(spelling, fqn, code) }
-      // Two candidates can reach the same page — a symbol under an alias as well as its own name,
-      // or an import and a qualified use of the same thing. The page is what the reader opens, so
-      // it is what de-duplicates.
+      // De-duplicated by page, since an alias and a qualified use can reach the same one.
       .distinctBy { it.link.url }
       .sortedWith(compareBy({ if (it.link.composable) 0 else 1 }, { it.firstUse }))
       .take(MAX_LINKS)
@@ -157,30 +132,22 @@ internal object ApiDocLinks {
     val composable =
       when {
         usedAsDeclaration(quoted, code) -> false
-        // Outside a Compose namespace there is no `.composable` page to be wrong about, so the
-        // call-site reading is not consulted at all: `Button(onClick = { Intent(ctx, T::class.java)
-        // })`
-        // puts a constructor exactly where a composable call sits, and no reading of the braces
-        // alone tells a callback lambda from a slot one.
+        // Outside a Compose namespace there is no `.composable` page, so call position isn't
+        // consulted (constructors in callback lambdas look like composable calls).
         !composableNamespace(fqn) -> false
         calledInStatementPosition(spelling, code) -> true
         // Mentioned, but neither a type nor a call: a property, which has no page of its own.
         else -> return null
       }
     val url = BASE + referencePath(fqn) + if (composable) ".composable" else ""
-    // The name the panel shows is what the code writes — an `as` alias included, since that is
-    // the identifier the reader just met. A qualified use writes the whole path, which is not a
-    // label, so it shows its leaf instead.
+    // Show the name the code writes (aliases included); a qualified use shows its leaf.
     val label = if (spelling.contains('.')) leaf else spelling
     return Ranked(Link(name = label, fqn = fqn, composable = composable, url = url), firstUse)
   }
 
   /**
-   * Whether a `.composable` page could exist for [fqn] at all — the namespaces that publish
-   * composable functions, minus the [VALUE_PACKAGES] inside them.
-   *
-   * `androidx.compose.*` and `androidx.wear.compose.*` are both covered by the `.compose.` segment;
-   * Glance and TV Material are the two composable homes that do not carry it.
+   * Whether a `.composable` page could exist for [fqn]: namespaces publishing composables
+   * (`.compose.` segment, plus Glance and TV Material) minus [VALUE_PACKAGES].
    */
   private fun composableNamespace(fqn: String): Boolean =
     (fqn.contains(".compose.") ||
@@ -188,12 +155,8 @@ internal object ApiDocLinks {
       fqn.startsWith("androidx.tv.material3.")) && VALUE_PACKAGES.none { fqn.startsWith("$it.") }
 
   /**
-   * The reference site's path for [fqn]: package segments separated by `/`, and the class chain
-   * kept dotted — `androidx/wear/protolayout/LayoutElementBuilders.Box` for a nested type, which is
-   * how the site spells one. Replacing every dot would ask for a directory that does not exist.
-   *
-   * Package segments are the leading lower-case ones, which is the naming convention every
-   * `androidx` and `android` package follows.
+   * The reference path for [fqn]: lower-case package segments joined with `/`, the class chain kept
+   * dotted (`LayoutElementBuilders.Box`), as the site spells nested types.
    */
   private fun referencePath(fqn: String): String {
     val segments = fqn.split('.')
@@ -212,19 +175,11 @@ internal object ApiDocLinks {
       Regex("""[<,]\s*$quoted\s*[>,]""").containsMatchIn(code)
 
   /**
-   * Whether [name] is called somewhere a *statement* may start: at the beginning of the code, after
-   * `{`, `}`, `)`, `;` or `->`, after a line break that closed the previous statement, or as the
-   * `fun … () = Name(…)` expression body of a composable.
-   *
-   * The `{` case excludes the value-producing lambdas ([VALUE_LAMBDAS]) and the trailing lambda of
-   * an already-parenthesised call, since neither opens a composition.
-   *
-   * The **line break** case is what makes a call after an ordinary local declaration reachable —
-   * `val enabled = true` then `Button(enabled = enabled)`, where the character before the call is
-   * the `e` of `true`. Kotlin has no statement terminator, so the line break is the only thing
-   * separating them. It counts only when the previous line *ended* an expression (an identifier, a
-   * literal, a `]`); a line ending in `=` or `,` or `(` is one argument wrapped across two lines,
-   * and treating that as a statement is exactly what put a `.composable` page on a value class.
+   * Whether [name] is called where a statement may start: code start, after `{` (except
+   * [VALUE_LAMBDAS] and trailing lambdas of parenthesised calls), `}`, `)`, `;`, `->`, a `fun … ()
+   * =` body, or after a line break that ended an expression. Kotlin has no terminator, so that line
+   * break is what separates `val enabled = true` from `Button(…)`; a line ending in `=`, `,` or `(`
+   * is a wrapped argument, not a statement.
    */
   private fun calledInStatementPosition(name: String, code: String): Boolean {
     val call = Regex("""(?<![A-Za-z0-9_.])${Regex.escape(name)}\s*[({]""")
@@ -259,10 +214,8 @@ internal object ApiDocLinks {
   }
 
   /**
-   * The identifier a `{` at [brace] belongs to — `remember` in `remember { … }`, and equally
-   * `remember` in `remember(key) { … }`, since an argument list between the two changes nothing
-   * about whose lambda it is. Empty for a brace that follows no call at all (`fun demo() {`, an
-   * `if` body, a bare block), which is exactly the case that must NOT be mistaken for one.
+   * The identifier a `{` at [brace] belongs to (`remember` in `remember { … }` or `remember(key) {
+   * … }`); empty for a brace following no call.
    */
   private fun ownerOfBrace(code: String, brace: Int): String {
     var k = brace - 1
@@ -286,21 +239,10 @@ internal object ApiDocLinks {
   }
 
   /**
-   * Replace every comment, and the contents of every string literal, with spaces — keeping newlines
-   * so line structure and offsets survive.
-   *
-   * Deliberately a scanner rather than a regex: `"a // b"` is a string containing what looks like a
-   * comment and `// "a` is a comment containing what looks like an unterminated string. A pattern
-   * that handles one gets the other wrong, and both appear in ordinary catalog source.
-   *
-   * A **raw** `"""…"""` string is consumed whole, before the single-quote case can see it. Toggling
-   * per quote instead would treat a raw string's own `"` characters as delimiters and hand back
-   * alternating slices of its contents as though they were code.
-   *
-   * A string blanks to **digits**, not spaces, while a comment blanks to spaces. The difference is
-   * that a string literal *is* an expression: `val json = "…"` ends a statement, and the next line
-   * may open a new one. Blanked to whitespace it would read as though the `=` were still hanging
-   * open, and the composable called on the following line would be lost.
+   * Replace comments and string contents with filler, keeping newlines so offsets survive. A
+   * scanner rather than a regex, since `"a // b"` and `// "a` defeat any single pattern. Raw
+   * `"""…"""` strings are consumed whole first. Strings blank to digits (still an expression that
+   * can end a statement), comments to spaces.
    */
   private fun blankCommentsAndStrings(source: String): String {
     val out = StringBuilder(source.length)

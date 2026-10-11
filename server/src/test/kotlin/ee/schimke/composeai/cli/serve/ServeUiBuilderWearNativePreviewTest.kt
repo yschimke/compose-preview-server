@@ -19,44 +19,26 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 /**
- * A **Wear** design on the native render lane, which is the only surface that can draw one.
- *
- * ## Why this is its own test and not a case in [ServeUiBuilderNativePreviewTest]
- *
- * That file is about a record-driven `m3-catalog` screen: generate from the component record,
- * compile, read back bounds. A Wear screen reaches the same compiler by a different road and every
- * junction on it used to be a wall:
- *
- * 1. the generator **refused** every record-free design outright, telling a designer to "preview it
- *    on the canvas" — a canvas that draws Material 3 lookalikes because Wasm cannot link an Android
- *    AAR, which is the one thing a Wear design must not be judged on;
- * 2. the source it now emits is Wear Compose, so it has to reach a bundle carrying
- *    `androidx.wear.compose:compose-material3` — a *different* served catalog from the design's own
- *    id; and
- * 3. that bundle is an Android one, so the compile has to go to the Robolectric daemon rather than
- *    to Skiko, which is a different `confType`.
- *
- * Each of those is silent when wrong: a desktop compile of Wear source fails on every import and
- * reads like the design is broken. So each is asserted here, against a recording compile seam —
- * standing up a Kotlin compiler and a Wear classpath to check the contents of a string would be
- * testing the compiler.
- *
- * A **widget** is record-free too and reaches the same compiler by a fourth road, asserted at the
- * bottom: its source is Remote Compose, so the lane submits a body, a brush and the container spec
- * the design authored, and the entry draws them inside the Glance Wear container rather than
- * composing a screen.
+ * A Wear design on the native render lane, the only surface that can draw one. Separate from
+ * [ServeUiBuilderNativePreviewTest] (record-driven `m3-catalog`) because a Wear screen takes
+ * another road to the compiler:
+ * 1. the generator handles record-free designs (the canvas only draws M3 lookalikes, since Wasm
+ *    can't link an Android AAR);
+ * 2. the emitted Wear Compose source must reach a bundle carrying
+ *    `androidx.wear.compose:compose-material3`, a different served catalog; and
+ * 3. that bundle is Android, so the compile goes to the Robolectric daemon (a different
+ *    `confType`). Each fails silently when wrong (desktop compiles of Wear source fail on every
+ *    import), so each is asserted against a recording compile seam. Widgets, also record-free,
+ *    submit Remote Compose: a body, a brush and the authored container spec, drawn inside the
+ *    Glance Wear container.
  */
 class ServeUiBuilderWearNativePreviewTest {
 
   private val submitted = mutableListOf<UiBuilderGeneratedCompose>()
 
   /**
-   * No component record for any catalog, which is the deployment `wear-m3` actually runs in.
-   *
-   * `wear-m3` deliberately has none — `ScreenScaffold` takes a scroll state that has to agree with
-   * the list inside its own content lambda, which no recovered signature can express — so a lane
-   * that needed one would be a lane Wear could never use. Passing `Unconfigured` here proves the
-   * Wear path does not touch the record at all rather than happening to find one.
+   * No component record for any catalog, as `wear-m3` runs (`ScreenScaffold`'s scroll state can't
+   * be expressed by a recovered signature), proving the Wear path never touches the record.
    */
   private val executor =
     ScreenGeneratorComposeExportExecutor({ ComponentRecordSource.Lookup.Unconfigured })
@@ -84,9 +66,8 @@ class ServeUiBuilderWearNativePreviewTest {
     val rendered = assertIs<UiBuilderNativePreviewOutcome.Rendered>(lane().render(wearScreen()))
 
     val request = submitted.single()
-    // The Robolectric daemon, and this is the assertion that matters most in the file: Wear
-    // Material 3 is an Android AAR, so a `compose-cmp` submission does not fail at render time —
-    // it fails at `import androidx.wear.compose.material3.ScreenScaffold`.
+    // The Robolectric daemon: Wear Material 3 is an Android AAR, so a `compose-cmp` submission
+    // fails at its imports.
     assertEquals(UiBuilderGeneratedCompose.COMPOSE_ANDROID, request.confType)
     // The served bundle, not the design's catalog id. Those were the same string only while
     // `m3-catalog` was the only catalog with a native lane.
@@ -98,12 +79,8 @@ class ServeUiBuilderWearNativePreviewTest {
   }
 
   /**
-   * The frame comes back addressable, which is what makes it an editor rather than a picture.
-   *
-   * Same requirement as the mobile lane and a harder one to meet here: the Wear source is written
-   * by `WearScreenCodeExporter` rather than projected through `ScreenDocumentProjection`, so the
-   * tag has to be threaded through a second generator. Untagged, an overlay has nothing to anchor
-   * to and clicking the render selects nothing.
+   * The frame comes back addressable (tagged), so overlays can anchor. The tag is threaded through
+   * `WearScreenCodeExporter`, a second generator.
    */
   @Test
   fun `the wear source carries every node id as a test tag`() {
@@ -127,10 +104,8 @@ class ServeUiBuilderWearNativePreviewTest {
   }
 
   /**
-   * A Wear component left as the design's root is written by neither Wear emitter, and the lane
-   * says what to do about it — the same sentence the export, the Code pane and the Issues panel
-   * give — rather than falling through to the record-driven generator and refusing once per
-   * component.
+   * A Wear component left as the design's root is written by neither Wear emitter; the lane says
+   * what to do, matching the export, Code pane and Issues panel.
    */
   @Test
   fun `a bare wear component root is refused with the wrap-it-in-a-screen sentence`() {
@@ -157,11 +132,8 @@ class ServeUiBuilderWearNativePreviewTest {
   }
 
   /**
-   * No bundle mapped for this catalog is the **host's** problem, and says so.
-   *
-   * A compile against a desktop classpath would fail on every `androidx.wear.compose` import and
-   * report a wall of unresolved references, which reads like the design is broken. The refusal
-   * names the flag an operator sets instead.
+   * No bundle mapped for this catalog is the host's problem: the refusal names the operator's flag
+   * rather than producing a wall of unresolved references.
    */
   @Test
   fun `a host with no wear bundle refuses by naming the flag, not the design`() {
@@ -177,13 +149,8 @@ class ServeUiBuilderWearNativePreviewTest {
   }
 
   /**
-   * A widget renders, and what it submits is not the file a designer exports.
-   *
-   * `WearWidgetCodeExporter` writes the artifact: a `GlanceWearWidget`, its `WearWidgetDocument`,
-   * and a `@Preview` driven by a shipped params provider. None of that is submittable here — the
-   * class's picture parameters default to a blank 1×1 bitmap nothing downstream can replace, and
-   * the providers carry only the published container spec. So this lane submits the three
-   * declarations `WearWidgetNativePreviewExporter` writes instead, and the entry hands them to
+   * A widget renders via the three declarations `WearWidgetNativePreviewExporter` writes, not the
+   * exported `GlanceWearWidget` (whose picture parameters default to a blank bitmap), handed to
    * `WearWidgetPreview`.
    */
   @Test
@@ -203,24 +170,15 @@ class ServeUiBuilderWearNativePreviewTest {
     // rather than the 192×496 watch screen this design's environment describes.
     assertEquals(232, request.widthDp)
     assertEquals(144, request.heightDp)
-    // Remote Compose carries no test tag, so the frame comes back as a picture with no overlay.
-    // Reported as none rather than as every node, so a client does not look up bounds that a
-    // tagless render was never going to have.
+    // Remote Compose carries no test tags, so no overlay ids are reported.
     assertEquals(emptyList(), rendered.taggedNodeIds)
     assertEquals(emptyMap(), rendered.nodeBounds)
   }
 
   /**
-   * The rectangular host container is a different frame, and the lane draws it when asked.
-   *
-   * Not a radius swap on the squircle: at Large the content box is 168×112dp inside 32/16dp of
-   * padding against the squircle's 200×108dp inside a uniform 8dp, so the submitted params and the
-   * `@Preview` canvas both move. That is the whole reason a designer needs to see it — a layout
-   * that just fits the squircle can clip here — and it is the frame recommended as the widget
-   * picker editor's image (yschimke/compose-preview-server#587).
-   *
-   * The shape is the host's, so it arrives as an argument rather than being read from the document:
-   * nothing in the design changes between these two renders.
+   * The rectangular host container is a different frame (different content box and padding than the
+   * squircle), drawn on request; a layout that fits the squircle can clip here (see
+   * yschimke/compose-preview-server#587). The shape comes from the host, not the document.
    */
   @Test
   fun `a widget asked for the rectangular container gets that frame`() {
@@ -240,8 +198,8 @@ class ServeUiBuilderWearNativePreviewTest {
   }
 
   /**
-   * The lane hands a widget to the player the host was started with, on the Android daemon either
-   * way: only playback differs, the recording stays the AndroidX writer's.
+   * The lane uses the player the host was started with, always on the Android daemon; only playback
+   * differs.
    */
   @Test
   fun `a widget is played by the CMP player by default and by androidx when the host asks`() {
@@ -257,8 +215,8 @@ class ServeUiBuilderWearNativePreviewTest {
   }
 
   /**
-   * The CMP entry imports `rc-player-compose`, so a bundle that does not carry it is drawn by the
-   * upstream preview instead of failing every widget compile on an unresolved reference.
+   * The CMP entry imports `rc-player-compose`; a bundle without it falls back to the upstream
+   * preview.
    */
   @Test
   fun `a widget bundle without the CMP player is drawn by androidx`() {
@@ -292,12 +250,8 @@ class ServeUiBuilderWearNativePreviewTest {
   }
 
   /**
-   * A widget's pictures travel inside the source, because nothing downstream can pass one.
-   *
-   * The export asks for them as parameters — a widget's artwork is application data — and defaults
-   * them to a blank bitmap so its `@Preview` compiles. Submitted here that would render a hole
-   * where the canvas beside it draws the picture, which is the one disagreement between the two
-   * surfaces this lane would have caused itself.
+   * A widget's pictures travel inside the source: the export defaults them to a blank bitmap, which
+   * would render a hole where the canvas draws the picture.
    */
   @Test
   fun `a widget picture is inlined into the native preview source`() {
@@ -357,11 +311,10 @@ class ServeUiBuilderWearNativePreviewTest {
     )
 
   /**
-   * A **Large** container, so the frame this lane reports is not the same number as the Small one's
-   * and an assertion about it cannot pass by accident.
+   * A Large container, so the reported frame can't match the Small one by accident.
    *
-   * @param assetKey a picture in the container's content, whose bytes ride in the design's own
-   *   asset map — an embedded binding rather than an uploaded one, so the fixture needs no store.
+   * @param assetKey a picture in the container's content, embedded in the design's own asset map
+   *   (no store needed).
    */
   private fun wearWidget(assetKey: String? = null): DesignDocumentV1 =
     DesignDocumentV1(

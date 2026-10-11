@@ -7,12 +7,9 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * The catalog-theme → web-chrome projection ([ServeThemeCss]).
- *
- * The token payloads below are verbatim excerpts of the `tokens.dtcg.json` files the published
- * `design-artifacts/<system>` branches actually carry, so the assertions are about real palettes:
- * `wear-m3` (dark-first, cyan), `jetnews` (light, crimson) and `jetsnack` (light, with the
- * alpha-carrying `onSurface` / `outline` several app catalogs publish).
+ * The catalog-theme → web-chrome projection ([ServeThemeCss]). Token payloads are verbatim excerpts
+ * of published `tokens.dtcg.json` files: `wear-m3` (dark-first, cyan), `jetnews` (light, crimson)
+ * and `jetsnack` (light, alpha-carrying `onSurface`/`outline`).
  */
 class ServeThemeCssTest {
 
@@ -61,11 +58,8 @@ class ServeThemeCssTest {
     )
 
   /**
-   * The `--cp-*` declarations of the emitted sheet, resolved for one mode.
-   *
-   * The projection emits ONE `:root` block of `light-dark(<light>, <dark>)` pairs rather than a
-   * light block plus a `prefers-color-scheme` block (that is what lets the page-theme setting pin a
-   * mode), so reading a mode out means taking one half of each pair.
+   * The `--cp-*` declarations resolved for one mode: the sheet emits one `:root` of `light-dark()`
+   * pairs, so this takes one half of each.
    */
   private fun vars(css: String, dark: Boolean): Map<String, String> = half(css, "--cp", dark)
 
@@ -231,9 +225,8 @@ class ServeThemeCssTest {
     }
   }
 
-  // wear-m3 as its CatalogTheme actually declares it: a cyan primary AND a distinct rose secondary
-  // family. The published design systems mostly publish no secondary family at all, which is the
-  // other half of this behaviour.
+  // wear-m3 as declared, with a cyan primary and a distinct rose secondary family (most published
+  // systems have no secondary family).
   private val wearM3WithSecondary =
     tokens(
       "primary" to "#4dd0e1ff",
@@ -249,9 +242,8 @@ class ServeThemeCssTest {
 
   @Test
   fun `a published secondary family paints the selected states it was authored for`() {
-    // M3 gives the two containers different jobs: `primaryContainer` backs the brand mark, while
-    // `secondaryContainer` is the selected state of every chip, segment, drawer toggle and nav row.
-    // Collapsing both onto the primary container would throw away half of a published scheme.
+    // `primaryContainer` backs the brand mark; `secondaryContainer` is the selected state of chips,
+    // segments, toggles and nav rows, so both are kept.
     val dark = roles(assertNotNull(ServeThemeCss.fromDtcg(wearM3WithSecondary)), dark = true)
     val aliases = vars(assertNotNull(ServeThemeCss.fromDtcg(wearM3WithSecondary)), dark = true)
     assertEquals("#4d3d76", dark["--md-sys-color-primary-container"], "the mark keeps the primary")
@@ -265,9 +257,8 @@ class ServeThemeCssTest {
 
   @Test
   fun `a catalog with no secondary family keeps the chip fill it has today`() {
-    // Most published catalogs name no `secondaryContainer`. They must fall back to the PRIMARY
-    // container rather than to a bare derived tint, so this projection doesn't silently restyle
-    // every design system that predates it.
+    // Without a `secondaryContainer` the projection falls back to the primary container, not a
+    // derived tint, so older design systems aren't restyled.
     for (dark in listOf(false, true)) {
       val r = roles(assertNotNull(ServeThemeCss.fromDtcg(wearM3)), dark)
       assertEquals(
@@ -299,10 +290,8 @@ class ServeThemeCssTest {
 
   @Test
   fun `both modes are emitted as one block of light-dark pairs`() {
-    // The shape is load-bearing, not incidental: `serve.css` pins a mode with `color-scheme` alone
-    // (the Page theme setting), which can only re-resolve values written as `light-dark()` pairs. A
-    // `prefers-color-scheme` block would ignore the pin and leave a catalog's palette on the OS
-    // preference while the built-in chrome around it followed the selected theme.
+    // `serve.css` pins a mode via `color-scheme` alone, which only re-resolves `light-dark()`
+    // pairs; a `prefers-color-scheme` block would ignore the Page theme setting.
     val css = assertNotNull(ServeThemeCss.fromDtcg(wearM3))
     assertEquals(1, Regex(":root \\{").findAll(css).count(), "one :root block")
     assertTrue("@media" !in css, "no media query")
@@ -326,9 +315,8 @@ class ServeThemeCssTest {
 
   @Test
   fun `an unreadable published foreground never becomes the page's body text`() {
-    // A catalog is free to publish a syntactically valid `onSurface` that is unreadable on its own
-    // surface. Body text anchors the whole neutral ramp, so taking it literally would make the
-    // matching-mode page unreadable end to end.
+    // A published `onSurface` may be unreadable on its own surface, and body text anchors the
+    // neutral ramp, so it cannot be taken literally.
     val white =
       vars(
         assertNotNull(

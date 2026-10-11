@@ -1,12 +1,5 @@
-// The arithmetic behind `<cp-page-zoom>`, as pure functions over plain boxes.
-//
-// Separated from the element on purpose: every interesting decision this feature
-// makes is geometric — how far to zoom to frame a section, how far a pan may go
-// before it shows white ground, which level of the export's tree is "one level
-// in" — and none of it needs a DOM to be right or wrong. Held in the element it
-// would only be reachable through a browser; held here it is unit-tested against
-// the two shapes that actually break it (a 3.4:1 specimen sheet and a full-height
-// section on it), which is how the `nothing happens` bug below stays fixed.
+// Pure geometry behind `<cp-page-zoom>`: zoom-to-frame, pan limits and "one level in" are decided
+// here so they can be unit-tested without a DOM, including against wide specimen sheets.
 
 /** How far the sheet is zoomed, and where it has been dragged to (CSS pixels). */
 export interface View {
@@ -26,11 +19,7 @@ export interface Box {
 /** 1:1 is the floor: the sheet is served at exactly the width of its stage. */
 export const MIN_SCALE = 1;
 
-/**
- * Far enough to read 8 px design type on a sheet squeezed into a sixth of its
- * drawn width, and short of the factor where a PNG render standing in a slot is
- * pure blur.
- */
+/** Enough to read 8 px design type on a heavily squeezed sheet, short of pure PNG blur. */
 export const MAX_SCALE = 24;
 
 /** One notch of the corner buttons, and of a double-click with nowhere to go. */
@@ -48,11 +37,7 @@ export function zoomed(view: View): boolean {
     return view.scale > 1.001;
 }
 
-/**
- * Hold the sheet inside its stage. Without this the canvas could be dragged clean
- * off, leaving a reader looking at white ground with no clue which way the
- * drawing went — and at 1:1 there is nothing to pan, so the view is pinned.
- */
+/** Keep the sheet inside its stage so it cannot be dragged off; at 1:1 the view is pinned. */
 export function clamp(view: View, box: Box): View {
     if (!(view.scale > MIN_SCALE)) return rest();
     const scale = Math.min(view.scale, MAX_SCALE);
@@ -64,14 +49,9 @@ export function clamp(view: View, box: Box): View {
 }
 
 /**
- * Carry a pan across a change in the stage's size, keeping the reader looking at the same part of
- * the sheet.
- *
- * The canvas fills the stage, so a pan offset means "this many of THIS stage's pixels" — clamping it
- * against the new bounds and leaving it otherwise alone silently moves the centre of the view. Halve
- * the width of a centred 2x view and the middle of the screen slides from 50% to 75% across the
- * sheet, which is how opening a side panel loses the reader's place. Scaling the offsets by the same
- * ratio the box changed by keeps the fraction — and therefore the content point — where it was.
+ * Carry a pan across a stage resize, keeping the same part of the sheet in view. Offsets are in
+ * stage pixels, so they are scaled by the size ratio rather than just re-clamped (which shifts the
+ * centre).
  */
 export function rescale(view: View, from: Box, to: Box): View {
     if (!(from.width > 0 && from.height > 0)) return view;
@@ -86,11 +66,7 @@ export function rescale(view: View, from: Box, to: Box): View {
     );
 }
 
-/**
- * Zoom about a point, keeping whatever is under it under it — the wheel gesture,
- * and what makes the corner buttons zoom the middle of the view rather than the
- * top-left corner.
- */
+/** Zoom about a point, keeping what is under it fixed. */
 export function zoomAbout(
     view: View,
     box: Box,
@@ -107,20 +83,11 @@ export function zoomAbout(
 }
 
 /**
- * How much bigger a rect gets when it is framed in the stage.
- *
- * FITTING BOTH AXES IS NOT ENOUGH, AND THE STYLES PAGE IS WHY. The stage wears
- * the SHEET's aspect ratio (the design decides the shape of the box), and a
- * specimen sheet can be 3.4:1 — m3-catalog's Styles page is 6263x1851. Its
- * sections are full-height cards, so "fit this section" is limited by the height
- * it already fills and resolves to about 1.0: the reader double-clicks Typography
- * and nothing happens, which is the one outcome this gesture must not have.
- *
- * So a section far taller than the viewport is fitted to its WIDTH and the caller
- * anchors it near the top, to be panned down like a column of text. The crop is
- * capped at 3x the height that would fit, so framing can never leave a tenth of
- * the thing on screen, and a rect whose shape is within 1.5x of the stage's is
- * still a plain fit that crops nothing at all.
+ * How much bigger a rect gets when framed in the stage. Fitting both axes is not enough: the stage
+ * has the sheet's aspect (possibly 3.4:1), so a full-height section would fit at ~1.0 and the
+ * gesture would do nothing. A rect much taller than the viewport is fitted to its width (caller
+ * top-anchors it), with the crop capped at 3x the fitting height; shapes within 1.5x of the stage
+ * just fit.
  */
 export function fitFactor(rect: Box, box: Box): number {
     if (!(rect.width > 0 && rect.height > 0)) return 1;
@@ -159,10 +126,8 @@ export function frameRect(view: View, box: Box, rect: Box): View {
 }
 
 /**
- * The smallest pan that brings a rect inside the stage, or null if it is already
- * there. Used when keyboard focus lands on a node the current zoom has pushed
- * off-screen — without it, tabbing a zoomed sheet lights an outline somewhere the
- * reader cannot see.
+ * The smallest pan that brings a rect into the stage, or null if already visible — so keyboard
+ * focus on an off-screen node is revealed.
  */
 export function revealDelta(
     rect: Box,
@@ -191,16 +156,10 @@ export interface Level<T> {
 }
 
 /**
- * Pick the next level in, given the chain of boxes under the pointer (outermost
- * first) and how deep the reader already is. Answers null for "nothing deeper
- * here", which the caller reads as a step back out.
- *
- * `start` is the index in `chain` of the level currently framed, or -1 for the
- * whole sheet — depth is REMEMBERED rather than inferred from the view, because a
- * framed section fills the stage's height but a quarter of its width (or the
- * reverse), so "does this box already fill the view" has no answer that holds for
- * both shapes. Getting that wrong means a double-click that re-frames the level
- * you are already on, i.e. a gesture that appears to do nothing.
+ * Pick the next level in from the chain of boxes under the pointer (outermost first); null means
+ * "nothing deeper", read by the caller as a step out. `start` is the currently framed index (-1 for
+ * the whole sheet); depth is remembered rather than inferred from the view, because a framed
+ * section may fill only one axis.
  */
 export function pickLevel<T>(
     chain: Array<Level<T>>,
@@ -212,29 +171,19 @@ export function pickLevel<T>(
     const current = start >= 0 ? chain[start].box : outer;
     for (let i = start + 1; i < chain.length; i++) {
         const level = chain[i];
-        // A wrapper the same size as the level we are on — a clip group, a frame
-        // around a frame, which real exports are full of. Entering it would
-        // re-frame the same picture, so it is not a level.
+        // A wrapper the same size as the current level (clip group, frame around a frame) re-frames
+        // the same picture, so it is not a level.
         if (
             level.box.width >= current.width * 0.92 &&
             level.box.height >= current.height * 0.92
         ) {
             continue;
         }
-        // A hairline or a single glyph stroke: filling the stage with one edge
-        // loses the reader entirely, and the level above it is the thing worth
-        // looking at.
-        //
-        // Measured in the SHEET's own pixels, not the screen's. These boxes come
-        // from `getBoundingClientRect`, so they already carry the zoom — and a
-        // fixed screen cutoff therefore stops filtering anything once the reader
-        // is in far enough: at 12x a 1 px stroke measures 12 and sails through the
-        // guard that exists to reject it.
+        // Skip hairlines and single glyph strokes. Measured in sheet pixels, since these rects
+        // already carry the zoom.
         if (level.box.width / scale < 6 || level.box.height / scale < 6)
             continue;
-        // A level that cannot be MAGNIFIED is not a level either, however
-        // differently shaped its box is: a section as wide as the sheet frames at
-        // 1.0x, so keep descending until something can actually be enlarged.
+        // A level that cannot be magnified is not a level; keep descending.
         if (fitFactor(level.box, box) < 1.15) continue;
         return level;
     }

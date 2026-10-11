@@ -7,26 +7,15 @@ import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * The **id → branch-path** maps a pinned (`?at=<sha>`) request resolves against, read from the
- * catalog's own manifests *at that commit*.
+ * catalog's own manifests at that commit.
  *
- * Why not reuse the loaded catalog's map: it describes the branch **tip**, and a permalink is a
- * question about a commit. The two lanes go wrong differently, and both do:
- * - a **render** id is derived from its path ([ServeCatalogStore.previewIdFor]), so a component
- *   renamed or reorganised in the catalog spec produces a *new* id and retires the old one. Every
- *   link made before that rename names an id the live catalog no longer holds, and the tip's map
- *   cannot resolve it under any path — the asset is right there at that commit, and the link 404s;
- * - a **reference** declares its id and its raster path independently, so the id survives a move.
- *   The tip's map then resolves confidently to a path that commit never had.
+ * The loaded catalog's map describes the branch tip, and is wrong for a pin in two ways: a
+ * **render** id is derived from its path ([ServeCatalogStore.previewIdFor]), so a renamed
+ * component's old id resolves nowhere; a **reference** declares its id independently of its path,
+ * so the tip resolves it to a path that commit never had.
  *
- * So a pin reads that commit's `catalog.json` and `references/index.json` and maps ids the same way
- * the loader does. Both are small JSON files, both are immutable at a given sha, and a commit's
- * maps are memoised — a pinned page costs at most two extra fetches once, however many assets it
- * links.
- *
- * Fail-soft throughout: an unreadable or unparseable manifest yields empty maps, and the caller
- * falls back to the tip's mapping, which is exactly the behaviour that existed before this class.
- * The parses are pure and live in the companion, so the id derivation is testable without a
- * network.
+ * Both manifests are small and immutable per sha, so each commit's maps are memoised. Fail-soft: an
+ * unreadable manifest yields empty maps and the caller falls back to the tip's mapping.
  */
 class ServePinnedManifest(
   /** Reads one published manifest at one commit. Supplied by [ServeCatalogStore]. */
@@ -51,12 +40,8 @@ class ServePinnedManifest(
     /** Design-reference id → its canonical raster's path on the branch. */
     val references: Map<String, String>,
     /**
-     * Preview id → the component it belonged to, when that revision's catalog named one.
-     *
-     * The bare minimum needed to *page* a preview this catalog no longer has: a permalink to one
-     * that has since been renamed away resolves its pixels from [renders], but the viewer also has
-     * to put a name on the page, and the session's own preview list — built from the tip — has
-     * nothing to say about an id it no longer contains.
+     * Preview id → its component, when that revision's catalog named one, so a permalink to a
+     * since-renamed preview can still be labelled.
      */
     val labels: Map<String, String> = emptyMap(),
     /** Preview id → the caption that revision published for it. See [CatalogEntries.captions]. */
@@ -80,21 +65,15 @@ class ServePinnedManifest(
   private val byCommit = java.util.concurrent.ConcurrentHashMap<String, Paths>()
 
   /**
-   * [commit]'s published layout, fetched once and then remembered.
-   *
-   * A miss is cached too, as [Paths.NONE]: a commit whose manifests cannot be read will not become
-   * readable, and remembering that is what stops a page of broken pinned images from re-fetching
-   * the branch once per image. At capacity an arbitrary entry is dropped — pinned traffic is a long
-   * tail of one-off links, so there is no recency order worth maintaining.
+   * [commit]'s published layout, fetched once and remembered. Misses are cached as [Paths.NONE] so
+   * a page of broken pinned images doesn't refetch per image. At capacity an arbitrary entry is
+   * dropped: pinned traffic is a long tail with no useful recency order.
    */
   fun forCommit(commit: String): Paths {
     val pin = ServeCatalogRevision.normalize(commit) ?: return Paths.NONE
-    // `computeIfAbsent` rather than get-then-put: the two panels of a comparison page (and every
-    // image of a pinned grid) race into this method at once, and a check-then-fetch lets each of
-    // them fetch both manifests before any of them stores a result — the memoisation this class
-    // promises, spent. ConcurrentHashMap serialises the mapping function per key, so the first
-    // caller fetches and the rest wait for its answer. The eviction stays outside the mapping
-    // function, which must not touch the map it is being computed into.
+    // `computeIfAbsent` so concurrent requests for one commit (comparison panels, a pinned grid)
+    // fetch once. Eviction stays outside the mapping function, which must not touch the map it
+    // computes into.
     val paths =
       byCommit.computeIfAbsent(pin) {
         // One read of catalog.json, two maps out of it — the paths a pinned asset resolves
@@ -126,21 +105,17 @@ class ServePinnedManifest(
   companion object {
 
     /**
-     * How many commits' layouts one catalog host remembers. Small on purpose: this is a
-     * de-duplicator across the assets of a page (and its reload), not an archive of the branch.
+     * Commits remembered per catalog host: a de-duplicator across one page's assets, not an
+     * archive.
      */
     private const val MAX_COMMITS = 4
 
     private val JSON = Json { ignoreUnknownKeys = true }
 
     /**
-     * The same eligibility rule [ServeCatalogStore] plans an image by: inside `images/`, a PNG, no
-     * traversal. An entry that fails it is one the live catalog never served, so a pinned request
-     * must not resolve to it either.
-     *
-     * Deliberately *not* mirrored: the loader's `maxImages` ceiling. That is a property of the
-     * server reading the catalog, not of the revision — a box with a different cap would otherwise
-     * disagree with itself about what a commit published.
+     * The eligibility rule [ServeCatalogStore] plans an image by: inside `images/`, a PNG, no
+     * traversal. The loader's `maxImages` cap is deliberately not mirrored, since it is a property
+     * of the server, not the revision.
      */
     private fun isServable(path: String): Boolean =
       path.startsWith("${ServeCatalogStore.IMAGES_DIR}/") &&
@@ -149,11 +124,8 @@ class ServePinnedManifest(
 
     /**
      * `catalog.json` → preview id → image path, keyed exactly as the loader keys the live catalog
-     * ([ServeCatalogStore.previewIdFor]), so a pinned id and a served id are the same string by
-     * construction rather than by coincidence.
-     *
-     * Tolerant by design: this reads a file published by an older CLI than the one reading it, so a
-     * malformed component or image is skipped rather than failing the whole map.
+     * ([ServeCatalogStore.previewIdFor]). Tolerant: a malformed component or image is skipped,
+     * since the file may come from an older CLI.
      */
     /** What one revision's `catalog.json` says, read in a single pass. */
     data class CatalogEntries(
@@ -193,26 +165,16 @@ class ServePinnedManifest(
             runCatching { image.jsonObject["path"]?.jsonPrimitive?.content }
               .getOrNull()
               ?.takeIf(::isServable) ?: continue
-          // LAST declaration wins, because that is what the live loader does
-          // (`bakedPathById[id] = path`). Two paths can flatten to one route id, and a pin that
-          // resolved such a collision the other way would serve different pixels than the same
-          // catalog served while it was current — the one thing a revision must never do.
-          //
-          // Which is also why the eligibility filter above has to run FIRST. The loader plans only
-          // the images it would serve, so an entry it rejects never reaches its map; accepting one
-          // here and then applying last-wins would let a rejected entry overwrite the served one
-          // under a shared id — a pin answering with bytes that revision never exposed, arrived at
-          // by faithfully copying half of the loader's rule.
+          // LAST declaration wins, matching the live loader, so a pin resolves id collisions to the
+          // same pixels the catalog served. The eligibility filter must run first for the same
+          // reason: the loader never maps rejected entries, so one must not overwrite a served one
+          // here.
           val id = ServeCatalogStore.previewIdFor(path)
           paths[id] = path
-          // The label follows the winning path, including when the winner has no component name —
-          // otherwise a collision resolved in favour of an unnamed entry leaves the *loser's*
-          // component behind, and the page attributes one component's render to another. Whichever
-          // declaration owns the pixels owns the name, even when that name is nothing.
+          // The label follows the winning path, even when the winner has no component name, so a
+          // render is never attributed to the loser's component.
           if (componentId != null) labels[id] = componentId else labels.remove(id)
-          // The caption follows the winning path for the same reason the label does: it describes
-          // the component that owns these pixels, so a collision resolved towards an uncaptioned
-          // entry must not leave the loser's sentence behind explaining someone else's render.
+          // Likewise the caption.
           if (caption != null) captions[id] = caption else captions.remove(id)
           val theme = runCatching {
             image.jsonObject["theme"]?.jsonPrimitive?.content
@@ -240,10 +202,8 @@ class ServePinnedManifest(
           runCatching { obj["raster"]?.jsonObject?.get("path")?.jsonPrimitive?.content }
             .getOrNull()
             ?.takeIf { it.isNotBlank() } ?: continue
-        // FIRST declaration wins here, and the asymmetry with the renders above is deliberate: the
-        // reference importer discards a duplicate id (`seen.add(reference.id)`), so first-wins is
-        // what the served catalog does. Each lane mirrors its own loader rather than both being
-        // made consistent with each other.
+        // FIRST declaration wins here, mirroring the reference importer (`seen.add(reference.id)`);
+        // each lane mirrors its own loader.
         paths.putIfAbsent(id, path)
       }
       return paths

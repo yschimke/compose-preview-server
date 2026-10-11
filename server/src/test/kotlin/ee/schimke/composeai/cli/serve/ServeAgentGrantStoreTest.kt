@@ -13,12 +13,10 @@ import kotlin.test.assertTrue
 
 /**
  * The grant state machine: what a request becomes, who may collect it, and what a grant may do.
- *
- * The properties worth pinning are the ones the design leans on — the token is delivered to the
- * device secret and not to the link, an approval can narrow but never widen, and everything here
- * expires. Each of those is a security claim in
- * [docs/design/AGENT_ACCESS_GRANTS.md](../../../../../../../../docs/design/AGENT_ACCESS_GRANTS.md),
- * so each gets a test rather than a comment.
+ * Each security claim in
+ * [docs/design/AGENT_ACCESS_GRANTS.md](../../../../../../../../docs/design/AGENT_ACCESS_GRANTS.md)
+ * gets a test: tokens go to the device secret not the link, approvals only narrow, everything
+ * expires.
  */
 class ServeAgentGrantStoreTest {
 
@@ -125,10 +123,8 @@ class ServeAgentGrantStoreTest {
 
   @Test
   fun `a capability the ceiling excludes stays in the request and out of the grant`() {
-    // The ask is what the approval page renders — selectable checkboxes for what this box offers,
-    // a withheld note naming `--agent-grant-capabilities` for what it does not — so the request
-    // must remember it. The MINT is where the ceiling bites: the note can be read, and the grant
-    // still cannot carry what the box refuses.
+    // The request remembers the ask so the approval page can render it, but the mint enforces the
+    // box's ceiling.
     val store =
       store(
         maxScope = AgentGrantScope.PLAYGROUND,
@@ -388,8 +384,8 @@ class ServeAgentGrantStoreTest {
 
   @Test
   fun `the pending cap holds under concurrent anonymous callers`() {
-    // The check and the insert used to be a check-then-act on a map an anonymous caller drives, so
-    // a burst could push it well past the cap — the bound this ungated route relies on for memory.
+    // Check and insert must be atomic, or a burst could exceed the cap this ungated route relies
+    // on.
     val store = store(maxPendingRequests = 8)
     val threads =
       (1..32).map { i ->
@@ -405,10 +401,9 @@ class ServeAgentGrantStoreTest {
 
   @Test
   fun `a denial does not make room for a new one`() {
-    // Inverted deliberately. This used to assert that denying freed capacity, which is exactly the
-    // vector that made the map unbounded: an operator working through hostile requests would hand
-    // the sender a fresh slot with every click. A denial is kept (its owner must be able to learn
-    // it was denied) and charged to whoever caused it; only its own expiry frees the space.
+    // Denying does not free capacity: denials are kept (the owner must learn of them) and charged
+    // to the requester until they expire; otherwise each denial hands a hostile sender a fresh
+    // slot.
     val store = store(maxPendingRequests = 2)
     val first = store.openRequest("a", "ip", AgentGrantScope.PREVIEW, 600)!!
     store.openRequest("b", "ip", AgentGrantScope.PREVIEW, 600)
@@ -471,11 +466,8 @@ class ServeAgentGrantStoreTest {
 
   @Test
   fun `overflow never strands a token the agent has not collected yet`() {
-    // This used to assert the *mechanism* — that a new ask was refused rather than evicting the
-    // uncollected approval. The mechanism changed (an approval no longer spends the pending budget
-    // at all, so there is nothing to refuse), but the guarantee it was protecting has not, so the
-    // test now states that instead: fill the pending budget and the uncollected token still
-    // arrives.
+    // An uncollected approval does not spend the pending budget, so filling it still lets the token
+    // arrive.
     val store = store(maxPendingRequests = 2)
     val approved = store.ask()
     store.approve(approved.id, "@yuri", AgentGrantScope.LIVE, 600)
@@ -488,9 +480,8 @@ class ServeAgentGrantStoreTest {
 
   @Test
   fun `an approval near the deadline is still collectable after it`() {
-    // The request TTL bounds how long a human has to DECIDE. Once they have decided, deleting the
-    // record strands the grant it created — which is what happened to anyone approving in the last
-    // seconds of the window, because the agent's next poll landed after it.
+    // The request TTL bounds deciding time; deleting the record after a decision would strand its
+    // grant.
     val store = store()
     val request = store.ask(ttl = 3600)
     store.approve(request.id, "@yuri", AgentGrantScope.LIVE, 3600)
@@ -501,9 +492,7 @@ class ServeAgentGrantStoreTest {
 
   @Test
   fun `approving concurrently with a purge never mints an orphaned grant`() {
-    // The lookup used to sit outside the lock that purging takes, so a purge landing between the
-    // two could delete the entry while approve minted a grant and marked a detached object
-    // approved: the page said success, the agent's poll found nothing.
+    // Lookup and approval must share the purge lock, or a purge in between strands the grant.
     repeat(40) {
       val store = store()
       val request = store.ask(ttl = 600)
@@ -527,12 +516,9 @@ class ServeAgentGrantStoreTest {
 
   @Test
   fun `concurrent polling never sees a half-published approval`() {
-    // HONEST SCOPE: this is a smoke test, not the guarantee. The guarantee is that `poll` reads
-    // under the same lock `approve` holds, so the intermediate state (APPROVED with a null grant
-    // id) cannot be observed at all. A racing test like this one passed against the *broken*
-    // ordering too — the window is two adjacent statements, and hitting it by sampling is luck.
-    // Kept because it would catch a gross regression (a lock removed, an exception under
-    // contention) cheaply, and because the reader should be told which of the two it is.
+    // A smoke test only: the guarantee is that `poll` reads under `approve`'s lock, so the
+    // intermediate state cannot be observed. Sampling cannot reliably hit the window, but this
+    // catches gross regressions cheaply.
     repeat(50) {
       val store = store()
       val request = store.ask(ttl = 600)
@@ -550,9 +536,8 @@ class ServeAgentGrantStoreTest {
 
   @Test
   fun `a label cannot reorder what the approval page says`() {
-    // U+202E RIGHT-TO-LEFT OVERRIDE survives an isISOControl filter AND HTML escaping, so a
-    // requester could reverse the rendering of everything after their label — on the one page whose
-    // whole job is to state accurately what is being agreed to, and in the operator's audit line.
+    // U+202E survives an isISOControl filter and HTML escaping, and would reverse the rendering of
+    // the approval page and the audit line after the label.
     val nasty = "fix \u202Ednarg lla tnarg\u202C \u2066issue\u2069 \u200Bnow\uFEFF"
     val clean = ServeAgentGrantStore.sanitizeLabel(nasty)
     for (c in clean) {
@@ -567,9 +552,8 @@ class ServeAgentGrantStoreTest {
 
   @Test
   fun `overflow never sheds an approval whose grant is still live`() {
-    // `collected` means a poll BUILT a response, not that the agent got one. Shedding on it meant a
-    // full map plus one dropped packet stranded a live grant — and filling the map is something an
-    // anonymous caller can attempt.
+    // `collected` means a poll built a response, not that the agent got one, so shedding on it
+    // could strand a live grant.
     val store = store(maxPendingRequests = 2)
     val mine = store.ask(ttl = 3600)
     store.approve(mine.id, "@yuri", AgentGrantScope.LIVE, 3600)
@@ -585,9 +569,8 @@ class ServeAgentGrantStoreTest {
 
   @Test
   fun `a lost token response can be collected again`() {
-    // `collected` marks that a poll BUILT a response, not that the agent received one. Treating it
-    // as a deletion trigger meant a response lost in flight left the retry told `unknown` while the
-    // grant was still live.
+    // Same: a response lost in flight must not leave the retry told `unknown` while the grant is
+    // live.
     val store = store()
     val request = store.ask(ttl = 3600)
     store.approve(request.id, "@yuri", AgentGrantScope.LIVE, 3600)
@@ -621,10 +604,8 @@ class ServeAgentGrantStoreTest {
 
   @Test
   fun `retained approvals do not consume the pending-request budget`() {
-    // Two populations, two reasons to be bounded. Pending requests are what an anonymous caller can
-    // create at will; a retained approval exists only while its grant does, and grants have their
-    // own cap. Counting both against one number made the caps fight: an operator asking for more
-    // concurrent grants than the request cap could never get them, with nothing to explain why.
+    // Pending requests (anonymous) and retained approvals (bounded by the grant cap) are counted
+    // separately, so the two caps don't fight.
     val store = store(maxPendingRequests = 2, maxActiveGrants = 8)
     // Fill the map with approvals whose grants are all live.
     val approved =
@@ -649,10 +630,8 @@ class ServeAgentGrantStoreTest {
 
   @Test
   fun `denying a batch does not hand the attacker a fresh batch`() {
-    // A denial stays in the map so the agent can learn it was denied rather than being told
-    // `unknown` — so if denials were not charged against the cap, an operator working through
-    // hostile requests would free capacity with every click: submit a batch, get it denied, submit
-    // another, forever, in an anonymously-controlled map that was supposed to be bounded.
+    // Denials stay (so the agent learns of them) and are charged against the cap, or
+    // deny-and-resubmit would make the map unbounded.
     val store = store(maxPendingRequests = 3)
     val first =
       (1..3).mapNotNull { store.openRequest("spam-$it", "10.9.9.9", AgentGrantScope.PREVIEW, 600) }
@@ -696,10 +675,8 @@ class ServeAgentGrantStoreTest {
 
   @Test
   fun `a finished request is shed to make room`() {
-    // This used to assert that a *collected* request was shed. That was wrong for the same reason
-    // the purge was: `collected` means a poll built a response, not that the agent received one, so
-    // shedding on it stranded a live grant whenever a response was lost. What may be shed is a
-    // request that is genuinely finished with — here, one whose grant has since expired.
+    // Only a genuinely finished request (here, one whose grant expired) may be shed, not one merely
+    // collected.
     val store = store(maxPendingRequests = 2)
     val done = store.ask(ttl = 60)
     store.approve(done.id, "@yuri", AgentGrantScope.LIVE, 60)

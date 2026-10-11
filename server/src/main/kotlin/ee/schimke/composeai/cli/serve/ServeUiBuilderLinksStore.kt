@@ -13,19 +13,15 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 
 /**
- * What one design is **for**: typed back-links to the issue behind it, the frame it reproduces, the
- * pull request that implemented it, the thread it is discussed in, and the design it continues (see
+ * What one design is for: typed back-links to its issue, reproduced frame, implementing PR,
+ * discussion thread and predecessor design (see
  * [`MULTIPLAYER_WORKFLOW.md`](../../../../../../../../docs/design/MULTIPLAYER_WORKFLOW.md) §4.2).
- *
- * Kept out of the design document for the reasons [ServeUiBuilderReferenceStore] gives: it is not
- * design content and must never reach an export, `DesignMutationV1` has no mutation for it, and it
- * must not advance the revision. One small JSON file per design under `links/`; losing it loses no
- * design content.
+ * Kept out of the document for [ServeUiBuilderReferenceStore]'s reasons. One small JSON file per
+ * design under `links/`.
  *
  * [StoredLinks.issue], [StoredLinks.reference], [StoredLinks.pr] and [StoredLinks.thread] are
- * absolute `http(s)` URLs, [StoredLinks.previous] is a design id on this host, each bounded at
- * [MAX_VALUE_BYTES]; an empty record is no file. **Nothing here is ever fetched**: the URLs are
- * written by any design writer, and this host holds no credential for the systems they name.
+ * absolute `http(s)` URLs, [StoredLinks.previous] a design id, each bounded by [MAX_VALUE_BYTES];
+ * an empty record is no file. Nothing here is ever fetched: any design writer sets these URLs.
  */
 class ServeUiBuilderLinksStore(private val root: Path) {
   init {
@@ -33,11 +29,7 @@ class ServeUiBuilderLinksStore(private val root: Path) {
     require(Files.isDirectory(root)) { "UI-builder links root is not a directory: $root" }
   }
 
-  /**
-   * Where each design was forked from and what was forked from it, kept beside the links because
-   * the same host that records what a design is for records where it came from. See
-   * [ServeUiBuilderAncestryStore].
-   */
+  /** Fork ancestry, kept beside the links; see [ServeUiBuilderAncestryStore]. */
   internal val ancestry: ServeUiBuilderAncestryStore by lazy {
     ServeUiBuilderAncestryStore(root.resolve(ServeUiBuilderAncestryStore.DIRECTORY))
   }
@@ -46,12 +38,8 @@ class ServeUiBuilderLinksStore(private val root: Path) {
   fun read(designId: String): StoredLinks? = readFile(fileFor(designId))
 
   /**
-   * Replace everything recorded for [designId], or explain why not.
-   *
-   * Replaces rather than merges: the record is five fields an operator or an agent holds in one
-   * form, and a partial write is how a design ends up citing the issue it *used* to be for.
-   * Clearing a field is done by sending the record without it, which a merge would make impossible
-   * to express.
+   * Replace everything recorded for [designId], or explain why not. Replace rather than merge, so a
+   * stale field can't survive and clearing one is expressible.
    */
   fun replace(designId: String, request: StoredLinks): LinksWriteResult {
     val candidate =
@@ -61,18 +49,14 @@ class ServeUiBuilderLinksStore(private val root: Path) {
         reference = request.reference.normalized(),
         pr = request.pr.normalized(),
         thread = request.thread.normalized(),
-        // Blank means unset, and nothing else is touched. Trimming would change which design the
-        // id names: the service creates a design under any non-blank id, whitespace included, so
-        // " checkout " and "checkout" are two designs and this field must not turn one into the
-        // other.
+        // Blank means unset; no trimming, since the service treats `" checkout "` and `"checkout"`
+        // as different designs.
         previous = request.previous?.ifBlank { null },
         updatedAtEpochMillis = System.currentTimeMillis(),
       )
     if (candidate.isEmpty) {
-      // Nothing to keep is not a refusal; it is somebody having cleared the record, and the honest
-      // storage for that is no file at all. A clear that did not happen is a refusal, though: the
-      // caller asked for these links to be gone, and reporting success over a record still on disk
-      // is how an issue or a pull request outlives the request to forget it.
+      // An empty record is stored as no file; a clear that didn't actually remove the file is a
+      // refusal, not success.
       return when (deleteRecord(designId)) {
         LinksDeleteResult.REMOVED,
         LinksDeleteResult.ABSENT -> LinksWriteResult.Stored(candidate)
@@ -87,12 +71,8 @@ class ServeUiBuilderLinksStore(private val root: Path) {
   }
 
   /**
-   * Forget what [designId] is linked to, if anything.
-   *
-   * Three answers rather than two, because "there was nothing to remove" and "there was something
-   * and it is still there" are the same `false` to a caller that cannot tell them apart — and the
-   * second one, reported as success, leaves an issue or a pull request readable after an explicit
-   * clear. The caller decides what a failure is worth; the store only declines to hide it.
+   * Forget [designId]'s links. Three answers, so "nothing to remove" is distinguishable from "still
+   * there", which must not be reported as success.
    */
   fun delete(designId: String): LinksDeleteResult {
     // The design is going, so where it came from goes with it; its links record decides the answer.
@@ -109,24 +89,14 @@ class ServeUiBuilderLinksStore(private val root: Path) {
     }
 
   /**
-   * Every design on this host whose record cites [issue], in a stable order.
-   *
-   * A directory scan, deliberately: the reverse lookup is the "what is in flight for this issue"
-   * question a person asks a handful of times a day, and the alternative — an index file to keep
-   * consistent with the records it indexes — is a second source of truth for a lookup that costs a
-   * few hundred stat calls.
-   *
-   * **This answers what is stored, not what the caller may see.** Every id returned is filtered
-   * through a read of the design as the calling actor before it leaves the process; a store cannot
-   * do that, and one that pretended to would be the wrong place for the access check to live.
+   * Every design here whose record cites [issue], in stable order. A directory scan rather than an
+   * index file, since the lookup is rare and an index would be a second source of truth. Returns
+   * what is stored, not what the caller may see: callers filter each id through a read as the
+   * asking actor.
    */
   fun citing(issue: String): List<String> = matching(issue) { it.issue }
 
-  /**
-   * Every design on this host whose record names [pr] as its pull request — the reverse of "the
-   * implementation PR for this design", with [citing]'s caveat: the caller filters each id through
-   * a read of the design as the asking actor.
-   */
+  /** Every design naming [pr] as its implementation; same filtering caveat as [citing]. */
   fun citingPr(pr: String): List<String> = matching(pr) { it.pr }
 
   private fun matching(value: String, field: (StoredLinks) -> String?): List<String> {
@@ -159,9 +129,8 @@ class ServeUiBuilderLinksStore(private val root: Path) {
     } catch (_: IOException) {
       null
     } catch (_: SerializationException) {
-      // A file this process cannot read is a file it will happily replace on the next write. The
-      // alternative — failing the design's open because its links record is corrupt — makes an
-      // optional annotation able to take a design offline.
+      // An unreadable record reads as none (and is replaced on the next write), so an optional
+      // annotation can't take a design offline.
       null
     }
   }
@@ -184,19 +153,16 @@ class ServeUiBuilderLinksStore(private val root: Path) {
   }
 
   /**
-   * A design id is caller-supplied text, so it never becomes a path segment: the file is named by
-   * the digest of the id, which is fixed-length, path-safe, and cannot escape [root].
+   * Design ids are caller-supplied, so files are named by the id's digest, which can't escape
+   * [root].
    */
   private fun fileFor(designId: String): Path =
     root.resolve(sha256Hex(designId.toByteArray(StandardCharsets.UTF_8)) + ".json")
 
   companion object {
     /**
-     * Why this record may not be kept, or null when it may. Sentences a person is meant to read.
-     *
-     * On the companion rather than the instance because the rule is about the links and not about
-     * where they are being put: the project design index checks an entry against it without holding
-     * a store, and a second copy of the rule there is a second rule that could disagree.
+     * Why this record may not be kept, as readable sentences, or null. On the companion so the
+     * project design index applies the same rule without a store.
      */
     fun refusal(links: StoredLinks): String? {
       URL_FIELDS.forEach { (name, read) ->
@@ -212,10 +178,8 @@ class ServeUiBuilderLinksStore(private val root: Path) {
       if (previous.toByteArray(StandardCharsets.UTF_8).size > MAX_VALUE_BYTES) {
         return "`previous` must be under $MAX_VALUE_BYTES bytes"
       }
-      // `previous` names a design on this host rather than a URL. Checked for exactly that and no
-      // more: the service creates a design under any non-blank id — long, non-ASCII, or carrying
-      // whitespace — so any shape imposed here would make a design that opens and edits normally
-      // impossible to name as a predecessor.
+      // `previous` is a design id, not a URL; no other shape is imposed since the service accepts
+      // any non-blank id.
       if (previous.isAbsoluteHttpUrl()) {
         return "`previous` must be a design id on this host, not a URL"
       }
@@ -223,11 +187,8 @@ class ServeUiBuilderLinksStore(private val root: Path) {
     }
 
     /**
-     * Ceiling on one link.
-     *
-     * Two kilobytes is longer than any tracker, forge or chat permalink in circulation and short
-     * enough that a design's whole record stays a single small read. A link that does not fit is
-     * not a link; it is somebody pasting a document into a field.
+     * Ceiling on one link: longer than any real permalink, short enough that a record stays one
+     * small read.
      */
     const val MAX_VALUE_BYTES: Int = 2 * 1024
 
@@ -252,12 +213,8 @@ class ServeUiBuilderLinksStore(private val root: Path) {
     private fun String?.normalized(): String? = this?.trim()?.ifEmpty { null }
 
     /**
-     * Absolute, `http` or `https`, with a host.
-     *
-     * Scheme-checked rather than merely parsed because the value is handed to a browser as a link:
-     * a `javascript:` or `data:` "URL" stored here would be a stored cross-site script the moment a
-     * panel rendered it as an anchor, and refusing it at the door is one check rather than an
-     * escaping rule every reader has to remember.
+     * Absolute `http`/`https` with a host. Scheme-checked because the value becomes a link in a
+     * browser; a stored `javascript:` or `data:` URL would be stored XSS.
      */
     private fun String.isAbsoluteHttpUrl(): Boolean {
       val uri =
@@ -280,20 +237,11 @@ class ServeUiBuilderLinksStore(private val root: Path) {
 }
 
 /**
- * The links payload, on the wire and on disk — [DesignLinksV1], published.
- *
- * The shape moved to `compose-preview-contracts` because that is where a wire shape lives, and this
- * record is one three times over: the response body of the links routes, the payload of
- * `ui_builder_get_links`, and the file under `links/`. The alias is kept because the name says what
- * this server does with it — it *stores* the thing — and because every reader here is about storage
- * rather than about the wire.
- *
- * Nothing about the JSON changed. The published type carries the same field names and the same
- * `@SerialName`, so a host reads the records it wrote before this bump.
- *
- * What did not move is everything that is not shape: [ServeUiBuilderLinksStore.refusal] and its URL
- * rules, the digest that names the file, and [isEmpty] below. The contracts module is shape and
- * never behaviour, so a question *about* a record is answered here.
+ * The links payload on the wire and on disk: the published [DesignLinksV1] (route body,
+ * `ui_builder_get_links` payload and file under `links/`). Aliased here because this server stores
+ * it. Same field names, so existing records still read. Behaviour
+ * ([ServeUiBuilderLinksStore.refusal], the file digest, [isEmpty]) stays here; contracts are shape
+ * only.
  */
 typealias StoredLinks = DesignLinksV1
 
@@ -311,20 +259,12 @@ enum class LinksDeleteResult {
 sealed interface LinksWriteResult {
   data class Stored(val links: StoredLinks) : LinksWriteResult
 
-  /**
-   * These links are not ones this host will keep, whatever the state of the disk.
-   *
-   * A fact about the record, so the same payload will be refused again: the caller should change it
-   * rather than retry it.
-   */
+  /** These links will never be kept; change the payload rather than retry. */
   data class Refused(val reason: String) : LinksWriteResult
 
   /**
-   * The record was acceptable and the storage did not take it.
-   *
-   * Kept apart from [Refused] because the two want opposite things from a client. A refusal is
-   * permanent and a failure is not, and reporting a full disk as a validation error tells a caller
-   * to stop sending a payload that would have worked.
+   * The record was acceptable but storage failed. Distinct from [Refused] because this one is worth
+   * retrying.
    */
   data class Failed(val reason: String) : LinksWriteResult
 }

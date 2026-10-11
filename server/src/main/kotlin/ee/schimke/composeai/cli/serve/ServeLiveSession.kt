@@ -6,14 +6,12 @@ import ee.schimke.composeai.daemon.protocol.StreamCodec
 import ee.schimke.composeai.daemon.protocol.StreamFrameParams
 
 /**
- * One **live** streamed-frame connection backed by the daemon's `stream/start` +
- * `interactive/input` protocol (tier-2). Frames are *pushed* by the daemon (animations,
- * recomposition, input results) — not re-requested per client message — and decoded inline (no
- * disk), which is the real upgrade over the [ServeStreamSession] snapshot fallback.
+ * One live streamed-frame connection over the daemon's `stream/start` + `interactive/input`
+ * protocol (tier-2). Frames are pushed by the daemon and decoded inline, unlike the
+ * [ServeStreamSession] snapshot fallback.
  *
- * Created via [tryStart], which returns `null` when the backend doesn't support streaming so the
- * WebSocket route can fall back to [ServeStreamSession]. Like that class it's transport-agnostic:
- * frames + errors go out through the [send] callback, so it's unit-testable without a socket.
+ * [tryStart] returns null when the backend can't stream, so the WebSocket route can fall back.
+ * Transport-agnostic: output goes through [send], so it's testable without a socket.
  */
 class ServeLiveSession
 private constructor(
@@ -33,9 +31,8 @@ private constructor(
   @Volatile private var handle: StreamHandle? = null
 
   /**
-   * The last visibility the client reported, re-applied to every stream this socket opens after it.
-   * Streams start visible daemon-side, so a hidden socket that restarts its stream (an override
-   * change, a `switch`) has to say so again or it silently returns to full rate.
+   * The last client-reported visibility, re-applied to every stream this socket opens: streams
+   * start visible daemon-side, so a hidden socket that restarts its stream must say so again.
    */
   @Volatile private var visible: Boolean = true
 
@@ -48,9 +45,8 @@ private constructor(
   private val seq = java.util.concurrent.atomic.AtomicLong(0)
 
   /**
-   * This catalog's always-dark (and any future per-system) override policy, applied to every
-   * client-supplied override map before it is parsed. Resolved from [system] rather than injected,
-   * so a socket lane can't be wired up without it — see [ServeWeb.SystemDisplay].
+   * This catalog's override policy (e.g. always-dark), applied to every client override map before
+   * parsing. Resolved from [system] so no socket lane can skip it; see [ServeWeb.SystemDisplay].
    */
   private fun normalize(overrides: Map<String, String>): Map<String, String> =
     ServeWeb.SystemDisplay.normalizeOverrideParams(system, overrides)
@@ -72,9 +68,8 @@ private constructor(
       is ServeStreamProtocol.ClientMessage.Input -> dispatchInput(message)
       is ServeStreamProtocol.ClientMessage.Switch -> switchTo(message)
       is ServeStreamProtocol.ClientMessage.Visibility -> {
-        // Remembered, because every later stream this socket opens has to start where the client
-        // left it: a `setOverrides` or `switch` while the tab is hidden would otherwise come back
-        // at full rate against a client that never said it was looking again.
+        // Remembered so a later `setOverrides` or `switch` while hidden doesn't come back at full
+        // rate.
         visible = message.visible
         visibilityFps = message.fps
         handle?.visibility(message.visible, message.fps)
@@ -129,10 +124,8 @@ private constructor(
   }
 
   /**
-   * Move this connection to a different preview (optionally with new overrides) without
-   * reconnecting. The new stream is opened *before* the old one is dropped, so a switch to a
-   * missing preview (or a backend that can't stream it) reports an error and leaves the current
-   * view intact rather than going blank.
+   * Move to a different preview without reconnecting. The new stream opens before the old one
+   * drops, so a failed switch reports an error and leaves the current view intact.
    */
   private fun switchTo(message: ServeStreamProtocol.ClientMessage.Switch) {
     val nextOverrides = message.overrides?.let(::normalize) ?: overrides
@@ -159,18 +152,11 @@ private constructor(
   }
 
   /**
-   * Parse [params] as [id]'s overrides, with a `themeProvider` first expanded into the named colour
-   * seeds that apply it to a replayed document ([ServeThemeReplay]).
-   *
-   * The expansion belongs on this lane for the same reason it belongs on the render handlers: a
-   * replayed preview has no composition to wrap, so forwarding the raw provider would stream frames
-   * the theme never touched while the viewer showed it as selected. Every message that carries
-   * overrides goes through here — `setOverrides` and `switch` — as does the socket's initial query
-   * in [tryStart], so a stream can't be opened by a route that skipped it.
-   *
-   * [params] itself is stored un-expanded by the callers: the seeds are derived per preview, and a
-   * `switch` that keeps the current overrides must re-derive them for the preview it lands on
-   * rather than carrying the previous one's.
+   * Parse [params] as [id]'s overrides, first expanding a `themeProvider` into the colour seeds
+   * that apply it to a replayed document ([ServeThemeReplay]); a replayed preview has no
+   * composition to wrap. Every override-carrying message and [tryStart]'s initial query go through
+   * here. Callers store [params] unexpanded, since seeds are per preview and a `switch` must
+   * re-derive them.
    */
   private fun parseFor(id: String, params: Map<String, String>): OverrideParse =
     ServeRcPlayerIds.parseOverrides(
@@ -193,9 +179,8 @@ private constructor(
     renderHost.declaredThemes.map { it.providerFqn }.toSet()
 
   private fun onFrame(frame: StreamFrameParams) {
-    // `unchanged` heartbeats carry no payload — nothing to paint. Counted before the return: the
-    // split between painted frames and heartbeats is what says whether a slow lane is the render
-    // loop or the idle backoff doing its job (#4281).
+    // `unchanged` heartbeats carry no payload. Counted before returning: the painted/heartbeat
+    // split tells a slow render loop from idle backoff.
     val payload =
       frame.payloadBase64
         ?: run {
@@ -204,19 +189,11 @@ private constructor(
         }
     frameStats?.recordFrame(payload.length)
     val codec = frame.codec?.name?.lowercase() ?: "png"
-    // This connection's own sequence, NOT the daemon's `frame.seq`.
-    //
-    // The daemon numbers per *stream* and starts each one at zero, and one socket outlives several
-    // of them: every `setOverrides` restarts the held session ([restart]) and every `switch` opens
-    // a replacement ([switchTo]), each with a fresh `frameStreamId` counting from scratch. Relaying
-    // those numbers made the socket's sequence jump backwards on any knob change.
-    //
-    // Nothing noticed while the browser painted every frame it received. It stops being harmless
-    // the moment the client uses `seq` to order paints (issue #4285): a viewer forty frames into a
-    // session that then restarts at 1 would reject every subsequent frame as stale and freeze the
-    // lane for good. The socket is one logical stream to the browser and has to be numbered like
-    // one — the same thing [ServeStreamSession] already does with its own counter on the snapshot
-    // lane.
+    // This connection's own sequence, not the daemon's `frame.seq`: the daemon numbers per stream
+    // from zero, and one socket outlives several streams (each `setOverrides` [restart] and
+    // [switchTo]). Relaying them would jump backwards, and a client ordering paints by `seq` would
+    // reject every later frame as stale. [ServeStreamSession] numbers its snapshot lane the same
+    // way.
     send(
       ServeStreamProtocol.frameMessage(
         seq.getAndIncrement(),
@@ -243,11 +220,9 @@ private constructor(
       }
 
     /**
-     * Try to open a daemon-backed live stream. Returns `null` when streaming is unsupported, or
-     * when the initial-overrides query is invalid — in both cases the caller falls back to the
-     * snapshot lane, which re-parses the same overrides and reports the reason once. The invalid
-     * case used to degrade to the preview's defaults and subscribe anyway; that quietly served a
-     * default-themed stream to a client that had asked for something else.
+     * Try to open a daemon-backed live stream. Returns null when streaming is unsupported or the
+     * initial overrides are invalid; either way the caller falls back to the snapshot lane, which
+     * re-parses and reports the reason once.
      */
     fun tryStart(
       renderHost: ServeHost,
@@ -265,14 +240,9 @@ private constructor(
       val knobKinds =
         ServeOverrides.declaredKnobKinds(renderHost.previews.firstOrNull { it.id == previewId })
       val normalizedOverrides = ServeWeb.SystemDisplay.normalizeOverrideParams(system, overrides)
-      // Validate the socket's *initial* query too, not just the later `setOverrides` / `switch`
-      // messages. Degrading an invalid parse to `PreviewOverrides()` here would subscribe the
-      // client to a stream rendered under the default theme while it believes it asked for another
-      // one — the exact silent-default this validation exists to stop, and worse on a live stream
-      // than on a snapshot because a later frame would clear the viewer's error overlay while the
-      // wrong stream kept running. Refuse to start instead: the reason goes out through
-      // [onUnavailable], and the caller's fallback to [ServeStreamSession] re-parses the same
-      // overrides and reports it once, rather than this lane and that one both sending it.
+      // Validate the initial query too. Degrading to `PreviewOverrides()` would stream the default
+      // theme to a client that asked for another, and a later frame would clear the viewer's error
+      // overlay. Refuse instead and let [ServeStreamSession] report the reason once.
       val initial =
         when (
           val parsed =
@@ -288,10 +258,9 @@ private constructor(
           }
           is OverrideParse.Ok -> parsed.overrides
         }
-      // Opened *before* the subscribe because the broadcast hub replays its last painted frame
-      // into `onFrame` synchronously for a late joiner — a recorder created after the call would
-      // miss that frame. Closed again right below if the open fails, so a stream that never
-      // started is never counted as an open socket.
+      // Opened before the subscribe because the broadcast hub replays its last frame into `onFrame`
+      // synchronously for a late joiner. Closed below if the open fails, so a stream that never
+      // started isn't counted.
       val recorder = frameStats?.openSocket(system, previewId)
       val session =
         ServeLiveSession(

@@ -5,14 +5,10 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 /**
- * Recompiles a module's Kotlin/Java sources so the classes a daemon loads match the source on disk.
- *
- * A daemon's `fileChanged({kind:"source"})` handler only swaps its user classloader: it re-reads
- * the class directories Gradle wrote and does not compile anything. The editor integrations run a
- * compile first (VS Code runs `composePreviewCompile`, or the daemon's `compileSources` when BTA is
- * wired), but an agent that edits a file and calls `notify_file_changed` has nobody doing that, so
- * the swapped classloader loads the old bytecode and `render_preview` returns the old image
- * (issue #1169). The MCP server now runs this before it forwards `fileChanged`.
+ * Recompiles a module's sources so the classes a daemon loads match disk. A daemon's
+ * `fileChanged({kind:"source"})` only swaps its classloader and compiles nothing; editors compile
+ * first, but an agent calling `notify_file_changed` would otherwise get the old image. The MCP
+ * server runs this before forwarding `fileChanged`.
  */
 fun interface SourceCompiler {
   fun compile(projectRoot: File, modulePath: String, sources: List<File>): SourceCompileOutcome
@@ -34,17 +30,11 @@ sealed interface SourceCompileOutcome {
 }
 
 /**
- * Stage-0 compile: `./gradlew <module>:composePreviewCompile`, the lifecycle task the Compose
- * Preview Gradle plugin registers for exactly this save loop. It runs the same Kotlin compile task
- * the daemon's class directories come from, without the discovery scan.
- *
- * A project that does not apply the plugin itself has it injected by the compose-preview CLI's init
- * script (`AutoInject`), and without that script the task does not exist (issue #1174). The CLI
- * does not tell this server where the script is, so [InitScripts] finds it the way the CLI writes
- * it, and the compile passes it exactly as the CLI does: `--init-script <path>` plus Isolated
- * Projects off.
- *
- * The child's output is captured, never inherited: this process's stdout is the MCP transport.
+ * Stage-0 compile: `./gradlew <module>:composePreviewCompile`, the plugin's lifecycle task for the
+ * save loop (Kotlin compile without discovery). For a project that doesn't apply the plugin, the
+ * task only exists with the CLI's init script, which [InitScripts] locates; it is passed as the CLI
+ * does (`--init-script <path>`, Isolated Projects off). Output is captured, never inherited: stdout
+ * is the MCP transport.
  */
 class GradleSourceCompiler(
   private val timeoutMs: Long = TimeUnit.MINUTES.toMillis(5),
@@ -143,9 +133,7 @@ class GradleSourceCompiler(
       initScript?.let { listOf("--init-script", it.absolutePath) + ISOLATED_PROJECTS_OFF }.orEmpty()
     val startedAt = System.nanoTime()
     val process = runCatching {
-      // Not `--quiet`: the plain console's `> Task :x` lines are how [CompileWork] learns which
-      // tasks the compile ran. The output is captured and only summarized, so the extra lines
-      // cost nothing the agent sees.
+      // Not `--quiet`: [CompileWork] reads the plain console's `> Task :x` lines.
       ProcessBuilder(command + injection + listOf("--console=plain", task))
         .directory(projectRoot)
         .redirectErrorStream(true)
@@ -275,10 +263,9 @@ class InitScripts(
   }
 
   /**
-   * Nothing cached yet, as on a machine where `compose-preview mcp install` never ran: ask the CLI
-   * to write the script (`compose-preview init-script --path`, side-effect free), instead of
-   * failing the first render with "run `compose-preview mcp install` once"
-   * (yschimke/compose-ag-plugin#87).
+   * Nothing cached yet (e.g. `compose-preview mcp install` never ran): ask the CLI to write the
+   * script (`compose-preview init-script --path`, side-effect free) rather than failing the first
+   * render.
    */
   private fun fromCli(projectRoot: File): File? {
     val cli = cli ?: return null
@@ -341,10 +328,8 @@ class InitScripts(
 }
 
 /**
- * Asks the compose-preview CLI to write its init script for a build and returns the path; a seam so
- * tests need no CLI. Driving Gradle stays the CLI's job: this only runs `compose-preview
- * init-script --path` across a process boundary, which writes the script into the cache
- * [InitScripts] reads.
+ * Asks the CLI to write its init script and returns the path (`compose-preview init-script
+ * --path`); a seam so tests need no CLI.
  */
 fun interface CliInitScript {
 

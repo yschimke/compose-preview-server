@@ -1,8 +1,5 @@
-// Getting pixels out of the browser and into the plain arrays everything else here works on.
-//
-// Everything that needs a `document`, an `Image` or a canvas lives in this file and nowhere else, so
-// the decisions next door — `planes.ts`, `contentBox.ts`, `deltaMap.ts` — stay testable without one.
-// What is left here is thin on purpose: decode, downscale, sample, hand off.
+// Getting browser pixels into plain arrays. Everything needing `document`, `Image` or a canvas
+// lives here so `planes.ts`, `contentBox.ts` and `deltaMap.ts` stay testable without one.
 
 import {
     boxFromSamples,
@@ -37,11 +34,8 @@ export function loadImage(src: string): Promise<HTMLImageElement> {
 }
 
 /**
- * SVG text decoded into an image.
- *
- * Through a blob URL rather than a data URI: an SVG of any real size overflows what a data URI can
- * carry comfortably, and the object URL is revoked either way — on the next macrotask when the
- * decode succeeded (the image still needs it during `onload`), immediately when it failed.
+ * SVG text decoded into an image via a blob URL (large SVGs overflow data URIs); the URL is revoked
+ * after decode either way.
  */
 export function svgImage(text: string): Promise<HTMLImageElement> {
     const url = URL.createObjectURL(
@@ -81,17 +75,10 @@ export interface Raster {
 }
 
 /**
- * A frame's own pixels, at its own size — the entry point to the portable path.
- *
- * The draw is one-to-one, so no filter runs and nothing here is host-dependent: what comes back is
- * the decoded image, and every downscale after it is {@link resampleArea}'s arithmetic rather than
- * `drawImage`'s implementation-defined smoothing. That is the whole of the rebaseline
- * ([D3](../../../../docs/design/parity-batches/00-decisions.md)) on this side — the score's geometry
- * is unchanged, its kernel is not.
- *
- * `null` for a frame whose pixels cannot be read at all: a cross-origin artifact taints the canvas
- * and `getImageData` throws. Every caller here already had that case, because the plane the score is
- * computed from is read back the same way.
+ * A frame's own pixels at its own size — the entry to the portable path. The draw is one-to-one so
+ * no host-dependent filter runs; downscaling is {@link resampleArea}'s arithmetic (see
+ * [D3](../../../../docs/design/parity-batches/00-decisions.md)). `null` when a cross-origin
+ * artifact taints the canvas.
  */
 export function rasterOf(image: Frame): Raster | null {
     const { width, height } = imageDimensions(image);
@@ -118,13 +105,8 @@ export function rasterOf(image: Frame): Raster | null {
 }
 
 /**
- * One raster composited onto `ground`, as a luminance plane.
- *
- * {@link grayFromDraw}'s answer without the canvas: the same `source-over` arithmetic on
- * non-premultiplied bytes, so a pixel with alpha `a` lands at `a·colour + (1−a)·ground`. Having it
- * here rather than painting the raster back onto a context is what keeps the portable path portable
- * — a `putImageData` round-trip would reintroduce the browser's own premultiplication rounding on
- * every pixel, which is a difference between engines for no gain.
+ * One raster composited onto `ground` as a luminance plane: {@link grayFromDraw}'s `source-over`
+ * arithmetic without a canvas round-trip, avoiding engine-specific premultiplication rounding.
  */
 export function grayFromRaster(
     raster: Raster,
@@ -144,19 +126,10 @@ export function grayFromRaster(
 }
 
 /**
- * {@link grayFromRaster} for a raster whose colour is already **premultiplied** — the score plane.
- *
- * `source-over` on premultiplied colour is `a·c + (1−a)·ground` with the `a·c` already done, so this
- * adds the ground's share instead of weighting the colour a second time. Handing a premultiplied
- * raster to {@link grayFromRaster} would multiply by alpha twice and drag every partly transparent
- * pixel toward the ground.
- *
- * It exists because averaging straight colour and compositing afterwards do not commute: the same
- * half-covered white edge on black scored 128 encoded as one pixel at alpha 128 and 64 encoded as an
- * opaque pixel beside a transparent one, so two visually identical exports at different resolutions
- * read as a mismatch. `resampleAreaPremultiplied` fixes the ordering upstream and this reads its
- * output — together they are `mean(a·c) + g·(1 − mean(a))`, which is also what `drawImage` produced
- * before the portable kernel replaced it, since a canvas downscales premultiplied.
+ * {@link grayFromRaster} for a **premultiplied** raster (the score plane): adds the ground's share
+ * without weighting colour by alpha again. Averaging straight colour then compositing does not
+ * commute, so `resampleAreaPremultiplied` averages premultiplied and this reads it, giving
+ * `mean(a·c) + g·(1 − mean(a))` — what a canvas downscale produces.
  */
 export function grayFromPremultipliedRaster(
     raster: Raster,
@@ -175,11 +148,8 @@ export function grayFromPremultipliedRaster(
 }
 
 /**
- * Whatever `draw` paints, on `ground`, as a luminance plane.
- *
- * The ground is a parameter rather than a constant because a score is taken on more than one of them
- * — see {@link COMPARISON_GROUNDS}. Both sides of a given comparison must be handed the same one, or
- * the pair differs by the ground everywhere.
+ * Whatever `draw` paints, on `ground`, as a luminance plane. Both sides of a comparison must use
+ * the same ground (see {@link COMPARISON_GROUNDS}).
  */
 export function grayFromDraw(
     draw: (context: CanvasRenderingContext2D) => void,
@@ -208,10 +178,8 @@ export function grayFromDraw(
 }
 
 /**
- * The rectangle an image actually draws in, in source pixels.
- *
- * Sampling is done on a downscale: a crop rectangle needs to be roughly right, not exact, and a
- * full-resolution scan of a 1078×2399 device shot per row is real time on the client.
+ * The rectangle an image actually draws in, in source pixels, sampled on a downscale since the crop
+ * only needs to be roughly right.
  */
 export function contentBox(image: Frame): Box {
     const raster = rasterOf(image);
@@ -221,11 +189,8 @@ export function contentBox(image: Frame): Box {
 }
 
 /**
- * {@link contentBox} over a raster the caller already holds.
- *
- * Split out because a full-resolution raster is the expensive thing on this path and a comparison
- * needs several answers from the same one: its content box, and then its score plane. Measuring
- * from the frame each time decoded it again per question.
+ * {@link contentBox} over a raster the caller already holds, so one decode serves both the content
+ * box and the score plane.
  */
 export function contentBoxOf(raster: Raster): Box {
     const size = { width: raster.width, height: raster.height };
@@ -268,11 +233,8 @@ export function normalisedBoxesOf(
 }
 
 /**
- * One image's content box redrawn into a fresh canvas of the shared comparison size.
- *
- * `willReadFrequently` because the very next thing anyone does with these is `getImageData` (the
- * diff walks both of them pixel by pixel), and the flag has to be set on the FIRST `getContext` — a
- * later call with different attributes silently returns the existing context.
+ * One image's content box redrawn into a canvas of the shared comparison size. `willReadFrequently`
+ * must be set on the first `getContext`, since `getImageData` follows immediately.
  */
 export function boxCanvas(
     image: Frame,
@@ -301,9 +263,8 @@ export function boxCanvas(
         );
         return canvas;
     }
-    // The same crop-and-resample the score plane is built by, so the magenta map marks the pixels
-    // the number was actually computed over rather than a second, differently-filtered rendering of
-    // the same pair.
+    // The same crop-and-resample as the score plane, so the magenta map marks the pixels the number
+    // was computed over.
     const scaled = cropTo(raster, box, width, height);
     const painted = context.createImageData(width, height);
     painted.data.set(scaled.pixels);

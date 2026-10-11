@@ -40,19 +40,11 @@ import okhttp3.WebSocketListener
 import org.junit.jupiter.api.io.TempDir
 
 /**
- * One discussion, three doors: the browser's REST calls, the browser's socket, and an agent's MCP
- * tools — including the one that *waits*.
- *
- * ## Why an integration test rather than unit ones
- *
- * The store's own rules are unit-tested next door. What cannot be unit-tested is the claim the
- * feature is actually making: that a comment typed in a browser wakes an agent that is waiting, and
- * that an agent's reply reaches a page that is open, without either of them polling for the other.
- * That claim is made of wiring — the routes registered only where a store is configured, the socket
- * subscribing before it reads, the MCP tools reaching the same store the routes reach, and one
- * design's access control gating all of it — and every one of those fails silently against a mock.
- *
- * So this starts the real server, wired the way `ServeRunner` wires it, and plays both parts.
+ * One discussion through three doors: the browser's REST calls, its socket, and an agent's MCP
+ * tools (including the waiting one). An integration test because the claim is wiring — routes
+ * registered only with a store, the socket subscribing before reading, MCP reaching the same store,
+ * access control gating all of it — which fails silently against mocks. Starts the real server
+ * wired as `ServeRunner` wires it.
  */
 class ServeUiBuilderCommentsIntegrationTest {
   @TempDir lateinit var stateDirectory: Path
@@ -120,10 +112,8 @@ class ServeUiBuilderCommentsIntegrationTest {
     val threadId = threadIdOf(opening.second)
 
     val frames = CopyOnWriteArrayList<String>()
-    // Two latches, not one: the socket sends the board it finds on connect, and the page is only
-    // "already open" once that has arrived. Posting before it would be testing a socket that
-    // opened after the reply, which is the case the connect frame exists to cover rather than the
-    // one this test is about.
+    // Wait for the connect frame first: posting before it would test the case the connect frame
+    // covers, not an already-open page.
     val connected = CountDownLatch(1)
     val replied = CountDownLatch(2)
     val socket = openCommentSocket(server, frames, listOf(connected, replied))
@@ -191,14 +181,9 @@ class ServeUiBuilderCommentsIntegrationTest {
     val server = start()
     createDesign(server)
 
-    // The reviewer holds a credential this host authenticates, and the design is real — what they
-    // do not hold is any access to THIS design. The board must answer exactly as it does for an id
-    // that names nothing, or the pair of replies tells a caller which private design ids exist.
-    //
-    // Pinned separately from the missing-design case because the two used to be answered by
-    // different code: the board asked by requesting a whole snapshot and seeing whether one came
-    // back, where the other sidecars ask the design's access control directly. One question with
-    // two implementations is one that can drift, and this is the reading that would drift.
+    // A reviewer with a valid credential but no access to this design must get the same answer as
+    // for a nonexistent id, or the replies reveal which private design ids exist. Pinned separately
+    // because the two cases were once answered by different code.
     for (path in
       listOf(
         "/api/ui-builder/v1/designs/$DESIGN_ID/comments",
@@ -218,11 +203,8 @@ class ServeUiBuilderCommentsIntegrationTest {
     createDesign(server)
     shareAsViewer(server, "github:reviewer")
 
-    // The board deliberately stays on READ where the reference overlay and the links record take
-    // the design's own WRITE action. Its whole reason to exist is a reviewer who may see a screen
-    // saying so on it; requiring WRITE to comment would lock the reviewer out of the review
-    // surface. This test is here so that a later tightening of the sidecars has to say no to it on
-    // purpose rather than by sweeping all three together.
+    // The board deliberately stays on READ (the other sidecars need WRITE) so a view-only reviewer
+    // can comment; this pins it so tightening the sidecars must exclude it on purpose.
     val posted =
       comments(
         server,
@@ -496,8 +478,8 @@ class ServeUiBuilderCommentsIntegrationTest {
       )
     assertTrue(reacted.contains("👀"), reacted)
 
-    // Read back over HTTP, which is what the panel does: the chip is there, the thread is still
-    // open, and the agent is no longer being nagged about a comment it has picked up.
+    // Read back over HTTP as the panel does: the chip is there, the thread open, and the agent no
+    // longer nagged.
     val read = comments(server, "GET", "/api/ui-builder/v1/designs/$DESIGN_ID/comments", null)
     assertEquals(200, read.first, read.second)
     assertTrue(read.second.contains("👀"), read.second)
@@ -589,12 +571,8 @@ class ServeUiBuilderCommentsIntegrationTest {
   }
 
   /**
-   * The operator and a second collaborator, both holding every UI-builder capability this host
-   * hands out.
-   *
-   * Two are needed to say anything about a *design's* access control rather than the host's: with
-   * one credential every design is owned by the caller, and "a viewer may comment" is not a
-   * sentence the fixture can express.
+   * The operator and a second collaborator, both with every UI-builder capability. Two are needed
+   * to test a design's access control: with one, every design is owned by the caller.
    */
   private fun twoCredentials(): ServeUiBuilderAuthorization =
     ServeUiBuilderAuthorization { call, _, presented ->
@@ -747,12 +725,8 @@ class ServeUiBuilderCommentsIntegrationTest {
     val server: ServeHttpServer,
     val registry: ServeSessionRegistry,
     /**
-     * The same store the routes and the MCP tools reach.
-     *
-     * Held so a test can speak as a *second* actor. Both doors in this test authenticate with the
-     * one operator token, so every comment posted through them is the agent's own — and an agent is
-     * never told to catch up with what it said itself, which is the case the unacknowledged notice
-     * exists for.
+     * The store the routes and MCP tools reach, held so a test can speak as a second actor (the
+     * doors both use the operator token, and an agent is never notified of its own comments).
      */
     val comments: ServeUiBuilderCommentStore?,
   ) : AutoCloseable {

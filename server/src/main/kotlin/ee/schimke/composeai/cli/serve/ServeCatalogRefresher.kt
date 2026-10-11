@@ -14,33 +14,18 @@ enum class CatalogRefreshResult {
 }
 
 /**
- * Keeps a running `serve` fresh against routinely-changing catalog branches.
+ * Keeps a running `serve` fresh against catalog branches that change routinely. Catalogs are
+ * otherwise fetched once at startup; a daemon thread periodically resolves each branch head and,
+ * when it moved, re-runs the same [reload] path (`ServeCatalogStore.load`), which re-registers the
+ * host in place. Unresolvable heads (offline, no `git`) are skipped.
  *
- * `serve --catalogs <system>` fetches each system's `design-artifacts/<system>` branch — its
- * `catalog.json`, baked renders, `web/wasm/` app, and `liveBundle` — **once at startup**. Nothing
- * re-checks it, so a regenerated branch (the `design-artifacts.yml` force-push) never reaches a
- * live server until the container restarts. But serving content that changes routinely is exactly
- * what this multi-catalog server is for — `compose-m3` is no different from the external apps it
- * also serves (`cadence`, `meshcore-mobile`, …), all of which go stale the same way.
- *
- * This closes that gap without a restart, a per-project server release, or baking content into the
- * image: a daemon thread periodically resolves each catalog branch's head commit and, when it has
- * moved, re-runs the same [reload] path (`ServeCatalogStore.load`) that the initial fetch used —
- * which re-fetches into the same on-disk dir and re-registers the host in place (the registry
- * closes the replaced host's daemon; the `/wasm/<system>/` route serves the rewritten dir on the
- * next request). A branch whose head can't be resolved (offline, `git` absent) is simply skipped —
- * the server keeps serving what it already has, exactly as today.
- *
- * @param entries the catalog branches to watch: `system` id + owning `repo` + full `branch` ref.
- *   Evaluated per pass rather than captured, because the catalog set is runtime config: a catalog
- *   published through the admin API starts being polled on the next tick, and a retired one stops.
- * @param reload re-fetch + re-register one system — the `store.load(system, sourceRepo = repo)`
- *   seam — handing back whatever the store said, or null when there was nothing to load. What that
- *   result *means* for the recorded head is decided here, in [checkOne], rather than by the caller:
- *   a load that registered but could not read everything is serving and not settled, and only one
- *   of those two facts belongs to the caller.
- * @param headResolver resolve a branch's head commit sha (or null when it can't be determined).
- *   Defaults to [gitLsRemoteHead]; injected so tests drive change detection without a network.
+ * @param entries the branches to watch (`system`, `repo`, full `branch` ref), evaluated per pass so
+ *   runtime-published catalogs are picked up and retired ones dropped.
+ * @param reload re-fetch and re-register one system, returning the store's result or null.
+ *   [checkOne] decides what it means for the recorded head: a load that registered but couldn't
+ *   read everything is serving but not settled.
+ * @param headResolver resolve a branch head sha, or null; defaults to [gitLsRemoteHead], injected
+ *   for tests.
  * @param intervalMillis poll cadence; the first tick fires one interval after [start].
  */
 public class ServeCatalogRefresher(
@@ -57,21 +42,11 @@ public class ServeCatalogRefresher(
   private val lastHead = ConcurrentHashMap<String, String>()
 
   /**
-   * How many times each system has been declared unsettled — monotonic, never consumed.
-   *
-   * A *count* rather than a pending flag, because the question a head-recorder has to answer is not
-   * "is there an invalidation outstanding?" but "did one arrive since I started reading?". Those
-   * differ, and the difference is the whole bug: the post-publish lanes run on their own executor
-   * and [seedInitialHeads] only runs once every startup load has finished, so an invalidation for
-   * one catalog lands while another is still loading. Removing a head that is not there yet is a
-   * no-op; a flag consumed *before* the branch-head resolution that follows is consumed before the
-   * window it was meant to cover. Both lose the invalidation, and the seed then records exactly the
-   * revision the lane was reporting as incomplete.
-   *
-   * So a recorder takes a [invalidationMark] before it starts and hands it back to [recordHead],
-   * which writes only if the count still matches. Reads and writes of the count happen inside
-   * [lastHead]'s per-key `compute` lock, so the check and the write are one step rather than two
-   * with a window between them — see [recordHead].
+   * How many times each system was declared unsettled; monotonic. A count rather than a flag,
+   * because a recorder must ask "did one arrive since I started?": post-publish lanes and
+   * [seedInitialHeads] run concurrently with loads, so a flag could be consumed before the window
+   * it covers. Recorders take an [invalidationMark] and [recordHead] writes only if it still
+   * matches, inside [lastHead]'s per-key `compute`.
    */
   private val invalidations = ConcurrentHashMap<String, Long>()
   private val exec: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { r ->
@@ -79,44 +54,28 @@ public class ServeCatalogRefresher(
   }
 
   /**
-   * Record the current head for catalogs that loaded **completely** at boot, so their first tick
-   * only reloads after a branch move. [systems] deliberately excludes startup failures: leaving
-   * their head absent makes the first tick retry the unchanged branch, then every later tick until
-   * it succeeds. Previously every configured head was seeded, permanently suppressing retries for
-   * an initial fetch/parse failure until someone happened to publish a new commit.
-   *
-   * It excludes an *incomplete* load for the same reason. A catalog that came up serving but could
-   * not fetch, say, its issue index because the branch host throttled us is not a settled revision
-   * — and seeding it would make that one throttled request permanent for the life of the process.
+   * Record current heads for catalogs that loaded completely at boot, so their first tick reloads
+   * only after a branch move. Startup failures and incomplete loads are excluded so the first tick
+   * retries them rather than settling a revision they couldn't fully read.
    */
   fun seedInitialHeads(systems: Set<String> = entries().mapTo(linkedSetOf()) { it.system }) {
     for (e in entries()) {
       if (e.system !in systems) continue
       val head = headResolver(e.repo, e.branch) ?: continue
-      // The mark is `0`, not the current count: what this seed vouches for is the **boot load**,
-      // which finished before this method was even called, so *any* invalidation reported since the
-      // process started necessarily postdates it. That covers both windows at once — a lane that
-      // reported while the startup loader was still working through the other catalogs, and one
-      // that reported while this loop was blocked in `git ls-remote`, which is the widest window
-      // in this class.
+      // Mark `0`: the boot load finished before this ran, so any invalidation since process start
+      // postdates it, including those during this loop's `git ls-remote` calls.
       recordHead(e.system, head, mark = 0L)
     }
   }
 
   /**
-   * Forget the recorded head for [systems], so the next [tick] re-fetches them even though their
-   * branch hasn't moved.
-   *
-   * The SHA short-circuit in [checkOne] is what makes polling cheap, but it also means a catalog
-   * can only be re-verified when its branch changes. Revoking a producer's trust has to re-verify
-   * *now* — otherwise the revoked catalog keeps whatever verdict it loaded with, potentially
-   * indefinitely.
+   * Forget recorded heads for [systems] so the next [tick] re-fetches them though the branch hasn't
+   * moved (e.g. after a trust revocation, which must re-verify now).
    */
   fun forgetHeads(systems: Collection<String>) {
     for (system in systems) {
-      // Inside `compute` so the bump and the removal are one step, and so they cannot interleave
-      // with a [recordHead] for the same system: that is what makes "did one arrive since I
-      // started?" answerable without a window. Returning null removes the entry.
+      // Bump and removal in one `compute`, so they can't interleave with [recordHead]. Returning
+      // null removes the entry.
       lastHead.compute(system) { _, _ ->
         invalidations.merge(system, 1L, Long::plus)
         null
@@ -130,13 +89,8 @@ public class ServeCatalogRefresher(
   private fun invalidationMark(system: String): Long = invalidations[system] ?: 0L
 
   /**
-   * Record [head] for [system] — settling that revision — unless [forgetHeads] ran for it since
-   * [mark] was taken, in which case the invalidation wins and the head stays absent.
-   *
-   * The check and the write are one `compute` on [lastHead], against which [forgetHeads] also
-   * computes. Two statements would leave a window between them, which is the same shape of bug one
-   * level in: an invalidation landing there would be read as "none since I started" and then
-   * overwritten by the very head it was rejecting.
+   * Record [head] for [system] unless [forgetHeads] ran since [mark] was taken. Check and write are
+   * one `compute` on [lastHead] (as [forgetHeads] uses), leaving no window between them.
    */
   private fun recordHead(system: String, head: String, mark: Long) {
     lastHead.compute(system) { _, current ->
@@ -157,23 +111,15 @@ public class ServeCatalogRefresher(
     )
   }
 
-  /**
-   * One poll pass over every watched branch. Package-visible so a test can drive it
-   * deterministically.
-   */
+  /** One poll pass over every watched branch; visible for deterministic tests. */
   @Synchronized
   fun tick() {
     for (e in entries()) checkOne(e)
   }
 
   /**
-   * Check one catalog immediately, using the same branch-head + reload path as the poller.
-   *
-   * [force] re-fetches even when the head has not moved, by dropping the recorded head exactly as
-   * [forgetHeads] does for a trust revocation. The short-circuit in [checkOne] is what makes
-   * polling cheap and is right almost always, but it also leaves no way to say "read it again
-   * anyway" — which is what an operator wants after discarding the blob cache, or when they would
-   * rather see the published bytes re-read than reason about whether they need to be.
+   * Check one catalog now via the poller's path. [force] drops the recorded head first (like
+   * [forgetHeads]) so an unmoved branch is re-read, e.g. after discarding the blob cache.
    */
   @Synchronized
   fun refresh(system: String, force: Boolean = false): CatalogRefreshResult {
@@ -193,9 +139,7 @@ public class ServeCatalogRefresher(
     onLog(
       "serve: catalog ${e.system} (${e.branch}) moved ${prev?.take(7) ?: "?"}→${head.take(7)} — re-fetching"
     )
-    // Taken before the reload: an invalidation arriving *during* it belongs to this attempt, and
-    // making the head write conditional on the mark is what closes the window between the load
-    // returning and the head being recorded.
+    // Taken before the reload, so an invalidation during it makes the head write conditional.
     val mark = invalidationMark(e.system)
     val loaded =
       runCatching { reload(e.system, e.repo) }.getOrNull() as? ServeCatalogStore.Result.Ok
@@ -203,19 +147,12 @@ public class ServeCatalogRefresher(
       onLog("serve: catalog ${e.system} refresh failed — keeping the current copy, will retry")
       return CatalogRefreshResult.FAILED
     }
-    // **Serving and settled are two answers, and only the first is the caller's.** The catalog is
-    // registered either way — it genuinely IS this revision, which is why both arms report
-    // `UPDATED`. What an incomplete read withholds is the recorded head, so the next tick re-reads
-    // what the branch would not give us this time instead of short-circuiting on an unmoved sha.
-    // A post-publish lane that failed while this reload ran counts the same as the load itself
-    // coming back incomplete — the revision is serving and it is not settled.
+    // Serving and settled are separate: the catalog is registered either way (both report
+    // `UPDATED`), but an incomplete read, including a post-publish lane failing meanwhile,
+    // withholds the recorded head so the next tick re-reads.
     if (loaded.incomplete) {
-      // Recorded as an invalidation, not merely left unrecorded. `refresh()` is reachable before
-      // [seedInitialHeads] runs — the route is live while the startup loader is still working
-      // through the other catalogs — so a catalog that booted complete, was refreshed
-      // incompletely, and is therefore still in the loader's `loaded` set would otherwise be
-      // settled by the seed at exactly the sha this read could not finish. Withholding a head only
-      // outlives the operation that withheld it if something says so.
+      // Recorded as an invalidation, not just left unrecorded: `refresh()` can run before
+      // [seedInitialHeads], which would otherwise settle this incompletely read sha.
       forgetHeads(listOf(e.system))
       onLog(
         "serve: catalog ${e.system} refreshed to ${head.take(7)}, but some assets could not be " +
@@ -241,8 +178,8 @@ public class ServeCatalogRefresher(
 }
 
 /**
- * Resolve a branch's head commit via `git ls-remote` — unauthenticated and unrated (unlike the
- * GitHub commits API's 60/hr). Null on any failure, which the refresher treats as "skip".
+ * Resolve a branch head via `git ls-remote`, which is unauthenticated and unrated (unlike the
+ * GitHub API's 60/hr). Null on failure, which the refresher skips.
  */
 public fun gitLsRemoteHead(repo: String, branch: String): String? {
   val (_, output) =
@@ -251,11 +188,9 @@ public fun gitLsRemoteHead(repo: String, branch: String): String? {
 }
 
 /**
- * `git ls-remote <options> https://github.com/<repo>.git <patterns>` as `(exitCode, combined
- * output)`, or null when it could not run or outlived [waitSeconds].
- *
- * Output is drained on a daemon thread: a remote that stalls without closing the pipe would
- * otherwise block a direct read forever and never reach the bounded wait.
+ * `git ls-remote … https://github.com/<repo>.git <patterns>` as `(exitCode, output)`, or null when
+ * it couldn't run or exceeded [waitSeconds]. Output drains on a daemon thread so a stalled remote
+ * can't block past the bounded wait.
  */
 internal fun gitLsRemote(
   repo: String,
