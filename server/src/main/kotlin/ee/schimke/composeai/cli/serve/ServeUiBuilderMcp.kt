@@ -62,10 +62,10 @@ import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceRequest
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
-import ee.schimke.composeai.uibuilder.service.UiBuilderTrashedDesign
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceUpdate
 import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionRejectedException
+import ee.schimke.composeai.uibuilder.service.UiBuilderTrashedDesign
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
