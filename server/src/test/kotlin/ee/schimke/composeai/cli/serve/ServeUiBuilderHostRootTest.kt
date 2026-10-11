@@ -1,5 +1,8 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
+import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
+import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.AfterTest
@@ -48,6 +51,7 @@ class ServeUiBuilderHostRootTest {
   private fun server(
     rooted: Boolean = true,
     bundle: File = bundle(),
+    projects: Boolean = false,
   ): ServeHttpServer =
     ServeHttpServer(
         host = "127.0.0.1",
@@ -61,6 +65,20 @@ class ServeUiBuilderHostRootTest {
         uiBuilderHost = BUILDER,
         uiBuilderStartUrl = START,
         uiBuilderHostRoot = rooted,
+        uiBuilderService =
+          if (projects)
+            PersistentUiBuilderService(
+              storage = FileUiBuilderStateStorage(bundle.toPath().resolve("state")),
+              catalogs = CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = setOf("m3-catalog")),
+              exporter = { error("this test never exports") },
+            )
+          else null,
+        uiBuilderProjectStore =
+          if (projects) ServeUiBuilderProjectStore(bundle.toPath().resolve("projects")) else null,
+        uiBuilderAuthorization =
+          if (projects)
+            ServeUiBuilderAuthorization { _, _, _ -> UiBuilderAuthorizationDecision.Missing }
+          else null,
       )
       .also {
         it.start()
@@ -68,6 +86,30 @@ class ServeUiBuilderHostRootTest {
       }
 
   private val client = OkHttpClient.Builder().followRedirects(false).build()
+
+  @Test
+  fun `the project workspace follows the rooted host instead of opening a design called projects`() {
+    val server = server(projects = true)
+    val query = "?project=app&design=login"
+    server.call("/ui-builder/projects$query", BUILDER).use {
+      assertEquals(302, it.code)
+      assertEquals("/projects$query", it.header("Location"))
+    }
+    for ((path, host) in
+      listOf("/projects$query" to BUILDER, "/ui-builder/projects$query" to OTHER)) {
+      server.call(path, host).use {
+        assertEquals(200, it.code)
+        assertTrue("<title>UI Builder projects</title>" in it.body!!.string())
+        assertEquals("no-store", it.header("Cache-Control"))
+      }
+    }
+    assertFalse(
+      server.call("/projects", OTHER).use {
+        "<title>UI Builder projects</title>" in it.body!!.string()
+      }
+    )
+    assertTrue(server(projects = false).call("/projects", BUILDER).isShell())
+  }
 
   private fun ServeHttpServer.call(
     path: String,
