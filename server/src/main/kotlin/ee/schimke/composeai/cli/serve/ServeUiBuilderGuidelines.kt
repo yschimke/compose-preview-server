@@ -29,19 +29,15 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
 /**
- * The `guidelines` half of `ui_builder_check_design`: a model judges a design against the Android
- * design guidance through OpenRouter, on the **operator's** key.
+ * The `guidelines` half of `ui_builder_check_design`: a model judges a design against Android
+ * design guidance through OpenRouter on the operator's key. Since the key is shared and costs
+ * money, it is never on by default and only [ServeUiBuilderGuidelineAccess]-admitted logins and
+ * orgs may run it; others get it reported as skipped.
  *
- * Because the key is shared and every call costs money, the check is never on by default and never
- * open to everyone: [ServeUiBuilderGuidelineAccess] admits only the GitHub logins and organizations
- * the operator named. Every other caller gets the check reported as skipped, with why, and the rest
- * of `ui_builder_check_design` runs as before.
- *
- * The rules, the prompt and the reading of the reply are compose-ui-builder's
- * (`ee.schimke.composeai.uibuilder.guidelines`, in `ui-builder-export`): the editor's own-key
- * check, this lane and `ui_builder_guidelines_prompt` send the same [DesignGuidelineRequest].
- * [prepare] builds one and needs no key; [check] spends the key on it. Model findings are advisory:
- * a failed rule is a warning or a note, never an error, so `ok` is unchanged by them.
+ * Rules, prompt and reply parsing are compose-ui-builder's
+ * (`ee.schimke.composeai.uibuilder.guidelines`); the editor's own-key check, this lane and
+ * `ui_builder_guidelines_prompt` send the same [DesignGuidelineRequest]. [prepare] needs no key;
+ * [check] spends it. Findings are advisory (warnings or notes), so `ok` is unaffected.
  */
 class ServeUiBuilderGuidelines
 internal constructor(
@@ -59,8 +55,8 @@ internal constructor(
     ),
 ) {
   /**
-   * The model and allow-list in force, swapped as one by [reconfigure] when `settings.json` is
-   * published ([ServeSettings]), so a check never reads a new model with an old allow-list.
+   * Model and allow-list in force, swapped together by [reconfigure] when `settings.json` is
+   * published ([ServeSettings]).
    */
   private class State(
     val config: ServeUiBuilderGuidelinesConfig,
@@ -79,10 +75,9 @@ internal constructor(
     get() = config.model
 
   /**
-   * Run on [model] for [users] and [orgs], with or without the evidence [triage], from now on; a
-   * null [model] is the default. The key and the endpoints stay as they started. Throws, changing
-   * nothing, when nobody would be allowed: the check spends the operator's key, so it is never open
-   * to everyone, and turning it off is a restart (it is built only when someone is named).
+   * From now on, run on [model] (null = default) for [users] and [orgs], with or without [triage].
+   * Key and endpoints are fixed. Throws, changing nothing, when nobody would be allowed: the check
+   * is never open to everyone, and disabling it needs a restart.
    */
   internal fun reconfigure(
     model: String?,
@@ -113,10 +108,9 @@ internal constructor(
     get() = config.triage
 
   /**
-   * Jev's probability, per evidence offer, that it would help judge [request]'s rules — a dark
-   * render, a large-font render, the accessibility tree — or null when triage is off, the call
-   * fails or it takes longer than [TRIAGE_TIMEOUT_MILLIS]. It never blocks a check: a null answer
-   * just means nothing extra is drawn.
+   * A triage model's probability, per evidence offer (dark render, large-font render, accessibility
+   * tree), that it would help judge [request]; null when off, failed or slower than
+   * [TRIAGE_TIMEOUT_MILLIS]. Never blocks a check.
    */
   internal suspend fun triage(request: DesignGuidelineRequest): Map<String, Double>? {
     if (!config.triage) return null
@@ -134,9 +128,8 @@ internal constructor(
   }
 
   /**
-   * Sends [request] to the model on the operator's key and reads the verdicts. The caller has
-   * already decided [allows]; the request is the one [prepare] built, unchanged, so what was shown
-   * is what was asked.
+   * Send [request] (as [prepare] built it, so what was shown is what was asked) to the model on the
+   * operator's key and read the verdicts. The caller has already checked [allows].
    */
   internal suspend fun check(request: DesignGuidelineRequest): UiBuilderGuidelineOutcome {
     // One snapshot for the whole check, so the model named in the result is the one asked.
@@ -202,9 +195,9 @@ internal constructor(
     const val TRIAGE_TIMEOUT_MILLIS: Long = 5_000
 
     /**
-     * The request built from [guidelines] — the design's own catalog's rules — rather than the
-     * bundled set. [rulesSource] is where the catalog's file is served; [profile] the Remote
-     * Compose profile the design targets, narrowing rules written for one.
+     * The request built from the design's own catalog [guidelines] rather than the bundled set.
+     * [rulesSource] is where the catalog's file is served; [profile] is the targeted Remote Compose
+     * profile.
      */
     fun prepare(
       guidelines: CatalogGuidelines,
@@ -228,9 +221,8 @@ internal constructor(
       )
 
     /**
-     * The request for [document] with [pictures] and [source], built from the bundled rules by the
-     * library's own `prepare`, so this host and the editor build byte-identical requests. Pure and
-     * keyless: `ui_builder_guidelines_prompt`, the prompt route and [check] all start here.
+     * The request for [document] from the bundled rules via the library's own `prepare`, so host
+     * and editor build byte-identical requests. Pure and keyless.
      */
     fun prepare(
       designId: String?,
@@ -243,8 +235,8 @@ internal constructor(
       DesignGuidelinePrompt.prepare(rules, designId, revision, document, pictures, source)
 
     /**
-     * [verdicts] as `ui_builder_check_design` findings: one per node a confident `fail` names (at
-     * most a few), or one for the whole design, each quoting the guideline and its source.
+     * [verdicts] as findings: one per node a confident `fail` names (at most a few), or one for the
+     * whole design, each quoting the guideline and source.
      */
     internal fun findings(
       verdicts: List<DesignGuidelineVerdict>,
@@ -252,10 +244,7 @@ internal constructor(
       nodeIds: Set<String>,
       model: String,
       minConfidence: Double,
-      /**
-       * The rules [asked] names: the catalog's own and the bundled set; see
-       * [ServeCatalogGuidelines].
-       */
+      /** The rules [asked] names: the catalog's and the bundled set ([ServeCatalogGuidelines]). */
       known: List<DesignGuidelineRule> = DesignGuidelineRuleSet.Bundled.rules,
       /** Who answered, when known: a router's served model, not the router. */
       served: DesignGuidelineServed? = null,
@@ -324,8 +313,8 @@ internal sealed interface UiBuilderGuidelineOutcome {
 }
 
 /**
- * `--ui-builder-guidelines-*`, and the key read from the environment. The key never travels on the
- * command line, where every process listing would show it.
+ * `--ui-builder-guidelines-*` plus the key from the environment, never the command line (visible in
+ * process listings).
  */
 internal data class ServeUiBuilderGuidelinesConfig(
   val apiKey: String,
@@ -333,16 +322,15 @@ internal data class ServeUiBuilderGuidelinesConfig(
   val allowedUsers: Set<String> = emptySet(),
   val allowedOrgs: Set<String> = emptySet(),
   /**
-   * A token that can read the named organizations' members, so a **private** membership counts.
-   * Without one only public memberships are visible.
+   * A token able to read the named orgs' members, so private memberships count; without one only
+   * public memberships are visible.
    */
   val githubToken: String? = null,
   val endpoint: String = OPENROUTER_CHAT_COMPLETIONS,
   /** OpenRouter's decisions endpoint, for the Jev evidence triage. */
   val decisionsEndpoint: String = OPENROUTER_DECISIONS_URL,
   /**
-   * Ask Jev (`typesafe/jev-1.13`, a fraction of a cent) which extra evidence would help before a
-   * check: a dark render, a large-font render, the accessibility tree. Off with
+   * Ask a cheap triage model which extra evidence would help before a check. Off with
    * `--ui-builder-guidelines-triage off`.
    */
   val triage: Boolean = true,
@@ -359,9 +347,8 @@ internal data class ServeUiBuilderGuidelinesConfig(
   }
 
   /**
-   * The generated `toString()` would print [apiKey] and [githubToken]: one `println(config)` or
-   * `"$config"` in a log line or a `require` message away from a leak. Both are redacted here, and
-   * only whether each is present is said.
+   * Redacts [apiKey] and [githubToken], which a generated `toString()` would leak into any log
+   * line.
    */
   override fun toString(): String =
     "ServeUiBuilderGuidelinesConfig(apiKey=$REDACTED, model=$model, " +
@@ -373,9 +360,8 @@ internal data class ServeUiBuilderGuidelinesConfig(
     private const val REDACTED = "<redacted>"
 
     /**
-     * Called directly. `typesafe/jev-router` routes this check to the same model most of the time,
-     * but picks at random, through dearer providers, and reads only the text, so it never chooses a
-     * model for the pictures the visual rules are judged on. Any OpenRouter model id works.
+     * Called directly rather than via a router, which picks models at random and ignores pictures.
+     * Any OpenRouter model id works.
      */
     const val DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash"
     const val OPENROUTER_CHAT_COMPLETIONS = "https://openrouter.ai/api/v1/chat/completions"
@@ -385,14 +371,10 @@ internal data class ServeUiBuilderGuidelinesConfig(
 }
 
 /**
- * Who may spend the operator's key: a GitHub login on [allowedUsers], a member of one of
- * [allowedOrgs], or the operator's own token. An agent working under a grant counts as the person
- * who approved it ([AuthenticatedUiBuilderActor.onBehalfOfActorId]), so it can run the check
- * exactly when that person could.
- *
- * Membership is asked of GitHub ([isOrgMember]) and remembered for [cacheMillis], so a design
- * session does not cost a GitHub round trip per check and somebody who leaves the org loses access
- * within that window.
+ * Who may spend the operator's key: a login on [allowedUsers], a member of [allowedOrgs], or the
+ * operator token. An agent under a grant counts as its approver
+ * ([AuthenticatedUiBuilderActor.onBehalfOfActorId]). Membership ([isOrgMember]) is cached for
+ * [cacheMillis].
  */
 internal class ServeUiBuilderGuidelineAccess(
   allowedUsers: Set<String>,
@@ -405,10 +387,7 @@ internal class ServeUiBuilderGuidelineAccess(
   private val users = allowedUsers.map { it.lowercase() }.toSet()
   private val orgs = allowedOrgs.map { it.lowercase() }.toSet()
 
-  /**
-   * The same membership lookup for a new allow-list. The cache is kept: an answer is about a person
-   * and an org, whichever list asked for it.
-   */
+  /** The same lookup for a new allow-list, keeping the cache (answers are per person and org). */
   fun allowing(allowedUsers: Set<String>, allowedOrgs: Set<String>): ServeUiBuilderGuidelineAccess =
     ServeUiBuilderGuidelineAccess(
       allowedUsers,
@@ -449,9 +428,8 @@ internal class ServeUiBuilderGuidelineAccess(
     private const val GITHUB_PREFIX = "github:"
 
     /**
-     * GitHub's own answer: `GET /orgs/{org}/members/{login}` is 204 for a member. With a token
-     * whose owner belongs to the org it sees private memberships; without one, or for a token the
-     * org does not trust, it falls back to the public-members list. Any failure is a no.
+     * GitHub's answer: `GET /orgs/{org}/members/{login}` is 204 for a member (private memberships
+     * visible with a member's token), falling back to the public-members list. Any failure is a no.
      */
     fun githubMembership(
       token: String?,
@@ -508,10 +486,8 @@ internal class OkHttpOpenRouterTransport(
 }
 
 /**
- * The guidelines model, allow-list and evidence triage as live settings ([ServeSettings]):
- * publishing `settings.json` swaps them on the running check, together. Refused when the new
- * allow-list names nobody, since the check is never open to everyone and turning it off needs a
- * restart.
+ * Guidelines model, allow-list and triage as live settings ([ServeSettings]), swapped together.
+ * Refused when the new allow-list names nobody.
  */
 internal class ServeGuidelinesLiveSettings(private val guidelines: ServeUiBuilderGuidelines) :
   ServeLiveSettings {

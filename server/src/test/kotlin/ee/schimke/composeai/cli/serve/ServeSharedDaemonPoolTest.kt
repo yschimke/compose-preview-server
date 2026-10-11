@@ -172,11 +172,8 @@ class ServeSharedDaemonPoolTest {
   }
 
   /**
-   * The optimizer reports its batch width from this number, and the whole point is that submitting
-   * five jobs does not mean five daemons ran. When the seat budget affords no replica the pool
-   * queues the jobs onto a host already in circulation — five threads taking turns on one daemon,
-   * which a count of jobs submitted would report as five wide. Reading the deployed box's
-   * `maxBatchWidth: 5` as "batching works" was exactly that mistake.
+   * The reported batch width must count daemons actually rendering, not jobs submitted: without
+   * seat budget for a replica, five jobs take turns on one daemon.
    */
   @Test
   fun `peak in-flight counts daemons that rendered at once, not jobs submitted`() {
@@ -210,11 +207,8 @@ class ServeSharedDaemonPoolTest {
   }
 
   /**
-   * Codex review on #3389. A replica's daemon session starts on its FIRST render, so that render
-   * carries the full cold start — 34-68s on an Android lane. Only the primary's warm is visible to
-   * the optimizer (via `awaitWarmCompletion`), so without this the replicas' cold starts land in
-   * the per-entry render bucket: the exact conflation the warm/batch split exists to remove, in the
-   * exact scenario it was built to diagnose.
+   * A replica's daemon session starts on its first render, carrying the full cold start; that must
+   * be reported as warm time, not lumped into per-entry render time.
    */
   @Test
   fun `a replica's first render is reported as cold-start time, and only the first`() {
@@ -263,11 +257,8 @@ class ServeSharedDaemonPoolTest {
   }
 
   /**
-   * Codex review on #3390. `ServeRenderHost.render` answers `NotFound` from its id set BEFORE it
-   * touches its lazy session — `ServeCatalogLiveHost.renderDaemon` reaches that path whenever the
-   * shared descriptor lacks an id. Consuming the cold marker there would mark a daemon warm that
-   * has never started, so the real cold start, paid by whichever later render does start it, would
-   * land back in `batchMillis` unreported.
+   * `ServeRenderHost.render` answers `NotFound` from its id set before touching its lazy session,
+   * so consuming the cold marker there would mark a never-started daemon warm.
    */
   @Test
   fun `a NotFound leaves the replica cold, so the real cold start is still reported`() {
@@ -326,11 +317,9 @@ class ServeSharedDaemonPoolTest {
   }
 
   /**
-   * The stream reserve exists so a visitor can always start a stream no matter how much render
-   * residency has built up. A leased *browse* burst is allowed to take it — a visitor is already
-   * waiting on those pixels. The idle theme optimizer reaches this same pool through the same
-   * leased path, but it is background residency and, unlike a burst, it does not end: on the
-   * deployed box that held 6-8 of 8 seats for hours with `activeStreams: 0`.
+   * The stream reserve guarantees a visitor can always start a stream. A leased browse burst may
+   * take it (someone is waiting); the idle optimizer, also leased, is background residency that
+   * doesn't end, so it must not.
    */
   @Test
   fun `a background render may not open a replica inside the stream reserve`() {
@@ -377,18 +366,14 @@ class ServeSharedDaemonPoolTest {
   }
 
   /**
-   * Codex review on #3393. Pricing replicas the optimizer OPENS is only half the job: a visitor's
-   * burst leaves a foreground-priced replica behind, and a continuously running optimizer would
-   * then reuse it and keep it alive — refreshing `replicaLastUsed` every batch so the idle sweep
-   * never closes it — while it occupies the stream reserve. Same production state, another road.
+   * A visitor's burst leaves a foreground-priced replica; a running optimizer reusing it would keep
+   * it alive in the stream reserve, so reuse reprices or leaves it to expire.
    */
   @Test
   fun `a prefetch cannot extend the life of a replica it could not reprice`() {
     var now = 0L
-    // One seat above the reserve. A visitor's burst can open a replica on it, but there is then no
-    // background headroom (weight + STREAM_RESERVE) to move that seat onto — so the reprice below
-    // must fail, which is the branch worth pinning: the prefetch keeps rendering, but it must not
-    // buy the replica more time on a foreground seat.
+    // One seat above the reserve: no background headroom to move the replica onto, so the reprice
+    // fails and the prefetch must not extend the replica's life on a foreground seat.
     val seats = LiveSeatLimiter(totalPermits = 1 + LiveSeatLimiter.STREAM_RESERVE)
     val entered = CountDownLatch(1)
     val release = CountDownLatch(1)
@@ -420,9 +405,8 @@ class ServeSharedDaemonPoolTest {
       now = 1_000
       assertTrue(pool.render("p", PreviewOverrides(), background = true) is RenderOutcome.Ok)
 
-      // … but the replica's clock still reads from the VISITOR's use, not the prefetch's. Just past
-      // the window measured from t=0 and short of it measured from t=1_000, so this only passes if
-      // the prefetch left `replicaLastUsed` alone.
+      // The replica's clock still reads from the visitor's use: this only passes if the prefetch
+      // left `replicaLastUsed` alone.
       now = 60_500
       assertEquals(1, pool.reapIdle(idleMillis = 60_000), "the prefetch did not buy it more time")
       assertEquals(
@@ -438,15 +422,13 @@ class ServeSharedDaemonPoolTest {
   }
 
   /**
-   * Codex review on #3393. `acquireBackground` tries the per-preview slice FIRST, and that slice is
-   * the one seat a supplement-only preview is guaranteed. A shared prefetch replica taking it
-   * recreates exactly the starvation the slice was carved out to prevent.
+   * `acquireBackground` tries the per-preview slice first; a shared prefetch replica must not take
+   * that seat, which is reserved for supplement-only previews.
    */
   @Test
   fun `a background replica never takes the per-preview slice`() {
-    // A one-seat slice on top of a general lane just wide enough for one background holder
-    // (weight + STREAM_RESERVE = 3). Sized so the two worlds diverge: taking the slice leaves the
-    // general lane wider, taking the general lane leaves the slice intact.
+    // A one-seat slice plus a general lane just wide enough for one background holder (weight +
+    // STREAM_RESERVE = 3), so the two outcomes diverge.
     val seats = LiveSeatLimiter(totalPermits = 4, perPreviewReserve = 1)
     assertEquals(1, seats.perPreviewPermits, "precondition: the box affords a one-seat slice")
 
@@ -468,9 +450,8 @@ class ServeSharedDaemonPoolTest {
           .get(10, TimeUnit.SECONDS) is RenderOutcome.Ok
       )
 
-      // Fill the general lane, the state in which the slice is the only thing standing between a
-      // supplement-only preview and a Busy/503. Taking the slice above would leave the general lane
-      // with room to absorb this instead, and the acquire below would then find nothing anywhere.
+      // With the general lane full, the slice is all that stands between a supplement-only preview
+      // and a 503.
       assertNotNull(seats.acquire(2), "the general lane still had room for a stream")
       assertNotNull(
         seats.acquireBackground(1),
@@ -539,8 +520,8 @@ class ServeSharedDaemonPoolTest {
   }
 
   /**
-   * Replicas outlive the burst that opened them unless something reaps them; nothing else does,
-   * because a catalog session is pinned and [ServeSessionRegistry.suspendIdle] skips those.
+   * Replicas outlive their burst unless reaped; catalog sessions are pinned, so
+   * [ServeSessionRegistry.suspendIdle] won't.
    */
   @Test
   fun `reaps idle replicas and never the primary`() {
@@ -580,19 +561,16 @@ class ServeSharedDaemonPoolTest {
 
   @Test
   fun `does not open a replica the live-seat budget cannot afford`() {
-    // Budget fully spent elsewhere — a stream, another catalog's pool. Since a leased replica is
-    // charged as FOREGROUND (see the test below), "cannot afford" means literally nothing free:
-    // leaving the stream reserve open would leave a replica affordable, and the test would then
-    // pass or fail on whether the renders happened to overlap.
+    // Budget fully spent elsewhere; since a leased replica is charged as foreground, "cannot
+    // afford" must mean nothing free at all.
     val seats = LiveSeatLimiter(totalPermits = 1)
     val held = requireNotNull(seats.acquire(1))
     assertEquals(0, seats.availablePermits(), "precondition: nothing left to spend")
 
     val entered = CountDownLatch(1)
     val release = CountDownLatch(1)
-    // Held mid-render, so the overlapping request has nothing to borrow and MUST reach the
-    // replica-launch path. With an InstantHost primary the overlap was a race, which is why this
-    // used to pass locally and fail on a loaded runner.
+    // Held mid-render so the overlapping request must take the replica-launch path (an instant
+    // primary made this racy).
     val primary = BlockingHost("primary", entered, release)
     val opened = AtomicInteger()
     val pool =
@@ -661,19 +639,14 @@ class ServeSharedDaemonPoolTest {
   }
 
   /**
-   * A leased burst is a visitor waiting on the grid, so its replicas draw on the FOREGROUND budget
-   * — the same class as a stream — rather than the background remainder the prefetcher leaves. The
-   * per-preview pool stays on the background path, so the stream reserve still protects streams.
+   * A leased burst's replicas draw on the foreground budget, like streams; the per-preview pool
+   * stays on the background path behind the stream reserve.
    */
   @Test
   fun `a leased replica may use the seats reserved against background work`() {
-    // Exactly the stream reserve free: a background holder (the per-preview pool) would be refused
-    // here, but a leased burst is foreground and may take it.
-    //
-    // `perPreviewReserve = 0` because this case is about the STREAM reserve. With the per-preview
-    // slice in play the background holder would be admitted from its own permits — correct, and
-    // covered by LiveSeatLimiterPerPreviewReserveTest — which would silently void the precondition
-    // below and leave this asserting nothing about the interaction it was written for.
+    // Exactly the stream reserve free: a background holder would be refused, a leased burst may
+    // take it. `perPreviewReserve = 0` so the per-preview slice can't satisfy the background holder
+    // and void the precondition (that case is LiveSeatLimiterPerPreviewReserveTest's).
     val seats =
       LiveSeatLimiter(totalPermits = LiveSeatLimiter.STREAM_RESERVE, perPreviewReserve = 0)
     assertNull(seats.acquireBackground(1), "precondition: background cannot touch the reserve")
@@ -707,9 +680,8 @@ class ServeSharedDaemonPoolTest {
   }
 
   /**
-   * Codex review on #3355. `liveSeatRefusals` is the evidence any change to the seat budget rests
-   * on, so it must only count callers that actually turned someone away. A leased burst that can't
-   * widen still serves its render off a host already in circulation — throttled, not refused.
+   * `liveSeatRefusals` must count only real refusals; a burst that can't widen still renders on an
+   * existing host.
    */
   @Test
   fun `replica backpressure is not counted as a live-seat refusal`() {

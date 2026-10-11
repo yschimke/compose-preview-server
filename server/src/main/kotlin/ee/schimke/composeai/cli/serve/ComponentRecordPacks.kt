@@ -20,45 +20,25 @@ import ee.schimke.composeai.uibuilder.service.UiBuilderComponentPackSource
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
- * A served catalog's component record, projected onto a component pack the builder can merge.
+ * A served catalog's component record projected onto a component pack the builder can merge: an
+ * application's own composables offered as extra components inside a Material 3 screen. This is the
+ * policy-free subset of the generator planned in
+ * `docs/design/UI_BUILDER_ON_THE_COMPONENT_RECORD.md`; it never replaces a hand-authored catalog.
  *
- * ## What this is the smallest form of
+ * - **Only the project's own symbols** ([ComponentOrigin.PROJECT]); records also list library
+ *   composables the previews call, which would be Material 3 under a misleading id.
+ * - **Only components with a proven call site** (`code.call`); ones the producer refused are left
+ *   out rather than refused at export.
+ * - **A property is a parameter with a literal** (`String`, `Boolean`, `Int`/`Long`,
+ *   `Float`/`Double`), required when it has no default and isn't nullable. Everything else is left
+ *   to the generator's placeholder table.
+ * - **A slot is a `@Composable` lambda and accepts anything**; slot policy is authored knowledge,
+ *   so the compiler is the check on the native lane.
+ * - **The canvas draws a named placeholder**: the browser can't link application classes, so
+ *   `wasm.adapterStatus` is `unsupported`.
  *
- * `docs/design/UI_BUILDER_ON_THE_COMPONENT_RECORD.md` plans to *generate* the builder's capability
- * catalog from `components.json` plus authored policy, and lists the corrections that separate a
- * generator from a regression. This is the generator for the case that needs no authored policy at
- * all: an application's own composables, offered inside a Material 3 screen as **extra** components
- * rather than as the catalog. Nothing here replaces `m3-catalog`'s hand-authored declaration — that
- * one carries editor hints, variant selectors and slot policy a record cannot say — so the rules
- * below are deliberately the safe subset:
- *
- * - **Only the project's own symbols.** A Confetti record also lists every `androidx.compose`
- *   composable its previews render, because the record describes what the previews call. Offering
- *   those as `confetti-mobile/text` would be Material 3 twice, under an id that lies about where it
- *   came from. [ComponentOrigin.PROJECT] is the line.
- * - **Only what the producer proved a call site for.** `code.call` is the licence: a component the
- *   producer refused (a required parameter with no literal, a collided overload, a receiver scope)
- *   is left out rather than offered and refused at export.
- * - **A property is a parameter with a literal.** `String`, `Boolean`, `Int`/`Long` and
- *   `Float`/`Double` become properties, required when the parameter has no default and is not
- *   nullable. Everything else — `Modifier`, callbacks, domain types, enums whose constants the
- *   record does not list — is left for the generator's placeholder table, which is what `code.call`
- *   proved works. The role table in the plan (event, state callback) is authored knowledge and is
- *   not guessed at here.
- * - **A slot is a `@Composable` lambda, and accepts anything.** Which roles and traits a slot
- *   accepts is authored policy the record does not carry, so a pack slot constrains nothing: a
- *   record-derived component can hold whatever the author drops in it, and the compiler is the
- *   check, on the native lane.
- * - **The canvas draws a placeholder, and says so.** The browser cannot link an application's
- *   classes, so `wasm.adapterStatus` is `unsupported` and the editor draws the node as a named
- *   outline — the same honest shape `wear-m3`'s native-only components use.
- *
- * ## One rule for the id, both ways
- *
- * [UiBuilderComponentPack.componentId] names the component; [aliasedRecord] writes the same id back
- * onto the record as a catalog alias so the export resolves it. Both call the one function, which
- * is what keeps the capability the editor offers and the record the export generates from agreeing
- * about what `confetti-mobile/session-card` is.
+ * [UiBuilderComponentPack.componentId] and [aliasedRecord] share one id function, so the editor's
+ * capability and the export's record agree on ids like `confetti-mobile/session-card`.
  */
 internal object ComponentRecordPacks {
 
@@ -111,14 +91,9 @@ internal object ComponentRecordPacks {
   }
 
   /**
-   * [record] with every component this pack offers carrying its pack id as a catalog alias, and
-   * every component it does not offer removed.
-   *
-   * Removed rather than kept, because the merged record an export generates from is the design's
-   * catalog record plus this one, and a library symbol the pack declined to offer would still
-   * resolve by canonical id — reachable from nothing in the document, but two records for
-   * `androidx.compose.material3.Text` is the ambiguity `ScreenGenerator` refuses by alias, and
-   * keeping one around for no caller is how that starts.
+   * [record] with every offered component aliased by its pack id and every other component removed:
+   * a declined library symbol would still resolve by canonical id, and duplicate records (e.g. two
+   * `androidx.compose.material3.Text`) are an ambiguity `ScreenGenerator` refuses.
    */
   fun aliasedRecord(packId: String, record: ComponentRecordFile): ComponentRecordFile {
     val taken = mutableSetOf<String>()
@@ -234,11 +209,8 @@ internal object ComponentRecordPacks {
   }
 
   /**
-   * The JSON Schema type a parameter's literal has, or null for a parameter with no literal.
-   *
-   * One rule for which parameters become properties. compose-ui-builder's
-   * `PublishedUiBuilderCatalog` carries its own copy of this object, so the two must change
-   * together.
+   * The JSON Schema type of a parameter's literal, or null. compose-ui-builder's
+   * `PublishedUiBuilderCatalog` carries a copy; change them together.
    */
   internal fun jsonTypeOf(parameter: TargetParameter): String? =
     when (parameter.typeFqn) {
@@ -257,12 +229,9 @@ internal object ComponentRecordPacks {
       "androidx.compose.ui.text.style.TextOverflow" -> "string"
       "androidx.compose.ui.unit.Dp",
       "androidx.compose.ui.unit.TextUnit" -> "number"
-      // The Remote Compose value types, which a Remote catalog's components take instead of the
-      // Kotlin ones: `RemoteText(text: RemoteString)` rather than `Text(text: String)`. Left out,
-      // every component of such a catalog was served with NO editable properties at all — a text
-      // with no `text` — so a design could not author one and the export then reported the value
-      // missing. What a design carries is the same JSON either way; the difference is only the
-      // expression the emitter writes around it (`"…".rs`), which is the emitter's business.
+      // Remote Compose value types, taken by Remote catalogs instead of Kotlin ones
+      // (`RemoteText(text: RemoteString)`); without them those components had no editable
+      // properties. The document JSON is the same; only the emitted expression (`"…".rs`) differs.
       "androidx.compose.remote.creation.compose.state.RemoteString",
       // A colour travels as a string in both vocabularies — `#RRGGBB` or a token name — which is
       // what the frozen catalogs already say for every `color` property they carry.
@@ -270,26 +239,17 @@ internal object ComponentRecordPacks {
       "androidx.compose.remote.creation.compose.state.RemoteBoolean" -> "boolean"
       "androidx.compose.remote.creation.compose.state.RemoteInt" -> "integer"
       "androidx.compose.remote.creation.compose.state.RemoteFloat" -> "number"
-      // A text size, and the property a design most visibly loses without it. Left out, a
-      // published Remote Compose text component offered a builder `text`, `color` and `maxLines`
-      // out of twelve parameters -- every size, weight and alignment dropped -- so a design moving
-      // onto it lost the size it was authored with.
-      //
-      // `number` the way `RemoteFloat` is, with one caveat this map cannot express and the emitter
-      // enforces: the spelling is `22.rsp`, and `RemoteTextUnitKt` publishes no `Float.rsp`, so
-      // only a whole number has a Kotlin form at all. `RemoteContentEmitter` refuses a fractional
-      // size by name rather than rounding one. Compiled rather than assumed, by the value
-      // vocabulary probe in the catalog repository that publishes the component.
+      // A text size. `number` like `RemoteFloat`, but spelled `22.rsp` and with no `Float.rsp`, so
+      // only whole numbers have a Kotlin form; `RemoteContentEmitter` refuses a fractional size by
+      // name rather than rounding.
       "androidx.compose.remote.creation.compose.state.RemoteTextUnit" -> "number"
       else -> null
     }
 
   /**
-   * The document spelling for a typed parameter.
-   *
-   * Units are bare numbers in JSON and typed values in Kotlin, so the suffix makes the unit part of
-   * the saved vocabulary (`fontSize` -> `fontSizeSp`, `tonalElevation` -> `tonalElevationDp`).
-   * Other conventions retain the callable's own parameter name.
+   * The document spelling for a typed parameter. Units get a suffix so the unit is part of the
+   * saved vocabulary (`fontSize` → `fontSizeSp`, `tonalElevation` → `tonalElevationDp`); others
+   * keep the parameter name.
    */
   internal fun propertyNameOf(parameter: TargetParameter): String =
     when (parameter.typeFqn) {
@@ -332,10 +292,9 @@ internal object ComponentRecordPacks {
 
   /** What `layout/column` may carry: the leaf set plus what a container that fills does. */
   /**
-   * The container/leaf split. compose-ui-builder's `PublishedUiBuilderCatalog` carries its own
-   * copy, and the two must agree so a published catalog that states no `modifiers` gets the same
-   * answer a pack component does — two fallbacks that disagreed would be two different ideas of
-   * what "the default" means.
+   * The container/leaf split. compose-ui-builder's `PublishedUiBuilderCatalog` carries a copy, and
+   * they must agree so a published catalog with no `modifiers` gets the same default as a pack
+   * component.
    */
   internal fun structuralModifiers(container: Boolean): List<String> =
     if (container) CONTAINER_MODIFIERS else LEAF_MODIFIERS

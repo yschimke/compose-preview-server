@@ -36,100 +36,59 @@ data class ServeGithubAuthConfig(
   val cookieSecret: String,
   val repository: String,
   /**
-   * A **second** repository whose access this session should also record, for a lane gated on
-   * something other than [repository] — today the image lane's `--image-upload-repo`.
+   * A second repository whose access the session also records, for a lane gated elsewhere (today
+   * the image lane's `--image-upload-repo`). The visitor's token isn't retained, so any bit not
+   * computed at sign-in can never be recovered; computing it in the same round trip is what lets
+   * the two gates differ. Null or equal to [repository] means no extra call.
    *
-   * The session cookie is the only thing an approval page has to reason with: the visitor's token
-   * is deliberately not retained, so a bit that was not computed at sign-in can never be recovered
-   * later. One boolean therefore speaks for exactly one repository, and a lane gated elsewhere used
-   * to have no honest answer available at all — which is why the combination was refused at
-   * startup. Computing the second bit here, from the same token and in the same round trip that
-   * computes the first, is what lets the two gates differ.
-   *
-   * Null, or equal to [repository], means there is no second bit to compute: the flag mirrors
-   * [GitHubOAuthUser.repositoryAccess] and no extra GitHub call is made.
-   *
-   * It never widens the consent asked for at sign-in: the token only ever carries
-   * [ServeGithubAuth.USER_SCOPE], so a **private** repository here reads as no access at all. See
-   * [ServeGithubAuth.requestedScope].
+   * Never widens consent: the token only carries [ServeGithubAuth.USER_SCOPE], so a private
+   * repository here reads as no access ([ServeGithubAuth.requestedScope]).
    */
   val imageRepository: String? = null,
   val allowedUsers: Set<String> = emptySet(),
   /**
-   * `--github-auth-orgs`: GitHub organizations whose members are admitted as **members**, exactly
-   * as if each were named in [allowedUsers]. It is the way to open a deployment to a whole team
-   * without maintaining a login list — `google` on preview.coo.ee — while every other account still
-   * lands as a guest (with [allowGuests]) or is refused.
-   *
-   * Membership is read once, at sign-in, with the visitor's own token, and baked into the session
-   * like every other bit here: it lasts until the session's absolute cap, so somebody who leaves
-   * the org keeps access for at most that long. Asking needs `read:org`, which
-   * [ServeGithubAuth.requestedScope] adds whenever this is non-empty. A private membership is only
-   * visible when the org allows this OAuth app; a public one always is — see
-   * [GitHubOAuthVerifier.isOrgMember].
+   * `--github-auth-orgs`: organizations whose members are admitted as members, as if named in
+   * [allowedUsers]. Read once at sign-in and baked into the session, so someone leaving the org
+   * keeps access until the absolute cap. Requires `read:org` (added by
+   * [ServeGithubAuth.requestedScope]); private memberships are visible only if the org allows this
+   * OAuth app ([GitHubOAuthVerifier.isOrgMember]).
    */
   val allowedOrgs: Set<String> = emptySet(),
   /**
-   * `--github-auth-guests`: let a GitHub account outside [allowedUsers] sign in anyway, as a
-   * **guest**.
-   *
-   * A guest is deliberately invisible to every existing gate: [ServeGithubAuth.currentLogin]
-   * answers null for one, so live sessions, the playground, image uploads, edit leases and grant
-   * approval all treat a guest exactly as they treat an anonymous visitor. The one thing a guest
-   * session carries is an identity — [ServeGithubAuth.currentSignedInLogin] — which the UI builder
-   * reads to let the account see the designs shared with it, read-only, and to ask for more.
-   *
-   * No repository access is looked up for a guest, so none can be lent by one. Without an allowlist
-   * every account is already a member, and this has nothing to do.
+   * `--github-auth-guests`: admit accounts outside [allowedUsers] as guests.
+   * [ServeGithubAuth.currentLogin] answers null for a guest, so every existing gate treats it as
+   * anonymous; only the UI builder reads its identity ([ServeGithubAuth.currentSignedInLogin]) to
+   * show designs shared with it, read-only. No repository access is looked up for a guest.
    */
   val allowGuests: Boolean = false,
   /**
-   * `--github-auth-open-ui-builder`: every signed-in **member** may create, edit and export
-   * UI-builder designs, and pass those three capabilities on to an agent through an access grant,
-   * without write access to [repository].
-   *
-   * Without it, repository access is the bar for UI-builder writes on a box that names no members,
-   * so the builder is not an open book by default. This is the operator saying it should be: any
-   * GitHub account may make designs here. It opens the UI builder only — the playground and image
-   * uploads still ask about [repository] — and each design's own sharing still decides who may
-   * touch it. A guest ([allowGuests]) is not a member and stays read-only; for "any GitHub
-   * account", set this without [allowedUsers] or [allowedOrgs], where every account is a member.
-   *
-   * Decided per request, not baked into the session: turning it off takes effect at once.
+   * `--github-auth-open-ui-builder`: every signed-in member may create, edit and export UI-builder
+   * designs (and grant those to agents) without write access to [repository]. Opens only the
+   * builder; the playground and image uploads still check [repository], and each design's sharing
+   * still applies. Guests stay read-only. Decided per request, so turning it off is immediate.
    */
   val openUiBuilder: Boolean = false,
   val callbackBaseUrl: String? = null,
   /**
-   * The domain the auth cookies are written for, so **one sign-in covers a parent host and every
-   * top-level site under it** — set `preview.coo.ee` and a session established anywhere in the
-   * family is valid on `m3.preview.coo.ee` too.
+   * Domain the auth cookies are scoped to, so one sign-in covers a parent host and every site host
+   * under it. Needed for a pinned callback to work from a site host: host-only `cp_gh_state`
+   * wouldn't reach the callback origin, failing CSRF.
    *
-   * This is what makes a pinned callback work from a site host at all. Without it the cookies are
-   * host-only: the `cp_gh_state` cookie written on the site host is not sent to the pinned callback
-   * origin, so the CSRF check there sees nothing and answers 401, and a session cookie set at the
-   * callback would be scoped to the wrong host anyway.
-   *
-   * Null (the default) keeps cookies host-only, which is right for a single-hostname box and is the
-   * only safe default: it must be the operator's explicit choice, never derived from the request's
-   * own `Host`, or an attacker-supplied header could widen the scope of a session cookie.
-   *
-   * **Every host under this domain is inside the session's blast radius**, so it must cover only
-   * hosts this deployment controls. A registrable public suffix (`co.uk`, or a bare `com`) is
-   * refused outright; beyond that the operator is trusted to know what lives under their own name.
+   * Null keeps cookies host-only, the only safe default: it must be the operator's explicit choice,
+   * never derived from `Host`. Every host under this domain is inside the session's blast radius;
+   * public suffixes are refused.
    */
   val cookieDomain: String? = null,
   /**
-   * Overrides the OAuth scope. Null (the default) asks for [ServeGithubAuth.USER_SCOPE] — see
-   * [ServeGithubAuth.requestedScope]. Only the read-only identity scopes in
-   * [ServeGithubAuth.ALLOWED_SCOPES] are accepted; anything that reaches repositories (`repo`,
-   * `public_repo`, …) or writes is refused at startup.
+   * Overrides the OAuth scope; null asks for [ServeGithubAuth.USER_SCOPE]
+   * ([ServeGithubAuth.requestedScope]). Only read-only identity scopes in
+   * [ServeGithubAuth.ALLOWED_SCOPES] are accepted; repository or write scopes are refused at
+   * startup.
    */
   val oauthScope: String? = null,
   /**
-   * Read the visitor's host and scheme from `X-Forwarded-Host` / `X-Forwarded-Proto` rather than
-   * the request's own `Host` and connection scheme. Set from `--trust-forwarded-for`, the one
-   * switch that says this server sits behind a reverse proxy it can believe. Off, a request's
-   * forwarded headers are ignored and [callbackBaseUrl], when set, still decides the public origin.
+   * Read host and scheme from `X-Forwarded-Host` / `-Proto` (from `--trust-forwarded-for`). Off,
+   * forwarded headers are ignored; [callbackBaseUrl] still decides the public origin when set.
    */
   val trustForwardedHeaders: Boolean = false,
 ) {
@@ -157,10 +116,8 @@ data class ServeGithubAuthConfig(
     if (domain != null) {
       val normalized = ServeSites.normalizeHost(domain)
       require(normalized != null) { "GitHub auth cookie domain '$cookieDomain' is not a hostname" }
-      // A single-label domain (`com`, `localhost`) or a two-label public suffix (`co.uk`) would ask
-      // the browser to scope the session across a whole registry. Browsers reject that, so the
-      // sign-in would fail at the Set-Cookie rather than here — which is a much worse place to find
-      // out. Two labels is the floor, and the known multi-part suffixes are named out.
+      // A single-label domain or two-label public suffix would scope the session across a registry;
+      // browsers would reject the Set-Cookie later, so refuse here.
       val labels = normalized.split(".")
       require(labels.size >= 2) {
         "GitHub auth cookie domain '$cookieDomain' must have at least two labels"
@@ -195,10 +152,8 @@ data class ServeGithubAuthConfig(
     private val GITHUB_ORG = Regex("[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}")
 
     /**
-     * Two-label names that are registries rather than registrable domains, so a cookie may not span
-     * them. Not a full public-suffix list — that is a large, churning dataset and a `serve` box
-     * carries no copy of it. These are the ones a plausible typo lands on; anything past them is
-     * the operator's own name to reason about.
+     * Two-label names that are registries, not registrable domains. Not a full public-suffix list,
+     * just the plausible typos.
      */
     private val PUBLIC_SUFFIXES =
       setOf(
@@ -223,10 +178,8 @@ class ServeGithubAuth(
   private val clock: Clock = Clock.systemUTC(),
 ) {
   /**
-   * `GET /auth/github/start`. [siteHosts] are the top-level site hostnames this server answers for
-   * ([ServeSites.hosts]) — the **only** hosts a sign-in may be returned to, and the list is checked
-   * again before [handleCallback] issues that redirect. Empty (the default) means the sign-in ends
-   * where it started, which is exactly what this did before sites existed.
+   * `GET /auth/github/start`. [siteHosts] ([ServeSites.hosts]) are the only hosts a sign-in may
+   * return to, re-checked in [handleCallback]. Empty means the sign-in ends where it started.
    */
   suspend fun RoutingContext.handleStart(siteHosts: Set<String> = emptySet()) {
     val returnTo = safeReturnTo(call.request.queryParameters["return"] ?: "/")
@@ -234,40 +187,27 @@ class ServeGithubAuth(
     val originHost = originHostFor(call, siteHosts)
     val state = signedState(nonce(), returnTo, originHost)
     val secure = isSecure(call, config.callbackBaseUrl, config.trustForwardedHeaders)
-    // A host-only `cp_gh_state`, or one scoped to a narrower domain, left from before the current
-    // cookie domain was configured would sit beside the new one. The browser stores them
-    // separately, so the order of these lines does not matter to it.
+    // Stale `cp_gh_state` variants from an older cookie domain are stored separately by the
+    // browser, so line order doesn't matter.
     clearStaleVariants(call, STATE_COOKIE, secure)
     call.response.cookies.append(stateCookie(state, maxAge = STATE_TTL_SECONDS, secure = secure))
     call.respondRedirect(authorizeUrl(call, state))
   }
 
   /**
-   * `GET /auth/github/callback` — GitHub's return leg, which on a pinned box always lands on the
-   * pinned origin whatever host the visitor started from.
+   * `GET /auth/github/callback`, which with a pinned callback always lands on the pinned origin. A
+   * same-host sign-in returns to a relative path; a cross-host one (started on a site) returns to
+   * an absolute URL on that site.
    *
-   * Two shapes end up here, and they differ only in where the visitor is sent afterwards. A
-   * **same-host** sign-in (no origin host in the state) returns to a relative path, as it always
-   * did. A **cross-host** sign-in — started on a top-level site — returns to an absolute URL on
-   * that site, so the visitor lands back where they were reading rather than being quietly moved to
-   * the pinned origin.
-   *
-   * **The CSRF check is unchanged**, and that is the point of doing this with a cookie domain
-   * rather than a token handoff: with [ServeGithubAuthConfig.cookieDomain] set, `cp_gh_state` is
-   * written for the parent domain, so it is sent to the pinned callback host too and can be
-   * compared here exactly as it always was. All the cross-host leg adds is *where to go back to* —
-   * a redirect target, not a credential.
-   *
-   * The session cookie is likewise written for the parent domain, so one sign-in is already valid
-   * on every site host under it. There is nothing to hand over.
+   * The CSRF check is unchanged: with [ServeGithubAuthConfig.cookieDomain] set, `cp_gh_state` is
+   * sent to the callback host too. The cross-host leg adds only a redirect target, not a
+   * credential, and the session cookie already covers every site host.
    */
   suspend fun RoutingContext.handleCallback(siteHosts: Set<String> = emptySet()) {
     val state = call.request.queryParameters["state"].orEmpty()
-    // Every value, not just a sole one: a stale `cp_gh_state` from an earlier, narrower cookie
-    // domain (`Domain=preview.coo.ee` before it was widened to `coo.ee`) is sent beside the fresh
-    // one, and a sign-in started on a sibling host cannot clear it, since a browser only accepts a
-    // `Domain` its own host is under. The check is unchanged in substance: the query's state must
-    // be one this browser holds in a cookie, which a cross-site request cannot arrange.
+    // Every value, not a sole one: a stale state cookie from a narrower domain can't be cleared
+    // from a sibling host. The query's state must still match one this browser holds, which a
+    // cross-site request can't arrange.
     val held = call.request.cookieValues(STATE_COOKIE)
     val code = call.request.queryParameters["code"].orEmpty()
     val statePayload = verifyState(state)
@@ -283,11 +223,9 @@ class ServeGithubAuth(
       call.respondText("GitHub sign-in failed.", status = HttpStatusCode.Unauthorized)
       return
     }
-    // Where the visitor started, when that was a different host to this one. Re-validated against
-    // the live site list rather than trusted from [handleStart]: the signature proves this server
-    // minted the state, not that the host is still one of ours, and an unchecked value here is an
-    // open redirect off the back of a real sign-in. Anything unrecognised falls back to a
-    // same-origin relative return, which is where this route always sent people.
+    // The origin host is re-validated against the live site list: the signature proves we minted
+    // the state, not that the host is still ours, and an unchecked value would be an open redirect.
+    // Unrecognised hosts fall back to a same-origin relative return.
     val returnHost = statePayload.originHost?.takeIf { it in siteHosts && withinCookieDomain(it) }
     val secure = isSecure(call, config.callbackBaseUrl, config.trustForwardedHeaders)
     val user =
@@ -325,15 +263,10 @@ class ServeGithubAuth(
   }
 
   /**
-   * The visitor's GitHub authorization for this app carries more than [ALLOWED_SCOPES] — almost
-   * always a `repo` grant approved back when sign-in still asked for it. GitHub keeps handing a
-   * returning visitor the scopes they approved before, so asking for less does not shrink it.
-   *
-   * [GitHubOAuthVerifier.verify] has already tried to revoke that whole authorization. When it
-   * could, the visitor is sent straight back through sign-in, where GitHub shows a fresh consent
-   * screen for [requestedScope] alone. That happens once: a [REGRANT_COOKIE] marks the retry, so an
-   * authorization that somehow comes back broad again is explained instead of looping. When the
-   * revoke failed, the visitor is told how to remove it themselves.
+   * The visitor's authorization carries more than [ALLOWED_SCOPES] (usually an old `repo` grant
+   * GitHub keeps re-issuing). [GitHubOAuthVerifier.verify] has tried to revoke it; if that worked,
+   * the visitor is sent through sign-in once more for a fresh consent screen (a [REGRANT_COOKIE]
+   * prevents loops), otherwise told how to remove it.
    */
   private suspend fun RoutingContext.respondToTooBroadGrant(
     failure: GitHubGrantTooBroadException,
@@ -358,34 +291,16 @@ class ServeGithubAuth(
   }
 
   /**
-   * `POST /auth/github/logout` — the eject button. Overwrites `cp_gh_auth` with an empty,
-   * already-expired cookie and sends the visitor back to [ServeGithubAuth.safeReturnTo] of the
-   * `return` query parameter.
+   * `POST /auth/github/logout`: overwrite `cp_gh_auth` with an empty, expired cookie and return to
+   * [safeReturnTo] of the `return` parameter.
    *
-   * **`POST`, never `GET`.** A sign-out reachable by following a URL is one a prefetcher, a
-   * link-unfurler or an `<img src>` on somebody else's page can fire — annoying rather than
-   * dangerous, but the approval flow is a POST for the same reason and there is no cause to be
-   * looser here. The return target rides in the query string rather than the body so this stays a
-   * two-line handler with nothing to parse: the form's `action` carries it, and only a
-   * same-origin-relative path survives [safeReturnTo].
+   * POST only, so prefetchers and `<img src>` can't fire it. The deletion uses the same
+   * [sessionCookie] attributes (a mismatch would store a second cookie), and the empty value fails
+   * [verifySession] regardless. With a cookie domain, the host-only variant is cleared too, since
+   * two session values read as signed out.
    *
-   * The cookie is cleared **twice over**, deliberately. `maxAge = 0` asks the browser to drop it,
-   * and it is written through the same [sessionCookie] builder the session itself uses — same
-   * `path`, same `domain`, same `secure` — because a deletion whose attributes do not match the
-   * cookie's is a second cookie the browser stores beside the first rather than a deletion. The
-   * empty **value** is the belt to that braces: whatever the browser makes of the attributes, an
-   * empty string carries no signature, so [verifySession] rejects it and this server treats the
-   * visitor as signed out from the next request onward.
-   *
-   * With a cookie domain configured, the host-only variant is cleared as well. A browser can hold
-   * both — one written before the domain was set, one after — and requests carrying two session
-   * values are read as signed out, so leaving the older one behind would keep the visitor signed
-   * out of their next sign-in too.
-   *
-   * What this cannot do is revoke: the cookie is stateless and self-signed, so a copy taken off the
-   * wire is unaffected. This ends *a browser's* session, which is the affordance that was missing;
-   * server-side revocation is a different design
-   * ([#280](https://github.com/yschimke/compose-preview-server/issues/280)).
+   * This can't revoke a stateless cookie copied off the wire; server-side revocation is a different
+   * design ([#280](https://github.com/yschimke/compose-preview-server/issues/280)).
    */
   suspend fun RoutingContext.handleLogout() {
     val returnTo = safeReturnTo(call.request.queryParameters["return"] ?: "/")
@@ -396,14 +311,10 @@ class ServeGithubAuth(
   }
 
   /**
-   * Whether a sign-in started on [rawHost] can actually come back to it.
-   *
-   * True when the callback isn't pinned (it is derived from the request, so it never leaves the
-   * host), when this *is* the pinned host, or when [rawHost] is a configured site host that the
-   * session cookie's domain covers — the case this exists for. False for a site outside the cookie
-   * domain: the cookies written at the callback would not be sent to it, so a sign-in started there
-   * would appear to succeed and land the visitor back signed-out. [ServeHttpServer] reads this to
-   * decide whether to offer the sign-in affordance at all.
+   * Whether a sign-in started on [rawHost] can come back to it: true when the callback isn't
+   * pinned, on the pinned host, or for a configured site host inside the cookie domain. False
+   * otherwise, since the visitor would land back signed out; [ServeHttpServer] uses it to decide
+   * whether to offer sign-in.
    */
   fun canRoundTrip(rawHost: String?, siteHosts: Set<String>): Boolean {
     if (!hasPinnedCallback) return true
@@ -417,46 +328,25 @@ class ServeGithubAuth(
   }
 
   /**
-   * Slide a still-valid session forward, so an active visitor stays signed in instead of being
-   * bounced through GitHub on a fixed cadence — but never past the absolute cap stamped at sign-in.
+   * Slide a still-valid session forward so an active visitor stays signed in, never past the
+   * absolute cap stamped at sign-in.
    *
-   * The session is a self-contained signed cookie: there is no server-side store to touch and the
-   * access token is deliberately not kept, so the only way to extend one is to mint a fresh cookie
-   * carrying a later expiry, and there is nothing to re-ask GitHub with at refresh time. That is
-   * precisely why the cap exists. A refreshed cookie copies the `repositoryAccess` flag GitHub
-   * computed at sign-in, and that flag is the playground gate; without a ceiling, somebody whose
-   * access to the gating repo was revoked would keep it for as long as they kept visiting —
-   * forever, for a daily visitor. [SESSION_ABSOLUTE_TTL_SECONDS] from [handleCallback] is the
-   * ceiling, and reaching it costs the visitor one silent redirect through GitHub (an OAuth app
-   * they have already approved re-authorises without a consent screen) which re-computes the flag.
+   * The cookie is self-contained and the token isn't kept, so refreshing copies the sign-in-time
+   * `repositoryAccess` flag (the playground gate); the cap ([SESSION_ABSOLUTE_TTL_SECONDS]) bounds
+   * how long a revoked user keeps it. Idle expiry [SESSION_TTL_SECONDS] slides once past its
+   * half-life ([SESSION_REFRESH_AFTER_SECONDS]); otherwise no cookie is set.
    *
-   * So: idle expiry [SESSION_TTL_SECONDS] slides on every visit past its half-life
-   * ([SESSION_REFRESH_AFTER_SECONDS]); the absolute expiry never moves. Under the half-life, or
-   * once the cap is reached, this does nothing at all — an ordinary page view sets no cookie.
-   *
-   * Skipped on the OAuth routes: [handleCallback] mints the authoritative cookie itself, and a
-   * second `Set-Cookie` for the same name in one response is a coin flip between them.
-   *
-   * Also skipped on any response marked `Cache-Control: public` (a vendored bundle, a font, an
-   * image). A shared cache may store such a response headers and all, so it must never carry one
-   * visitor's session; the next ordinary page view slides the session instead. That is why this
-   * runs once the response is ready to send ([ServeHttpServer] installs it on
-   * `ResponseBodyReadyForSend`) rather than before routing: only then is the route's own
-   * `Cache-Control` known. [contentCacheControl] is whatever the outgoing content itself declares,
-   * on top of the headers the route appended to the call.
-   *
-   * When a cookie domain is configured and the request carries two session values, the host-only
-   * and narrower-domain ones are cleared here: such a request reads as signed out
-   * ([soleCookieValue]), and this is what lets the next request read as signed in again.
+   * Skipped on OAuth routes ([handleCallback] mints its own cookie) and on `Cache-Control: public`
+   * responses, which a shared cache might store with the cookie; hence it runs at
+   * `ResponseBodyReadyForSend` when [contentCacheControl] is known. With a cookie domain, duplicate
+   * host-only or narrower session cookies are cleared here.
    */
   fun refreshSession(call: ApplicationCall, contentCacheControl: List<String> = emptyList()) {
     if (call.request.uri.substringBefore('?').startsWith(AUTH_PATH_PREFIX)) return
     val secure = isSecure(call, config.callbackBaseUrl, config.trustForwardedHeaders)
-    // Before the public-cache check: a request carrying two session values reads as signed out,
-    // so its page is served with the anonymous (public) cache policy, and returning early there
-    // would leave the stale host-only copy in place for as long as the visitor browses. The
-    // clearing cookie is empty and already expired, so it carries nobody's session even when a
-    // shared cache keeps it.
+    // Before the public-cache check: a request with two session values reads as signed out and gets
+    // the public cache policy, so returning early would leave the stale copy forever. The clearing
+    // cookie carries no session.
     if (call.request.cookieValues(AUTH_COOKIE).size > 1) {
       clearStaleVariants(call, AUTH_COOKIE, secure)
       return
@@ -489,9 +379,8 @@ class ServeGithubAuth(
   }
 
   /**
-   * The signed-in **member** — an account the allowlist admits, or any account when there is none.
-   * Null for a guest ([ServeGithubAuthConfig.allowGuests]), which is what keeps every gate written
-   * against this closed to one.
+   * The signed-in member (allowlisted, or any account without an allowlist). Null for a guest,
+   * which keeps every member gate closed to one.
    */
   fun currentLogin(call: ApplicationCall): String? {
     val cookie = call.request.soleCookieValue(AUTH_COOKIE) ?: return null
@@ -499,9 +388,8 @@ class ServeGithubAuth(
   }
 
   /**
-   * Whoever GitHub vouched for, member or guest — an identity, never a permission. Read only where
-   * a guest is meant to count: the UI builder's read-only access and the page chrome that says who
-   * is signed in.
+   * Whoever GitHub vouched for, member or guest: an identity, never a permission. Used only by the
+   * UI builder's read-only access and page chrome.
    */
   fun currentSignedInLogin(call: ApplicationCall): String? {
     val cookie = call.request.soleCookieValue(AUTH_COOKIE) ?: return null
@@ -523,10 +411,8 @@ class ServeGithubAuth(
   }
 
   /**
-   * Access to the repository the **image lane** gates on, which is [accessRepository] unless the
-   * operator pointed `--image-upload-repo` somewhere else. This is what decides whether a signed-in
-   * approver may pass `images` on to an agent — the "never grant what you do not hold" rule, asked
-   * of the repository the grant would actually publish to rather than of the sign-in one.
+   * Access to the image lane's gating repository ([imageAccessRepository]), deciding whether an
+   * approver may grant `images` to an agent.
    */
   fun hasImageRepositoryAccess(call: ApplicationCall): Boolean {
     val cookie = call.request.soleCookieValue(AUTH_COOKIE) ?: return false
@@ -535,9 +421,8 @@ class ServeGithubAuth(
 
   /** [hasImageRepositoryAccess] on a raw cookie value, so the rule can be tested without a call. */
   internal fun hasImageRepositoryAccess(cookie: String): Boolean {
-    // Every accepted cookie carries its own image bit: [GitHubOAuthVerifier] copies the sign-in
-    // answer into it when both lanes gate on one repository, and a cookie minted before the field
-    // existed no longer verifies at all (see [verifySession]).
+    // Every accepted cookie carries its own image bit; older cookies without the field no longer
+    // verify ([verifySession]).
     return verifySession(cookie)?.imageRepositoryAccess == true
   }
 
@@ -546,20 +431,15 @@ class ServeGithubAuth(
     return "$START_PATH?return=${urlEncode(current)}"
   }
 
-  /**
-   * Where a "Sign out" form posts to, returning the visitor to the page they were on. Mirrors
-   * [loginPath] exactly — same `return` parameter, same encoding — so signing out of `/playground`
-   * lands back on `/playground` (anonymously) rather than at the index.
-   */
+  /** Where a "Sign out" form posts, returning to the current page; mirrors [loginPath]. */
   fun logoutPath(call: ApplicationCall): String {
     val current = call.uriWithQuery()
     return "$LOGOUT_PATH?return=${urlEncode(current)}"
   }
 
   /**
-   * The origin of the pinned callback (`--github-auth-callback-base-url`), or `null` when the
-   * callback follows the request's own host. Listed in the pages' `form-action`
-   * ([ServePagePolicy]).
+   * The pinned callback's origin, or null when it follows the request's host. Listed in pages'
+   * `form-action` ([ServePagePolicy]).
    */
   fun callbackOrigin(): String? = config.callbackBaseUrl?.let(ServePagePolicy::formActionSource)
 
@@ -569,10 +449,8 @@ class ServeGithubAuth(
   fun allowedOrgs(): Set<String> = config.allowedOrgs
 
   /**
-   * The repository [hasImageRepositoryAccess] speaks for: `--image-upload-repo` when the operator
-   * pointed the image lane somewhere else, else the sign-in repository it falls back to. A caller
-   * comparing a lane's gating repository against a session's verdict must compare against THIS, not
-   * against [accessRepository] — that is the whole difference between the two bits.
+   * The repository [hasImageRepositoryAccess] speaks for: `--image-upload-repo`, else the sign-in
+   * repository. Compare lane gates against this, not [accessRepository].
    */
   fun imageAccessRepository(): String =
     config.imageRepository?.takeIf { it.isNotBlank() } ?: config.repository
@@ -598,24 +476,14 @@ class ServeGithubAuth(
   }
 
   /**
-   * The OAuth scope to ask a visitor to consent to: who they are, and nothing about their
-   * repositories.
+   * The OAuth scope to request: identity only, nothing about repositories. Never `repo` (full
+   * control of private repositories) just to answer one access question.
    *
-   * This used to be `read:user repo` whenever the gating repo was private — or merely *looked*
-   * private to an anonymous probe that a rate limit or network blip could fail. `repo` is GitHub's
-   * *full control of private repositories*: read and write, code, issues and settings, across every
-   * private repo the visitor can reach. Asking every signer-in for that to answer one question
-   * about one repository is far more than sign-in needs, so it is never asked for.
-   *
-   * [USER_SCOPE] is enough for everything the callback does: `GET /user` for the login, and `GET
-   * /repos/{owner}/{repo}` ([GitHubOAuthVerifier.fetchRepositoryAccess]), which reports the
-   * visitor's own `permissions` on a **public** repo to a token with no repository scope at all. A
-   * private gating repo is invisible to such a token, so it simply grants no access — the safe side
-   * for a gate on running code.
-   *
-   * `read:org` is added when `--github-auth-orgs` is set, so a private org membership can be read;
-   * it is read-only and names nothing about repositories. [ServeGithubAuthConfig.oauthScope]
-   * replaces the base, but only with scopes from [ALLOWED_SCOPES].
+   * [USER_SCOPE] covers `GET /user` and `GET /repos/{owner}/{repo}`
+   * ([GitHubOAuthVerifier.fetchRepositoryAccess]), which reports the visitor's permissions on a
+   * public repo; a private gating repo is invisible and grants no access, the safe side. `read:org`
+   * is added with `--github-auth-orgs`. [ServeGithubAuthConfig.oauthScope] may replace the base
+   * only with [ALLOWED_SCOPES].
    */
   internal fun requestedScope(): String {
     val base = config.oauthScope?.trim()?.takeIf { it.isNotEmpty() } ?: USER_SCOPE
@@ -624,11 +492,9 @@ class ServeGithubAuth(
   }
 
   /**
-   * Whether the OAuth callback is pinned to one origin (`--github-auth-callback-base-url`) rather
-   * than derived from the request. A pinned callback means the return leg always lands on that one
-   * origin, whatever host the visitor started from — which is why a sign-in begun on a top-level
-   * site has to be handed back to it ([handleComplete]) instead of finishing at the callback. Use
-   * [canRoundTrip] to ask whether a given host's sign-in can complete; this is the raw setting.
+   * Whether the callback is pinned (`--github-auth-callback-base-url`) rather than request-derived,
+   * so a sign-in begun on a site host must be handed back to it. Use [canRoundTrip] for a specific
+   * host.
    */
   val hasPinnedCallback: Boolean
     get() = !config.callbackBaseUrl.isNullOrBlank()
@@ -639,13 +505,9 @@ class ServeGithubAuth(
       ?: CALLBACK_PATH
 
   /**
-   * The host to send the visitor back to once the callback has run, or null when the sign-in ends
-   * where it started (the ordinary case: no pinned callback, or already on the pinned origin).
-   *
-   * Only a configured site host the cookie domain covers is ever returned. That is the allowlist
-   * which keeps the state's origin field from becoming an open redirect, and it is applied again in
-   * [handleCallback], because between the two legs the value has been round-tripped through the
-   * client.
+   * The host to return to after the callback, or null when the sign-in ends where it started. Only
+   * configured site hosts inside the cookie domain qualify (preventing an open redirect),
+   * re-checked in [handleCallback] since the value round-trips through the client.
    */
   private fun originHostFor(call: ApplicationCall, siteHosts: Set<String>): String? {
     if (!hasPinnedCallback || siteHosts.isEmpty()) return null
@@ -655,12 +517,9 @@ class ServeGithubAuth(
   }
 
   /**
-   * Whether a cookie written for [ServeGithubAuthConfig.cookieDomain] would actually be sent to
-   * [host] — it is the domain itself, or a subdomain of it. No cookie domain configured ⇒ cookies
-   * are host-only, so nothing but the host that set them qualifies.
-   *
-   * The dot matters: a naive `endsWith` would read `notpreview.coo.ee` as being under
-   * `preview.coo.ee` and offer a sign-in that silently can't work.
+   * Whether a cookie for [ServeGithubAuthConfig.cookieDomain] would be sent to [host] (the domain
+   * or a subdomain). The dot check stops `notpreview.coo.ee` matching `preview.coo.ee`. No domain ⇒
+   * false.
    */
   private fun withinCookieDomain(host: String): Boolean {
     val domain = cookieDomain ?: return false
@@ -685,22 +544,16 @@ class ServeGithubAuth(
       ?.let { ServeSites.normalizeHost(it) }
 
   /**
-   * `nonce|issuedAt|originHost|returnTo`, with an empty origin host on the same-host flow. The
-   * nonce is base64url, the issue time is digits and the origin host is a validated hostname, so
-   * none can contain the separator and `returnTo` keeps its rest-of-string reading — which matters,
-   * since a return path may carry a query string containing anything at all.
-   *
-   * The issue time lets [verifyState] hold a state to [STATE_TTL_SECONDS] itself rather than
-   * relying on the browser to drop the cookie on time.
+   * `nonce|issuedAt|originHost|returnTo`. None of the first three can contain `|`, so `returnTo`
+   * (which may contain anything) keeps the rest of the string. The issue time lets [verifyState]
+   * enforce [STATE_TTL_SECONDS] itself.
    */
   private fun signedState(nonce: String, returnTo: String, originHost: String?): String =
     sign(STATE_PURPOSE, "$nonce|${clock.millis()}|${originHost.orEmpty()}|$returnTo")
 
   /**
-   * Null for anything but a state this server minted in the last [STATE_TTL_SECONDS]. A state from
-   * before the issue time was added carries a different shape and a signature over a different
-   * input, so it is refused; the only visitor that affects is one mid-sign-in across the deploy,
-   * who starts the sign-in again.
+   * Null unless this is a state we minted within [STATE_TTL_SECONDS]. Older-shape states are
+   * refused; only a sign-in in flight across a deploy is affected.
    */
   private fun verifyState(value: String): StatePayload? {
     val parts = verifySigned(STATE_PURPOSE, value)?.split("|", limit = 4) ?: return null
@@ -713,9 +566,8 @@ class ServeGithubAuth(
   }
 
   /**
-   * `login|repo|expiresAt|authenticatedAt|image|role|configFingerprint`. Fields are **appended**,
-   * never interleaved, so the older ones keep their positions: the role (`member`/`guest`) and the
-   * [configFingerprint] were the last two to arrive.
+   * `login|repo|expiresAt|authenticatedAt|image|role|configFingerprint`. Fields are only ever
+   * appended so older ones keep their positions.
    */
   private fun signedSession(
     login: String,
@@ -735,21 +587,10 @@ class ServeGithubAuth(
   }
 
   /**
-   * Null unless [value] is a session this server signed, still inside its expiry, **under the
-   * sign-in configuration it is running with now** ([configFingerprint]).
-   *
-   * The fingerprint is what makes a configuration change take effect for people already signed in:
-   * the bits a session carries (member or guest, repository access) were decided against the
-   * allowlist and repositories of the day, so a session from before `--github-auth-users` was added
-   * would otherwise keep reading as a member for up to [SESSION_ABSOLUTE_TTL_SECONDS]. On a
-   * mismatch the visitor is simply signed out and signs in again — an OAuth app they have already
-   * approved re-authorises without a consent screen.
-   *
-   * Cookies minted before the fingerprint existed are refused too, deliberately: they carry no
-   * record of the configuration they were decided under, so none of their bits can be trusted to
-   * match the current one. Deploying this therefore signs everybody out once. The shorter shapes
-   * are not parsed at all any more for the same reason; their signatures were also computed without
-   * the purpose tag [sign] now includes, so they would not verify regardless.
+   * Null unless [value] is a session we signed, unexpired, under the current sign-in configuration
+   * ([configFingerprint]). The fingerprint makes config changes (e.g. a new allowlist) apply to
+   * existing sessions, which simply sign in again silently. Cookies without a fingerprint, or older
+   * shapes signed without the purpose tag, are refused.
    */
   private fun verifySession(value: String): SessionPayload? {
     val parts = verifySigned(SESSION_PURPOSE, value)?.split("|") ?: return null
@@ -779,17 +620,14 @@ class ServeGithubAuth(
   }
 
   /**
-   * The sign-in configuration a session is decided against, reduced to a short digest; see
-   * [verifySession]. Order-insensitive in the lists and case-insensitive throughout, matching how
-   * each value is compared at sign-in, so restarting with the same settings keeps everybody signed
-   * in.
+   * The sign-in configuration digest sessions are checked against ([verifySession]). Order- and
+   * case-insensitive, so a restart with the same settings keeps everyone signed in.
    */
   private val configFingerprint: String by lazy { configFingerprint(config) }
 
   /**
-   * `base64url(payload).mac`, where the MAC also covers [purpose] ([SESSION_PURPOSE] or
-   * [STATE_PURPOSE]). One secret signs both cookies, so without the tag a value signed as one kind
-   * would verify as the other; with it, each only ever verifies for the purpose it was signed for.
+   * `base64url(payload).mac`, with the MAC also covering [purpose], so a session value can't verify
+   * as a state (one secret signs both).
    */
   private fun sign(purpose: String, payload: String): String {
     val bytes = payload.toByteArray(Charsets.UTF_8)
@@ -812,17 +650,10 @@ class ServeGithubAuth(
   }
 
   /**
-   * With a cookie domain configured, expire every **other** variant of the cookie called [name]
-   * this host can reach: the host-only one, and one scoped to each domain between this host and the
-   * configured cookie domain. The browser keeps each of those side by side with the current domain
-   * cookie, so one written before the domain was set — or before it was widened, as when
-   * `preview.coo.ee` became `coo.ee` to admit a sibling builder host — would otherwise linger and
-   * make every request carry two values. A no-op when cookies are host-only already: the ordinary
-   * clear covers that cookie.
-   *
-   * The narrower domains come from the request's host, which is safe here because these cookies
-   * only ever expire something: a forged `Host` names a domain the browser refuses to set, never a
-   * session wider than [cookieDomain].
+   * With a cookie domain, expire every other variant of cookie [name] this host can reach
+   * (host-only and each intermediate domain), which would otherwise linger after the domain was set
+   * or widened. Deriving the narrower domains from `Host` is safe since these cookies only expire
+   * things.
    */
   private fun clearStaleVariants(call: ApplicationCall, name: String, secure: Boolean) {
     val domain = cookieDomain ?: return
@@ -853,9 +684,8 @@ class ServeGithubAuth(
     sessionCookie(AUTH_COOKIE, value, maxAge, secure)
 
   /**
-   * [secure] is derived per request rather than hardcoded: a deployment terminates TLS at Caddy and
-   * must not hand the session cookie back over a plaintext downgrade, while `serve` on
-   * `http://localhost` would never see the cookie again if it were always set. See [isSecure].
+   * [secure] is derived per request ([isSecure]): TLS-terminated deployments must not send the
+   * cookie over plaintext, while `http://localhost` must still get it back.
    */
   private fun sessionCookie(
     name: String,
@@ -869,10 +699,7 @@ class ServeGithubAuth(
       value = value,
       path = "/",
       maxAge = maxAge.toInt(),
-      // Null ⇒ no Domain attribute ⇒ host-only, the default and the single-hostname behaviour.
-      // Set, it scopes the cookie to the parent domain and every site host under it, which is what
-      // lets one sign-in cover preview.coo.ee and m3.preview.coo.ee alike. Always the operator's
-      // configured value, never anything derived from the request.
+      // Null ⇒ host-only. Always the operator's configured value, never request-derived.
       domain = domain,
       secure = secure,
       httpOnly = true,
@@ -906,8 +733,8 @@ class ServeGithubAuth(
     const val CALLBACK_PATH = "/auth/github/callback"
 
     /**
-     * `POST`-only, and under [AUTH_PATH_PREFIX] so [refreshSession] leaves it alone — otherwise a
-     * sign-out response would carry a freshly-minted session cookie beside the expired one.
+     * POST-only, and under [AUTH_PATH_PREFIX] so [refreshSession] doesn't mint a fresh session
+     * beside the expired one.
      */
     const val LOGOUT_PATH = "/auth/github/logout"
 
@@ -933,8 +760,8 @@ class ServeGithubAuth(
     const val ORG_SCOPE = "read:org"
 
     /**
-     * Every scope sign-in may ask for, override included: read-only identity, nothing that reaches
-     * a repository.
+     * Every scope sign-in may request, override included: read-only identity, nothing reaching a
+     * repository.
      */
     val ALLOWED_SCOPES: Set<String> = setOf(USER_SCOPE, "user:email", ORG_SCOPE)
 
@@ -947,8 +774,8 @@ class ServeGithubAuth(
     private const val CONFIG_FINGERPRINT_CHARS = 16
 
     /**
-     * A short digest of everything that decides what a session may carry: the sign-in repository,
-     * the image lane's repository, the allowed logins and orgs, and whether guests are admitted.
+     * Short digest of everything deciding what a session may carry: both repositories, allowed
+     * logins and orgs, and guest admission.
      */
     internal fun configFingerprint(config: ServeGithubAuthConfig): String {
       val imageRepository = config.imageRepository?.takeIf { it.isNotBlank() } ?: config.repository
@@ -971,45 +798,25 @@ class ServeGithubAuth(
       value.split(',').any { it.trim().equals("public", ignoreCase = true) }
 
     /**
-     * The **idle** expiry: how long a session survives without a visit. [refreshSession] slides it
-     * forward on each visit, up to [SESSION_ABSOLUTE_TTL_SECONDS].
-     *
-     * This was 12 hours *absolute*, which is shorter than the gap between one working day and the
-     * next: a visitor who signed in yesterday afternoon was reliably signed out this morning, and
-     * the server is a preview gallery people drop into occasionally, not a console they live in. A
-     * week of idle means the normal rhythm of visiting — daily, or on Monday after a quiet weekend
-     * — never lands on a sign-in.
+     * Idle expiry: how long a session survives without a visit; [refreshSession] slides it up to
+     * [SESSION_ABSOLUTE_TTL_SECONDS]. A week, so ordinary occasional visits never hit a sign-in.
      */
     internal const val SESSION_TTL_SECONDS = 7L * 24 * 60 * 60
 
     /**
-     * The **absolute** expiry, measured from the sign-in itself and never extended: however
-     * regularly someone visits, GitHub gets asked about them again this often.
-     *
-     * It is the ceiling on how stale the cached `repositoryAccess` flag — the playground gate — can
-     * be, so revoking someone's access to the gating repo closes the playground behind them within
-     * a fortnight rather than never. That is what makes the sliding idle expiry above safe: an
-     * entitlement decided once at sign-in cannot ride along indefinitely on the strength of the
-     * visitor simply continuing to visit.
-     *
-     * Reaching it is cheap for the visitor: an OAuth app they have already approved re-authorises
-     * without a consent screen, so it reads as a page load rather than a sign-in.
+     * Absolute expiry from sign-in, never extended: the ceiling on how stale the cached
+     * `repositoryAccess` (playground gate) can be. Re-authorising an approved OAuth app needs no
+     * consent screen, so reaching it is cheap.
      */
     internal const val SESSION_ABSOLUTE_TTL_SECONDS = 14L * 24 * 60 * 60
 
-    /**
-     * Sessions are re-minted once their idle expiry is this close (half of [SESSION_TTL_SECONDS]).
-     * Half-life rather than every request: the cookie is only worth rewriting when the extension is
-     * meaningful, and a `Set-Cookie` on every page view is noise on responses that are otherwise
-     * identical.
-     */
+    /** Sessions are re-minted past half their idle expiry, rather than on every response. */
     internal const val SESSION_REFRESH_AFTER_SECONDS = SESSION_TTL_SECONDS / 2
     private val SECURE_RANDOM = SecureRandom()
 
     /**
-     * [value] when it is a same-origin path, else `/`. Browsers read `\` as `/` and drop tabs and
-     * newlines in http(s) URLs, so `/\evil.com` or `/\t/evil.com` would still leave the origin as
-     * `//evil.com`; any backslash or control character is refused along with `//`.
+     * [value] when it is a same-origin path, else `/`. Browsers treat `\` as `/` and drop
+     * tabs/newlines, so any backslash or control character is refused along with `//`.
      */
     fun safeReturnTo(value: String): String =
       if (
@@ -1031,9 +838,8 @@ data class GitHubOAuthUser(
   val login: String,
   val repositoryAccess: Boolean,
   /**
-   * Access to [ServeGithubAuthConfig.imageRepository], when the box gates a lane on a repository
-   * other than the sign-in one. Defaults to [repositoryAccess], which is the answer whenever the
-   * two repositories are the same — or when nobody asked about a second one.
+   * Access to [ServeGithubAuthConfig.imageRepository]; defaults to [repositoryAccess] when it is
+   * the same repository or unset.
    */
   val imageRepositoryAccess: Boolean = repositoryAccess,
   /** Admitted as a guest — outside the allowlist — so carrying no access of its own. */
@@ -1079,9 +885,7 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
     return GitHubOAuthUser(
       login,
       repositoryAccess = repositoryAccess,
-      // Same token, same rule, one more round trip — and only when the operator actually gated a
-      // lane somewhere else. This is the only moment the visitor's token exists here, so a bit not
-      // taken now is a bit that cannot be taken at all.
+      // Only now does the visitor's token exist here, so the second bit must be taken now or never.
       imageRepositoryAccess =
         config.imageRepository
           ?.takeIf { !it.equals(config.repository, ignoreCase = true) }
@@ -1090,23 +894,14 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
   }
 
   /**
-   * The same identity + access decision as [verify], for a caller who **already holds a GitHub
-   * token** — no OAuth code to exchange, and so no client id/secret needed at all.
+   * The same identity and access decision as [verify], for a caller already holding a GitHub token
+   * (no OAuth exchange or client secret). Agents are measured against exactly the same bar on one
+   * code path, so the gate can't diverge.
    *
-   * This is the headless half of the same gate: a browser earns its session through [verify]'s
-   * redirect flow, while an agent presents the token it was issued (`GITHUB_TOKEN`, `gh auth
-   * token`) and is measured against exactly the same bar — [allowedUsers] when the operator
-   * narrowed sign-in, then [fetchRepositoryAccess]'s public-vs-private rule. Keeping both on one
-   * code path is the point: a second, subtly different notion of "has access" is how a gate ends up
-   * admitting people one of its doors was meant to refuse.
-   *
-   * Which tokens count at all is [tokens]: a user token issued to [app] (this server's own OAuth
-   * app) always does; a personal access token, a user token issued to some other app, and an
-   * installation token each only when [tokens] says so. See [ImageUploadTokenPolicy].
-   *
-   * The token is used for the reads and dropped; nothing here retains or logs it. A failure to get
-   * an answer from GitHub at all is a [GitHubCheckUnavailableException], which callers must not
-   * treat as a verdict on the token.
+   * Which tokens count is [tokens] ([ImageUploadTokenPolicy]): a user token issued to [app] always;
+   * PATs, other apps' user tokens and installation tokens only when allowed. The token is never
+   * retained or logged. A failure to reach GitHub is a [GitHubCheckUnavailableException], not a
+   * verdict.
    */
   fun verifyAccessToken(
     token: String,
@@ -1163,10 +958,8 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
   }
 
   /**
-   * `GET /user` for [verifyAccessToken]: the login, or null when GitHub refuses the token as a user
-   * credential (`401` / `403`). Anything that isn't an answer about the token — the network, a
-   * `429`, a `5xx` — is a [GitHubCheckUnavailableException] instead, so an outage is not cached
-   * against a good token.
+   * `GET /user`: the login, or null when GitHub refuses the token (`401`/`403`). Network, `429` or
+   * `5xx` throw [GitHubCheckUnavailableException] so an outage isn't cached against a good token.
    */
   private fun lookupLogin(token: String): String? {
     val request =
@@ -1193,10 +986,8 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
   }
 
   /**
-   * Whether [token] was issued to [app]: `POST /applications/{client_id}/token`, authenticated as
-   * the app. `200` is yes; `404` and `422` are GitHub's no. Anything else — including a `401` for
-   * this server's own client credentials — says nothing about the token, and is a
-   * [GitHubCheckUnavailableException].
+   * Whether [token] was issued to [app] (`POST /applications/{client_id}/token`): `200` yes,
+   * `404`/`422` no, anything else [GitHubCheckUnavailableException].
    */
   internal fun isIssuedToApp(token: String, app: GitHubOAuthApp): Boolean {
     val body =
@@ -1226,31 +1017,13 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
   }
 
   /**
-   * The other kind of credential a CI caller actually holds: a **GitHub App installation token** —
-   * what `${'$'}{{ github.token }}` / `GITHUB_TOKEN` is inside every GitHub Actions job.
+   * GitHub App installation tokens (e.g. `GITHUB_TOKEN` in Actions): no user behind them, but `GET
+   * /repos/{owner}/{repo}` reports the installation's own permissions.
    *
-   * There is no user behind one, so `GET /user` answers `403 Resource not accessible by
-   * integration` and the user path above can't decide anything about it. What it *can* do is read
-   * the repositories its installation covers, and `GET /repos/{owner}/{repo}` reports the
-   * installation's own `permissions` — which is the grant that matters here: a workflow token
-   * carrying `contents: write` on the gating repo was deliberately given that by the repo's own
-   * configuration.
-   *
-   * Two deliberate narrowings against the user path:
-   * - **Write, always**, public or private. The private-repo "any real grant counts" reasoning is
-   *   about a *person* somebody let in; a machine credential scoped by a workflow file is not that,
-   *   and a read-only workflow token (what a fork's pull_request run gets) must not be able to post
-   *   to the host.
-   * - **Refused outright when the operator narrowed sign-in** with `--github-auth-users` or
-   *   `--github-auth-orgs`. Those name people; an installation token is nobody on them, and
-   *   silently admitting one would widen a gate whose whole point is to be narrow.
-   *
-   * The identity returned is [INSTALLATION_LOGIN] rather than a name, because there isn't one: an
-   * installation token cannot read `GET /app` (that needs the app's JWT), and neither `GET
-   * /repos/{owner}/{repo}/installation` (JWT again) nor `GET /installation/repositories` names the
-   * app. So this admits **any** GitHub App installed on the repository with write — not only GitHub
-   * Actions — which is why an operator can turn it off with `--image-upload-tokens`. The audit
-   * trail says "some app installation with write on this repo", which is exactly what was verified.
+   * Two narrowings versus users: write is always required (a fork's read-only workflow token must
+   * not post), and they are refused outright when sign-in is narrowed by users or orgs. The
+   * identity is [INSTALLATION_LOGIN], since an installation token can't name its app; this admits
+   * any app installed with write, which `--image-upload-tokens` can turn off.
    */
   private fun verifyInstallationToken(
     token: String,
@@ -1267,9 +1040,8 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
   }
 
   /**
-   * Whether [login] is a member rather than a guest: no restriction at all, a name on
-   * [allowedUsers], or membership of any of [allowedOrgs]. The login list is checked first so a
-   * named user costs no GitHub round trip.
+   * Whether [login] is a member: no restriction, a name on [allowedUsers] (checked first, no round
+   * trip), or membership of an [allowedOrgs] org.
    */
   private fun isAdmitted(
     token: String,
@@ -1283,14 +1055,10 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
   }
 
   /**
-   * Whether [login] belongs to [org], asked two ways because GitHub answers them differently.
-   *
-   * `GET /user/memberships/orgs/{org}` sees a **private** membership, but only with `read:org` and
-   * only when the org has not restricted third-party OAuth apps (or has approved this one) — a
-   * large org such as `google` commonly has. `GET /orgs/{org}/public_members/{login}` sees only a
-   * **public** membership, but needs no scope and no approval at all. Either saying yes is enough;
-   * anything else — a 403 from an app restriction, a 404, a network failure — is a no, which is the
-   * safe direction for a gate: the visitor lands as a guest and can ask for more.
+   * Whether [login] belongs to [org], asked two ways: `/user/memberships/orgs/{org}` sees private
+   * membership (needs `read:org` and org approval of the app), `/orgs/{org}/public_members/{login}`
+   * sees public membership with no scope. Either yes suffices; anything else is no (the visitor
+   * lands as a guest).
    */
   internal fun isOrgMember(token: String, org: String, login: String): Boolean {
     val membership =
@@ -1390,30 +1158,15 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
   }
 
   /**
-   * Whether [login] has access to [repository] that means something — the gate on the playground,
-   * which compiles and runs a stranger's Kotlin.
-   *
-   * What "means something" is depends on the repository's visibility, and #3313 got this half
-   * right. On a **public** repo, `read` is what GitHub reports for *every* authenticated user,
-   * because reading is what public means — so a read-level gate there admits the whole of GitHub,
-   * which is the hole #3313 closed. On a **private** repo, `read` is the opposite: somebody
-   * deliberately granted this person access to a repository nobody else can see. Requiring write
-   * everywhere, as #3313 did, locked out read-only collaborators in the one case that was never
-   * broken.
-   *
-   * So: public repo → require `admin` / `maintain` / `write`. Private repo → any permission other
-   * than `none`, exactly as before #3313. One extra API call per sign-in, on a path that already
-   * makes two.
-   *
-   * When visibility can't be determined the answer is **write**, the safe side: a token that can't
-   * read the repo metadata tells us nothing that should widen a gate on code execution.
+   * Whether [login] has meaningful access to [repository], the gate on the playground (which runs a
+   * stranger's Kotlin). On a public repo every user has `read`, so require
+   * `admin`/`maintain`/`write`; on a private repo any permission other than `none` is a deliberate
+   * grant (see #3313). Unknown visibility requires write, the safe side.
    */
   private fun fetchRepositoryAccess(token: String, repository: String, login: String): Boolean {
-    // `GET /repos/{owner}/{repo}` answers both halves at once: `private` is the visibility, and
-    // `permissions` is *this* user's access as GitHub computes it. That matters for scope as much
-    // as for round-trips — this endpoint is readable on a public repo by a token carrying no repo
-    // scope at all, where `/collaborators/{login}/permission` is not. See
-    // [ServeGithubAuth.requestedScope].
+    // One call answers both visibility (`private`) and this user's `permissions`, and works on a
+    // public repo with no repo scope, unlike `/collaborators/{login}/permission`
+    // ([ServeGithubAuth.requestedScope]).
     repositoryView(token, repository)?.let { repo ->
       val access = repo.permissions ?: return@let // no permissions block — fall through below
       return if (repo.private == true) access.any() else access.write()
@@ -1457,11 +1210,7 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
       .getOrNull()
   }
 
-  /**
-   * Whether [repository] is public. Defaults to **true** when the lookup fails or the field is
-   * absent — see [fetchRepositoryAccess]: public is the stricter branch, so an unknown visibility
-   * falls back to requiring write rather than accepting a bare `read`.
-   */
+  /** Whether [repository] is public; defaults to true on failure, the stricter branch. */
   private fun isPublicRepository(token: String, repository: String): Boolean {
     val request =
       Request.Builder()
@@ -1482,17 +1231,12 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
   companion object {
     private val JSON = Json { ignoreUnknownKeys = true }
 
-    /**
-     * Values meaning "can push", across both the legacy `permission` field and the fine-grained
-     * `role_name` one. `maintain` only ever appears in the latter today, but naming it in both
-     * costs nothing and survives GitHub widening the legacy field.
-     */
+    /** "Can push" values across the legacy `permission` and fine-grained `role_name` fields. */
     private val WRITE_PERMISSIONS = setOf("admin", "maintain", "write")
 
     /**
-     * The identity a verified **installation** token is attributed to. Not a login — no user is
-     * behind one — and shaped so it can never collide with a real GitHub login, which cannot
-     * contain a bracket.
+     * Identity for a verified installation token; brackets can't appear in a real GitHub login, so
+     * it never collides.
      */
     const val INSTALLATION_LOGIN = "[app-installation]"
   }
@@ -1564,22 +1308,16 @@ private fun io.ktor.server.request.ApplicationRequest.cookieValues(name: String)
   }
 
 /**
- * The value of the cookie [name] when the request carries exactly one, else null.
- *
- * A browser sends two cookies of one name when it holds two that match — for example a host-only
- * one and a domain one — and gives the server no way to tell which is which. Picking either would
- * be a guess, so a request carrying more than one reads as carrying none: signed out for the
- * session, a failed check for the sign-in state.
+ * The cookie [name]'s value when the request carries exactly one, else null: two same-named cookies
+ * (host-only and domain) are indistinguishable, so guessing is refused.
  */
 private fun io.ktor.server.request.ApplicationRequest.soleCookieValue(name: String): String? =
   cookieValues(name).singleOrNull()
 
 /**
- * Whether this request reached us over TLS, so the cookies can be marked `secure`.
- *
- * The configured `callbackBaseUrl` is the authoritative answer where it exists — it is the operator
- * stating the public origin — and it is what a reverse-proxied deployment is told to set. Otherwise
- * fall back to the request's own view, which behind a trusted proxy means `X-Forwarded-Proto`.
+ * Whether the request arrived over TLS, so cookies can be `secure`. The configured
+ * `callbackBaseUrl` is authoritative; otherwise the request's view (`X-Forwarded-Proto` behind a
+ * trusted proxy).
  */
 internal fun isSecure(
   call: ApplicationCall,
@@ -1590,11 +1328,8 @@ internal fun isSecure(
     ?: externalOrigin(call, trustForwardedHeaders).startsWith("https://", ignoreCase = true)
 
 /**
- * The externally visible hostname of this request, normalised for comparison against the configured
- * site hosts. `X-Forwarded-Host` first when [trustForwardedHeaders] is set (behind a proxy that
- * rewrites `Host` it is the only view of the name the visitor typed), else `Host`. Null when what
- * arrives isn't a hostname at all, so a junk header matches no site and simply gets the pre-handoff
- * behaviour.
+ * The externally visible hostname, normalised for site-host comparison: `X-Forwarded-Host` when
+ * [trustForwardedHeaders], else `Host`. Null for a non-hostname, which matches no site.
  */
 internal fun requestHost(call: ApplicationCall, trustForwardedHeaders: Boolean = false): String? {
   val forwarded = forwardedHeader(call, "X-Forwarded-Host", trustForwardedHeaders)
@@ -1603,9 +1338,8 @@ internal fun requestHost(call: ApplicationCall, trustForwardedHeaders: Boolean =
 }
 
 /**
- * The first value of a proxy-set `X-Forwarded-*` header, or null — always null unless
- * [trustForwardedHeaders] says a reverse proxy this server believes sets it. A request that reaches
- * the listener directly chooses these headers itself, so they are read only on that say-so.
+ * First value of an `X-Forwarded-*` header, only when [trustForwardedHeaders]; a direct request
+ * chooses these itself.
  */
 internal fun forwardedHeader(
   call: ApplicationCall,

@@ -8,19 +8,9 @@ import okio.Path
 import okio.Path.Companion.toPath
 
 /**
- * The **served catalog set as data** — the operator's `catalogs.json`, not code.
- *
- * Which catalogs a preview server publishes, where each one's `design-artifacts/<system>` branch
- * lives, whether it's on the front door, and which front-page section it belongs to used to be
- * spread across three places that all had to agree: a comma-separated `--catalogs` flag baked into
- * the container entrypoint, and a pair of hardcoded id/repo sets in [ServeWeb.homeSections] that
- * decided a catalog's publisher section by *name*. Adding a catalog meant editing the image and
- * shipping a CLI release; a catalog the code had never heard of could only ever land in "Other".
- *
- * This file is the single declarative source instead. It lives **outside** the image (a mounted
- * volume / config dir), so publishing a catalog is a config edit — or a call to the admin API
- * ([ServeCatalogAdmin]), which rewrites this same file so a runtime registration survives a
- * restart.
+ * The served catalog set as data: the operator's `catalogs.json`, living outside the image so
+ * publishing a catalog is a config edit or an admin API call ([ServeCatalogAdmin], which rewrites
+ * this file so runtime registrations survive restarts).
  *
  * ```json
  * {
@@ -34,11 +24,9 @@ import okio.Path.Companion.toPath
  * }
  * ```
  *
- * A [Group] is *claimed*, never assumed: a catalog only renders under its declared heading when the
- * bytes actually came from a repo the entry names ([Entry.repo] plus any [Entry.attributionRepos]).
- * That keeps the property the old hardcoded sets existed for — a third party serving a catalog
- * under the id `compose-m3` can't present it as an official design system — while making the
- * mapping data rather than a code branch.
+ * A [Group] is claimed, never assumed: a catalog renders under its heading only when its bytes came
+ * from a repo the entry names ([Entry.repo] plus [Entry.attributionRepos]), so a third party can't
+ * present a catalog as an official design system by reusing its id.
  */
 @Serializable
 data class ServeCatalogsConfig(
@@ -47,46 +35,37 @@ data class ServeCatalogsConfig(
   /** The catalogs to serve, in front-page order. */
   val catalogs: List<Entry> = emptyList(),
   /**
-   * **Top-level sites** ([ServeSites]): hostnames that serve one of the [catalogs] as if it were
-   * the only thing on the box. Config rather than code for the same reason the catalog set is — a
-   * new vhost is a DNS record plus a line here, not an image rebuild.
+   * Top-level sites ([ServeSites]): hostnames serving one of the [catalogs] as the whole box.
+   * Config, so a new vhost needs no rebuild.
    */
   val sites: List<Site> = emptyList(),
   /**
-   * The **UI-builder editor** this instance serves, pinned by version and digest
-   * ([ServeUiBuilderEditor]). Null ⇒ the editor bundled in the distribution. Config rather than
-   * code so an editor fix ships as a compose-ui-builder release plus this one value, with no server
-   * release; rolling back is removing it.
+   * The pinned UI-builder editor ([ServeUiBuilderEditor]); null uses the bundled one. Lets an
+   * editor fix ship without a server release; rollback is removing it.
    */
   val editor: EditorPin? = null,
   /**
-   * The **UI builder's catalog settings** ([UiBuilderSettings]), maintained here and through
-   * `/admin/ui-builder/config` instead of the box's `.env`. Null ⇒ every setting comes from the
-   * `SERVE_UI_BUILDER_*` environment as before, so a file that says nothing changes nothing.
+   * The UI builder's catalog settings ([UiBuilderSettings]), also editable via
+   * `/admin/ui-builder/config`. Null keeps the `SERVE_UI_BUILDER_*` environment.
    */
   val uiBuilder: UiBuilderSettings? = null,
 ) {
   /**
-   * The UI builder's catalog settings, as **overrides of the environment** rather than a
-   * replacement for it.
-   *
-   * Every field is optional, and a catalog [catalogs] does not name keeps exactly what the
-   * `SERVE_UI_BUILDER_*` variables give it. So moving a box onto this block is incremental and
-   * cannot drop a catalog the operator's `.env` serves: the old variable stays the baseline and
-   * this names only what changes. [ServeUiBuilderSettings] maps each variable to its field and
-   * resolves the two together.
+   * UI-builder catalog settings as overrides of the environment, not a replacement: every field is
+   * optional and an unnamed catalog keeps what `SERVE_UI_BUILDER_*` gives it, so migrating can't
+   * drop one. [ServeUiBuilderSettings] resolves the two.
    */
   @Serializable
   data class UiBuilderSettings(
     /**
-     * Per-catalog overrides, keyed by builder catalog id. Each replaces
+     * Per-catalog overrides by builder catalog id, replacing that catalog's share of
      * `SERVE_UI_BUILDER_CATALOGS`, `…_PUBLISHED_CATALOGS`, `…_CATALOG_OWNERSHIP` and
-     * `…_NATIVE_CATALOGS` for that one catalog.
+     * `…_NATIVE_CATALOGS`.
      */
     val catalogs: Map<String, UiBuilderCatalogSettings> = emptyMap(),
     /**
-     * Component packs (`SERVE_UI_BUILDER_PACKS`), `<served catalog>` → platform. A null value
-     * withdraws a pack the environment offers.
+     * Component packs (`SERVE_UI_BUILDER_PACKS`), served catalog → platform; null withdraws an
+     * environment pack.
      */
     val packs: Map<String, String?> = emptyMap(),
     /** The Wear widget player (`SERVE_UI_BUILDER_WIDGET_PLAYER`); null keeps the environment's. */
@@ -99,22 +78,21 @@ data class ServeCatalogsConfig(
     /** Offered in the builder (`SERVE_UI_BUILDER_CATALOGS`). False withdraws it. */
     val serve: Boolean? = null,
     /**
-     * Defined by its repository's published `ui-builder.json` rather than the build's own Kotlin
+     * Defined by its repository's published `ui-builder.json` rather than the built-in Kotlin
      * catalog (`SERVE_UI_BUILDER_PUBLISHED_CATALOGS`).
      */
     val published: Boolean? = null,
     /** Seeds and exports from its own declaration (`SERVE_UI_BUILDER_CATALOG_OWNERSHIP`). */
     val owned: Boolean? = null,
     /**
-     * The served catalog its designs compile against for the native preview
-     * (`SERVE_UI_BUILDER_NATIVE_CATALOGS`). An empty string removes the mapping.
+     * Served catalog its designs compile against for native preview
+     * (`SERVE_UI_BUILDER_NATIVE_CATALOGS`); empty removes the mapping.
      */
     val nativeCatalog: String? = null,
     /**
-     * Report, at startup, what owning this catalog would change, without changing what is served
-     * (compose-ui-builder's `CatalogCutoverShadow`). Only a catalog that reads its published file
-     * and is not already owned can be shadowed. There is no environment variable for it: it is a
-     * step a deployment takes on its way to [owned], from this file.
+     * Report at startup what owning this catalog would change, without changing what is served
+     * (`CatalogCutoverShadow`). Only for a published, not-yet-owned catalog; file-only, as a step
+     * toward [owned].
      */
     val shadow: Boolean? = null,
   )
@@ -133,19 +111,10 @@ data class ServeCatalogsConfig(
     val heading: String,
     val noun: String = DEFAULT_NOUN,
     /**
-     * **Front-page section order**, highest first; ties keep first-appearance order. Default 0, so
-     * a config that says nothing renders exactly as it always did.
-     *
-     * Section order was purely positional — first appearance while walking the catalog list — so
-     * the only way to lift a section was to reorder the catalogs under it, and a catalog published
-     * through the admin API is appended, which put its whole section last however the file reads.
-     * The box's reference design systems could therefore end up below the sample apps
-     * (issue #4601). This decouples the two orders: the catalog list still orders the cards inside
-     * a section, this orders the sections themselves.
-     *
-     * Only *declared* groups carry one. A card that falls back to its source repo's owner heading
-     * sits at the default 0, and the unattributed "Other" bucket stays pinned last whatever any
-     * priority says.
+     * Front-page section order, highest first, ties by first appearance; default 0 keeps the old
+     * layout. Decoupled from catalog order, since admin-published catalogs are appended and would
+     * otherwise push their whole section last (#4601). Only declared groups carry one; "Other"
+     * stays last.
      */
     val priority: Int = 0,
   )
@@ -162,62 +131,35 @@ data class ServeCatalogsConfig(
     /** [Group.id] this catalog is published under; null ⇒ grouped by its source repo's owner. */
     val group: String? = null,
     /**
-     * `<owner>/<repo>` this catalog's previews were RENDERED FROM, when that is not [repo].
-     *
-     * An imported catalog is served from a staging repository that renders somebody else's project
-     * — `yschimke/compose-preview-imports` publishing `joreilly/PeopleInSpace`'s previews. Two
-     * things go wrong without this. The card falls back to grouping by the SERVING repo's owner, so
-     * an import of a joreilly project lands under the staging repo's owner rather than beside that
-     * owner's other catalogs; and nothing on the card says the catalog is somebody else's work seen
-     * through this box, which is the one fact a reader most needs about it.
-     *
-     * Attribution only: it never widens what a catalog may claim. [group] still has to satisfy
-     * [attributionRepos], and trust is still decided by the branch this was fetched from.
+     * `<owner>/<repo>` the previews were rendered from, when not [repo] (an import served from a
+     * staging repo). Groups the card with that owner and tells readers whose work it is.
+     * Attribution only: never widens [group] claims or trust.
      */
     val importedFrom: String? = null,
     /**
-     * Extra repos allowed to satisfy the [group] claim, for a catalog **fetched** from somewhere
-     * other than where it's authored — Android's samples are served from preview branches in a
-     * fork, but the section is Android's. Never widen this to a repo you don't trust to publish
+     * Extra repos allowed to satisfy the [group] claim, for a catalog fetched from somewhere other
+     * than where it is authored (e.g. a fork's preview branches). Only repos you trust to publish
      * under the heading.
      */
     val attributionRepos: List<String> = emptyList(),
     /**
-     * **Startup load order**, highest first; ties keep the order they appear in here. Default 0, so
-     * a config that says nothing loads exactly as it always did — front-page order.
-     *
-     * The initial fetch is one sequential pass over the configured set, and a big catalog takes
-     * minutes to fetch, verify and register. Which catalog that pass reaches first is therefore
-     * what a rollout's first few minutes serve — and the order was purely positional, which for a
-     * catalog published through the admin API means *last*, since a runtime registration is
-     * appended ([CatalogLoadTracker.add]). So the catalogs a box most wants back after a restart
-     * were reliably the ones it got back last (issue #4231). This decouples the two orders: the
-     * list stays the front page's, this decides the queue.
-     *
-     * It does **not** change what is served, or where a card renders — only what gets fetched
-     * first. Nothing here is a guarantee of availability either: loading stays best-effort per
-     * catalog, and a prioritised catalog that fails to fetch just fails earlier. The one exception
-     * is [isDesignSystem], which is a guarantee — see [DESIGN_SYSTEMS_GROUP].
+     * Startup load order, highest first, ties by position; default 0. The initial fetch is one
+     * sequential pass and admin-published catalogs are appended ([CatalogLoadTracker.add]), so
+     * without this the most important catalogs could come back last (#4231). Changes only fetch
+     * order, not what is served; [isDesignSystem] is the one guarantee ([DESIGN_SYSTEMS_GROUP]).
      */
     val loadPriority: Int = 0,
   ) {
     /**
-     * This entry claims [DESIGN_SYSTEMS_GROUP]: fetched ahead of everything else, and required to
-     * render before the server reports ready.
-     *
-     * Read off the claimed [group] id rather than the resolved [Group], and deliberately so: a
-     * claim the group table does not define is still a claim, and resolving first would make an
-     * entry silently stop gating readiness the moment someone deleted its group heading.
+     * Claims [DESIGN_SYSTEMS_GROUP]: fetched first and required before ready. Read from the claimed
+     * id rather than the resolved group, so deleting a heading can't silently stop it gating
+     * readiness.
      */
     val isDesignSystem: Boolean
       get() = group == DESIGN_SYSTEMS_GROUP
   }
 
-  /**
-   * One top-level site: a [host] that serves [system] at its root. The system must be one of this
-   * config's [catalogs] — a site is a second door onto a catalog already being served, never a way
-   * to publish one.
-   */
+  /** One top-level site: [host] serves [system], which must already be one of [catalogs]. */
   @Serializable data class Site(val host: String, val system: String)
 
   /**
@@ -226,9 +168,8 @@ data class ServeCatalogsConfig(
   fun groupFor(entry: Entry): Group? = entry.group?.let { id -> groups.firstOrNull { it.id == id } }
 
   /**
-   * Human-readable problems with this config — unknown group ids, malformed system ids / repo
-   * slugs, duplicate systems. Empty ⇒ usable. Reported rather than thrown so a server starts with
-   * the entries that *are* valid instead of refusing to boot on one typo.
+   * Human-readable problems (unknown groups, malformed ids or repos, duplicates); empty ⇒ usable.
+   * Reported rather than thrown so valid entries still load.
    */
   fun problems(): List<String> = buildList {
     groups
@@ -275,16 +216,11 @@ data class ServeCatalogsConfig(
     const val DEFAULT_NOUN: String = "catalog(s)"
 
     /**
-     * The [Group.id] whose catalogs this box exists to serve.
-     *
-     * Two things key off it, and they are deliberately the same list. These catalogs are fetched
-     * FIRST ([CatalogLoadTracker.loadOrder]), and the server is not READY until every one of them
-     * has rendered ([CatalogLoadTracker.Config.designSystem]) — so a rolling update never drains
-     * traffic onto a replica that would answer a design system's page with an empty grid.
-     *
-     * A group id rather than a hard-coded set of systems: which catalogs are design systems is the
-     * operator's statement in `catalogs.json`, and a list in Kotlin would be a second copy of it
-     * that goes stale the first time one is added.
+     * The group whose catalogs this box exists to serve: fetched first
+     * ([CatalogLoadTracker.loadOrder]) and required before ready
+     * ([CatalogLoadTracker.Config.designSystem]), so a rolling update never routes to a replica
+     * with empty design-system grids. A group id so the operator's `catalogs.json` is the only
+     * list.
      */
     const val DESIGN_SYSTEMS_GROUP: String = "design-systems"
 
@@ -298,8 +234,8 @@ data class ServeCatalogsConfig(
     }
 
     /**
-     * A catalog id is a URL path segment and a branch-name suffix, so it stays in the conservative
-     * slug alphabet — no `/`, no `..`, no whitespace.
+     * Catalog ids are URL segments and branch suffixes, so they stay in a conservative slug
+     * alphabet.
      */
     private val SYSTEM_RE = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
     private val REPO_RE = Regex("[A-Za-z0-9._-]{1,64}/[A-Za-z0-9._-]{1,64}")
@@ -310,10 +246,8 @@ data class ServeCatalogsConfig(
       JSON.encodeToString(serializer(), config) + "\n"
 
     /**
-     * A group id is referenced by catalog entries and never appears in a URL, so it only needs to
-     * be a stable slug. The heading and noun ARE rendered, so they're length-capped — they reach
-     * the page HTML-escaped ([ServeWeb.section]), but an operator pasting a novel into a heading
-     * should get told, not silently produce an unreadable front page.
+     * Group ids are stable slugs; headings and nouns are rendered (escaped by [ServeWeb.section])
+     * and length-capped.
      */
     private val GROUP_ID_RE = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
@@ -329,8 +263,8 @@ data class ServeCatalogsConfig(
       }
 
     /**
-     * A release version as compose-ui-builder tags it. It lands in a URL path and a cache directory
-     * name, so the alphabet stays narrow whatever the operator typed.
+     * A compose-ui-builder release version; it reaches a URL path and directory name, so the
+     * alphabet is narrow.
      */
     private val EDITOR_VERSION_RE = Regex("[0-9]+\\.[0-9]+\\.[0-9]+(-[A-Za-z0-9.]{1,32})?")
     private val SHA256_RE = Regex("[0-9a-fA-F]{64}")
@@ -349,11 +283,9 @@ data class ServeCatalogsConfig(
     fun validateEntry(entry: Entry): String? =
       when {
         !SYSTEM_RE.matches(entry.system) -> "invalid catalog system id '${entry.system}'"
-        // A slug-shaped id can still be one of the server's own top-level routes, which the
-        // registry refuses to name a session ([ServeSessionRegistry.register]) — so the entry
-        // would parse, validate, be scheduled for loading, and then fail at registration with a
-        // runtime error instead of the ordinary malformed-entry warning. Say so here, where the
-        // three callers (startup filtering, `problems()`, the admin add) all read it.
+        // A slug may still be a reserved top-level route, which the registry refuses
+        // ([ServeSessionRegistry.register]); report it here as an ordinary malformed entry instead
+        // of a later runtime error.
         entry.system in ServeSites.RESERVED_SYSTEMS ->
           "catalog system id '${entry.system}' is one of the server's own routes"
         entry.repo != null && !REPO_RE.matches(entry.repo) ->
@@ -366,10 +298,8 @@ data class ServeCatalogsConfig(
 }
 
 /**
- * The `catalogs.json` file itself — read at startup, rewritten by the admin API so a runtime
- * registration outlives the container. Deliberately a plain JSON document on a mounted path rather
- * than a database: the whole point is that it's editable, diffable, and backup-able by the operator
- * without the image knowing anything about it.
+ * The `catalogs.json` file: read at startup, rewritten by the admin API. Plain JSON on a mounted
+ * path so operators can edit, diff and back it up.
  */
 class ServeCatalogsConfigFile(
   private val path: Path,
@@ -388,8 +318,8 @@ class ServeCatalogsConfigFile(
   }
 
   /**
-   * Write [config] back. Staged through a sibling temp file + [FileSystem.atomicMove] so a crash
-   * mid-write can't leave a truncated config that would drop every catalog on the next boot.
+   * Write [config] via a temp file and [FileSystem.atomicMove], so a crash can't leave a truncated
+   * config.
    */
   fun save(config: ServeCatalogsConfig) {
     val parent = path.parent
@@ -400,19 +330,9 @@ class ServeCatalogsConfigFile(
   }
 
   /**
-   * [load] -> [mutate] -> [save] as one critical section, returning what was written.
-   *
-   * The whole read-modify-write has to be serialised, not just the write: two admin requests on
-   * different threads would otherwise load the same document, apply one edit each, and atomically
-   * move — last one wins, both report success, and the loser's change silently vanishes on the next
-   * restart. Atomicity of the individual save doesn't help, because the lost update happens between
-   * the load and the save.
-   *
-   * The lock lives here, on the file, rather than inside one administrator, because more than one
-   * edits this document now — [ServeCatalogAdmin] for catalogs and groups, [ServeSiteAdmin] for
-   * sites. A lock per administrator would serialise each against itself and neither against the
-   * other, which is the same lost update with a longer stack trace. Callers share one instance per
-   * path.
+   * [load] → [mutate] → [save] as one critical section, so concurrent admin edits can't silently
+   * lose updates. The lock is on the file, shared by [ServeCatalogAdmin] and [ServeSiteAdmin];
+   * callers share one instance per path.
    */
   fun update(mutate: (ServeCatalogsConfig) -> ServeCatalogsConfig): ServeCatalogsConfig =
     synchronized(this) { mutate(load()).also { save(it) } }

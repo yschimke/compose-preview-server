@@ -29,19 +29,10 @@ import kotlin.test.assertTrue
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
- * A screen built from the palette **without special knowledge** produces Kotlin with no
- * diagnostics.
- *
- * That sentence is the whole of compose-preview-server#488, and it was false: three screens built
- * over MCP in one session — a news feed, a Google-app home, a Discord channel — each exported as a
- * file of comments until rebuilt out of the subset of the palette that happened to work. The subset
- * was not documented anywhere; the way to a working design was knowing which third of the palette
- * to avoid.
- *
- * The tests here are that subset's complement, one per gap the cluster named: every arrangement
- * value (#475), `fontStyle` and the four components the generator had no record for (#477), the
- * `verticalScroll` a feed column reaches for first (#481), and the `alignment` property #475 asked
- * to have checked in the same pass. The last test is the screen itself.
+ * A screen built from the palette without special knowledge produces Kotlin with no diagnostics.
+ * One test per gap: every arrangement value, `fontStyle` and four components lacking records, the
+ * `verticalScroll` of a feed column, and the `alignment` property. The last test is the whole
+ * screen.
  */
 class OrdinaryScreenExportTest {
 
@@ -107,9 +98,8 @@ class OrdinaryScreenExportTest {
 
   @Test
   fun `a row exports each of its six arrangements`() {
-    // The regression #488 asks for by name. Every value the catalog allows on
-    // `horizontalArrangement`, each as the `Arrangement` member it names — the `spaceBetween` of a
-    // top bar, the `center` of a wordmark, the `spaceEvenly` of a navigation bar.
+    // Every value the catalog allows on `horizontalArrangement`, as the `Arrangement` member it
+    // names.
     for ((value, member) in
       listOf(
         "start" to "Start",
@@ -136,8 +126,7 @@ class OrdinaryScreenExportTest {
         "spaceAround" to "SpaceAround",
         "spaceEvenly" to "SpaceEvenly",
       )) {
-      // Both wrappers: `enum` is what the reducer writes now and `string` is what documents
-      // committed before #339 still hold, and the arrangement has to read the same from either.
+      // Both wrappers: `enum` is written now, `string` remains in older committed documents.
       for (wrapper in listOf(EnumValueV1(value), StringValueV1(value))) {
         val source = source(layout("layout/column", "verticalArrangement" to wrapper))
         assertTrue("verticalArrangement = Arrangement.$member" in source, "$value:\n$source")
@@ -147,9 +136,8 @@ class OrdinaryScreenExportTest {
 
   @Test
   fun `an arrangement with a gap composes the way the canvas draws it`() {
-    // The pair the loop could not read one row at a time: an aligned arrangement and a spacing
-    // name one `Arrangement` between them, through `spacedBy(space, alignment)` — and note the
-    // alignment is `Alignment.End`, not the `Arrangement.End` the value names alone.
+    // An aligned arrangement plus spacing name one `Arrangement` via `spacedBy(space, alignment)` —
+    // with `Alignment.End`, not `Arrangement.End`.
     assertTrue(
       "horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)" in
         source(
@@ -170,9 +158,8 @@ class OrdinaryScreenExportTest {
           )
         )
     )
-    // A `space*` arrangement distributes the free space itself, and Compose has no form of it that
-    // also inserts a gap — the catalog's own note — so the arrangement wins and the gap is spent,
-    // exactly as the canvas renders the pair.
+    // A `space*` arrangement distributes free space itself and Compose cannot also add a gap, so
+    // the arrangement wins, as on the canvas.
     val spaced =
       source(
         layout(
@@ -227,9 +214,7 @@ class OrdinaryScreenExportTest {
 
   @Test
   fun `an italic caption exports its font style`() {
-    // The table already mapped `fontStyle`; the record's `Text` simply did not declare the
-    // parameter, so one italic caption refused as "`Text` has no parameter `fontStyle`" and cost
-    // the whole file (#477).
+    // The record's `Text` must declare `fontStyle`, or one italic caption refuses the whole file.
     val source =
       source(
         document(
@@ -247,9 +232,8 @@ class OrdinaryScreenExportTest {
 
   @Test
   fun `a box child's alignment property is the box's align modifier, and nothing else's`() {
-    // "How a parent Box aligns this" node, as the catalog puts it: the authored `align` modifier
-    // under a property's name, so it resolves inside a box slot and refuses by placement anywhere
-    // else — never silently dropped, and never emitted where `BoxScope.align` does not resolve.
+    // The authored `align` modifier under a property name: resolves inside a box slot, refuses by
+    // placement elsewhere, never silently dropped.
     fun inside(container: String) =
       document(
         roots = listOf("container"),
@@ -410,9 +394,8 @@ class OrdinaryScreenExportTest {
               )
           ),
       )
-    // The canvas draws `size(d).clip(CircleShape).background(colour)` on a `Box`; the export
-    // writes the same chain on the same component, the record reached by alias. A missing
-    // diameter is the canvas's 8dp, not a 0dp box that vanished.
+    // The canvas draws `size(d).clip(CircleShape).background(colour)` on a `Box`; the export writes
+    // the same chain. A missing diameter is the canvas's 8dp.
     val source = source(dot("color" to ColorValueV1("#6750A4")))
     assertTrue(
       "Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(color = Color(" in source,
@@ -430,11 +413,9 @@ class OrdinaryScreenExportTest {
   }
 
   /**
-   * The screen itself: a channel view of the shape #488's `agent-welcome` has — a centred top bar,
-   * rows laid out with arrangements, an italic caption, a colour dot beside a name, a list item, a
-   * slider, and a feed column that scrolls — built from the palette as a person would build it and
-   * exported through the served executor, so what is asserted is the artifact's own diagnostics and
-   * not a projection's outcome.
+   * The screen itself (centred top bar, arranged rows, italic caption, colour dot, list item,
+   * slider, scrolling feed), exported through the served executor and checked by the artifact's own
+   * diagnostics.
    */
   @Test
   fun `an ordinary screen built from the palette exports with no diagnostics`() {

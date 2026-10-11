@@ -9,14 +9,9 @@ import java.io.File
 /**
  * The normalized configuration the preview server consumes.
  *
- * `ServeCommand` parsed 79 flags and then ran ~3,800 lines of preview server on the results, all
- * inside `:cli`. That is what kept 92 serve symbols on the seam register: #4599 gave the server its
- * own module, but the code that *starts* it stayed on the CLI side of the boundary, so the one file
- * that matters most for separability was the one file the boundary did not cover.
- *
- * [ServeCommandOptions] owns argv syntax, defaults, and normalization inside the server artifact;
- * this interface is the stable shape [ServeRunner] and focused tests consume. Build operations are
- * separate in [ServeBuildHost], whose signatures deliberately name no Gradle type.
+ * [ServeCommandOptions] owns argv syntax, defaults and normalization; this interface is the stable
+ * shape [ServeRunner] and tests consume. Build operations live separately in [ServeBuildHost],
+ * which deliberately names no Gradle type.
  */
 public interface ServeOptions {
 
@@ -29,36 +24,23 @@ public interface ServeOptions {
   public val tokenOverride: String?
 
   /**
-   * Cap on concurrent **live** (daemon-backed) stream sessions — the "live seats". `0` (default) is
-   * unbounded (a local dev box); a small positive value bounds the JVM render daemons a constrained
-   * public box (e.g. `--allow-render-trusted` on a 4 GB VM) will spawn, so an over-cap stream is
-   * refused rather than risking the OOM killer. Only bites when a live daemon actually backs a
-   * session; the snapshot + Wasm tiers never take a seat.
+   * Cap on concurrent daemon-backed ("live seat") stream sessions; `0` (default) is unbounded. A
+   * small value bounds the JVM daemons a constrained public box will spawn, refusing over-cap
+   * streams rather than risking OOM. Snapshot and Wasm tiers never take a seat.
    */
   public val liveSeats: Int
 
   /**
-   * Background renders admitted at once, server-wide, when the operator names it — otherwise
-   * [ServeBackgroundWork.renderLaneFor] derives one from the seat budget.
-   *
-   * The derivation clamps at [ServeBackgroundWork.MAX_DERIVED_CONCURRENT_RENDERS] (3), and that
-   * ceiling is reached at a seat budget of 8 — so on a box with more seats than that the lane stops
-   * widening while everything else does, and there was no way to say otherwise short of rebuilding
-   * the image: `composeai.serve.backgroundRenders` is a system property, and the prebuilt image
-   * bakes JAVA_TOOL_OPTIONS into its own ENV. Measured on preview.coo.ee, whose container is
-   * allowed 24 GB: the seat budget went 8 → 12 and the background lane stayed 3.
-   *
-   * Deliberately un-clamped. The derivation is conservative because it is guessing; an operator
-   * naming a number has looked at their own box, and the seat budget still bounds how many daemons
-   * those renders can actually occupy.
+   * Background renders admitted at once, server-wide; null derives one from the seat budget via
+   * [ServeBackgroundWork.renderLaneFor]. Deliberately un-clamped: the derivation is conservative,
+   * while an operator naming a number knows their box, and seats still bound daemon count.
    */
   public val backgroundRenders: Int?
 
   /**
-   * Warm Android sandbox workers kept booted ahead of demand, server-wide, for the catalog daemons
-   * to adopt instead of booting their own ([ServeSpareSandboxes]). `0` (default) keeps none: every
-   * daemon boots as before. Each spare is a resident Robolectric JVM (~450-500 MB), which is why it
-   * is a budget of its own rather than a share of [liveSeats].
+   * Warm Android sandbox workers kept booted for catalog daemons to adopt ([ServeSpareSandboxes]);
+   * `0` (default) keeps none. Each is a resident Robolectric JVM (~450-500 MB), hence a budget
+   * separate from [liveSeats].
    */
   public val spareSandboxes: Int
 
@@ -67,134 +49,99 @@ public interface ServeOptions {
   public val inlineBundle: Boolean
 
   /**
-   * Project mode: besides the current checkout (the default session), fork a daemon-backed session
-   * per git revision requested via `?session=<rev>`, each built in its own worktree and suspended /
-   * resumed by the registry. Off by default (just the current module).
+   * Project mode: also fork a daemon-backed session per git revision requested via
+   * `?session=<rev>`, each in its own worktree. Off by default.
    */
   public val revisions: Boolean
 
   /**
-   * Project mode's render-history timeline: the **baseline delivery branch**, as it exists in this
-   * checkout, whose publishes the viewer's history strip is computed from ([ServeProjectHistory]).
-   *
-   * On by default and self-disabling: a clone that never fetched the branch resolves nothing and
-   * the strip is simply omitted, so the default costs one `git rev-parse` per refresh window on a
-   * project that doesn't publish baselines. `--history-branch <ref>` points it at another branch (a
-   * fork's, or a fully-qualified `refs/…`); `--no-history` turns it off outright.
+   * Baseline delivery branch the viewer's render-history strip is computed from
+   * ([ServeProjectHistory]). On by default and self-disabling when the branch was never fetched;
+   * `--no-history` turns it off.
    */
   public val historyBranch: String?
 
   /**
-   * Opt in to local Gradle discovery + build. By default `serve` never runs Gradle: it hosts only
-   * the fetched sources (`--bundle` / `--bundles` / `--catalogs` / uploaded bundles) as a pure
-   * preview server, even when launched from inside a Gradle checkout. Passing `--discover` (or
-   * scoping with `--module <path>`) opts into the old behaviour — discover the project's modules,
-   * build their previews, and host one. Kept off by default because a stray `serve` at a repo root
-   * would otherwise trigger a full module build (and, on a large multi-module tree, hang).
+   * Opt in to local Gradle discovery + build. Off by default so a stray `serve` at a repo root
+   * hosts only fetched sources instead of triggering a full (possibly hanging) module build.
    */
   public val discover: Boolean
 
   /**
-   * Trusted server-side re-render (SECURITY/RCE, opt-in, default off). When set, a `--catalogs`
-   * catalog that verifies as `Trusted` AND declares a `source` is served by a **daemon-backed,
-   * re-renderable** session built from that source (full-fidelity overrides) instead of static
-   * baked PNGs. Building runs the source's Gradle = code execution, so it's gated three ways: the
-   * catalog must be Trusted, its `source.ref` must clear the [revisionAllowRefs] allowlist
-   * (fail-closed), and its `source.repo` must be the server's own [catalogRepo]. NEVER enable on a
-   * box that can't build the catalog source (e.g. the desktop-only public image can't build the
-   * Android catalogs) — leave it off there and let the in-browser Wasm tier carry CMP. Reuses
-   * `--revisions-allow` as the ref allowlist.
+   * Trusted server-side re-render (SECURITY/RCE, opt-in, default off): a Trusted `--catalogs`
+   * catalog that declares a `source` is served by a daemon-backed session built from that source.
+   * Building runs Gradle, so it is gated three ways: the catalog must be Trusted, `source.ref` must
+   * clear [revisionAllowRefs] (fail-closed), and `source.repo` must be [catalogRepo]. Never enable
+   * on a box that can't build the catalog source.
    */
   public val allowRenderTrusted: Boolean
 
   /**
-   * Optional git repo root the trusted-catalog builder ([buildTrustedCatalogSource]) and its
-   * [GitWorktrees] use, instead of the served module's own project root ([findProjectRoot]). Lets a
-   * module-less box (e.g. the prebuilt `deploy/image`) live-render a fetched catalog by pointing
-   * this at a separate checkout of the catalog's `source.repo` (which the entrypoint clones). The
-   * `source.repo == `[catalogRepo] and `--revisions-allow` gates are unchanged — this only moves
-   * the worktree root. Off ⇒ the served module's project root, as before.
+   * Git repo root for the trusted-catalog builder ([buildTrustedCatalogSource]) and its
+   * [GitWorktrees], instead of the served module's project root. Lets a module-less box live-render
+   * a fetched catalog from a separate checkout; the repo and ref gates still apply.
    */
   public val catalogSourceRoot: File?
 
   /**
-   * Where the read-only checkouts of pasted repositories live (`--onboard-cache`), for `POST
-   * /admin/onboard/scan`. One directory per repository, reused across requests. Defaults to a
-   * temporary directory, which is the right default for a scratch tree a restart may forget.
-   *
-   * Nothing in these checkouts is ever executed — the scan reads them as text, and building an
-   * imported project happens on a runner in the import staging repository, not here.
+   * Where read-only checkouts of pasted repositories live (`--onboard-cache`) for `POST
+   * /admin/onboard/scan`. Nothing in them is ever executed; the scan reads them as text.
    */
   public val onboardCacheDir: File
 
   /**
-   * Project mode revision policy (SECURITY/RCE): comma-separated refs whose history a requested
-   * `?session=<rev>` must be reachable from to be checked out and built. Empty = nothing builds
-   * (fail closed), since building runs that revision's Gradle. e.g. `--revisions-allow
-   * main,release`. Also gates the trusted-catalog source build ([allowRenderTrusted]).
+   * Project mode revision policy (SECURITY/RCE): refs a requested `?session=<rev>` must be
+   * reachable from to be built. Empty = nothing builds (fail closed). Also gates the
+   * trusted-catalog source build ([allowRenderTrusted]).
    */
   public val revisionAllowRefs: List<String>
 
   /**
-   * Ephemeral mode: shut the whole server down once it's been idle — no open connections and no
-   * requests — for [idleExitSeconds]. `--exit-when-idle` uses the default window;
-   * `--exit-when-idle=<seconds>` sets it (a short value ≈ "exit shortly after the last client
-   * disconnects"). Off by default (runs until Ctrl-C).
+   * Ephemeral mode: shut down after [idleExitSeconds] with no open connections or requests. Off by
+   * default.
    */
   public val exitWhenIdle: Boolean
 
   public val idleExitSeconds: Long
 
   /**
-   * Seconds between re-checks of each `--catalogs` branch's head commit; when it has moved, the
-   * catalog is re-fetched in place (no restart) — see [ServeCatalogRefresher]. Default
-   * [DEFAULT_CATALOG_REFRESH_SECONDS]; `0` (or negative) disables polling (boot-snapshot only, the
-   * pre-refresh behaviour). Wired from `SERVE_CATALOG_REFRESH` by the image entrypoint.
+   * Seconds between re-checks of each `--catalogs` branch head; a moved head re-fetches the catalog
+   * in place ([ServeCatalogRefresher]). `0` or negative disables polling.
    */
   public val catalogRefreshSeconds: Long
 
   /**
-   * How long an RSS reader keeps a catalog's background change-feed worker interested. Every
-   * `feed.xml` request renews the lease; after this many quiet seconds the worker stops fetching
-   * the delivery branch while retaining its last XML + shallow Git cache. `0` disables the feed
-   * lane.
+   * How long an RSS reader keeps a catalog's change-feed worker interested; each `feed.xml` request
+   * renews the lease. `0` disables the feed lane.
    */
   public val catalogFeedIdleSeconds: Long
 
   /**
-   * Shared mode: a directory of pre-rendered portable bundles (or a single bundle) to host
-   * read-only alongside the live session, each reachable at `?session=<bundle-name>`. No checkout
-   * or build — the bundle's `previews/<id>.png` files are served directly.
+   * Shared mode: a directory of pre-rendered bundles (or a single bundle) hosted read-only at
+   * `?session=<bundle-name>`.
    */
   public val bundlesDir: String?
 
   /**
-   * Raw repeatable `--bundle` values, unparsed.
-   *
-   * `ServeStartupBundles.Spec` is the server's shape for a bundle to preload; the CLI's job ends at
-   * collecting the strings.
+   * Raw repeatable `--bundle` values, unparsed; `ServeStartupBundles.Spec` is the server's shape.
    */
   public val bundleFlags: List<String>
 
   /**
-   * Shared/public mode ingestion: enable `POST /bundles/{name}` so clients can contribute bundles
-   * at runtime — upload a zip, or pass `?url=` to a build-results artifact. Off by default;
-   * intended for a deployed shared instance (combine with `--lan` + a strong `--token`).
+   * Enable `POST /bundles/{name}` uploads (zip or `?url=`). Off by default; combine with `--lan`
+   * and a strong `--token`.
    */
   public val acceptBundles: Boolean
 
   /**
-   * Public mode: serve every route **without** requiring the token (the deployed public preview
-   * server, where browsing the published catalogs + uploaded bundles is the point). Safe by
-   * construction — no server-side code execution, re-render of untrusted Compose refused, uploads
-   * capped + SSRF-gated. Off by default so a normal `serve` stays token-gated.
+   * Public mode: serve every route without the token. Safe by construction: no server-side code
+   * execution, untrusted re-render refused, uploads capped and SSRF-gated. Off by default.
    */
   public val public: Boolean
 
   /**
-   * Streamlined, Storybook-like presentation. The routes and render products stay the same, but the
-   * HTML pages expose only catalog browsing, visual variants, usage source and the small set of
-   * controls useful while evaluating a component.
+   * Streamlined, Storybook-like presentation over the same routes, exposing only catalog browsing,
+   * variants, usage source and a few controls.
    */
   public val componentBrowser: Boolean
 
@@ -202,144 +149,88 @@ public interface ServeOptions {
   public val openBrowser: Boolean
 
   /**
-   * Which page [openBrowser] opens. Defaults to the landing page, which is what every caller before
-   * the `ui` command wanted.
-   *
-   * A default implementation rather than another abstract member: this interface is published, and
-   * an option that every existing implementor answers identically should not be a source break for
-   * one that does not. `ui` overrides it with `/ui-builder/<catalog>/` — the builder is the page
-   * that command exists to open, and landing on the preview list instead would leave the user one
-   * unexplained navigation away from what they asked for.
-   *
-   * Always an absolute path with no query of its own; the session token is appended by the opener.
+   * Which page [openBrowser] opens: an absolute path with no query (the opener appends the token).
+   * A default member so adding it is not a source break for existing implementors; `ui` overrides
+   * it with `/ui-builder/<catalog>/`.
    */
   public val openBrowserPath: String
     get() = "/"
 
-  /**
-   * SSRF allowlist for `POST /bundles/{name}?url=` fetches: comma-separated hostnames the server
-   * may fetch a bundle from. Empty = no URL fetch is allowed (fail closed), so `--accept-bundles`
-   * alone only accepts uploads; a host must be explicitly trusted before the server will reach out.
-   */
+  /** SSRF allowlist for `POST /bundles/{name}?url=` fetches. Empty = no URL fetch (fail closed). */
   public val acceptBundlesFrom: List<String>
 
   /**
-   * Document ingestion (`--accept-docs`): enable `GET /docs` + `POST /docs` so a client can hand
-   * the server one **known document** (a Remote Compose `.rc`, a Lottie JSON — [ServeDocFormats])
-   * and get back an **expiring permalink** (`/d/<id>`) that plays it in the browser. Off by
-   * default.
-   *
-   * Independent of `--accept-bundles`: a bundle becomes a whole preview session, a document is one
-   * file with a short-lived share link and no server-side render at all.
+   * Document ingestion (`--accept-docs`): `GET`/`POST /docs` turns one known document
+   * ([ServeDocFormats]) into an expiring `/d/<id>` permalink. Off by default; independent of
+   * `--accept-bundles`.
    */
   public val acceptDocs: Boolean
 
   /** How long an ingested document's permalink lives (`--doc-ttl <seconds>`). */
   public val docTtlSeconds: Long
 
-  /**
-   * SSRF allowlist for `POST /docs?url=`: hostnames the server may fetch a document from. Empty =
-   * uploads only (fail closed), exactly like [acceptBundlesFrom].
-   */
+  /** SSRF allowlist for `POST /docs?url=`. Empty = uploads only (fail closed). */
   public val acceptDocsFrom: List<String>
 
   /**
-   * `--playground-bundle <path|system>`: enable the playground lane (`POST /api/{v}/compiler/run`),
-   * resolving the CMP compile classpath from a catalog liveBundle. Takes either a local `.bundle`
-   * path or — since issue #3212 — the id of a system this box already serves via `--catalogs`
-   * (`--playground-bundle compose-m3`), which reuses that catalog's fetched, trust-verified bundle
-   * instead of a hand-placed copy that would silently go stale. See [PlaygroundBundleSource].
-   *
-   * Under `--public` the lane still has to clear [PlaygroundPublicGate], which admits it either
-   * behind a verified sandbox or behind GitHub repo-access gating — the compile runs
-   * **user-supplied code**, so one of the two must bound who supplies it. See
-   * docs/design/PLAYGROUND.md §6.
+   * `--playground-bundle <path|system>`: enable the playground lane, resolving the CMP classpath
+   * from a local `.bundle` or a served `--catalogs` system id ([PlaygroundBundleSource]). Under
+   * `--public` it must still clear [PlaygroundPublicGate] (verified sandbox or GitHub repo-access
+   * gating), since it compiles user-supplied code.
    */
   public val playgroundBundlePath: String?
 
   /**
-   * `--playground-android-bundle <path|system>`: enable the playground's **Android / Remote
-   * Compose** compile lane, resolving its classpath from an Android catalog liveBundle — a local
-   * path or a served `--catalogs` system id, exactly like `--playground-bundle`. Snippets sent with
-   * `confType=remote-compose` compile against it, render on the Robolectric daemon, and their
-   * captured `.rc` is published as a `/d/<id>` permalink (needs the `lib-daemon-android` sidecar +
-   * `android.jar` + the `/d/` document store). Gated under `--public` like `--playground-bundle`.
+   * `--playground-android-bundle <path|system>`: enable the Android / Remote Compose compile lane,
+   * resolved like `--playground-bundle` and gated the same way under `--public`. Needs the
+   * `lib-daemon-android` sidecar, `android.jar` and the `/d/` document store.
    */
   public val playgroundAndroidBundlePath: String?
 
   /**
-   * `--playground` (env `SERVE_PLAYGROUND=1`): enable the playground lane with **nothing pinned**,
-   * offering a runtime selector over the catalogs this host already serves
-   * ([PlaygroundCatalogTargets]).
-   *
-   * The `--playground-bundle` flags pin one catalog per mode for the life of the process, which
-   * makes "try this snippet against a different design system" an operator edit and a restart — on
-   * a box already serving twenty verified catalogs. With this flag the choice moves to the request:
-   * each catalog's bundle backend picks the renderer and its manifest supplies the dependencies, so
-   * selecting a catalog selects the whole compile target. The pinned flags still work and become
-   * the selector's preselected *default* entry, so an existing deployment is unchanged by adding
-   * this.
-   *
-   * Needs `--catalogs` to be of any use — with no served catalogs there is nothing to select — so a
-   * host with neither a pin nor a catalog is refused (loudly) rather than serving an empty
-   * selector.
+   * `--playground`: enable the playground with nothing pinned, offering a runtime selector over
+   * served catalogs ([PlaygroundCatalogTargets]). Pinned bundles become the preselected default.
+   * Refused when there is neither a pin nor a served catalog.
    */
   public val playgroundRuntimeSelection: Boolean
 
   /**
-   * `--compile-engine` (env `SERVE_COMPILE_ENGINE=1`): start the playground's compile engine for
-   * this host's own consumers — the UI builder's native preview and inline Remote Compose capture —
-   * **without** the public playground surface. `/playground` keeps its disabled page, `POST
-   * /api/{v}/compiler/run` and `/pg/` are not mounted, and no page links to an editor.
-   *
-   * The engine selects among served catalogs at runtime, as `--playground` does, and every other
-   * `--playground-*` knob (sandbox, compile slots, catalog limit, pins) configures it. A pinned
-   * `--playground-bundle` stops implying the public surface once this flag is set; add
-   * `--playground` to expose it as well.
+   * `--compile-engine`: start the playground compile engine for this host's own consumers
+   * (UI-builder native preview, Remote Compose capture) without mounting the public playground
+   * surface. Add `--playground` to expose it as well.
    */
   public val compileEngine: Boolean
 
   /**
-   * `--role playground` (env `SERVE_ROLE=playground`): this process is the public playground's own
-   * container, behind the same proxy as the main server. It mounts the playground surface over a
-   * runtime-selecting engine, and mints its `/d/` documents with [ServeDocStore.PLAYGROUND_PREFIX]
-   * so the proxy can send them back here. The proxy routes only the playground's paths to it; the
-   * entrypoint also switches off the catalog theme optimizer and background warming, which a
-   * process that never serves catalog pages has no use for.
+   * `--role playground`: this process is the public playground's own container behind the shared
+   * proxy; it mints `/d/` ids with [ServeDocStore.PLAYGROUND_PREFIX] so the proxy routes them back
+   * here.
    */
   public val playgroundRole: Boolean
 
   /**
-   * `--playground-external` (env `SERVE_PLAYGROUND_EXTERNAL=1`): the public playground is served by
-   * a sibling process at this same origin (`--role playground`), so this host renders the editor
-   * handoff links without mounting the routes. Which catalogs get a link is decided by this host's
-   * own engine, so it needs `--compile-engine` too; without one, no link is offered.
+   * `--playground-external`: a sibling `--role playground` process serves the playground at this
+   * origin, so this host only renders editor handoff links. Needs `--compile-engine` to decide
+   * which catalogs get one.
    */
   public val playgroundExternal: Boolean
 
   /**
-   * `--playground-catalog-limit <n>`: how many runtime-selected catalogs may hold a resolved
-   * compile classpath at once. Each one is an unpacked bundle plus a resolved Maven classpath held
-   * for the life of the process (they cannot be evicted while snippet JVMs hold their jars open),
-   * so this is the knob that stops a public host from being walked into a full disk by a visitor
-   * clicking through every entry in the selector.
+   * `--playground-catalog-limit`: runtime-selected catalogs that may hold a resolved classpath at
+   * once. They cannot be evicted while snippet JVMs hold their jars, so this bounds disk use on a
+   * public host.
    */
   public val playgroundCatalogLimit: Int
 
   /**
-   * `--playground-rate-limit <n>`: compiles per minute **per caller** (0 disables the limiter).
-   *
-   * Every other playground bound — compile slots, the compile timeout, the body cap, live seats,
-   * the token store — is a whole-host one (issue #3214). None of them stops two callers from
-   * holding every slot with back-to-back 180-second compiles while everyone else is told the
-   * playground is busy. This is the fair-sharing half.
+   * `--playground-rate-limit`: compiles per minute per caller (`0` disables). The per-caller
+   * fairness bound; every other playground limit is host-wide.
    */
   public val playgroundRateLimit: Int
 
   /**
-   * `--playground-caller-concurrency <n>`: compiles one caller may hold at once. Default 1, which
-   * is the knob that answers the complaint directly — with the host's `--playground-compile-slots`
-   * at its default 2, one caller cannot hold both.
+   * `--playground-caller-concurrency`: compiles one caller may hold at once (default 1), so one
+   * caller cannot occupy every compile slot.
    */
   public val playgroundCallerConcurrency: Int
 
@@ -349,31 +240,16 @@ public interface ServeOptions {
   public val playgroundEditLeaseTtlSeconds: Long
 
   /**
-   * `--trust-forwarded-for`: rate-limit an anonymous caller by the **last** `X-Forwarded-For` entry
-   * rather than the socket peer, and take the public host and scheme (absolute links, OAuth
-   * metadata, top-level site routing) from `X-Forwarded-Host` / `X-Forwarded-Proto`. Off, those are
-   * the request's own `Host` and connection scheme. `--github-auth-callback-base-url`, when set,
-   * still decides the sign-in origin either way.
-   *
-   * Opt-in, because the header is client-supplied: on a directly-exposed host trusting it would let
-   * a caller mint a fresh identity per request and walk straight past the limit. Set it only when
-   * this server sits behind a reverse proxy you control that sets the last entry from the peer
-   * address it saw — nginx's `$proxy_add_x_forwarded_for` appends it, and Caddy without
-   * `trusted_proxies` replaces the header with that one address. Either way the last entry is the
-   * one a client can't forge. Without it, every caller behind the proxy shares one bucket. The
-   * bundled `deploy/image` compose file turns it on, since `preview` is reachable only via Caddy.
+   * `--trust-forwarded-for`: key rate limits on the last `X-Forwarded-For` entry and take public
+   * host/scheme from `X-Forwarded-Host`/`-Proto`. Opt-in because the headers are client-supplied;
+   * enable only behind a reverse proxy you control that sets the last entry from the peer address.
    */
   public val trustForwardedFor: Boolean
 
   /**
-   * `--playground-sandbox <profile>`: the **per-session sandbox** every playground snippet JVM runs
-   * inside (`none` | `unshare` | `bwrap` | `systemd` | `strict` | `custom:<argv>`), plus its
-   * resource knobs. This is Phase 4 of docs/design/PLAYGROUND.md — one of the two things that lets
-   * the playground run under `--public`: with a verified sandbox the snippet no longer executes
-   * unconfined on the serve host, so *anyone* may compile. The other is GitHub repo-access gating,
-   * which bounds who may compile instead of what a compile can reach; with that configured a
-   * sandbox here is defence in depth rather than the precondition. Default `none` — playground
-   * allowed token-gated, and under `--public` only when repo-access-gated.
+   * `--playground-sandbox <profile>`: the per-session sandbox each snippet JVM runs in (`none` |
+   * `unshare` | `bwrap` | `systemd` | `strict` | `custom:<argv>`). A verified sandbox, or GitHub
+   * repo-access gating, is what admits the playground under `--public`. Default `none`.
    */
   public val playgroundSandboxSpec: String?
 
@@ -384,9 +260,8 @@ public interface ServeOptions {
   public val playgroundSandboxPids: Int
 
   /**
-   * `--playground-compile-slots <n>`: how many snippet compiles may hold a jailed JVM at once. The
-   * compile-side counterpart to `--live-seats` — per-process caps bound one compile, this bounds
-   * the aggregate, so peak compile memory is `slots × --playground-sandbox-memory-mb`.
+   * `--playground-compile-slots`: compiles that may hold a jailed JVM at once, so peak compile
+   * memory is `slots × --playground-sandbox-memory-mb`.
    */
   public val playgroundCompileSlots: Int
 
@@ -394,80 +269,45 @@ public interface ServeOptions {
   public val playgroundSandboxTtlSeconds: Long
 
   /**
-   * `--playground-sandbox-ro <path>[,<path>…]`: extra host paths bound **read-only** into the jail.
-   * The escape hatch for caches a render legitimately reads while having no network to fetch them —
-   * the Robolectric `android-all` cache (`~/.m2/repository`) and the downloadable-font cache are
-   * the two that matter in practice; prewarm them before going public.
+   * `--playground-sandbox-ro`: extra host paths bound read-only into the jail, for caches a
+   * networkless render reads (Robolectric `android-all`, downloadable fonts).
    */
   public val playgroundSandboxReadOnlyPaths: List<String>
 
   /**
-   * Extra remote Maven repository base URLs the live-daemon classpath resolver may fetch from, on
-   * top of Maven Central + Google Maven (`--extra-maven-repos <url>[,<url>…]`; env
-   * `SERVE_EXTRA_MAVEN_REPOS`). A served catalog whose module pulls deps from a non-default repo —
-   * e.g. `https://jitpack.io`, an Apollo/JetBrains snapshot repo — otherwise has those coordinates
-   * skipped by the resolver, leaving the daemon's classpath incomplete so a class that references
-   * them fails at bootstrap and the catalog falls back to baked PNGs (`livebundle-unavailable`).
-   * Empty by default. Operator-curated: only repos the deployer trusts should be listed, since the
-   * server will fetch artifacts from them when resolving a trusted catalog's live bundle.
+   * Extra Maven repository URLs the live-daemon classpath resolver may fetch from, beyond Central
+   * and Google. Without them a catalog's non-default deps are skipped and it falls back to baked
+   * PNGs. Operator-curated: list only repos you trust.
    */
   public val extraMavenRepos: List<String>
 
   /**
-   * Path to the producer-trust store (`--trust-store <file>`): the JSON allowlist of trusted
-   * signing keys / branches / CI identities ([TrustStore]). Uploaded bundles are verified against
-   * it and the verdict is surfaced in the API + viewer. Absent ⇒ the empty, fail-closed store
-   * (every upload `unverified`), which is correct for a private box; a public server points it at
-   * `trust/producers.json`.
+   * Producer-trust store path ([TrustStore]) uploaded bundles are verified against. Absent ⇒ the
+   * empty, fail-closed store (every upload `unverified`).
    */
   public val trustStorePath: String?
 
   /**
-   * Design systems to serve from their published `design-artifacts/<system>` branches (`--catalogs
-   * compose-m3,wear-m3`): each is fetched (catalog.json + images) and registered as a read-only
-   * session reachable at `/<system>/` (and, for back-compat, `?session=<system>`),
-   * trusted-by-origin when the branch is in the trust store.
-   *
-   * An entry may carry a **per-system source repo** as `<system>@<owner>/<repo>` so one server can
-   * mix catalogs published to different repos (e.g. `meshcore-mobile@yschimke/meshcore-mobile`
-   * alongside the default-repo `compose-m3`). Without `@…` the shared `--catalog-repo` is used.
+   * Design systems served from their `design-artifacts/<system>` branches (`--catalogs
+   * compose-m3,wear-m3`), each at `/<system>/`. An entry may name its own source repo as
+   * `<system>@<owner>/<repo>`; otherwise `--catalog-repo` is used.
    */
   public val catalogsRaw: String?
 
-  /**
-   * Like [catalogsRaw], but these systems are served **without** a front-page nav link — reachable
-   * by path (`/<system>/`) / `?session=<system>` but hidden from the landing "Design systems" row
-   * (`--catalogs-unlisted meshcore-mobile@yschimke/meshcore-mobile,…`). For app design systems we
-   * publish but don't want on the public front door.
-   */
+  /** Like [catalogsRaw], but served without a landing-page nav link. */
   public val catalogsUnlistedRaw: String?
 
   /**
-   * **Catalog registry projects** (`--catalog-registry yschimke/compose-preview-imports-out,…`; env
-   * `SERVE_CATALOG_REGISTRY`): GitHub projects that publish their own served set, rather than the
-   * operator naming each catalog here.
-   *
-   * Each nominated project publishes `.compose-preview/catalogs.json` on its default branch, and
-   * every catalog it lists is served from that project's `design-artifacts/<system>` branch as if
-   * it had been named in [catalogsRaw]. Re-read on the [catalogRefreshSeconds] cadence, so a
-   * catalog the project starts listing is imported without a restart — which is what makes "merging
-   * the pull request IS the import" true for `yschimke/compose-preview-imports`.
-   *
-   * An entry may name the ref its document is read from as `<owner>/<repo>@<ref>`; without one,
-   * `HEAD` is read first — raw's alias for the default branch — falling back to `main` and `master`
-   * only if it does not answer ([ServeCatalogRegistry.DEFAULT_REF_CANDIDATES] says why those
-   * fallbacks exist).
-   *
-   * What this delegates, and the three things it deliberately does not, are in
+   * Catalog registry projects (`--catalog-registry owner/repo[@ref],…`): projects whose
+   * `.compose-preview/catalogs.json` lists catalogs to serve as if named in [catalogsRaw]. Re-read
+   * every [catalogRefreshSeconds], so listing a catalog imports it without a restart. See
    * [ServeCatalogRegistry].
    */
   public val catalogRegistryRaw: String?
 
   /**
-   * **Top-level sites** (`--sites m3.preview.coo.ee=m3-catalog,…`; also `catalogs.json`'s `sites`):
-   * host names on which one already-served catalog is presented as the whole server — its landing
-   * at `/`, its links inside the custom domain, no front door and no neighbours. See [ServeSites];
-   * it adds no catalog and no work, only a different reading of the same request.
+   * Top-level sites (`--sites host=catalog,…`): host names on which one served catalog is presented
+   * as the whole server. See [ServeSites].
    */
   public val sitesRaw: String?
 
@@ -478,27 +318,16 @@ public interface ServeOptions {
   public val uiBuilderStartUrl: String?
 
   /**
-   * Serve the UI builder at the ROOT of [uiBuilderHost] (`https://ui.coo.ee/<design>`) instead of
-   * under `/ui-builder/`, keeping every server route ([ServeSites.RESERVED_SYSTEMS]) on that host.
-   * Off by default: it needs an editor bundle that reads the `ui-builder-base-path` meta, or the
-   * editor writes `/ui-builder/<id>` links (still served, and redirected on navigation). Ignored
-   * without [uiBuilderHost]. See `ServeUiBuilderHostRoot.kt`.
+   * Serve the UI builder at the root of [uiBuilderHost] instead of under `/ui-builder/`. Needs an
+   * editor bundle that reads the `ui-builder-base-path` meta; ignored without [uiBuilderHost].
    */
   public val uiBuilderHostRoot: Boolean
     get() = false
 
-  /**
-   * Raw `--catalogs-file` path, unopened.
-   *
-   * The CLI knows a path was given; `ServeCatalogsConfigFile` — what that file means, and how it is
-   * read and rewritten — is the server's.
-   */
+  /** Raw `--catalogs-file` path, unopened; `ServeCatalogsConfigFile` owns what the file means. */
   public val catalogsFilePath: String?
 
-  /**
-   * The deployment's `settings.json` ([ServeSettings]); null ⇒ none. Defaults beside
-   * [catalogsFilePath].
-   */
+  /** The deployment's `settings.json` ([ServeSettings]); null ⇒ none. */
   public val settingsFilePath: String?
     get() = null
 
@@ -506,20 +335,15 @@ public interface ServeOptions {
   public val catalogFeedCacheDir: File
 
   /**
-   * Shared secret for the runtime admin routes (`--admin-token`; env `SERVE_ADMIN_TOKEN`) — both
-   * `/admin/catalogs` and `/admin/trust`. Absent ⇒ neither is registered at all, so a server that
-   * didn't opt in has no admin surface. Deliberately distinct from the browse token: a `--public`
-   * box hands that one out to every visitor.
-   *
-   * On a server running `--allow-render-trusted`, treat this as a code-execution credential:
-   * `/admin/trust` can make a producer's Compose eligible for server-side re-render here.
+   * Shared secret for `/admin/catalogs` and `/admin/trust`; absent ⇒ no admin surface. Distinct
+   * from the browse token, which `--public` hands to everyone. With `--allow-render-trusted` this
+   * is a code-execution credential.
    */
   public val adminToken: String?
 
   /**
-   * Read-only credential for the UI-builder admin overview (`--admin-read-token`; env
-   * `SERVE_ADMIN_READ_TOKEN`). It may list design summaries and their unusable reasons, but cannot
-   * read documents or reach any admin mutation. Null keeps that diagnostic surface operator-only.
+   * Read-only credential for the UI-builder admin overview: lists design summaries but cannot read
+   * documents or mutate anything.
    */
   public val adminReadToken: String?
 
@@ -527,17 +351,14 @@ public interface ServeOptions {
   public val uiBuilderAdminActors: Set<String>
 
   /**
-   * Whether a new UI-builder design starts public or private (`--ui-builder-default-visibility`).
-   * See [UiBuilderDefaultVisibility]; the owner can change it per design either way.
+   * Whether a new UI-builder design starts public or private; the owner can change it per design.
    */
   public val uiBuilderDefaultVisibility: UiBuilderDefaultVisibility
     get() = UiBuilderDefaultVisibility.PRIVATE
 
   /**
-   * `--ui-builder-public-origin <url>`: the stable public origin this server's UI-builder designs
-   * are canonical at, recorded as their `home`. Unset falls back to
-   * `--github-auth-callback-base-url`; with neither, designs are left unhomed rather than stamped
-   * with a bind address that is not an identity.
+   * Stable public origin UI-builder designs are canonical at (their `home`). Falls back to
+   * `--github-auth-callback-base-url`; with neither, designs stay unhomed.
    */
   public val uiBuilderPublicOrigin: String?
     get() = null
@@ -556,41 +377,28 @@ public interface ServeOptions {
   public val githubAuthCallbackBaseUrl: String?
 
   /**
-   * Scopes the auth cookies to a parent domain so one sign-in covers it and every `--sites` host
-   * under it (`preview.coo.ee` ⇒ valid on `m3.preview.coo.ee`). Unset keeps them host-only, which
-   * is right for a single-hostname box; it is deliberately explicit rather than derived, since a
-   * cookie domain is the blast radius of a session.
+   * Scopes auth cookies to a parent domain so one sign-in covers every `--sites` host under it.
+   * Explicit rather than derived, since a cookie domain is a session's blast radius.
    */
   public val githubAuthCookieDomain: String?
 
-  /**
-   * Overrides the OAuth scope. Unset derives it from `--github-auth-repo`'s visibility, which is
-   * what a deployment wants unless its GitHub App or org policy demands something specific.
-   */
+  /** Overrides the OAuth scope; unset derives it from `--github-auth-repo`'s visibility. */
   public val githubAuthScope: String?
 
   public val githubAuthUsers: Set<String>
 
-  /**
-   * `--github-auth-orgs`: GitHub organizations whose members sign in as members, as if each were
-   * listed in [githubAuthUsers]. See [ServeGithubAuthConfig.allowedOrgs].
-   */
+  /** GitHub organizations whose members sign in as if listed in [githubAuthUsers]. */
   public val githubAuthOrgs: Set<String>
     get() = emptySet()
 
   /**
-   * `--github-auth-guests`: admit GitHub accounts outside [githubAuthUsers] / [githubAuthOrgs] as
-   * guests, who can see the UI-builder designs shared with them, read-only, and ask for more
-   * through an access grant. A guest counts as signed out everywhere else. See
-   * [ServeGithubAuthConfig.allowGuests].
+   * Admit other GitHub accounts as guests who can read designs shared with them and request access;
+   * a guest is signed out everywhere else.
    */
   public val githubAuthGuests: Boolean
     get() = false
 
-  /**
-   * `--ui-builder-guidelines-users`: GitHub logins who may run `ui_builder_check_design`'s
-   * `guidelines` check on the operator's OpenRouter key. See [ServeUiBuilderGuidelinesConfig].
-   */
+  /** GitHub logins who may run the `guidelines` design check on the operator's OpenRouter key. */
   public val uiBuilderGuidelinesUsers: Set<String>
     get() = emptySet()
 
@@ -603,86 +411,59 @@ public interface ServeOptions {
     get() = null
 
   /**
-   * `--ui-builder-guidelines-picture-budget`: how many seconds a guidelines prompt waits for the
-   * native renders it has no cached picture of, before answering without them. They keep drawing
-   * into the cache, so asking again a minute later includes them.
+   * Seconds a guidelines prompt waits for uncached native renders before answering without them.
    */
   public val uiBuilderGuidelinesPictureBudgetSeconds: Long
     get() = DEFAULT_GUIDELINES_PICTURE_BUDGET_SECONDS
 
   /**
-   * `--ui-builder-guidelines-triage on|off`: whether a guidelines check first asks Jev
-   * (`typesafe/jev-1.13`) which extra evidence would help — a dark render, a large-font render, the
-   * accessibility tree — and gathers only that. On by default; it costs a fraction of a cent.
+   * Whether a guidelines check first asks a cheap triage model which extra evidence to gather. On
+   * by default.
    */
   public val uiBuilderGuidelinesTriage: Boolean
     get() = true
 
   /**
-   * `--github-auth-open-ui-builder`: every signed-in GitHub member may create, edit and export
-   * UI-builder designs, and approve agent grants for them, without repository access. See
-   * [ServeGithubAuthConfig.openUiBuilder].
+   * Every signed-in GitHub member may create, edit and export UI-builder designs and approve agent
+   * grants, without repository access.
    */
   public val githubAuthOpenUiBuilder: Boolean
     get() = false
 
   /**
-   * Agent access grants (`--agent-grants`): enable the device-grant flow at `/agent-access/…` so an
-   * agent with no credential can ask for temporary, scoped, revocable access, and a human approves
-   * it from a link the agent prints. See
-   * [docs/design/AGENT_ACCESS_GRANTS.md](../../../../../../../../docs/design/AGENT_ACCESS_GRANTS.md).
-   *
-   * Off by default and deliberately not derivable: the lane's whole purpose is to mint credentials,
-   * so an operator turns it on knowingly or not at all.
+   * Agent access grants: enable the device-grant flow at `/agent-access/…` so an agent can request
+   * temporary, scoped, revocable access that a human approves. Off by default and never derived,
+   * since the lane mints credentials.
    */
   public val agentGrants: Boolean
 
   /** Expose all catalogs through aggregate Streamable HTTP MCP at `/mcp`. */
   public val catalogMcp: Boolean
 
-  /**
-   * Raw `--agent-grant-scopes`, unparsed.
-   *
-   * Deliberately a string: what a scope name means, and which of them is highest, is server policy.
-   */
+  /** Raw `--agent-grant-scopes`, unparsed; scope meaning is server policy. */
   public val agentGrantScopesFlag: String?
 
-  /**
-   * Raw `--agent-grant-max-ttl`, unparsed.
-   *
-   * The duration grammar and the hard ceiling are both server policy, so both live on that side.
-   */
+  /** Raw `--agent-grant-max-ttl`, unparsed; the grammar and ceiling are server policy. */
   public val agentGrantMaxTtlFlag: String?
 
   /**
-   * Raw `--agent-grant-capabilities`, unparsed.
-   *
-   * The CLI reads the flag; the server decides what the names mean. A capability list is a server
-   * policy, and parsing it here would put `AgentGrantCapability` on the CLI's classpath for the
-   * sake of a string split.
+   * Raw `--agent-grant-capabilities`, unparsed, so the CLI never needs `AgentGrantCapability` on
+   * its classpath.
    */
   public val agentGrantCapabilitiesFlag: String?
 
   public val agentGrantMaxActive: Int
 
   /**
-   * Per-address budget on the two ungated grant routes (`--agent-grant-rate-limit`, requests per
-   * minute; `0` disables). The default is generous enough for a polling agent — one poll every
-   * three seconds is 20/min — and small enough that an anonymous caller cannot churn the request
-   * map.
+   * Per-address requests/minute on the two ungated grant routes (`0` disables): enough for a
+   * polling agent, small enough that anonymous callers cannot churn the request map.
    */
   public val agentGrantRateLimit: Int
 
   /**
-   * Image ingestion (`--accept-images`): enable `POST /images` so an **agent preparing a pull
-   * request** can hand the server a rendered preview PNG and get back `/i/<id>.png` — a URL it can
-   * embed in the PR body from a box with neither a GitHub CLI nor push rights to a capture branch.
-   * Off by default.
-   *
-   * Unlike `--accept-docs`, this lane is **never anonymous**: uploading requires a GitHub token
-   * whose owner has access to [imageUploadRepository], on a `--public` host as much as on a private
-   * one. Reading is open, because the point of the URL is that GitHub's image proxy can fetch it.
-   * The whole rationale is in [ServeImageStore].
+   * Image ingestion (`--accept-images`): `POST /images` returns an `/i/<id>.png` an agent can embed
+   * in a PR body. Uploading always requires a GitHub token with access to [imageUploadRepository];
+   * reading is open so GitHub's image proxy can fetch it. See [ServeImageStore].
    */
   public val acceptImages: Boolean
 
@@ -690,10 +471,8 @@ public interface ServeOptions {
   public val imageTtlSeconds: Long
 
   /**
-   * The repository an uploader must have access to (`--image-upload-repo <owner/repo>`), falling
-   * back to the GitHub-auth gating repo when the operator already configured one. There is no
-   * default beyond that and the lane refuses to start without it: a gate whose repository was
-   * guessed is not a gate.
+   * Repository an image uploader must have access to, falling back to the GitHub-auth repo. The
+   * lane refuses to start without one.
    */
   public val imageUploadRepository: String?
 
@@ -701,43 +480,27 @@ public interface ServeOptions {
   public val imageRateLimit: Int
 
   /**
-   * Raw `--image-upload-tokens`, unparsed: which GitHub token kinds the image lane accepts. Null
-   * takes the default, which depends on whether GitHub OAuth is configured — see
-   * [ImageUploadTokenPolicy.parse].
+   * Raw `--image-upload-tokens`: accepted GitHub token kinds; null takes the default
+   * ([ImageUploadTokenPolicy.parse]).
    */
   public val imageUploadTokensFlag: String?
     get() = null
 
   /**
-   * Server-wide admission for the catalogs' background theme optimization: it parks while any
-   * catalog is loading, and bounds how many of them render at once. Shared by every catalog host
-   * this server opens — see [ServeBackgroundWork] for why both halves matter on a public box.
-   *
-   * The lane is derived from [liveSeatLimiter] because widening it is only safe where something
-   * else bounds daemon count: an unbounded budget (the CLI default) keeps the single lane.
+   * Directory used for server-wide admission of the catalogs' background theme optimization, which
+   * parks while any catalog loads and bounds concurrent renders. See [ServeBackgroundWork].
    */
   public val optimizerCoordinationDirectory: File?
 
   /**
-   * Raw `--catalog-cache-dir`, or `none` to disable persistence. Unresolved.
-   *
-   * As with the theme cache, everything the old val did — creating the directory, testing it for
-   * writability, printing the operator line about container volumes, falling back to a temp dir —
-   * is server startup and now happens there.
+   * Raw `--catalog-cache-dir`, or `none` to disable persistence; resolved during server startup.
    */
   public val catalogCacheDirFlag: String?
 
   /** Raw `--catalog-cache-max-bytes`; null means "use the server's default". */
   public val catalogCacheMaxBytesFlag: Long?
 
-  /**
-   * Raw `--theme-cache-dir`, or `none` to disable. Unresolved.
-   *
-   * Everything the old `themeCacheStore` val did — deriving the default location beside
-   * `--catalogs-file`, creating the directory, testing it for writability, printing the operator
-   * line, opening the store and running its first eviction — is server startup, and it now happens
-   * in the server. The CLI's share is the two strings.
-   */
+  /** Raw `--theme-cache-dir`, or `none` to disable; resolved during server startup. */
   public val themeCacheDirFlag: String?
 
   /** Raw `--theme-cache-max-bytes`; null means "use the server's default". */
@@ -747,17 +510,14 @@ public interface ServeOptions {
   public val themeCacheEvictRequested: Boolean
 
   /**
-   * In-browser CMP tier (`--wasm-dir <system>=<dir>[,<system>=<dir>…]`): map a design system to the
-   * assembled Wasm catalog app (`./gradlew :samples:cmp-wasm-catalog:wasmCatalogDist` →
-   * `build/wasmDist`). Its viewer then offers a "Run in browser (Wasm)" toggle that mounts the app
-   * client-side. Missing dirs are dropped with a warning. Empty ⇒ no Wasm tier.
+   * In-browser CMP tier (`--wasm-dir <system>=<dir>,…`): maps a design system to its assembled Wasm
+   * catalog app. Missing dirs are dropped with a warning.
    */
   public val wasmDirs: Map<String, File>
 
   /**
-   * Packaged catalog browser used when a catalog does not publish its own Wasm app. Unlike
-   * [wasmDirs], this is not a catalog registration: the same static app is projected at
-   * `/wasm/<system>/` for every known session and discovers that session from the path.
+   * Packaged catalog browser for catalogs without their own Wasm app, projected at
+   * `/wasm/<system>/` for every session.
    */
   public val wasmUiDir: File?
 
@@ -770,154 +530,96 @@ public interface ServeOptions {
     get() = setOf("m3-catalog")
 
   /**
-   * Which enabled catalogs may be served from the `ui-builder.json` they publish, rather than from
-   * the catalog this build writes in Kotlin.
-   *
-   * The lever the cutover of `docs/design/UI_BUILDER_CATALOG_CONTRACT.md` calls "per catalog and
-   * reversible". Reversing it used to mean asking another repository to withdraw its file, which is
-   * not a thing an operator can do at 3am: a published catalog is preferred the moment it appears,
-   * and it appears when somebody else's CI runs. This is the switch that makes the sentence true.
-   *
-   * Null — the default — means every enabled catalog may. `emptySet()` means none may, so every
-   * catalog keeps its built-in definition. A non-empty set names the only catalogs allowed to.
-   *
-   * It exists because the two can differ in ways nothing here would catch. `wear-m3` published a
-   * real file whose components carry no `@BuilderComponent` policy at all, so 28 of its derived ids
-   * collided and its shelf came out materially different from the one this server synthesises —
-   * caught by `.github/scripts/ui-builder-equivalence.sh`, which is worth running against a
-   * catalog's published file before letting it flip.
+   * Enabled catalogs that may be served from their published `ui-builder.json` instead of the
+   * built-in Kotlin definition. Null (default) allows all, empty allows none. The per-catalog,
+   * reversible switch, since the two definitions can differ; check with
+   * `.github/scripts/ui-builder-equivalence.sh` before flipping one.
    */
   public val uiBuilderPublishedCatalogs: Set<String>?
     get() = null
 
   /**
-   * The builder catalogs a deployment serves from their own published `ui-builder.json` unless told
-   * otherwise (`--ui-builder-published-default`). The image entrypoint passes the list it derives
-   * `--ui-builder-published-catalogs` from, so a catalog `catalogs.json`'s `uiBuilder` block starts
-   * serving is published exactly as naming it in the `.env` would publish it. Empty ⇒ a newly
-   * served catalog keeps the build's own definition unless the block says `published`.
+   * Builder catalogs served from their published `ui-builder.json` unless told otherwise; the image
+   * entrypoint passes the list it derives `--ui-builder-published-catalogs` from.
    */
   public val uiBuilderPublishedDefault: Set<String>
     get() = emptySet()
 
   /**
-   * Builder catalogs this machine cannot serve (`--ui-builder-unavailable-catalogs`), which
-   * `catalogs.json`'s `uiBuilder` block cannot turn back on. The image entrypoint passes `wear-m3`
-   * here under `SERVE_UI_BUILDER_WEAR=0`, the opt-out for a box that cannot carry the Wear lane.
+   * Builder catalogs this machine cannot serve, which `catalogs.json` cannot turn back on (e.g.
+   * `wear-m3` under `SERVE_UI_BUILDER_WEAR=0`).
    */
   public val uiBuilderUnavailableCatalogs: Set<String>
     get() = emptySet()
 
   /**
-   * Builder catalogs reported on, at startup, as if catalog-owned, while still served as they are:
-   * the shadow step before [uiBuilderCatalogOwnership] names them. Set only from `catalogs.json`'s
-   * `uiBuilder.catalogs.<id>.shadow`; empty ⇒ nothing is reported.
+   * Builder catalogs reported at startup as if catalog-owned while still served as-is: the shadow
+   * step before [uiBuilderCatalogOwnership].
    */
   public val uiBuilderShadowCatalogs: Set<String>
     get() = emptySet()
 
   /**
-   * Which UI-builder catalogs answer for themselves (`--ui-builder-catalog-ownership
-   * <all|none|<id>[,<id>]>`): their seed templates, new-design chooser card and export route come
-   * from what they publish, and their synthesised Kotlin definition is never built.
-   *
-   * The finer half of the cutover [uiBuilderPublishedCatalogs] began: that flag moved a catalog's
-   * *definition* to its published file; this one moves everything else the builder still decides by
-   * catalog id. See compose-ui-builder's `docs/design/UI_BUILDER_CATALOG_CUTOVER.md` for what each
-   * catalog still has to publish before naming it here is a no-op.
-   *
-   * [CatalogOwnership.NONE] — the default — changes nothing.
+   * Which UI-builder catalogs answer for themselves: seed templates, chooser card and export route
+   * come from what they publish, and their synthesised Kotlin definition is never built.
+   * [CatalogOwnership.NONE] (default) changes nothing.
    */
   public val uiBuilderCatalogOwnership: CatalogOwnership
     get() = CatalogOwnership.NONE
 
   /**
-   * Discovered component records for the UI-builder's catalogs (`--ui-builder-components
-   * <system>=<components.json>[,<system>=<file>]`).
-   *
-   * A **build output** per catalog, not a configuration file: each is the `components.json` a
-   * preview bundle carries, holding that catalog's recovered signatures, opt-in markers and whether
-   * a call site can be printed for each component at all. The Compose export path generates from
-   * the record whose key matches the design's pinned catalog, so a host serving several catalogs
-   * cannot generate one catalog's call site for another's document.
-   *
-   * Empty by default because most hosts serve renders rather than source. A catalog with no record
-   * refuses a Compose export naming that catalog
-   * ([ScreenGeneratorComposeExportExecutor.NO_COMPONENT_RECORD]) rather than emitting
-   * almost-Kotlin, and a host with no records at all reports `composeCode = false` so the builder
-   * does not offer an export action that can only fail.
-   *
-   * `remote-m3` and `wear-m3` are exempt from all of that, and deliberately have no record: their
-   * designs are written by the emitters in `RecordFreeExport` rather than from recovered
-   * signatures, so they export with nothing configured here and are never named as missing one.
+   * Discovered component records per UI-builder catalog (`--ui-builder-components
+   * <system>=<components.json>,…`). Compose export generates from the record matching the design's
+   * pinned catalog; a catalog with none refuses export
+   * ([ScreenGeneratorComposeExportExecutor.NO_COMPONENT_RECORD]). `remote-m3` and `wear-m3` need no
+   * record: `RecordFreeExport` writes them.
    */
   public val uiBuilderComponents: Map<String, File>
 
   /**
-   * Where each project keeps the designs it is working on: `[<catalog>=]<dir>`.
-   *
-   * The prototyping half of the design library. A team pointing this at their own checkout sees a
-   * design the moment it is exported into the repository, with no publish step and no commit — the
-   * loop a screen is actually designed in. The published half needs no flag at all: a served
-   * catalog's designs are read from its own delivery branch.
+   * Where each project keeps the designs it is working on: `[<catalog>=]<dir>`. Designs exported
+   * into that checkout appear immediately, with no publish step.
    */
   public val uiBuilderDesigns: Map<String, File>
     get() = emptyMap()
 
   /**
-   * Where a comment board's activity is posted when it moves (`--ui-builder-comment-webhook
-   * <url>`). Null keeps the discussion inside the product.
-   *
-   * The outbound half of Talk: a new thread, a reply and a resolution reach one URL, so a reviewer
-   * who is in a chat window rather than in the editor hears about them. Nothing else fires — see
-   * [ServeUiBuilderCommentWebhook] for why a reaction is not news.
-   *
-   * **Treat the value as a credential.** A Slack, Teams or Google Chat incoming-webhook URL carries
-   * its secret in the path, so it is never logged or shown; only `https` is accepted (loopback
-   * aside, for a test receiver or a local relay), and a URL that is neither is refused at startup.
+   * URL a comment board's activity is posted to (see [ServeUiBuilderCommentWebhook]); null keeps it
+   * in-product. Treat it as a credential: it is never logged, and only `https` (or loopback) is
+   * accepted.
    */
   public val uiBuilderCommentWebhook: String?
     get() = null
 
   /**
-   * Which body the webhook posts (`--ui-builder-comment-webhook-format`): `plain`, `slack`, `teams`
-   * or `google-chat`. Defaults to this server's own event JSON.
-   *
-   * Named separately from the URL rather than sniffed from its host, deliberately: a hook behind a
-   * relay, a proxy or a workflow runner has a hostname that says nothing about what the far end
-   * parses, and guessing wrong is a channel that silently receives nothing readable.
+   * Webhook body format: `plain`, `slack`, `teams` or `google-chat`; defaults to the server's own
+   * event JSON. Named explicitly rather than sniffed from the host, which says nothing behind a
+   * relay.
    */
   public val uiBuilderCommentWebhookFormat: String?
     get() = null
 
   /**
-   * What that webhook posts (`--ui-builder-webhook-events`): a comma-separated list of `comments`,
-   * `fork`, `decision`, `implementation`, or `all`. Defaults to `comments`, which is all a hook
-   * posted before design activity existed, so an existing channel gets nothing new on upgrade.
+   * Webhook event kinds: comma-separated `comments`, `fork`, `decision`, `implementation`, or
+   * `all`. Defaults to `comments` so existing hooks get nothing new.
    */
   public val uiBuilderWebhookEvents: String?
     get() = null
 
   /**
-   * Web Push notifications (`--no-web-push` turns them off). On by default wherever they can work —
-   * a host with GitHub sign-in and a UI builder — because a person still has to sign in and turn
-   * them on per browser before anything is sent. See [ServePushNotifier].
+   * Web Push notifications, on by default where they can work (GitHub sign-in plus a UI builder);
+   * users still opt in per browser. See [ServePushNotifier].
    */
   public val webPush: Boolean
     get() = true
 
-  /**
-   * The VAPID `sub` claim (`--vapid-subject mailto:…|https://…`): who a push service contacts about
-   * this deployment. Defaults to the deployment's own https origin, else the project's page.
-   */
+  /** The VAPID `sub` claim; defaults to the deployment's https origin, else the project page. */
   public val vapidSubject: String?
     get() = null
 
   /**
-   * A pinned VAPID key pair (`--vapid-public-key` / `--vapid-private-key`, base64url, as `web-push
-   * generate-vapid-keys` prints them). Unset generates one on first start and keeps it beside the
-   * UI-builder state. **The private key is a credential**: whoever holds it can push to every
-   * subscriber of this deployment.
+   * Pinned VAPID key pair (base64url); unset generates one on first start. The private key is a
+   * credential: it can push to every subscriber.
    */
   public val vapidPublicKey: String?
     get() = null
@@ -926,66 +628,42 @@ public interface ServeOptions {
     get() = null
 
   /**
-   * Which served catalog each UI-builder catalog's designs are **compiled** against for the native
-   * preview lane (`--ui-builder-native-catalog <builder catalog>=<served catalog>`).
-   *
-   * The native lane takes a design, generates its Kotlin and hands it to the playground's compile
-   * and render lane, which needs a real classpath — a served catalog's bundle. While `m3-catalog`
-   * was the only catalog with that lane the two ids were the same string and nothing had to say so.
-   * `wear-m3` breaks it in both halves: its bundle is a different repository's catalog (typically
-   * served as `wear-m3-catalog`), and because `androidx.wear.compose:compose-material3` is an
-   * Android AAR that bundle is a Robolectric one — so mapping it also selects the daemon.
-   *
-   * A catalog absent from this map is compiled against a served catalog of its own name, which is
-   * what every host did before this existed. A `wear-m3` design on a host with neither is refused
-   * with [ServeUiBuilderNativePreview.NO_NATIVE_CATALOG] naming this flag, rather than compiled
-   * against a desktop classpath that has no Wear Compose on it.
+   * Served catalog each UI-builder catalog is compiled against for the native preview lane
+   * (`<builder catalog>=<served catalog>`). Absent entries use a served catalog of the same name;
+   * an Android (e.g. Wear) target also selects the Robolectric daemon. Unresolvable designs are
+   * refused with [ServeUiBuilderNativePreview.NO_NATIVE_CATALOG].
    */
   public val uiBuilderNativeCatalogs: Map<String, String>
     get() = emptyMap()
 
   /**
-   * Which player draws a Wear widget design in the native preview lane and its thumbnails
-   * (`--ui-builder-widget-player cmp-android|androidx`, default `cmp-android`).
-   *
-   * Both record the widget with the AndroidX writer on the Android daemon. `cmp-android` is used
-   * only where the widget's bundle carries `rc-player-compose`, else `androidx`. `cmp-android`
-   * plays the document with the Compose Multiplatform `RcComposePlayer`; `androidx` keeps
-   * upstream's `WearWidgetPreview`, whose player currently drops a `RemoteButton`'s container
+   * Which player draws a Wear widget design in the native preview lane (`cmp-android` or
+   * `androidx`). `cmp-android` applies only where the bundle carries `rc-player-compose`;
+   * `androidx`'s `WearWidgetPreview` currently drops a `RemoteButton`'s container
    * (yschimke/compose-ui-builder#511).
    */
   public val uiBuilderWidgetPlayer: UiBuilderWidgetPlayer
     get() = UiBuilderWidgetPlayer.DEFAULT
 
   /**
-   * Served catalogs admitted as **component packs** for the UI builder (`--ui-builder-packs <served
-   * catalog>=<platform>[,…]`), by id, each naming the platform whose authoring catalogs receive it:
-   * `mobile`, `wear` or `remote-compose`.
-   *
-   * A pack is another catalog's components offered inside the builder's own — a `confetti-mobile`
-   * design system's `SessionCard` beside `m3/card` in a Material 3 screen. Its components are
-   * projected from that catalog's discovered component record, read from the served catalog's own
-   * delivery branch (`ServeCatalogStore.fetchComponentRecord`); a `--ui-builder-components
-   * <pack>=<components.json>` entry overrides it. A served catalog that supplies no record — one
-   * rendered before records existed — is logged and its pack not offered, rather than refusing to
-   * start over another repository's publish cadence.
-   *
-   * Empty by default: admitting a pack is the operator saying that catalog's components may appear
-   * in another catalog's designs, which is not something a served catalog opts into by existing.
+   * Served catalogs admitted as UI-builder component packs (`<served
+   * catalog>=<mobile|wear|remote-compose>,…`), projected from each catalog's discovered component
+   * record. A catalog with no record is logged and skipped. Empty by default: admitting a pack is
+   * an operator decision.
    */
   public val uiBuilderPacks: Map<String, String>
     get() = emptyMap()
 
   /**
-   * Retained native renderer bundles (`runtimeId` to directory). Each directory contains a verified
-   * `runtime-manifest.json`; ids are exact pins and never aliases for a latest runtime.
+   * Retained native renderer bundles (`runtimeId` to directory), each with a verified
+   * `runtime-manifest.json`; ids are exact pins, never aliases.
    */
   public val uiBuilderRuntimeDirs: Map<String, File>
     get() = emptyMap()
 
   /**
-   * Durable authoritative UI-builder state (`--ui-builder-state-dir <dir>|none`). Null derives a
-   * stable location when the builder app is enabled; `none` deliberately keeps the API off.
+   * Durable UI-builder state directory, or `none` to keep the API off. Null derives a stable
+   * location when the builder is enabled.
    */
   public val uiBuilderStateDirFlag: String?
     get() = null
@@ -998,11 +676,8 @@ public interface ServeOptions {
   public val rcPlayerWasmDir: File?
 
   /**
-   * The Remote Compose player the viewer opens on when a preview enables it (`--rc-default-player
-   * <id>`; env `SERVE_RC_DEFAULT_PLAYER` in the image), as a canonical [ServeRcPlayerIds] id, or
-   * null for the built-in order (`androidx-embedded`, `androidx-view`, `camaelon-js`). A preview
-   * that does not enable the named player falls back through that order — see
-   * [ServeRcPlayerIds.defaultPlayer].
+   * Default Remote Compose player id ([ServeRcPlayerIds]), or null for the built-in order. A
+   * preview that does not enable it falls back via [ServeRcPlayerIds.defaultPlayer].
    */
   public val rcDefaultPlayer: String?
     get() = null
@@ -1013,11 +688,8 @@ public interface ServeOptions {
 
   public val catalogMaxImages: Int
 
-  // ---- selectors and timeouts the server reads, declared by `Command` rather than by `serve` ----
-  //
-  // These are not `ServeCommand`'s own flags; they are the shared ones every command parses. The
-  // server reads them all the same, so they are part of this contract — a `serve` that could not
-  // see `--module` or `--id` would be a different program.
+  // Shared selectors and timeouts every command parses; the server reads them too, so they are part
+  // of this contract.
 
   /** `--module`, the Gradle path a run is scoped to, or null for "every module". */
   public val explicitModule: String?
@@ -1037,19 +709,11 @@ public interface ServeOptions {
   /** Per-invocation Gradle timeout. */
   public val timeoutSeconds: Long
 
-  /**
-   * True when `serve` was launched by `browse` rather than typed directly.
-   *
-   * A `ServeCommand` constructor parameter until now. It reads as CLI-only trivia and is not — it
-   * changes what the server does (`browse` gets a print-free, auto-opening variant), so it is part
-   * of the contract like any flag.
-   */
+  /** True when `serve` was launched by `browse`, which gets a print-free, auto-opening variant. */
   public val browseProject: Boolean
 
-  // ---- the one selector rule shared with the root CLI ----
-  //
-  // The server owns its argv, but preview-reference matching remains a tool-wide policy. The root
-  // CLI injects that pure callback so `serve`, `render`, and `show` cannot drift apart.
+  // Preview-reference matching is tool-wide policy, injected by the root CLI so `serve`, `render`
+  // and `show` agree.
 
   /** The shared preview-id selector rule, so `serve` and the other commands agree on a match. */
   public fun previewIdMatchesRequest(
@@ -1063,12 +727,8 @@ public interface ServeOptions {
 }
 
 /**
- * What the server needs back from a discovery build.
- *
- * Deliberately narrower than `Command.RenderModulesOutcome`, which also carries `GradleTaskOutcome`
- * — a `:gradle-preview-driver` type. The server reads exactly two of that class's fields, so
- * narrowing here keeps the Tooling API off this module rather than importing a type for two
- * properties.
+ * What the server needs back from a discovery build. Narrower than `Command.RenderModulesOutcome`
+ * to keep the Tooling API off this module.
  */
 public class ServeDiscovery(
   public val buildOk: Boolean,
@@ -1076,19 +736,9 @@ public class ServeDiscovery(
 )
 
 /**
- * [discovered] narrowed to the module [requested] names, or null when it is not among them.
- *
- * `--module` is scoped inside the build host — the spawn passes it, and `resolveModules` resolves
- * exactly one module before the render task is configured. This is the server-side half of the same
- * promise, applied to whatever came back: a build host older than the spawn argument ignores
- * `--module` and reports every module, and without this the run would render them all and then fail
- * with "N modules discovered; narrow with --module <path>" — naming the flag the caller already
- * passed.
- *
- * The comparison mirrors `GradleConnector.findPreviewModule`: `PreviewModule.gradlePath` carries no
- * leading colon (`:app` and `app` are the same module), and a nested path stays colon-separated.
- * Both sides are normalised, because the driver's own modules are bare while a fixture or a
- * hand-built `PreviewModule` may carry the colon.
+ * [discovered] narrowed to the module [requested] names, or null when absent. Guards against an
+ * older build host that ignores `--module` and reports every module. Both sides are normalised,
+ * since `:app` and `app` are the same module.
  */
 internal fun selectRequestedModule(
   discovered: ServeDiscovery,
@@ -1100,7 +750,6 @@ internal fun selectRequestedModule(
 }
 
 /**
- * The default `--ui-builder-guidelines-picture-budget`: under every layer in front of an MCP call,
- * with room for the model-free rest of the prompt.
+ * Default `--ui-builder-guidelines-picture-budget`: below every timeout in front of an MCP call.
  */
 public const val DEFAULT_GUIDELINES_PICTURE_BUDGET_SECONDS: Long = 45L

@@ -1,18 +1,11 @@
-// `<cp-compare-wall>` — the `/compare` wall: every component's baked PNG beside the same render in
-// another format, scored. Replaces the `#cp-compare` half of `assets/format-compare.js`.
+// `<cp-compare-wall>`: the `/compare` wall, every component's baked PNG beside the same render in
+// another format, scored. SVG and Remote Compose lanes compare a render against an export of that
+// render (shared geometry, bare percentage). The reference lane compares against independently
+// drawn design artwork, so it alone carries a proportion figure and a middle column: the delta map,
+// from the same normalised frames as the percentage.
 //
-// Three lanes over one table. SVG and Remote Compose compare a render against an export of THAT
-// render, so they share geometry by construction and report a bare percentage. The reference lane
-// compares independently-authored artwork — the design's own drawing — and is the only one that
-// carries a proportion figure, and the only one with a middle column: the delta map between the two
-// panels beside it, the same triptych the detail page opens onto, painted from the same normalised
-// frames the row's percentage is measured over.
-//
-// The scoring itself still belongs to `format-compare.js`, reached through the typed handle in
-// `compare/api.ts`. This element owns the wall: which two artifacts a row pairs, what the page is
-// showing and why, which rows survive the filter, and the order they end up in.
-//
-// Renders nothing of its own; `serve.css` hides the tag. The decisions live next door:
+// Scoring belongs to `format-compare.js` via `compare/api.ts`; this element owns pairing, page
+// state, filtering and order. Renders nothing itself (`serve.css` hides the tag). Decisions live in
 // `compare/pairing.ts`, `compare/state.ts`, `compare/wallRows.ts` and `compare/grade.ts`.
 
 import { ControllerElement, customElement } from "../controllerElement.js";
@@ -53,25 +46,15 @@ import { whenParsed } from "../dom/whenParsed.js";
 // Types only: the player bundle is script-injected at runtime, never imported.
 
 /**
- * Longest side the wall keeps a delta map at.
- *
- * The detail page holds ONE map and shows it as large as the window allows, so it keeps the
- * normalised frame's own dimensions. A wall holds one per row — every row of a catalog with design
- * references, which for the published Wear catalog is 233 — and shows each in a 200px column at most
- * 220px tall. Retaining the full normalised size there is backing store nobody can see: a wall of
- * phone-sized captures would hold hundreds of megabytes of canvas, and a capture past the browser's
- * canvas limit would turn a row that used to score into "unavailable". 440 is twice the tallest the
- * column ever draws, so the map is still crisp at 2× device pixel ratio.
+ * Longest side the wall keeps a delta map at. Unlike the detail page's single map, a wall holds one
+ * per row (hundreds) drawn in a ~200px column, so full-size maps would waste memory and could
+ * exceed canvas limits. 440 is twice the tallest drawn size, crisp at 2× DPR.
  */
 const MAP_MAX_SIDE = 440;
 
 /**
- * How far ahead of the viewport a row is measured.
- *
- * Two screens, so a reader scrolling at a normal pace meets rows that have already been scored
- * rather than a column of "comparing…" chasing them down the page. Wide enough to hide the latency,
- * narrow enough that opening a catalog of several hundred rows still measures a handful rather than
- * all of them.
+ * How far ahead of the viewport a row is measured: two screens, enough to hide latency at a normal
+ * scroll pace without measuring a whole large catalog on open.
  */
 const MEASURE_MARGIN = "200% 0px";
 
@@ -117,8 +100,8 @@ export class CompareWall extends ControllerElement {
     /** Bumped per run, so a slow lane cannot write its scores over a newer one's. */
     private sequence = 0;
     /**
-     * What is watching for rows to come near the viewport, so they can be measured then rather than
-     * all at once. Null on a browser with no `IntersectionObserver` — see {@link measureAll}.
+     * Watches for rows nearing the viewport. Null without `IntersectionObserver`; see {@link
+     * measureAll}.
      */
     private viewport: IntersectionObserver | null = null;
     private cleanups: Array<() => void> = [];
@@ -205,9 +188,8 @@ export class CompareWall extends ControllerElement {
     }
 
     private remembered(): string | null {
-        // Per-tab, like every other theme choice on this site: a wall compared in dark here does
-        // not re-theme the viewer someone left open in the next tab. A browser with storage
-        // blocked still gets the wall, on the page's default.
+        // Per-tab, like every other theme choice on this site; blocked storage falls back to the
+        // page's default.
         return readThemeMemory(this.themeKey()) || null;
     }
 
@@ -285,14 +267,9 @@ export class CompareWall extends ControllerElement {
     // ---- the multi-row picker -------------------------------------------------------------------
 
     /**
-     * Read the page-level halves of a locator off the wall's own report, once.
-     *
-     * Their presence is the whole switch: `ServeWeb.reportIssueHtml` writes
-     * `data-cp-locator-system` only where the body template also carries a `{{locators}}` line, so
-     * one attribute answers both "may this page write locators" and "is there anywhere to put
-     * them". A wall with no report to file — a plain local session — leaves [pickFacts] null and
-     * the checkboxes stay hidden, which is what they should be when a tick could not become
-     * anything.
+     * Read the page-level locator halves off the wall's report, once. `ServeWeb.reportIssueHtml`
+     * writes `data-cp-locator-system` only where the template has a `{{locators}}` line, so its
+     * presence is the switch; without it [pickFacts] stays null and the checkboxes stay hidden.
      */
     private resolvePicking(): void {
         this.pickedBar = document.getElementById("cp-compare-picked");
@@ -327,11 +304,8 @@ export class CompareWall extends ControllerElement {
     }
 
     /**
-     * The locator a row would contribute right now, or null if it would contribute none.
-     *
-     * Read from the row's own "+ file" href — the one {@link dressRow} has already re-pointed at
-     * the pair this row is SHOWING — so the picked set follows the lane and the theme without a
-     * second copy of the pairing rules to keep in step.
+     * The locator a row would contribute now, or null. Read from the row's "+ file" href, which
+     * {@link dressRow} already re-pointed at the shown pair, so picks follow the lane and theme.
      */
     private locatorFor(row: HTMLElement) {
         const facts = this.pickFacts;
@@ -349,13 +323,9 @@ export class CompareWall extends ControllerElement {
     }
 
     /**
-     * Recompute what is picked, hand it to the report, and say so.
-     *
-     * The disabling is the interesting half. The producer refuses a body naming one component
-     * twice — and refuses the WHOLE body, so a report ticking two variants of one component is not
-     * partly indexed, it silently never appears anywhere. A wall of per-variant rows makes that the
-     * easy mistake to make, so the second variant's checkbox goes disabled the moment the first is
-     * ticked, with a title saying why. Untick the first and it comes back.
+     * Recompute what is picked, hand it to the report, and say so. The producer refuses a whole
+     * body that names one component twice, so once one variant is ticked its siblings' checkboxes
+     * are disabled (with a title saying why) until it is unticked.
      */
     private syncPicks(): void {
         const field = this.reportField;
@@ -370,9 +340,7 @@ export class CompareWall extends ControllerElement {
             if (!box) continue;
             const locator = picking ? this.locatorFor(row) : null;
             if (!locator) {
-                // Nothing this row could contribute in this lane. Unticked as well as disabled: a
-                // tick left standing on a row the report cannot name is a promise the body does not
-                // keep.
+                // Nothing this row can contribute in this lane: untick as well as disable.
                 box.checked = false;
                 box.disabled = true;
                 box.title = picking
@@ -380,9 +348,8 @@ export class CompareWall extends ControllerElement {
                     : "";
                 continue;
             }
-            // Cleared before the second pass rather than left as it was found: the "one component
-            // once" disabling below is derived state, and a box still disabled from the LAST pass
-            // is one the second pass skips — so unticking a row would never give its siblings back.
+            // Clear before the second pass: the one-component-once disabling is derived, and a box
+            // left disabled from the last pass would never be re-enabled.
             box.disabled = false;
             box.title = "";
             if (box.checked) {
@@ -448,19 +415,15 @@ export class CompareWall extends ControllerElement {
         this.root.setAttribute("data-format", this.state.format);
         this.root.setAttribute("data-theme", this.state.theme);
         this.orderColumns();
-        // Off the reference lane there is no design reference to name, so the checkboxes go away
-        // rather than sitting there disabled — and `syncPicks` drops whatever was ticked, because a
-        // report that still claimed those rows would be describing a comparison the page is no
-        // longer making.
+        // Off the reference lane there is no design reference to name, so the checkboxes go and
+        // `syncPicks` drops any ticks.
         if (this.table) {
             if (this.picking()) this.table.setAttribute("data-picking", "on");
             else this.table.removeAttribute("data-picking");
         }
 
-        // The lane wall is its own view: it owns its rows, its reference picker and its diffs, and
-        // needs none of the per-row scoring below — every number it shows was computed offline. Hand
-        // it the filter and stop, or the client-rendered table keeps decoding a document per preview
-        // for a table nobody can see.
+        // The lane wall is its own view with offline-computed numbers; hand it the filter and stop,
+        // rather than decode documents for an invisible table.
         if (this.lanesPane) this.lanesPane.hidden = !this.lanesActive();
         if (this.formatsPane) this.formatsPane.hidden = this.lanesActive();
         if (this.lanesActive()) {
@@ -468,23 +431,15 @@ export class CompareWall extends ControllerElement {
             return;
         }
 
-        // Everything that does not need the scorer, done before the scorer is asked for anything:
-        // the pictures, the grounds, the links and the published scores. See {@link dressRow}.
-        //
-        // Dressing is driven from {@link applySearch} rather than run over every row here, because
-        // it assigns both image `src` values — so dressing first and filtering after had the
-        // browser fetch and decode the whole wall for a `?preview=` or `?q=` link showing one row.
-        // On the large catalogs this page exists for that is hundreds of full-resolution pairs for
-        // a single visible comparison. The dressed set is reset per run: a format or theme switch
-        // changes which pair each row shows, so a row already dressed for the previous lane has to
-        // be dressed again for this one.
+        // Dressing (pictures, grounds, links, published scores; see {@link dressRow}) happens
+        // before scoring, driven from {@link applySearch} so only visible rows fetch images; a
+        // `?preview=` link showing one row shouldn't decode the whole wall. Reset per run, since a
+        // format or theme switch changes each row's pair.
         this.dressedRows = new Set();
         this.applySearch();
         const visible = this.rows.filter((row) => !row.hidden);
-        // Ordered on the published numbers BEFORE anything is measured. The server already served
-        // the reference lane in this order, so on first load this is a no-op; it earns its keep on
-        // every lane and theme switch after that, where the served order is about another pairing
-        // entirely and the rows would otherwise sit in it for the length of the whole chain below.
+        // Order on the published numbers before measuring. A no-op on first load (the server
+        // already ordered the reference lane); matters on lane and theme switches.
         visible.sort((a, b) =>
             byWorstKnownFirst(this.bakedScore(a), this.bakedScore(b)),
         );
@@ -493,39 +448,22 @@ export class CompareWall extends ControllerElement {
     }
 
     /**
-     * Measure [visible], **viewport-first**.
-     *
-     * Every row of this wall used to join one chain the moment the run started, and the chain
-     * walked all of them: each row fetching two full-resolution frames, decoding both, and scoring
-     * them with a per-pixel pass on the main thread. On a catalog the size of `remote-m3` — several
-     * hundred comparable rows — that is minutes of work for a reader looking at the first screen of
-     * it, and the browser is busy for the whole of it. Worse on the lanes whose candidate frame is
-     * drawn to order: the `rc` lane fetches a document per row, and a wall carrying a live player
-     * column has the server render one per cell.
-     *
-     * So a row is measured when it comes within {@link MEASURE_MARGIN} of the viewport and not
-     * before. What that changes is *when* the work happens, never what it produces: a row scores
-     * exactly as it did, in the same serial chain (each one decodes two full frames, and a wall of
-     * thirty racing each other is what made this page unusable on a laptop), and the wall still
-     * re-sorts on the measured numbers once every visible row has been through it.
-     *
-     * A browser with no `IntersectionObserver` measures the lot up front, exactly as before. That
-     * is the honest fallback rather than a degraded one: without a viewport signal there is no
-     * better moment to pick, and the wall must not simply stop scoring.
+     * Measure [visible] viewport-first: a row is measured when it comes within {@link
+     * MEASURE_MARGIN} of the viewport. Each measurement fetches and decodes two full frames and
+     * scores them on the main thread, so measuring every row up front took minutes on large
+     * catalogs. Results are unchanged: same serial chain, and the wall re-sorts once every visible
+     * row is measured. Without `IntersectionObserver` everything is measured up front.
      */
     private measureAll(visible: HTMLElement[], runId: number): void {
-        // The previous run's watch goes first. Its rows are these rows — a lane switch re-measures
-        // the same elements against a different pair — so leaving it connected would enqueue every
-        // row twice, once per lane, into a chain that has already been superseded.
+        // Disconnect the previous run's observer, or every row would be enqueued once per lane.
         this.viewport?.disconnect();
         this.viewport = null;
 
         let measured = 0;
         const settle = (): void => {
             if (runId !== this.sequence) return;
-            // Only once the whole wall has been through the scorer. Re-sorting on a partial pass
-            // would move rows the reader is looking at, under numbers most of the wall has not been
-            // asked for yet.
+            // Re-sort only after the whole wall is measured, so rows don't move under the reader
+            // mid-pass.
             if (++measured < visible.length) return;
             visible.sort((a, b) =>
                 byWorstFirst(
@@ -549,9 +487,8 @@ export class CompareWall extends ControllerElement {
             return;
         }
 
-        // `unobserve` on the way past, and a set besides: a row can be reported intersecting more
-        // than once before the callback that queued it has run, and measuring it twice would spend
-        // a second full comparison to write the same number over itself.
+        // A row can be reported intersecting more than once before its callback runs; the set
+        // prevents measuring it twice.
         const queued = new Set<HTMLElement>();
         const observer = new IntersectionObserver(
             (entries) => {
@@ -571,22 +508,15 @@ export class CompareWall extends ControllerElement {
     }
 
     /**
-     * Put the design spec on the left of the render, on the lane where there is one.
-     *
-     * The server renders the table in the order its OWN default format wants; a visitor who arrives
-     * on `?format=reference`, or presses the Figma button, changes the question the two columns are
-     * answering, so the columns move to match. Moving the cells (rather than reordering with CSS)
-     * is what keeps the header, the picture and the copied-out DOM agreeing — and a table cell has
-     * no `order` to give anyway.
-     *
-     * Idempotent: every run re-asserts the order, and a pair already in it is left untouched.
+     * Put the design spec left of the render on the reference lane. The server orders columns for
+     * its default format; moving the cells (not CSS order) keeps header, picture and DOM agreeing.
+     * Idempotent.
      */
     private orderColumns(): void {
         const specFirst = specLeadsColumns(this.state.format);
         if (this.targetHead) {
-            // The NAME node, never the whole cell: the header also carries a `cp-compare-head-role`
-            // line saying which half of the pair this column is, and that line does not change with
-            // the lane. Writing `textContent` on the `<th>` would take it out on the first switch.
+            // The name node, not the whole `<th>`, which also carries the unchanging
+            // `cp-compare-head-role` line.
             const name =
                 this.targetHead.querySelector<HTMLElement>(
                     ".cp-compare-head-name",
@@ -609,12 +539,9 @@ export class CompareWall extends ControllerElement {
     }
 
     /**
-     * The score the delivery branch published for the pair this row is CURRENTLY showing, if any.
-     *
-     * Reference lane only, and that gate is load-bearing rather than an optimisation: the published
-     * number describes a render against an independently-drawn design, and `data-match-light` sits
-     * on the same row the SVG lane is scoring. Ungated, switching to SVG would seed and order that
-     * lane by numbers about a comparison it is not making.
+     * The published score for the pair this row currently shows, if any. Reference lane only: the
+     * number describes render-vs-design, and using it on the SVG lane would seed and order by an
+     * unrelated comparison.
      */
     private bakedScore(row: HTMLElement): number | null {
         if (this.state.format !== "reference") return null;
@@ -628,19 +555,10 @@ export class CompareWall extends ControllerElement {
     }
 
     /**
-     * Put the published score on a row before anything is measured.
-     *
-     * The wall used to open on a column of "waiting…" and stay there for as long as it took to
-     * decode and score two rasters per row — tens of seconds on a real catalog — with the rows in
-     * catalog order the whole time, which is the one order that says nothing about which of them is
-     * wrong. The delivery branch already measured every one of these pairs with this same scorer
-     * (`design-reference-score.mjs`), so the number exists; carrying it here makes the wall
-     * readable and correctly ordered at first paint, and turns the in-browser pass into the
-     * refinement it always was (issue #4624).
-     *
-     * The band is the live one's band, because it is the live one's number. What differs is
-     * `data-score-source`, which says where it came from — for the dotted rule in `serve.css`, for
-     * the failure path in {@link scoreRow}, and so a test can tell a seeded row from a measured one.
+     * Put the published score on a row before measuring, so the wall is readable and ordered at
+     * first paint instead of "waiting…" in catalog order. The delivery branch measured these pairs
+     * with the same scorer (`design-reference-score.mjs`). `data-score-source` records the origin
+     * (for `serve.css`, the failure path in {@link scoreRow}, and tests).
      */
     private seedScore(row: HTMLElement, score: HTMLElement): void {
         const baked = this.bakedScore(row);
@@ -679,16 +597,9 @@ export class CompareWall extends ControllerElement {
                     this.state.theme,
                 ),
             );
-            // A row this lane cannot pair is not merely hidden — it is unscoreable, and its cell
-            // has to stop claiming otherwise. The server renders every cell "waiting…", and a row
-            // filtered out here is never dressed and never scored, so without this it keeps that
-            // word for the life of the page: a promise of a number that is not coming. Invisible
-            // while the row is hidden, and wrong the moment a lane switch or a cleared filter
-            // reveals it.
-            //
-            // It also hangs anything that waits for the wall to settle by reading every cell — the
-            // page-capture harness does exactly that, and spent its whole budget waiting on a row
-            // it was never going to photograph.
+            // A row this lane can't pair is unscoreable, so its cell must stop saying "waiting…"
+            // (it would never change, and would be wrong once revealed). It also unblocks anything
+            // waiting for every cell to settle, like the capture harness.
             if (!hasFormat) this.markUnpairable(row);
             const keep = keepRow(
                 {
@@ -708,9 +619,8 @@ export class CompareWall extends ControllerElement {
                 preview,
                 component,
             );
-            // Dressed HERE, and only when it is going to be seen — see {@link run}. `ensureDressed`
-            // is also what keeps a row revealed by a later filter change (the search input clearing,
-            // a Back to a wider query) from appearing with no pictures in it.
+            // Dressed here, only when visible (see {@link run}); also covers rows revealed by a
+            // later filter change.
             const show = keep && this.ensureDressed(row);
             row.hidden = !show;
             if (show) visible++;
@@ -718,23 +628,17 @@ export class CompareWall extends ControllerElement {
         if (this.count) this.count.textContent = countLabel(visible);
         if (this.empty) this.empty.hidden = visible !== 0;
         this.showScope(component || preview, visible);
-        // After the dressing, never before it: a row's locator is read off the "+ file" href that
-        // {@link dressRow} has just re-pointed at the pair this lane is showing, so recomputing the
-        // picked set any earlier would write the previous lane's comparisons into the report.
+        // After dressing: a row's locator reads the "+ file" href {@link dressRow} just re-pointed.
         this.syncPicks();
     }
 
     /**
-     * Blank the score of a row the current lane has no pair for.
-     *
-     * `—` rather than "waiting…" or a zero: nothing is coming and nothing was measured, which is a
-     * third state from both "being measured" and "measured badly". It borrows the `--na` band the
-     * scorer already uses for a pair it could not read, because it is the same answer.
+     * Blank the score of a row the current lane has no pair for: `—`, a third state distinct from
+     * "being measured" and "measured badly", using the scorer's `--na` band.
      */
     private markUnpairable(row: HTMLElement): void {
-        // Unconditional and idempotent, deliberately: a "have I already done this?" flag would
-        // have to be cleared by every path that writes a real score, and one that forgot would
-        // leave a row that HAS a pair on this lane unable to say it has none on the next.
+        // Unconditional and idempotent; a "done" flag would need clearing on every path that writes
+        // a score.
         const score = row.querySelector<HTMLElement>(".cp-compare-score");
         if (!score) return;
         score.textContent = "—";
@@ -744,16 +648,9 @@ export class CompareWall extends ControllerElement {
     }
 
     /**
-     * Say out loud that the wall is scoped, and offer the way out.
-     *
-     * A `?component=` or `?preview=` link opens the wall showing three rows out of four hundred,
-     * and nothing on the page said why: the search box is empty, the count says "3 comparisons",
-     * and the reader's own conclusion is that this catalog compares three things. The chip names
-     * the scope in the catalog's own words and links to the same view without it.
-     *
-     * Server-rendered `hidden` and revealed from here, like every other control that means nothing
-     * without a script — the "clear" is a link the browser can follow either way, but a chip
-     * claiming a scope on a page whose script never ran would be claiming a filter nobody applied.
+     * Show that the wall is scoped (`?component=` / `?preview=`), naming the scope and linking to
+     * the unscoped view. Server-rendered `hidden` and revealed here, so it never claims a filter no
+     * script applied.
      */
     private showScope(scope: string, visible: number): void {
         const bar = this.root.querySelector<HTMLElement>("#cp-compare-scope");
@@ -787,19 +684,14 @@ export class CompareWall extends ControllerElement {
     // ---- one row -------------------------------------------------------------
 
     /**
-     * Rows already dressed for the current format and theme, so {@link applySearch} can dress a
-     * newly revealed one without redressing the wall. Reset by {@link run}, which is what a format
-     * or theme switch goes through.
+     * Rows already dressed for the current format and theme, so {@link applySearch} can dress newly
+     * revealed ones. Reset by {@link run}.
      */
     private dressedRows = new Set<HTMLElement>();
 
     /**
-     * {@link dressRow} once per row per run, remembering the outcome.
-     *
-     * False when the row cannot be paired in this format — the caller hides it, exactly as the
-     * unconditional pass used to. A failure is deliberately not remembered: it costs one repeated
-     * `querySelector` sweep on a row that will not be shown either way, and remembering it would
-     * mean carrying a second set whose only purpose is to skip work nobody waits on.
+     * {@link dressRow} once per row per run. False when the row can't be paired in this format (the
+     * caller hides it). Failures aren't remembered; retrying costs a cheap sweep.
      */
     private ensureDressed(row: HTMLElement): boolean {
         if (this.dressedRows.has(row)) return true;
@@ -809,18 +701,9 @@ export class CompareWall extends ControllerElement {
     }
 
     /**
-     * Everything a row shows that is known WITHOUT measuring anything: the pair it is pointing at,
-     * the ground it sits on, the published score, and where its links go.
-     *
-     * Split out of {@link scoreRow} and run synchronously over every row before the measuring chain
-     * starts, because it used to ride INSIDE that chain — which walks the rows one at a time, each
-     * one decoding and scoring two full frames. So a wall of thirty rows did not merely take tens of
-     * seconds to finish scoring; it took tens of seconds to finish drawing, painting one row's two
-     * pictures per completed comparison and showing nothing but labels until then. None of this
-     * needs the scorer, and none of it needed to wait for it (issue #4624).
-     *
-     * False for a row this format cannot pair, or one whose markup is missing a part — the caller
-     * drops it rather than scoring the wrong two pictures.
+     * Everything a row shows without measuring: its pair, ground, published score and links. Run
+     * before the measuring chain rather than inside it, so a wall isn't blank until each row is
+     * scored. False for a row this format can't pair or whose markup is incomplete.
      */
     private dressRow(row: HTMLElement): boolean {
         const sources = this.sourcesOf(row);
@@ -835,9 +718,8 @@ export class CompareWall extends ControllerElement {
         const png = row.querySelector<HTMLImageElement>(".cp-compare-png");
         const vector =
             row.querySelector<HTMLImageElement>(".cp-compare-vector");
-        // Two canvases per row now, so both are named: the delta map in the middle column and the
-        // one the Remote Compose lane plays into. A bare `querySelector("canvas")` would have
-        // started returning the diff, and the rc lane would have scored an empty frame.
+        // Two canvases per row (delta map and RC lane), so select by name; a bare `canvas` query
+        // would get the diff.
         const canvas = row.querySelector<HTMLCanvasElement>(".cp-compare-rc");
         const diff = row.querySelector<HTMLCanvasElement>(".cp-compare-diff");
         if (!pngUrl || !candidateUrl || !score || !png || !vector || !canvas)
@@ -859,11 +741,8 @@ export class CompareWall extends ControllerElement {
         const detail = () => {
             location.href = sources("reference-detail", variant);
         };
-        // The Bugs column's "+ file" follows the pair the row is showing, exactly as the pictures
-        // do: the focused Reference / Diff / Actual page files a report naming that preview AND
-        // that reference, so a link left pointing at the light comparison would file the wrong one
-        // from the dark lane. Off the reference lane there is no focused pair to name, and it falls
-        // back to the viewer's own report.
+        // The Bugs column's "+ file" follows the shown pair, since the focused page files against
+        // that preview and reference. Off the reference lane it falls back to the viewer's report.
         const report = row.querySelector<HTMLAnchorElement>(
             ".cp-compare-bug-new",
         );
@@ -874,10 +753,8 @@ export class CompareWall extends ControllerElement {
                     : "";
             report.href = focused || report.dataset.bugFallback || report.href;
         }
-        // Exact issue pills travel with the same preview variant as the pictures. The server
-        // serializes every real theme variant in the row so changing theme does not require a
-        // request; only the pill naming the preview now on screen is exposed. Component-wide pills
-        // remain visible across the switch.
+        // Exact issue pills follow the shown preview variant (the server serializes every theme
+        // variant); component-wide pills stay visible.
         const activePreview = sources("preview", variant);
         for (const issue of row.querySelectorAll<HTMLElement>(
             '[data-bug-scope="variant"]',
@@ -909,16 +786,12 @@ export class CompareWall extends ControllerElement {
         } else {
             vector.hidden = true;
             canvas.hidden = false;
-            // The Remote Compose lane paints a canvas rather than loading a raster, and its size is
-            // the document's rather than a file's — nothing to report, so the caption is cleared
-            // instead of being left with the previous lane's numbers under a different picture.
+            // The RC lane paints a canvas with no file size, so clear the caption.
             stampSize(row, "target", null);
         }
         if (diff) {
-            // Blanked before the run, not just repainted after it: the map is only redrawn when the
-            // measurement succeeds, so a row that goes unmeasurable — or a lane switch away from the
-            // reference — would otherwise leave the PREVIOUS pair's magenta standing beside the new
-            // render, which reads as a finding rather than as stale paint.
+            // Blank the map before the run: it's only redrawn on success, so a failed or switched
+            // row would keep the previous pair's magenta.
             diff.width = 0;
             diff.height = 0;
             diff.setAttribute(
@@ -933,13 +806,9 @@ export class CompareWall extends ControllerElement {
     }
 
     private async scoreRow(row: HTMLElement, runId: number): Promise<void> {
-        // Nothing below may touch the row unless this chain is still the current one. Bumping
-        // `sequence` on a lane switch stops an abandoned run's RESULTS from landing, but the chain
-        // itself keeps walking its remaining rows — and it writes to the row on the way past: the
-        // score cell's "comparing…", and the result. A stale chain arriving behind a finished one
-        // therefore wiped rows the visitor was already reading and left them that way, because the
-        // guard further down then discarded the very measurement that would have filled them back
-        // in. Checked here, an abandoned chain costs one comparison per remaining row and no paint.
+        // Touch nothing unless this chain is current. Bumping `sequence` stops an abandoned run's
+        // results, but its chain keeps walking and would otherwise blank rows the visitor is
+        // reading.
         if (runId !== this.sequence) return;
         const sources = this.sourcesOf(row);
         const variant = variantFor(
@@ -953,9 +822,7 @@ export class CompareWall extends ControllerElement {
         const canvas = row.querySelector<HTMLCanvasElement>(".cp-compare-rc");
         const diff = row.querySelector<HTMLCanvasElement>(".cp-compare-diff");
         if (!pngUrl || !candidateUrl || !score || !canvas) return;
-        // A row that arrived with a published score keeps showing it while this one is taken.
-        // Blanking it to "comparing…" would spend the very thing carrying it is for: the wall is
-        // legible and ordered before this chain — which walks the rows one at a time — reaches it.
+        // A row with a published score keeps showing it while being measured.
         if (!row.hasAttribute("data-score")) {
             score.textContent = "comparing…";
             score.className = "cp-compare-score";
@@ -971,18 +838,13 @@ export class CompareWall extends ControllerElement {
                 Boolean(diff),
             );
             if (runId !== this.sequence) return;
-            // Only NOW does the map reach the row. `measure` drew it into a canvas of its own, and
-            // that ordering is the whole point: the abandoned lane's rows are still in flight when a
-            // switch starts a second chain over the same elements, so a comparison that painted the
-            // shared canvas before this check could land after the new one and leave the old theme's
-            // magenta beside the new render and the new percentage — the stale-paint-reads-as-a-
-            // finding failure, arriving by the one route blanking the canvas up front cannot close.
+            // Only now does the map reach the row: `measure` drew it into its own canvas, so an
+            // abandoned chain's late result can't paint stale magenta after the current check.
             if (diff && measured.map) this.paintMap(measured.map, diff);
             row.setAttribute("data-score", String(measured.percent));
             score.textContent = `${measured.percent.toFixed(1)}%`;
             score.className = `cp-compare-score cp-compare-score--${grade(measured.percent)}`;
-            // Measured here now, so the published marking and the note that went with it go — the
-            // geometry tooltip below is written over a cleared title rather than over that note.
+            // Measured now, so the published marking and its note go.
             score.removeAttribute("data-score-source");
             score.title = "";
             if (typeof measured.geometry === "number") {
@@ -999,11 +861,8 @@ export class CompareWall extends ControllerElement {
             }
         } catch {
             if (runId !== this.sequence) return;
-            // A PUBLISHED score outlives a failed measurement. The delivery branch scored this
-            // exact pair with this exact scorer, so a throw here is a fact about this browser — a
-            // fetch that failed, a canvas it would not give us — and not about the pair. Replacing
-            // a real number with "unavailable" would lose it and sort the row to the top as though
-            // nobody had ever measured it.
+            // A published score survives a failed measurement: the failure is about this browser
+            // (fetch, canvas), not the pair.
             if (score.getAttribute("data-score-source") === "published") return;
             // `-1` rather than dropping the row: an unmeasurable pair sorts to the top, because it
             // is the one nobody is looking at.
@@ -1015,11 +874,8 @@ export class CompareWall extends ControllerElement {
     }
 
     /**
-     * The comparison handle, read HERE rather than cached at install.
-     *
-     * `format-compare.js` publishes the global from its own script tag, and this page emits the
-     * components bundle first — so an element that cached the handle when it upgraded would cache
-     * `null` and every row would read "unavailable", silently, on a page that otherwise looks fine.
+     * The comparison handle, read here rather than at install: `format-compare.js` loads after the
+     * components bundle, so a handle cached at upgrade would be `null`.
      */
     private async measure(
         format: Format,
@@ -1034,9 +890,8 @@ export class CompareWall extends ControllerElement {
     }> {
         const compare = compareApi();
         if (!compare) throw new Error("no scorer");
-        // The vector lanes score a render against an export of that same render, so they share its
-        // geometry by construction and report a bare percentage. Only the reference lane compares
-        // independently-authored artwork, and only it carries a geometry figure.
+        // Vector lanes share the render's geometry by construction and report a bare percentage;
+        // only the reference lane carries a geometry figure.
         if (format === "svg") {
             return {
                 percent: await compare.scoreSvgUrls(pngUrl, candidateUrl),
@@ -1044,15 +899,9 @@ export class CompareWall extends ControllerElement {
         }
         if (format === "reference" || format === "parallel") {
             if (!withMap) return compare.scoreImageUrls(candidateUrl, pngUrl);
-            // The same composition the detail page measures with, for the same reason: normalise
-            // the pair ONCE, then diff and score those frames, so the map in the middle column and
-            // the percentage at the end of the row are describing the same pixels. The number is
-            // unchanged — `compareImageUrls` scores the decoded originals, which is what
-            // `scoreImageUrls` did with its own two fetches.
-            //
-            // Painted into a canvas belonging to THIS call rather than to the row: it is handed back
-            // for the caller to copy in once the run has been validated, and it is thrown away
-            // afterwards instead of being retained per row at the normalised frame's full size.
+            // Normalise the pair once, then diff and score those frames, so the map and percentage
+            // describe the same pixels. Painted into a canvas owned by this call and copied in once
+            // the run is validated, then discarded.
             const map = document.createElement("canvas");
             const result = await compareImageUrls(
                 compare,
@@ -1069,11 +918,9 @@ export class CompareWall extends ControllerElement {
     }
 
     /**
-     * Copy a freshly-measured delta map into the row's canvas, bounded to {@link MAP_MAX_SIDE}.
-     *
-     * The dimensions are set before the context is asked for, so a row still reports a painted map
-     * even where a 2D context is unavailable — that is the state a caller reads to tell a measured
-     * row from a blanked one, and it must not depend on the drawing itself succeeding.
+     * Copy a measured delta map into the row's canvas, bounded to {@link MAP_MAX_SIDE}. Dimensions
+     * are set before the context is requested, so a row reports a painted map even without a 2D
+     * context.
      */
     private paintMap(
         source: HTMLCanvasElement,
@@ -1131,11 +978,9 @@ export class CompareWall extends ControllerElement {
         canvas: HTMLCanvasElement,
         compare: NonNullable<ReturnType<typeof compareApi>>,
     ): Promise<number> {
-        // The page registers the vendored faces the player's generic-family stacks name;
-        // `cpRcFonts.ready()` is what actually LOADS them, since a canvas neither drives a lazy
-        // `@font-face` nor repaints when one arrives. Unawaited, this lane would score the document
-        // drawn in the visitor's own `sans-serif` against a PNG baked with Roboto — a permanent
-        // residual that reads as a layout defect.
+        // Await `cpRcFonts.ready()`: a canvas neither triggers lazy `@font-face` loads nor
+        // repaints, so the document would be scored in the visitor's own sans-serif against a
+        // Roboto PNG.
         const [, png, response] = await Promise.all([
             this.ensureRcPlayer(),
             compare.loadImage(pngUrl),
@@ -1171,17 +1016,9 @@ declare global {
 
 /** A row's picture cell, by its own class — position is what we are about to change. */
 /**
- * Say what a picture's own pixel size is, under the box it was fitted into.
- *
- * The two panels are one fixed frame each (`serve.css`, `.cp-compare-shot`), so a baseline exported
- * at a different scale no longer *looks* bigger than the render — which removes a false finding and
- * introduces a fair question, "how big are these actually?". This answers it from the decoded
- * raster rather than from anything the server printed, because the wall chooses which theme variant
- * of the pair is on screen.
- *
- * `null` clears the caption: a lane that paints a canvas has no file size to report, and leaving
- * the previous lane's numbers under a different picture would be a wrong answer rather than a
- * missing one.
+ * Caption a picture's own pixel size under its fixed frame (panels are a fixed box, so scale
+ * differences aren't visible). Read from the decoded raster since the wall chooses the theme
+ * variant. `null` clears it (canvas lanes have no file size).
  */
 function stampSize(
     row: HTMLElement,
@@ -1211,15 +1048,9 @@ function cellOf(row: HTMLElement, selector: string): HTMLElement | null {
 }
 
 /**
- * Ensure [spec] sits before [render] when [specFirst], else after it, with [middle] between them.
- *
- * Both have to be present and siblings for there to be an order at all — a table rendered with the
- * pair in one cell (or with one of them absent) is left exactly as it is rather than half-moved.
- *
- * [middle] is the delta map, and it has to be part of THIS decision rather than left where the
- * server put it: it is only a diff of the two pictures if it sits between them, and swapping a pair
- * that had something parked in the middle would otherwise shunt that something to the end. Absent
- * or in another row, it is ignored and the pair is ordered on its own.
+ * Ensure [spec] precedes [render] when [specFirst], else follows it, with [middle] (the delta map)
+ * between them. Both must be present siblings, or the row is left untouched. [middle] is ignored if
+ * absent or elsewhere.
  */
 function lead(
     spec: HTMLElement | null,

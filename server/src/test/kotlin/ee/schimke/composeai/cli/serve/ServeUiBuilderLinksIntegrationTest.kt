@@ -35,21 +35,12 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.junit.jupiter.api.io.TempDir
 
 /**
- * What a design is for, through both doors it is reachable by: the panel's REST calls and an
- * agent's MCP tools.
- *
- * ## Why an integration test rather than unit ones
- *
- * The store's own rules — what a link may be, what an empty record means — are unit-tested next
- * door. What cannot be unit-tested is the claim the feature makes: that the record is gated by the
- * *design's* access control rather than by the route's capability alone, that an agent opening a
- * design is told what it is for without asking, and that the reverse lookup answers a question
- * about designs the caller can actually open. Every one of those is wiring, and every one of them
- * fails silently against a mock.
- *
- * So this starts the real server, wired the way `ServeRunner` wires it, with three credentials: the
- * operator, a viewer who may read the surface and not write it, and a stranger who may do both and
- * owns a design of their own.
+ * What a design is for, through the panel's REST calls and an agent's MCP tools. An integration
+ * test because the claims are wiring: the record is gated by the design's access control, not just
+ * the route capability; an agent opening a design is told its purpose; and the reverse lookup only
+ * covers openable designs. Starts the real server as `ServeRunner` wires it, with three
+ * credentials: the operator, a read-only viewer, and a stranger with every capability who owns a
+ * design.
  */
 class ServeUiBuilderLinksIntegrationTest {
   @TempDir lateinit var stateDirectory: Path
@@ -238,9 +229,8 @@ class ServeUiBuilderLinksIntegrationTest {
     createDesign(server, OPERATOR_TOKEN, DESIGN_ID)
     links(server, OPERATOR_TOKEN, "PUT", designPath(DESIGN_ID), """{"issue":"$ISSUE"}""")
 
-    // The stranger holds every capability this host hands out, and is shared in as a VIEWER. That
-    // is exactly the actor the route capability alone could not tell apart from an editor: a
-    // repository-authorised session or an approved agent grant passes the WRITE gate on the door.
+    // The stranger has every capability but is shared in as a VIEWER — the actor the route
+    // capability alone cannot distinguish from an editor.
     envelope(
       server,
       ServeUiBuilderMcp.SHARE_DESIGN,
@@ -345,9 +335,8 @@ class ServeUiBuilderLinksIntegrationTest {
     createDesign(server, STRANGER_TOKEN, OTHER_DESIGN_ID)
     links(server, STRANGER_TOKEN, "PUT", designPath(OTHER_DESIGN_ID), """{"issue":"$ISSUE"}""")
 
-    // The service refuses, and a refusal is an ordinary reply envelope rather than a thrown error
-    // — so the splice has to read the refusal, or it hands a private issue URL to anyone holding a
-    // read capability who can guess a design id.
+    // A refusal is an ordinary reply envelope, so the splice must read it, or a private issue URL
+    // leaks to anyone guessing a design id.
     val refused =
       envelope(server, ServeUiBuilderMcp.GET_DESIGN, """{"designId":"$OTHER_DESIGN_ID"}""")
     assertEquals(null, Json.parseToJsonElement(refused).jsonObject["links"], refused)
@@ -503,12 +492,8 @@ class ServeUiBuilderLinksIntegrationTest {
   }
 
   /**
-   * The operator, a read-only viewer of this surface, and a stranger who holds everything it hands
-   * out.
-   *
-   * A stand-in for the real identity lane, which reads GitHub sessions and agent grants: what these
-   * tests are about is which of the two gates refuses — the route's capability, or the design's own
-   * access control — and that needs three credentials rather than one real one.
+   * The operator, a read-only viewer, and a stranger with every capability: a stand-in for the real
+   * identity lane, since these tests are about which gate refuses.
    */
   private fun threeCredentials(): ServeUiBuilderAuthorization =
     ServeUiBuilderAuthorization { call, capability, presented ->

@@ -27,8 +27,8 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 
 /**
- * Coverage for [ServeCatalogStore] — fetching a published `design-artifacts/<system>` catalog and
- * registering it as a read-only session, trusted-by-origin when the branch is in the trust store.
+ * Coverage for [ServeCatalogStore]: fetching a published `design-artifacts/<system>` catalog and
+ * registering it as a read-only session, trusted by origin when the branch is in the trust store.
  * The network is stubbed via the injected fetcher.
  */
 class ServeCatalogStoreTest {
@@ -37,8 +37,8 @@ class ServeCatalogStoreTest {
     Files.createTempDirectory("catalog").toFile().also { it.deleteOnExit() }
 
   /**
-   * Where a store rooted at [root] holds the blob whose sha256 is [sha] — the default
-   * [CatalogBlobPool] location, which is the store root plus its own subdirectory.
+   * Where a store rooted at [root] holds the blob with sha256 [sha] (the default [CatalogBlobPool]
+   * location).
    */
   private fun blobFile(root: File, sha: String): File =
     File(File(root, ServeCatalogStore.BLOB_CACHE_DIR), "${CatalogBlobPool.CONTENT_DIR}/$sha")
@@ -138,8 +138,7 @@ class ServeCatalogStoreTest {
   @Test
   fun `a function-name hero resolves through the images' daemon preview ids`() {
     // A @CatalogVariant function publishes under its parent's slug, so neither the exact-id nor the
-    // componentId-slug path can find it — glimmer-catalog's `CardActionSticker` fell through to the
-    // server's own pick (a lone Button) this way.
+    // componentId-slug path finds it.
     assertEquals(
       "card__ideal__default__content-action",
       heroOf(glimmerCatalog("CardActionSticker")),
@@ -276,11 +275,9 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `the image cap rejects a catalog instead of silently truncating it`() {
-    // Fetching lazily makes the ceiling count DECLARED previews rather than successfully fetched
-    // ones: whether an image can be had isn't known at load time any more, and finding out would
-    // mean fetching everything — the thing lazy loading exists to avoid. A partial catalog is not
-    // a safe fallback, though: its later components disappear from navigation with no visible
-    // failure. Reject the generation before registration instead.
+    // Lazy fetching makes the ceiling count declared previews. A partial catalog isn't a safe
+    // fallback (components silently vanish from navigation), so the generation is rejected before
+    // registration.
     val trust =
       TrustStore(
         branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"))
@@ -352,8 +349,8 @@ class ServeCatalogStoreTest {
   }
 
   /**
-   * A catalog whose one component publishes a still, a capture beside it, and a second capture
-   * whose path tries to climb out of the motion directory.
+   * A catalog whose component publishes a still, a capture, and a second capture whose path tries
+   * to escape the motion directory.
    */
   private val motionCatalogJson =
     """
@@ -400,9 +397,7 @@ class ServeCatalogStoreTest {
     assertEquals("Toggle off and back on.", motion.caption)
     assertEquals(".apng", motion.extension)
 
-    // Nothing was fetched to publish it. A capture is one to two orders of magnitude heavier than
-    // the sticker beside it and most readers never open one, so paying for it at registration would
-    // be the whole cost of the feature spent on nobody.
+    // Nothing was fetched to publish it: captures are heavy and rarely opened.
     assertEquals(0, requested.count { it.endsWith(".apng") })
 
     // It lands on first watch, and only once — the second read comes off disk.
@@ -435,9 +430,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a catalog publishes before its baked vectors are fetched`() {
-    // The vectors are the last bulk fetch on the publish path — one per image plus one per slug.
-    // Publishing must not wait for them: the catalog serves (uncropped, briefly) and the pass fills
-    // them behind it. Captured rather than run so the assertion is about ordering, not timing.
+    // Vector fetches must not block publishing; the deferred pass fills them. Captured rather than
+    // run so the assertion is about ordering.
     val deferred = mutableListOf<Runnable>()
     val requested = CopyOnWriteArrayList<String>()
     val result =
@@ -458,9 +452,8 @@ class ServeCatalogStoreTest {
         .load("compose-m3")
 
     assertTrue(result is ServeCatalogStore.Result.Ok)
-    // One probe decided the lane exists; the other ~8 vectors have not been asked for yet.
-    // The probe samples this catalog's single component — its per-variant vector plus the slug
-    // fallback — and stops. The remaining ~8 vectors have not been asked for yet.
+    // One probe (the component's per-variant vector plus the slug fallback) decided the lane
+    // exists; the rest haven't been requested.
     assertEquals(
       2,
       requested.count { it.endsWith(".svg") },
@@ -478,9 +471,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `computing thumbnail crops never fetches a cold preview`() {
-    // The landing page computes a crop for EVERY card while building its HTML. If that filled
-    // missing pixels, the first page request would serially download a whole cold catalog on the
-    // request thread — reintroducing the stall this lazy path exists to remove, just moved.
+    // The landing computes a crop for every card; filling missing pixels there would serially
+    // download a cold catalog on the request thread.
     val requested = CopyOnWriteArrayList<String>()
     store(
         TrustStore.EMPTY,
@@ -553,9 +545,8 @@ class ServeCatalogStoreTest {
     // This catalog carries no liveBundle, so it's registered baked-only and records WHY — surfaced
     // by the viewer banner + /api/previews so a visitor sees it's snapshot-only, not guessing.
     assertEquals(listOf(ServeDegradation.CATALOG_BAKED_ONLY), host.degradations.map { it.code })
-    // The traversal entry (../../etc/passwd.png) is rejected; only the two image-dir PNGs land, and
-    // their ids are flattened to a single route-safe segment (the subdir '/' → '__') so /p/{name}
-    // and /render/{name}.png can actually open them.
+    // The traversal entry is rejected; the two image-dir PNGs land with ids flattened to one
+    // route-safe segment ('/' → '__').
     assertEquals(
       setOf("button-filled__ideal__default__dark", "button-filled__ideal__default__light"),
       host.previews.map { it.id }.toSet(),
@@ -617,11 +608,9 @@ class ServeCatalogStoreTest {
   }
 
   /**
-   * A served catalog is a fresh staging tree assembled from explicitly fetched parts, so a
-   * published file nobody copies is invisible to the host no matter what the producer wrote. The
-   * parity feed is exactly that kind of file, and getting this wrong is silent: the `/parity` view
-   * still renders, just coverage-only, on every *published* catalog — which is every catalog the
-   * feature exists for.
+   * A served catalog is assembled from explicitly fetched parts, so an uncopied file is invisible.
+   * The parity feed must be staged, or `/parity` silently renders coverage-only on every published
+   * catalog.
    */
   @Test
   fun `catalog stages the published parity activity feed`() {
@@ -722,10 +711,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `catalog stages the published parity verdict`() {
-    // The staging path is where this feature is invisible when it is missing: the host reads the
-    // staged tree, so a manifest nothing fetches is one it correctly reports as absent, and the
-    // verdict panel would be dark on every published catalog — the one environment it exists for —
-    // with no error anywhere to say why.
+    // A manifest nothing fetches is correctly reported absent by the host, leaving the verdict
+    // panel silently dark on published catalogs.
     val root = tempRoot()
     val requested = CopyOnWriteArrayList<String>()
     val catalog =
@@ -779,9 +766,8 @@ class ServeCatalogStoreTest {
   }
 
   /**
-   * A document the derivation refuses **whole** — an unknown document-level member. Using it is
-   * what makes "the index was copied" distinguishable from "the list was re-derived": if the
-   * artifacts arrive, only the index can have named them.
+   * A document the derivation refuses whole (an unknown document-level member): if its artifacts
+   * arrive, only the index can have named them.
    */
   private val DERIVATION_REJECTS =
     """
@@ -791,9 +777,7 @@ class ServeCatalogStoreTest {
     """
       .trimIndent()
 
-  /**
-   * The same records in a document the derivation happily reads, for the mirror-image assertion.
-   */
+  /** The same records in a document the derivation accepts, for the mirror assertion. */
   private val DERIVATION_ACCEPTS =
     """
     {"schema":"compose-preview-known-differences/v1","acceptances":[
@@ -840,12 +824,9 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a published artifact index is copied, not derived from the contract`() {
-    // The point of the index. Deriving the fetch list from the document means mirroring every
-    // pre-read refusal the engine has, and a mirror that drifts stricter starves a legal record of
-    // its artifacts. The producer wrote the files; it can simply say which.
-    //
-    // The document here carries an unknown member, which the derivation refuses whole — so if the
-    // artifacts arrive, the list came from the index and nothing re-derived it.
+    // The index's point: deriving the fetch list means mirroring every engine refusal, and a
+    // stricter mirror starves legal records. The document carries an unknown member, so arriving
+    // artifacts prove the index was used.
     val (host, requested) =
       loadWithArtifactIndex(
         """
@@ -894,11 +875,9 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `an index does not stage artifacts for a document past the byte ceiling`() {
-    // The transport's envelope is 25x the contract's, so a document between the two arrives intact
-    // and its index arrives with it — but the reader answers `TooLarge` and the engine refuses the
-    // document whole, reading not one artifact. Preferring the index walked straight past the
-    // length guard that made that cheap, so 512 individually legal files could be fetched and
-    // staged on every refresh for a verdict that names none of them.
+    // A document between the contract limit and the transport's 25x envelope arrives intact with
+    // its index, but the reader answers `TooLarge` and reads no artifact. The length guard must
+    // apply before the index, or up to 512 files are fetched per refresh for nothing.
     val oversized =
       """{"schema":"compose-preview-known-differences/v1","acceptances":[],"pad":"""" +
         "x".repeat(ServeKnownDifferences.MAX_DOCUMENT_BYTES) +
@@ -921,14 +900,9 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `an index with a wrongly typed entry falls back rather than staging nothing`() {
-    // Skipping a malformed entry looks harmless and is the opposite: the list reduces to a shorter
-    // one — possibly empty — and an empty list is honoured as the producer saying it carried
-    // nothing. A document naming perfectly good artifacts would then stage none of them and every
-    // record would read as `artifact-unreadable`, which is the changed-verdict failure reached
-    // through the fallback written to prevent it.
-    // `[null]` rather than `["glyph/mask.png", null]`: with a surviving entry, skipping and
-    // rejecting both end up fetching that entry, so the assertion would pass either way and prove
-    // nothing. The list that reduces to *empty* is the one where the two behaviours diverge.
+    // Skipping a malformed entry can reduce the list to empty, which reads as "carried nothing" and
+    // makes every record `artifact-unreadable`. `[null]` is the case where skipping and rejecting
+    // diverge.
     val (_, requested) =
       loadWithArtifactIndex(
         """{"schema":"compose-preview-known-difference-artifacts/v1","artifacts":[null]}""",
@@ -944,14 +918,9 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `an index naming two spellings of one file falls back`() {
-    // `glyph/mask.png` and `glyph/MASK.PNG` are distinct strings, both portable, and on Windows or
-    // a default macOS volume they are one file. The plan is executed concurrently, so staging both
-    // schedules two workers writing the same path — last writer wins, and the canonical spelling
-    // left behind may be the one the reader then rejects for case. A record's real artifact can be
-    // overwritten by a sibling the document never named, differently on each refresh.
-    //
-    // Reachable through the index in particular, because it may carry siblings the document does
-    // not name.
+    // `glyph/mask.png` and `glyph/MASK.PNG` are one file on Windows / default macOS, and the plan
+    // runs concurrently, so staging both is last-writer-wins. Reachable through the index, which
+    // may name siblings the document doesn't.
     val (_, requested) =
       loadWithArtifactIndex(
         """
@@ -976,17 +945,9 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `the derivation stages one write per file, and keeps the rest of the document`() {
-    // The same hazard one layer down, where the index's answer is not available. A record naming
-    // `mask.png` and `MASK.PNG` derives two portable paths fetched from two URLs that are ONE file
-    // on Windows and on a default macOS volume; the plan runs concurrently, so staging both leaves
-    // behind whichever worker returned last — and the canonical spelling on disk may be the one the
-    // reader then rejects for case.
-    //
-    // Rejecting the whole list the way `publishedArtifactIndex` does is NOT available here: an
-    // index that is refused falls back to the derivation, while a derivation that is refused leaves
-    // nothing, so every legal record in the document would lose its artifacts. First spelling wins
-    // instead — which drops a path only when another path in the same plan already claims that
-    // file, and makes the outcome a function of the document rather than of fetch timing.
+    // The same hazard via derivation. Rejecting the whole list isn't possible here (a refused
+    // derivation leaves nothing), so the first spelling wins, making the outcome a function of the
+    // document, not fetch timing.
     val document =
       """
       {"schema":"compose-preview-known-differences/v1","acceptances":[
@@ -1038,9 +999,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a malformed index falls back to deriving rather than staging nothing`() {
-    // The fail-soft direction matters. Treating an unreadable index as an empty list would let one
-    // bad file silently strip every record of its artifacts — the changed-verdict failure the whole
-    // change exists to remove. So a wrong schema means "this producer published no usable index".
+    // An unreadable index means "no usable index" (fall back), not an empty list, which would strip
+    // every record's artifacts.
     val (host, _) =
       loadWithArtifactIndex("""{"schema":"something-else/v1","artifacts":["glyph/mask.png"]}""")
 
@@ -1053,12 +1013,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `an index that names nothing stages nothing`() {
-    // An empty list is a statement, not an absence: the producer published an index and carried no
-    // artifacts. Falling back to the derivation here would make a producer that says "nothing"
-    // indistinguishable from one that says nothing at all.
-    // The document here is one the derivation *accepts* and would derive two artifacts from, so a
-    // fallback is visible: if anything under the artifact root is fetched, the empty list was
-    // treated as an absence.
+    // An empty list is a statement ("nothing carried"), not an absence. The document is one the
+    // derivation accepts, so any fetch under the artifact root would reveal a fallback.
     val (_, requested) =
       loadWithArtifactIndex(
         """{"schema":"compose-preview-known-difference-artifacts/v1","artifacts":[]}""",
@@ -1073,9 +1029,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `catalog stages the published known differences, document and artifacts`() {
-    // The failure this guards is silent: `knownDifferences()` reads the staging tree, so a document
-    // nobody copies makes the comparison band, the dashboard audit, the `/parity` availability lane
-    // and the landing link all behave exactly as they do for a catalog that accepts nothing.
+    // `knownDifferences()` reads the staging tree, so an uncopied document silently looks like a
+    // catalog that accepts nothing.
     val root = tempRoot()
     val requested = CopyOnWriteArrayList<String>()
     val catalog =
@@ -1139,10 +1094,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a document past the acceptance cap stages alone, fetching none of its artifacts`() {
-    // Past `maxAcceptances` the engine refuses the whole document before it reads one artifact, so
-    // every byte fetched for one is held for a result that names no record. Truncating to the cap
-    // would pull the first 256 records' artifacts — up to 4 GiB of individually legal files — on
-    // every refresh, for a document nothing will ever evaluate.
+    // Past `maxAcceptances` the engine refuses the whole document, so no artifact should be
+    // fetched; truncating would pull up to 4 GiB per refresh for nothing.
     val root = tempRoot()
     val requested = CopyOnWriteArrayList<String>()
     val catalog =
@@ -1188,9 +1141,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `an over-sized document stages alone, fetching none of its artifacts`() {
-    // The ceiling one step earlier than the acceptance cap, and the same reasoning: the reader
-    // answers `TooLarge` from the file's length and the route serves 413 without evaluating a
-    // record, so not one of the artifacts this document names can ever be read.
+    // Same for the document-size ceiling: the reader answers `TooLarge` (413) without evaluating a
+    // record.
     val root = tempRoot()
     val requested = CopyOnWriteArrayList<String>()
     val catalog =
@@ -1237,14 +1189,9 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a document the transport refuses by size still reaches the reader as too-large`() {
-    // #4521. The transport's envelope (25 MiB) sits far above the contract's document ceiling
-    // (1 MiB), so a document big enough to be refused *by the transport* is one the reader would
-    // refuse anyway — but it would refuse it as absent, because a read that brings back no bytes
-    // and a branch that published no file were the same `null`. `too-large`/413 and
-    // `unreadable`/404 are different verdicts, and the second one hides why.
-    //
-    // The marker is a length, not a payload: the reader answers from the file's metadata and never
-    // opens it, so nothing here materialises the megabytes it stands for.
+    // A document refused by the transport (25 MiB) must read as too large (413), not absent (404):
+    // a read with no bytes and an unpublished file were the same `null`. The marker is a length, so
+    // nothing materialises the megabytes.
     val root = tempRoot()
     val catalog =
       """
@@ -1283,10 +1230,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `an artifact the transport refuses by size still reaches the reader as too-large`() {
-    // The artifact half of #4521, and the half that costs something in practice: a mask past the
-    // transport's envelope was staged as nothing at all, so the engine reached
-    // `artifact-unreadable` — "the producer published no such file" — for a file the producer did
-    // publish and this server declined to carry.
+    // The artifact half: a mask past the transport envelope was staged as nothing, so the engine
+    // reported `artifact-unreadable` for a file that was published.
     val root = tempRoot()
     val catalog =
       """
@@ -1331,9 +1276,7 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `an absent artifact stays absent — the marker is only for a size refusal`() {
-    // The other side of the same seam, and the reason the marker is opt-in per lane: a 404 must
-    // keep answering `unreadable`. A stager that invented a file for every failure would trade one
-    // collapsed verdict for the opposite one.
+    // ...while a 404 must still answer `unreadable`; the marker is opt-in per lane.
     val root = tempRoot()
     val catalog =
       """
@@ -1371,14 +1314,9 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a refreshing catalog never serves one host against another generation's files`() {
-    // #4522. The live directory is generation-scoped, so a refresh assembles `g<n+1>` while the
-    // registered host keeps reading `g<n>`. What this pins is the property the shared directory
-    // could not have: at every moment between the swap and the new registration, the host that is
-    // serving reads the files it was built for.
-    //
-    // Read through the outgoing host itself, since that is the thing the old shape got wrong: it
-    // kept serving from a directory whose files a later load had already replaced, so a lazily-read
-    // artifact came back as the new generation's bytes under the old generation's metadata.
+    // Generation-scoped live directories: a refresh assembles `g<n+1>` while the registered host
+    // keeps reading `g<n>`, so the serving host always reads the files it was built for. Read
+    // through the outgoing host, which a shared directory got wrong.
     val root = tempRoot()
     val catalog = { marker: String ->
       """
@@ -1449,11 +1387,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a document the engine refuses whole names nothing to fetch`() {
-    // Every one of these is a rejection of the *file*: the engine reaches it before `readArtifact`
-    // is called once, and the result carries no `statuses` at all. So a stager that read the fetch
-    // list out of one anyway would pull up to 256 × 2 × 8 MiB of individually legal artifacts, on
-    // every refresh, for a verdict that names not one record — the exhaustion the caps exist to
-    // prevent, reached through the guard itself.
+    // Each is a rejection of the file, reached before `readArtifact`, with no `statuses`; a stager
+    // that fetched anyway would pull up to 256 × 2 × 8 MiB per refresh.
     val record =
       """{"id":"glyph","issue":"https://github.com/yschimke/m3-catalog/issues/40","mask":"mask.png"}"""
     val refused =
@@ -1515,14 +1450,9 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `an id blank only to the JVM does not cost the other records their artifacts`() {
-    // The mirror's one forbidden direction: claiming a rejection the engine would not make starves
-    // legal records of their artifacts and turns them into `artifact-unreadable`.
-    //
-    // `String.isBlank()` delegates to `Character.isWhitespace`, which counts U+001C..U+001F as
-    // whitespace; ECMAScript's `trim()` does not. So this id is keyable to the engine — that record
-    // fails on its own as `id-not-safe` while the rest of the document is read normally — and using
-    // the JVM's definition here would have rejected the whole document and skipped `glyph`'s
-    // artifacts along with it.
+    // The mirror must never claim a rejection the engine wouldn't make. JVM `isBlank()` treats
+    // U+001C..U+001F as whitespace but ECMAScript `trim()` doesn't, so this id is keyable to the
+    // engine (that record fails as `id-not-safe`; the rest are read).
     val root = tempRoot()
     val requested = CopyOnWriteArrayList<String>()
     val document =
@@ -1566,9 +1496,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `an id blank to JavaScript still rejects the document`() {
-    // The other side of the same definition: `trim()` removes the non-breaking U+00A0, which
-    // `Character.isWhitespace` does not. The engine calls this id unkeyable and rejects the
-    // document, so nothing here is worth fetching for.
+    // Conversely `trim()` removes U+00A0, which `Character.isWhitespace` doesn't: the engine
+    // rejects the document, so nothing is worth fetching.
     val root = tempRoot()
     val requested = CopyOnWriteArrayList<String>()
     val document =
@@ -1638,10 +1567,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a throttled optional asset leaves the load incomplete`() {
-    // The load succeeds — every writer beside the required ones is fail-soft, and a catalog missing
-    // its issue index is far better than no catalog. What it must NOT do is look settled: the
-    // absence is ours, not the producer's, so `incomplete` is what stops the refresher recording
-    // this revision as current and never re-reading it.
+    // The load succeeds (optional writers are fail-soft) but is marked `incomplete`, so the
+    // refresher re-reads this revision instead of treating it as settled.
     val (result, asked) = loadWithIssueIndexOutcome(BranchFetch.Throttled(retryAfterSeconds = 5))
     assertTrue(asked.any { it.endsWith("/parity/issues.json") }, "the index was asked for: $asked")
     val ok = result as ServeCatalogStore.Result.Ok
@@ -1650,9 +1577,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `an optional asset the branch does not have leaves the load complete`() {
-    // The other half, and the one that must not regress into needless re-reads: `404` is an answer.
-    // Most catalogs publish no issue index at all, so treating absence as incomplete would put
-    // every one of them into a permanent re-read loop.
+    // `404` is an answer: most catalogs publish no issue index, so it must not mark the load
+    // incomplete.
     val (result, _) = loadWithIssueIndexOutcome(BranchFetch.NotFound)
     val ok = result as ServeCatalogStore.Result.Ok
     assertTrue(!ok.incomplete, "a genuinely absent optional asset is a settled answer")
@@ -1666,12 +1592,9 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a transient failure on a request-time read does not un-settle a concurrent load`() {
-    // `incomplete` speaks for the operation that issued the read, not for the store. Lazy
-    // request-time reads — a capture somebody opened, a pinned asset — run continuously against
-    // the same branch host, so a store-wide signal would let one reader retrying an unavailable
-    // capture keep every complete revision unsettled and force a full reload every polling
-    // interval. That is traffic amplification precisely while the host is unwell, which is the
-    // condition the mechanism exists to survive.
+    // `incomplete` speaks for the operation that issued the read, not the store: lazy request-time
+    // reads run continuously, and a store-wide signal would force full reloads every poll while the
+    // host is unwell.
     val requested = CopyOnWriteArrayList<String>()
     var host: ServeBundleHost? = null
     val watched = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -1718,10 +1641,9 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a throttled post-publish vector fill un-settles the revision`() {
-    // `incomplete` can only speak for what the load itself read. The vector fills run on
-    // `figmaExecutor` AFTER the catalog is published, so a throttle there lands once the result has
-    // been handed back and the branch head recorded — and without this the missing vectors would
-    // wait for the next commit, which is the permanence this whole change exists to end.
+    // `incomplete` covers only what the load read. Vector fills run on `figmaExecutor` after
+    // publishing, so a throttle there must be reported separately or the vectors wait for the next
+    // commit.
     val catalog =
       """
       {"schema":"design-parity-catalog/v1","system":"compose-m3",
@@ -1731,9 +1653,8 @@ class ServeCatalogStoreTest {
         .trimIndent()
     val unsettled = CopyOnWriteArrayList<String>()
     val deferred = mutableListOf<Runnable>()
-    // The publish path itself takes one or two vectors inline (see `scheduleFigmaSvgFetch`) and
-    // leaves the rest to the deferred lane. Throttling only after the load has returned is what
-    // isolates the case under test: a failure the load could not possibly have counted.
+    // The publish path fetches one or two vectors inline; throttling only after load returns
+    // isolates a failure the load couldn't have counted.
     var published = false
     val store =
       ServeCatalogStore(
@@ -1773,10 +1694,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a superseded post-publish lane does not un-settle the revision that replaced it`() {
-    // The lane checks the generation on entry, but it does network I/O afterwards — so a refresh
-    // can land a whole new revision while it is still reading. The entry check cannot see that;
-    // reporting anyway un-settles the *fresh* revision over a throttle belonging to the one it
-    // replaced, costing it a needless full reload. The new revision reports for itself.
+    // The lane checks the generation on entry but does I/O after, so a refresh can land meanwhile;
+    // it must not unsettle the fresh revision over the replaced one's throttle.
     val catalog =
       """
       {"schema":"design-parity-catalog/v1","system":"compose-m3",
@@ -2099,9 +2018,8 @@ class ServeCatalogStoreTest {
       return registered.getValue("compose-m3")
     }
 
-    // The declared token file is fetched off the same branch as the images and projected onto the
-    // chrome's custom properties, so this system's pages carry its crimson rather than the
-    // built-in indigo.
+    // The declared token file is fetched from the branch and projected onto the chrome's custom
+    // properties.
     val themed = load("tokens.dtcg.json").webThemeCss
     assertTrue(
       // Light half of the pair: the projection emits one `light-dark(<light>, <dark>)` declaration
@@ -2131,14 +2049,9 @@ class ServeCatalogStoreTest {
   }
 
   /**
-   * A catalog image whose ONLY metadata is `previewParams` still gets a manifest entry.
-   *
-   * The emission gate lists the metadata worth writing a record for, and `previewParams` was not on
-   * it — so a flat component with no componentId, state, theme, section or knobs was dropped
-   * entirely and its ground, device frame and capture player never reached [ServeBundleHost]. That
-   * was already true of `captureGutter`; it matters more now that a missing record is the
-   * difference between naming the player a bare URL already is and answering unknown
-   * ([ServeHost.bakedRcPlayer]).
+   * A catalog image whose only metadata is `previewParams` still gets a manifest entry, so its
+   * ground, device frame and capture player reach [ServeBundleHost] (and
+   * [ServeHost.bakedRcPlayer]).
    */
   @Test
   fun `an image whose only metadata is previewParams still reaches the manifest`() {
@@ -2308,9 +2221,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a fixedTheme image reaches the browse surface with nothing else declared`() {
-    // A theme specimen declares no knobs and detects no features. `fixedTheme` therefore has to
-    // carry a variants-manifest entry on its own — if it didn't, the specimen would arrive with no
-    // metadata at all and the landing would happily re-render it under a themeProvider override.
+    // A theme specimen declares no knobs or features, so `fixedTheme` must carry its own
+    // variants-manifest entry, or the landing would re-render it under a themeProvider override.
     val declared =
       """
       {"schema":"design-parity-catalog/v1","system":"meshcore","components":[
@@ -2338,9 +2250,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a second-tier image reaches the browse surface as one`() {
-    // Like `fixedTheme`, this has to ride a variants-manifest entry of its own: an exhaustive
-    // matrix cell declares no knobs and detects no features, and if the flag did not carry it the
-    // browse surface would list all ninety of them in the component's tree.
+    // Likewise this flag rides its own entry; otherwise every exhaustive matrix cell would be
+    // listed in the component's tree.
     val declared =
       """
       {"schema":"design-parity-catalog/v1","system":"meshcore","components":[
@@ -2501,9 +2412,9 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a trusted liveBundle catalog hands the builder the catalog-id to daemon-id alias`() {
-    // A catalog that carries a liveBundle and per-image previewId: the store fetches the bundle and
-    // invokes the live builder with the catalog-id → daemon-id alias so it can bridge the two id
-    // namespaces (see ServeCatalogLiveHost). Only the image that declares a previewId is aliased.
+    // A catalog with a liveBundle and per-image previewId: the store fetches the bundle and invokes
+    // the live builder with the catalog-id → daemon-id alias (see ServeCatalogLiveHost). Only
+    // images declaring a previewId are aliased.
     val json =
       """
       {"schema":"design-parity-catalog/v1","system":"compose-m3",
@@ -2697,9 +2608,8 @@ class ServeCatalogStoreTest {
   @Test
   fun `the empty-prefix liveBundle is the primary even when declared after a prefixed one`() {
     val prefix = "module_3a7476__"
-    // The prefixed module comes first: the primary (the runner's unwrapped daemon) must still be
-    // the bundle whose local ids are the catalog's ids, or prefixed ids reach a daemon that does
-    // not know them.
+    // The prefixed module comes first: the primary must be the bundle whose local ids are the
+    // catalog's ids.
     val json =
       """
       {"schema":"design-parity-catalog/v1","system":"all-modules",
@@ -2831,9 +2741,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `live bundles use the larger dedicated download envelope`() {
-    // jetchat (36.5 MB) and jetsnack (51.2 MB) are valid published bundles that exceed the 25 MB
-    // catalog-asset cap. The ordinary fetcher must remain tight for images, while the executable
-    // bundle takes the dedicated 100 MB path shared with uploaded/startup bundles.
+    // jetchat (36.5 MB) and jetsnack (51.2 MB) exceed the 25 MB asset cap; the executable bundle
+    // takes the dedicated 100 MB path, while images stay tight.
     assertTrue(
       ServeCatalogStore.MAX_LIVE_BUNDLE_FETCH_BYTES >= 51_218_125L,
       "the live-bundle cap must accommodate the published jetsnack bundle",
@@ -2846,10 +2755,8 @@ class ServeCatalogStoreTest {
          {"path":"images/button/ideal__default.png","previewId":"ButtonPreview"}]}]}
       """
         .trimIndent()
-    // Written from the `serve-catalog-fetch` pool (up to ASSET_FETCH_CONCURRENCY threads call the
-    // transport at once), so the recorder has to be concurrent and the assertions have to run off a
-    // snapshot — a plain map races put-with-put and iteration-with-put. Insertion order is not
-    // relied on: both assertions select by key.
+    // Written concurrently from the `serve-catalog-fetch` pool, so the recorder is concurrent and
+    // assertions read a snapshot by key.
     val requestedLimits = ConcurrentHashMap<String, Long>()
     // Outcome-shaped like the seam it stands in for: one transport, so no lane can reach the
     // network around an injected one.
@@ -2894,11 +2801,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a trusted liveBundle catalog materialises ir rc docs re-keyed to the catalog id`() {
-    // The live bundle carries the captured Remote Compose document as `ir/<daemon-id>.rc`; the
-    // store
-    // re-keys it to the published catalog id (via the same alias) so the baked host's client-side
-    // canvas lane serves it at `/render/<catalog-id>.rc`. A preview whose daemon twin has no `.rc`
-    // entry stays docless.
+    // The live bundle's `ir/<daemon-id>.rc` is re-keyed to the catalog id (via the alias) and
+    // served at `/render/<catalog-id>.rc`. A preview whose daemon twin has no `.rc` stays docless.
     val root = tempRoot()
     val rcBytes = byteArrayOf(0x52, 0x43, 0x07, 0x08)
     val bundle =
@@ -2958,10 +2862,9 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `the per-preview fetcher fetches a daemon-id's own split bundle beside the liveBundle`() {
-    // The builder is handed a per-preview fetcher: given a daemon-preview id it fetches that
-    // preview's OWN FULL split bundle from <liveBundle.path>/previews/<daemon-id>.png on the same
-    // branch (the default render lane). A hit returns a local file; a miss (no per-preview bundle)
-    // returns null so the caller falls back to the monolithic daemon.
+    // The builder gets a per-preview fetcher: a daemon-preview id fetches that preview's own split
+    // bundle from <liveBundle.path>/previews/<daemon-id>.png; a miss returns null (fall back to the
+    // monolithic daemon).
     val json =
       """
       {"schema":"design-parity-catalog/v1","system":"compose-m3",
@@ -2974,9 +2877,7 @@ class ServeCatalogStoreTest {
       polyglotBundle(
         """{"schemaVersion":8,"backend":"desktop","previewIds":["a"],"coverPreviewId":"a","classpath":[{"kind":"module","path":"classes/app.jar"}],"modulePath":":app","producedBy":"test"}"""
       )
-    // Thread-safe: a catalog load also kicks off background fetch lanes (vectors, the published
-    // rc-compare), so this recorder is written from those threads while the assertions below read
-    // it. A plain ArrayList fails the reads with a ConcurrentModificationException.
+    // Thread-safe: background fetch lanes write this recorder while assertions read it.
     val requested = java.util.concurrent.CopyOnWriteArrayList<String>()
     val fetch: (String) -> ByteArray? = { url ->
       requested += url
@@ -3003,9 +2904,7 @@ class ServeCatalogStoreTest {
         fetch = fetch,
         networkProbe = { url ->
           requested += "HEAD $url"
-          // Outcome-shaped like the seam it stands in for: a probe that answered a bare Boolean
-          // could not tell "absent" from "the branch refused us", which is what left the
-          // executable-bundle lane invisible to /status.json.
+          // Outcome-shaped like the real seam, so "absent" and "refused" are distinguishable.
           if (url.endsWith("bundle/previews/FilledButton_Dark.png")) BranchFetch.Ok(ByteArray(0))
           else BranchFetch.NotFound
         },
@@ -3097,10 +2996,9 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `daemon ids that sanitize to the same stem skip the per-preview lane`() {
-    // `bundle split` disambiguates colliding sanitised ids with -2/-3 suffixes the server can't
-    // reconstruct, so two daemon ids that sanitise to one stem ("Foo Bar" and "Foo_Bar" → Foo_Bar)
-    // must NOT fetch the bare <stem>.png (that's only one of them) — both resolve null and fall
-    // back to the monolithic daemon, which renders every preview correctly.
+    // `bundle split` disambiguates colliding sanitised ids with suffixes the server can't
+    // reconstruct, so two ids sanitising to one stem must both resolve null (falling back to the
+    // monolithic daemon).
     val json =
       """
       {"schema":"design-parity-catalog/v1","system":"compose-m3",
@@ -3145,10 +3043,9 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a trusted liveBundle's externalized fonts are fetched into a cache and materialized`() {
-    // The bundle's manifest declares an externalized font (lifted out of classes/app.jar by
-    // `bundle externalize`); the store must fetch it from bundle/res/<sha>, verify the hash, cache
-    // it under <root>/.res-cache/, and hand the builder a materialized classpath dir where the font
-    // sits at its recorded path so the daemon's `getResourceAsStream("/fonts/…")` resolves.
+    // The bundle declares an externalized font; the store must fetch it from bundle/res/<sha>,
+    // verify the hash, cache it under <root>/.res-cache/, and place it at its recorded path in a
+    // materialized classpath dir so `getResourceAsStream("/fonts/…")` resolves.
     val font = ByteArray(2048) { (it % 131).toByte() }
     val sha =
       java.security.MessageDigest.getInstance("SHA-256").digest(font).joinToString("") {
@@ -3325,11 +3222,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a recorded launch reason is carried into the daemon-startup degradation`() {
-    // The failure this closes: every way a live lane can fail collapsed into one sentence — "the
-    // live bundle daemon could not be started" — while the launch's own explanation went to stderr
-    // and nowhere else. On preview.coo.ee that sentence was all a missing `lib-daemon-desktop/`
-    // ever said, so a deployment gap read exactly like a broken bundle, and telling them apart
-    // needed a shell on the box. The reason now rides the degradation into /status.json.
+    // A failed live lane carries the launch's own explanation into the degradation (and
+    // /status.json) rather than one generic sentence.
     val bundleBytes =
       polyglotBundle(
         manifest =
@@ -3458,21 +3352,16 @@ class ServeCatalogStoreTest {
     }
 
   /** Build a minimal desktop-bundle polyglot (PNG cover + zip) with the given bundle.json. */
-  // ------------------------------------------------------------------------------------------
-  // The blob pool: what a reload and a restart no longer have to re-download.
-  // ------------------------------------------------------------------------------------------
+  // The blob pool: what a reload and a restart no longer re-download.
 
   /** A one-entry commit feed, so a load resolves a delivery commit and pins its reads to it. */
-  // ------------------------------------------------------------------------------------------
   // The asset cache: small commit-pinned reads answered from the pool.
-  // ------------------------------------------------------------------------------------------
 
   @Test
   fun `a pinned load reads its manifests from the pool on the next load`() {
-    // Every asset a load reads is addressed through the delivery commit it resolved first, so the
-    // bytes at that URL are immutable and a second load of the same revision need not ask again.
-    // A branch that HAS moved names a different commit, so its URLs miss and are fetched — the
-    // freshness rule needs no cache logic of its own.
+    // Every asset is read through the resolved delivery commit, so its bytes are immutable and a
+    // second load of the same revision needn't refetch. A moved branch names a new commit, so its
+    // URLs miss.
     val reads = java.util.concurrent.atomic.AtomicLong()
     val json =
       """
@@ -3509,18 +3398,15 @@ class ServeCatalogStoreTest {
     assertTrue(store.load("compose-m3") is ServeCatalogStore.Result.Ok)
 
     assertEquals(1, reads.get(), "the same revision's manifest must not be re-fetched")
-    // Not an exact count: a load also samples a baked image to prove the branch can serve one, and
-    // that read is pinned and cached too. What matters is that the pool answered rather than the
-    // branch, which the manifest count above states precisely.
+    // Not an exact count (a load also samples a baked image, also cached); the point is the pool
+    // answered.
     assertTrue(assertNotNull(store.branchFetchStats.snapshot()).cached > 0)
   }
 
   @Test
   fun `a pinned miss is not asked again on the next load, an un-pinned one is`() {
-    // A catalog declares far more than it publishes; the figma fill alone asks for a vector per
-    // preview. Only hits used to be cached, so every reload re-asked each question whose answer had
-    // been "no" — thousands per catalog. `history.json` stands in for those here: optional, read on
-    // every load, absent from this branch.
+    // A catalog declares far more than it publishes, so negative answers are cached too; otherwise
+    // every reload re-asks thousands of "no" questions. `history.json` stands in for those.
     fun run(serveFeed: Boolean): Long {
       val misses = java.util.concurrent.atomic.AtomicLong()
       val json =
@@ -3607,9 +3493,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a missing asset is not remembered as missing`() {
-    // Only Ok is stored. A NotFound is a statement about one revision that callers cache in their
-    // own terms, and a throttle is a statement about now — caching either would turn a bad minute
-    // into a permanent answer.
+    // Only Ok is stored: a NotFound is per-revision (callers cache it), and a throttle is about
+    // now.
     val pool = CatalogBlobPool(tempRoot())
     val url = "https://raw.githubusercontent.com/o/r/$COMMIT/images/late.png"
     assertFalse(pool.holds(url))
@@ -3648,9 +3533,8 @@ class ServeCatalogStoreTest {
   }
 
   /**
-   * A branch that resolves one commit and serves the catalog + its liveBundle, counting every read
-   * of the bundle itself. Reads are answered under both the pinned and the branch-name base so the
-   * same stub drives a pinned and an un-pinned load.
+   * A branch resolving one commit and serving the catalog and its liveBundle, counting bundle
+   * reads. Answers under both pinned and branch-name bases.
    */
   private fun liveBundleBranch(
     commit: String,
@@ -3676,9 +3560,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a pinned load caches the liveBundle so a reload does not download it again`() {
-    // The reload half of the problem: `load` deletes the per-system directory before swapping
-    // staging over it, so before the pool every regeneration re-pulled a ~100 MB bundle the new
-    // revision may not have changed. A commit-pinned URL names one immutable object, so the second
+    // `load` deletes the per-system directory before swapping, so without the pool every
+    // regeneration re-pulled the ~100 MB bundle; a commit-pinned URL is immutable, so the second
     // load reads the pooled copy.
     val reads = java.util.concurrent.atomic.AtomicLong()
     val store =
@@ -3723,9 +3606,7 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `an un-pinned load caches nothing`() {
-    // The rule the pool depends on: without a resolved delivery commit the base is the branch ref,
-    // which is a moving target. Caching under it would let a regenerated branch be answered with
-    // the bytes it published last week, so an un-pinned load stages exactly as it always did.
+    // Without a resolved commit the base is the moving branch ref, so nothing is cached under it.
     val pool = CatalogBlobPool(tempRoot())
     val reads = java.util.concurrent.atomic.AtomicLong()
     fun store() =
@@ -3757,10 +3638,8 @@ class ServeCatalogStoreTest {
        "signatureKnown":true}]}"""
 
   /**
-   * A served catalog is assembled from explicitly fetched parts, so a record the producer wrote
-   * beside `catalog.json` is invisible to the UI builder unless this store stages it. It is what
-   * lets a served catalog become a component pack without an operator copying a build output onto
-   * the box.
+   * A record beside `catalog.json` is invisible to the UI builder unless staged; staging it lets a
+   * served catalog become a component pack.
    */
   @Test
   fun `catalog stages the declared component record`() {
@@ -4068,9 +3947,8 @@ class ServeCatalogStoreTest {
   }
 
   /**
-   * The Gradle plugin packs the record into every bundle, so a catalog that publishes a live bundle
-   * carries its record whether or not its producer published the file beside `catalog.json` — which
-   * is every catalog rendered by a current plugin, today.
+   * The Gradle plugin packs the record into every bundle, so a live-bundle catalog carries it even
+   * without the published file.
    */
   @Test
   fun `a trusted live bundle supplies the component record where the branch declares none`() {
@@ -4116,9 +3994,8 @@ class ServeCatalogStoreTest {
   }
 
   /**
-   * The UI builder derives a pack at startup, before any catalog has loaded, so it asks for the
-   * record ahead of the load — by the same route the load takes, into a file the next load's sweep
-   * leaves alone.
+   * The UI builder derives a pack at startup, before any load, so it fetches the record by the
+   * load's route into a file the next sweep leaves alone.
    */
   @Test
   fun `a component record can be fetched ahead of any load, from the branch or the bundle`() {
@@ -4317,9 +4194,7 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a per-system sourceRepo override fetches from that repo and attributes to it`() {
-    // Catalog vectors continue fetching on the background executor after load() publishes the
-    // host. Keep the recorder safe while that pass appends, then assert against one locked
-    // snapshot rather than iterating a list that can still be changing.
+    // Vectors keep fetching in the background after load() publishes; assert on a locked snapshot.
     val urls = CopyOnWriteArrayList<String>()
     val trust =
       TrustStore(branches = listOf(TrustedBranch("yschimke/meshcore-mobile", "design-artifacts/*")))
@@ -4336,9 +4211,8 @@ class ServeCatalogStoreTest {
     val result = store.load("meshcore-mobile", sourceRepo = "yschimke/meshcore-mobile")
     val fetchedUrls = synchronized(urls) { urls.toList() }
 
-    // Every fetch went to the override repo's design-artifacts/<system> branch, not the default —
-    // its assets off the raw host, and its publish history off the branch's own commit feed
-    // (github.com, the one fetch this load makes that isn't an asset).
+    // Every fetch went to the override repo's branch: assets from the raw host, history from the
+    // commit feed.
     assertTrue(
       fetchedUrls.all {
         it.startsWith(
@@ -4396,9 +4270,7 @@ class ServeCatalogStoreTest {
     val wasmDir = registeredWasm.getValue("compose-m3")
     assertTrue(File(wasmDir, "index.html").isFile, "index.html landed")
     assertTrue(File(wasmDir, "composeApp.wasm").isFile && File(wasmDir, "skiko.wasm").isFile)
-    // The in-browser Wasm tier IS a live lane (the viewer's Live toggle switches to it), so this
-    // session is NOT baked-only even though it carries no server-side liveBundle — no banner
-    // reason.
+    // The in-browser Wasm tier is a live lane, so this session isn't baked-only.
     assertTrue(
       registered.getValue("compose-m3").degradations.isEmpty(),
       "a Wasm-backed session must not be flagged snapshot-only",
@@ -4407,11 +4279,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a refresh that drops the wasm app withdraws its registration`() {
-    // Generation directories outlive their host by one refresh, so an app the previous generation
-    // registered stays readable after the new host publishes. A registration nobody withdrew would
-    // keep the viewer's "Run in browser" toggle serving the OLD catalog's code beside the new
-    // catalog's pages — and then, once the sweep took that directory, 404 on the same toggle. So
-    // the registration moves with the generation, in both directions.
+    // Generation directories outlive their host by one refresh, so the Wasm registration must move
+    // with the generation, or the toggle serves the old code and later 404s.
     val withWasm = wasmCatalog("\"index.html\",\"composeApp.wasm\",\"skiko.wasm\"")
     val withoutWasm =
       """
@@ -4461,9 +4330,8 @@ class ServeCatalogStoreTest {
     store(TrustStore.EMPTY, fetch = wasmFetcher(catalog, missing = setOf("composeApp.wasm")))
       .load("compose-m3")
     assertTrue(registeredWasm.isEmpty(), "incomplete app must not register")
-    // With no live lane (Wasm failed to register, no liveBundle), the session IS baked-only and
-    // says
-    // so — the flag tracks actual registration, not the mere `webRender` declaration.
+    // With no live lane registered, the session is baked-only; the flag tracks registration, not
+    // the `webRender` declaration.
     assertEquals(
       listOf(ServeDegradation.CATALOG_BAKED_ONLY),
       registered.getValue("compose-m3").degradations.map { it.code },
@@ -4574,11 +4442,11 @@ class ServeCatalogStoreTest {
     )
   }
 
-  // --- deferred (live-only) coverage — issue #2965 ----------------------------------------------
+  // Deferred (live-only) coverage.
 
   /**
-   * A catalog that bakes the dark sticker and defers the light one (a `modePriority` thinning),
-   * declaring a liveBundle so a trusted server can render the deferred entry on demand.
+   * A catalog that bakes the dark sticker and defers the light one, declaring a liveBundle so a
+   * trusted server can render the deferred entry.
    */
   private val deferredJson =
     """
@@ -4610,9 +4478,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a deferred record is aliased and registered as a live-only preview under the live lane`() {
-    // The whole point of #2965: a deferred entry ships no PNG, so it can only be served where a
-    // live daemon can produce it — the baked host the live builder fronts lists it, aliases it to
-    // its daemon twin, and marks it live-only so the composite always routes it to the daemon.
+    // A deferred entry ships no PNG, so the live builder's baked host lists it, aliases it to its
+    // daemon twin and marks it live-only.
     var alias: Map<String, String> = emptyMap()
     var fronted: ServeHost? = null
     val store =
@@ -4657,10 +4524,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a deferred record's second-tier flag reaches the browse surface`() {
-    // A second-tier cell CI declared live-only is described by its deferred record and by nothing
-    // else — it has no image for the components loop to carry the flag on. Without the field the
-    // flag had no route here at all, so exactly the cells `secondary` exists to thin out stayed
-    // listed in the component's variant tree, on the catalogs that defer the most of them.
+    // A live-only second-tier cell has only its deferred record, so the flag must be read from
+    // there or it stays in the variant tree.
     val json =
       """
       {"schema":"design-parity-catalog/v1","system":"compose-m3",
@@ -4703,11 +4568,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a wholly deferred component's pairing reaches the server's parallel lookup`() {
-    // The generator writes a wholly deferred component's `parallel` onto its DEFERRED record —
-    // such a component short-circuits before it ever reaches `components[]`, so that is the only
-    // copy of it in the manifest. Reading the lookup from `components` alone discarded it, and the
-    // deferred card was the one card that could not offer the sibling comparison source on a
-    // catalog that publishes `compareWith` precisely to have it.
+    // A wholly deferred component's `parallel` lives only on its deferred record, so it must be
+    // read from there.
     val json =
       """
       {"schema":"design-parity-catalog/v1","system":"compose-m3",
@@ -4754,12 +4616,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `related links are read off both the component and the deferred record`() {
-    // The reading half of yschimke/compose-ai-tools#5398. `related` is NOT a second `parallel`: it
-    // is a LIST, because a catalog has one rendition to be compared against but any number of
-    // catalogs that are about it — here `compareWith` is already spent on the Remote rendition
-    // while the samples catalog still has to be reachable. Read from the same two lists as
-    // `parallelByComponentId`, and for the same reason: a wholly deferred component carries its
-    // links on the deferred record and nowhere else.
+    // `related` is a list (any number of catalogs about this one), unlike the single `parallel`,
+    // and read from the same two lists for the same reason.
     val json =
       """
       {"schema":"design-parity-catalog/v1","system":"wear-m3-catalog",
@@ -4812,9 +4670,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a component's own pairing outranks one inherited by its deferred variant record`() {
-    // A component that IS in `components[]` states its own pairing; a deferred VARIANT record
-    // sharing its id only inherits one. Components win, the same way the caption lookup resolves
-    // the mirror case.
+    // A component in `components[]` states its own pairing; a deferred variant record sharing its
+    // id only inherits. Components win.
     val json =
       """
       {"schema":"design-parity-catalog/v1","system":"compose-m3",
@@ -4854,9 +4711,7 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a baked-only session hides the deferred previews and records why`() {
-    // Fail-soft (issue #2965 point 5): with no live lane there is nothing to render a deferred
-    // preview from, so it is omitted rather than listed as a card whose every request 404s — and
-    // the session says so, next to the reason it has no live lane at all.
+    // With no live lane, deferred previews are omitted (they'd 404), and the session says why.
     val store =
       ServeCatalogStore(
         root = tempRoot(),
@@ -4879,9 +4734,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `deferred records with no route or no daemon twin are skipped`() {
-    // Three unusable records: no `path` (an older catalog, or one whose export detected naming
-    // drift), a traversing path, and one with no daemon preview to render it. None may reach the
-    // alias or the host.
+    // Three unusable records (no `path`, a traversing path, no daemon preview); none reaches the
+    // alias or host.
     val json =
       """
       {"schema":"design-parity-catalog/v1","system":"compose-m3",
@@ -4917,9 +4771,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `an ambiguity-free single previewId is enough for an older catalog's deferred record`() {
-    // Before the exporter resolved a record's own annotation it recorded only the function's id
-    // list. One id is unambiguous, so it still serves; more than one would be a guess (covered
-    // above) and is skipped.
+    // Older exports recorded only the function's id list: one id is unambiguous and serves; more is
+    // skipped.
     val json =
       """
       {"schema":"design-parity-catalog/v1","system":"compose-m3",
@@ -4949,10 +4802,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `a wholly-deferred catalog loads through its live lane`() {
-    // Every entry `priority: "deferred"` ⇒ the export publishes a catalog with NO baked images and
-    // only `deferred[]`. The empty-images guard must not reject that: it exists to protect a
-    // healthy catalog from an image outage, not to refuse the publish that leans hardest on the
-    // deferred lane.
+    // An all-deferred catalog has no baked images; the empty-images guard (meant for image outages)
+    // must not reject it.
     val json =
       """
       {"schema":"design-parity-catalog/v1","system":"compose-m3",
@@ -4996,9 +4847,8 @@ class ServeCatalogStoreTest {
 
   @Test
   fun `an image outage is still a failure even when the catalog defers coverage`() {
-    // The mirror of the test above: this catalog DECLARES a baked image, so zero fetched images is
-    // an outage — the deferred records must not talk the store into swapping in an empty catalog
-    // over the healthy one it is already serving.
+    // The mirror: this catalog declares a baked image, so zero fetched is an outage and must not
+    // replace the healthy catalog.
     val fetch: (String) -> ByteArray? = { url ->
       when {
         url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") -> deferredJson.toByteArray()

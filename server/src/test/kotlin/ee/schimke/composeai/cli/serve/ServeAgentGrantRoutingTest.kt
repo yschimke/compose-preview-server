@@ -22,14 +22,10 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
 /**
- * The whole grant flow over real HTTP on a **token-gated** server — an agent asks with no
- * credential, the operator approves in the browser, and the agent's bearer then opens the gate that
- * was 404ing a moment earlier.
- *
- * Token-gated rather than GitHub-gated on purpose: it is the configuration where the *approver* is
- * the `--token` holder, so the "who may approve" rule is exercised against something a test can
- * actually present, and the escalation case (an agent trying to approve with its own grant) is
- * reachable end to end.
+ * The grant flow over real HTTP on a token-gated server: an agent asks with no credential, the
+ * operator approves in the browser, and the agent's bearer then opens the gate that was 404ing.
+ * Token-gated because the approver is the `--token` holder, which a test can present, making the
+ * escalation case (an agent approving with its own grant) reachable end to end.
  */
 class ServeAgentGrantRoutingTest {
 
@@ -51,15 +47,9 @@ class ServeAgentGrantRoutingTest {
             "AScY42YAAAAASUVORK5CYII="
         )
     File(dir, "previews/example.png").writeBytes(pixel)
-    // A staged cmp-jvm raster for `example`, so this catalog has one lane that a bare
-    // `?rcPlayer=cmp-jvm` can be answered from without a renderer. Without it every player
-    // selection here would reach a subprocess and the "may replay" half of the gate would be
-    // untestable — the refusal and the admission would both read as 403.
-    //
-    // The staged name is `<lane>/<slot>.png` with a **numeric** slot, which
-    // `ServeRcCompare.isStagedImageName` enforces: a name whose slot is not all digits is refused
-    // before the file is ever read, so `cmp-jvm/example.png` would have staged nothing and this
-    // fixture would have quietly tested the refusal twice.
+    // A staged cmp-jvm raster for `example`, so a bare `?rcPlayer=cmp-jvm` can be answered without
+    // a renderer (testing the "may replay" half of the gate). The slot must be numeric
+    // (`ServeRcCompare.isStagedImageName`), or nothing would stage.
     File(dir, "rc-compare/cmp-jvm").mkdirs()
     File(dir, "rc-compare/cmp-jvm/0.png").writeBytes(pixel)
     File(dir, "rc-compare/index.json")
@@ -261,9 +251,8 @@ class ServeAgentGrantRoutingTest {
   }
 
   /**
-   * Discovery is open, and it is open for one reason: a client that cannot finish `initialize`
-   * cannot reach the tool that asks a human for a credential either, so an agent holding nothing
-   * had nowhere to start but an out-of-band `curl`.
+   * Discovery is open: a client that can't finish `initialize` can't reach the tool that asks a
+   * human for a credential.
    */
   @Test
   fun `an agent with no credential can initialize and list tools`() {
@@ -428,9 +417,8 @@ class ServeAgentGrantRoutingTest {
   }
 
   /**
-   * The whole point: an agent holding nothing bootstraps itself without leaving the protocol.
-   * request_access → a human approves in a browser → poll_access → the token opens the gate that
-   * was answering 401 a moment earlier.
+   * An agent holding nothing bootstraps itself within the protocol: request_access → human approval
+   * → poll_access → the token opens the gate that answered 401.
    */
   @Test
   fun `an agent bootstraps a grant through MCP alone`() {
@@ -606,15 +594,8 @@ class ServeAgentGrantRoutingTest {
   }
 
   /**
-   * The other half of bootstrapping: an agent that cannot set a header still uses what it was
-   * granted.
-   *
-   * `request_access` gave a client with no credential somewhere to start, and left it somewhere it
-   * could not finish. An MCP client fixes its request headers when it connects, so a token handed
-   * back by `poll_access` — mid-session, as a tool result — had nowhere to go: the agent held a
-   * live grant a human had just approved and every gated tool went on refusing it until somebody
-   * edited a config file and restarted the session. Here the token goes back in the way it arrived,
-   * as an argument, and the same call that answered 401 answers.
+   * An agent that can't set a header (MCP clients fix headers at connect) passes the granted token
+   * back as an argument, and the same call that answered 401 now succeeds.
    */
   @Test
   fun `a token obtained in this session is usable in it without a header`() {
@@ -631,9 +612,8 @@ class ServeAgentGrantRoutingTest {
     assertEquals(200, presented.first, presented.second)
     assertEquals(null, json(presented.second)["result"]!!.jsonObject["isError"])
 
-    // Live scope too, not merely the `preview` rung the transport gate asks for: the token the door
-    // accepted is the token the tool behind it is authorized against, or escalation stops at the
-    // door.
+    // Live scope too: the tool behind the door is authorized against the same token, or escalation
+    // stops only at the door.
     val rendered =
       mcpAnonymous(
         """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"catalog":"none","previewId":"none","token":"$token"}}}"""
@@ -795,9 +775,7 @@ class ServeAgentGrantRoutingTest {
   }
 
   /**
-   * A held poll returns the moment a human decides, rather than at the next tick of a client's own
-   * loop. The point is not latency for its own sake: over MCP every poll is a tool call through a
-   * model, so a human taking half a minute costs a dozen round trips unless the server can wait.
+   * A held poll returns as soon as a human decides; over MCP each poll is a model-driven tool call.
    */
   @Test
   fun `a poll can wait for the decision instead of being asked again`() {
@@ -857,8 +835,8 @@ class ServeAgentGrantRoutingTest {
   }
 
   /**
-   * Only `pending` is worth holding open. `unknown` — which is what a WRONG DEVICE SECRET gets —
-   * must answer at once, or guessing a secret becomes a way to occupy a connection for 30 seconds.
+   * Only `pending` is held. `unknown` (a wrong device secret) answers at once, so guessing can't
+   * occupy connections.
    */
   @Test
   fun `a wrong device secret is refused immediately, however long a wait it asks for`() {
@@ -889,12 +867,8 @@ class ServeAgentGrantRoutingTest {
   }
 
   /**
-   * The MCP tool waits by default, and the default is deliberately short.
-   *
-   * A held call only helps if the CLIENT holds it too, and a conservative HTTP client gives up
-   * before this lane would like — OkHttp's default read timeout is 10s, which is what the client in
-   * this very test uses. So the default has to fit inside the tightest common timeout; raising it
-   * towards the maximum would turn a latency improvement into a transport error.
+   * The MCP tool waits by default, briefly: the default must fit within common client read timeouts
+   * (OkHttp's 10s, used here).
    */
   @Test
   fun `poll_access waits by default, and the default fits a conservative client`() {
@@ -947,7 +921,7 @@ class ServeAgentGrantRoutingTest {
         """{"jsonrpc":"2.0","id":2,"method":"resources/list","params":{}}""",
       )
     val resources = json(listed.second)["result"]!!.jsonObject["resources"]!!.jsonArray
-    // The viewer, the library app (#1241) and the two catalogs' previews.
+    // The viewer, the library app and the two catalogs' previews.
     assertEquals(4, resources.size)
     val uri =
       resources
@@ -1292,9 +1266,8 @@ class ServeAgentGrantRoutingTest {
   @Test
   fun `a page served to a grant holder never carries the operator token`() {
     val token = grantedToken()
-    // Every generated link on a token-gated server carries a `?token=`, which is exactly how a
-    // twenty-minute `preview` grant could have walked off with the permanent operator credential.
-    // Each page a grant can reach must therefore be wired with the grant's own token instead.
+    // Every generated link on a token-gated server carries `?token=`, so pages reachable with a
+    // grant must use the grant's own token, never the operator credential.
     for (path in listOf("/", "/status", "/no-such-page")) {
       val (_, body) = get(path, token = token)
       assertFalse(
@@ -1319,9 +1292,8 @@ class ServeAgentGrantRoutingTest {
 
   @Test
   fun `a preview grant cannot open the ingest lanes it was never shown`() {
-    // This server wires no ingest lanes, so the unit under test is the gate itself: a `preview`
-    // grant that satisfies every ordinary route must NOT satisfy the one an operator opted into
-    // for clients contributing content. The consent page says "browse", and it has to mean it.
+    // A `preview` grant must not satisfy the ingest-lane gate an operator opted into; the consent
+    // page says "browse".
     val token = grantedToken(scope = "preview")
     assertEquals(200, get("/status.json", token = token).first)
     assertEquals(404, post("/docs", "{}", token = token).first)
@@ -1330,10 +1302,8 @@ class ServeAgentGrantRoutingTest {
 
   @Test
   fun `a preview grant is refused the live socket even with no github auth configured`() {
-    // The bug this pins: the live gate used to read `githubAuth ?: return false` BEFORE looking at
-    // the grant, so on a box with no OAuth — like this one — every grant sailed through it
-    // regardless of what a human had actually approved. The socket is the live lane, so it is
-    // where the rule is checked.
+    // The live gate used to check `githubAuth` before the grant, so without OAuth every grant
+    // passed it. Checked on the socket, the live lane.
     val refusal = socketCloseReason(grantedToken(scope = "preview"))
     assertTrue(
       refusal.contains("live not approved"),
@@ -1398,9 +1368,8 @@ class ServeAgentGrantRoutingTest {
   @Test
   fun `a preview grant replays a staged player capture but never commissions one`() {
     val preview = grantedToken(scope = "preview")
-    // A **bare** player selection naming a lane this catalog staged is a replay of published bytes
-    // — the same class of thing as the bare PNG above — so it is answered rather than refused. It
-    // used to 403 at the door, which cost a `preview` grant every cell of the compare wall.
+    // A bare player selection naming a staged lane is a replay of published bytes, so it's answered
+    // for a `preview` grant.
     val staged = get("/render/example.png?rcPlayer=cmp-jvm", token = preview)
     assertEquals(200, staged.first)
 
@@ -1408,9 +1377,7 @@ class ServeAgentGrantRoutingTest {
     // subprocess instead, and is refused there.
     assertEquals(403, get("/render/Anything.png?rcPlayer=cmp-jvm", token = preview).first)
 
-    // A client-side backend is not a server-side render lane at all — `ServeOverrides.parse` calls
-    // it a bad parameter before any of this is reached, and that stays a 400 rather than becoming a
-    // scope refusal. Asserted so the two kinds of "no" do not get conflated later.
+    // A client-side backend is a bad parameter (`ServeOverrides.parse`, 400), not a scope refusal.
     assertEquals(400, get("/render/example.png?rcPlayer=cmp-wasm", token = preview).first)
 
     // Still only *bare*. Anything alongside the player selection is a real override again, and
@@ -1430,14 +1397,9 @@ class ServeAgentGrantRoutingTest {
 
   @Test
   fun `an override-free browse is never refused for having no bytes in hand yet`() {
-    // The regression the deferred refusal invited. `bakedRender` is a local-only fast path — it
-    // must not trigger the delivery-branch fetch — so a catalog whose published image has not been
-    // pulled answers null from the `cached` chain and `render` serves it after fetching. Reading
-    // that null as "about to commission" would refuse ordinary browsing on a cold catalog, which
-    // this gate has always admitted and which no grant scope was ever asked about.
-    //
-    // Pinned on a preview this host declares but has no local PNG for, which is the shape that
-    // answers null. The point is only that it is not a 403.
+    // `bakedRender` is local-only, so a cold catalog's not-yet-fetched image answers null from the
+    // `cached` chain and `render` fetches it. That null must not be read as "commissioning a
+    // render": ordinary browsing is never a 403.
     val preview = grantedToken(scope = "preview")
 
     assertTrue(get("/render/example.png", token = preview).first != 403)
@@ -1470,8 +1432,7 @@ class ServeAgentGrantRoutingTest {
   @Test
   fun `a grant in the query is not shadowed by an unrelated bearer`() {
     // `share-preview --mechanism serve` sends the host credential in `?token=` and a GitHub token
-    // in `Authorization: Bearer`. Reading the sources by precedence made the GitHub token hide the
-    // grant, so the browse gate 404'd a caller that was properly authorised.
+    // as a bearer; reading by precedence let the GitHub token hide the grant.
     val token = grantedToken()
     val request =
       Request.Builder()
