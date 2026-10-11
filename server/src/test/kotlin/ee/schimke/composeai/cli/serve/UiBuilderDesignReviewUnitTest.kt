@@ -8,6 +8,7 @@ import ee.schimke.composeai.uibuilder.protocol.CodeCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.ColorTokenValueV1
 import ee.schimke.composeai.uibuilder.protocol.ColorValueV1
 import ee.schimke.composeai.uibuilder.protocol.ComponentCapabilityV1
+import ee.schimke.composeai.uibuilder.protocol.DecimalValueV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignEnvironmentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
@@ -142,6 +143,78 @@ class UiBuilderDesignReviewUnitTest {
     assertTrue(UiBuilderAccessibilityCheck.check(document, emptyMap()).isEmpty())
     val dark = document.copy(environment = document.environment.copy(theme = ThemeV1.DARK))
     assertTrue(UiBuilderAccessibilityCheck.check(dark, emptyMap()).isEmpty())
+  }
+
+  @Test
+  fun `a translucent background over a literal backdrop stays literal in the other theme`() {
+    val document =
+      document(
+        "panel" to
+          DesignNodeV1(
+            id = "panel",
+            componentId = "layout/box",
+            modifiers = listOf(BackgroundModifierV1(ColorValueV1("#FFFFFF"), null)),
+            slots = mapOf("content" to listOf("veil")),
+          ),
+        "veil" to
+          DesignNodeV1(
+            id = "veil",
+            componentId = "layout/box",
+            modifiers = listOf(BackgroundModifierV1(ColorValueV1("#80FFFFFF"), null)),
+            slots = mapOf("content" to listOf("title")),
+          ),
+        "title" to
+          DesignNodeV1(
+            id = "title",
+            componentId = "m3/text",
+            properties =
+              mapOf("text" to StringValueV1("Schedule"), "color" to ColorValueV1("#5F6368")),
+          ),
+      )
+    // White at half alpha over white is white in both themes: no dark-theme backdrop is invented.
+    assertTrue(UiBuilderAccessibilityCheck.check(document, emptyMap()).isEmpty())
+    val dark = document.copy(environment = document.environment.copy(theme = ThemeV1.DARK))
+    assertTrue(UiBuilderAccessibilityCheck.check(dark, emptyMap()).isEmpty())
+  }
+
+  @Test
+  fun `a refused property the catalog requires is not one to remove`() {
+    val field =
+      ComponentCapabilityV1.Builder(
+          "m3/slider",
+          "Slider",
+          "Leaf",
+          WasmCapabilityV1.Builder(JsonPrimitive(false), WasmAdapterStatusV1.SUPPORTED).build(),
+        )
+        .also {
+          it.properties =
+            listOf(
+              PropertyCapabilityV1.Builder("value", JsonPrimitive("number"))
+                .also { property -> property.required = true }
+                .build()
+            )
+        }
+        .build()
+    val document =
+      document(
+        "volume" to
+          DesignNodeV1(
+            id = "volume",
+            componentId = "m3/slider",
+            properties = mapOf("value" to DecimalValueV1(0.4)),
+          )
+      )
+    val place =
+      UiBuilderExportDiagnosticLocation.locate(
+          "node `volume`.value: expected kotlin.Float",
+          null,
+          document,
+          listOf(field),
+        )
+        .single()
+    assertEquals("volume", place.nodeId)
+    assertTrue(place.message.contains("requires `value`"), place.message)
+    assertTrue(!place.message.contains("Remove `value`"), place.message)
   }
 
   @Test

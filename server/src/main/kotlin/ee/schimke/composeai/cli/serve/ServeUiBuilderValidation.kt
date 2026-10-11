@@ -412,24 +412,26 @@ internal object UiBuilderExportDiagnosticLocation {
     val places = places(message, nodeId, document, components)
     if (places.isEmpty()) return listOf(Place(message, nodeId, null))
     return places.map { (node, field) ->
-      val declared =
-        field != null &&
-          document.nodes[node]?.componentId?.let { componentId ->
-            components
-              .firstOrNull { it.componentId == componentId }
-              ?.properties
-              ?.any { it.name == field }
-          } == true
       val componentId = document.nodes[node]?.componentId
-      Place(
-        if (!declared) message
-        else
-          "$message — the pinned catalog declares `$field` on `$componentId`, so the Compose " +
-            "export gate and the catalog disagree: the design is not wrong, this host's export " +
-            "cannot write that property yet. Remove `$field` from `$node` to export now",
-        node,
-        field,
-      )
+      val declared = field?.let { name ->
+        components
+          .firstOrNull { it.componentId == componentId }
+          ?.properties
+          ?.firstOrNull { it.name == name }
+      }
+      val text =
+        when {
+          declared == null -> message
+          declared.required ->
+            "$message — the pinned catalog requires `$field` on `$componentId`, so the Compose " +
+              "export gate and the catalog disagree: the design is not wrong, and `$node` cannot " +
+              "export on this host until the catalog or its export is fixed"
+          else ->
+            "$message — the pinned catalog declares `$field` on `$componentId`, so the Compose " +
+              "export gate and the catalog disagree: the design is not wrong, this host's export " +
+              "cannot write that property yet. Remove `$field` from `$node` to export now"
+        }
+      Place(text, node, field)
     }
   }
 

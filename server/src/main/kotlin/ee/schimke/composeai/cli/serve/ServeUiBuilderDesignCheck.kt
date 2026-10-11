@@ -294,28 +294,60 @@ internal object UiBuilderAccessibilityCheck {
     document: DesignDocumentV1,
     dark: Boolean,
   ): Background? {
+    // The nearest painted layer names the background; a translucent one is composited over what is
+    // actually under it (the next painted ancestor, the environment, and only then the theme's own
+    // background), so a literal backdrop stays literal in both themes.
+    var top: Background? = null
+    val layers = mutableListOf<Resolved>()
     for (candidate in listOf(node) + tree.ancestors(node.id)) {
-      candidate.modifiers
-        .lastOrNull { it is BackgroundModifierV1 }
-        ?.let { (it as BackgroundModifierV1).color }
-        ?.let { resolveColor(it, dark) }
-        ?.takeIf { it.alpha > 0 }
-        ?.let {
-          return Background(it.overOpaque(dark), candidate.id, BackgroundSource.MODIFIER)
-        }
-      if (candidate !== node) {
-        candidate.properties[CONTAINER_COLOR]
+      val painted =
+        candidate.modifiers
+          .lastOrNull { it is BackgroundModifierV1 }
+          ?.let { (it as BackgroundModifierV1).color }
           ?.let { resolveColor(it, dark) }
           ?.takeIf { it.alpha > 0 }
-          ?.let {
-            return Background(it.overOpaque(dark), candidate.id, BackgroundSource.CONTAINER)
-          }
-      }
+          ?.let { it to BackgroundSource.MODIFIER }
+          ?: candidate
+            .takeIf { it !== node }
+            ?.properties
+            ?.get(CONTAINER_COLOR)
+            ?.let { resolveColor(it, dark) }
+            ?.takeIf { it.alpha > 0 }
+            ?.let { it to BackgroundSource.CONTAINER }
+          ?: continue
+      if (top == null) top = Background(painted.first, candidate.id, painted.second)
+      layers += painted.first
+      if (painted.first.alpha == 0xff) break
     }
-    val environment = document.environment.background?.let { resolveColor(it, dark) }
-    return environment?.let {
-      Background(it.overOpaque(dark), ENVIRONMENT_NODE, BackgroundSource.ENVIRONMENT)
+    if (layers.lastOrNull()?.alpha != 0xff) {
+      document.environment.background
+        ?.let { resolveColor(it, dark) }
+        ?.takeIf { it.alpha > 0 }
+        ?.let { environment ->
+          if (top == null)
+            top = Background(environment, ENVIRONMENT_NODE, BackgroundSource.ENVIRONMENT)
+          layers += environment
+        }
     }
+    val named = top ?: return null
+    return Background(flatten(layers, dark), named.nodeId, named.source)
+  }
+
+  /**
+   * [layers], nearest first, painted bottom-up; the theme's background is under a translucent
+   * stack.
+   */
+  private fun flatten(layers: List<Resolved>, dark: Boolean): Resolved {
+    val opaque = layers.last().alpha == 0xff
+    var argb = if (opaque) layers.last().argb else baselineScheme(dark).getValue("background").argb
+    for (layer in (if (opaque) layers.dropLast(1) else layers).asReversed()) {
+      argb = composite(layer.argb, argb)
+    }
+    return Resolved(
+      argb,
+      fromToken = layers.any { it.fromToken },
+      themed = !opaque || layers.any { it.themed },
+    )
   }
 
   private fun isLargeText(node: DesignNodeV1): Boolean {
@@ -340,13 +372,6 @@ internal object UiBuilderAccessibilityCheck {
   ) {
     val alpha: Int
       get() = ((argb shr 24) and 0xff).toInt()
-
-    /** This colour composited over the theme's own background, so a ratio has two opaque ends. */
-    fun overOpaque(dark: Boolean): Resolved {
-      if (alpha == 0xff) return this
-      val base = baselineScheme(dark).getValue("background").argb
-      return Resolved(composite(argb, base), fromToken, themed = true)
-    }
   }
 
   fun resolveColor(value: UiValueV1, dark: Boolean): Resolved? =
