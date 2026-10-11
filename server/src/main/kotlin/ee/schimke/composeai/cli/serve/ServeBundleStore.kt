@@ -86,7 +86,15 @@ class ServeBundleStore(
     }
     // Uploads are attributed only by verifiable signature (no origin trust for client uploads). The
     // verdict travels with the host for display and never blocks serving extracted data.
-    val verdict = BundleVerifier.verify(zip, trust(), origin)
+    // The verifier re-reads the whole archive, ignored entries included, and rejects one that
+    // inflates past its own budget (GHSA-73ch-2g69-w99h) by throwing — a bad upload, not a 500.
+    val verdict =
+      try {
+        BundleVerifier.verify(zip, trust(), origin)
+      } catch (e: Exception) {
+        dir.deleteRecursively()
+        return Result.Failed("could not verify bundle: ${e.message}")
+      }
     val host = ServeBundleHost(dir, safe, verdict)
     register(safe, host)
     return Result.Ok(safe, host.previews.size, BundleVerifier.summary(verdict))
