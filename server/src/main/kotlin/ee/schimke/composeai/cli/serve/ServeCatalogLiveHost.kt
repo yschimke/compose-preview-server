@@ -138,6 +138,13 @@ class ServeCatalogLiveHost(
    * without the library the render fails with a linkage error. Defaults to false.
    */
   private val cmpAndroidPlayerFor: (daemonId: String) -> Boolean = { false },
+  /**
+   * Whether the bundle a daemon-preview id renders from carries the embedded AndroidX player
+   * ([ServeRcPlayerIds.carriesEmbeddedPlayer]). The Android sidecar never stages it, so without it
+   * an `androidx-embedded` render fails with a linkage error. Defaults to true: a host with no
+   * bundle manifest to read (a source build) keeps offering it.
+   */
+  private val embeddedPlayerFor: (daemonId: String) -> Boolean = { true },
   private val clock: () -> Long = System::currentTimeMillis,
 ) : ServeHost {
   /**
@@ -1338,9 +1345,11 @@ class ServeCatalogLiveHost(
    * The RC player selector unions both lanes: [RcPlayerBackend.CAMAELON_JS] when the baked bundle
    * carries the `.rc`; the AndroidX view/embedded players when there is a daemon twin
    * ([canRenderOverridesFor]) on a backend honouring the override
-   * ([remoteComposePlayerSelectable]); [RcPlayerBackend.CMP_ANDROID] additionally needs the player
-   * classes ([cmpAndroidPlayerFor]); [RcPlayerBackend.CMP_JVM] when the desktop player is installed
-   * and the bundle can size a render ([supportsCmpJvm]). No `.rc` doc means no selector.
+   * ([remoteComposePlayerSelectable]); [RcPlayerBackend.ANDROIDX_EMBEDDED] and
+   * [RcPlayerBackend.CMP_ANDROID] additionally need their player classes in the bundle
+   * ([embeddedPlayerFor], [cmpAndroidPlayerFor]); [RcPlayerBackend.CMP_JVM] when the desktop player
+   * is installed and the bundle can size a render ([supportsCmpJvm]). No `.rc` doc means no
+   * selector.
    */
   override fun enabledRcPlayersFor(previewId: String): List<RcPlayerBackend> {
     if (!hasRemoteComposeDoc(previewId)) return emptyList()
@@ -1348,8 +1357,9 @@ class ServeCatalogLiveHost(
       add(RcPlayerBackend.CAMAELON_JS)
       if (canRenderOverridesFor(previewId) && remoteComposePlayerSelectable) {
         add(RcPlayerBackend.ANDROIDX_VIEW)
-        add(RcPlayerBackend.ANDROIDX_EMBEDDED)
-        if (alias[previewId]?.let(cmpAndroidPlayerFor) == true) add(RcPlayerBackend.CMP_ANDROID)
+        val daemonId = alias[previewId]
+        if (daemonId?.let(embeddedPlayerFor) == true) add(RcPlayerBackend.ANDROIDX_EMBEDDED)
+        if (daemonId?.let(cmpAndroidPlayerFor) == true) add(RcPlayerBackend.CMP_ANDROID)
       }
       if (supportsCmpJvm(previewId)) add(RcPlayerBackend.CMP_JVM)
       // Players the parity run staged are offerable without a daemon, which keeps the embedded

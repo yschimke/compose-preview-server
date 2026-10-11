@@ -166,10 +166,43 @@ internal object ServeRcPlayerIds {
    * [carriesCmpAndroidPlayer] for a bundle on disk; unreadable or manifest-less answers false
    * (offered only on positive evidence).
    */
-  fun bundleCarriesCmpAndroidPlayer(bundleFile: java.io.File): Boolean = runCatching {
-    carriesCmpAndroidPlayer(BundleReader.readMetadata(bundleFile).manifest.classpath)
+  fun bundleCarriesCmpAndroidPlayer(bundleFile: java.io.File): Boolean =
+    RcPlayerBackend.CMP_ANDROID in bundleCarriedPlayers(bundleFile)
+
+  /**
+   * The embedded AndroidX player's artifact (`ee/schimke/composeai/rcembedded/player/…`). The
+   * Android sidecar deliberately never stages it, so a catalog daemon can draw `androidx-embedded`
+   * only when the consumer's bundle brings it; the `-android` spelling covers a KMP publication.
+   */
+  const val EMBEDDED_PLAYER_ARTIFACT: String = "third-party-rc-embedded-player"
+
+  private val EMBEDDED_PLAYER_ARTIFACTS: Set<String> =
+    setOf(EMBEDDED_PLAYER_ARTIFACT, "$EMBEDDED_PLAYER_ARTIFACT-android")
+
+  /**
+   * Whether a bundle's resolved [classpath] carries the embedded player. The daemon always
+   * registers `androidx-embedded`, but without these classes a render fails with
+   * `RemoteComposeLinkageException` (`rcembedded/player/RcPlayerKt (class not found)`).
+   */
+  fun carriesEmbeddedPlayer(classpath: List<BundleReader.ClasspathEntry>): Boolean = classpath.any {
+    it is BundleReader.ClasspathEntry.Maven &&
+      it.group == CMP_PLAYER_GROUP &&
+      it.artifact in EMBEDDED_PLAYER_ARTIFACTS
   }
-    .getOrDefault(false)
+
+  /**
+   * The Android players whose libraries a bundle on disk carries ([carriesCmpAndroidPlayer],
+   * [carriesEmbeddedPlayer]), read from one manifest parse. Unreadable or manifest-less answers
+   * empty: a library-dependent player is offered only on positive evidence.
+   */
+  fun bundleCarriedPlayers(bundleFile: java.io.File): Set<RcPlayerBackend> = runCatching {
+    val classpath = BundleReader.readMetadata(bundleFile).manifest.classpath
+    buildSet {
+      if (carriesCmpAndroidPlayer(classpath)) add(RcPlayerBackend.CMP_ANDROID)
+      if (carriesEmbeddedPlayer(classpath)) add(RcPlayerBackend.ANDROIDX_EMBEDDED)
+    }
+  }
+    .getOrDefault(emptySet())
 
   /** Whether a `?rcPlayer=` value selects the desktop-JVM subprocess lane. */
   fun isCmpJvm(raw: String?): Boolean = raw != null && normalizeRequest(raw) == CMP_JVM

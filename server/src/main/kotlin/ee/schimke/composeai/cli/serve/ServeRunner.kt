@@ -221,13 +221,13 @@ public class ServeRunner(
     java.util.concurrent.ConcurrentHashMap<String, List<CatalogLiveBundle>>()
 
   /**
-   * Which daemon-preview ids of a live catalog can run the `cmp-android` player, keyed by session
-   * descriptor (the only key [openHost] has). Filled from the bundle manifest
-   * ([ServeRcPlayerIds.bundleCarriesCmpAndroidPlayer]); keyed by descriptor so a resumed session
-   * keeps its answer.
+   * Which library-dependent players (`cmp-android`, `androidx-embedded`) each daemon-preview id of
+   * a live catalog can run, keyed by session descriptor (the only key [openHost] has). Filled from
+   * the bundle manifest ([ServeRcPlayerIds.bundleCarriedPlayers]); keyed by descriptor so a resumed
+   * session keeps its answer.
    */
   private val cmpAndroidPlayerByDescriptor =
-    java.util.concurrent.ConcurrentHashMap<String, (String) -> Boolean>()
+    java.util.concurrent.ConcurrentHashMap<String, (String) -> Set<RcPlayerBackend>>()
 
   /** The descriptor key each system last PUBLISHED with, so a refresh retires its predecessor. */
   private val cmpAndroidPlayerKeyBySystem = java.util.concurrent.ConcurrentHashMap<String, String>()
@@ -235,7 +235,7 @@ public class ServeRunner(
   /** Record before [openHost] reads it; [commitCmpAndroidPlayer] once the generation is live. */
   private fun recordCmpAndroidPlayer(
     descriptor: File,
-    carriesPlayer: (daemonId: String) -> Boolean,
+    carriesPlayer: (daemonId: String) -> Set<RcPlayerBackend>,
   ) {
     cmpAndroidPlayerByDescriptor[descriptor.absolutePath] = carriesPlayer
   }
@@ -1327,7 +1327,14 @@ public class ServeRunner(
           liveSeats = liveSeatLimiter,
           residencySeatWeight = { state.liveSeatWeight },
           cmpAndroidPlayerFor =
-            cmpAndroidPlayerByDescriptor[state.descriptor.absolutePath] ?: { false },
+            cmpAndroidPlayerByDescriptor[state.descriptor.absolutePath]?.let { players ->
+              { daemonId: String -> RcPlayerBackend.CMP_ANDROID in players(daemonId) }
+            } ?: { false },
+          // No recorded manifest (a source build) keeps the embedded player offered.
+          embeddedPlayerFor =
+            cmpAndroidPlayerByDescriptor[state.descriptor.absolutePath]?.let { players ->
+              { daemonId: String -> RcPlayerBackend.ANDROIDX_EMBEDDED in players(daemonId) }
+            } ?: { true },
         )
         // Prewarm off the request path so a slow-starting Android daemon is ready for the first
         // browse.
@@ -4584,9 +4591,9 @@ public class ServeRunner(
     // Now that the backend is known, the pool's daemons charge this catalog's real weight — an
     // Android/Robolectric per-preview daemon is not the same cost to the box as a desktop one.
     perPreviewSeatWeight = state.liveSeatWeight
-    // Whether this bundle can run the CMP player is a fact about its classpath, read once here.
-    val carriesCmpPlayer = ServeRcPlayerIds.bundleCarriesCmpAndroidPlayer(bundleFile)
-    recordCmpAndroidPlayer(state.descriptor) { carriesCmpPlayer }
+    // Which library-dependent players this bundle can run is a fact about its classpath, read once.
+    val carriedPlayers = ServeRcPlayerIds.bundleCarriedPlayers(bundleFile)
+    recordCmpAndroidPlayer(state.descriptor) { carriedPlayers }
     val host =
       openHost(state)
         ?: run {
@@ -4763,10 +4770,13 @@ public class ServeRunner(
           .toMap()
       val alias = opened.flatMap { it.published.alias.entries }.associate { it.toPair() }
       // Per module: each daemon id runs on its own module's bundle, so each answers for itself.
-      val cmpPlayerDaemonIds =
+      val carriedPlayersByDaemonId =
         opened
-          .filter { ServeRcPlayerIds.bundleCarriesCmpAndroidPlayer(it.published.file) }
-          .flatMapTo(HashSet()) { it.published.alias.values }
+          .flatMap { runtime ->
+            val players = ServeRcPlayerIds.bundleCarriedPlayers(runtime.published.file)
+            runtime.published.alias.values.map { daemonId -> daemonId to players }
+          }
+          .toMap()
       val resolver: (String) -> ServeHost? = { daemonId ->
         val runtime = ownerByDaemonId[daemonId]
         when {
@@ -4808,7 +4818,7 @@ public class ServeRunner(
           serverIdleMillis = backgroundWork.idleClock(registry::idleMillis),
           backgroundWork = backgroundWork,
         )
-      recordCmpAndroidPlayer(state.descriptor) { it in cmpPlayerDaemonIds }
+      recordCmpAndroidPlayer(state.descriptor) { carriedPlayersByDaemonId[it].orEmpty() }
       val host =
         openHost(state)
           ?: run {
