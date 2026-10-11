@@ -132,8 +132,11 @@ class ServeBundleHost(
   private val fetchBakedPng: ((String) -> ByteArray?)? = null,
   /** Published RC documents offered by a trusted catalog, keyed by the baked preview id. */
   declaredRcDocs: List<String> = emptyList(),
-  /** Fetches one published document on demand; the catalog store owns the branch URL and limits. */
-  private val fetchRcDoc: ((String) -> ByteArray?)? = null,
+  /**
+   * Fetches one published document on demand; the catalog store owns the branch URL and limits. A
+   * failure comes back as itself so the route can tell a throttle from an unpublished document.
+   */
+  private val fetchRcDoc: ((String) -> BranchFetch)? = null,
   /**
    * Ids this catalog publishes an animated capture for. Separate from [declaredBaked]: a capture
    * owns no card and is reachable only from its still.
@@ -1170,26 +1173,41 @@ class ServeBundleHost(
     )
   }
 
-  override fun remoteComposeDoc(previewId: String): ByteArray? {
-    if (!hasRemoteComposeDoc(previewId)) return null
+  override fun remoteComposeDoc(previewId: String): ByteArray? =
+    remoteComposeDocRead(previewId).bytesOrNull
+
+  /**
+   * [remoteComposeDoc] with the failure kept: a declared document the delivery branch is refusing
+   * right now is transient, not missing. Blocks on the network for a cold declared document, so
+   * call it off the request dispatcher.
+   */
+  fun remoteComposeDocRead(previewId: String): BranchFetch {
+    if (!hasRemoteComposeDoc(previewId)) return BranchFetch.NotFound
     val doc = File(irDir, "$previewId$RC_SUFFIX").toOkioPath()
-    if (!fileSystem.exists(doc)) {
-      val fetch = fetchRcDoc ?: return null
-      synchronized(fillLocks.computeIfAbsent("rc:$previewId") { Any() }) {
-        if (!fileSystem.exists(doc)) {
-          val bytes = runCatching { fetch(previewId) }.getOrNull() ?: return null
-          val saved = runCatching {
-            fileSystem.createDirectories(doc.parent!!)
-            val partial = doc.parent!!.resolve("${doc.name}.$instanceTag$PARTIAL_SUFFIX")
-            fileSystem.write(partial) { write(bytes) }
-            fileSystem.atomicMove(partial, doc)
-          }
-          if (saved.isFailure) return null
-        }
+    if (fileSystem.exists(doc)) return readStagedDoc(doc)
+    val fetch = fetchRcDoc ?: return BranchFetch.NotFound
+    synchronized(fillLocks.computeIfAbsent("rc:$previewId") { Any() }) {
+      if (fileSystem.exists(doc)) return readStagedDoc(doc)
+      val outcome = runCatching {
+        fetch(previewId)
       }
+        .getOrElse { BranchFetch.Transport(it::class.simpleName ?: "error") }
+      val bytes = outcome.bytesOrNull ?: return outcome
+      // As for captures: the bytes are in hand, so a staging failure still serves them.
+      runCatching {
+        fileSystem.createDirectories(doc.parent!!)
+        val partial = doc.parent!!.resolve("${doc.name}.$instanceTag$PARTIAL_SUFFIX")
+        fileSystem.write(partial) { write(bytes) }
+        fileSystem.atomicMove(partial, doc)
+      }
+      return BranchFetch.Ok(bytes)
     }
-    return runCatching { fileSystem.read(doc) { readByteArray() } }.getOrNull()
   }
+
+  private fun readStagedDoc(path: okio.Path): BranchFetch = runCatching {
+    BranchFetch.Ok(fileSystem.read(path) { readByteArray() })
+  }
+    .getOrElse { BranchFetch.Transport(it::class.simpleName ?: "error") }
 
   // Cheap existence check (no read) so the per-preview page render can gate the client-side canvas
   // lane without pulling the whole document — the browser fetches the bytes over `/render/<id>.rc`.
