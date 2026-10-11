@@ -333,8 +333,11 @@ COPY --from=desktop-daemon /opt/lib-renderer /opt/lib-renderer
 # `NoClassDefFoundError: androidx/window/core/layout/WindowSizeClass` — a LinkageError, so the
 # breaker then disabled the lane for every design. Taken from the server tarball rather than
 # fetched, so its version is the one `checkServerDesktopSidecarPackaging` pins; a glob with no match
-# fails the build, which is the assertion. `test-renderer-window-core.sh` keeps the line here.
+# fails the build, which is the assertion. `test-renderer-window-core.sh` keeps the lines here.
+# From window-core 1.5 `window-core-desktop` is an empty redirect and Google's `window-core-jvm`
+# holds `WindowSizeClass`, so both jars are copied, each by its own glob so each must match.
 COPY --from=server "/opt/compose-preview-server-${SERVER_VERSION}/lib-renderer/window-core-desktop-*.jar" /opt/lib-renderer/
+COPY --from=server "/opt/compose-preview-server-${SERVER_VERSION}/lib-renderer/window-core-jvm-*.jar" /opt/lib-renderer/
 # …and the embedded JVM Remote Compose player the `cmp-jvm` render lane spawns
 # (`RcJvmServerRenderer`), whose subprocess classpath is `lib-rcjvm/*` + `lib-daemon-desktop/*`.
 # Only half of that pair was here, so every `?rcPlayer=cmp-jvm` on the deployed site answered 503

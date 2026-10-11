@@ -52,7 +52,12 @@ wearcmp-port = "1.7.0-beta02-cmp09"
 # library out from under the bundle. That agreement used to be checked in this build
 # (`:ui-builder:checkWindowSidecarVersion`); it is enforced in yschimke/compose-ui-builder now, and
 # this repository's half of the rule is to move this ref only alongside `composeai-ui-builder`.
-androidx-window = "1.4.0"
+#
+# 1.5.1 goes ahead of that bump, deliberately: compose-ui-builder#695 moves the UI builder to 1.5.1
+# (for `WindowSizeClass.WIDTH_DP_LARGE_LOWER_BOUND`). A NEWER sidecar is the safe direction —
+# window-core 1.5 is binary compatible with 1.4, so bundles built against 1.4.0 still link — whereas
+# a sidecar left behind a bundle is the drift this rule exists to prevent.
+androidx-window = "1.5.1"
 material-icons-extended = "1.7.3"
 graphics-shapes = "1.1.0"
 # One ref for every compose-ai-tools coordinate, and for the Gradle plugin id it also drives.
