@@ -1,6 +1,5 @@
 package ee.schimke.composeai.cli.serve
 
-import ee.schimke.composeai.bundle.TrustStore
 import ee.schimke.composeai.uibuilder.export.CatalogOwnership
 import java.io.File
 
@@ -856,8 +855,8 @@ public class ServeCommandOptions(
 
   /**
    * `serve` turns `@PreviewParameter` fan-out into row ids, so module selection may keep previews
-   * whose rows might match; [modulesWithMatchingPreviews] later drops modules that didn't (see
-   * #3786).
+   * whose rows might match; [modulesWithMatchingPreviews] later drops modules that didn't
+   * (see #3786).
    */
   override val rowAwareSelection: Boolean
     get() = true

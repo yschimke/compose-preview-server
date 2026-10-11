@@ -220,12 +220,14 @@ data class PreviewSettings(
 /**
  * The settings file shared by the MCP server and the CLI: `~/.compose-preview/settings.json`, or
  * [FILE_ENV] when set.
+ *
  * ```json
  * {
  *   "schema": "compose-preview-settings/v1",
  *   "values": { "darkTheme": true, "renderResult": "file" }
  * }
  * ```
+ *
  * `values` holds only keys someone set (defaults fill the rest); unknown keys are kept on save.
  * Writes are atomic via a temp file; reads are cached by modification time.
  */

@@ -988,8 +988,8 @@ class ServeHttpServer(
 
   /**
    * The builder is served at the root of [uiBuilderHost] (`ServeUiBuilderHostRoot.kt`); decided
-   * once at bind time. An editor that can't read its base path ([uiBuilderRootEditorProblem])
-   * keeps the host on `/ui-builder/` and logs why.
+   * once at bind time. An editor that can't read its base path ([uiBuilderRootEditorProblem]) keeps
+   * the host on `/ui-builder/` and logs why.
    */
   private val uiBuilderRootMode: Boolean =
     uiBuilderHost != null &&

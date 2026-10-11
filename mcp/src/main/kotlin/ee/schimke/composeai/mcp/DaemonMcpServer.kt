@@ -859,9 +859,7 @@ class DaemonMcpServer(
    *
    * The first sighting records both silently.
    */
-  /**
-   * @return `true` when this probe forwarded a `fileChanged` (the poller counts these).
-   */
+  /** @return `true` when this probe forwarded a `fileChanged` (the poller counts these). */
   private fun ensureSourceFreshBeforeRender(uri: PreviewUri, daemon: SupervisedDaemon): Boolean {
     freshnessMetrics.probesTotal.incrementAndGet()
     val addr = DaemonAddr(uri.workspaceId, uri.modulePath)
@@ -959,6 +957,7 @@ class DaemonMcpServer(
    * `fileChanged({kind:"source"})` per edited file so the daemon swaps onto the fresh classes (its
    * handler swaps but never compiles). A failed or impossible compile is remembered in [staleNotes]
    * so `render_preview` can flag the image as possibly stale. Serialized per module.
+   *
    * @return the compile outcome, or `null` when nothing was pending or no compiler is configured.
    */
   private fun recompilePendingSources(daemon: SupervisedDaemon): SourceCompileOutcome? {

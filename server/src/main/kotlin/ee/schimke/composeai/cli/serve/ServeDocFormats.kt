@@ -19,17 +19,17 @@ data class ServeDocSize(val width: Int, val height: Int)
  * them with the format's vendored player. Adding a format is one entry plus its player bundle.
  *
  * @param id stable wire id (`remotecompose`, `lottie`), used in the upload response and
- * `/doc-player/<id>/bundle.js`.
+ *   `/doc-player/<id>/bundle.js`.
  * @param label human name for the document page.
  * @param extension canonical file extension for the raw download's filename.
  * @param contentType what `GET /d/<id>/raw` responds with.
  * @param playerResource classpath path of the vendored player bundle served at
- * `/doc-player/<id>/bundle.js`.
+ *   `/doc-player/<id>/bundle.js`.
  * @param detect content sniff, run before anything else touches the upload so a mislabelled or
- * hostile file is rejected on shape, not name.
+ *   hostile file is rejected on shape, not name.
  * @param describe best-effort facts for the document page (dimensions, duration, version …).
  * @param size the declared drawing size, if any; the page sizes the player's stage with it before
- * load, since a canvas player can't recover from a later resize.
+ *   load, since a canvas player can't recover from a later resize.
  */
 data class ServeDocFormat(
   val id: String,

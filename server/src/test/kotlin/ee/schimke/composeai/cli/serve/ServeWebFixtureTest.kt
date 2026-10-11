@@ -41,6 +41,7 @@ import kotlinx.serialization.json.buildJsonObject
  * ```
  * UPDATE_SERVE_WEB_FIXTURES=true ./gradlew :cli:test --tests '*ServeWebFixtureTest*'
  * ```
+ *
  * (An env var because Gradle forwards the environment, not arbitrary system properties, to the test
  * JVM.) The server [version] and asset-href hashes ([stableAssetHrefs]) are held constant so diffs
  * only show markup.

@@ -8,21 +8,14 @@ import ee.schimke.composeai.daemon.protocol.RemoteComposePlayerKind
  * The Remote Compose player ids this server speaks: what the viewer's renderer combo offers, what
  * `data-rc-default` / `data-rc-baked-player` report, and what minted links put in `?rcPlayer=`.
  *
- * |id                 |implementation                                     |where
- * |
- * |-------------------|---------------------------------------------------|------------------------------------------|
- * |`androidx-view`    |AndroidX `remote-player-view` `RemoteComposePlayer`|daemon,
- * [RemoteComposePlayerKind.VIEW]    |
- * |`androidx-embedded`|vendored AndroidX embedded player                  |daemon,
- * [RemoteComposePlayerKind.EMBEDDED]|
- * |`cmp-android`      |the CMP player (`rc-player-compose`) on Android    |daemon, by `playerId`
- * |
- * |`cmp-jvm`          |the CMP player on the desktop JVM                  |this server's
- * `rc-render-jvm` subprocess  |
- * |`cmp-wasm`         |the CMP player compiled to Wasm                    |browser
- * |
- * |`camaelon-js`      |the vendored TypeScript player                     |browser
- * |
+ * |id                                |implementation                                     |where              |
+ * |----------------------------------|---------------------------------------------------|-------------------|
+ * |`androidx-view`                   |AndroidX `remote-player-view` `RemoteComposePlayer`|daemon,            |
+ * |[RemoteComposePlayerKind.VIEW]    |                                                   |`androidx-embedded`|vendored AndroidX embedded player      |daemon,                          |
+ * |[RemoteComposePlayerKind.EMBEDDED]|                                                   |`cmp-android`      |the CMP player (`rc-player-compose`) on|
+ * |Android                           |daemon, by `playerId`                              |                   |`cmp-jvm`                              |the CMP player on the desktop JVM|this server's|
+ * |`rc-render-jvm` subprocess        |                                                   |`cmp-wasm`         |the CMP player compiled to Wasm        |browser                          |
+ * |`camaelon-js`                     |the vendored TypeScript player                     |browser            |
  *
  * Two vocabularies are kept apart. A `?rcPlayer=` request ([normalizeRequest]) accepts unambiguous
  * legacy spellings (`java`/`view`, `embedded`, `js`, `rcplayer-jvm`, `rcplayer-wasm`) and never

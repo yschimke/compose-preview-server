@@ -20,7 +20,6 @@ import ee.schimke.composeai.uibuilder.guidelines.plan
 import ee.schimke.composeai.uibuilder.guidelines.wanted
 import ee.schimke.composeai.uibuilder.protocol.ApplyOperationRequestV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
-import ee.schimke.composeai.uibuilder.protocol.CatalogsResponseV1
 import ee.schimke.composeai.uibuilder.protocol.ComponentCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.CreateDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
@@ -615,7 +614,7 @@ class ServeUiBuilderMcp(
       properties = component.properties.map(::summarize),
     )
 
-  /** Slot name, `[min..max]` cardinality, then `:` and accepted roles and traits, `|`-separated. */
+  /** Slot name, cardinality `min..max` in square brackets, then `:` and accepted roles/traits. */
   private fun summarize(slot: SlotCapabilityV1): String {
     val accepted = (slot.acceptedRoles + slot.acceptedTraits).joinToString("|")
     val cardinality = "${slot.cardinality.min}..${slot.cardinality.max ?: "*"}"
@@ -4920,7 +4919,8 @@ internal data class CatalogSummaryV1(
 
 /**
  * A component as a table row. [properties] are `name:type` with `!` when required and `=a|b|c` when
- * restricted; [slots] are `name[min..max]` (`*` unbounded) then `:role|trait|…`.
+ * restricted; [slots] are the name, cardinality `min..max` in square brackets (`*` unbounded), then
+ * `:role|trait|…`.
  */
 @kotlinx.serialization.Serializable
 internal data class ComponentSummaryV1(

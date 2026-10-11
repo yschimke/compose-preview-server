@@ -238,10 +238,10 @@ object ServeAgentGrants {
 
       /**
        * @param repositoryAccess access to the sign-in repository (`--github-auth-repo`), behind the
-       * scope ceiling and every capability except [AgentGrantCapability.IMAGES].
+       *   scope ceiling and every capability except [AgentGrantCapability.IMAGES].
        * @param imageRepositoryAccess access to the image lane's repository (`--image-upload-repo`,
-       * defaulting to the sign-in one). Asked separately so access to the OAuth repo alone can't
-       * mint a grant that publishes where the approver has no rights.
+       *   defaulting to the sign-in one). Asked separately so access to the OAuth repo alone can't
+       *   mint a grant that publishes where the approver has no rights.
        */
       fun github(
         login: String,

@@ -20,12 +20,12 @@ enum class CatalogRefreshResult {
  * host in place. Unresolvable heads (offline, no `git`) are skipped.
  *
  * @param entries the branches to watch (`system`, `repo`, full `branch` ref), evaluated per pass so
- * runtime-published catalogs are picked up and retired ones dropped.
+ *   runtime-published catalogs are picked up and retired ones dropped.
  * @param reload re-fetch and re-register one system, returning the store's result or null.
- * [checkOne] decides what it means for the recorded head: a load that registered but couldn't read
- * everything is serving but not settled.
+ *   [checkOne] decides what it means for the recorded head: a load that registered but couldn't
+ *   read everything is serving but not settled.
  * @param headResolver resolve a branch head sha, or null; defaults to [gitLsRemoteHead], injected
- * for tests.
+ *   for tests.
  * @param intervalMillis poll cadence; the first tick fires one interval after [start].
  */
 public class ServeCatalogRefresher(

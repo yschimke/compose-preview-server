@@ -1454,7 +1454,7 @@ public class ServeRunner(
    * logs and disables the lane.
    *
    * @param repoAccessGated GitHub auth is configured, so the routes' repo-access check actually
-   * rejects callers.
+   *   rejects callers.
    */
   private fun openPlaygroundService(
     docStore: ServeDocStore?,

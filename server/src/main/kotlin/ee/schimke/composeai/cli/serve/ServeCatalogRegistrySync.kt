@@ -13,9 +13,9 @@ import java.util.concurrent.TimeUnit
  *
  * @param repos the nominated registry projects, in `--catalog-registry` order.
  * @param read fetch and normalise one registry's document, reporting why through its second
- * argument; null ⇒ unreadable this pass.
+ *   argument; null ⇒ unreadable this pass.
  * @param tracked the systems the box serves or is configured to serve, read per pass so an admin
- * publish between ticks is seen.
+ *   publish between ticks is seen.
  * @param publish register one newly listed catalog; returns the failure reason, or null.
  * @param retire drop a catalog this sync published and the registry no longer lists.
  * @param intervalMillis poll cadence; the first tick fires one interval after [start].

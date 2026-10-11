@@ -11,9 +11,8 @@ import java.security.MessageDigest
  * * [svg]: a vector for browser tabs; no unfurler accepts it.
  * * [appleTouchIcon]: a 180×180 PNG, which most chat clients and link fetchers read first.
  * * [ico]: a 32×32 PNG in an ICO container at `/favicon.ico`, for fetchers that only probe that
- *   path.
- *   All drawn from [ServeBrand] so the mark matches the header and unfurl card; rasters baked once
- *   per process and served with a content ETag.
+ *   path. All drawn from [ServeBrand] so the mark matches the header and unfurl card; rasters baked
+ *   once per process and served with a content ETag.
  */
 internal object ServeSiteIcon {
 

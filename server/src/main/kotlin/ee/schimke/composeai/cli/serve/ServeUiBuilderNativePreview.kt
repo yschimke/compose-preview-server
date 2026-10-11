@@ -267,7 +267,7 @@ private const val MAX_REPORTED_DIAGNOSTICS = 5
 fun interface UiBuilderNativePreviewLane {
   /**
    * @param widgetHostShape which host container frames a Wear widget design; ignored otherwise. A
-   * `fun interface` method can't have defaults; see the overload below.
+   *   `fun interface` method can't have defaults; see the overload below.
    */
   fun render(
     document: DesignDocumentV1,

@@ -312,6 +312,7 @@ class ServeUiBuilderWearNativePreviewTest {
 
   /**
    * A Large container, so the reported frame can't match the Small one by accident.
+   *
    * @param assetKey a picture in the container's content, embedded in the design's own asset map
    *   (no store needed).
    */

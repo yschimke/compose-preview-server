@@ -24,10 +24,10 @@ object PlaygroundSourceCleaner {
 
   /**
    * @property text the cleaned Kotlin: imports, the entry declaration, and any same-file helpers it
-   * still needs.
+   *   still needs.
    * @property entryFunction the name of the declaration the anchor fell in, for the editor's note.
    * @property residue declared scaffolding that survived every pass. Non-empty is reportable, not a
-   * failure: these are the names whose rules need writing.
+   *   failure: these are the names whose rules need writing.
    */
   data class Result(val text: String, val entryFunction: String?, val residue: List<String>)
 
@@ -227,7 +227,6 @@ object PlaygroundSourceCleaner {
         ?: DECLARATION.find(line)?.groupValues?.get(1)
     }
 
-
   /**
    * One `import` line: the name the body uses ([name], the alias when present), the target, and how
    * to render it. Aliases are kept so `import foo.Bar as Baz` is neither pruned nor re-emitted
@@ -338,7 +337,6 @@ object PlaygroundSourceCleaner {
     }
     return out
   }
-
 
   private fun cleanBlock(
     text: String,

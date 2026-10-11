@@ -605,8 +605,8 @@ class ServeSessionRegistry(
 
   /**
    * Second-level reclaim: remove forked sessions (project-mode revisions with worktrees) suspended
-   * past [suspendedGcTimeoutMillis], running [ServeSessionState.reclaim] to prune worktrees (see
-   * #2022). Registered sessions are never removed; a reclaimed revision just rebuilds. Idle is
+   * past [suspendedGcTimeoutMillis], running [ServeSessionState.reclaim] to prune worktrees
+   * (see #2022). Registered sessions are never removed; a reclaimed revision just rebuilds. Idle is
    * measured from [Entry.lastAccess]. Returns the count.
    */
   fun reclaimIdleForked(): Int = lock.withLock {

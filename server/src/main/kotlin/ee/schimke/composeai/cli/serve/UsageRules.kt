@@ -49,8 +49,8 @@ data class UsageRules(
 
   /**
    * Repo-root-relative Kotlin files the cleaner may read, so a delegating sticker (`fun
-   * FilledButton() = Sticker("button-filled")`) can be followed to its body in a shared module (see
-   * #4169). Repo-root-relative because the point is to cross module boundaries; read at the
+   * FilledButton() = Sticker("button-filled")`) can be followed to its body in a shared module
+   * (see #4169). Repo-root-relative because the point is to cross module boundaries; read at the
    * preview's `ref`. A name declared in more than one of these files is ambiguous and dropped.
    */
   @SerialName("scaffoldSources") val scaffoldSources: List<String> = emptyList(),

@@ -2482,8 +2482,8 @@ class ServeCatalogStore(
   /**
    * The `<id>/<file>` paths a known-difference document names, or none when the engine will reject
    * it whole. The fallback for catalogs published before the artifact index
-   * ([knownDifferenceArtifactPlan]); kept conservative because nobody is left to fix those.
-   * A whole-document rejection reads no artifacts, so fetching for it would waste up to 256 × 2 × 8
+   * ([knownDifferenceArtifactPlan]); kept conservative because nobody is left to fix those. A
+   * whole-document rejection reads no artifacts, so fetching for it would waste up to 256 × 2 × 8
    * MiB per refresh ([rejectsWholeDocument]). Otherwise path extraction is lenient: a record with a
    * non-string artifact contributes nothing and the engine refuses it itself.
    */

@@ -1853,7 +1853,7 @@ ${captureControlsHtml().prependIndent("          ")}
    *
    * * `kit` — the imported design reference: a specification fixed at publish time.
    * * `parallel` — the counterpart component in the `compareWith` sibling: another implementation's
-   * render, not a spec.
+   *   render, not a spec.
    *
    * [provenance] states that the sibling's render used its own theme, knobs and overrides, so the
    * comparison is not implied to be symmetric.
@@ -1861,9 +1861,9 @@ ${captureControlsHtml().prependIndent("          ")}
    * @property id the value the picker carries (`kit` / `parallel`); also the URL state's token.
    * @property label what the picker button reads, e.g. `Figma` or `wear-m3-catalog`.
    * @property rasterUrl same-origin URL of the image to compare against; the viewer refuses any
-   * other origin ([specRasterSrc]).
+   *   other origin ([specRasterSrc]).
    * @property provenance one line naming where this image came from; empty when no caveat is
-   * needed.
+   *   needed.
    */
   data class SpecSource(
     val id: String,
@@ -4552,10 +4552,10 @@ ${captureControlsHtml().prependIndent("          ")}
    * The navigation tree's behaviour, spliced into [catalogFilterScript]'s IIFE to share `current`,
    * `reflectTabs`, `apply` and `pushUrl`.
    * * **group rows**: select the section, then scroll its divider into view; the bare `#cp-group-…`
-   * href is the no-JS fallback.
+   *   href is the no-JS fallback.
    * * **keyboard**: roving focus (Down/Up visible rows, Right opens, Left climbs, Home/End).
    * * **scroll-spy**: the row for the on-screen sub-group gets `aria-current`; without
-   * `IntersectionObserver` marking follows clicks.
+   *   `IntersectionObserver` marking follows clicks.
    */
   private fun catalogTreeScript(
     tabStorageKey: String,
@@ -16548,9 +16548,9 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
    * `location.origin`, and the `#cp-url-<ext>` fields fill on first render.
    *
    * * One always-visible line rather than a `<details>`, since this is the viewer's primary
-   * hand-off.
+   *   hand-off.
    * * The URL lives in an off-flow `tabindex="-1"` field: `refreshLinks`, both copy buttons and the
-   * lane e2e read it.
+   *   lane e2e read it.
    *
    * "Full page (scroll)" lives in the drawer's Scroll group ([scrollGroupHtml]).
    */
