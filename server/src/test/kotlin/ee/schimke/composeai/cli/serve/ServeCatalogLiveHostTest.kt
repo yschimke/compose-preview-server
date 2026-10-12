@@ -297,6 +297,8 @@ class ServeCatalogLiveHostTest {
   private fun rcComposite(
     selectable: Boolean = true,
     cmpAndroidPlayerFor: (String) -> Boolean = { false },
+    embeddedPlayerFor: (String) -> Boolean = { true },
+    staged: List<RcPlayerBackend> = emptyList(),
   ): ServeCatalogLiveHost {
     val bakedDelegate =
       RecordingHost(
@@ -307,6 +309,8 @@ class ServeCatalogLiveHostTest {
     val baked =
       object : ServeHost by bakedDelegate {
         override fun remoteComposeDoc(previewId: String): ByteArray = byteArrayOf(1)
+
+        override fun stagedRcPlayers(previewId: String): List<RcPlayerBackend> = staged
       }
     val liveDelegate =
       RecordingHost(previews = listOf(ServePreview(daemonId, daemonId)), tag = "live")
@@ -319,6 +323,7 @@ class ServeCatalogLiveHostTest {
       live = live,
       baked = baked,
       cmpAndroidPlayerFor = cmpAndroidPlayerFor,
+      embeddedPlayerFor = embeddedPlayerFor,
     )
   }
 
@@ -350,6 +355,45 @@ class ServeCatalogLiveHostTest {
         rcComposite(selectable = false, cmpAndroidPlayerFor = { true })
           .enabledRcPlayersFor(catalogId)
     )
+  }
+
+  @Test
+  fun `daemon players leave out players offered only through a staged capture`() {
+    // homeassistant-remotecompose shape: a staged comparison column for androidx-embedded, but no
+    // embedded player on the daemon's classpath. The picker may offer the staged column; lending
+    // the daemon to another document must not count on it.
+    val host =
+      rcComposite(
+        embeddedPlayerFor = { false },
+        staged = listOf(RcPlayerBackend.ANDROIDX_EMBEDDED),
+      )
+    assertTrue(RcPlayerBackend.ANDROIDX_EMBEDDED in host.enabledRcPlayersFor(catalogId))
+    assertEquals(listOf(RcPlayerBackend.ANDROIDX_VIEW), host.daemonRcPlayersFor(catalogId))
+    // No daemon twin, no daemon players, whatever is staged.
+    assertTrue(host.daemonRcPlayersFor(androidOnlyId).isEmpty())
+  }
+
+  @Test
+  fun `androidx-embedded is offered only when the catalog bundle carries the embedded player`() {
+    // A bundle with the CMP player but not the embedded one (homeassistant-remotecompose): the
+    // daemon would refuse androidx-embedded with a linkage error, so it is not offered.
+    val asked = mutableListOf<String>()
+    val without =
+      rcComposite(
+          cmpAndroidPlayerFor = { true },
+          embeddedPlayerFor = {
+            asked += it
+            false
+          },
+        )
+        .enabledRcPlayersFor(catalogId)
+    assertFalse(RcPlayerBackend.ANDROIDX_EMBEDDED in without, "$without")
+    assertTrue(RcPlayerBackend.ANDROIDX_VIEW in without, "$without")
+    assertTrue(RcPlayerBackend.CMP_ANDROID in without, "$without")
+    assertEquals(listOf(daemonId), asked, "asked about the daemon id the alias maps to")
+
+    // The default (no manifest to read) keeps offering it.
+    assertTrue(RcPlayerBackend.ANDROIDX_EMBEDDED in rcComposite().enabledRcPlayersFor(catalogId))
   }
 
   @Test

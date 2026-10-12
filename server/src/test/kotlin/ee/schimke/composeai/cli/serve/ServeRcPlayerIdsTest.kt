@@ -170,6 +170,38 @@ class ServeRcPlayerIdsTest {
     assertFalse(ServeRcPlayerIds.bundleCarriesCmpAndroidPlayer(java.io.File("/no/such/bundle.png")))
   }
 
+  @Test
+  fun `a bundle's carried players name the embedded and CMP players its classpath brings`() {
+    assertEquals(
+      setOf(RcPlayerBackend.ANDROIDX_EMBEDDED, RcPlayerBackend.CMP_ANDROID),
+      ServeRcPlayerIds.bundleCarriedPlayers(
+        bundleWith(
+          "ee.schimke.composeai" to "third-party-rc-embedded-player",
+          "ee.schimke.composeai" to "rc-player-compose-android",
+        )
+      ),
+    )
+    // homeassistant-remotecompose: the CMP player, no embedded player.
+    assertEquals(
+      setOf(RcPlayerBackend.CMP_ANDROID),
+      ServeRcPlayerIds.bundleCarriedPlayers(
+        bundleWith("ee.schimke.composeai" to "rc-player-compose-android")
+      ),
+    )
+    // remote-widgets: the embedded player, no CMP player.
+    assertEquals(
+      setOf(RcPlayerBackend.ANDROIDX_EMBEDDED),
+      ServeRcPlayerIds.bundleCarriedPlayers(
+        bundleWith(
+          "ee.schimke.composeai" to "third-party-rc-embedded-player",
+          // Same artifact name under another group is not the player.
+          "com.example" to "rc-player-compose",
+        )
+      ),
+    )
+    assertTrue(ServeRcPlayerIds.bundleCarriedPlayers(java.io.File("/no/such/bundle.png")).isEmpty())
+  }
+
   // ---- the configured default player ---------------------------------------------------------
 
   private val allDaemonLanes =
