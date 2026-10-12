@@ -425,7 +425,10 @@ composeai-contracts = "3.30.0"
 # `ServeUiBuilderTrash` and the admin and MCP trash routes (#1564) call; it is built on
 # compose-ai-tools 2.46.0 and androidx-window 1.5.1, so `composeai-tools` above moves with it.
 # 3.107.0 moves with compose-ai-tools 2.50.0 and contracts 3.30.0; `androidx-window` is unchanged.
-composeai-ui-builder = "3.107.0"
+# 3.108.0 renders, edits and validates typed adapters' list and object properties
+# (compose-ui-builder#717) and retires the catalog-cutover shadow comparison (#716), whose server
+# side #1575 already removed. Built on compose-ai-tools 2.49.0; 2.50.0 above wins resolution.
+composeai-ui-builder = "3.108.0"
 # The CMP/Wasm Remote Compose player (yschimke/rc-players' `rc-player-wasm-dist`, a zip of its
 # static browser bundle). Shipped in the server tarball as `rc-player-wasm/`, which the image's
 # entrypoint already passes as `--rc-player-wasm-dir`: that serves `/rc-player-wasm/`, enables the
@@ -461,7 +464,7 @@ truth = "1.4.5"
 okhttp = "5.5.0"
 okio = "3.18.2"
 classgraph = "4.8.197"
-jmdns = "3.6.3"
+jmdns = "3.6.4"
 
 [libraries]
 composeai-common-web-escaping = { module = "ee.schimke.composeai:common-web-escaping" }
