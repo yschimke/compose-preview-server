@@ -21,6 +21,9 @@
 #                   `PlaygroundDaemonOpeners.desktop`).
 #   cmp-jvm         `locateBundleSidecarJars("lib-rcjvm")` + `locateBundleSidecarJars(
 #                   "lib-daemon-desktop")` (compose-ai-tools' `RcJvmServerRenderer.classpath`).
+#   cmp-jvm live    the server's `lib-rc-player-desktop/` (under `compose-preview-server/`, where the
+#                   server tarball puts it) + `lib-daemon-desktop` (with lib-skiko's native
+#                   prepended) + `lib-renderer` (`ServeRcPlayerDaemon.desktopSubprocess`).
 # Each directory's jars are taken sorted by name, as `locateBundleSidecarJars` does.
 set -euo pipefail
 export LC_ALL=C
@@ -83,6 +86,8 @@ check() {
 
 desktop_cp="$(jars lib-skiko natives; jars lib-daemon-desktop; jars lib-renderer)"
 rcjvm_cp="$(jars lib-rcjvm; jars lib-skiko natives; jars lib-daemon-desktop)"
+player_dir=compose-preview-server/lib-rc-player-desktop
+player_cp="$(jars "${player_dir}"; jars lib-skiko natives; jars lib-daemon-desktop; jars lib-renderer)"
 
 check "desktop daemon (lib-skiko + lib-daemon-desktop + lib-renderer)" \
   "stage the native matching lib-daemon-desktop's skiko-awt into lib-skiko/" "${desktop_cp}"
@@ -90,6 +95,12 @@ check "desktop daemon (lib-skiko + lib-daemon-desktop + lib-renderer)" \
 if [[ -n "$(jars lib-rcjvm)" ]]; then
   check "cmp-jvm (lib-rcjvm + lib-skiko + lib-daemon-desktop)" \
     "stage the native matching lib-rcjvm's skiko-awt into lib-rcjvm/" "${rcjvm_cp}"
+fi
+
+# Only a server that ships the desktop player daemon's sidecar has this lane.
+if [[ -n "$(jars "${player_dir}")" ]]; then
+  check "cmp-jvm live (lib-rc-player-desktop + lib-skiko + lib-daemon-desktop + lib-renderer)" \
+    "stage the native matching lib-rc-player-desktop's skiko-awt into it" "${player_cp}"
 fi
 
 exit "${failed}"
