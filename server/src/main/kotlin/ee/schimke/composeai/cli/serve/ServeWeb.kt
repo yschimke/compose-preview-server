@@ -13866,6 +13866,12 @@ ${scriptTag("known-differences.js")}
      */
     hasLiveStream: Boolean = canApplyOverrides,
     /**
+     * Whether the live lane [hasLiveStream] offers forwards input. False for a document-only
+     * preview's carried-document stream ([ServeCarriedRcStream]), which animates but holds no
+     * composition for a tap to land on; the page then says so instead of inviting clicks.
+     */
+    liveTakesInput: Boolean = true,
+    /**
      * Whether an override-bearing `/render` returns fresh pixels although the default snapshot is
      * baked — true for a trusted-catalog live session ([ServeCatalogLiveHost]). Decides whether
      * declared knob controls are live or disabled. Defaults to [canApplyOverrides].
@@ -14994,6 +15000,7 @@ ${scriptTag("known-differences.js")}
     // [wasmSrc]); disabled with the note otherwise.
     val liveToggleDis =
       if ((hasLiveStream || wasmSrc != null) && !liveAuthBlocksStream) "" else " disabled"
+    val liveInputAttr = if (hasLiveStream && !liveTakesInput) " data-live-input=\"none\"" else ""
     val liveAuthTitle = liveAuthPrompt?.let { "Sign in with GitHub to enable Live preview." }
     // The tooltip says what pressing the chip does. This is only the opening text;
     // `updateLiveToggle()` re-derives it on every transition, and this matches its initial (static)
@@ -15849,7 +15856,7 @@ ${scriptTag("known-differences.js")}
         </span>
       </div>
       $historyInlineHtml
-      <div class="cp-viewer"$bgThemeAttr$alwaysDarkAttr$irReplayAttr$replayThemesAttr data-preview-id="$idText" data-mode="snapshot" data-modes="$modes" data-static-snapshot="$staticSnapshot" data-can-render-overrides="$canRenderOverrides" data-snapshot-backend="$backendLabel" data-live-backend="$liveLabel" data-render-density="${renderDensityAttr(renderDensity)}" data-fold-scope="${foldStorageScope(sessionId, basePath)}"$sourceLaneAttr$unseededAttr$wasmAttr$rcAttr$rcDensityData$historyAttrs$pinnedAttr$generationAttr>
+      <div class="cp-viewer"$bgThemeAttr$alwaysDarkAttr$irReplayAttr$replayThemesAttr data-preview-id="$idText" data-mode="snapshot" data-modes="$modes" data-static-snapshot="$staticSnapshot" data-can-render-overrides="$canRenderOverrides" data-snapshot-backend="$backendLabel" data-live-backend="$liveLabel"$liveInputAttr data-render-density="${renderDensityAttr(renderDensity)}" data-fold-scope="${foldStorageScope(sessionId, basePath)}"$sourceLaneAttr$unseededAttr$wasmAttr$rcAttr$rcDensityData$historyAttrs$pinnedAttr$generationAttr>
         $navDrawer
         <div class="cp-stage"><cp-backend-badge class="cp-backend" id="cp-backend" role="status" aria-live="polite"></cp-backend-badge><img id="cp-img" alt="$label"><canvas id="cp-canvas" hidden></canvas>${spatialSceneUrl?.let { "<cp-spatial-view scene-url=\"${WebEscaping.htmlEscape(it)}\" label=\"$label\"></cp-spatial-view>" }.orEmpty()}$rcCanvas$wasmFrame$rcWasmFrame$specImg$motionImg$motionPlayer$sourcePanelHtml$specCompare$inspectLayerHtml$stageLiveHint<div class="cp-error" id="cp-error" role="alert" hidden></div></div>
         $inspectLegendHtml

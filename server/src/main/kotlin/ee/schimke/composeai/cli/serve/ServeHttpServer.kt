@@ -15,6 +15,7 @@ import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.daemon.protocol.RemoteComposeOverride
 import ee.schimke.composeai.daemon.protocol.RemoteNamedValue
 import ee.schimke.composeai.daemon.protocol.StreamCodec
+import ee.schimke.composeai.daemon.protocol.StreamFrameParams
 import ee.schimke.composeai.daemon.protocol.UiMode
 import ee.schimke.composeai.data.layoutinspector.ComposeFigmaSvgProduct
 import ee.schimke.composeai.data.layoutinspector.ExplodedSvg
@@ -10608,9 +10609,14 @@ class ServeHttpServer(
           repo = reportContext.repo,
           login = githubAuth?.currentLogin(call),
         )
+      // A document-only preview a daemon can replay on an Android player streams that replay
+      // ([carriedRcLiveHost]), so it offers Live although its host has no live lane of its own.
+      val carriedRcLive =
+        !renderHost.hasLiveStream && donorBackedRcPlayers(renderHost, preview.id).isNotEmpty()
+      val offersLive = renderHost.hasLiveStream || carriedRcLive
       val liveAuthPrompt =
         githubAuth
-          ?.takeIf { renderHost.hasLiveStream }
+          ?.takeIf { offersLive }
           ?.takeUnless { it.isAuthenticated(call) }
           ?.takeIf { oauthCanRoundTrip() }
           ?.let {
@@ -10689,7 +10695,10 @@ class ServeHttpServer(
           // The baked half of the same Typography layer: a published catalog measured it off the
           // frame it also published, so the overlay works on a host with no daemon at all.
           hasPublishedTypography = renderHost.hasPublishedTypographyFor(preview.id),
-          hasLiveStream = renderHost.hasLiveStream,
+          hasLiveStream = offersLive,
+          // …and that replay's stream is a picture of the document's clock, not a held
+          // composition, so the page must not invite input it would drop.
+          liveTakesInput = !carriedRcLive,
           trust = catalogBundleHost(renderHost)?.let { BundleVerifier.summary(it.trust) },
           // Per-preview: the Remote Compose canvas lane needs a captured `.rc` (fetched from
           // `/render/<id>.rc`).
@@ -12249,21 +12258,15 @@ class ServeHttpServer(
     stage: suspend (ByteArray) -> ByteArray = { it },
   ) {
     val overrides =
-      PreviewOverrides(
-        widthPx = widthPx.coerceIn(1, DOC_RENDER_MAX_PX),
-        heightPx = heightPx.coerceIn(1, DOC_RENDER_MAX_PX),
-        density = density,
-        fontScale = fontScale,
-        uiMode = uiMode,
-        remoteCompose =
-          RemoteComposeOverride.Builder()
-            .also {
-              it.player = player.playerKind
-              it.playerId = player.daemonPlayerId
-              it.documentBase64 = java.util.Base64.getEncoder().encodeToString(document)
-              it.namedValues = namedValues
-            }
-            .build(),
+      carriedRcOverrides(
+        player,
+        document,
+        widthPx,
+        heightPx,
+        density,
+        uiMode,
+        namedValues,
+        fontScale,
       )
     // Preferred over borrowing even while a catalog daemon is resident: its players are the ones
     // this server pins, and a stranger's document never runs inside a catalog's daemon.
@@ -12338,6 +12341,216 @@ class ServeHttpServer(
       respondCarriedRcOutcome(outcome, player, stage)
     }
   }
+
+  /**
+   * The overrides a daemon replays [document] with on [player] (`overrides.remoteCompose
+   * .documentBase64`): [respondDonorRcRender]'s, and every frame of a carried live stream's
+   * ([carriedRcLiveHost]).
+   */
+  private fun carriedRcOverrides(
+    player: RcPlayerBackend,
+    document: ByteArray,
+    widthPx: Int,
+    heightPx: Int,
+    density: Float,
+    uiMode: UiMode?,
+    namedValues: Map<String, RemoteNamedValue>,
+    fontScale: Float? = null,
+  ): PreviewOverrides =
+    PreviewOverrides(
+      widthPx = widthPx.coerceIn(1, DOC_RENDER_MAX_PX),
+      heightPx = heightPx.coerceIn(1, DOC_RENDER_MAX_PX),
+      density = density,
+      fontScale = fontScale,
+      uiMode = uiMode,
+      remoteCompose =
+        RemoteComposeOverride.Builder()
+          .also {
+            it.player = player.playerKind
+            it.playerId = player.daemonPlayerId
+            it.documentBase64 = java.util.Base64.getEncoder().encodeToString(document)
+            it.namedValues = namedValues
+          }
+          .build(),
+    )
+
+  /**
+   * [renderHost], for one socket, with a live lane for its document-only previews: those whose
+   * Android players only a daemon replaying the document can draw ([donorBackedRcPlayers]). Their
+   * stream is a [ServeCarriedRcStream] drawn exactly where `/render` would draw the same player —
+   * the server's own player daemon when it offers the player, else a resident catalog daemon that
+   * lends itself ([renderCarriedRcFrame]) — because no daemon's `stream/start` can hold a carried
+   * document. Null when [previewId] has no such player, so the socket keeps the host's own lanes.
+   *
+   * Everything but the stream is [renderHost]'s, and closing the wrapper closes nothing: the
+   * socket's lease owns the host. [onError] is the socket's, for a stream whose render fails.
+   */
+  private fun carriedRcLiveHost(
+    renderHost: ServeHost,
+    sessionId: String,
+    previewId: String,
+    onError: (String) -> Unit,
+  ): ServeHost? {
+    if (donorBackedRcPlayers(renderHost, previewId).isEmpty()) return null
+    val streams = java.util.concurrent.CopyOnWriteArrayList<ServeCarriedRcStream>()
+    return object : ServeHost by renderHost {
+      override val hasLiveStream: Boolean
+        get() = true
+
+      override fun subscribeStream(
+        previewId: String,
+        overrides: PreviewOverrides,
+        codec: StreamCodec?,
+        maxFps: Int?,
+        onUnavailable: ((String) -> Unit)?,
+        onFrame: (StreamFrameParams) -> Unit,
+      ): StreamHandle? {
+        val players = donorBackedRcPlayers(renderHost, previewId)
+        if (players.isEmpty()) {
+          onUnavailable?.invoke("no Android player here can draw this document live")
+          return null
+        }
+        val player =
+          carriedRcPlayerOf(overrides) ?: defaultCarriedRcPlayer(renderHost, previewId, players)
+        if (player !in players) {
+          onUnavailable?.invoke(
+            "${ServeRcPlayerIds.of(player)} cannot stream this document here; live players: " +
+              players.joinToString { ServeRcPlayerIds.of(it) }
+          )
+          return null
+        }
+        val document = runCatching { renderHost.remoteComposeDoc(previewId) }.getOrNull()
+        val spec = renderHost.remoteComposeRenderSpec(previewId)
+        if (document == null || spec == null) {
+          onUnavailable?.invoke("this preview's Remote Compose document is not available yet")
+          return null
+        }
+        // Themed as `/render` themes the same replay: the viewer's mode, else the preview's own.
+        val theme =
+          cmpJvmRenderTheme(
+            overrides.uiMode?.name,
+            renderHost.previews.firstOrNull { it.id == previewId }?.uiMode ?: 0,
+            ServeWeb.SystemDisplay.resolveDarkFirst(
+              sessionId,
+              catalogBundleHost(renderHost)?.stageSurface,
+            ),
+          )
+        val base =
+          carriedRcOverrides(
+            player = player,
+            document = document,
+            widthPx = spec.widthPx,
+            heightPx = spec.heightPx,
+            density = spec.density,
+            uiMode =
+              if (theme == RcJvmServerRenderer.RenderTheme.DARK) UiMode.DARK else UiMode.LIGHT,
+            namedValues = overrides.remoteCompose?.namedValues.orEmpty(),
+            fontScale = spec.fontScale.takeIf { it != 1f },
+          )
+        return ServeCarriedRcStream(
+            base = base,
+            renderFrame = { renderCarriedRcFrame(player, it) },
+            maxFps = maxFps,
+            onFrame = onFrame,
+            onError = onError,
+          )
+          .also { streams += it }
+      }
+
+      override fun activeStreamCount(): Int {
+        streams.removeIf { it.isClosed }
+        return streams.size + renderHost.activeStreamCount()
+      }
+
+      override fun close() {}
+    }
+  }
+
+  /** The Android player a stream's overrides name, or null when they name none. */
+  private fun carriedRcPlayerOf(overrides: PreviewOverrides): RcPlayerBackend? {
+    val rc = overrides.remoteCompose ?: return null
+    rc.playerId?.let { id ->
+      RcPlayerBackend.fromWire(id)?.let {
+        return it
+      }
+    }
+    return rc.player?.let { RcPlayerBackend.fromWire(ServeRcPlayerIds.ofKind(it)) }
+  }
+
+  /**
+   * The player a stream that names none opens on: the deployment's preferred player, else the one
+   * the preview was captured with, else the first [players] offers.
+   */
+  private fun defaultCarriedRcPlayer(
+    host: ServeHost,
+    previewId: String,
+    players: List<RcPlayerBackend>,
+  ): RcPlayerBackend {
+    val preferred = preferredRcPlayer?.let {
+      RcPlayerBackend.fromWire(ServeRcPlayerIds.normalizeRequest(it))
+    }
+    val baked =
+      host.bakedRcPlayer(previewId)?.let { RcPlayerBackend.fromWire(ServeRcPlayerIds.ofKind(it)) }
+    return listOfNotNull(preferred, baked).firstOrNull { it in players } ?: players.first()
+  }
+
+  /**
+   * One frame of a carried live stream: [overrides] drawn by [player] where [respondDonorRcRender]
+   * would draw them — the player daemon when it offers [player], else a resident catalog daemon
+   * ([docRcDonor]) — under the shared render queue, so a stream never starves `/render`. Blocking;
+   * called on the stream's own thread.
+   */
+  private fun renderCarriedRcFrame(
+    player: RcPlayerBackend,
+    overrides: PreviewOverrides,
+  ): ServeCarriedRcStream.Tick {
+    if (!renderSemaphore.tryAcquire(CARRIED_RC_QUEUE_WAIT_MILLIS, TimeUnit.MILLISECONDS)) {
+      return ServeCarriedRcStream.Tick.Retry(CARRIED_RC_BUSY_RETRY_MILLIS)
+    }
+    try {
+      var playerDaemonUnavailable: String? = null
+      val playerDaemon = rcPlayerDaemon?.takeIf { it.offers(player) }
+      if (playerDaemon != null) {
+        when (val outcome = playerDaemon.render(overrides)) {
+          is ServeRcPlayerDaemon.Outcome.Rendered -> return carriedRcTick(outcome.outcome)
+          ServeRcPlayerDaemon.Outcome.Warming ->
+            return ServeCarriedRcStream.Tick.Retry(CARRIED_RC_WARMING_RETRY_MILLIS)
+          // As on `/render`: a seatless or backing-off player daemon is not the end of the lane.
+          is ServeRcPlayerDaemon.Outcome.Unavailable -> playerDaemonUnavailable = outcome.reason
+        }
+      }
+      val unavailable =
+        playerDaemonUnavailable ?: "no running catalog here can draw ${ServeRcPlayerIds.of(player)}"
+      val donor = docRcDonor(player) ?: return ServeCarriedRcStream.Tick.Failed(unavailable)
+      val lease =
+        sessions.lease(donor.sessionId) ?: return ServeCarriedRcStream.Tick.Failed(unavailable)
+      return lease.use {
+        // Leasing resumes a suspended session without its daemon; never boot one for a borrow.
+        if (!it.host.daemonStarted) ServeCarriedRcStream.Tick.Failed(unavailable)
+        else carriedRcTick(it.host.render(donor.previewId, overrides))
+      }
+    } finally {
+      renderSemaphore.release()
+    }
+  }
+
+  /**
+   * A carried-document render as a stream frame; baked or published pixels are not the player's.
+   */
+  private fun carriedRcTick(outcome: RenderOutcome): ServeCarriedRcStream.Tick =
+    when (outcome) {
+      is RenderOutcome.Ok ->
+        if (
+          outcome.generation == RenderOutcome.Generation.BAKED ||
+            outcome.generation == RenderOutcome.Generation.RC_PUBLISHED
+        )
+          ServeCarriedRcStream.Tick.Retry(CARRIED_RC_WARMING_RETRY_MILLIS)
+        else ServeCarriedRcStream.Tick.Frame(outcome.png)
+      RenderOutcome.Busy -> ServeCarriedRcStream.Tick.Retry(CARRIED_RC_BUSY_RETRY_MILLIS)
+      is RenderOutcome.Failed -> ServeCarriedRcStream.Tick.Failed(outcome.reason)
+      RenderOutcome.NotFound -> ServeCarriedRcStream.Tick.Failed("the donor preview is gone")
+      else -> ServeCarriedRcStream.Tick.Retry(CARRIED_RC_WARMING_RETRY_MILLIS)
+    }
 
   /**
    * A carried-document render's answer, from either daemon [respondDonorRcRender] uses; null is a
@@ -12893,6 +13106,9 @@ class ServeHttpServer(
         close(CloseReason(CloseReason.Codes.CANNOT_ACCEPT, "no such session"))
         return
       }
+      // The extra seat a carried-document stream takes ([carriedRcLiveHost]); released with the
+      // lease.
+      var carriedSeat: LiveSeatLimiter.Ticket? = null
       try {
         val renderHost = lease.host
         val previewId = call.parameters["name"]
@@ -12911,6 +13127,21 @@ class ServeHttpServer(
             .let { ServeWeb.SystemDisplay.normalizeOverrideParams(sessionId, it) }
         // Non-suspending hand-off to the socket; drop frames a slow client can't keep up with.
         val send: (String) -> Unit = { text -> outgoing.trySend(Frame.Text(text)) }
+        // A document-only preview's Android players have no daemon stream to join, but a replay of
+        // its document can be streamed. Its session is static, so the seat above was weightless:
+        // the stream takes one of its own, under the same capacity rule.
+        val carriedHost =
+          carriedRcLiveHost(renderHost, sessionId, previewId) { reason ->
+            send(ServeStreamProtocol.errorMessage(reason))
+          }
+        if (carriedHost != null) {
+          carriedSeat =
+            liveSeats.acquire(CARRIED_RC_STREAM_SEAT_WEIGHT, verified = true)
+              ?: run {
+                close(CloseReason(1013.toShort(), "live preview at capacity — try again shortly"))
+                return
+              }
+        }
         // Optional stream tuning: codec (WebP is ~30–60% smaller; the daemon falls back to PNG) and
         // an fps cap.
         val codec =
@@ -12927,7 +13158,7 @@ class ServeHttpServer(
         val live =
           withContext(Dispatchers.IO) {
             ServeLiveSession.tryStart(
-              renderHost,
+              carriedHost ?: renderHost,
               previewId,
               initialOverrides,
               codec,
@@ -12977,6 +13208,7 @@ class ServeHttpServer(
           }
         }
       } finally {
+        carriedSeat?.close()
         lease.close()
       }
     } finally {
@@ -17006,6 +17238,24 @@ class ServeHttpServer(
      * How long a `/render` request waits for a concurrency slot before getting 503 + Retry-After.
      */
     private const val RENDER_QUEUE_WAIT_SECONDS = 30L
+
+    /**
+     * How long one carried live-stream frame waits for a render worker before skipping a beat: a
+     * stream must never queue behind `/render` the way a page's request may.
+     */
+    private const val CARRIED_RC_QUEUE_WAIT_MILLIS = 250L
+
+    /** A carried frame turned away by a busy queue or daemon tries again after this. */
+    private const val CARRIED_RC_BUSY_RETRY_MILLIS = 500L
+
+    /** …and one whose daemon is still starting (a cold player daemon takes ~15 s) after this. */
+    private const val CARRIED_RC_WARMING_RETRY_MILLIS = 1_000L
+
+    /**
+     * The live seat a carried stream holds. Its session is static and took none, and the daemon it
+     * draws on already holds its own; this is the stream's render loop on that daemon.
+     */
+    private const val CARRIED_RC_STREAM_SEAT_WEIGHT = 1
 
     /** Max accepted upload-body size for `POST /bundles` (matches the store's extraction cap). */
     private const val MAX_UPLOAD_BYTES = 100L * 1024 * 1024
