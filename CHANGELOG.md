@@ -1,5 +1,15 @@
 # Changelog
 
+## [3.131.0](https://github.com/yschimke/compose-preview-server/compare/v3.130.0...v3.131.0) (2026-10-12)
+
+
+### Features
+
+* **mcp-app:** number layout boxes with a property legend and add an Audit mode to the render card ([#1615](https://github.com/yschimke/compose-preview-server/issues/1615)) ([a140e71](https://github.com/yschimke/compose-preview-server/commit/a140e7184000af3dab2661181b1a8b44cd1705a5))
+* **mcp:** ask default guideline packs when a module publishes none, and show thin previews' widget source ([#1617](https://github.com/yschimke/compose-preview-server/issues/1617)) ([d706f07](https://github.com/yschimke/compose-preview-server/commit/d706f074248ddf1da8598886cfe66930419c92f4))
+* **serve:** forward input to document-only previews' live lane when the player daemon can hold the document ([#1609](https://github.com/yschimke/compose-preview-server/issues/1609)) ([a643e0f](https://github.com/yschimke/compose-preview-server/commit/a643e0f73e2512f4b137826b55ee1a1a146a4656))
+* **serve:** hold live cmp-jvm sessions for document-only previews on a desktop player daemon ([#1616](https://github.com/yschimke/compose-preview-server/issues/1616)) ([36d7c9e](https://github.com/yschimke/compose-preview-server/commit/36d7c9ef84736751b2ddfc2cf85b933dab63f018))
+
 ## [3.130.0](https://github.com/yschimke/compose-preview-server/compare/v3.129.0...v3.130.0) (2026-10-12)
 
 
