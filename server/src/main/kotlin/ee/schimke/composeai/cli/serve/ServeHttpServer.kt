@@ -11273,14 +11273,18 @@ class ServeHttpServer(
           return@withLeasedSession
         }
       }
-      // The cmp-jvm lane renders the captured document with the embedded desktop player in an
-      // isolated subprocess, for `.png` and `.svg`; slots stay a daemon product.
-      if (
-        !wantSlots &&
-          !wantA11y &&
-          !wantAnnotations &&
-          ServeRcPlayerIds.isCmpJvm(renderParams()["rcPlayer"])
-      ) {
+      // The subprocess lanes render the captured document in an isolated process: cmp-jvm with the
+      // embedded desktop player for `.png` and `.svg`, swift-appkit with the native Swift player
+      // (`rc-swift-render`) for `.png` only; slots stay a daemon product.
+      val subprocessLane = ServeRcPlayerIds.subprocessLaneOf(renderParams()["rcPlayer"])
+      if (!wantSlots && !wantA11y && !wantAnnotations && subprocessLane != null) {
+        if (wantSvg && subprocessLane == RcPlayerBackend.SWIFT_APPKIT) {
+          call.respondText(
+            "swift-appkit renders PNG only; AppKit has no vector export",
+            status = HttpStatusCode.NotFound,
+          )
+          return@withLeasedSession
+        }
         // Past the staged shortcut this spawns the desktop player, so it is a commission — the
         // first place the up-front gate defers to.
         bareRcPlayerBelowLive?.let {
@@ -11300,6 +11304,7 @@ class ServeHttpServer(
           format,
           webMode,
           sessionId,
+          lane = subprocessLane,
           // PNG only; an SVG export has no alpha to composite and is handed through untouched.
           stage = { bytes -> staged(bytes, emptyMap()) },
           cacheControl =
@@ -11927,6 +11932,8 @@ class ServeHttpServer(
     format: RcJvmServerRenderer.Format,
     webMode: Boolean,
     sessionId: String,
+    /** [RcPlayerBackend.CMP_JVM], or [RcPlayerBackend.SWIFT_APPKIT] for `rc-swift-render`. */
+    lane: RcPlayerBackend = RcPlayerBackend.CMP_JVM,
     /** The `?bg=` stage for a raster result; identity without `bg=`, never applied to SVG. */
     stage: suspend (ByteArray) -> ByteArray = { it },
     /** Lifetime for a successful render — see the call site for which requests earn one. */
@@ -11940,7 +11947,7 @@ class ServeHttpServer(
     val doc = docOutcome.bytesOrNull
     val spec = renderHost.remoteComposeRenderSpec(previewId)
     if (doc == null || spec == null) {
-      call.respondText("no cmp-jvm render for this preview", status = HttpStatusCode.NotFound)
+      call.respondText("no ${lane.wire} render for this preview", status = HttpStatusCode.NotFound)
       return
     }
     // Apply live `rc.<name>=…` knob edits, leniently parsed (malformed seeds fall back to the
@@ -11967,7 +11974,7 @@ class ServeHttpServer(
           catalogBundleHost(renderHost)?.stageSurface,
         ),
       )
-    respondCmpJvmRender(doc, spec, seeds, format, theme, webMode, stage, cacheControl)
+    respondCmpJvmRender(doc, spec, seeds, format, theme, webMode, stage, cacheControl, lane)
   }
 
   /**
@@ -11983,6 +11990,7 @@ class ServeHttpServer(
     webMode: Boolean,
     stage: suspend (ByteArray) -> ByteArray,
     cacheControl: String,
+    lane: RcPlayerBackend = RcPlayerBackend.CMP_JVM,
   ) {
     val result =
       withContext(Dispatchers.IO) {
@@ -11990,7 +11998,11 @@ class ServeHttpServer(
           null
         } else {
           try {
-            RcJvmServerRenderer.render(doc, spec, seeds, format, theme)
+            if (lane == RcPlayerBackend.SWIFT_APPKIT) {
+              RcSwiftServerRenderer.render(doc, spec, seeds, theme)
+            } else {
+              RcJvmServerRenderer.render(doc, spec, seeds, format, theme)
+            }
           } finally {
             renderSemaphore.release()
           }
@@ -12049,11 +12061,17 @@ class ServeHttpServer(
       if (RcJvmServerRenderer.isAvailable())
         listOf(ServeWeb.DocServerPlayer(ServeRcPlayerIds.CMP_JVM, "CMP (JVM)", renderPath))
       else emptyList()
+    val swift =
+      if (RcSwiftServerRenderer.isAvailable())
+        listOf(
+          ServeWeb.DocServerPlayer(ServeRcPlayerIds.SWIFT_APPKIT, "Swift (AppKit)", renderPath)
+        )
+      else emptyList()
     val android =
       DOC_DAEMON_PLAYERS.filter(::canDrawCarriedRc).map {
         ServeWeb.DocServerPlayer(ServeRcPlayerIds.of(it), it.label, renderPath)
       }
-    return jvm + android
+    return jvm + swift + android
   }
 
   /**
@@ -12117,7 +12135,8 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /d/{id}/render.png?rcPlayer=cmp-jvm`: a shared Remote Compose document drawn server-side.
+   * `GET /d/{id}/render.png?rcPlayer=cmp-jvm` (or `swift-appkit` on a macOS host): a shared Remote
+   * Compose document drawn server-side.
    * Needs a real credential ([mayRenderDocServerSide]) even on a public host. Sized from the
    * document header at `?density=` (default 1); `?uiMode=` and `rc.<name>=` as on `/render`.
    */
@@ -12149,10 +12168,12 @@ class ServeHttpServer(
       respondDocDaemonRender(doc, daemonPlayer, size, density, params)
       return
     }
-    if (!ServeRcPlayerIds.isCmpJvm(params["rcPlayer"])) {
+    val subprocessLane = ServeRcPlayerIds.subprocessLaneOf(params["rcPlayer"])
+    if (subprocessLane == null) {
       call.respondText(
         "a shared document renders server-side with rcPlayer=" +
-          (listOf(ServeRcPlayerIds.CMP_JVM) + DOC_DAEMON_PLAYERS.map { ServeRcPlayerIds.of(it) })
+          (listOf(ServeRcPlayerIds.CMP_JVM, ServeRcPlayerIds.SWIFT_APPKIT) +
+              DOC_DAEMON_PLAYERS.map { ServeRcPlayerIds.of(it) })
             .joinToString("|"),
         status = HttpStatusCode.BadRequest,
       )
@@ -12181,6 +12202,7 @@ class ServeHttpServer(
       webMode = false,
       stage = { it },
       cacheControl = "private, no-store",
+      lane = subprocessLane,
     )
   }
 

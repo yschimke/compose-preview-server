@@ -31,6 +31,7 @@ internal object ServeRcPlayerIds {
   const val ANDROIDX_EMBEDDED: String = "androidx-embedded"
   const val CMP_ANDROID: String = "cmp-android"
   const val CMP_JVM: String = "cmp-jvm"
+  const val SWIFT_APPKIT: String = "swift-appkit"
   const val CMP_WASM: String = "cmp-wasm"
   const val CAMAELON_JS: String = "camaelon-js"
 
@@ -49,6 +50,7 @@ internal object ServeRcPlayerIds {
       Player(ANDROIDX_EMBEDDED, "AndroidX Embedded", serverSide = true),
       Player(CMP_ANDROID, "CMP Android", serverSide = true),
       Player(CMP_JVM, "CMP JVM", serverSide = true),
+      Player(SWIFT_APPKIT, "Swift AppKit", serverSide = true),
     )
 
   private val CANONICAL: Set<String> = UNIVERSE.mapTo(mutableSetOf()) { it.id }
@@ -206,6 +208,23 @@ internal object ServeRcPlayerIds {
 
   /** Whether a `?rcPlayer=` value selects the desktop-JVM subprocess lane. */
   fun isCmpJvm(raw: String?): Boolean = raw != null && normalizeRequest(raw) == CMP_JVM
+
+  /**
+   * Whether a `?rcPlayer=` value selects the native Swift player's AppKit subprocess
+   * (`rc-swift-render`, [RcSwiftServerRenderer]).
+   */
+  fun isSwiftAppKit(raw: String?): Boolean = raw != null && normalizeRequest(raw) == SWIFT_APPKIT
+
+  /**
+   * The server-subprocess lane a `?rcPlayer=` value selects — [RcPlayerBackend.CMP_JVM] or
+   * [RcPlayerBackend.SWIFT_APPKIT] — or null for every other player.
+   */
+  fun subprocessLaneOf(raw: String?): RcPlayerBackend? =
+    when {
+      isCmpJvm(raw) -> RcPlayerBackend.CMP_JVM
+      isSwiftAppKit(raw) -> RcPlayerBackend.SWIFT_APPKIT
+      else -> null
+    }
 
   /**
    * [ServeOverrides.parse] with `rcPlayer` normalised first ([normalizeRequest]), so legacy links

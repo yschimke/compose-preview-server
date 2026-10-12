@@ -78,7 +78,7 @@ class ServeRcPlayerIdsTest {
 
   @Test
   fun `a browser or subprocess lane is still refused as a daemon render`() {
-    for (v in listOf("camaelon-js", "js", "cmp-wasm", "cmp-jvm", "rcplayer-jvm")) {
+    for (v in listOf("camaelon-js", "js", "cmp-wasm", "cmp-jvm", "rcplayer-jvm", "swift-appkit")) {
       assertIs<OverrideParse.Invalid>(ServeRcPlayerIds.parseOverrides(mapOf("rcPlayer" to v)), v)
     }
   }
@@ -89,6 +89,19 @@ class ServeRcPlayerIdsTest {
     assertTrue(ServeRcPlayerIds.isCmpJvm("rcplayer-jvm"))
     assertFalse(ServeRcPlayerIds.isCmpJvm("cmp-android"))
     assertFalse(ServeRcPlayerIds.isCmpJvm(null))
+  }
+
+  @Test
+  fun `the two subprocess lanes are told apart, and nothing else is one`() {
+    assertTrue(ServeRcPlayerIds.isSwiftAppKit("swift-appkit"))
+    assertTrue(ServeRcPlayerIds.isSwiftAppKit(" Swift-AppKit "))
+    assertFalse(ServeRcPlayerIds.isSwiftAppKit("cmp-jvm"))
+    assertEquals(RcPlayerBackend.CMP_JVM, ServeRcPlayerIds.subprocessLaneOf("rcplayer-jvm"))
+    assertEquals(RcPlayerBackend.SWIFT_APPKIT, ServeRcPlayerIds.subprocessLaneOf("swift-appkit"))
+    for (v in listOf("camaelon-js", "cmp-wasm", "androidx-embedded", "cmp-android", null)) {
+      assertNull(ServeRcPlayerIds.subprocessLaneOf(v), v)
+    }
+    assertTrue(ServeRcPlayerIds.UNIVERSE.any { it.id == "swift-appkit" && it.serverSide })
   }
 
   // ---- cmp-android capability: read from the bundle manifest's classpath ----------------------

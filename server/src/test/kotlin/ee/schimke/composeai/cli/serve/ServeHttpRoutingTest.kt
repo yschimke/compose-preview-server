@@ -1226,6 +1226,22 @@ class ServeHttpRoutingTest {
   }
 
   /**
+   * `swift-appkit` is a subprocess lane like `cmp-jvm`, never a daemon override, and there is no
+   * published column to replay: it either renders through `rc-swift-render` or says why not. Its
+   * SVG export is refused outright, since AppKit has none.
+   */
+  @Test
+  fun `the swift-appkit lane is routed to its own renderer, PNG only`() {
+    val (svgCode, svgBody) = getFull("/rc-published/render/$previewId.svg?rcPlayer=swift-appkit")
+    assertEquals(404, svgCode)
+    assertTrue(svgBody.contains("PNG only"), svgBody)
+    // This host carries the document but no render spec, so the lane has nothing to size against.
+    val (code, body) = getFull("/rc-published/render/$previewId.png?rcPlayer=swift-appkit")
+    assertEquals(404, code)
+    assertEquals("no swift-appkit render for this preview", body)
+  }
+
+  /**
    * A bare browse and `?rcPlayer=androidx-embedded` are the same request and must return the same
    * bytes. The staged `embedded` column is a different render (vendored player under Robolectric,
    * for comparison), whereas baked is the androidx-embedded capture itself.

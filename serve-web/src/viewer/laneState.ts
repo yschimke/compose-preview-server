@@ -21,6 +21,7 @@ export interface LaneFlags {
  * | `androidx-embedded` | vendored AndroidX embedded player                 | daemon                |
  * | `cmp-android`       | CMP player (`rc-player-compose`) on Android       | daemon, by `playerId` |
  * | `cmp-jvm`           | CMP player on the desktop JVM                     | server subprocess     |
+ * | `swift-appkit`      | native Swift player's AppKit renderer (macOS)     | server subprocess     |
  * | `cmp-wasm`          | CMP player compiled to Wasm                       | browser               |
  * | `camaelon-js`       | vendored TypeScript player                        | browser               |
  */
@@ -29,6 +30,7 @@ export const RC_PLAYER = {
     androidxEmbedded: "androidx-embedded",
     cmpAndroid: "cmp-android",
     cmpJvm: "cmp-jvm",
+    swiftAppKit: "swift-appkit",
     cmpWasm: "cmp-wasm",
     camaelonJs: "camaelon-js",
 } as const;
@@ -39,6 +41,7 @@ const SERVER_SIDE_PLAYERS: ReadonlySet<string> = new Set([
     RC_PLAYER.androidxEmbedded,
     RC_PLAYER.cmpAndroid,
     RC_PLAYER.cmpJvm,
+    RC_PLAYER.swiftAppKit,
 ]);
 
 /**

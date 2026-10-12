@@ -1281,6 +1281,7 @@ class ServeWebTest {
         "androidx-embedded",
         "cmp-android",
         "cmp-jvm",
+        "swift-appkit",
       )) {
       assertTrue(html.contains("value=\"rc:$wire\""), "option for $wire present")
     }
