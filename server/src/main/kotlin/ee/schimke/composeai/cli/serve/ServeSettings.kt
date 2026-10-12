@@ -265,8 +265,9 @@ object ServeSettings {
         ),
         Apply.RESTART,
         "Sites whose seed documents a signed-in person may start a UI-builder design from, at " +
-          "`/ui-builder/import?url=<seed URL on that origin>`. The design is created as that " +
-          "person, private to them; the site holds no credential on this server. Off when empty.",
+          "`/ui-builder/designs/import?url=<seed URL on that origin>`. The design is created " +
+          "as that person, private to them; the site holds no credential on this server. Off " +
+          "when empty.",
       ),
       Setting(
         "uiBuilder.hostRoot",

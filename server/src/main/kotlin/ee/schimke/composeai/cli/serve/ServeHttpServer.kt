@@ -6186,10 +6186,10 @@ class ServeHttpServer(
     // `{catalog}` would otherwise swallow `designs`.
     post("${base}/designs/copy") { handleUiBuilderCopy() }
     // Start a design from a seed document a listed site prepared (--ui-builder-import-origins).
-    // Registered before `{catalog}` and the editor shell, which would otherwise take `import`.
+    // Under `designs/`, like copy, so it never shadows a design whose id is `import`.
     if (uiBuilderImportOrigins.isNotEmpty()) {
-      get("${base}/import") { handleUiBuilderImportConfirm() }
-      post("${base}/import") { handleUiBuilderImport() }
+      get("${base}/designs/import") { handleUiBuilderImportConfirm() }
+      post("${base}/designs/import") { handleUiBuilderImport() }
     }
     // Compatibility for creation forms emitted by older builder bundles.
     post("${base}/{catalog}") { handleUiBuilderCreate() }
@@ -14361,7 +14361,7 @@ class ServeHttpServer(
   }
 
   /**
-   * `GET /ui-builder/import?url=…`: the confirmation page for starting a design from a seed
+   * `GET /ui-builder/designs/import?url=…`: the confirmation page for starting a design from a seed
    * document on a listed origin ([ServeUiBuilderImport]). Fetches and checks the seed first, so a
    * bad one is refused here rather than after the person has confirmed.
    */
@@ -14392,7 +14392,7 @@ class ServeHttpServer(
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
     call.respondText(
       ServeUiBuilderImport.confirmPage(
-        action = uiBuilderPagePath(call, "import"),
+        action = uiBuilderPagePath(call, "designs/import"),
         url = url,
         document = document,
         login = githubAuth?.currentLogin(call),
@@ -14402,9 +14402,9 @@ class ServeHttpServer(
   }
 
   /**
-   * `POST /ui-builder/import`: create the confirmed seed as the caller's own private design, then
-   * `303` to it. The seed is fetched again rather than taken from the form, and an id that already
-   * exists is left alone, like every other creation route.
+   * `POST /ui-builder/designs/import`: create the confirmed seed as the caller's own private
+   * design, then `303` to it. The seed is fetched again rather than taken from the form, and an id
+   * that already exists is left alone, like every other creation route.
    */
   private suspend fun RoutingContext.handleUiBuilderImport() {
     val dir = uiBuilderDir

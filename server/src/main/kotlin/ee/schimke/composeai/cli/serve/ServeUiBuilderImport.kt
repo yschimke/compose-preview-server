@@ -7,7 +7,15 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.nio.ByteBuffer
 import java.time.Duration
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionStage
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Flow
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -17,14 +25,14 @@ import kotlinx.serialization.json.jsonObject
  *
  * A site that seeds designs for its own users — the Home Assistant card design server seeds a
  * card's content from its binding schema — publishes the seed document at a URL on its own origin
- * and sends the signed-in person to `/ui-builder/import?url=<that URL>`. They confirm, and the
- * design is created **as them**, private to them, on this server. The other site holds no
+ * and sends the signed-in person to `/ui-builder/designs/import?url=<that URL>`. They confirm, and
+ * the design is created **as them**, private to them, on this server. The other site holds no
  * credential here: no operator token, no agent grant, nobody else's design.
  *
  * Only the listed origins are fetched, so this is not a way to make the server fetch arbitrary
- * URLs; the fetch follows no redirects and reads at most [MAX_BYTES]. The creating POST is
- * same-origin like every other creation form, and the document is fetched again there rather than
- * trusted from the form. Off unless an operator lists an origin.
+ * URLs; the fetch follows no redirects, reads at most [MAX_BYTES] and gives up after ten seconds,
+ * body included. The creating POST is same-origin like every other creation form, and the document
+ * is fetched again there rather than trusted from the form. Off unless an operator lists an origin.
  */
 object ServeUiBuilderImport {
   const val MAX_BYTES = 1 shl 20
@@ -65,36 +73,86 @@ object ServeUiBuilderImport {
     data class Refused(val reason: String) : Fetched
   }
 
-  /** Fetches and decodes the seed document at [uri]. Blocking; call off the event loop. */
-  fun fetch(uri: URI): Fetched {
+  /**
+   * Fetches and decodes the seed document at [uri]. Blocking; call off the event loop.
+   *
+   * [timeout] bounds the whole exchange, body included: `HttpRequest.timeout` stops at the headers,
+   * so a site that answers and then stalls would otherwise hold the caller.
+   */
+  fun fetch(uri: URI, timeout: Duration = FETCH_TIMEOUT): Fetched {
+    val request =
+      HttpRequest.newBuilder(uri)
+        .timeout(timeout)
+        .header("Accept", "application/json")
+        .GET()
+        .build()
+    val body = AtomicReference<CappedBody?>()
+    val future =
+      client.sendAsync(request) { info ->
+        if (info.statusCode() == 200) CappedBody(MAX_BYTES).also(body::set)
+        else HttpResponse.BodySubscribers.replacing(null)
+      }
     val response =
       try {
-        client.send(
-          HttpRequest.newBuilder(uri)
-            .timeout(FETCH_TIMEOUT)
-            .header("Accept", "application/json")
-            .GET()
-            .build(),
-          HttpResponse.BodyHandlers.ofInputStream(),
-        )
+        future.get(timeout.toMillis(), TimeUnit.MILLISECONDS)
+      } catch (e: TimeoutException) {
+        future.cancel(true)
+        body.get()?.cancel()
+        return Fetched.Refused("the seed document took longer than ${timeout.toSeconds()} s")
       } catch (e: Exception) {
-        return Fetched.Refused("the seed document could not be fetched: ${e.javaClass.simpleName}")
+        val cause = (e as? ExecutionException)?.cause ?: e
+        return Fetched.Refused(
+          "the seed document could not be fetched: ${cause.javaClass.simpleName}"
+        )
       }
-    response.body().use { body ->
-      if (response.statusCode() != 200) {
-        return Fetched.Refused("the seed document answered ${response.statusCode()}")
+    if (response.statusCode() != 200) {
+      return Fetched.Refused("the seed document answered ${response.statusCode()}")
+    }
+    val bytes =
+      response.body()
+        ?: return Fetched.Refused("the seed document is larger than ${MAX_BYTES / 1024} KiB")
+    return decode(bytes.toString(Charsets.UTF_8))
+  }
+
+  /**
+   * Collects a body up to [max] bytes, completing with null (and cancelling the stream) once it
+   * passes that.
+   */
+  private class CappedBody(private val max: Int) : HttpResponse.BodySubscriber<ByteArray?> {
+    private val bytes = ByteArrayOutputStream()
+    private val result = CompletableFuture<ByteArray?>()
+    @Volatile private var subscription: Flow.Subscription? = null
+
+    override fun getBody(): CompletionStage<ByteArray?> = result
+
+    override fun onSubscribe(subscription: Flow.Subscription) {
+      this.subscription = subscription
+      subscription.request(Long.MAX_VALUE)
+    }
+
+    override fun onNext(item: List<ByteBuffer>) {
+      if (result.isDone) return
+      for (buffer in item) {
+        val chunk = ByteArray(buffer.remaining())
+        buffer.get(chunk)
+        bytes.write(chunk)
       }
-      val bytes = ByteArrayOutputStream()
-      val buffer = ByteArray(16 * 1024)
-      while (true) {
-        val read = body.read(buffer)
-        if (read < 0) break
-        bytes.write(buffer, 0, read)
-        if (bytes.size() > MAX_BYTES) {
-          return Fetched.Refused("the seed document is larger than ${MAX_BYTES / 1024} KiB")
-        }
+      if (bytes.size() > max) {
+        result.complete(null)
+        cancel()
       }
-      return decode(bytes.toString(Charsets.UTF_8))
+    }
+
+    override fun onError(throwable: Throwable) {
+      result.completeExceptionally(throwable)
+    }
+
+    override fun onComplete() {
+      result.complete(bytes.toByteArray())
+    }
+
+    fun cancel() {
+      subscription?.cancel()
     }
   }
 

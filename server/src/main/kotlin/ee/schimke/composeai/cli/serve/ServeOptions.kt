@@ -319,7 +319,7 @@ public interface ServeOptions {
 
   /**
    * HTTPS origins whose seed documents a signed-in person may import as a design of their own, at
-   * `/ui-builder/import` ([ServeUiBuilderImport]). Empty turns the route off.
+   * `/ui-builder/designs/import` ([ServeUiBuilderImport]). Empty turns the route off.
    */
   public val uiBuilderImportOrigins: List<String>
     get() = emptyList()

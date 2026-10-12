@@ -1177,9 +1177,9 @@ public class ServeCommandOptions(
                           Optional /start guide redirect on the builder hostname.
         --ui-builder-import-origins <https-origin>[,…]
                           Sites whose seed documents a signed-in person may start a design from,
-                          at /ui-builder/import?url=<seed URL on that origin>. The design is created
-                          as that person, private to them; the site holds no credential here. Off
-                          when empty (the default).
+                          at /ui-builder/designs/import?url=<seed URL on that origin>. The design
+                          is created as that person, private to them; the site holds no
+                          credential here. Off when empty (the default).
         --sites <host>=<system>[,…]
                           Top-level sites: serve an already-published catalog on a hostname of its
                           own, where it looks like the whole server (e.g.

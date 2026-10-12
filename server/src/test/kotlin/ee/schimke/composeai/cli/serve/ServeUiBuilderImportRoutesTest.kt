@@ -13,10 +13,14 @@ import ee.schimke.composeai.uibuilder.service.UiBuilderServiceUpdate
 import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionCall
 import java.io.Closeable
 import java.io.File
+import java.net.InetAddress
+import java.net.ServerSocket
 import java.net.URI
 import java.nio.file.Files
+import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import kotlin.concurrent.thread
 import kotlin.coroutines.coroutineContext
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -140,7 +144,7 @@ class ServeUiBuilderImportRoutesTest {
   private fun url(path: String) = "http://127.0.0.1:${server.port}$path"
 
   private fun confirm(seedUrl: String, actor: String? = "github:octocat"): Pair<Int, String> {
-    val builder = Request.Builder().url(url("/ui-builder/import?url=$seedUrl"))
+    val builder = Request.Builder().url(url("/ui-builder/designs/import?url=$seedUrl"))
     actor?.let { builder.header("X-Test-Actor", it) }
     return client.newCall(builder.get().build()).execute().use { it.code to it.body.string() }
   }
@@ -152,7 +156,7 @@ class ServeUiBuilderImportRoutesTest {
   ): Pair<Int, String?> {
     val builder =
       Request.Builder()
-        .url(url("/ui-builder/import"))
+        .url(url("/ui-builder/designs/import"))
         .header("Origin", origin)
         .post(FormBody.Builder().add("url", seedUrl).build())
     actor?.let { builder.header("X-Test-Actor", it) }
@@ -164,7 +168,7 @@ class ServeUiBuilderImportRoutesTest {
     val (code, page) = confirm("https://ha.example/seeds/card-tile-1.json")
     assertEquals(200, code, page)
     assertTrue("Living room" in page && "https://ha.example" in page, page)
-    assertTrue("action=\"/ui-builder/import\"" in page, page)
+    assertTrue("action=\"/ui-builder/designs/import\"" in page, page)
     assertTrue(created.isEmpty(), "looking at the confirmation creates nothing")
 
     assertEquals(
@@ -174,6 +178,59 @@ class ServeUiBuilderImportRoutesTest {
     assertEquals(listOf("card-tile-1"), created)
     assertEquals("github:octocat", owners["card-tile-1"])
     assertEquals(UiBuilderDefaultVisibility.PRIVATE, visibility["card-tile-1"])
+  }
+
+  @Test
+  fun `a design whose id is import still opens in the editor`() {
+    val (code, page) =
+      client.newCall(Request.Builder().url(url("/ui-builder/import")).build()).execute().use {
+        it.code to it.body.string()
+      }
+    assertEquals(200, code, page)
+    assertTrue("Compose UI builder" in page, page)
+    assertTrue(fetched.isEmpty())
+  }
+
+  @Test
+  fun `a seed that stalls or overflows is given up on`() {
+    ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { socket ->
+      val stalled = thread {
+        socket.accept().use { conn ->
+          conn.getInputStream().read(ByteArray(4096))
+          // Headers, then a body that never arrives.
+          conn.getOutputStream().apply {
+            write("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n{".toByteArray())
+            flush()
+          }
+          Thread.sleep(5_000)
+        }
+      }
+      val started = System.nanoTime()
+      val result =
+        ServeUiBuilderImport.fetch(
+          URI("http://127.0.0.1:${socket.localPort}/seed.json"),
+          Duration.ofMillis(500),
+        )
+      assertIs<ServeUiBuilderImport.Fetched.Refused>(result)
+      assertTrue(System.nanoTime() - started < 4_000_000_000L, "the deadline covers the body")
+      stalled.interrupt()
+    }
+    ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { socket ->
+      thread {
+        socket.accept().use { conn ->
+          conn.getInputStream().read(ByteArray(4096))
+          val size = ServeUiBuilderImport.MAX_BYTES + 1
+          conn.getOutputStream().apply {
+            write("HTTP/1.1 200 OK\r\nContent-Length: $size\r\n\r\n".toByteArray())
+            runCatching { write(ByteArray(size) { ' '.code.toByte() }) }
+            flush()
+          }
+        }
+      }
+      val result = ServeUiBuilderImport.fetch(URI("http://127.0.0.1:${socket.localPort}/seed.json"))
+      assertIs<ServeUiBuilderImport.Fetched.Refused>(result)
+      assertTrue("larger" in result.reason, result.reason)
+    }
   }
 
   @Test
