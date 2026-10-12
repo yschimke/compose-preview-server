@@ -273,33 +273,70 @@ val stageRcPlayerWasm =
 
 // The Android Remote Compose players, shipped as `<APP_HOME>/lib-rc-players-android/` for the
 // server's own player-only Android daemon (`ServeRcPlayerDaemon`), which replays a document with no
-// catalog behind it. Exactly the family the Android daemon sidecar leaves for a consumer to bring
-// (androidx.compose.remote plus the rc-players embedded player); everything else those players link
-// already sits in `lib-daemon-android/`. Never on a server classpath. The CMP player
-// (`cmp-android`) is not staged: its rc-player-compose tail (Coil, Ktor, kotlinx-datetime) is no
-// part of the sidecar, so that player stays off unless an operator's directory supplies it.
+// catalog behind it. The family the Android daemon sidecar leaves for a consumer to bring: the
+// AndroidX players plus the rc-players embedded player (`rcPlayersAndroid`), and the CMP player
+// with the part of its runtime graph the sidecar does not carry (`rcPlayersAndroidCmp`).
+// Everything else those players link already sits in `lib-daemon-android/`. Never on a server
+// classpath; the daemon classpath puts these jars ahead of the sidecar.
+fun Configuration.androidReleaseRuntime() {
+  isCanBeConsumed = false
+  isCanBeResolved = true
+  attributes {
+    attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage.JAVA_RUNTIME))
+    attribute(Category.CATEGORY_ATTRIBUTE, objects.named(Category.LIBRARY))
+    attribute(
+      TargetJvmEnvironment.TARGET_JVM_ENVIRONMENT_ATTRIBUTE,
+      objects.named(TargetJvmEnvironment.ANDROID),
+    )
+    attribute(
+      org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType.attribute,
+      org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType.androidJvm,
+    )
+    attribute(
+      Attribute.of("com.android.build.api.attributes.BuildTypeAttr", String::class.java),
+      "release",
+    )
+  }
+}
+
 val rcPlayersAndroid =
   configurations.create("rcPlayersAndroid") {
     description = "The Android Remote Compose players the player-only daemon replays with."
-    isCanBeConsumed = false
-    isCanBeResolved = true
-    attributes {
-      attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage.JAVA_RUNTIME))
-      attribute(Category.CATEGORY_ATTRIBUTE, objects.named(Category.LIBRARY))
-      attribute(
-        TargetJvmEnvironment.TARGET_JVM_ENVIRONMENT_ATTRIBUTE,
-        objects.named(TargetJvmEnvironment.ANDROID),
-      )
-      attribute(
-        org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType.attribute,
-        org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType.androidJvm,
-      )
-      attribute(
-        Attribute.of("com.android.build.api.attributes.BuildTypeAttr", String::class.java),
-        "release",
-      )
-    }
+    androidReleaseRuntime()
   }
+
+// The CMP player behind `cmp-android` (rc-players' `rc-player-compose`, which the daemon's
+// connector loads by name), resolved transitively so its own tail comes with it: rc-player-runtime,
+// -protocol and -trace, Coil 3 with its Ktor network fetcher, kotlinx-datetime, and the newer
+// kotlinx-coroutines / kotlinx-io that tail needs. What the sidecar already carries is filtered out
+// at staging ([sidecarCarries]) rather than shipped twice: those jars would precede the sidecar's
+// and could downgrade it (rc-player-compose resolves lifecycle 2.9.4, the sidecar ships 2.10.0).
+val rcPlayersAndroidCmp =
+  configurations.create("rcPlayersAndroidCmp") {
+    description = "The CMP Remote Compose player and the runtime tail the Android sidecar lacks."
+    androidReleaseRuntime()
+  }
+
+/**
+ * Whether the Android daemon sidecar (`lib-daemon-android/`) already carries a component of the CMP
+ * player's graph, at the version the player resolves or newer. The sidecar is an Android Compose
+ * renderer: it ships the AndroidX graph (Compose 1.12.1, which `org.jetbrains.compose`'s Android
+ * artifacts redirect to), the Kotlin stdlib, kotlinx-serialization, Okio and the usual annotation
+ * jars. Checked against the daemon 3.15.3 sidecar; the one AndroidX library it lacks is
+ * `androidx.exifinterface`, which Coil decodes with. kotlinx-coroutines and kotlinx-io are staged
+ * although the sidecar has older ones (1.9.0, 0.3.3): Ktor 3 needs the newer lines, and a catalog
+ * bundle's copies of exactly those two precede the sidecar in the same way
+ * (`ServeBundleDaemon.shouldPrecedeDaemonSidecar`).
+ */
+fun sidecarCarries(group: String, module: String): Boolean =
+  (group.startsWith("androidx.") && group != "androidx.exifinterface") ||
+    group.startsWith("org.jetbrains.compose") ||
+    group == "org.jetbrains.kotlin" ||
+    (group == "org.jetbrains.kotlinx" && module.startsWith("kotlinx-serialization")) ||
+    group == "com.squareup.okio" ||
+    group == "org.jetbrains" ||
+    group == "org.jspecify" ||
+    group == "com.google.guava"
 
 dependencies {
   rcPlayersAndroid(platform(libs.rc.players.bom))
@@ -314,6 +351,8 @@ dependencies {
       libs.rcplayer.embedded.android,
     )
     .forEach { rcPlayersAndroid(it) { isTransitive = false } }
+  rcPlayersAndroidCmp(platform(libs.rc.players.bom))
+  rcPlayersAndroidCmp(libs.rcplayer.compose)
 }
 
 /** Copy jars as they are and each AAR's `classes.jar` (plus its `libs/`) as `<aar>.jar`. */
@@ -357,6 +396,15 @@ val stageRcPlayersAndroidLibs =
     description = "Stage the Android Remote Compose players into lib-rc-players-android."
     group = "distribution"
     artifacts.from(rcPlayersAndroid)
+    artifacts.from(
+      rcPlayersAndroidCmp.incoming
+        .artifactView {
+          componentFilter { id ->
+            id !is ModuleComponentIdentifier || !sidecarCarries(id.group, id.module)
+          }
+        }
+        .files
+    )
     destinationDir.set(layout.buildDirectory.dir("staged-rc-players-android-libs"))
   }
 
@@ -706,6 +754,20 @@ tasks.withType<Test>().configureEach {
     .files(stageRcPlayerWasm)
     .withPropertyName("rcPlayerWasm")
     .withPathSensitivity(PathSensitivity.RELATIVE)
+  // The exact `lib-rc-players-android/` the distribution packages, so
+  // `ServeRcPlayersStagingTest` checks that the player daemon would offer every Android player.
+  inputs
+    .files(stageRcPlayersAndroidLibs)
+    .withPropertyName("rcPlayersAndroid")
+    .withNormalizer(ClasspathNormalizer::class)
+  val rcPlayersAndroidDir = stageRcPlayersAndroidLibs.flatMap { it.destinationDir }
+  jvmArgumentProviders.add(
+    CommandLineArgumentProvider {
+      listOf(
+        "-Dcomposeai.test.rcPlayersAndroidDir=${rcPlayersAndroidDir.get().asFile.absolutePath}"
+      )
+    }
+  )
   val rcJvmFontsDir = layout.buildDirectory.dir("rc-player-wasm/fonts")
   jvmArgumentProviders.add(
     CommandLineArgumentProvider {
