@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.134.0](https://github.com/yschimke/compose-preview-server/compare/v3.133.0...v3.134.0) (2026-10-12)
+
+
+### Features
+
+* **serve:** offer the swift-appkit player and route it to rc-swift-render ([#1619](https://github.com/yschimke/compose-preview-server/issues/1619)) ([4c41267](https://github.com/yschimke/compose-preview-server/commit/4c412672880cbe9e267e175e53ce0fe2de3a24a9))
+
+
+### Bug Fixes
+
+* **deps:** move rc-players to 2.11.0 so CMP gauges bound to their canvas size draw ([#1627](https://github.com/yschimke/compose-preview-server/issues/1627)) ([a35b463](https://github.com/yschimke/compose-preview-server/commit/a35b463d837bcdf80c6c851f633f647191cdcd2a))
+* **deps:** update dependency io.github.classgraph:classgraph to v4.8.198 ([#1629](https://github.com/yschimke/compose-preview-server/issues/1629)) ([462f6d1](https://github.com/yschimke/compose-preview-server/commit/462f6d1d6ac5daa338c225987bc3cb38e0e52995))
+
 ## [3.133.0](https://github.com/yschimke/compose-preview-server/compare/v3.132.0...v3.133.0) (2026-10-12)
 
 
