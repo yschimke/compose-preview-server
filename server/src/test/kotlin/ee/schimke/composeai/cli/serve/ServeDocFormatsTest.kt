@@ -55,6 +55,33 @@ class ServeDocFormatsTest {
     assertNull(ServeDocFormats.LOTTIE.unsupported(ServeDocFixtures.lottieDoc()))
   }
 
+  /**
+   * `DOC_DENSITY_AT_GENERATION` (key 7, a float) is what a replay is scaled by when nothing else
+   * speaks for the document; a document without it, or in the untagged form, declares none.
+   */
+  @Test
+  fun `remote compose generation density is read from the header when declared`() {
+    val declared =
+      ServeDocFixtures.remoteComposeDoc(width = 300, height = 200, densityAtGeneration = 2f)
+    assertEquals(2f, ServeDocFormats.remoteComposeDensityAtGeneration(declared))
+    // The other properties still read alongside it.
+    assertEquals(ServeDocSize(300, 200), ServeDocFormats.REMOTE_COMPOSE.size(declared))
+    assertNull(
+      ServeDocFormats.remoteComposeDensityAtGeneration(ServeDocFixtures.remoteComposeDoc())
+    )
+    assertNull(
+      ServeDocFormats.remoteComposeDensityAtGeneration(
+        ServeDocFixtures.androidxUntaggedRemoteComposePrefix()
+      )
+    )
+    assertNull(
+      ServeDocFormats.remoteComposeDensityAtGeneration(
+        ServeDocFixtures.remoteComposeDoc(densityAtGeneration = Float.NaN)
+      )
+    )
+    assertNull(ServeDocFormats.remoteComposeDensityAtGeneration(byteArrayOf(0x52, 0x43, 0x01)))
+  }
+
   @Test
   fun `remote compose document is detected and summarised from its header`() {
     val doc =
@@ -194,7 +221,8 @@ object ServeDocFixtures {
 
   /**
    * A minimal Remote Compose document: the `Header` operation (opcode 0, `magic|major`, minor,
-   * patch) followed by a two-entry property table carrying `DOC_WIDTH` / `DOC_HEIGHT`.
+   * patch) followed by a property table carrying `DOC_WIDTH` / `DOC_HEIGHT`, plus
+   * `DOC_DENSITY_AT_GENERATION` (a float) when [densityAtGeneration] is given.
    */
   fun remoteComposeDoc(
     major: Int = 1,
@@ -202,6 +230,7 @@ object ServeDocFixtures {
     patch: Int = 0,
     width: Int = 256,
     height: Int = 256,
+    densityAtGeneration: Float? = null,
   ): ByteArray {
     val out = ByteArrayOutputStream()
     fun int(value: Int) {
@@ -218,13 +247,18 @@ object ServeDocFixtures {
     int((0x048C shl 16) or major)
     int(minor)
     int(patch)
-    int(2) // property count
+    int(if (densityAtGeneration == null) 2 else 3) // property count
     short(5) // DOC_WIDTH, DATA_TYPE_INT
     short(4)
     int(width)
     short(6) // DOC_HEIGHT, DATA_TYPE_INT
     short(4)
     int(height)
+    if (densityAtGeneration != null) {
+      short((1 shl 10) or 7) // DOC_DENSITY_AT_GENERATION, DATA_TYPE_FLOAT
+      short(4)
+      int(densityAtGeneration.toRawBits())
+    }
     return out.toByteArray()
   }
 
