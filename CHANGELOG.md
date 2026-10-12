@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.128.0](https://github.com/yschimke/compose-preview-server/compare/v3.127.0...v3.128.0) (2026-10-12)
+
+
+### Bug Fixes
+
+* **serve-web:** size the Camaelon canvas from the snapshot before the document header ([#1603](https://github.com/yschimke/compose-preview-server/issues/1603)) ([74f569c](https://github.com/yschimke/compose-preview-server/commit/74f569c28bc92003c496a95440beb93888b94925))
+
 ## [3.127.0](https://github.com/yschimke/compose-preview-server/compare/v3.126.0...v3.127.0) (2026-10-12)
 
 
