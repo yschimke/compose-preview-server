@@ -3507,8 +3507,7 @@
       const bounds = boundsOf(node);
       if (!validBounds(bounds)) continue;
       const rect = document.createElementNS(namespace, 'rect');
-      rect.setAttribute('class', box.className ? `${className} ${box.className}` : className);
-      if (box.key !== undefined) rect.dataset.key = String(box.key);
+      rect.setAttribute('class', className);
       rect.setAttribute('x', bounds[0] * scale);
       rect.setAttribute('y', bounds[1] * scale);
       rect.setAttribute('width', (bounds[2] - bounds[0]) * scale);
