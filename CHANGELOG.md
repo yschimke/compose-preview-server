@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.129.0](https://github.com/yschimke/compose-preview-server/compare/v3.128.0...v3.129.0) (2026-10-12)
+
+
+### Features
+
+* **serve:** stream document-only previews live on the Android players, and stop the renderer menu reading as disabled ([#1608](https://github.com/yschimke/compose-preview-server/issues/1608)) ([b872fcb](https://github.com/yschimke/compose-preview-server/commit/b872fcb94f25ef6947c2d9170f07995e7c390cd8))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.52.0 ([#1605](https://github.com/yschimke/compose-preview-server/issues/1605)) ([f46909c](https://github.com/yschimke/compose-preview-server/commit/f46909c2c0d0a87b4b6e31cd36b94327a4e76ea5))
+* **deps:** update dependency ee.schimke.composeai:rc-players-bom to v2.9.0 ([#1606](https://github.com/yschimke/compose-preview-server/issues/1606)) ([de2ebea](https://github.com/yschimke/compose-preview-server/commit/de2ebeafe4bd923c00a8d0cba4ff4bb69189f332))
+
 ## [3.128.0](https://github.com/yschimke/compose-preview-server/compare/v3.127.0...v3.128.0) (2026-10-12)
 
 
