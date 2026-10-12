@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.127.0](https://github.com/yschimke/compose-preview-server/compare/v3.126.0...v3.127.0) (2026-10-12)
+
+
+### Bug Fixes
+
+* **deps:** take rc-players 2.9.0 so the CMP Wasm lane honours density ([#1601](https://github.com/yschimke/compose-preview-server/issues/1601)) ([03c8ca2](https://github.com/yschimke/compose-preview-server/commit/03c8ca268000afd25505a4ec1072f7bba814ac51))
+
 ## [3.126.0](https://github.com/yschimke/compose-preview-server/compare/v3.125.0...v3.126.0) (2026-10-12)
 
 
