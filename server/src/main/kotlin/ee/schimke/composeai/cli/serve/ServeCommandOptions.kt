@@ -246,6 +246,29 @@ public class ServeCommandOptions(
       }
     }
 
+  override val uiBuilderImportOrigins: List<String> =
+    args
+      .flagValue("--ui-builder-import-origins")
+      ?.split(",")
+      ?.map(String::trim)
+      ?.filter(String::isNotEmpty)
+      ?.map { raw ->
+        requireNotNull(ServeUiBuilderImport.normalizeOrigin(raw)) {
+          "--ui-builder-import-origins accepts HTTPS origins such as https://ha.coo.ee, got `$raw`"
+        }
+      }
+      ?.distinct() ?: emptyList()
+
+  override val uiBuilderProfile: ServeUiBuilderProfile? =
+    ServeUiBuilderProfile.of(
+      host = args.flagValue("--ui-builder-profile-host"),
+      name = args.flagValue("--ui-builder-profile-name"),
+      catalogs = args.flagValue("--ui-builder-profile-catalogs")?.split(",").orEmpty(),
+      accent = args.flagValue("--ui-builder-profile-accent"),
+      homeUrl = args.flagValue("--ui-builder-profile-home-url"),
+      uiBuilderHost = uiBuilderHost,
+    )
+
   override val uiBuilderStartUrl: String? =
     args.flagValue("--ui-builder-start-url")?.also { raw ->
       val uri = java.net.URI(raw)
@@ -1162,6 +1185,23 @@ public class ServeCommandOptions(
                           Include it in the TLS proxy and configure a shared auth cookie domain.
         --ui-builder-start-url <https-url>
                           Optional /start guide redirect on the builder hostname.
+        --ui-builder-import-origins <https-origin>[,…]
+                          Sites whose seed documents a signed-in person may start a design from,
+                          at /ui-builder/designs/import?url=<seed URL on that origin>. The design
+                          is created as that person, private to them; the site holds no
+                          credential here. Off when empty (the default).
+        --ui-builder-profile-host <host>
+                          A white-labelled builder on one more hostname, which keeps the
+                          builder's /ui-builder/ paths: its pages carry the profile's name, link
+                          to no catalog, and offer only its catalogs. Grants nothing; off unset.
+        --ui-builder-profile-name <text>
+                          What the builder is called on that host (required with the host).
+        --ui-builder-profile-catalogs <catalog>[,…]
+                          The UI-builder catalogs offered there (required with the host).
+        --ui-builder-profile-accent <#rrggbb>
+                          Optional accent colour for that host's builder chrome.
+        --ui-builder-profile-home-url <https-url>
+                          Optional target of that host's logo and back links.
         --sites <host>=<system>[,…]
                           Top-level sites: serve an already-published catalog on a hostname of its
                           own, where it looks like the whole server (e.g.
