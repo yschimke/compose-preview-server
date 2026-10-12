@@ -143,6 +143,28 @@ class ServeRcPlayerDaemon(
     val lastError: String? = null,
   )
 
+  /**
+   * The tickets a running daemon's seat is made of: one, or — after a viewer's stream seat was
+   * handed over ([SeatHandOver]) — that ticket plus the rest of the weight. Closed together.
+   */
+  private class Seat(private val tickets: List<LiveSeatLimiter.Ticket>) : AutoCloseable {
+    constructor(ticket: LiveSeatLimiter.Ticket) : this(listOf(ticket))
+
+    override fun close() = tickets.forEach { it.close() }
+  }
+
+  /**
+   * A viewer's own stream seat, offered to a held-session start that would not fit beside it
+   * ([openLive]). [permits] is what [take] would hand over; [take] gives up the ticket for good and
+   * records [daemon] as the one now paying for the stream, or answers null when it has none. Called
+   * under this daemon's lock.
+   */
+  interface SeatHandOver {
+    val permits: Int
+
+    fun take(daemon: ServeRcPlayerDaemon): LiveSeatLimiter.Ticket?
+  }
+
   private sealed interface State {
     data object Idle : State
 
@@ -150,7 +172,7 @@ class ServeRcPlayerDaemon(
 
     class Running(
       val host: ServeHost,
-      var seat: LiveSeatLimiter.Ticket?,
+      var seat: Seat?,
       /** Whether [host]'s daemon holds a live session for a carried document. */
       val playsLive: Boolean,
       /**
@@ -246,14 +268,16 @@ class ServeRcPlayerDaemon(
    * or has no seat) answers [LiveOutcome.Busy]. Blocking while `stream/start` runs.
    *
    * A cold start here takes a foreground seat (see the class doc). [streamSeat] is the seat the
-   * viewer's stream already holds, if any: when the foreground seat does not fit beside it, it is
-   * released to make room, since the daemon about to hold the session is that stream's cost.
+   * viewer's stream already holds, if any: when the foreground seat does not fit beside it, the
+   * daemon takes it over as part of its own, since the daemon about to hold the session is that
+   * stream's cost. The hand-over never releases a permit first, so no other admission can slip in
+   * between and leave the viewer's stream uncounted.
    */
   fun openLive(
     overrides: PreviewOverrides,
     codec: StreamCodec?,
     maxFps: Int?,
-    streamSeat: (() -> LiveSeatLimiter.Ticket?)? = null,
+    streamSeat: SeatHandOver? = null,
     onFrame: (StreamFrameParams) -> Unit,
   ): LiveOutcome {
     val host =
@@ -341,14 +365,14 @@ class ServeRcPlayerDaemon(
   private fun start(
     overrides: PreviewOverrides,
     foreground: Boolean,
-    streamSeat: (() -> LiveSeatLimiter.Ticket?)? = null,
+    streamSeat: SeatHandOver? = null,
   ): Outcome {
     // A resident daemon costs what a catalog's of the same backend does, so it holds that seat (an
     // Android one for Robolectric).
     val seat = liveSeats?.let { seats ->
       val ticket =
         if (foreground) acquireForeground(seats, streamSeat)
-        else seats.acquireBackground(seatWeight, dedicatedSlice = false)
+        else seats.acquireBackground(seatWeight, dedicatedSlice = false)?.let(::Seat)
       ticket
         ?: return Outcome.Unavailable(noSeat()).also {
           // Said once per reason, so a lane asking every few seconds does not flood the log, and
@@ -401,23 +425,26 @@ class ServeRcPlayerDaemon(
   /**
    * A foreground seat for a viewer's held session: from the general lane, without the stream
    * headroom [LiveSeatLimiter.acquireBackground] keeps (this *is* the stream it keeps it for). When
-   * that does not fit, the viewer's own stream seat is given up and the acquire tried once more.
-   * Not counted as a refusal: the lane keeps its replay, and asks again.
+   * that does not fit, the viewer's own stream seat makes up part of it: the rest of the weight is
+   * acquired first, and only then is the viewer's ticket taken over — nothing is released in
+   * between, so a refusal leaves the viewer's seat exactly as it was. Not counted as a refusal: the
+   * lane keeps its replay, and asks again.
    */
-  private fun acquireForeground(
-    seats: LiveSeatLimiter,
-    streamSeat: (() -> LiveSeatLimiter.Ticket?)?,
-  ): LiveSeatLimiter.Ticket? {
+  private fun acquireForeground(seats: LiveSeatLimiter, streamSeat: SeatHandOver?): Seat? {
     seats.acquire(seatWeight, countRefusal = false)?.let {
-      return it
+      return Seat(it)
     }
-    val own = streamSeat?.invoke()?.takeIf { it.permits > 0 } ?: return null
-    // Only when giving it up would make room: a stream stripped of its seat for nothing would
-    // leave the box over-admitted. Racy, but a race can only make the second acquire fail.
-    val generalFree = seats.availablePermits() - seats.perPreviewPermitsAvailable()
-    if (generalFree + own.permits < seatWeight) return null
-    own.close()
-    return seats.acquire(seatWeight, countRefusal = false)
+    val own = streamSeat?.permits?.takeIf { it > 0 } ?: return null
+    // A weight at or under what the viewer holds needs nothing more (`acquire(0)` is free).
+    val rest =
+      seats.acquire((seatWeight - own).coerceAtLeast(0), countRefusal = false) ?: return null
+    val taken =
+      streamSeat.take(this)
+        ?: run {
+          rest.close()
+          return null
+        }
+    return Seat(listOf(rest, taken))
   }
 
   /**
@@ -450,7 +477,8 @@ class ServeRcPlayerDaemon(
         val current = state as? State.Running ?: return
         if (liveSessions > 0) return
         if (current.foreground) {
-          val repriced = liveSeats?.acquireBackground(seatWeight, dedicatedSlice = false)
+          val repriced =
+            liveSeats?.acquireBackground(seatWeight, dedicatedSlice = false)?.let(::Seat)
           if (repriced != null) {
             current.seat?.close()
             current.seat = repriced

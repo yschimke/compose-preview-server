@@ -6,6 +6,7 @@ import ee.schimke.composeai.daemon.protocol.RemoteComposeOverride
 import ee.schimke.composeai.daemon.protocol.StreamCodec
 import ee.schimke.composeai.daemon.protocol.StreamFrameParams
 import java.util.Base64
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
@@ -25,6 +26,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 
@@ -69,7 +71,12 @@ class ServeCarriedRcSeatTest {
       maxFps: Int?,
       onUnavailable: ((String) -> Unit)?,
       onFrame: (StreamFrameParams) -> Unit,
-    ): StreamHandle {
+    ): StreamHandle? {
+      // As a real player daemon: one held session at a time.
+      if (heldOpen.get() > 0) {
+        onUnavailable?.invoke("the daemon already holds a live session")
+        return null
+      }
       heldOpen.incrementAndGet()
       val seq = AtomicLong()
       fun frame(marker: Int) =
@@ -196,6 +203,7 @@ class ServeCarriedRcSeatTest {
 
   @AfterTest
   fun stop() {
+    viewers.forEach { runCatching { it.cancel() } }
     runCatching { socket?.cancel() }
     runCatching { server?.stop() }
     runCatching { daemon?.close() }
@@ -230,16 +238,52 @@ class ServeCarriedRcSeatTest {
   fun `the viewer's own stream seat is given up when the daemon would not fit beside it`() {
     val seats = spentBox()
     val daemon = androidDaemon(seats)
-    val streamSeat = assertNotNull(seats.acquire(1))
+    val streamSeat = ServeCarriedRcStreamSeat(seats, 1).also { assertTrue(it.acquire()) }
     assertEquals(
       ServeRcPlayerDaemon.LiveOutcome.Warming,
-      daemon.openLive(carried(), null, null, streamSeat = { streamSeat }) {},
+      daemon.openLive(carried(), null, null, streamSeat = streamSeat) {},
     )
     awaitRunning(daemon)
+    assertFalse(streamSeat.holdsTicket, "the daemon's seat is made of it now")
     assertEquals(seats.perPreviewPermits, seats.availablePermits())
-    // The socket still closes its ticket when it ends; a released ticket must not pay back twice.
+    assertTrue(streamSeat.ensureCharged(), "a replay meanwhile is paid for by that daemon")
+    // The socket still closes its seat when it ends; a handed-over ticket must not pay back twice.
     streamSeat.close()
     assertEquals(seats.perPreviewPermits, seats.availablePermits())
+    daemon.close()
+    assertEquals(3, seats.availablePermits(), "the daemon returns both parts of its seat")
+  }
+
+  @Test
+  fun `an admission racing the hand-over leaves the viewer's seat held`() {
+    val seats = spentBox()
+    val daemon = androidDaemon(seats)
+    val own = assertNotNull(seats.acquire(1))
+    var intruder: LiveSeatLimiter.Ticket? = null
+    var taken = false
+    // Another socket claims the last free permit the moment the daemon reads the viewer's seat —
+    // between deciding to take it over and acquiring the rest of the weight.
+    val racing =
+      object : ServeRcPlayerDaemon.SeatHandOver {
+        override val permits: Int
+          get() {
+            intruder = intruder ?: seats.acquire(1)
+            return own.permits
+          }
+
+        override fun take(daemon: ServeRcPlayerDaemon): LiveSeatLimiter.Ticket? {
+          taken = true
+          return own
+        }
+      }
+    assertIs<ServeRcPlayerDaemon.LiveOutcome.Busy>(
+      daemon.openLive(carried(), null, null, streamSeat = racing) {}
+    )
+    assertNotNull(intruder, "the race happened")
+    assertFalse(taken, "nothing is taken over unless the rest of the weight was had first")
+    assertEquals(seats.perPreviewPermits, seats.availablePermits(), "the viewer still holds its")
+    own.close()
+    assertEquals(seats.perPreviewPermits + 1, seats.availablePermits())
   }
 
   @Test
@@ -247,11 +291,12 @@ class ServeCarriedRcSeatTest {
     val seats = spentBox()
     val daemon = androidDaemon(seats)
     assertNotNull(seats.acquire(1))
-    val streamSeat = assertNotNull(seats.acquire(1))
+    val streamSeat = ServeCarriedRcStreamSeat(seats, 1).also { assertTrue(it.acquire()) }
     val busy =
       assertIs<ServeRcPlayerDaemon.LiveOutcome.Busy>(
-        daemon.openLive(carried(), null, null, streamSeat = { streamSeat }) {}
+        daemon.openLive(carried(), null, null, streamSeat = streamSeat) {}
       )
+    assertTrue(streamSeat.holdsTicket)
     assertTrue("no live seat" in busy.reason, busy.reason)
     assertEquals("idle", daemon.snapshot().state)
     assertEquals(
@@ -259,6 +304,25 @@ class ServeCarriedRcSeatTest {
       seats.availablePermits(),
       "the stream still holds its seat",
     )
+  }
+
+  @Test
+  fun `waiting on a starting daemon is not charged, and falling back to the replay is`() {
+    val seats = spentBox()
+    val daemon = androidDaemon(seats)
+    val streamSeat = ServeCarriedRcStreamSeat(seats, 1)
+    // Another viewer's open started the daemon, on the whole general lane.
+    daemon.openLive(carried(), null, null) {}
+    awaitRunning(daemon)
+    assertTrue(streamSeat.ensureCharged(startingFor = daemon), "its seat stands for the session")
+    assertFalse(streamSeat.holdsTicket)
+    // The session went elsewhere: the replay must be paid for, and there is nothing free.
+    assertFalse(streamSeat.ensureCharged())
+    daemon.close()
+    assertTrue(streamSeat.ensureCharged(), "once a seat is free, it is taken")
+    assertTrue(streamSeat.holdsTicket)
+    streamSeat.close()
+    assertEquals(3, seats.availablePermits())
   }
 
   @Test
@@ -357,6 +421,77 @@ class ServeCarriedRcSeatTest {
     assertEquals("running", desktop!!.snapshot().state)
     assertEquals(0L, seats.refusalCount())
   }
+
+  @Test
+  fun `a second viewer on the replay while the session is held is turned away on a spent box`() {
+    val seats = spentBox()
+    serve(androidDaemon(seats), seats)
+    val first = openLive("rcPlayer=androidx-view")
+    assertTrue(first.next("lane") { it["input"]!!.jsonPrimitive.boolean }.isNotEmpty())
+    assertEquals(seats.perPreviewPermits, seats.availablePermits(), "the held daemon has it all")
+
+    // The daemon holds a seat, so the second viewer is let in to see whether the held session is
+    // theirs; it is not (one at a time), so its lane is the replay, which it cannot pay for.
+    val second = viewer("rcPlayer=androidx-view")
+    assertEquals(1013, second.closed.get(10, TimeUnit.SECONDS))
+    assertEquals(seats.perPreviewPermits, seats.availablePermits(), "and it holds nothing")
+    assertEquals(1, heldOpen.get(), "the first viewer keeps its session")
+  }
+
+  @Test
+  fun `a second viewer on the replay while the session is held pays for its own seat`() {
+    val seats = LiveSeatLimiter(6)
+    serve(androidDaemon(seats), seats)
+    val first = openLive("rcPlayer=androidx-view")
+    assertTrue(first.next("lane") { it["input"]!!.jsonPrimitive.boolean }.isNotEmpty())
+    val afterFirst = seats.availablePermits()
+
+    val second = viewer("rcPlayer=androidx-view")
+    assertFalse(second.messages.next("lane")["input"]!!.jsonPrimitive.boolean, "the replay")
+    second.messages.next("frame")
+    assertEquals(afterFirst - 1, seats.availablePermits(), "charged one stream seat")
+    assertFalse(second.closed.isDone)
+    second.socket.close(1000, null)
+    val deadline = System.currentTimeMillis() + 5_000
+    while (seats.availablePermits() != afterFirst && System.currentTimeMillis() < deadline) {
+      Thread.sleep(20)
+    }
+    assertEquals(afterFirst, seats.availablePermits(), "and returns it when it leaves")
+  }
+
+  private class Viewer(
+    val socket: WebSocket,
+    val messages: LinkedBlockingQueue<JsonObject>,
+    val closed: CompletableFuture<Int>,
+  )
+
+  private fun viewer(query: String): Viewer {
+    val messages = LinkedBlockingQueue<JsonObject>()
+    val closed = CompletableFuture<Int>()
+    val ws =
+      client.newWebSocket(
+        Request.Builder()
+          .url("ws://127.0.0.1:${server!!.port}/examples/ws/$EXAMPLE_ID?token=$TOKEN&$query")
+          .build(),
+        object : WebSocketListener() {
+          override fun onMessage(webSocket: WebSocket, text: String) {
+            messages += Json.parseToJsonElement(text).jsonObject
+          }
+
+          override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+            closed.complete(code)
+          }
+
+          override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            closed.complete(-1)
+          }
+        },
+      )
+    viewers += ws
+    return Viewer(ws, messages, closed)
+  }
+
+  private val viewers = CopyOnWriteArrayList<WebSocket>()
 
   private fun serve(
     rcPlayerDaemon: ServeRcPlayerDaemon,

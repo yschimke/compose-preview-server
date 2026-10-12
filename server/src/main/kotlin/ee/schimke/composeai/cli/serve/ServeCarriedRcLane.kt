@@ -33,6 +33,11 @@ internal constructor(
   private val openReplay: ((StreamFrameParams) -> Unit) -> StreamHandle,
   private val onFrame: (StreamFrameParams) -> Unit,
   private val onLane: (takesInput: Boolean) -> Unit,
+  /**
+   * Told when the lane stops waiting for a daemon that is still starting after [maxWaitMillis]:
+   * from then on it is the replay for good.
+   */
+  private val onGaveUp: () -> Unit = {},
   private val retryMillis: Long = DEFAULT_RETRY_MILLIS,
   private val maxWaitMillis: Long = DEFAULT_MAX_WAIT_MILLIS,
   private val busyRetryMillis: Long = DEFAULT_BUSY_RETRY_MILLIS,
@@ -142,7 +147,10 @@ internal constructor(
       Attempt.NotYet ->
         if (clock() - startedAt < maxWaitMillis && !isClosed) {
           runCatching { executor?.schedule(::retry, retryMillis, TimeUnit.MILLISECONDS) }
-        } else executor?.shutdown()
+        } else {
+          executor?.shutdown()
+          if (!isClosed) onGaveUp()
+        }
       // No deadline: the session it waits for ends whenever its viewer leaves.
       is Attempt.Busy ->
         if (!isClosed) {
