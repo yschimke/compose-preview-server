@@ -3224,7 +3224,32 @@ function closeRc() {
 // AndroidX-conformant CMP/Wasm RC lane: an isolated app that receives the document URL and
 // announces its first rendered frame.
 function positionRcWasmFrame() {
-    if (rcWasmFrame) positionOverlay(rcWasmFrame);
+    if (!rcWasmFrame) return;
+    positionOverlay(rcWasmFrame);
+    refreshRcWasmDensity();
+}
+// The `density` the iframe was loaded with, and the header it came from; null until a URL is
+// built. The player reads `density` once per page, so a box that changes width (the snapshot
+// decoding after the lane opened, a window resize) reloads the iframe at the new scale.
+var rcWasmLoadedDensity: number | null = null;
+var rcWasmLoadedHeader: RcDocumentHeader | null = null;
+var rcWasmDensityTimer: ReturnType<typeof setTimeout> | null = null;
+function refreshRcWasmDensity() {
+    if (rcWasmLoadedDensity === null || !rcWasmActive()) return;
+    if (rcWasmDensityTimer) clearTimeout(rcWasmDensityTimer);
+    rcWasmDensityTimer = setTimeout(function () {
+        rcWasmDensityTimer = null;
+        if (rcWasmLoadedDensity === null || !rcWasmActive() || !rcWasmFrame)
+            return;
+        var next = rcWasmDensityNow(rcWasmLoadedHeader);
+        if (
+            next === null ||
+            Math.abs(next - rcWasmLoadedDensity) <= rcWasmLoadedDensity * 0.01
+        )
+            return;
+        rcWasmLoadedDensity = next;
+        rcWasmFrame.src = rcWasmSrc(next);
+    }, 250);
 }
 function rcWasmNamedValues() {
     var values: Array<{ name: string; kind: string; value: string }> = [];
@@ -3317,7 +3342,10 @@ function openRcWasm() {
     // page) before the iframe URL is built.
     rcDocHeader().then(function (header) {
         if (seq !== rcWasmOpenSeq || !rcWasmFrame) return; // closed or reopened meanwhile
-        rcWasmFrame.src = rcWasmSrc(rcWasmDensityNow(header));
+        var density = rcWasmDensityNow(header);
+        rcWasmLoadedHeader = header;
+        rcWasmLoadedDensity = density;
+        rcWasmFrame.src = rcWasmSrc(density);
     });
     if (rcWasmBootTimer) clearTimeout(rcWasmBootTimer);
     rcWasmBootTimer = setTimeout(function () {
@@ -3332,6 +3360,7 @@ function openRcWasm() {
 function closeRcWasm() {
     if (!rcWasmFrame) return;
     rcWasmOpenSeq++;
+    rcWasmLoadedDensity = null;
     setPending(null);
     rcWasmReady = false;
     if (rcWasmBootTimer) {
