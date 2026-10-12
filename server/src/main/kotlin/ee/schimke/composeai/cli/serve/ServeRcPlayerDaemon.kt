@@ -3,7 +3,11 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.bundle.AndroidBundleLaunch
 import ee.schimke.composeai.bundle.bundleSidecarSearchDescription
 import ee.schimke.composeai.bundle.locateBundleSidecarJars
+import ee.schimke.composeai.daemon.protocol.InteractiveInputKind
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
+import ee.schimke.composeai.daemon.protocol.ServerCapabilities
+import ee.schimke.composeai.daemon.protocol.StreamCodec
+import ee.schimke.composeai.daemon.protocol.StreamFrameParams
 import ee.schimke.composeai.previewdata.PreviewInfo
 import ee.schimke.composeai.previewdata.PreviewManifest
 import ee.schimke.composeai.render.session.subprocess.SubprocessRenderSessions
@@ -11,6 +15,7 @@ import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.zip.ZipFile
 import kotlin.time.Duration.Companion.minutes
 import kotlinx.serialization.Serializable
@@ -29,11 +34,20 @@ import kotlinx.serialization.json.Json
  * bundle-less daemon, held open across renders behind a [ServeRenderHost] instead of spawned per
  * call.
  *
- * Lifecycle: nothing runs until the first [render], which starts the daemon off the request thread
- * and answers [Outcome.Warming] (the caller's `503 + Retry-After`) until it is up; that first
- * render is the warm-up, so the retry is a cache hit. An idle daemon is closed after [idleMillis]
- * and its live seat returned; the next render starts it again. A daemon that failed to start is not
- * retried for [failureBackoffMillis], so a broken runtime is not respawned on every poll.
+ * The same daemon also holds a **live** session for a carried document ([openLive]): its
+ * `stream/start` plays `overrides.remoteCompose.documentBase64` in a held composition, so viewer
+ * input reaches the document's click actions and touch expressions. Only a daemon that advertises
+ * [CARRIED_LIVE_CAPABILITY] does that ([playsCarriedDocumentsLive]); an older one ignores the
+ * document on that lane and would stream the manifest's empty preview, so it is never asked, and
+ * the caller keeps its repeated-render replay ([ServeCarriedRcStream]). A held session pins one
+ * sandbox and needs another left for renders, so the daemon boots two ([SANDBOX_COUNT]).
+ *
+ * Lifecycle: nothing runs until the first [render] (or [openLive]), which starts the daemon off the
+ * request thread and answers [Outcome.Warming] (the caller's `503 + Retry-After`) until it is up;
+ * that first render is the warm-up, so the retry is a cache hit. An idle daemon — no render for
+ * [idleMillis] and no live session open — is closed and its live seat returned; the next render
+ * starts it again. A daemon that failed to start is not retried for [failureBackoffMillis], so a
+ * broken runtime is not respawned on every poll.
  */
 class ServeRcPlayerDaemon(
   /** The Android players this daemon's classpath can draw ([playersIn]); never empty. */
@@ -60,6 +74,27 @@ class ServeRcPlayerDaemon(
     data class Unavailable(val reason: String) : Outcome
   }
 
+  /** What an [openLive] call came to. */
+  sealed interface LiveOutcome {
+    /** A held session is playing the document; input on [handle] reaches it. */
+    class Streaming(val handle: StreamHandle) : LiveOutcome
+
+    /** The daemon is starting (this call may have started it); ask again shortly. */
+    data object Warming : LiveOutcome
+
+    /** No held session for this document here, now or (for this daemon) ever; replay instead. */
+    data class Unsupported(val reason: String) : LiveOutcome
+  }
+
+  /**
+   * Implemented by the host [openHost] returns when it can say whether its daemon plays a carried
+   * document in a held session ([playsCarriedDocumentsLive] of its `initialize` capabilities). A
+   * host that does not implement it is treated as one that cannot.
+   */
+  interface LiveDocuments {
+    val playsCarriedDocumentsLive: Boolean
+  }
+
   /** `/status`'s view of the daemon: whether it is up, and how its renders have gone. */
   @Serializable
   data class Snapshot(
@@ -74,7 +109,12 @@ class ServeRcPlayerDaemon(
 
     data object Starting : State
 
-    class Running(val host: ServeHost, val seat: LiveSeatLimiter.Ticket?) : State
+    class Running(
+      val host: ServeHost,
+      val seat: LiveSeatLimiter.Ticket?,
+      /** Whether [host]'s daemon holds a live session for a carried document. */
+      val playsLive: Boolean,
+    ) : State
 
     class Failed(val reason: String, val atMillis: Long) : State
   }
@@ -84,6 +124,15 @@ class ServeRcPlayerDaemon(
   private var lastUsedMillis = 0L
   private var renders = 0L
   private var lastError: String? = null
+
+  /** Live sessions open on the running daemon; while any is, the daemon is not idle. */
+  private var liveSessions = 0
+
+  /**
+   * Whether this daemon's runtime plays carried documents live, once a start has said; null before
+   * the first. The runtime is fixed for the server's life, so it outlives an idle close.
+   */
+  @Volatile private var playsLiveKnown: Boolean? = null
 
   private val executor: ScheduledExecutorService =
     Executors.newSingleThreadScheduledExecutor { runnable ->
@@ -131,6 +180,101 @@ class ServeRcPlayerDaemon(
     return Outcome.Rendered(outcome)
   }
 
+  /**
+   * Whether a start has shown this daemon plays carried documents live: true or false once known,
+   * null before the daemon has ever run. Lets a page say up front that its live lane takes input.
+   */
+  val knownToPlayCarriedDocumentsLive: Boolean?
+    get() = playsLiveKnown
+
+  /**
+   * Hold a live session that plays the document [overrides] carry (`stream/start` with the same
+   * overrides [render] takes), frames to [onFrame]. A cold daemon is started, as [render] starts
+   * it, and answers [LiveOutcome.Warming]; a daemon without [CARRIED_LIVE_CAPABILITY], or one that
+   * could not hold the session (it holds one at a time), answers [LiveOutcome.Unsupported].
+   * Blocking while `stream/start` runs.
+   */
+  fun openLive(
+    overrides: PreviewOverrides,
+    codec: StreamCodec?,
+    maxFps: Int?,
+    onFrame: (StreamFrameParams) -> Unit,
+  ): LiveOutcome {
+    val host =
+      synchronized(lock) {
+        lastUsedMillis = clock()
+        val current = state
+        when {
+          current is State.Running ->
+            if (current.playsLive) current.host
+            else return LiveOutcome.Unsupported(NO_LIVE_DOCUMENTS)
+          current == State.Starting -> return LiveOutcome.Warming
+          current is State.Failed && clock() - current.atMillis < failureBackoffMillis ->
+            return LiveOutcome.Unsupported(current.reason)
+          // Starting a daemon known not to hold a carried document would only warm the replay.
+          playsLiveKnown == false -> return LiveOutcome.Unsupported(NO_LIVE_DOCUMENTS)
+          else ->
+            return when (val started = start(overrides)) {
+              is Outcome.Unavailable -> LiveOutcome.Unsupported(started.reason)
+              else -> LiveOutcome.Warming
+            }
+        }
+      }
+    var unavailable: String? = null
+    val handle =
+      try {
+        host.subscribeStream(
+          PREVIEW_ID,
+          overrides,
+          codec,
+          maxFps,
+          onUnavailable = { unavailable = it },
+          onFrame = onFrame,
+        )
+      } catch (e: IllegalStateException) {
+        unavailable = "the Android player daemon closed: ${e.message}"
+        null
+      }
+        ?: return LiveOutcome.Unsupported(
+          unavailable ?: "the Android player daemon did not hold a live session"
+        )
+    synchronized(lock) { liveSessions++ }
+    return LiveOutcome.Streaming(LiveSession(handle))
+  }
+
+  /** [delegate], counted in [liveSessions] until closed so the daemon is not closed under it. */
+  private inner class LiveSession(private val delegate: StreamHandle) : StreamHandle {
+    private val closed = AtomicBoolean(false)
+
+    override fun input(
+      kind: InteractiveInputKind,
+      pixelX: Int?,
+      pixelY: Int?,
+      pointerId: Int?,
+      scrollDeltaY: Float?,
+      keyCode: String?,
+      text: String?,
+      pointerType: String?,
+    ) {
+      if (closed.get()) return
+      delegate.input(kind, pixelX, pixelY, pointerId, scrollDeltaY, keyCode, text, pointerType)
+    }
+
+    override fun visibility(visible: Boolean, fps: Int?) {
+      if (!closed.get()) delegate.visibility(visible, fps)
+    }
+
+    override fun close() {
+      if (!closed.compareAndSet(false, true)) return
+      runCatching { delegate.close() }
+      synchronized(lock) {
+        liveSessions--
+        // The idle clock restarts when the last viewer leaves, not when it arrived.
+        lastUsedMillis = clock()
+      }
+    }
+  }
+
   /** Start the daemon off the request thread, rendering [overrides] as its warm-up. */
   private fun start(overrides: PreviewOverrides): Outcome {
     // A resident Robolectric daemon costs what a catalog's does, so it holds an Android seat. A
@@ -162,11 +306,16 @@ class ServeRcPlayerDaemon(
       // Its answer lands in the host's render cache, so the request that started the daemon is a
       // cache hit when it asks again; a failure here is that document's, not the daemon's.
       val warm = runCatching { host.render(PREVIEW_ID, overrides) }.getOrNull()
+      val playsLive = runCatching {
+        (host as? LiveDocuments)?.playsCarriedDocumentsLive == true
+      }
+        .getOrDefault(false)
+      playsLiveKnown = playsLive
       synchronized(lock) {
         renders++
         if (warm is RenderOutcome.Failed) lastError = warm.reason
         lastUsedMillis = clock()
-        state = State.Running(host, seat)
+        state = State.Running(host, seat, playsLive)
       }
     }
     return Outcome.Warming
@@ -177,7 +326,7 @@ class ServeRcPlayerDaemon(
     val running =
       synchronized(lock) {
         val current = state as? State.Running ?: return
-        if (clock() - lastUsedMillis < idleMillis) return
+        if (liveSessions > 0 || clock() - lastUsedMillis < idleMillis) return
         state = State.Idle
         current
       }
@@ -218,6 +367,33 @@ class ServeRcPlayerDaemon(
   }
 
   companion object {
+    /**
+     * The `InitializeResult.capabilities.supportedOverrides` token of a daemon whose held lane
+     * (`stream/start`) plays `overrides.remoteCompose.documentBase64` instead of the preview id
+     * (compose-preview-daemon's `docs/daemon/STREAMING.md`, "Carried Remote Compose documents").
+     */
+    const val CARRIED_LIVE_CAPABILITY: String = "remoteCompose.documentBase64.live"
+
+    /**
+     * Whether a daemon advertising [capabilities] holds a live session for a carried document. The
+     * token is only advertised alongside `interactive`, and both are checked: a daemon that ignores
+     * the document on `stream/start` would stream the bare preview id — on this daemon, nothing.
+     */
+    fun playsCarriedDocumentsLive(capabilities: ServerCapabilities): Boolean =
+      capabilities.interactive && CARRIED_LIVE_CAPABILITY in capabilities.supportedOverrides
+
+    private const val NO_LIVE_DOCUMENTS =
+      "this Android player daemon cannot hold a carried document live " +
+        "(it does not advertise $CARRIED_LIVE_CAPABILITY)"
+
+    /**
+     * Sandboxes the daemon boots: a held live session pins one (the in-process slot) and renders
+     * need another, and a daemon with fewer advertises no `interactive` at all. The second is a
+     * worker JVM; still well inside the [ServeBundleDaemon.ANDROID_LIVE_SEAT_WEIGHT] seat a catalog
+     * daemon's five-sandbox fleet is charged.
+     */
+    const val SANDBOX_COUNT: Int = 2
+
     /** The one preview the daemon's manifest names; it picks a sandbox and frame, nothing more. */
     const val PREVIEW_ID: String = "ee.schimke.composeai.serve.RcPlayerDaemonKt.Player"
 
@@ -333,12 +509,20 @@ class ServeRcPlayerDaemon(
               // A cold boot may download the Robolectric runtime before it can answer.
               initializeTimeout = INITIALIZE_TIMEOUT,
               jvmArgs = launch.jvmArgs(),
-              // One sandbox: [ServeRenderHost] renders one at a time anyway, and the daemon's
-              // warm-spare default of five took over a minute to boot before `initialize` answered.
+              // [SANDBOX_COUNT], not the daemon's warm-spare default of five, which took over a
+              // minute
+              // to boot before `initialize` answered: [ServeRenderHost] renders one at a time, and
+              // the second sandbox is only there so a held live session leaves one for renders.
               extraSystemProperties =
-                launch.robolectricSystemProperties() + ("composeai.daemon.sandboxCount" to "1"),
+                launch.robolectricSystemProperties() +
+                  ("composeai.daemon.sandboxCount" to SANDBOX_COUNT.toString()),
             )
-          ServeRenderHost(session, listOf(PREVIEW), label = "Remote Compose players", onLog = log)
+          val playsLive = playsCarriedDocumentsLive(session.initializeResult.capabilities)
+          val host =
+            ServeRenderHost(session, listOf(PREVIEW), label = "Remote Compose players", onLog = log)
+          object : ServeHost by host, LiveDocuments {
+            override val playsCarriedDocumentsLive: Boolean = playsLive
+          }
         },
         liveSeats = liveSeats,
         onLog = log,

@@ -18,13 +18,16 @@ import java.util.concurrent.atomic.AtomicLong
  * catalog daemon lending itself).
  *
  * A daemon's own live lane is `stream/start`, which holds one composition and pushes its frames.
- * That lane cannot carry a document: the held session resolves its content from the preview id (the
- * bundle's own IR replay store, else the preview class), never from
- * `overrides.remoteCompose.documentBase64`, which only the one-shot render honours. So this stream
- * is the one-shot render driven as a clock: each frame replays the document with `captureAdvanceMs`
- * set to the time since the stream started, so an animated document (`#animation`) plays through
- * the same paused frame clock a capture settles on, and a static one stops costing renders once its
- * frames stop changing ([IDLE_INTERVAL_MILLIS]).
+ * Only a daemon advertising [ServeRcPlayerDaemon.CARRIED_LIVE_CAPABILITY] holds a carried document
+ * there, and [ServeCarriedRcLane] prefers that held session whenever the server's player daemon
+ * offers one. An older daemon's held session resolves its content from the preview id (the bundle's
+ * own IR replay store, else the preview class), never from
+ * `overrides.remoteCompose.documentBase64`, which only its one-shot render honours; and a borrowed
+ * catalog daemon is never asked. For those this stream is the fallback: the one-shot render driven
+ * as a clock: each frame replays the document with `captureAdvanceMs` set to the time since the
+ * stream started, so an animated document (`#animation`) plays through the same paused frame clock
+ * a capture settles on, and a static one stops costing renders once its frames stop changing
+ * ([IDLE_INTERVAL_MILLIS]).
  *
  * What it does not do is take input: there is no held composition for a tap to land on, so [input]
  * is ignored, and the page says so ([ServeWeb]'s `data-live-input`).
