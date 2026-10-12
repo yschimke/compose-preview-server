@@ -231,3 +231,27 @@ export function rcWasmDensity(
 export function formatRcDensity(density: number): string {
     return String(Number(density.toFixed(4)));
 }
+
+/**
+ * Whether the image on stage still shows the preview at its captured layout, so its size can stand
+ * for the document's viewport. [renderedUrl] is the `/render` URL its bytes came from
+ * (`data-cp-src`), absent for the page's own baked snapshot. A render under a layout-changing
+ * override — a device, an orientation, or any `…Px` size bound — is a different viewport from the
+ * base `.rc` the canvas lane plays, so it is not.
+ */
+export function snapshotKeepsCapturedLayout(
+    renderedUrl: string | null,
+): boolean {
+    if (!renderedUrl) return true;
+    var q = renderedUrl.indexOf("?");
+    if (q < 0) return true;
+    var keys = renderedUrl
+        .slice(q + 1)
+        .split("&")
+        .map(function (pair) {
+            return decodeURIComponent(pair.split("=")[0] || "");
+        });
+    return !keys.some(function (key) {
+        return key === "device" || key === "orientation" || /Px$/.test(key);
+    });
+}

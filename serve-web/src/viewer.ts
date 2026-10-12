@@ -30,6 +30,7 @@ import {
     rcDocumentHeader,
     rcLaneDensity,
     rcWasmDensity,
+    snapshotKeepsCapturedLayout,
     type RcDocumentHeader,
     whenImageSized,
 } from "./viewer/rcCanvasSize.js";
@@ -3119,7 +3120,16 @@ function openRc() {
                 return whenImageSized(
                     img,
                     declared ? RC_SNAPSHOT_HEADER_WAIT_MS : RC_SNAPSHOT_WAIT_MS,
-                ).then(function (snapshot) {
+                ).then(function (decoded) {
+                    // A snapshot rendered under a size, device or orientation override is a
+                    // different viewport from the base document this lane plays.
+                    var snapshot =
+                        decoded &&
+                        snapshotKeepsCapturedLayout(
+                            img.getAttribute("data-cp-src"),
+                        )
+                            ? decoded
+                            : null;
                     return {
                         buf: buf,
                         header: header,
@@ -3176,6 +3186,8 @@ function openRc() {
 function refitRcWhenSized(buf: ArrayBuffer) {
     whenImageSized(img, RC_SNAPSHOT_REFIT_MS).then(function (size) {
         if (!size || !rcActive() || !rcPlayer) return;
+        if (!snapshotKeepsCapturedLayout(img.getAttribute("data-cp-src")))
+            return;
         if (
             rcCanvasEl!.width === size.width &&
             rcCanvasEl!.height === size.height
