@@ -99,6 +99,30 @@
   .detail-boxes rect { fill: none; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
   .detail-boxes rect.layout { stroke: #1a73e8; }
   .detail-boxes rect.finding { stroke: #d93025; stroke-width: 2; }
+  /* Nesting depth, cycled: the legend's swatch and the box share it. */
+  :is(.detail-boxes, .detail-badges, .details) .d0 { --box: #1a73e8; }
+  :is(.detail-boxes, .detail-badges, .details) .d1 { --box: #188038; }
+  :is(.detail-boxes, .detail-badges, .details) .d2 { --box: #e37400; }
+  :is(.detail-boxes, .detail-badges, .details) .d3 { --box: #a142f4; }
+  :is(.detail-boxes, .detail-badges, .details) .d4 { --box: #12a4af; }
+  :is(.detail-boxes, .detail-badges, .details) .d5 { --box: #d01884; }
+  :is(.detail-boxes, .detail-badges, .details) .error { --box: #d93025; }
+  :is(.detail-boxes, .detail-badges, .details) .warning { --box: #e37400; }
+  :is(.detail-boxes, .detail-badges, .details) .info { --box: #1a73e8; }
+  .detail-boxes rect[class] { stroke: var(--box, #1a73e8); }
+  .detail-boxes rect.active { stroke-width: 3; fill: color-mix(in srgb, var(--box, #1a73e8) 18%, transparent); }
+  .detail-badges { position: absolute; inset: 0; pointer-events: none; line-height: 1; }
+  .detail-badges span { position: absolute; transform: translate(-1px, -1px); min-width: 12px; padding: 1px 3px; border-radius: 3px; background: var(--box, #1a73e8); color: #fff; font: 600 10px/1.2 system-ui, sans-serif; text-align: center; pointer-events: auto; cursor: default; }
+  .legend { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; font-size: 12px; max-height: 240px; overflow: auto; }
+  .legend li { display: grid; grid-template-columns: auto 1fr; gap: 2px 7px; align-items: baseline; padding: 4px 7px; border-radius: 6px; background: var(--color-background-secondary, #f8f8fa); overflow-wrap: anywhere; }
+  .legend li.active { outline: 2px solid var(--box, #1a73e8); }
+  .legend .badge { grid-row: span 2; min-width: 14px; padding: 1px 4px; border-radius: 3px; background: var(--box, #1a73e8); color: #fff; font-weight: 600; text-align: center; }
+  .legend .props { color: var(--color-text-secondary, #555); }
+  .legend-key { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: 12px; }
+  .legend-key .swatch { display: inline-block; width: 10px; height: 10px; margin-right: 4px; border: 2px solid var(--box, #1a73e8); border-radius: 2px; vertical-align: -1px; }
+  .legend-key[hidden], .legend[hidden] { display: none; }
+  .findings .badge { display: inline-block; min-width: 12px; padding: 0 4px; border-radius: 3px; background: var(--box, #1a73e8); color: #fff; font-weight: 600; text-align: center; }
+  .findings li.active { outline: 2px solid var(--box, #1a73e8); }
   .findings { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 12px; }
   .findings li { padding: 5px 7px; border-radius: 6px; background: var(--color-background-secondary, #f8f8fa); overflow-wrap: anywhere; }
   .findings .level { font-weight: 700; margin-right: 6px; }
@@ -180,6 +204,8 @@
   <section id="details" class="details" aria-label="Render details" hidden>
     <div id="detail-modes" class="detail-modes" role="group" aria-label="Render view"></div>
     <div id="detail-summary" class="muted"></div>
+    <div id="detail-key" class="legend-key" hidden></div>
+    <ol id="detail-legend" class="legend" hidden></ol>
     <ol id="findings" class="findings" aria-label="Accessibility findings"></ol>
   </section>
   <section id="audit" class="details" aria-label="Design guidelines review" hidden>
@@ -237,6 +263,8 @@
   const detailModes = q('#detail-modes');
   const detailSummary = q('#detail-summary');
   const findingsList = q('#findings');
+  const detailKey = q('#detail-key');
+  const detailLegend = q('#detail-legend');
   const auditSection = q('#audit');
   const auditRun = q('#audit-run');
   const auditCopy = q('#audit-copy');
@@ -924,6 +952,10 @@
     detailModes.replaceChildren();
     detailSummary.textContent = '';
     findingsList.replaceChildren();
+    detailKey.replaceChildren();
+    detailKey.hidden = true;
+    detailLegend.replaceChildren();
+    detailLegend.hidden = true;
   }
 
   function detailBoxes(boxes, className, width, height) {
@@ -935,7 +967,8 @@
     for (const box of boxes) {
       const [left, top, right, bottom] = box.bounds.map(Number);
       const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-      rect.setAttribute('class', className);
+      rect.setAttribute('class', box.className ? `${className} ${box.className}` : className);
+      if (box.key !== undefined) rect.dataset.key = String(box.key);
       rect.setAttribute('x', left);
       rect.setAttribute('y', top);
       rect.setAttribute('width', Math.max(0, right - left));
@@ -951,6 +984,105 @@
   const hasBounds = item =>
     Array.isArray(item?.bounds) && item.bounds.length === 4 && item.bounds.every(n => Number.isFinite(Number(n)));
 
+  const levelClass = level => {
+    const value = String(level || 'INFO').toLowerCase();
+    return value === 'error' || value === 'warning' ? value : 'info';
+  };
+
+  // A number at each box's top-left corner, placed in percent so it follows the fitted image;
+  // hovering it lights the box and its legend row.
+  function detailBadges(boxes, width, height) {
+    const layer = document.createElement('div');
+    layer.className = 'detail-badges';
+    layer.setAttribute('aria-hidden', 'true');
+    // Boxes that share a corner (a wrapper and its only child) would stack their numbers; step each
+    // later one to the right so every number stays readable.
+    const corners = new Map();
+    for (const box of boxes) {
+      const [left, top] = box.bounds.map(Number);
+      const corner = `${left},${top}`;
+      const stacked = corners.get(corner) || 0;
+      corners.set(corner, stacked + 1);
+      const badge = document.createElement('span');
+      badge.className = box.className || '';
+      badge.textContent = String(box.key + 1);
+      badge.title = box.label || '';
+      badge.style.left = `${(Math.max(0, left) / width) * 100}%`;
+      badge.style.top = `${(Math.max(0, top) / height) * 100}%`;
+      if (stacked) badge.style.marginLeft = `${stacked * 20}px`;
+      badge.addEventListener('mouseenter', () => highlightDetail(box.key));
+      badge.addEventListener('mouseleave', () => highlightDetail(undefined));
+      layer.append(badge);
+    }
+    return layer;
+  }
+
+  function highlightDetail(key) {
+    const target = key === undefined ? undefined : String(key);
+    canvas.querySelectorAll('.detail-boxes rect').forEach(rect =>
+      rect.classList.toggle('active', rect.dataset.key === target));
+    for (const list of [detailLegend, findingsList]) {
+      list.querySelectorAll(':scope > li').forEach(row => row.classList.toggle('active', row.dataset.key === target));
+    }
+  }
+
+  function legendKey(entries) {
+    detailKey.replaceChildren(...entries.map(([className, text]) => {
+      const entry = document.createElement('span');
+      entry.className = className;
+      if (!className) {
+        entry.className = 'muted';
+        entry.textContent = text;
+        return entry;
+      }
+      const swatch = document.createElement('span');
+      swatch.className = 'swatch';
+      entry.append(swatch, text);
+      return entry;
+    }));
+    detailKey.hidden = !entries.length;
+  }
+
+  // Layout bounds: what each colour means, then one row per numbered box with its measured size,
+  // padding, gap, min size, scale and source line. Audit: the level colours; the numbered rows are
+  // the findings list itself.
+  function showLegend(mode, layoutBoxes, auditBoxes) {
+    detailLegend.replaceChildren();
+    detailLegend.hidden = mode !== 'layout' || !layoutBoxes.length;
+    if (mode === 'layout') {
+      const depths = layoutBoxes.map(box => Number(box.depth) || 0);
+      const colours = [...new Set(depths.map(depth => depth % 6))].sort((a, b) => a - b);
+      legendKey([
+        ...colours.map(colour => [`d${colour}`, colour === 0 ? 'Root' : `Depth ${colour}`]),
+        [undefined, `Colour is nesting depth${Math.max(0, ...depths) > 5 ? ', repeating every 6 levels' : ''}; numbers match the rows below; sizes are render pixels.`],
+      ]);
+      for (const box of layoutBoxes) {
+        const row = document.createElement('li');
+        row.className = box.className;
+        row.dataset.key = String(box.key);
+        const badge = document.createElement('span');
+        badge.className = 'badge';
+        badge.textContent = String(box.key + 1);
+        const name = document.createElement('strong');
+        name.textContent = box.name || 'node';
+        const props = document.createElement('span');
+        props.className = 'props';
+        props.textContent = [...(Array.isArray(box.props) ? box.props : []), box.source].filter(Boolean).join(' · ') || 'no layout properties reported';
+        row.append(badge, name, props);
+        row.addEventListener('mouseenter', () => highlightDetail(box.key));
+        row.addEventListener('mouseleave', () => highlightDetail(undefined));
+        detailLegend.append(row);
+      }
+    } else if (mode === 'audit') {
+      const levels = [...new Set(auditBoxes.map(box => box.className))];
+      legendKey(['error', 'warning', 'info'].filter(level => levels.includes(level))
+        .map(level => [level, level[0].toUpperCase() + level.slice(1)]));
+    } else {
+      legendKey([]);
+    }
+    highlightDetail(undefined);
+  }
+
   function renderDetails(result, image) {
     const block = result?.content?.find(candidate => candidate.type === 'text' && detailOf(candidate) === 'details');
     const details = block && parse(block.text);
@@ -962,8 +1094,27 @@
     const layoutDetail = details.layout && typeof details.layout === 'object' ? details.layout : undefined;
     const findings = Array.isArray(a11yDetail?.findings) ? a11yDetail.findings.filter(f => f && typeof f === 'object') : [];
     const layoutBoxes = Array.isArray(layoutDetail?.boxes) ? layoutDetail.boxes.filter(hasBounds) : [];
+    const auditBoxes = findings
+      .map((finding, index) => ({ finding, index }))
+      .filter(({ finding }) => hasBounds(finding))
+      .map(({ finding, index }) => ({
+        bounds: finding.bounds,
+        label: `${index + 1}. ${finding.rule || ''} ${finding.message || ''}`.trim(),
+        className: levelClass(finding.level),
+        key: index,
+      }));
+    const numberedLayout = layoutBoxes.map((box, index) => ({
+      ...box,
+      name: box.label,
+      label: `${index + 1}. ${[box.label, ...(Array.isArray(box.props) ? box.props : [])].filter(Boolean).join(' · ')}`,
+      className: `d${(Number(box.depth) || 0) % 6}`,
+      key: index,
+    }));
     const modes = [{ id: 'plain', label: 'Plain' }];
-    if (a11yDetail) modes.push({ id: 'a11y', label: 'A11y overlay' });
+    if (a11yDetail && overlay) modes.push({ id: 'a11y', label: 'A11y overlay' });
+    // The ATF findings drawn over the plain render, numbered against the list below: the overlay
+    // PNG above annotates the hierarchy, not what the checks found.
+    if (auditBoxes.length) modes.push({ id: 'audit', label: 'Audit' });
     if (layoutDetail) modes.push({ id: 'layout', label: 'Layout bounds' });
     const unavailable = details.unavailable && typeof details.unavailable === 'object' ? details.unavailable : {};
     const notes = [a11yDetail?.summary, layoutDetail?.summary]
@@ -986,13 +1137,16 @@
     const setMode = mode => {
       if (!stage || !preview) return;
       measure();
-      stage.querySelectorAll('.detail-boxes').forEach(node => node.remove());
+      stage.querySelectorAll('.detail-boxes, .detail-badges').forEach(node => node.remove());
       const { width, height } = size;
       preview.src = `data:image/png;base64,${mode === 'a11y' && overlay ? overlay.data : image.data}`;
-      if (mode === 'layout') stage.append(detailBoxes(layoutBoxes, 'layout', width, height));
-      if (mode === 'a11y' && !overlay) {
-        stage.append(detailBoxes(findings.filter(hasBounds).map(f => ({ bounds: f.bounds, label: f.message })), 'finding', width, height));
+      if (mode === 'layout') {
+        stage.append(detailBoxes(numberedLayout, 'layout', width, height), detailBadges(numberedLayout, width, height));
       }
+      if (mode === 'audit') {
+        stage.append(detailBoxes(auditBoxes, 'finding', width, height), detailBadges(auditBoxes, width, height));
+      }
+      showLegend(mode, numberedLayout, auditBoxes);
       stage.dataset.detailMode = mode;
       detailModes.querySelectorAll('button').forEach(button =>
         button.setAttribute('aria-pressed', String(button.dataset.mode === mode))
@@ -1014,8 +1168,16 @@
         detailModes.append(button);
       }
     }
-    findings.forEach(finding => {
+    findings.forEach((finding, index) => {
       const item = document.createElement('li');
+      item.dataset.key = String(index);
+      item.className = levelClass(finding.level);
+      if (hasBounds(finding)) {
+        const badge = document.createElement('span');
+        badge.className = 'badge';
+        badge.textContent = String(index + 1);
+        item.append(badge, ' ');
+      }
       const level = document.createElement('span');
       const levelText = String(finding.level || 'INFO').toUpperCase();
       level.className = `level ${levelText.toLowerCase()}`;
@@ -1024,6 +1186,8 @@
       rule.textContent = String(finding.rule || '');
       item.append(level, rule, document.createTextNode(` ${finding.message || ''}`));
       if (finding.node) item.append(document.createTextNode(` (${finding.node})`));
+      item.addEventListener('mouseenter', () => highlightDetail(index));
+      item.addEventListener('mouseleave', () => highlightDetail(undefined));
       findingsList.append(item);
     });
   }
@@ -3343,7 +3507,8 @@
       const bounds = boundsOf(node);
       if (!validBounds(bounds)) continue;
       const rect = document.createElementNS(namespace, 'rect');
-      rect.setAttribute('class', className);
+      rect.setAttribute('class', box.className ? `${className} ${box.className}` : className);
+      if (box.key !== undefined) rect.dataset.key = String(box.key);
       rect.setAttribute('x', bounds[0] * scale);
       rect.setAttribute('y', bounds[1] * scale);
       rect.setAttribute('width', (bounds[2] - bounds[0]) * scale);
