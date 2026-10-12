@@ -11678,14 +11678,15 @@ ${captureControlsHtml().prependIndent("          ")}
    * carry that provenance before widening this set. `cmp-jvm` is a distinct rasteriser;
    * `androidx-view` is distinct but maps to no published column; see [LIVE_ONLY_LANES].
    */
-  private val LIVE_FILLABLE = setOf(RcPlayerBackend.CMP_JVM, RcPlayerBackend.ANDROIDX_VIEW)
+  private val LIVE_FILLABLE =
+    setOf(RcPlayerBackend.CMP_JVM, RcPlayerBackend.ANDROIDX_VIEW, RcPlayerBackend.SWIFT_APPKIT)
 
   /**
-   * A player with no offline lane id, which the wall names itself. Only
-   * [RcPlayerBackend.ANDROIDX_VIEW]: the AOSP view-backed `RemoteComposePlayer` drawing into a
-   * framework `Canvas`, a genuinely different renderer (hence its null
-   * [RcPlayerBackend.ANDROIDX_VIEW.rcCompareLane]). Kept out of [ServeRcCompare.LANES], which
-   * mirrors the offline columns, so the absent-players note never reports it.
+   * A player with no offline lane id, which the wall names itself: [RcPlayerBackend.ANDROIDX_VIEW],
+   * the AOSP view-backed `RemoteComposePlayer` drawing into a framework `Canvas`, and
+   * [RcPlayerBackend.SWIFT_APPKIT], the native Swift player on AppKit — genuinely different
+   * renderers (hence their null `rcCompareLane`). Kept out of [ServeRcCompare.LANES], which mirrors
+   * the offline columns, so the absent-players note never reports it.
    */
   private val LIVE_ONLY_LANES =
     mapOf(
@@ -11694,7 +11695,15 @@ ${captureControlsHtml().prependIndent("          ")}
           ServeRcPlayerIds.ANDROIDX_VIEW,
           "AndroidX View",
           ServeRcPlayerIds.ANDROIDX_VIEW,
-        )
+        ),
+      // The native Swift player's AppKit renderer: Apple's text shaping and antialiasing, which no
+      // offline column has, drawn live on a macOS host.
+      RcPlayerBackend.SWIFT_APPKIT to
+        RcCompareLane(
+          ServeRcPlayerIds.SWIFT_APPKIT,
+          "Swift AppKit",
+          ServeRcPlayerIds.SWIFT_APPKIT,
+        ),
     )
 
   /**

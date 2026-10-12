@@ -1364,8 +1364,9 @@ class ServeCatalogLiveHost(
    * ([remoteComposePlayerSelectable]); [RcPlayerBackend.ANDROIDX_EMBEDDED] and
    * [RcPlayerBackend.CMP_ANDROID] additionally need their player classes in the bundle
    * ([embeddedPlayerFor], [cmpAndroidPlayerFor]); [RcPlayerBackend.CMP_JVM] when the desktop player
-   * is installed and the bundle can size a render ([supportsCmpJvm]). No `.rc` doc means no
-   * selector.
+   * is installed and the bundle can size a render ([supportsCmpJvm]);
+   * [RcPlayerBackend.SWIFT_APPKIT] on the same terms when this host can run `rc-swift-render`
+   * ([supportsSwiftAppKit]). No `.rc` doc means no selector.
    */
   override fun enabledRcPlayersFor(previewId: String): List<RcPlayerBackend> {
     if (!hasRemoteComposeDoc(previewId)) return emptyList()
@@ -1373,6 +1374,7 @@ class ServeCatalogLiveHost(
       add(RcPlayerBackend.CAMAELON_JS)
       addAll(daemonRcPlayersFor(previewId))
       if (supportsCmpJvm(previewId)) add(RcPlayerBackend.CMP_JVM)
+      if (supportsSwiftAppKit(previewId)) add(RcPlayerBackend.SWIFT_APPKIT)
       // Players the parity run staged are offerable without a daemon, which keeps the embedded
       // default available when the daemon is down.
       addAll(stagedRcPlayers(previewId).filterNot { it in this })

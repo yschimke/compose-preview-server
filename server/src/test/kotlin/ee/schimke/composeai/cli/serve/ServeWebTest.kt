@@ -1284,6 +1284,12 @@ class ServeWebTest {
       )) {
       assertTrue(html.contains("value=\"rc:$wire\""), "option for $wire present")
     }
+    // The Swift AppKit player is no option at all on a host that cannot run it, not a disabled one.
+    assertEquals(
+      RcSwiftServerRenderer.isSupportedHost(),
+      html.contains("value=\"rc:swift-appkit\""),
+      "swift-appkit is offered exactly when this host can run it",
+    )
     // Lane values and labels ([ServeRcPlayerIds]) name the implementation that draws. Asserted
     // literally: comparing chip to combo would pass even if both were wrong. AndroidX Embedded is
     // the seeded default (a real Compose tree: editable figma-svg geometry and semantics);

@@ -47,7 +47,11 @@ class ServeRcPlayerIdsTest {
     assertEquals(ids.distinct(), ids, "no two backends share an id")
     for (backend in RcPlayerBackend.UNIVERSE) {
       val id = ServeRcPlayerIds.of(backend)
-      assertTrue(ServeRcPlayerIds.UNIVERSE.any { it.id == id }, "$backend → $id is offered")
+      // Offered on a host that can run it: swift-appkit is only listed on Apple silicon.
+      assertTrue(
+        ServeRcPlayerIds.universe(swiftAppKitHost = true).any { it.id == id },
+        "$backend → $id is offered",
+      )
       assertEquals(backend.playerKind, ServeRcPlayerIds.playerKindOf(id), "$backend → $id")
     }
     // The pinned release spells the EMBEDDED backend `cmp-android`; this server never does.
@@ -78,7 +82,7 @@ class ServeRcPlayerIdsTest {
 
   @Test
   fun `a browser or subprocess lane is still refused as a daemon render`() {
-    for (v in listOf("camaelon-js", "js", "cmp-wasm", "cmp-jvm", "rcplayer-jvm")) {
+    for (v in listOf("camaelon-js", "js", "cmp-wasm", "cmp-jvm", "rcplayer-jvm", "swift-appkit")) {
       assertIs<OverrideParse.Invalid>(ServeRcPlayerIds.parseOverrides(mapOf("rcPlayer" to v)), v)
     }
   }
@@ -89,6 +93,33 @@ class ServeRcPlayerIdsTest {
     assertTrue(ServeRcPlayerIds.isCmpJvm("rcplayer-jvm"))
     assertFalse(ServeRcPlayerIds.isCmpJvm("cmp-android"))
     assertFalse(ServeRcPlayerIds.isCmpJvm(null))
+  }
+
+  @Test
+  fun `the two subprocess lanes are told apart, and nothing else is one`() {
+    assertTrue(ServeRcPlayerIds.isSwiftAppKit("swift-appkit"))
+    assertTrue(ServeRcPlayerIds.isSwiftAppKit(" Swift-AppKit "))
+    assertFalse(ServeRcPlayerIds.isSwiftAppKit("cmp-jvm"))
+    assertEquals(RcPlayerBackend.CMP_JVM, ServeRcPlayerIds.subprocessLaneOf("rcplayer-jvm"))
+    assertEquals(RcPlayerBackend.SWIFT_APPKIT, ServeRcPlayerIds.subprocessLaneOf("swift-appkit"))
+    for (v in listOf("camaelon-js", "cmp-wasm", "androidx-embedded", "cmp-android", null)) {
+      assertNull(ServeRcPlayerIds.subprocessLaneOf(v), v)
+    }
+  }
+
+  @Test
+  fun `swift-appkit is listed only on a host that can run it`() {
+    assertTrue(
+      ServeRcPlayerIds.universe(swiftAppKitHost = true).any {
+        it.id == "swift-appkit" && it.serverSide
+      }
+    )
+    assertFalse(ServeRcPlayerIds.universe(swiftAppKitHost = false).any { it.id == "swift-appkit" })
+    assertEquals(
+      ServeRcPlayerIds.universe(swiftAppKitHost = false),
+      ServeRcPlayerIds.universe(swiftAppKitHost = true).filterNot { it.id == "swift-appkit" },
+      "nothing else depends on the host",
+    )
   }
 
   // ---- cmp-android capability: read from the bundle manifest's classpath ----------------------
