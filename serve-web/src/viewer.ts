@@ -1591,6 +1591,12 @@ function openStream() {
             setPending(null);
         } else if (m.type === "error") {
             showModeError(m.message || "Live preview error.");
+        } else if (m.type === "lane") {
+            // A document-only preview's lane opens on a replay that takes no input and may switch
+            // to a held session that does (server-side `ServeCarriedRcLane`); the hint follows.
+            if (m.input) root.removeAttribute("data-live-input");
+            else root.setAttribute("data-live-input", "none");
+            updateLiveToggle();
         }
     };
     // onerror always precedes onclose; let onclose decide (it carries the code/reason). Only
@@ -3935,8 +3941,9 @@ const modeHint = may<HTMLElement>("cp-mode-hint");
 function liveOffer() {
     return { daemon: !!(live && !live.disabled), wasm: !!wasmToggle };
 }
-// A document-only preview's live lane replays its document on a clock (server-side
+// A document-only preview's live lane may replay its document on a clock (server-side
 // `ServeCarriedRcStream`): frames animate, but there is no held composition for input to reach.
+// The page renders the opening state; the socket's `lane` message updates it.
 function liveReplayOnly() {
     return (
         !!(live && live.checked) &&

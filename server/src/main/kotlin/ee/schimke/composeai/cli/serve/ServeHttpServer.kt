@@ -10611,8 +10611,17 @@ class ServeHttpServer(
         )
       // A document-only preview a daemon can replay on an Android player streams that replay
       // ([carriedRcLiveHost]), so it offers Live although its host has no live lane of its own.
-      val carriedRcLive =
-        !renderHost.hasLiveStream && donorBackedRcPlayers(renderHost, preview.id).isNotEmpty()
+      val carriedRcPlayers =
+        if (renderHost.hasLiveStream) emptyList() else donorBackedRcPlayers(renderHost, preview.id)
+      val carriedRcLive = carriedRcPlayers.isNotEmpty()
+      // Whether that lane is known to open on a held session that takes input: the player daemon
+      // has run and said it plays carried documents live. Unknown reads as the replay, which is
+      // what a cold daemon's lane opens on; the socket's `lane` message corrects the page either
+      // way ([ServeCarriedRcLane]).
+      val carriedRcTakesInput =
+        rcPlayerDaemon?.let { daemon ->
+          daemon.knownToPlayCarriedDocumentsLive == true && carriedRcPlayers.any(daemon::offers)
+        } == true
       val offersLive = renderHost.hasLiveStream || carriedRcLive
       val liveAuthPrompt =
         githubAuth
@@ -10698,7 +10707,7 @@ class ServeHttpServer(
           hasLiveStream = offersLive,
           // …and that replay's stream is a picture of the document's clock, not a held
           // composition, so the page must not invite input it would drop.
-          liveTakesInput = !carriedRcLive,
+          liveTakesInput = !carriedRcLive || carriedRcTakesInput,
           trust = catalogBundleHost(renderHost)?.let { BundleVerifier.summary(it.trust) },
           // Per-preview: the Remote Compose canvas lane needs a captured `.rc` (fetched from
           // `/render/<id>.rc`).
@@ -12377,22 +12386,31 @@ class ServeHttpServer(
   /**
    * [renderHost], for one socket, with a live lane for its document-only previews: those whose
    * Android players only a daemon replaying the document can draw ([donorBackedRcPlayers]). Their
-   * stream is a [ServeCarriedRcStream] drawn exactly where `/render` would draw the same player —
-   * the server's own player daemon when it offers the player, else a resident catalog daemon that
-   * lends itself ([renderCarriedRcFrame]) — because no daemon's `stream/start` can hold a carried
-   * document. Null when [previewId] has no such player, so the socket keeps the host's own lanes.
+   * stream is a [ServeCarriedRcLane]:
+   * - a **held** session playing the document on the server's own player daemon, when it offers the
+   *   player and its daemon advertises [ServeRcPlayerDaemon.CARRIED_LIVE_CAPABILITY]
+   *   ([ServeRcPlayerDaemon.openLive]) — input is forwarded to it;
+   * - else a [ServeCarriedRcStream] replay drawn exactly where `/render` would draw the same player
+   *   — the player daemon, or a resident catalog daemon that lends itself ([renderCarriedRcFrame]).
+   *   A lending daemon is never asked to hold the document: its one held session is its own
+   *   catalog's live lane, its frames route by preview id alongside that catalog's viewers, and
+   *   nothing here can read its capabilities, so it keeps the replay.
+   *
+   * Null when [previewId] has no such player, so the socket keeps the host's own lanes.
    *
    * Everything but the stream is [renderHost]'s, and closing the wrapper closes nothing: the
-   * socket's lease owns the host. [onError] is the socket's, for a stream whose render fails.
+   * socket's lease owns the host. [onError] is the socket's, for a stream whose render fails;
+   * [onLane] is told whether the lane forwards input each time that changes.
    */
   private fun carriedRcLiveHost(
     renderHost: ServeHost,
     sessionId: String,
     previewId: String,
+    onLane: (takesInput: Boolean) -> Unit = {},
     onError: (String) -> Unit,
   ): ServeHost? {
     if (donorBackedRcPlayers(renderHost, previewId).isEmpty()) return null
-    val streams = java.util.concurrent.CopyOnWriteArrayList<ServeCarriedRcStream>()
+    val streams = java.util.concurrent.CopyOnWriteArrayList<ServeCarriedRcLane>()
     return object : ServeHost by renderHost {
       override val hasLiveStream: Boolean
         get() = true
@@ -12447,12 +12465,32 @@ class ServeHttpServer(
             namedValues = overrides.remoteCompose?.namedValues.orEmpty(),
             fontScale = spec.fontScale.takeIf { it != 1f },
           )
-        return ServeCarriedRcStream(
-            base = base,
-            renderFrame = { renderCarriedRcFrame(player, it) },
-            maxFps = maxFps,
+        val playerDaemon = rcPlayerDaemon?.takeIf { it.offers(player) }
+        return ServeCarriedRcLane(
+            openHeld = { frames ->
+              if (playerDaemon == null) ServeCarriedRcLane.Attempt.Never("no player daemon")
+              else
+                when (val live = playerDaemon.openLive(base, codec, maxFps, frames)) {
+                  is ServeRcPlayerDaemon.LiveOutcome.Streaming ->
+                    ServeCarriedRcLane.Attempt.Held(live.handle)
+                  ServeRcPlayerDaemon.LiveOutcome.Warming -> ServeCarriedRcLane.Attempt.NotYet
+                  is ServeRcPlayerDaemon.LiveOutcome.Busy ->
+                    ServeCarriedRcLane.Attempt.Busy(live.reason)
+                  is ServeRcPlayerDaemon.LiveOutcome.Unsupported ->
+                    ServeCarriedRcLane.Attempt.Never(live.reason)
+                }
+            },
+            openReplay = { frames ->
+              ServeCarriedRcStream(
+                base = base,
+                renderFrame = { renderCarriedRcFrame(player, it) },
+                maxFps = maxFps,
+                onFrame = frames,
+                onError = onError,
+              )
+            },
             onFrame = onFrame,
-            onError = onError,
+            onLane = onLane,
           )
           .also { streams += it }
       }
@@ -13131,7 +13169,12 @@ class ServeHttpServer(
         // its document can be streamed. Its session is static, so the seat above was weightless:
         // the stream takes one of its own, under the same capacity rule.
         val carriedHost =
-          carriedRcLiveHost(renderHost, sessionId, previewId) { reason ->
+          carriedRcLiveHost(
+            renderHost,
+            sessionId,
+            previewId,
+            onLane = { takesInput -> send(ServeStreamProtocol.laneMessage(takesInput)) },
+          ) { reason ->
             send(ServeStreamProtocol.errorMessage(reason))
           }
         if (carriedHost != null) {
