@@ -50,7 +50,15 @@
       "branch": "design-artifacts/*"
     },
     {
+      "repo": "yschimke/meshcore-mobile-out",
+      "branch": "design-artifacts/*"
+    },
+    {
       "repo": "yschimke/homeassistant-remotecompose",
+      "branch": "design-artifacts/*"
+    },
+    {
+      "repo": "yschimke/homeassistant-remotecompose-out",
       "branch": "design-artifacts/*"
     },
     {
