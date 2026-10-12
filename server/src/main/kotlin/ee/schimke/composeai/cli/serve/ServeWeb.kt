@@ -13877,6 +13877,13 @@ ${scriptTag("known-differences.js")}
      */
     renderDensity: Float? = null,
     /**
+     * The density the browser Remote Compose lanes draw a document at when its header declares none
+     * ([ServeBundleHost.rcLaneDensityFor]); null when unknown, in which case `data-rc-density` is
+     * omitted and the players keep their own default. Deliberately not [FALLBACK_RENDER_DENSITY]: a
+     * guessed 2.0 would override the players' better guesses.
+     */
+    rcDensity: Float? = null,
+    /**
      * The override params this request carried (`knob.<key>`, `rc.<name>`), filtered and normalised
      * like the page's links (`requestOverrideParams`). Seeds the declared-knob controls so a deep
      * link opens with its values; `hydrateFromUrl` does the same client-side. Empty for a plain
@@ -14372,6 +14379,9 @@ ${scriptTag("known-differences.js")}
     val rcAttr = if (hasRemoteComposeDoc) " data-has-rc-doc=\"1\"" else ""
     val rcCanvas = if (hasRemoteComposeDoc) "<canvas id=\"cp-rc-canvas\" hidden></canvas>" else ""
     val hasRcWasm = ServeRcPlayerIds.CMP_WASM in enabledRcPlayers
+    // The density both browser RC lanes (camaelon-js, cmp-wasm) apply to a document whose header
+    // declares none, so they agree with the server lanes ([ServeBundleHost.rcLaneDensityFor]).
+    val rcDensityData = if (hasRemoteComposeDoc || hasRcWasm) rcDensityAttr(rcDensity) else ""
     val rcWasmFrame =
       if (hasRcWasm)
         "<iframe id=\"cp-rc-wasm\" hidden sandbox=\"allow-scripts allow-same-origin\" " +
@@ -15839,7 +15849,7 @@ ${scriptTag("known-differences.js")}
         </span>
       </div>
       $historyInlineHtml
-      <div class="cp-viewer"$bgThemeAttr$alwaysDarkAttr$irReplayAttr$replayThemesAttr data-preview-id="$idText" data-mode="snapshot" data-modes="$modes" data-static-snapshot="$staticSnapshot" data-can-render-overrides="$canRenderOverrides" data-snapshot-backend="$backendLabel" data-live-backend="$liveLabel" data-render-density="${renderDensityAttr(renderDensity)}" data-fold-scope="${foldStorageScope(sessionId, basePath)}"$sourceLaneAttr$unseededAttr$wasmAttr$rcAttr$historyAttrs$pinnedAttr$generationAttr>
+      <div class="cp-viewer"$bgThemeAttr$alwaysDarkAttr$irReplayAttr$replayThemesAttr data-preview-id="$idText" data-mode="snapshot" data-modes="$modes" data-static-snapshot="$staticSnapshot" data-can-render-overrides="$canRenderOverrides" data-snapshot-backend="$backendLabel" data-live-backend="$liveLabel" data-render-density="${renderDensityAttr(renderDensity)}" data-fold-scope="${foldStorageScope(sessionId, basePath)}"$sourceLaneAttr$unseededAttr$wasmAttr$rcAttr$rcDensityData$historyAttrs$pinnedAttr$generationAttr>
         $navDrawer
         <div class="cp-stage"><cp-backend-badge class="cp-backend" id="cp-backend" role="status" aria-live="polite"></cp-backend-badge><img id="cp-img" alt="$label"><canvas id="cp-canvas" hidden></canvas>${spatialSceneUrl?.let { "<cp-spatial-view scene-url=\"${WebEscaping.htmlEscape(it)}\" label=\"$label\"></cp-spatial-view>" }.orEmpty()}$rcCanvas$wasmFrame$rcWasmFrame$specImg$motionImg$motionPlayer$sourcePanelHtml$specCompare$inspectLayerHtml$stageLiveHint<div class="cp-error" id="cp-error" role="alert" hidden></div></div>
         $inspectLegendHtml
@@ -17057,6 +17067,16 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
   internal fun renderDensityAttr(density: Float?): String {
     val value = density?.takeIf { it > 0f && it.isFinite() } ?: FALLBACK_RENDER_DENSITY
     return if (value == value.toInt().toFloat()) value.toInt().toString() else value.toString()
+  }
+
+  /**
+   * The ` data-rc-density="…"` attribute for [density], formatted like [renderDensityAttr], or
+   * nothing when the density is unknown or nonsense: the browser players then fall back to the
+   * document's declared density and their own default, never a guessed 2.0.
+   */
+  internal fun rcDensityAttr(density: Float?): String {
+    val value = density?.takeIf { it > 0f && it.isFinite() } ?: return ""
+    return " data-rc-density=\"${renderDensityAttr(value)}\""
   }
 
   private data class ScreenDevice(
