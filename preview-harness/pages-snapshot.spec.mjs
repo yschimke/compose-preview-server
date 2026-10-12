@@ -2477,6 +2477,35 @@ const FIXTURE_STATES = [
     },
   },
   {
+    // The renderer combo's whole list, unavailable players included, so a player added to (or
+    // dropped from) `ServeRcPlayerIds.UNIVERSE` shows up as a diff. A native <select> popup cannot
+    // be captured headless, and this one is an invisible overlay on the caret, so the list is laid
+    // out as a visible listbox under the control instead.
+    fixture: "serve-viewer-rc-players",
+    suffix: "players-open",
+    apply: async (page) => {
+      await page.evaluate(() => {
+        const lanes = document.getElementById("cp-lane-select");
+        lanes.size = lanes.options.length;
+        Object.assign(lanes.style, {
+          opacity: "1",
+          position: "absolute",
+          // The overlay is pinned with `inset: 0`; a listbox needs its own bottom and right.
+          inset: "calc(100% + 4px) auto auto 0",
+          width: "auto",
+          height: "auto",
+          maxWidth: "none",
+          padding: "4px 0",
+          border: "1px solid var(--md-sys-color-outline)",
+          borderRadius: "12px",
+          zIndex: "10",
+          background: "var(--md-sys-color-surface-container-high)",
+        });
+        lanes.parentElement.style.position = "relative";
+      });
+    },
+  },
+  {
     // "Report an issue" open: the Summary field on a floating M3 menu that must not push the render
     // down or fall off the fold. Opened through the summary. Shot before `connecting`.
     fixture: "serve-viewer",
