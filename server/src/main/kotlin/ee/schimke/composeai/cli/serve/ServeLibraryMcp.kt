@@ -23,9 +23,10 @@ import kotlinx.serialization.json.putJsonObject
  * the opening result. Deep links arrive as `hostContext["openai/deepLink"].url`:
  * `/project/<catalog>`, `/preview/<uri>` and, for `ui_builder_open`, `/design/<id>`.
  *
- * The `_meta` shapes are the ones `:mcp`'s `OpenAiUi` emits. `:server` does not link `:mcp` (it
- * would bring the MCP SDK and the daemon supervisor with it), and this surface builds its JSON by
- * hand anyway, so the few keys are written here; `ServeLibraryMcpTest` pins them.
+ * The `_meta` shapes are the ones compose-preview-mcp's `OpenAiUi` emits. `:server` does not link
+ * it (a separate repository, and it would bring the MCP SDK and the daemon supervisor with it), and
+ * this surface builds its JSON by hand anyway, so the few keys are written here;
+ * `ServeLibraryMcpTest` pins them.
  */
 internal object ServeLibraryMcp {
   /** Canonical name; the wire name carries the `catalog_` prefix (#1105, #1225). */

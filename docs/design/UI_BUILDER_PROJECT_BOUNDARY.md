@@ -65,7 +65,9 @@ both were decisions nothing was checking.
 
 **The server** — the host, its transports and the surfaces that are not the builder:
 
-`:mcp` · `:native-catalog-m3` · `:server` · `:usage-source-psi` · `:wasm-ui`
+`:native-catalog-m3` · `:server` · `:usage-source-psi` · `:wasm-ui`
+
+(`:mcp`, the local MCP server, moved to yschimke/compose-preview-mcp.)
 
 `:ui-builder-runtime` is inside the builder, not the server, even though `:server` links it. It is
 the builder's own service — design state, catalog validation, revision-pinned export — and the fact

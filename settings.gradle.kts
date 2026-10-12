@@ -199,8 +199,8 @@ providers.gradleProperty("composeUiBuilderDir").orNull?.let { path ->
 
 include(":server")
 
-// The MCP server (`compose-preview mcp serve`); it lives here because it needs an HTTP server.
-include(":mcp")
+// The MCP server (`compose-preview mcp serve`) moved to yschimke/compose-preview-mcp, a layer-3
+// leaf on its own release train (that repository's docs/design/MCP_REPOSITORY.md).
 
 include(":usage-source-psi")
 
