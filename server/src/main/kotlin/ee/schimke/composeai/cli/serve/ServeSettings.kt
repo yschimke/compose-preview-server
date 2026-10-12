@@ -257,6 +257,61 @@ object ServeSettings {
         BOTH,
       ),
       Setting(
+        "uiBuilder.importOrigins",
+        "SERVE_UI_BUILDER_IMPORT_ORIGINS",
+        Type.Names(
+          Regex("https://[a-z0-9.-]+(?::[0-9]{1,5})?"),
+          "an HTTPS origin such as https://ha.coo.ee",
+        ),
+        Apply.RESTART,
+        "Sites whose seed documents a signed-in person may start a UI-builder design from, at " +
+          "`/ui-builder/designs/import?url=<seed URL on that origin>`. The design is created " +
+          "as that person, private to them; the site holds no credential on this server. Off " +
+          "when empty.",
+      ),
+      Setting(
+        "uiBuilder.profile.host",
+        "SERVE_UI_BUILDER_PROFILE_HOST",
+        Type.Text(pattern = HOSTNAME, patternHint = "a hostname such as ha.coo.ee"),
+        Apply.RESTART,
+        "A white-labelled UI builder on one more hostname, whose edge sends only the builder's " +
+          "paths here: its pages keep `/ui-builder/`, carry `uiBuilder.profile.name`, link to no " +
+          "catalog or front door, and offer only `uiBuilder.profile.catalogs`. It narrows and " +
+          "rebrands, granting nothing; sign-in may return to it. Off when unset. Must not be " +
+          "SERVE_UI_BUILDER_HOST.",
+      ),
+      Setting(
+        "uiBuilder.profile.name",
+        "SERVE_UI_BUILDER_PROFILE_NAME",
+        Type.Text(),
+        Apply.RESTART,
+        "What the builder is called on `uiBuilder.profile.host`, in titles, headings and its " +
+          "web app manifest. Required with the host.",
+      ),
+      Setting(
+        "uiBuilder.profile.catalogs",
+        "SERVE_UI_BUILDER_PROFILE_CATALOGS",
+        Type.Names(ServeUiBuilderProfile.CATALOG, "a UI-builder catalog id"),
+        Apply.RESTART,
+        "The UI-builder catalogs `uiBuilder.profile.host` lists and creates in; designs in any " +
+          "other are left off its lists, and creating one there is refused. Required with the host.",
+      ),
+      Setting(
+        "uiBuilder.profile.accent",
+        "SERVE_UI_BUILDER_PROFILE_ACCENT",
+        Type.Text(pattern = ServeUiBuilderProfile.ACCENT, patternHint = "a #rrggbb colour"),
+        Apply.RESTART,
+        "The accent colour of `uiBuilder.profile.host`'s builder chrome. Optional.",
+      ),
+      Setting(
+        "uiBuilder.profile.homeUrl",
+        "SERVE_UI_BUILDER_PROFILE_HOME_URL",
+        Type.Text(pattern = HTTPS_URL, patternHint = "an HTTPS URL without credentials"),
+        Apply.RESTART,
+        "Where the logo and back links on `uiBuilder.profile.host` go. Optional; the builder's " +
+          "own home when unset.",
+      ),
+      Setting(
         "uiBuilder.hostRoot",
         "SERVE_UI_BUILDER_HOST_ROOT",
         Type.Flag,

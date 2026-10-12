@@ -318,6 +318,19 @@ public interface ServeOptions {
   public val uiBuilderStartUrl: String?
 
   /**
+   * HTTPS origins whose seed documents a signed-in person may import as a design of their own, at
+   * `/ui-builder/designs/import` ([ServeUiBuilderImport]). Empty turns the route off.
+   */
+  public val uiBuilderImportOrigins: List<String>
+    get() = emptyList()
+
+  /**
+   * A white-labelled builder on one more hostname ([ServeUiBuilderProfile]), or null (the default).
+   */
+  public val uiBuilderProfile: ServeUiBuilderProfile?
+    get() = null
+
+  /**
    * Serve the UI builder at the root of [uiBuilderHost] instead of under `/ui-builder/`. Needs an
    * editor bundle that reads the `ui-builder-base-path` meta; ignored without [uiBuilderHost].
    */
