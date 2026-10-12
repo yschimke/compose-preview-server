@@ -916,6 +916,9 @@ class ServeCatalogStore(
           stagesRcCompare = ServeRcCompare.stagesFor(rcCompareAlias),
           // Staged through the identity fallback, its lanes are comparison data, not players.
           rcCompareComparisonOnly = alias.isEmpty(),
+          // The same catalogs' documents are authored one unit per pixel (their baked PNGs are that
+          // draw), so a replay without a device or a declared generation density draws at 1.
+          documentDensityFallback = if (alias.isEmpty()) 1f else null,
           // Every id the catalog bakes, so the grid is complete the moment `catalog.json` lands…
           declaredBaked = bakedPathById.keys.toList() + failedIds,
           // …and the pixels follow on first use. The store keeps ownership of the network here: the

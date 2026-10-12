@@ -127,6 +127,14 @@ class ServeBundleHost(
    */
   private val rcCompareComparisonOnly: Boolean = false,
   /**
+   * The density a Remote Compose replay is drawn at when neither the preview's device nor the
+   * document's own header (`DOC_DENSITY_AT_GENERATION`) states one; null keeps the renderer's phone
+   * default. Set to 1 for a catalog of pure `.rc` documents (the condition behind
+   * [rcCompareComparisonOnly]): their baked PNGs are a web player's one-unit-per-pixel draw, and
+   * the players themselves read a missing generation density as 1.
+   */
+  private val documentDensityFallback: Float? = null,
+  /**
    * Ids this catalog publishes a baked PNG for, whether or not the pixels are local yet. Catalogs
    * pass their declared set (images are fetched lazily via [fetchBakedPng]); plain bundles pass
    * none and are exactly their `previews/` PNGs.
@@ -1238,10 +1246,44 @@ class ServeBundleHost(
     val (widthPx, heightPx) = readPngSize(bakedPngFile(previewId) ?: return null) ?: return null
     // Device density before the renderer default: 2.625 is a phone number and every Wear device is
     // 2.0, so using the default would scale a watch replay against its baked PNG. Same resolution
-    // as the viewer's dp→px, so the two can't drift.
-    val density = renderDensityFor(previewId) ?: DEFAULT_RENDER_DENSITY
+    // as the viewer's dp→px, so the two can't drift. Without a device, the document's own declared
+    // generation density, then this host's document fallback (1 for a document-only catalog, whose
+    // documents are authored one unit per pixel), and only then the phone default.
+    val density =
+      renderDensityFor(previewId)
+        ?: documentDensityAtGeneration(previewId)
+        ?: documentDensityFallback
+        ?: DEFAULT_RENDER_DENSITY
     return RcJvmRenderSpec(widthPx, heightPx, density)
   }
+
+  /**
+   * [previewId]'s document's `DOC_DENSITY_AT_GENERATION`, read from the header prefix of the staged
+   * copy; null when it declares none or is not staged yet. Never fetches: the render paths read the
+   * document (which stages it) before asking for the spec, while the page's player gating asks
+   * without wanting a network read. Memoised once the document has been read.
+   */
+  private fun documentDensityAtGeneration(previewId: String): Float? {
+    docDensityCache[previewId]?.let {
+      return it.orElse(null)
+    }
+    val doc = File(irDir, "$previewId$RC_SUFFIX").toOkioPath()
+    val prefix =
+      runCatching {
+        if (!fileSystem.exists(doc)) return null
+        fileSystem.read(doc) {
+          request(RC_HEADER_PREFIX_BYTES)
+          readByteArray(minOf(buffer.size, RC_HEADER_PREFIX_BYTES))
+        }
+      }
+        .getOrNull() ?: return null
+    val density = ServeDocFormats.remoteComposeDensityAtGeneration(prefix)
+    docDensityCache[previewId] = java.util.Optional.ofNullable(density)
+    return density
+  }
+
+  private val docDensityCache =
+    java.util.concurrent.ConcurrentHashMap<String, java.util.Optional<Float>>()
 
   /** Read a PNG's pixel dimensions from its IHDR without decoding the image; null if unreadable. */
   private fun readPngSize(path: okio.Path): Pair<Int, Int>? {
@@ -1545,6 +1587,9 @@ class ServeBundleHost(
     /** Sibling of `previews/` holding the captured Remote Compose docs (`ir/<id>.rc`). */
     private const val IR_SUBDIR = "ir"
     private const val RC_SUFFIX = ".rc"
+
+    /** Enough of a `.rc` to hold its header's property table; the header opens the document. */
+    private const val RC_HEADER_PREFIX_BYTES = 64L * 1024
     private const val PREVIEWS_JSON = "previews.json"
 
     /**
