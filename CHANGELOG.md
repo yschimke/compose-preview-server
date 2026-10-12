@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.133.0](https://github.com/yschimke/compose-preview-server/compare/v3.132.0...v3.133.0) (2026-10-12)
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.54.0 ([#1623](https://github.com/yschimke/compose-preview-server/issues/1623)) ([a6c6ffb](https://github.com/yschimke/compose-preview-server/commit/a6c6ffb7687c8b932114fffecbecd1d6b86ed690))
+* **mcp-app:** show the whole render in Actual size ([#1620](https://github.com/yschimke/compose-preview-server/issues/1620)) ([d169f9a](https://github.com/yschimke/compose-preview-server/commit/d169f9a0bee0ec2223f53a7abb19845b17b26e9b))
+* **serve:** give a carried document's held session a foreground live seat ([#1625](https://github.com/yschimke/compose-preview-server/issues/1625)) ([59678ef](https://github.com/yschimke/compose-preview-server/commit/59678ef2f2d21916a3655aa3941e0800d3885f15))
+
 ## [3.132.0](https://github.com/yschimke/compose-preview-server/compare/v3.131.0...v3.132.0) (2026-10-12)
 
 
