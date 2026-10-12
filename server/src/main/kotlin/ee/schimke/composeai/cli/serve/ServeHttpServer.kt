@@ -10666,6 +10666,8 @@ class ServeHttpServer(
           canRenderOverrides = renderHost.canRenderOverridesFor(preview.id),
           // Per-preview: dp size overrides are converted against this density.
           renderDensity = catalogBundleHost(renderHost)?.renderDensityFor(preview.id),
+          // Per-preview: the density the browser RC lanes use for an undeclared document.
+          rcDensity = catalogBundleHost(renderHost)?.rcLaneDensityFor(preview.id),
           // The knob values this request asked for, unless the picture can't be showing them
           // ([seedableOverrideParams]).
           requestOverrides = overrideSeeds.seeded,

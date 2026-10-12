@@ -1252,10 +1252,24 @@ class ServeBundleHost(
     val density =
       renderDensityFor(previewId)
         ?: documentDensityAtGeneration(previewId)
-        ?: documentDensityFallback
+        ?: rcLaneDensityFor(previewId)
         ?: DEFAULT_RENDER_DENSITY
     return RcJvmRenderSpec(widthPx, heightPx, density)
   }
+
+  /**
+   * The density a Remote Compose lane draws [previewId]'s document at when the document's header
+   * declares none: the preview's own render density ([renderDensityFor]) when the manifest or
+   * device states one, else this host's [documentDensityFallback] (1 for a document-only catalog),
+   * else null — "nothing here knows", which leaves the renderer to its own default rather than
+   * claiming the page's generic 2.0. [remoteComposeRenderSpec] resolves through it for the server
+   * lanes, and the viewer page publishes it as `data-rc-density` for the browser lanes, so an
+   * undeclared document draws at the same density whichever lane paints it. (A document that does
+   * declare one is drawn at it by the browser players; the server chain still lets a known device
+   * outrank it.)
+   */
+  fun rcLaneDensityFor(previewId: String): Float? =
+    renderDensityFor(previewId) ?: documentDensityFallback
 
   /**
    * [previewId]'s document's `DOC_DENSITY_AT_GENERATION`, read from the header prefix of the staged

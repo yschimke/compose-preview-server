@@ -119,6 +119,63 @@ class ServeBakedCatalogPreviewParamsTest {
     assertEquals("2", ServeWeb.renderDensityAttr(Float.NaN))
   }
 
+  /**
+   * The density the browser Remote Compose lanes draw an undeclared document at
+   * (yschimke/compose-preview-server#1590). Without it the camaelon player used
+   * `window.devicePixelRatio` — a 2.75 phone widget drew at 1 on a desktop screen, and a
+   * document-only catalog authored at 1 drew magnified on a retina one.
+   */
+  @Test
+  fun `the browser rc lanes take the preview's density, else the host's document fallback`() {
+    val catalog =
+      bakedCatalog(
+        """
+        {"timetext":{"previewParams":{"device":"id:pixel_5"}},
+         "sticker":{"previewParams":{"widthDp":120}}}
+        """
+          .trimIndent()
+      )
+    assertEquals(2.75f, catalog.rcLaneDensityFor("timetext"), "the device's density")
+    assertNull(
+      catalog.rcLaneDensityFor("sticker"),
+      "unknown stays unknown, never the page's generic 2.0",
+    )
+
+    val dir = Files.createTempDirectory("doc-only-catalog").toFile().also { it.deleteOnExit() }
+    File(dir, "previews").mkdirs()
+    File(dir, "previews/game.png").writeBytes(png())
+    val docOnly = ServeBundleHost(dir, label = "rc", documentDensityFallback = 1f)
+    assertEquals(1f, docOnly.rcLaneDensityFor("game"), "a document-only catalog's fallback")
+  }
+
+  @Test
+  fun `the rc density attribute is omitted when nothing knows the density`() {
+    assertEquals("", ServeWeb.rcDensityAttr(null))
+    assertEquals("", ServeWeb.rcDensityAttr(0f))
+    assertEquals("", ServeWeb.rcDensityAttr(Float.NaN))
+    assertEquals(" data-rc-density=\"1\"", ServeWeb.rcDensityAttr(1f))
+    assertEquals(" data-rc-density=\"2.75\"", ServeWeb.rcDensityAttr(2.75f))
+  }
+
+  @Test
+  fun `the viewer page publishes the rc density only alongside an rc lane`() {
+    val preview = ServePreview("w", "Widget")
+    val withDoc =
+      ServeWeb.viewerPage(
+        preview = preview,
+        token = "",
+        hasRemoteComposeDoc = true,
+        enabledRcPlayers = listOf("camaelon-js", "cmp-wasm"),
+        renderDensity = 2.75f,
+        rcDensity = 2.75f,
+      )
+    assertTrue(withDoc.contains("data-rc-density=\"2.75\""), "an RC page carries it")
+    val unknown = ServeWeb.viewerPage(preview = preview, token = "", hasRemoteComposeDoc = true)
+    assertTrue(!unknown.contains("data-rc-density"), "an unknown density is left to the player")
+    val noDoc = ServeWeb.viewerPage(preview = preview, token = "", rcDensity = 2.75f)
+    assertTrue(!noDoc.contains("data-rc-density"), "a page with no RC lane has no use for it")
+  }
+
   @Test
   fun `the stated ground reaches the comparison stage, rather than the catalog's default`() {
     // The point of the whole change, asserted where a reader would see it. `PreviewBackdrop` would

@@ -23,8 +23,13 @@ import { rcWasmFailureMessage } from "./viewer/rcWasmFailure.js";
 import {
     RC_SNAPSHOT_REFIT_MS,
     RC_SNAPSHOT_WAIT_MS,
+    parseRcDensityAttr,
+    formatRcDensity,
     rcCanvasSize,
-    rcDocumentSize,
+    rcDocumentHeader,
+    rcLaneDensity,
+    rcWasmDensity,
+    type RcDocumentHeader,
     whenImageSized,
 } from "./viewer/rcCanvasSize.js";
 import {
@@ -2929,9 +2934,17 @@ const rcToggle = may<HTMLInputElement>("cp-rc-toggle");
 const rcWasmFrame = may<HTMLIFrameElement>("cp-rc-wasm");
 const rcWasmToggle = may<HTMLInputElement>("cp-rc-wasm-toggle");
 var rcWasmReady = false;
+var rcWasmOpenSeq = 0; // bumped by each open/close so a late header read can't set a stale src
 var rcWasmBootTimer: ReturnType<typeof setTimeout> | null = null;
 var hasRcDoc = root.getAttribute("data-has-rc-doc") === "1";
 var rcPlayer: RcPlayer | null = null; // created lazily on first open
+// The density the current player instance was explicitly given (`setDensity` is sticky), or null
+// for one that never was and so still honours a document's own declared density.
+var rcPlayerDensity: number | null = null;
+// The density both browser RC lanes impose on a document whose header declares none: the
+// preview's render density, or 1 for a document-only catalog (`ServeBundleHost.rcLaneDensityFor`).
+// Absent when the server knows none, leaving each player to its own default.
+var rcPageDensity = parseRcDensityAttr(root.getAttribute("data-rc-density"));
 var rcCtx: RemoteContext | null = null; // its WebRemoteContext, for named-value overrides
 var rcReady = false; // a first frame is painted and the canvas revealed
 var rcScriptState = 0; // 0 = not loaded, 1 = loading, 2 = ready
@@ -3039,6 +3052,25 @@ function applyRcOverrides() {
     });
     if (rcPlayer && rcPlayer.repaint) rcPlayer.repaint();
 }
+// The camaelon-js player to load a document with [header] into, at the density the lane rule
+// ([rcLaneDensity]) picks. Because `setDensity` cannot be undone on an instance, a document that
+// must be left to its own declared density gets a fresh player when the current one was given one.
+function rcPlayerFor(header: RcDocumentHeader | null): RcPlayer {
+    var density = rcLaneDensity(header, rcPageDensity);
+    if (rcPlayer && density === null && rcPlayerDensity !== null) {
+        if (rcPlayer.destroy) rcPlayer.destroy();
+        rcPlayer = null;
+    }
+    if (!rcPlayer) {
+        rcPlayer = new window.RC!.RcdPlayer(rcCanvasEl!);
+        rcPlayerDensity = null;
+    }
+    if (density !== null && rcPlayer.setDensity) {
+        rcPlayer.setDensity(density);
+        rcPlayerDensity = density;
+    }
+    return rcPlayer;
+}
 function openRc() {
     if (!rcAvailable()) return;
     root.setAttribute("data-mode", "rc");
@@ -3076,13 +3108,16 @@ function openRc() {
                 // The document declares the pixel size it was captured at; only a document that
                 // declares none waits on the snapshot, which on a `?mode=rc` deep link is often
                 // still in flight (or never arrives) and reads a `naturalWidth` of 0.
-                var declared = rcDocumentSize(buf);
+                var header = rcDocumentHeader(buf);
+                if (!rcDocHeaderPromise)
+                    rcDocHeaderPromise = Promise.resolve(header);
+                var declared = header ? header.size : null;
                 return (
                     declared
                         ? Promise.resolve(declared)
                         : whenImageSized(img, RC_SNAPSHOT_WAIT_MS)
                 ).then(function (natural) {
-                    return { buf: buf, natural: natural };
+                    return { buf: buf, header: header, natural: natural };
                 });
             })
             .then(function (loaded) {
@@ -3101,11 +3136,14 @@ function openRc() {
                 );
                 rcCanvasEl!.width = size.width;
                 rcCanvasEl!.height = size.height;
-                if (!rcPlayer) rcPlayer = new window.RC!.RcdPlayer(rcCanvasEl!);
+                // Density: a document that declares one draws at it; an undeclared one at the
+                // page's `data-rc-density`, not at `devicePixelRatio` (which drew a 2.75 widget
+                // tiny on a DPR-1 screen and a density-1 document magnified on a DPR-2 one).
+                var player = rcPlayerFor(loaded.header);
                 // The stand-in size is only a guess at the aspect ratio, so re-fit once the
                 // snapshot does decode.
                 if (!loaded.natural) refitRcWhenSized(buf);
-                return rcPlayer.loadFromArrayBuffer(buf);
+                return player.loadFromArrayBuffer(buf);
             })
             .then(function () {
                 if (!rcActive()) return;
@@ -3186,7 +3224,32 @@ function closeRc() {
 // AndroidX-conformant CMP/Wasm RC lane: an isolated app that receives the document URL and
 // announces its first rendered frame.
 function positionRcWasmFrame() {
-    if (rcWasmFrame) positionOverlay(rcWasmFrame);
+    if (!rcWasmFrame) return;
+    positionOverlay(rcWasmFrame);
+    refreshRcWasmDensity();
+}
+// The `density` the iframe was loaded with, and the header it came from; null until a URL is
+// built. The player reads `density` once per page, so a box that changes width (the snapshot
+// decoding after the lane opened, a window resize) reloads the iframe at the new scale.
+var rcWasmLoadedDensity: number | null = null;
+var rcWasmLoadedHeader: RcDocumentHeader | null = null;
+var rcWasmDensityTimer: ReturnType<typeof setTimeout> | null = null;
+function refreshRcWasmDensity() {
+    if (rcWasmLoadedDensity === null || !rcWasmActive()) return;
+    if (rcWasmDensityTimer) clearTimeout(rcWasmDensityTimer);
+    rcWasmDensityTimer = setTimeout(function () {
+        rcWasmDensityTimer = null;
+        if (rcWasmLoadedDensity === null || !rcWasmActive() || !rcWasmFrame)
+            return;
+        var next = rcWasmDensityNow(rcWasmLoadedHeader);
+        if (
+            next === null ||
+            Math.abs(next - rcWasmLoadedDensity) <= rcWasmLoadedDensity * 0.01
+        )
+            return;
+        rcWasmLoadedDensity = next;
+        rcWasmFrame.src = rcWasmSrc(next);
+    }, 250);
 }
 function rcWasmNamedValues() {
     var values: Array<{ name: string; kind: string; value: string }> = [];
@@ -3201,13 +3264,48 @@ function rcWasmNamedValues() {
     });
     return values;
 }
-function rcWasmSrc() {
+// The document's header, fetched at most once per page and shared by both browser RC lanes: the
+// wasm lane needs its declared density and size before it can build the iframe URL.
+var rcDocHeaderPromise: Promise<RcDocumentHeader | null> | null = null;
+function rcDocHeader(): Promise<RcDocumentHeader | null> {
+    if (!rcDocHeaderPromise) {
+        rcDocHeaderPromise = fetch(rcDocUrl())
+            .then(function (r) {
+                if (!r.ok) throw new Error("doc " + r.status);
+                return r.arrayBuffer();
+            })
+            .then(rcDocumentHeader)
+            .catch(function () {
+                rcDocHeaderPromise = null; // a transient failure may be retried by the next open
+                return null;
+            });
+    }
+    return rcDocHeaderPromise;
+}
+// The wasm player's `density` (CSS px per dp) for the iframe as currently positioned: the lane
+// density (declared, else `data-rc-density`) times the scale the snapshot box is displayed at.
+function rcWasmDensityNow(header: RcDocumentHeader | null): number | null {
+    var box = rcWasmFrame ? rcWasmFrame.getBoundingClientRect().width : 0;
+    var natural =
+        img.naturalWidth > 0
+            ? img.naturalWidth
+            : header && header.size
+              ? header.size.width
+              : 0;
+    return rcWasmDensity(header, rcPageDensity, box, natural);
+}
+function rcWasmSrc(density: number | null) {
     var absoluteDoc = new URL(rcDocUrl(), location.origin).href;
     var src =
         "/rc-player-wasm/index.html?src=" + encodeURIComponent(absoluteDoc);
     var uiMode = may<HTMLSelectElement>("cp-uiMode");
     if (uiMode && (uiMode.value === "light" || uiMode.value === "dark")) {
         src += "&theme=" + encodeURIComponent(uiMode.value);
+    }
+    // CSS px per dp ([rcWasmDensity]); omitted when nothing knows a density, which keeps the
+    // player's `devicePixelRatio` default. Older players ignore it.
+    if (density !== null) {
+        src += "&density=" + encodeURIComponent(formatRcDensity(density));
     }
     var namedValues = rcWasmNamedValues();
     if (namedValues.length) {
@@ -3238,8 +3336,17 @@ function openRcWasm() {
     positionRcWasmFrame();
     rcWasmFrame.hidden = false;
     rcWasmReady = false;
-    rcWasmFrame.src = rcWasmSrc();
+    var seq = ++rcWasmOpenSeq;
     status.textContent = "loading CMP Wasm RC player…";
+    // The density rule needs the document's declared density, so the header is read (once per
+    // page) before the iframe URL is built.
+    rcDocHeader().then(function (header) {
+        if (seq !== rcWasmOpenSeq || !rcWasmFrame) return; // closed or reopened meanwhile
+        var density = rcWasmDensityNow(header);
+        rcWasmLoadedHeader = header;
+        rcWasmLoadedDensity = density;
+        rcWasmFrame.src = rcWasmSrc(density);
+    });
     if (rcWasmBootTimer) clearTimeout(rcWasmBootTimer);
     rcWasmBootTimer = setTimeout(function () {
         if (!rcWasmReady && rcWasmActive())
@@ -3252,6 +3359,8 @@ function openRcWasm() {
 }
 function closeRcWasm() {
     if (!rcWasmFrame) return;
+    rcWasmOpenSeq++;
+    rcWasmLoadedDensity = null;
     setPending(null);
     rcWasmReady = false;
     if (rcWasmBootTimer) {

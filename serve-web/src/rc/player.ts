@@ -24,6 +24,14 @@ export interface RcPlayer {
     fontsReady(): Promise<unknown>;
     repaint?(): void;
     getRemoteContext?(): RemoteContext | null;
+    /**
+     * Impose a dp→px density. Sticky on the instance: once set, every later document is drawn at
+     * it, its own `DOC_DENSITY_AT_GENERATION` included. Unset, a document draws at its declared
+     * density, else `devicePixelRatio`.
+     */
+    setDensity?(density: number): void;
+    /** Stop painting and detach the instance's canvas listeners. */
+    destroy?(): void;
 }
 
 declare global {

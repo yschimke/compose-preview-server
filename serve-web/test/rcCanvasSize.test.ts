@@ -5,7 +5,12 @@ import assert from "node:assert/strict";
 import {
     RC_FALLBACK_DP,
     rcCanvasSize,
+    formatRcDensity,
+    parseRcDensityAttr,
+    rcDocumentHeader,
     rcDocumentSize,
+    rcLaneDensity,
+    rcWasmDensity,
     whenImageSized,
 } from "../src/viewer/rcCanvasSize.js";
 
@@ -165,5 +170,156 @@ describe("rcDocumentSize", () => {
             null,
         );
         assert.equal(rcDocumentSize(header([[4, 0x89504e47]])), null);
+    });
+});
+
+describe("rcDocumentHeader", () => {
+    const tagged = (density: number | null) =>
+        header([
+            [1, 0],
+            [4, (0x048c << 16) | 1],
+            [4, 1],
+            [4, 0],
+            [4, density === null ? 2 : 3],
+            ...(density === null
+                ? []
+                : ([
+                      [2, (1 << 10) | 7],
+                      [2, 4],
+                      [4, floatBits(density)],
+                  ] as Array<[number, number]>)),
+            [2, 5],
+            [2, 4],
+            [4, 454],
+            [2, 6],
+            [2, 4],
+            [4, 300],
+        ]);
+
+    it("reads DOC_DENSITY_AT_GENERATION from the tagged form", () => {
+        assert.deepEqual(rcDocumentHeader(tagged(2.75)), {
+            size: { width: 454, height: 300 },
+            density: 2.75,
+        });
+    });
+
+    it("reports no density when the tagged form declares none", () => {
+        assert.deepEqual(rcDocumentHeader(tagged(null)), {
+            size: { width: 454, height: 300 },
+            density: null,
+        });
+    });
+
+    it("ignores a non-positive declared density", () => {
+        assert.equal(rcDocumentHeader(tagged(0))!.density, null);
+    });
+
+    it("never declares a density in the untagged form", () => {
+        const buf = header([
+            [1, 0],
+            [4, 1],
+            [4, 0],
+            [4, 0],
+            [4, 558],
+            [4, 280],
+        ]);
+        assert.deepEqual(rcDocumentHeader(buf), {
+            size: { width: 558, height: 280 },
+            density: null,
+        });
+    });
+
+    it("does not take an int property with key 7 for the density", () => {
+        const buf = header([
+            [1, 0],
+            [4, (0x048c << 16) | 1],
+            [4, 1],
+            [4, 0],
+            [4, 1],
+            [2, 7],
+            [2, 4],
+            [4, 3],
+        ]);
+        assert.equal(rcDocumentHeader(buf)!.density, null);
+    });
+
+    it("is null for a buffer that is not Remote Compose", () => {
+        assert.equal(rcDocumentHeader(header([[4, 0x89504e47]])), null);
+    });
+});
+
+describe("rcLaneDensity", () => {
+    const declared = { size: null, density: 2.625 };
+    const undeclared = { size: { width: 10, height: 10 }, density: null };
+
+    it("leaves a document that declares its density to the player", () => {
+        assert.equal(rcLaneDensity(declared, 2.75), null);
+    });
+
+    it("imposes the page density on an undeclared document", () => {
+        assert.equal(rcLaneDensity(undeclared, 2.75), 2.75);
+        assert.equal(rcLaneDensity(undeclared, 1), 1);
+        assert.equal(rcLaneDensity(null, 1), 1);
+    });
+
+    it("imposes nothing when the page knows no density", () => {
+        assert.equal(rcLaneDensity(undeclared, null), null);
+        assert.equal(rcLaneDensity(undeclared, 0), null);
+    });
+});
+
+describe("parseRcDensityAttr", () => {
+    it("reads a positive density and refuses anything else", () => {
+        assert.equal(parseRcDensityAttr("2.75"), 2.75);
+        assert.equal(parseRcDensityAttr("1"), 1);
+        assert.equal(parseRcDensityAttr(null), null);
+        assert.equal(parseRcDensityAttr(""), null);
+        assert.equal(parseRcDensityAttr("0"), null);
+        assert.equal(parseRcDensityAttr("-2"), null);
+        assert.equal(parseRcDensityAttr("abc"), null);
+    });
+});
+
+function floatBits(f: number): number {
+    const v = new DataView(new ArrayBuffer(4));
+    v.setFloat32(0, f);
+    return v.getInt32(0);
+}
+
+describe("rcWasmDensity", () => {
+    const declared = { size: { width: 454, height: 400 }, density: 2 };
+    const undeclared = { size: { width: 558, height: 280 }, density: null };
+
+    it("is the lane density at natural size", () => {
+        assert.equal(rcWasmDensity(undeclared, 2.75, 558, 558), 2.75);
+        assert.equal(rcWasmDensity(declared, 2.75, 454, 454), 2);
+    });
+
+    it("prefers the declared density over the page's", () => {
+        assert.equal(rcWasmDensity(declared, 3, 454, 454), 2);
+    });
+
+    it("scales by the snapshot's displayed size", () => {
+        assert.equal(rcWasmDensity(undeclared, 2.75, 279, 558), 1.375);
+        assert.equal(rcWasmDensity(declared, null, 908, 454), 4);
+    });
+
+    it("takes the box at natural size when either width is unknown", () => {
+        assert.equal(rcWasmDensity(undeclared, 1, 0, 400), 1);
+        assert.equal(rcWasmDensity(undeclared, 1, 300, 0), 1);
+    });
+
+    it("is null when neither the document nor the page knows a density", () => {
+        assert.equal(rcWasmDensity(undeclared, null, 558, 558), null);
+        assert.equal(rcWasmDensity(null, null, 558, 558), null);
+    });
+});
+
+describe("formatRcDensity", () => {
+    it("writes a plain decimal", () => {
+        assert.equal(formatRcDensity(2.75), "2.75");
+        assert.equal(formatRcDensity(1), "1");
+        assert.equal(formatRcDensity(2.75 * (279 / 558)), "1.375");
+        assert.equal(formatRcDensity(1 / 3), "0.3333");
     });
 });
