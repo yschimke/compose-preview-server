@@ -74,6 +74,26 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
   echo "PASS: playground role — only the settings both containers must agree on"
 )
 
+# A white-labelled builder profile: nested two deep, a list comma-joined, every field optional
+# but the ones the server requires with the host.
+(
+  cat > "${work}/profile.json" <<'JSON'
+{"uiBuilder": {"profile": {"host": "ha.coo.ee", "name": "Home Assistant card designer",
+  "catalogs": ["remote-m3"], "accent": "#03a9f4", "homeUrl": "https://ha.coo.ee/"}}}
+JSON
+  unset SERVE_UI_BUILDER_PROFILE_HOST SERVE_UI_BUILDER_PROFILE_NAME \
+    SERVE_UI_BUILDER_PROFILE_CATALOGS SERVE_UI_BUILDER_PROFILE_ACCENT \
+    SERVE_UI_BUILDER_PROFILE_HOME_URL SERVE_SETTINGS_SOURCES
+  apply_settings_file "${work}/profile.json" "${schema}" preview 2> /dev/null
+  [[ "${SERVE_UI_BUILDER_PROFILE_HOST}" == "ha.coo.ee" ]] || fail "profile host"
+  [[ "${SERVE_UI_BUILDER_PROFILE_NAME}" == "Home Assistant card designer" ]] ||
+    fail "profile name with spaces: '${SERVE_UI_BUILDER_PROFILE_NAME}'"
+  [[ "${SERVE_UI_BUILDER_PROFILE_CATALOGS}" == "remote-m3" ]] || fail "profile catalogs"
+  [[ "${SERVE_UI_BUILDER_PROFILE_ACCENT}" == "#03a9f4" ]] || fail "profile accent"
+  [[ "${SERVE_UI_BUILDER_PROFILE_HOME_URL}" == "https://ha.coo.ee/" ]] || fail "profile home"
+  echo "PASS: the UI-builder profile reaches its variables"
+)
+
 # A broken file is reported and skipped; the box still comes up.
 (
   printf '{"uiBuilder": ' > "${work}/broken.json"

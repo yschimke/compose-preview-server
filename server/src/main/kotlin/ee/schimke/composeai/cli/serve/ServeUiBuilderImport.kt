@@ -175,19 +175,28 @@ object ServeUiBuilderImport {
     }
 
   /** The page that asks the signed-in person to confirm the import. */
-  fun confirmPage(action: String, url: URI, document: DesignDocumentV1, login: String?): String {
+  fun confirmPage(
+    action: String,
+    url: URI,
+    document: DesignDocumentV1,
+    login: String?,
+    /**
+     * A white-labelled host's product name ([ServeUiBuilderProfile]), for the title and heading.
+     */
+    productName: String? = null,
+  ): String {
     fun esc(s: String) = WebEscaping.htmlEscape(s)
     val origin = "https://${url.host}${if (url.port == -1) "" else ":${url.port}"}"
     return """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Start a design · ${esc(document.title)}</title>
+<title>Start a design · ${esc(document.title)}${productName?.let { " · " + esc(it) }.orEmpty()}</title>
 <style>
 :root{color-scheme:light dark;font-family:system-ui,sans-serif}
 body{max-width:36rem;margin:3rem auto;padding:0 1rem;line-height:1.5}
 .muted{opacity:.7}button{font:inherit;padding:.5rem 1rem;border-radius:.4rem;cursor:pointer}
 code{font-size:.9em}
 </style></head><body>
-<h1>Start a design</h1>
+<h1>${productName?.let { esc(it) + ": start a design" } ?: "Start a design"}</h1>
 <p><b>${esc(origin)}</b> prepared <b>${esc(document.title)}</b>, a <code>${esc(document.catalogPin.systemId)}</code> design.</p>
 <p class="muted">It is created as ${if (login != null) "<b>${esc(login)}</b>" else "you"}, private to you: only you, and whoever you share it with, can open it. ${esc(origin)} keeps no access to it.</p>
 <form method="post" action="${esc(action)}">

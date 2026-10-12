@@ -104,6 +104,27 @@ object ServeWeb {
   )
 
   /**
+   * The chrome a builder page wears on a white-labelled host ([ServeUiBuilderProfile]): another
+   * product's name and home in place of compose-preview's, and nothing that leads to the server's
+   * own pages (catalogs, front door, status, footer links), which that host does not route here.
+   */
+  data class PageBrand(
+    val name: String,
+    /** The brand slot's link: the product's home. */
+    val homeHref: String,
+    /** A `#rrggbb` colour, already validated, or null for the default palette. */
+    val accent: String? = null,
+    val manifestPath: String = ServeSiteIcon.MANIFEST_PATH,
+  ) {
+    /** [accent] as the chrome's primary colour; empty without one. */
+    internal fun accentCss(): String =
+      accent
+        ?.takeIf { ServeUiBuilderProfile.ACCENT.matches(it) }
+        ?.let { "\n:root { --md-sys-color-primary: $it; }" }
+        .orEmpty()
+  }
+
+  /**
    * Absolute URLs advertised to link unfurlers for a browser-facing page. [imageUrl] is what the
    * page represents; utility/error pages leave it null for a text-only card. Supplied by the HTTP
    * layer, which alone knows the external scheme/host (e.g. behind Caddy TLS).
@@ -1042,7 +1063,32 @@ ${captureControlsHtml().prependIndent("          ")}
      * `/ui-builder/designs` 404s on hosts without a builder.
      */
     designsHref: String = "",
+    /** A white-labelled builder's chrome: its name and home in the brand slot, no Status link. */
+    brand: PageBrand? = null,
   ): String {
+    val esc = WebEscaping::htmlEscape
+    val brandLink =
+      if (brand == null)
+        """
+        <a class="cp-site-brand" href="/$navSuffix" aria-label="compose-preview home">
+          <span class="cp-site-mark" aria-hidden="true">◇</span>
+          <span class="cp-site-wordmark">compose-preview</span>
+        </a>
+        """
+          .trimIndent()
+      else
+        """
+        <a class="cp-site-brand" href="${esc(brand.homeHref)}" aria-label="${esc(brand.name)} home">
+          <span class="cp-site-wordmark">${esc(brand.name)}</span>
+        </a>
+        """
+          .trimIndent()
+    // Status is the server's page, reached only on its own hosts.
+    val statusHtml =
+      if (brand != null) ""
+      else
+        """<a class="cp-site-status-link" id="cp-status-link" href="/status$navSuffix">Status<span
+              class="cp-daemon-status" id="cp-daemon-status" aria-hidden="true" hidden></span></a>"""
     val actionHtml = action.takeIf { it.isNotBlank() }?.let { "\n          $it" } ?: ""
     val designsHtml =
       designsHref
@@ -1073,10 +1119,7 @@ ${captureControlsHtml().prependIndent("          ")}
       return """
         <header class="cp-site-header">
           <div class="cp-site-lead">
-            <a class="cp-site-brand" href="/$navSuffix" aria-label="compose-preview home">
-              <span class="cp-site-mark" aria-hidden="true">◇</span>
-              <span class="cp-site-wordmark">compose-preview</span>
-            </a>$name$crumb
+            ${brandLink.prependIndent("            ").trimStart()}$name$crumb
           </div>$searchHtml$modeToggleHtml
         </header>
         """
@@ -1085,10 +1128,7 @@ ${captureControlsHtml().prependIndent("          ")}
     return """
       <header class="cp-site-header">
         <div class="cp-site-lead">
-          <a class="cp-site-brand" href="/$navSuffix" aria-label="compose-preview home">
-            <span class="cp-site-mark" aria-hidden="true">◇</span>
-            <span class="cp-site-wordmark">compose-preview</span>
-          </a>$name$crumb
+          ${brandLink.prependIndent("          ").trimStart()}$name$crumb
         </div>
         <nav class="cp-site-nav" aria-label="Primary navigation">$searchHtml$modeToggleHtml
           <details class="cp-site-menu" id="cp-site-menu">
@@ -1096,8 +1136,7 @@ ${captureControlsHtml().prependIndent("          ")}
               aria-controls="cp-site-menu-panel"><span aria-hidden="true">⋮</span></summary>
           </details>
           <div class="cp-site-menu-panel" id="cp-site-menu-panel">
-            <a class="cp-site-status-link" id="cp-status-link" href="/status$navSuffix">Status<span
-              class="cp-daemon-status" id="cp-daemon-status" aria-hidden="true" hidden></span></a>$designsHtml$actionHtml
+            $statusHtml$designsHtml$actionHtml
             ${settingsMenuHtml(showPreviewThemeSetting, sessionSettings).prependIndent("            ").trimStart()}
           </div>
         </nav>
@@ -5996,6 +6035,8 @@ ${captureControlsHtml().prependIndent("          ")}
     version: String? = null,
     githubAuth: GitHubAuthStatus? = null,
     componentBrowser: Boolean = false,
+    /** A white-labelled builder's chrome; it has no catalogs to go back to. */
+    brand: PageBrand? = null,
   ): String {
     val suffix =
       querySuffix(
@@ -6008,20 +6049,26 @@ ${captureControlsHtml().prependIndent("          ")}
           "\n        <p><a class=\"cp-action-chip cp-action-chip--primary\" " +
             "href=\"${WebEscaping.htmlEscape(it)}\">$GITHUB_ICON Sign in with GitHub</a></p>"
         } ?: ""
+    val back =
+      if (brand == null) "<a class=\"cp-back\" href=\"/$suffix\">← All design systems</a>"
+      else
+        "<a class=\"cp-back\" href=\"${WebEscaping.htmlEscape(brand.homeHref)}\">← " +
+          "${WebEscaping.htmlEscape(brand.name)}</a>"
     return document(
-      title = "Access needed — compose-preview",
+      title = "Access needed — ${brand?.name ?: "compose-preview"}",
       unfurlDescription = message,
       version = version,
       navSuffix = suffix,
       componentBrowser = componentBrowser,
-      interfaceModeControl = true,
+      interfaceModeControl = brand == null,
+      brand = brand,
       headerAction = if (componentBrowser) "" else githubAuthControl(githubAuth),
       headerSessionSettings = if (componentBrowser) "" else githubSessionSettings(githubAuth),
       body =
         """
         <h1 class="cp-head">Access needed</h1>
         <p class="cp-sub">${WebEscaping.htmlEscape(message)}</p>$signIn
-        <a class="cp-back" href="/$suffix">← All design systems</a>
+        $back
         """
           .trimIndent(),
     )
@@ -6054,6 +6101,7 @@ ${captureControlsHtml().prependIndent("          ")}
     isPublic: Boolean = false,
     /** Where the design's history lives, or null when this host shows none. */
     historyHref: String? = null,
+    brand: PageBrand? = null,
   ): String {
     val esc = WebEscaping::htmlEscape
     val noticeBlock =
@@ -6102,7 +6150,8 @@ ${captureControlsHtml().prependIndent("          ")}
             .trimIndent()
         }
     return document(
-      title = "Share ${esc(designId)} — compose-preview",
+      title = "Share ${esc(designId)} — ${brand?.name ?: "compose-preview"}",
+      brand = brand,
       unfurlDescription = "Who can open this UI-builder design.",
       version = version,
       navSuffix = navSuffix,
@@ -6198,6 +6247,7 @@ ${captureControlsHtml().prependIndent("          ")}
     version: String? = null,
     siteName: String = "",
     themeCss: String = "",
+    brand: PageBrand? = null,
   ): String {
     val esc = WebEscaping::htmlEscape
     val noticeBlock =
@@ -6254,7 +6304,8 @@ ${captureControlsHtml().prependIndent("          ")}
           " not shown.</p>"
       else ""
     return document(
-      title = "History of ${esc(title)} — compose-preview",
+      title = "History of ${esc(title)} — ${brand?.name ?: "compose-preview"}",
+      brand = brand,
       unfurlDescription = "Revision history of a UI-builder design.",
       version = version,
       navSuffix = navSuffix,
@@ -6383,6 +6434,7 @@ ${captureControlsHtml().prependIndent("          ")}
     requestAccessHref: String = "",
     /** Designs in the trash this viewer may restore; the section is omitted when empty. */
     trash: List<UiBuilderTrashRow> = emptyList(),
+    brand: PageBrand? = null,
   ): String {
     val esc = WebEscaping::htmlEscape
     val trashHtml = uiBuilderTrashSection(trash)
@@ -6859,13 +6911,14 @@ ${captureControlsHtml().prependIndent("          ")}
         """
           .trimIndent()
     return document(
-      title = "Designs — compose-preview",
+      title = "Designs — ${brand?.name ?: "compose-preview"}",
       unfurlDescription = "UI-builder designs owned by or shared with this account.",
       version = version,
       navSuffix = navSuffix,
       siteName = siteName,
       themeCss = themeCss,
       wide = true,
+      brand = brand,
       body =
         """
         <h1 class="cp-head">Designs</h1>
@@ -6879,7 +6932,7 @@ ${captureControlsHtml().prependIndent("          ")}
         $grid
         $trashHtml
         $create
-        <a class="cp-back" href="/ui-builder/$navSuffix">← UI builder</a>
+        <a class="cp-back" href="/ui-builder/$navSuffix">← ${esc(brand?.name ?: "UI builder")}</a>
         """
           .trimIndent(),
     )
@@ -16291,7 +16344,13 @@ ${scriptTag("known-differences.js")}
    * The Open Graph and Twitter card tags for one page, from unescaped [title] and [description].
    * Separate so pages not laid out by [document] (the UI builder shell) share the same unfurl.
    */
-  internal fun unfurlHeadHtml(title: String, description: String, unfurl: UnfurlMetadata): String {
+  internal fun unfurlHeadHtml(
+    title: String,
+    description: String,
+    unfurl: UnfurlMetadata,
+    /** `og:site_name`: a profile host's product name, else compose-preview. */
+    siteName: String = "compose-preview",
+  ): String {
     val metaTitle = WebEscaping.htmlEscape(title)
     val metaDescription = WebEscaping.htmlEscape(description)
     val pageUrl = WebEscaping.htmlEscape(unfurl.pageUrl)
@@ -16325,7 +16384,7 @@ ${scriptTag("known-differences.js")}
           .trimIndent()
     return """
       <meta property="og:type" content="website">
-      <meta property="og:site_name" content="compose-preview">
+      <meta property="og:site_name" content="${WebEscaping.htmlEscape(siteName)}">
       <meta property="og:title" content="$metaTitle">
       <meta property="og:description" content="$metaDescription">
       <meta property="og:url" content="$pageUrl">
@@ -16428,6 +16487,11 @@ ${scriptTag("known-differences.js")}
      * wide image (a design page's specimen sheet). Opt-in per surface.
      */
     wide: Boolean = false,
+    /**
+     * A white-labelled builder's chrome ([ServeUiBuilderProfile]): its name in the header and the
+     * icons' app title, its accent, and no footer or report launcher, whose links are the server's.
+     */
+    brand: PageBrand? = null,
   ): String {
     val unfurlHtml =
       if (unfurl == null) ""
@@ -16436,16 +16500,17 @@ ${scriptTag("known-differences.js")}
           unfurlTitle ?: title,
           unfurlDescription ?: "Compose preview rendered by compose-preview",
           unfurl,
+          brand?.name ?: "compose-preview",
         )
     val unfurlBlock = if (unfurlHtml.isEmpty()) "" else "\n${unfurlHtml.prependIndent("        ")}"
     val footerBlock =
-      if (componentBrowser) ""
+      if (componentBrowser || brand != null) ""
       else
         "\n${siteFooter(version, footerNote, bugReport, changelogHref).prependIndent("        ")}"
     // The floating launcher follows the footer entry's conditions: not in component-browser mode,
     // not on the report page.
     val launcherBlock =
-      if (componentBrowser || !bugReport) ""
+      if (componentBrowser || !bugReport || brand != null) ""
       else "\n${reportLauncherHtml(assetHref("report-capture.js")).prependIndent("        ")}"
     // Feed autodiscovery: the same document the footer's Changelog entry links, declared where a
     // reader's "subscribe to this page" affordance looks for it.
@@ -16460,7 +16525,7 @@ ${scriptTag("known-differences.js")}
     // declares faces only and collides with nothing in the chrome.
     val rcFontsBlock = if (rcFonts) "\n" + ServeRcFonts.linkTag().prependIndent("        ") else ""
     val themeBlock =
-      themeCss
+      (themeCss + brand?.accentCss().orEmpty())
         .takeIf { it.isNotBlank() }
         ?.let { "\n" + ("<style>\n" + it.trimEnd() + "\n</style>").prependIndent("        ") } ?: ""
     val themeKeyAttr =
@@ -16498,7 +16563,7 @@ ${scriptTag("known-differences.js")}
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">$unfurlBlock
         <title>${WebEscaping.htmlEscape(title)}</title>
-${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prependIndent("        ")}
+${(if (brand == null) ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }) else ServeSiteIcon.linkTags(themeCss, brand.name, brand.manifestPath)).prependIndent("        ")}
         $SPECULATION_RULES
         <link rel="stylesheet" href="${assetHref("serve.css")}">$feedLink$rcFontsBlock$themeBlock$interfaceModeBoot
         <!-- Apply the Transparent choice before first paint (no checkerboard flash).
@@ -16508,7 +16573,7 @@ ${ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }).prepe
       </head>
       <body${bodyClassAttr}>
         ${scriptTag("serve-chrome.js")}${ServeAnalytics.scriptTag()}
-        ${siteHeader(navSuffix, headerAction, headerBreadcrumb, siteName, componentBrowser, interfaceModeControl, themeStorageKey.isNotBlank() && interfaceModeControl, headerSessionSettings, headerSearch, headerDesignsHref)}
+        ${siteHeader(navSuffix, headerAction, headerBreadcrumb, siteName, componentBrowser, interfaceModeControl, themeStorageKey.isNotBlank() && interfaceModeControl, headerSessionSettings, headerSearch, headerDesignsHref, brand)}
         <main class="cp-main">
         $body
         </main>$footerBlock$launcherBlock$interfaceModeControls

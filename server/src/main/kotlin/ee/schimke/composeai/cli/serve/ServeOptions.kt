@@ -325,6 +325,12 @@ public interface ServeOptions {
     get() = emptyList()
 
   /**
+   * A white-labelled builder on one more hostname ([ServeUiBuilderProfile]), or null (the default).
+   */
+  public val uiBuilderProfile: ServeUiBuilderProfile?
+    get() = null
+
+  /**
    * Serve the UI builder at the root of [uiBuilderHost] instead of under `/ui-builder/`. Needs an
    * editor bundle that reads the `ui-builder-base-path` meta; ignored without [uiBuilderHost].
    */

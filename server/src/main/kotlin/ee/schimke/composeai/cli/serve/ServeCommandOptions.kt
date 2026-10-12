@@ -259,6 +259,16 @@ public class ServeCommandOptions(
       }
       ?.distinct() ?: emptyList()
 
+  override val uiBuilderProfile: ServeUiBuilderProfile? =
+    ServeUiBuilderProfile.of(
+      host = args.flagValue("--ui-builder-profile-host"),
+      name = args.flagValue("--ui-builder-profile-name"),
+      catalogs = args.flagValue("--ui-builder-profile-catalogs")?.split(",").orEmpty(),
+      accent = args.flagValue("--ui-builder-profile-accent"),
+      homeUrl = args.flagValue("--ui-builder-profile-home-url"),
+      uiBuilderHost = uiBuilderHost,
+    )
+
   override val uiBuilderStartUrl: String? =
     args.flagValue("--ui-builder-start-url")?.also { raw ->
       val uri = java.net.URI(raw)
@@ -1180,6 +1190,18 @@ public class ServeCommandOptions(
                           at /ui-builder/designs/import?url=<seed URL on that origin>. The design
                           is created as that person, private to them; the site holds no
                           credential here. Off when empty (the default).
+        --ui-builder-profile-host <host>
+                          A white-labelled builder on one more hostname, which keeps the
+                          builder's /ui-builder/ paths: its pages carry the profile's name, link
+                          to no catalog, and offer only its catalogs. Grants nothing; off unset.
+        --ui-builder-profile-name <text>
+                          What the builder is called on that host (required with the host).
+        --ui-builder-profile-catalogs <catalog>[,…]
+                          The UI-builder catalogs offered there (required with the host).
+        --ui-builder-profile-accent <#rrggbb>
+                          Optional accent colour for that host's builder chrome.
+        --ui-builder-profile-home-url <https-url>
+                          Optional target of that host's logo and back links.
         --sites <host>=<system>[,…]
                           Top-level sites: serve an already-published catalog on a hostname of its
                           own, where it looks like the whole server (e.g.

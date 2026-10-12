@@ -83,6 +83,12 @@ internal fun Route.installUiBuilderRoutes(
    */
   liveNativeSession: ((token: String, previewId: String) -> UiBuilderNativeLiveSession?)? = null,
   agentPresence: ServeUiBuilderAgentPresence? = null,
+  /**
+   * The catalogs a request's host offers, or null for all of them: a white-labelled host
+   * ([ServeUiBuilderProfile]) narrows what the protocol lists and creates. Narrows only; a design
+   * the caller may read stays readable by its id.
+   */
+  catalogScope: (ApplicationCall) -> Set<String>? = { null },
 ) {
   if (agentPresence != null) {
     get("/api/ui-builder/v1/designs/{designId}/agents") {
@@ -210,6 +216,20 @@ internal fun Route.installUiBuilderRoutes(
       return@post
     }
 
+    val scope = catalogScope(call)
+    val outOfScope =
+      (envelope.request as? CreateDesignRequestV1)?.document?.catalogPin?.systemId?.takeIf {
+        scope != null && it !in scope
+      }
+    if (outOfScope != null) {
+      call.respondProtocolError(
+        envelope.requestId,
+        ServiceErrorCodeV1.FORBIDDEN,
+        "this host creates ${scope.orEmpty().joinToString()} designs, not $outOfScope",
+        HttpStatusCode.Forbidden,
+      )
+      return@post
+    }
     val mapping = UiBuilderProtocolMapper.toServiceCall(actor, envelope.request)
     val response =
       when (mapping) {
@@ -232,7 +252,7 @@ internal fun Route.installUiBuilderRoutes(
           }
         is ProtocolRequestMapping.Rejected -> UiBuilderServiceResponse.Error(mapping.error)
       }
-    val protocol = UiBuilderProtocolMapper.toProtocolResponse(response)
+    val protocol = UiBuilderProtocolMapper.toProtocolResponse(response.withinCatalogs(scope))
     call.respondText(
       UI_BUILDER_JSON.encodeToString(
         HttpResponseEnvelopeV1(requestId = envelope.requestId, response = protocol)
@@ -384,6 +404,14 @@ internal fun Route.installUiBuilderRoutes(
           status = HttpStatusCode.PreconditionFailed,
         )
       }
+      return@put
+    }
+    val scope = catalogScope(call)
+    if (scope != null && incoming.catalogPin.systemId !in scope) {
+      call.respondText(
+        "this host creates ${scope.joinToString()} designs, not ${incoming.catalogPin.systemId}",
+        status = HttpStatusCode.Forbidden,
+      )
       return@put
     }
     incomingHomeRefusal(incoming, serverOrigin())?.let { reason ->
@@ -1009,3 +1037,19 @@ internal fun logUiBuilderServiceFailure(failure: Exception) {
   )
   failure.printStackTrace()
 }
+
+/**
+ * This response as a host offering only [catalogs] gives it: catalog and design lists narrowed to
+ * those catalogs, everything else untouched. Null [catalogs] is every catalog.
+ */
+internal fun UiBuilderServiceResponse.withinCatalogs(
+  catalogs: Set<String>?
+): UiBuilderServiceResponse =
+  when {
+    catalogs == null -> this
+    this is UiBuilderServiceResponse.Catalogs ->
+      copy(catalogs = this.catalogs.filter { it.benchmark.catalogSystemId in catalogs })
+    this is UiBuilderServiceResponse.Designs ->
+      copy(designs = designs.filter { it.catalogPin.systemId in catalogs })
+    else -> this
+  }

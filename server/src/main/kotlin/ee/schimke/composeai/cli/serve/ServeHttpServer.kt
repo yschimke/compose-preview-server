@@ -275,6 +275,8 @@ class ServeHttpServer(
   /** How an import fetches its seed; a test substitutes its own. */
   private val uiBuilderImportFetch: (java.net.URI) -> ServeUiBuilderImport.Fetched =
     ServeUiBuilderImport::fetch,
+  /** `--ui-builder-profile-host` and its siblings; see [ServeUiBuilderProfile]. Null: none. */
+  private val uiBuilderProfile: ServeUiBuilderProfile? = null,
   /** `--ui-builder-host-root`; see [uiBuilderRootMode]. */
   private val uiBuilderHostRoot: Boolean = false,
   /**
@@ -1003,7 +1005,36 @@ class ServeHttpServer(
 
   /** Explicit hosts admitted to the existing OAuth return and browser-origin checks. */
   private val browserHosts: Set<String>
-    get() = sites.hosts + listOfNotNull(uiBuilderHost)
+    get() = sites.hosts + listOfNotNull(uiBuilderHost, uiBuilderProfile?.host)
+
+  /** [uiBuilderProfile] when [call] arrived on its host, else null — every other host. */
+  private fun uiBuilderProfileFor(call: ApplicationCall): ServeUiBuilderProfile? =
+    uiBuilderProfile?.takeIf {
+      it.matches(call, trustForwardedFor)
+    }
+
+  /**
+   * The builder catalogs [call]'s host offers: all of them, or the profile's that this box serves.
+   */
+  private fun uiBuilderCatalogsFor(call: ApplicationCall): Set<String> =
+    uiBuilderProfileFor(call)?.let { profile ->
+      profile.catalogs.filter(uiBuilderCatalogs::contains).toCollection(LinkedHashSet())
+    } ?: uiBuilderCatalogs
+
+  /**
+   * Why [catalog] may not be created into from [call]'s host, or null when it may. Only a profile
+   * host refuses anything: there a design outside the profile's catalogs belongs to another
+   * product.
+   */
+  private fun uiBuilderProfileCatalogRefusal(call: ApplicationCall, catalog: String): String? {
+    val profile = uiBuilderProfileFor(call) ?: return null
+    if (profile.allows(catalog)) return null
+    return "${profile.name} works with ${profile.catalogs.joinToString()} designs, not $catalog"
+  }
+
+  /** [ServeWeb]'s chrome for a builder page on [call]'s host: the profile's, or the default. */
+  private fun uiBuilderPageBrand(call: ApplicationCall): ServeWeb.PageBrand? =
+    uiBuilderProfileFor(call)?.pageBrand()
 
   private fun isUiBuilderHost(call: ApplicationCall): Boolean =
     uiBuilderHost != null && requestHost(call, trustForwardedFor) == uiBuilderHost
@@ -1284,6 +1315,10 @@ class ServeHttpServer(
             uiBuilderInlineCapture,
             identityDetails = ::uiBuilderIdentityDetails,
             agentPresence = uiBuilderAgentPresence,
+            // A white-labelled host lists and creates only its own catalogs.
+            catalogScope = { call ->
+              uiBuilderProfileFor(call)?.let { uiBuilderCatalogsFor(call) }
+            },
             // The native pane's live lane on hosts with Stage-2 redemption: the compile's token is
             // redeemed into a registered session and the editor opens the same
             // `/{session}/ws/{preview}` socket as the viewer's Live toggle. Otherwise the response
@@ -1433,7 +1468,9 @@ class ServeHttpServer(
         githubAuth?.let { auth ->
           // Configured browser hosts are the only hostnames a sign-in started elsewhere may return
           // to. Passed in so host config stays with the server.
-          get(ServeGithubAuth.START_PATH) { with(auth) { handleStart(browserHosts) } }
+          get(ServeGithubAuth.START_PATH) {
+            with(auth) { handleStart(browserHosts, setOfNotNull(uiBuilderProfile?.host)) }
+          }
           get(ServeGithubAuth.CALLBACK_PATH) { with(auth) { handleCallback(browserHosts) } }
           // POST only ([ServeGithubAuth.handleLogout]): a prefetcher or unfurler following the URL
           // gets 405 rather than signing the visitor out.
@@ -2225,7 +2262,9 @@ class ServeHttpServer(
           if (isUiBuilderRootCall(call)) {
             // The editor's home IS this host's root page.
             handleUiBuilderAsset()
-          } else if (isUiBuilderHost(call)) {
+          } else if (isUiBuilderHost(call) || uiBuilderProfileFor(call) != null) {
+            // A profile host's root is normally the other product's, and its edge never sends it
+            // here; reached directly, it is the builder, never the catalogs' front door.
             call.respondRedirect("/ui-builder/" + call.request.queryString().prefixedQuery())
           } else {
             handleLanding(sessionInPath = false)
@@ -6220,8 +6259,40 @@ class ServeHttpServer(
     get("${base}/$UI_BUILDER_VERSION_SEGMENT/{version}/{path...}") {
       handleUiBuilderVersionedAsset()
     }
+    // A profile host's own web app manifest ([ServeUiBuilderProfile.MANIFEST_PATH]); every other
+    // host gets whatever the bundle has at that path, as before.
+    if (uiBuilderProfile != null && base.isNotEmpty()) {
+      get("${base}/manifest.webmanifest") {
+        val profile = uiBuilderProfileFor(call)
+        val dir = uiBuilderDir
+        when {
+          profile != null -> respondSiteIcon(uiBuilderProfileManifest(profile))
+          dir != null -> serveUiBuilderPath(dir, listOf("manifest.webmanifest"))
+          else -> call.respondText("not found", status = HttpStatusCode.NotFound)
+        }
+      }
+    }
     get("${base}/{path...}") { handleUiBuilderAsset() }
   }
+
+  /** The profile host's manifest: its name, starting and staying in the builder. Built once. */
+  private val uiBuilderProfileManifests =
+    java.util.concurrent.ConcurrentHashMap<ServeUiBuilderProfile, ServeSiteIcon.Icon>()
+
+  private fun uiBuilderProfileManifest(profile: ServeUiBuilderProfile): ServeSiteIcon.Icon =
+    uiBuilderProfileManifests.computeIfAbsent(profile) {
+      ServeSiteIcon.manifest(
+        name = profile.name,
+        shortName = profile.name.take(SHORT_NAME_MAX),
+        startUrl = "/ui-builder/",
+        shortcuts = emptyList(),
+        id = "/ui-builder/",
+        scope = "/ui-builder/",
+        description = profile.name,
+        themeColor = profile.accent ?: ServeSiteIcon.hex(ServeBrand.MARK_BG),
+        serverExtras = false,
+      )
+    }
 
   /** `?a=b` for a non-empty query string, else `""` — for rebuilding a URL we are redirecting. */
   private fun String.prefixedQuery(): String = if (isEmpty()) "" else "?$this"
@@ -14025,12 +14096,18 @@ class ServeHttpServer(
     val version = uiBuilderBundleVersion
     // The shell is one file for every design, so what makes a pasted link unfurl as *this* design
     // is written into its head here. The ETag folds it in, because the body now depends on it.
-    val shellHead = uiBuilderShellHead(designId)
+    val profile = uiBuilderProfileFor(call)
+    val shellHead = uiBuilderShellHead(designId, profile)
+    // On a profile host the tab says the product's name, never the build's own title.
+    val title =
+      if (profile == null) shellHead.first
+      else shellHead.first?.let { "$it · ${profile.name}" } ?: profile.name
     val head =
-      shellHead.first to
+      title to
         (shellHead.second +
           uiBuilderCatalogOwnershipTag() +
           uiBuilderBasePathTag(call) +
+          profile?.shellMetaTags(uiBuilderCatalogsFor(call).toList()).orEmpty() +
           ServeAnalytics.scriptTag())
     val headTag = Integer.toHexString(head.second.hashCode())
     val etag =
@@ -14046,7 +14123,7 @@ class ServeHttpServer(
     uiBuilderPrecompressed.warm(dir)
     val html = withContext(Dispatchers.IO) { index.readText() }
     call.respondBytes(
-      withUiBuilderShellHead(versionUiBuilderShellReferences(dir, html, version), head)
+      withUiBuilderShellHead(versionUiBuilderShellReferences(dir, html, version), head, profile)
         .toByteArray(),
       wasmContentType(index.name),
     )
@@ -14079,7 +14156,13 @@ class ServeHttpServer(
    * unfurls as itself (title and thumbnail), judged as the anonymous reader an unfurler is;
    * everything else unfurls as the UI builder with a drawn card.
    */
-  private suspend fun RoutingContext.uiBuilderShellHead(designId: String?): Pair<String?, String> {
+  private suspend fun RoutingContext.uiBuilderShellHead(
+    designId: String?,
+    /** The host's profile, whose name the unfurl then carries; null everywhere else. */
+    profile: ServeUiBuilderProfile? = null,
+  ): Pair<String?, String> {
+    val product = profile?.name ?: UI_BUILDER_UNFURL_TITLE
+    val siteName = profile?.name ?: "compose-preview"
     val origin = externalOrigin()
     val pageUrl = origin + call.request.path()
     // Only a `--public` box has anonymous readers, so only there can a design be public.
@@ -14115,16 +14198,18 @@ class ServeHttpServer(
           imageHeight = size?.second,
         )
       val description =
-        "A ${public.catalogPin.systemId} screen designed in the Compose UI builder, at revision " +
-          "${public.revision}. Open it to see it, or fork it to make it your own."
-      return title to ServeWeb.unfurlHeadHtml(title, description, unfurl)
+        (if (profile == null)
+          "A ${public.catalogPin.systemId} screen designed in the Compose UI builder"
+        else "A design made with ${profile.name}") +
+          ", at revision ${public.revision}. Open it to see it, or fork it to make it your own."
+      return title to ServeWeb.unfurlHeadHtml(title, description, unfurl, siteName)
     }
     val card =
       withContext(Dispatchers.IO) {
         socialCards.cardFor(
           ServeSocialCard.Spec(
-            title = UI_BUILDER_UNFURL_TITLE,
-            subtitle = UI_BUILDER_UNFURL_SUBTITLE,
+            title = product,
+            subtitle = if (profile == null) UI_BUILDER_UNFURL_SUBTITLE else "",
           )
         )
       }
@@ -14136,13 +14221,17 @@ class ServeHttpServer(
         imageHeight = card?.height,
       )
     val description =
-      if (designId == null) UI_BUILDER_UNFURL_SUBTITLE
-      else "A private Compose UI builder design. Sign in to open it if it was shared with you."
-    return null to ServeWeb.unfurlHeadHtml(UI_BUILDER_UNFURL_TITLE, description, unfurl)
+      if (designId == null) (if (profile == null) UI_BUILDER_UNFURL_SUBTITLE else profile.name)
+      else "A private $product design. Sign in to open it if it was shared with you."
+    return null to ServeWeb.unfurlHeadHtml(product, description, unfurl, siteName)
   }
 
   /** [html] with [head]'s unfurl tags after its `<title>`. */
-  private fun withUiBuilderShellHead(html: String, head: Pair<String?, String>): String {
+  private fun withUiBuilderShellHead(
+    html: String,
+    head: Pair<String?, String>,
+    profile: ServeUiBuilderProfile? = null,
+  ): String {
     // A public design's own title; otherwise the shell keeps the title it was built with.
     val existing = Regex("<title>.*?</title>", RegexOption.DOT_MATCHES_ALL)
     val match = existing.find(html)
@@ -14150,7 +14239,15 @@ class ServeHttpServer(
       head.first?.let { "<title>${WebEscaping.htmlEscape(it)}</title>" } ?: match?.value.orEmpty()
     // The shell is the builder's own page, so it carries the site's icons and manifest too:
     // installing from inside the editor installs the same app as installing from anywhere else.
-    val block = title + "\n" + ServeSiteIcon.linkTags() + "\n" + head.second
+    // A profile host installs as its own product, from a manifest under the paths it sends here.
+    val icons =
+      if (profile == null) ServeSiteIcon.linkTags()
+      else
+        ServeSiteIcon.linkTags(
+          appTitle = profile.name,
+          manifestPath = ServeUiBuilderProfile.MANIFEST_PATH,
+        )
+    val block = title + "\n" + icons + "\n" + head.second
     return when {
       match != null -> html.replaceRange(match.range, block)
       "</head>" in html -> html.replaceFirst("</head>", "$block\n</head>")
@@ -14236,6 +14333,7 @@ class ServeHttpServer(
         version = SERVE_VERSION,
         githubAuth = githubAuthStatus(),
         componentBrowser = componentBrowserMode(),
+        brand = uiBuilderPageBrand(call),
       ),
       ContentType.Text.Html,
       status,
@@ -14274,6 +14372,10 @@ class ServeHttpServer(
         ?: form["catalog"]?.trim().orEmpty().ifEmpty { call.parameters["catalog"].orEmpty() }
     if (catalog !in uiBuilderCatalogs) {
       call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    uiBuilderProfileCatalogRefusal(call, catalog)?.let { reason ->
+      call.respondText(reason, status = HttpStatusCode.Forbidden)
       return
     }
     if (!isSameOriginFormSubmission()) {
@@ -14389,6 +14491,10 @@ class ServeHttpServer(
           return
         }
       }
+    uiBuilderProfileCatalogRefusal(call, document.catalogPin.systemId)?.let { reason ->
+      call.respondText(reason, status = HttpStatusCode.Forbidden)
+      return
+    }
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
     call.respondText(
       ServeUiBuilderImport.confirmPage(
@@ -14396,6 +14502,7 @@ class ServeHttpServer(
         url = url,
         document = document,
         login = githubAuth?.currentLogin(call),
+        productName = uiBuilderProfileFor(call)?.name,
       ),
       ContentType.Text.Html,
     )
@@ -14441,6 +14548,10 @@ class ServeHttpServer(
         "the seed's id must start with a letter or number and use only path-safe characters",
         status = HttpStatusCode.BadRequest,
       )
+      return
+    }
+    uiBuilderProfileCatalogRefusal(call, document.catalogPin.systemId)?.let { reason ->
+      call.respondText(reason, status = HttpStatusCode.Forbidden)
       return
     }
     val outcome =
@@ -14527,6 +14638,10 @@ class ServeHttpServer(
           return
         }
       }
+    uiBuilderProfileCatalogRefusal(call, source.catalogPin.systemId)?.let { reason ->
+      call.respondText(reason, status = HttpStatusCode.Forbidden)
+      return
+    }
     // A new design: revision zero, timestamps cleared, and a title saying where it came from.
     val copy =
       source.copy(
@@ -14651,6 +14766,7 @@ class ServeHttpServer(
         version = SERVE_VERSION,
         siteName = skin.first,
         themeCss = skin.second,
+        brand = uiBuilderPageBrand(call),
       ),
       ContentType.Text.Html,
     )
@@ -14761,6 +14877,10 @@ class ServeHttpServer(
           return
         }
       }
+    uiBuilderProfileCatalogRefusal(call, source.catalogPin.systemId)?.let { reason ->
+      call.respondText(reason, status = HttpStatusCode.Forbidden)
+      return
+    }
     // Its own id — a fork is never an existing design — made from where it came from.
     val forkId = defaultForkId(designId, revision)
     val fork = forkedDesignDocument(source, designId, forkId)
@@ -15001,6 +15121,10 @@ class ServeHttpServer(
         }
       }
     } while (cursor != null)
+    // A profile host lists only its own catalogs' designs; the rest stay reachable on the box's
+    // other hosts, exactly as before.
+    val profile = uiBuilderProfileFor(call)
+    if (profile != null) listed.retainAll { profile.allows(it.catalogPin.systemId) }
 
     val tokenQuery = agentGrantTokenQuery()
     // Whether this reader may create at all, asked once: the create/copy forms and every Duplicate
@@ -15144,16 +15268,20 @@ class ServeHttpServer(
         viewerActorId = actor.actorId,
         createAction = createAction,
         copyAction = copyAction,
-        catalogs = if (mayCreate) uiBuilderNewDesignOptions() else emptyList(),
+        catalogs =
+          if (mayCreate) uiBuilderNewDesignOptions(uiBuilderCatalogsFor(call)) else emptyList(),
         suggestedDesignId = NewDesignNames.random(),
         notice = call.request.queryParameters["notice"].orEmpty().take(200),
-        catalogProblems = if (mayCreate) uiBuilderCatalogProblems() else emptyMap(),
+        catalogProblems =
+          if (mayCreate) uiBuilderCatalogProblems().filterKeys(uiBuilderCatalogsFor(call)::contains)
+          else emptyMap(),
         navSuffix = tokenQuery,
         version = SERVE_VERSION,
         siteName = skin.first,
         themeCss = skin.second,
         requestAccessHref = requestAccessHref,
         trash = trash,
+        brand = profile?.pageBrand(),
       ),
       ContentType.Text.Html,
     )
@@ -15163,8 +15291,11 @@ class ServeHttpServer(
    * The catalogs the New design form offers and their starting points, read from
    * [UiBuilderNewDesignSeed] so the form can't offer a template the create route refuses.
    */
-  private fun uiBuilderNewDesignOptions(): List<ServeWeb.UiBuilderNewDesignOption> =
-    uiBuilderCatalogs.sorted().map { catalog ->
+  private fun uiBuilderNewDesignOptions(
+    /** The catalogs the request's host offers ([uiBuilderCatalogsFor]). */
+    offered: Set<String> = uiBuilderCatalogs
+  ): List<ServeWeb.UiBuilderNewDesignOption> =
+    offered.sorted().map { catalog ->
       ServeWeb.UiBuilderNewDesignOption(
         systemId = catalog,
         label = catalog,
@@ -15439,6 +15570,7 @@ class ServeHttpServer(
         version = SERVE_VERSION,
         siteName = skin.first,
         themeCss = skin.second,
+        brand = uiBuilderPageBrand(call),
       ),
       ContentType.Text.Html,
     )

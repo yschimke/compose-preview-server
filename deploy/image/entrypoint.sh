@@ -248,6 +248,19 @@ fi
 [[ -n "${SERVE_UI_BUILDER_START_URL:-}" ]] && args+=(--ui-builder-start-url "${SERVE_UI_BUILDER_START_URL}")
 [[ -n "${SERVE_UI_BUILDER_IMPORT_ORIGINS:-}" ]] &&
   args+=(--ui-builder-import-origins "${SERVE_UI_BUILDER_IMPORT_ORIGINS}")
+# A white-labelled builder on one more hostname (settings uiBuilder.profile.*). The rest of the
+# profile is passed only with its host, so a stray name alone cannot fail the start.
+if [[ -n "${SERVE_UI_BUILDER_PROFILE_HOST:-}" ]]; then
+  args+=(--ui-builder-profile-host "${SERVE_UI_BUILDER_PROFILE_HOST}")
+  [[ -n "${SERVE_UI_BUILDER_PROFILE_NAME:-}" ]] &&
+    args+=(--ui-builder-profile-name "${SERVE_UI_BUILDER_PROFILE_NAME}")
+  [[ -n "${SERVE_UI_BUILDER_PROFILE_CATALOGS:-}" ]] &&
+    args+=(--ui-builder-profile-catalogs "${SERVE_UI_BUILDER_PROFILE_CATALOGS}")
+  [[ -n "${SERVE_UI_BUILDER_PROFILE_ACCENT:-}" ]] &&
+    args+=(--ui-builder-profile-accent "${SERVE_UI_BUILDER_PROFILE_ACCENT}")
+  [[ -n "${SERVE_UI_BUILDER_PROFILE_HOME_URL:-}" ]] &&
+    args+=(--ui-builder-profile-home-url "${SERVE_UI_BUILDER_PROFILE_HOME_URL}")
+fi
 # The builder at the ROOT of SERVE_UI_BUILDER_HOST (ui.coo.ee/<design>) instead of under /ui-builder/.
 # Opt in once the served editor bundle reads its `ui-builder-base-path` meta; ignored without a host.
 [[ -n "${SERVE_UI_BUILDER_HOST:-}" && ( "${SERVE_UI_BUILDER_HOST_ROOT:-}" == "1" || "${SERVE_UI_BUILDER_HOST_ROOT:-}" == "true" ) ]] &&

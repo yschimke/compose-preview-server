@@ -180,11 +180,22 @@ class ServeGithubAuth(
   /**
    * `GET /auth/github/start`. [siteHosts] ([ServeSites.hosts]) are the only hosts a sign-in may
    * return to, re-checked in [handleCallback]. Empty means the sign-in ends where it started.
+   *
+   * `return` is a same-origin path, except that it may be an absolute `https://` URL on one of
+   * [absoluteReturnHosts] (a white-labelled builder's host, [ServeUiBuilderProfile]) — itself one
+   * of [siteHosts] and inside the cookie domain — so a sign-in begun anywhere can land there. That
+   * URL is split into the host, carried like any site host's, and a path; any other absolute URL is
+   * the plain `/` it always was, never an open redirect.
    */
-  suspend fun RoutingContext.handleStart(siteHosts: Set<String> = emptySet()) {
-    val returnTo = safeReturnTo(call.request.queryParameters["return"] ?: "/")
+  suspend fun RoutingContext.handleStart(
+    siteHosts: Set<String> = emptySet(),
+    absoluteReturnHosts: Set<String> = emptySet(),
+  ) {
+    val requested = call.request.queryParameters["return"] ?: "/"
+    val absolute = absoluteReturn(requested, siteHosts intersect absoluteReturnHosts)
+    val returnTo = absolute?.second ?: safeReturnTo(requested)
     // Null on the ordinary same-host sign-in, which is then byte-for-byte what it always was.
-    val originHost = originHostFor(call, siteHosts)
+    val originHost = absolute?.first ?: originHostFor(call, siteHosts)
     val state = signedState(nonce(), returnTo, originHost)
     val secure = isSecure(call, config.callbackBaseUrl, config.trustForwardedHeaders)
     // Stale `cp_gh_state` variants from an older cookie domain are stored separately by the
@@ -514,6 +525,23 @@ class ServeGithubAuth(
     val host = requestHost(call, config.trustForwardedHeaders) ?: return null
     if (host == pinnedCallbackHost()) return null
     return host.takeIf { it in siteHosts && withinCookieDomain(it) }
+  }
+
+  /**
+   * `(host, path)` when [raw] is an absolute HTTPS URL on one of [hosts] that a sign-in can return
+   * to (a pinned callback, and inside the cookie domain); null for anything else, including every
+   * relative path, which [safeReturnTo] handles as it always has.
+   */
+  internal fun absoluteReturn(raw: String, hosts: Set<String>): Pair<String, String>? {
+    if (hosts.isEmpty() || !hasPinnedCallback || !raw.startsWith("https://")) return null
+    if (raw.any { it == '\\' || it.isISOControl() }) return null
+    val uri = runCatching { java.net.URI(raw) }.getOrNull() ?: return null
+    if (uri.userInfo != null || (uri.port != -1 && uri.port != 443)) return null
+    val host = uri.host?.let { ServeSites.normalizeHost(it) } ?: return null
+    if (host !in hosts || !withinCookieDomain(host)) return null
+    val path = uri.rawPath.orEmpty().ifEmpty { "/" } + (uri.rawQuery?.let { "?$it" } ?: "")
+    val safe = safeReturnTo(path)
+    return if (safe == path) host to path else null
   }
 
   /**

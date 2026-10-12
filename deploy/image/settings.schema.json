@@ -56,6 +56,70 @@
             "preview"
           ]
         },
+        "profile": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "host": {
+              "description": "A white-labelled UI builder on one more hostname, whose edge sends only the builder's paths here: its pages keep `/ui-builder/`, carry `uiBuilder.profile.name`, link to no catalog or front door, and offer only `uiBuilder.profile.catalogs`. It narrows and rebrands, granting nothing; sign-in may return to it. Off when unset. Must not be SERVE_UI_BUILDER_HOST.",
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)$",
+              "x-env": "SERVE_UI_BUILDER_PROFILE_HOST",
+              "x-apply": "restart",
+              "x-roles": [
+                "preview"
+              ]
+            },
+            "name": {
+              "description": "What the builder is called on `uiBuilder.profile.host`, in titles, headings and its web app manifest. Required with the host.",
+              "type": "string",
+              "minLength": 1,
+              "x-env": "SERVE_UI_BUILDER_PROFILE_NAME",
+              "x-apply": "restart",
+              "x-roles": [
+                "preview"
+              ]
+            },
+            "catalogs": {
+              "description": "The UI-builder catalogs `uiBuilder.profile.host` lists and creates in; designs in any other are left off its lists, and creating one there is refused. Required with the host.",
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(?:[A-Za-z0-9][A-Za-z0-9._-]{0,63})$"
+              },
+              "x-env": "SERVE_UI_BUILDER_PROFILE_CATALOGS",
+              "x-apply": "restart",
+              "x-roles": [
+                "preview"
+              ]
+            },
+            "accent": {
+              "description": "The accent colour of `uiBuilder.profile.host`'s builder chrome. Optional.",
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?:#[0-9a-fA-F]{6})$",
+              "x-env": "SERVE_UI_BUILDER_PROFILE_ACCENT",
+              "x-apply": "restart",
+              "x-roles": [
+                "preview"
+              ]
+            },
+            "homeUrl": {
+              "description": "Where the logo and back links on `uiBuilder.profile.host` go. Optional; the builder's own home when unset.",
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?:https://[^\\s/?#@]+(?:/[^\\s]*)?)$",
+              "x-env": "SERVE_UI_BUILDER_PROFILE_HOME_URL",
+              "x-apply": "restart",
+              "x-roles": [
+                "preview"
+              ]
+            }
+          }
+        },
         "hostRoot": {
           "description": "Serve the UI builder at the root of SERVE_UI_BUILDER_HOST (`https://ui.coo.ee/<design>`) instead of under `/ui-builder/`, keeping every server route (`/start`, `/api`, `/mcp`, `/agent-access`, `/auth`, `/admin`, health and status, assets) on that host. Needs an editor bundle that reads the `ui-builder-base-path` meta. Ignored without SERVE_UI_BUILDER_HOST.",
           "type": "boolean",

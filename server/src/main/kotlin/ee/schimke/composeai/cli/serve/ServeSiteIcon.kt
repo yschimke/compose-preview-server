@@ -179,6 +179,11 @@ internal object ServeSiteIcon {
     description: String = "Compose previews, catalogs and the UI builder.",
     /** The title bar colour of the installed window; defaults to the brand's tonal container. */
     themeColor: String = hex(ServeBrand.MARK_BG),
+    /**
+     * compose-preview's own install screenshots and share target. False for a white-labelled
+     * builder ([ServeUiBuilderProfile]), which is another product and whose host routes neither.
+     */
+    serverExtras: Boolean = true,
   ): Icon {
     fun str(value: String) = kotlinx.serialization.json.JsonPrimitive(value)
     val json =
@@ -246,56 +251,58 @@ internal object ServeSiteIcon {
         )
         // What the install dialog shows beside the name. Committed captures of the catalog page,
         // one per form factor, so the richer install UI has something true to show at either size.
-        put(
-          "screenshots",
-          kotlinx.serialization.json.buildJsonArray {
-            screenshots.forEach { shot ->
-              add(
-                kotlinx.serialization.json.buildJsonObject {
-                  put("src", str(shot.path))
-                  put("sizes", str("${shot.width}x${shot.height}"))
-                  put("type", str("image/png"))
-                  put("form_factor", str(shot.formFactor))
-                  put("label", str(shot.label))
-                }
-              )
-            }
-          },
-        )
+        if (serverExtras)
+          put(
+            "screenshots",
+            kotlinx.serialization.json.buildJsonArray {
+              screenshots.forEach { shot ->
+                add(
+                  kotlinx.serialization.json.buildJsonObject {
+                    put("src", str(shot.path))
+                    put("sizes", str("${shot.width}x${shot.height}"))
+                    put("type", str("image/png"))
+                    put("form_factor", str(shot.formFactor))
+                    put("label", str(shot.label))
+                  }
+                )
+              }
+            },
+          )
         // Installed, the app appears in the OS share sheet: shared screenshots land in the
         // bug-report flow and shared links open if they're this server's. See [ServeShareTarget].
-        put(
-          "share_target",
-          kotlinx.serialization.json.buildJsonObject {
-            put("action", str(ServeShareTarget.ACTION_PATH))
-            put("method", str("POST"))
-            put("enctype", str("multipart/form-data"))
-            put(
-              "params",
-              kotlinx.serialization.json.buildJsonObject {
-                put("title", str(ServeShareTarget.TITLE_FIELD))
-                put("text", str(ServeShareTarget.TEXT_FIELD))
-                put("url", str(ServeShareTarget.URL_FIELD))
-                put(
-                  "files",
-                  kotlinx.serialization.json.buildJsonArray {
-                    add(
-                      kotlinx.serialization.json.buildJsonObject {
-                        put("name", str(ServeShareTarget.FILE_FIELD))
-                        put(
-                          "accept",
-                          kotlinx.serialization.json.buildJsonArray {
-                            ServeShareTarget.ACCEPTED_IMAGE_TYPES.forEach { add(str(it)) }
-                          },
-                        )
-                      }
-                    )
-                  },
-                )
-              },
-            )
-          },
-        )
+        if (serverExtras)
+          put(
+            "share_target",
+            kotlinx.serialization.json.buildJsonObject {
+              put("action", str(ServeShareTarget.ACTION_PATH))
+              put("method", str("POST"))
+              put("enctype", str("multipart/form-data"))
+              put(
+                "params",
+                kotlinx.serialization.json.buildJsonObject {
+                  put("title", str(ServeShareTarget.TITLE_FIELD))
+                  put("text", str(ServeShareTarget.TEXT_FIELD))
+                  put("url", str(ServeShareTarget.URL_FIELD))
+                  put(
+                    "files",
+                    kotlinx.serialization.json.buildJsonArray {
+                      add(
+                        kotlinx.serialization.json.buildJsonObject {
+                          put("name", str(ServeShareTarget.FILE_FIELD))
+                          put(
+                            "accept",
+                            kotlinx.serialization.json.buildJsonArray {
+                              ServeShareTarget.ACCEPTED_IMAGE_TYPES.forEach { add(str(it)) }
+                            },
+                          )
+                        }
+                      )
+                    },
+                  )
+                },
+              )
+            },
+          )
         if (shortcuts.isNotEmpty()) {
           put(
             "shortcuts",
@@ -332,14 +339,21 @@ internal object ServeSiteIcon {
    * The `<head>` icon links every page carries. Fixed well-known paths rather than content-hashed,
    * since icon fetchers guess these and a day's cache costs little.
    */
-  fun linkTags(themeCss: String = "", appTitle: String = "Compose Preview"): String {
+  fun linkTags(
+    themeCss: String = "",
+    appTitle: String = "Compose Preview",
+    /**
+     * A profile host's own manifest ([ServeUiBuilderProfile.MANIFEST_PATH]); the site's otherwise.
+     */
+    manifestPath: String = MANIFEST_PATH,
+  ): String {
     val (light, dark) = themeColors(themeCss)
     val title = WebEscaping.htmlEscape(appTitle.ifBlank { "Compose Preview" })
     return """
     <link rel="icon" href="$SVG_PATH" type="image/svg+xml">
     <link rel="icon" href="$ICO_PATH" sizes="32x32">
     <link rel="apple-touch-icon" href="$APPLE_TOUCH_PATH">
-    <link rel="manifest" href="$MANIFEST_PATH">
+    <link rel="manifest" href="$manifestPath">
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="$light">
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="$dark">
     <meta name="mobile-web-app-capable" content="yes">

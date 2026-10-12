@@ -3493,6 +3493,7 @@ public class ServeRunner(
         uiBuilderHost = uiBuilderHost,
         uiBuilderStartUrl = uiBuilderStartUrl,
         uiBuilderImportOrigins = uiBuilderImportOrigins,
+        uiBuilderProfile = uiBuilderProfile,
         uiBuilderHostRoot = uiBuilderHostRoot,
         catalogLoads = catalogLoads,
         heroCacheDir = catalogCacheDirFlag?.takeIf { it != "none" }?.let { File(it, "heroes") },
