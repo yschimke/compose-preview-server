@@ -273,33 +273,70 @@ val stageRcPlayerWasm =
 
 // The Android Remote Compose players, shipped as `<APP_HOME>/lib-rc-players-android/` for the
 // server's own player-only Android daemon (`ServeRcPlayerDaemon`), which replays a document with no
-// catalog behind it. Exactly the family the Android daemon sidecar leaves for a consumer to bring
-// (androidx.compose.remote plus the rc-players embedded player); everything else those players link
-// already sits in `lib-daemon-android/`. Never on a server classpath. The CMP player
-// (`cmp-android`) is not staged: its rc-player-compose tail (Coil, Ktor, kotlinx-datetime) is no
-// part of the sidecar, so that player stays off unless an operator's directory supplies it.
+// catalog behind it. The family the Android daemon sidecar leaves for a consumer to bring: the
+// AndroidX players plus the rc-players embedded player (`rcPlayersAndroid`), and the CMP player
+// with the part of its runtime graph the sidecar does not carry (`rcPlayersAndroidCmp`).
+// Everything else those players link already sits in `lib-daemon-android/`. Never on a server
+// classpath; the daemon classpath puts these jars ahead of the sidecar.
+fun Configuration.androidReleaseRuntime() {
+  isCanBeConsumed = false
+  isCanBeResolved = true
+  attributes {
+    attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage.JAVA_RUNTIME))
+    attribute(Category.CATEGORY_ATTRIBUTE, objects.named(Category.LIBRARY))
+    attribute(
+      TargetJvmEnvironment.TARGET_JVM_ENVIRONMENT_ATTRIBUTE,
+      objects.named(TargetJvmEnvironment.ANDROID),
+    )
+    attribute(
+      org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType.attribute,
+      org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType.androidJvm,
+    )
+    attribute(
+      Attribute.of("com.android.build.api.attributes.BuildTypeAttr", String::class.java),
+      "release",
+    )
+  }
+}
+
 val rcPlayersAndroid =
   configurations.create("rcPlayersAndroid") {
     description = "The Android Remote Compose players the player-only daemon replays with."
-    isCanBeConsumed = false
-    isCanBeResolved = true
-    attributes {
-      attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage.JAVA_RUNTIME))
-      attribute(Category.CATEGORY_ATTRIBUTE, objects.named(Category.LIBRARY))
-      attribute(
-        TargetJvmEnvironment.TARGET_JVM_ENVIRONMENT_ATTRIBUTE,
-        objects.named(TargetJvmEnvironment.ANDROID),
-      )
-      attribute(
-        org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType.attribute,
-        org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType.androidJvm,
-      )
-      attribute(
-        Attribute.of("com.android.build.api.attributes.BuildTypeAttr", String::class.java),
-        "release",
-      )
-    }
+    androidReleaseRuntime()
   }
+
+// The CMP player behind `cmp-android` (rc-players' `rc-player-compose`, which the daemon's
+// connector loads by name), resolved transitively so its own tail comes with it: rc-player-runtime,
+// -protocol and -trace, Coil 3 with its Ktor network fetcher, kotlinx-datetime, and the newer
+// kotlinx-coroutines / kotlinx-io that tail needs. What the sidecar already carries is filtered out
+// at staging ([sidecarCarries]) rather than shipped twice: those jars would precede the sidecar's
+// and could downgrade it (rc-player-compose resolves lifecycle 2.9.4, the sidecar ships 2.10.0).
+val rcPlayersAndroidCmp =
+  configurations.create("rcPlayersAndroidCmp") {
+    description = "The CMP Remote Compose player and the runtime tail the Android sidecar lacks."
+    androidReleaseRuntime()
+  }
+
+/**
+ * Whether the Android daemon sidecar (`lib-daemon-android/`) already carries a component of the CMP
+ * player's graph, at the version the player resolves or newer. The sidecar is an Android Compose
+ * renderer: it ships the AndroidX graph (Compose 1.12.1, which `org.jetbrains.compose`'s Android
+ * artifacts redirect to), the Kotlin stdlib, kotlinx-serialization, Okio and the usual annotation
+ * jars. Checked against the daemon 3.15.3 sidecar; the one AndroidX library it lacks is
+ * `androidx.exifinterface`, which Coil decodes with. kotlinx-coroutines and kotlinx-io are staged
+ * although the sidecar has older ones (1.9.0, 0.3.3): Ktor 3 needs the newer lines, and a catalog
+ * bundle's copies of exactly those two precede the sidecar in the same way
+ * (`ServeBundleDaemon.shouldPrecedeDaemonSidecar`).
+ */
+fun sidecarCarries(group: String, module: String): Boolean =
+  (group.startsWith("androidx.") && group != "androidx.exifinterface") ||
+    group.startsWith("org.jetbrains.compose") ||
+    group == "org.jetbrains.kotlin" ||
+    (group == "org.jetbrains.kotlinx" && module.startsWith("kotlinx-serialization")) ||
+    group == "com.squareup.okio" ||
+    group == "org.jetbrains" ||
+    group == "org.jspecify" ||
+    group == "com.google.guava"
 
 dependencies {
   rcPlayersAndroid(platform(libs.rc.players.bom))
@@ -314,6 +351,8 @@ dependencies {
       libs.rcplayer.embedded.android,
     )
     .forEach { rcPlayersAndroid(it) { isTransitive = false } }
+  rcPlayersAndroidCmp(platform(libs.rc.players.bom))
+  rcPlayersAndroidCmp(libs.rcplayer.compose)
 }
 
 /** Copy jars as they are and each AAR's `classes.jar` (plus its `libs/`) as `<aar>.jar`. */
@@ -357,7 +396,129 @@ val stageRcPlayersAndroidLibs =
     description = "Stage the Android Remote Compose players into lib-rc-players-android."
     group = "distribution"
     artifacts.from(rcPlayersAndroid)
+    artifacts.from(
+      rcPlayersAndroidCmp.incoming
+        .artifactView {
+          componentFilter { id ->
+            id !is ModuleComponentIdentifier || !sidecarCarries(id.group, id.module)
+          }
+        }
+        .files
+    )
     destinationDir.set(layout.buildDirectory.dir("staged-rc-players-android-libs"))
+  }
+
+// The CMP Remote Compose player for the desktop daemon, shipped as
+// `<APP_HOME>/lib-rc-player-desktop/`
+// for the server's own desktop player daemon (`ServeRcPlayerDaemon.desktopSubprocess`), which holds
+// a live `cmp-jvm` session for a carried document. compose-preview-daemon's `daemon-desktop` plays
+// one only when the host puts rc-players' `rc-player-compose` (JVM) on its classpath, and that
+// player is built on a newer Compose Multiplatform line than the daemon's own.
+//
+// So the directory is a DELTA laid ahead of `lib-daemon-desktop/` + `lib-renderer/` — the order
+// `lib-rcjvm/` already takes on the cmp-jvm one-shot lane and `lib-rc-players-android/` takes on
+// the
+// Android sidecar. It is computed rather than listed: the daemon resolved together with the player
+// (Gradle picks the player's newer Compose line), minus every module at the same version in the
+// daemon's own sidecars. What is left is the player, its Compose line, and whatever moved with it.
+// Host-specific Skiko natives are excluded, as everywhere in this distribution; a deployment stages
+// the native matching this directory's `skiko-awt` into it (`deploy/image/Dockerfile`).
+val rcPlayerDesktop =
+  configurations.create("rcPlayerDesktop") {
+    description = "daemon-desktop resolved together with the CMP player's JVM target."
+    isCanBeConsumed = false
+    isCanBeResolved = true
+    attributes {
+      attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage.JAVA_RUNTIME))
+      attribute(Category.CATEGORY_ATTRIBUTE, objects.named(Category.LIBRARY))
+      attribute(
+        TargetJvmEnvironment.TARGET_JVM_ENVIRONMENT_ATTRIBUTE,
+        objects.named(TargetJvmEnvironment.STANDARD_JVM),
+      )
+      attribute(
+        org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType.attribute,
+        org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType.jvm,
+      )
+    }
+  }
+
+dependencies {
+  rcPlayerDesktop(platform(libs.composeai.daemon.bom))
+  rcPlayerDesktop("ee.schimke.composeai:daemon-desktop")
+  rcPlayerDesktop("ee.schimke.composeai:renderer-desktop")
+  rcPlayerDesktop(platform(libs.rc.players.bom))
+  rcPlayerDesktop(libs.rcplayer.compose)
+}
+
+/**
+ * Stage the jars of [combined] whose module (at its resolved version) is not already among
+ * [baseline]'s, under the same collision-free names [registerIsolatedDesktopSidecar] gives, minus
+ * host-specific Skiko natives.
+ */
+abstract class StageClasspathDelta : DefaultTask() {
+  @get:Input abstract val combined: MapProperty<String, String>
+
+  @get:Input abstract val baseline: SetProperty<String>
+
+  @get:InputFiles
+  @get:PathSensitive(PathSensitivity.NAME_ONLY)
+  abstract val combinedFiles: ConfigurableFileCollection
+
+  @get:OutputDirectory abstract val destinationDir: DirectoryProperty
+
+  @TaskAction
+  fun stage() {
+    val dest = destinationDir.get().asFile
+    dest.deleteRecursively()
+    dest.mkdirs()
+    val byPath = combinedFiles.files.associateBy { it.absolutePath }
+    val staged = combined.get().filterValues { it !in baseline.get() }
+    check(staged.isNotEmpty()) { "the CMP player added nothing to the desktop daemon's classpath" }
+    val jars = staged.mapNotNull { (path, module) ->
+      byPath[path]?.takeUnless { it.name.startsWith("skiko-awt-runtime-") }?.let { it to module }
+    }
+    // `org.jetbrains.compose.runtime` and `androidx.compose.runtime` both publish
+    // `runtime-desktop`:
+    // a colliding name is spelled `<group>-<module>-<version>.jar`, as `lib-rcjvm/` spells it.
+    val counts = jars.groupingBy { it.first.name }.eachCount()
+    for ((jar, module) in jars) {
+      val name =
+        if (counts.getValue(jar.name) > 1 && module.count { it == ':' } == 2)
+          module.replaceFirst(':', '-').replaceFirst(':', '-') + ".jar"
+        else jar.name
+      val target = File(dest, name)
+      check(!target.exists()) { "lib-rc-player-desktop has colliding filenames: ${jar.name}" }
+      jar.copyTo(target)
+    }
+  }
+}
+
+/** `group:module:version` of each resolved jar, keyed by its path; project jars by file name. */
+fun moduleVersions(configuration: Configuration): Provider<Map<String, String>> =
+  configuration.incoming.artifacts.resolvedArtifacts.map { resolved ->
+    resolved.associate { artifact ->
+      val id = artifact.id.componentIdentifier
+      artifact.file.absolutePath to
+        if (id is ModuleComponentIdentifier) "${id.group}:${id.module}:${id.version}"
+        else artifact.file.name
+    }
+  }
+
+val stageRcPlayerDesktopLibs =
+  tasks.register<StageClasspathDelta>("stageRcPlayerDesktopLibs") {
+    description =
+      "Stage the CMP Remote Compose player (and its Compose line) for the desktop player daemon."
+    group = "distribution"
+    combined.set(moduleVersions(rcPlayerDesktop))
+    combinedFiles.from(rcPlayerDesktop)
+    baseline.set(
+      moduleVersions(composePreviewDaemonDesktop).zip(moduleVersions(composePreviewRenderer)) {
+        daemon,
+        renderer ->
+        (daemon.values + renderer.values).toSet()
+      }
+    )
+    destinationDir.set(layout.buildDirectory.dir("staged-rc-player-desktop-libs"))
   }
 
 // The TypeScript Remote Compose player behind `/rc-player/bundle.js` (the camaelon-js lane and
@@ -410,6 +571,7 @@ distributions {
       into("lib-renderer") { from(stageRendererLibs) }
       into("lib-daemon-desktop") { from(stageDaemonDesktopLibs) }
       into("lib-rc-players-android") { from(stageRcPlayersAndroidLibs) }
+      into("lib-rc-player-desktop") { from(stageRcPlayerDesktopLibs) }
     }
     // The CMP/Wasm Remote Compose player — see `stageRcPlayerWasm`. Its `fonts/` is also the
     // cmp-jvm render worker's typefaces.
@@ -427,10 +589,22 @@ abstract class CheckServerDesktopSidecarPackaging : DefaultTask() {
   @get:PathSensitive(PathSensitivity.RELATIVE)
   abstract val daemonJars: ConfigurableFileCollection
 
+  @get:InputFiles
+  @get:PathSensitive(PathSensitivity.RELATIVE)
+  abstract val playerJars: ConfigurableFileCollection
+
   @TaskAction
   fun checkPackaging() {
     val renderer = rendererJars.files.flatMap { it.listFiles()?.toList().orEmpty() }
     val daemon = daemonJars.files.flatMap { it.listFiles()?.toList().orEmpty() }
+    val player = playerJars.files.flatMap { it.listFiles()?.toList().orEmpty() }
+    // The desktop player daemon's sidecar: the CMP player itself, and never a host native.
+    check(player.any { it.name.startsWith("rc-player-compose-jvm-") }) {
+      "Standalone server distribution lost the CMP player (lib-rc-player-desktop)"
+    }
+    check(player.none { it.name.startsWith("skiko-awt-runtime-") }) {
+      "Portable server distribution contains a host-specific Skiko native in lib-rc-player-desktop"
+    }
     check(renderer.any { it.name.startsWith("renderer-desktop-") }) {
       "Standalone server distribution lost renderer-desktop"
     }
@@ -472,9 +646,10 @@ val checkServerDesktopSidecarPackaging =
   tasks.register<CheckServerDesktopSidecarPackaging>("checkServerDesktopSidecarPackaging") {
     description = "Checks the standalone server's isolated desktop renderer sidecars."
     group = "verification"
-    dependsOn(stageRendererLibs, stageDaemonDesktopLibs)
+    dependsOn(stageRendererLibs, stageDaemonDesktopLibs, stageRcPlayerDesktopLibs)
     rendererJars.from(stageRendererLibs)
     daemonJars.from(stageDaemonDesktopLibs)
+    playerJars.from(stageRcPlayerDesktopLibs)
   }
 
 tasks.named("check") { dependsOn(checkServerDesktopSidecarPackaging) }
@@ -706,6 +881,20 @@ tasks.withType<Test>().configureEach {
     .files(stageRcPlayerWasm)
     .withPropertyName("rcPlayerWasm")
     .withPathSensitivity(PathSensitivity.RELATIVE)
+  // The exact `lib-rc-players-android/` the distribution packages, so
+  // `ServeRcPlayersStagingTest` checks that the player daemon would offer every Android player.
+  inputs
+    .files(stageRcPlayersAndroidLibs)
+    .withPropertyName("rcPlayersAndroid")
+    .withNormalizer(ClasspathNormalizer::class)
+  val rcPlayersAndroidDir = stageRcPlayersAndroidLibs.flatMap { it.destinationDir }
+  jvmArgumentProviders.add(
+    CommandLineArgumentProvider {
+      listOf(
+        "-Dcomposeai.test.rcPlayersAndroidDir=${rcPlayersAndroidDir.get().asFile.absolutePath}"
+      )
+    }
+  )
   val rcJvmFontsDir = layout.buildDirectory.dir("rc-player-wasm/fonts")
   jvmArgumentProviders.add(
     CommandLineArgumentProvider {

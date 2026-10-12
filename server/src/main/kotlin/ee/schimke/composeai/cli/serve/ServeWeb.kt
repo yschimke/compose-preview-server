@@ -13876,8 +13876,10 @@ ${scriptTag("known-differences.js")}
     hasLiveStream: Boolean = canApplyOverrides,
     /**
      * Whether the live lane [hasLiveStream] offers forwards input. False for a document-only
-     * preview's carried-document stream ([ServeCarriedRcStream]), which animates but holds no
-     * composition for a tap to land on; the page then says so instead of inviting clicks.
+     * preview's carried-document replay ([ServeCarriedRcStream]), which animates but holds no
+     * composition for a tap to land on; the page then says so instead of inviting clicks. Only the
+     * opening state: a document-only lane that switches to a held session ([ServeCarriedRcLane])
+     * tells the page over the socket.
      */
     liveTakesInput: Boolean = true,
     /**

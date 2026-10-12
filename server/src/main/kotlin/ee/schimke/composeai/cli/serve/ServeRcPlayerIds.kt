@@ -2,6 +2,7 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.bundle.BundleReader
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
+import ee.schimke.composeai.daemon.protocol.RemoteComposeOverride
 import ee.schimke.composeai.daemon.protocol.RemoteComposePlayerKind
 
 /**
@@ -235,15 +236,42 @@ internal object ServeRcPlayerIds {
     params: Map<String, String>,
     knobKinds: Map<String, String> = emptyMap(),
     declaredThemeFqns: Set<String>? = null,
+    /**
+     * Whether `cmp-jvm` names a daemon player here: true only on a document-only preview's live
+     * lane, where the desktop player daemon plays the carried document by `playerId` ([asCmpJvm]).
+     * Everywhere else cmp-jvm is the one-shot subprocess lane, which no daemon override reaches, so
+     * it stays [OverrideParse.Invalid].
+     */
+    cmpJvmPlayerId: Boolean = false,
   ): OverrideParse {
     val raw = params["rcPlayer"]?.takeIf { it.isNotBlank() }
     val player = raw?.let { normalizeRequest(it) }
+    if (player == CMP_JVM && cmpJvmPlayerId) {
+      return when (
+        val parsed = ServeOverrides.parse(params - "rcPlayer", knobKinds, declaredThemeFqns)
+      ) {
+        is OverrideParse.Ok -> OverrideParse.Ok(asCmpJvm(parsed.overrides))
+        else -> parsed
+      }
+    }
     val normalized =
       if (player == null || player == raw) params else params + ("rcPlayer" to player)
     val parsed = ServeOverrides.parse(normalized, knobKinds, declaredThemeFqns)
     if (player != CMP_ANDROID || parsed !is OverrideParse.Ok) return parsed
     return OverrideParse.Ok(asCmpAndroid(parsed.overrides))
   }
+
+  /** [o] asking the daemon for the `cmp-jvm` player by `playerId`. */
+  private fun asCmpJvm(o: PreviewOverrides): PreviewOverrides =
+    o.copy(
+      remoteCompose =
+        (o.remoteCompose?.newBuilder() ?: RemoteComposeOverride.Builder())
+          .also {
+            it.player = null
+            it.playerId = CMP_JVM
+          }
+          .build()
+    )
 
   private fun asCmpAndroid(o: PreviewOverrides): PreviewOverrides {
     val rc = o.remoteCompose ?: return o

@@ -1738,7 +1738,7 @@ class DaemonMcpServer(
                 "inline":{"type":"boolean","description":"Default true. Set false on a local-FS client to return the rendered PNG's absolute pngPath plus sha256, dimensions, changed, and durationMs as text instead of an inline observation. inline=false takes precedence over observe, so it returns no semantics or image content. Cannot be combined with crop. Known agent clients (Claude Code, Codex, Gemini CLI, OpenCode, Antigravity) default to false when observe and crop are omitted."},
                 "crop":{"type":"object","description":"Return only ONE element's rectangle instead of the full frame (issue #1817) — far fewer tokens, and it focuses the view on the region you care about (the natural partner to diff_semantics: 'ref X changed' -> crop ref X). Set EITHER a semantic target (ref | testTag | role/text, resolved against compose/semantics) OR explicit render-pixel bounds {left,top,right,bottom}. Honours 'observe': png returns the cropped image (+ region metadata), hash/semantics return the crop's sha + dimensions only.","properties":{"ref":{"type":"string"},"testTag":{"type":"string"},"role":{"type":"string"},"text":{"type":"string"},"left":{"type":"integer"},"top":{"type":"integer"},"right":{"type":"integer"},"bottom":{"type":"integer"}}},
                 "overrides":{"type":"object","description":"Optional per-call display overrides."},
-                "details":{"type":"array","items":{"type":"string","enum":["a11y","layout"]},"description":"Opt-in, default none. Also fetch the accessibility findings and overlay (a11y) and the layout bounds (layout) in this call. Each adds ONE summary line to the result; the full detail goes only into the card, where the person toggles Plain / A11y overlay / Layout. Pass it only when the person asks about accessibility or layout."},
+                "details":{"type":"array","items":{"type":"string","enum":["a11y","layout"]},"description":"Opt-in, default none. Also fetch the accessibility findings and overlay (a11y) and the layout bounds (layout) in this call. Each adds ONE summary line to the result; the full detail goes only into the card, where the person toggles Plain / A11y overlay / Audit (numbered findings) / Layout bounds (numbered boxes with a legend of each one's size, padding, gap and scale). Pass it only when the person asks about accessibility or layout."},
                 "force":{"type":"object","description":"Sanctioned escape hatch when the freshness probe missed an edit. Forwards fileChanged({kind:\"classpath\"}) before rendering, dropping the daemon's user classloader. Each use is logged + counted; please report on issue #924.","properties":{"reason":{"type":"string","description":"Human-readable reason for needing force (required)."}},"required":["reason"]}
               },
               "required":[]
@@ -2013,7 +2013,7 @@ class DaemonMcpServer(
                     }
                   }
                 },
-                "details":{"type":"array","items":{"type":"string","enum":["a11y","layout"]},"description":"Opt-in, default none. Also fetch the accessibility findings and overlay (a11y) and the layout bounds (layout) in this call. Each adds ONE summary line to the result; the full detail goes only into the card, where the person toggles Plain / A11y overlay / Layout. Pass it only when the person asks about accessibility or layout."},
+                "details":{"type":"array","items":{"type":"string","enum":["a11y","layout"]},"description":"Opt-in, default none. Also fetch the accessibility findings and overlay (a11y) and the layout bounds (layout) in this call. Each adds ONE summary line to the result; the full detail goes only into the card, where the person toggles Plain / A11y overlay / Audit (numbered findings) / Layout bounds (numbered boxes with a legend of each one's size, padding, gap and scale). Pass it only when the person asks about accessibility or layout."},
                 "force":{
                   "type":"object",
                   "description":"Sanctioned escape hatch for stale renders. Forwards a fileChanged({kind:\"classpath\"}) to every replica of this URI's daemon before issuing renderNow, dropping the daemon's user classloader. Each use bumps a `forces.used` counter and is logged in `recent` (see `status`). Please report on https://github.com/yschimke/compose-ai-tools/issues/924.",
@@ -7976,25 +7976,9 @@ class DaemonMcpServer(
 }
 
 /**
- * The preview function starting near 1-based [line] (its annotation or `fun`): from there to the
- * brace that closes its body, capped at [maxLines]. Null when [line] is unknown.
+ * The preview function starting near 1-based [line] (its annotation or `fun`), then the same-file
+ * declarations it calls, capped at [maxLines]: see [PreviewSourceExcerpt]. Null when [line] is
+ * unknown.
  */
-internal fun previewFunctionSource(lines: List<String>, line: Int?, maxLines: Int = 200): String? {
-  val start = ((line ?: return null) - 1).coerceIn(0, lines.lastIndex.coerceAtLeast(0))
-  if (lines.isEmpty()) return null
-  var depth = 0
-  var opened = false
-  val out = mutableListOf<String>()
-  for (index in start until minOf(lines.size, start + maxLines)) {
-    val text = lines[index]
-    out += text
-    text.forEach { ch ->
-      if (ch == '{') {
-        depth++
-        opened = true
-      } else if (ch == '}') depth--
-    }
-    if (opened && depth <= 0) break
-  }
-  return out.joinToString("\n")
-}
+internal fun previewFunctionSource(lines: List<String>, line: Int?, maxLines: Int = 200): String? =
+  PreviewSourceExcerpt.of(lines, line, maxLines)

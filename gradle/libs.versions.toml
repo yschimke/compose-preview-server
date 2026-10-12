@@ -135,7 +135,7 @@ graphics-shapes = "1.1.0"
 # also adds the engine's `GuidelineCredentials` and `OpenAiCompatibleClient`, which
 # `check_preview_guidelines` uses (compose-ai-tools#5833, #5846).
 # 2.50.0 moves with compose-ui-builder 3.107.0 and contracts 3.30.0 below.
-composeai-tools = "2.52.0"
+composeai-tools = "2.53.0"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
 # in that repository's `docs/design/REPOSITORY_LAYERS.md`: between the contracts and
@@ -231,7 +231,7 @@ composeai-tools = "2.52.0"
 # own content: the AndroidX lanes on a shared `/d/<id>` page. The image's `lib-daemon-android`
 # sidecar is read from this pin, so it is what makes the deployed host replay the bytes.
 # 3.15.1 is built on contracts 3.24.0 (compose-preview-daemon#234), the line this build pins.
-composeai-preview-daemon = "3.15.3"
+composeai-preview-daemon = "3.15.4"
 # 2.9.0 is the first release carrying `DesignEnvironmentV1.exportDevices` and its Set/Reset
 # changes, which is the field a design names its export devices in. 2.14.0 adds the components a
 # design defines — `DesignDocumentV1.components`, `DesignNodeV1.component` and the `binding` value
@@ -428,7 +428,7 @@ composeai-contracts = "3.30.0"
 # 3.108.0 renders, edits and validates typed adapters' list and object properties
 # (compose-ui-builder#717) and retires the catalog-cutover shadow comparison (#716), whose server
 # side #1575 already removed. Built on compose-ai-tools 2.49.0; 2.50.0 above wins resolution.
-composeai-ui-builder = "3.108.0"
+composeai-ui-builder = "3.109.0"
 # The CMP/Wasm Remote Compose player (yschimke/rc-players' `rc-player-wasm-dist`, a zip of its
 # static browser bundle). Shipped in the server tarball as `rc-player-wasm/`, which the image's
 # entrypoint already passes as `--rc-player-wasm-dir`: that serves `/rc-player-wasm/`, enables the
@@ -444,9 +444,12 @@ rc-players = "2.9.0"
 # `isConsumerSuppliedRemoteCompose`), so a daemon with no catalog behind it has to be handed one.
 # `rc-players-android` is the rc-players release (its BOM) the daemon's connector is built against,
 # and `compose-remote` is the AndroidX line that release's embedded player depends on; move them
-# together.
+# together. The same BOM picks the CMP player (`rc-player-compose`) staged beside them for
+# `cmp-android`, and pins its JVM target staged as `lib-rc-player-desktop/` for the desktop player
+# daemon (`stageRcPlayerDesktopLibs`); compose-preview-daemon's desktop binding is compiled against
+# this release's `rc-player-compose`.
 rc-players-android = "2.9.0"
-compose-remote = "1.0.0-alpha19"
+compose-remote = "1.0.0-alpha21"
 # The TypeScript player's browser bundle (`remote-compose-player-js-dist`, a zip with the `dist`
 # classifier). Its own ref because rc-players publishes only the modules a release changed: the
 # bundle last changed in 2.1.2, and 2.1.3–2.4.0 never published this coordinate.
@@ -571,6 +574,11 @@ compose-remote-player-view = { module = "androidx.compose.remote:remote-player-v
 compose-remote-player-compose = { module = "androidx.compose.remote:remote-player-compose", version.ref = "compose-remote" }
 # Versionless, through the rc-players BOM: rc-players publishes only the modules a release changed.
 rcplayer-embedded-android = { module = "ee.schimke.composeai:third-party-rc-embedded-player" }
+# The CMP player behind `cmp-android` and, as its JVM target, the server's own desktop player daemon
+# (the cmp-jvm held session, staged as `lib-rc-player-desktop/`). Transitive at its use sites
+# (`rcPlayersAndroidCmp`, `stageRcPlayerDesktopLibs`), unlike the family above: its runtime tail is
+# not the sidecar's. Versionless, through the same rc-players BOM.
+rcplayer-compose = { module = "ee.schimke.composeai:rc-player-compose" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }

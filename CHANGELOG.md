@@ -1,5 +1,29 @@
 # Changelog
 
+## [3.131.0](https://github.com/yschimke/compose-preview-server/compare/v3.130.0...v3.131.0) (2026-10-12)
+
+
+### Features
+
+* **mcp-app:** number layout boxes with a property legend and add an Audit mode to the render card ([#1615](https://github.com/yschimke/compose-preview-server/issues/1615)) ([a140e71](https://github.com/yschimke/compose-preview-server/commit/a140e7184000af3dab2661181b1a8b44cd1705a5))
+* **mcp:** ask default guideline packs when a module publishes none, and show thin previews' widget source ([#1617](https://github.com/yschimke/compose-preview-server/issues/1617)) ([d706f07](https://github.com/yschimke/compose-preview-server/commit/d706f074248ddf1da8598886cfe66930419c92f4))
+* **serve:** forward input to document-only previews' live lane when the player daemon can hold the document ([#1609](https://github.com/yschimke/compose-preview-server/issues/1609)) ([a643e0f](https://github.com/yschimke/compose-preview-server/commit/a643e0f73e2512f4b137826b55ee1a1a146a4656))
+* **serve:** hold live cmp-jvm sessions for document-only previews on a desktop player daemon ([#1616](https://github.com/yschimke/compose-preview-server/issues/1616)) ([36d7c9e](https://github.com/yschimke/compose-preview-server/commit/36d7c9ef84736751b2ddfc2cf85b933dab63f018))
+
+## [3.130.0](https://github.com/yschimke/compose-preview-server/compare/v3.129.0...v3.130.0) (2026-10-12)
+
+
+### Features
+
+* **serve:** stage the CMP player for the player-only Android daemon ([#1610](https://github.com/yschimke/compose-preview-server/issues/1610)) ([1f05f8b](https://github.com/yschimke/compose-preview-server/commit/1f05f8be85f09a3ab1f11dcb0a49978e515ef17d))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.53.0 ([#1614](https://github.com/yschimke/compose-preview-server/issues/1614)) ([0579de0](https://github.com/yschimke/compose-preview-server/commit/0579de03a4598fb0d568347b6449b272ca6b68ea))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.15.4 ([#1611](https://github.com/yschimke/compose-preview-server/issues/1611)) ([c216e4a](https://github.com/yschimke/compose-preview-server/commit/c216e4a2aab6db7a7908e156f5bb95d0bcbccb35))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-ui-builder-bom to v3.109.0 ([#1612](https://github.com/yschimke/compose-preview-server/issues/1612)) ([f5bf003](https://github.com/yschimke/compose-preview-server/commit/f5bf00362281561bb31c0ffc060a1521e131b9da))
+
 ## [3.129.0](https://github.com/yschimke/compose-preview-server/compare/v3.128.0...v3.129.0) (2026-10-12)
 
 

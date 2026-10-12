@@ -96,6 +96,23 @@ expect fail "no native at all" "$(layout none "${desktop[@]}")" >/dev/null
 expect fail "only another platform's native is staged" \
   "$(layout wrong-host "${desktop[@]}" lib-skiko/skiko-awt-runtime-linux-arm64-0.144.6.jar)" >/dev/null
 
+# The desktop player daemon's sidecar (cmp-jvm live) binds the player's newer Skiko, so it carries
+# its own native too; without one it would load lib-skiko's.
+player=compose-preview-server/lib-rc-player-desktop
+out="$(expect fail "lib-rc-player-desktop binds 0.150.1 with only lib-skiko's 0.144.6 native" \
+  "$(layout player-skew "${desktop[@]}" \
+    lib-skiko/skiko-awt-runtime-linux-x64-0.144.6.jar \
+    "${player}/rc-player-compose-jvm-2.9.0.jar" "${player}/skiko-awt-0.150.1.jar")")"
+[[ "${out}" == *"cmp-jvm live"*"binds Skiko 0.150.1"* ]] || {
+  echo "FAIL: the player layout failed, but not on the cmp-jvm live lane." >&2
+  exit 1
+}
+expect pass "lib-rc-player-desktop with its own native" \
+  "$(layout player-fixed "${desktop[@]}" \
+    lib-skiko/skiko-awt-runtime-linux-x64-0.144.6.jar \
+    "${player}/rc-player-compose-jvm-2.9.0.jar" "${player}/skiko-awt-0.150.1.jar" \
+    "${player}/skiko-awt-runtime-linux-x64-0.150.1.jar")" >/dev/null
+
 # Wiring: the Dockerfile must stage lib-rcjvm's own native and run the check in the same stage.
 [[ -f "${dockerfile}" ]] || {
   echo "FAIL: missing ${dockerfile}" >&2
@@ -115,6 +132,11 @@ grep -qE 'stage_native /opt/lib-rcjvm /opt/lib-rcjvm' "${dockerfile}" || {
   echo "      lib-skiko's, which pairs with lib-daemon-desktop's skiko-awt instead." >&2
   exit 1
 }
-echo "PASS: the Dockerfile stages lib-rcjvm's native and runs the pairing check"
+grep -qE 'player=/opt/compose-preview-server/lib-rc-player-desktop' "${dockerfile}" || {
+  echo "FAIL: the Dockerfile no longer stages lib-rc-player-desktop's own Skiko native, so the" >&2
+  echo "      desktop player daemon would bind a Skiko it has no native for." >&2
+  exit 1
+}
+echo "PASS: the Dockerfile stages lib-rcjvm's and lib-rc-player-desktop's natives and runs the pairing check"
 
 echo "PASS: all Skiko pairing checks"

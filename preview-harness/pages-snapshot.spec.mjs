@@ -5421,7 +5421,7 @@ test("contract · the static fragment takes precedence over an inline result blo
 
 // render_preview `details` (#1170): the card carries the a11y overlay, the findings and the layout
 // boxes after the render, marked in `_meta`, and the static viewer toggles between them with no call.
-test("contract · static card toggles a11y overlay and layout bounds from embedded details", async ({ page }) => {
+test("contract · static card toggles a11y overlay, audit and layout bounds from embedded details", async ({ page }) => {
   const png = readFileSync(renderPlaceholder).toString("base64");
   const overlayPng =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
@@ -5463,7 +5463,7 @@ test("contract · static card toggles a11y overlay and layout bounds from embedd
   // The render, not the overlay, is what the card opens on.
   expect(await image.getAttribute("src")).toBe(`data:image/png;base64,${png}`);
   const modes = viewer.locator("#detail-modes button");
-  await expect(modes).toHaveText(["Plain", "A11y overlay", "Layout bounds"]);
+  await expect(modes).toHaveText(["Plain", "A11y overlay", "Audit", "Layout bounds"]);
   await expect(modes.nth(0)).toHaveAttribute("aria-pressed", "true");
   await expect(viewer.locator("#findings li")).toHaveCount(2);
   await expect(viewer.locator("#findings li").first()).toContainText("ERROR");
@@ -5475,12 +5475,19 @@ test("contract · static card toggles a11y overlay and layout bounds from embedd
   expect(await image.getAttribute("src")).toBe(`data:image/png;base64,${overlayPng}`);
   await expect(viewer.locator(".detail-boxes")).toHaveCount(0);
 
+  // Audit numbers the one finding with bounds over the plain render.
   await modes.nth(2).click();
+  expect(await image.getAttribute("src")).toBe(`data:image/png;base64,${png}`);
+  await expect(viewer.locator(".detail-boxes rect.finding.error")).toHaveCount(1);
+  await expect(viewer.locator(".detail-badges span")).toHaveText(["1"]);
+
+  await modes.nth(3).click();
   expect(await image.getAttribute("src")).toBe(`data:image/png;base64,${png}`);
   const boxes = viewer.locator(".detail-boxes rect.layout");
   await expect(boxes).toHaveCount(2);
   await expect(viewer.locator(".detail-boxes")).toHaveAttribute("viewBox", "0 0 100 100");
   expect(await boxes.nth(1).getAttribute("width")).toBe("80");
+  await expect(viewer.locator("#detail-legend li")).toHaveCount(2);
 
   await modes.nth(0).click();
   await expect(viewer.locator(".detail-boxes")).toHaveCount(0);

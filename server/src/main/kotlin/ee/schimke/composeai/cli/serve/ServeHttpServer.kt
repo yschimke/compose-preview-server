@@ -604,6 +604,14 @@ class ServeHttpServer(
    */
   private val rcPlayerDaemon: ServeRcPlayerDaemon? = null,
   /**
+   * The server's own desktop player daemon ([ServeRcPlayerDaemon.desktopSubprocess]): holds a live
+   * `cmp-jvm` session for a document-only preview's carried document, so viewer input reaches it.
+   * Live only; the cmp-jvm render lane stays the one-shot subprocess. Null when this host has no
+   * staged CMP player, no desktop daemon that plays carried documents, or server-side rendering is
+   * off; cmp-jvm then has no live lane.
+   */
+  private val rcDesktopPlayerDaemon: ServeRcPlayerDaemon? = null,
+  /**
    * Delivery-branch read counters for `/status.json`, from the catalog store. A provider since the
    * numbers move; null without a catalog store.
    */
@@ -8496,6 +8504,8 @@ class ServeHttpServer(
                 )
               },
             rcPlayerDaemon = if (onlySystem == null) rcPlayerDaemon?.snapshot() else null,
+            rcDesktopPlayerDaemon =
+              if (onlySystem == null) rcDesktopPlayerDaemon?.snapshot() else null,
           ),
         config =
           ConfigDto(
@@ -10609,10 +10619,20 @@ class ServeHttpServer(
           repo = reportContext.repo,
           login = githubAuth?.currentLogin(call),
         )
-      // A document-only preview a daemon can replay on an Android player streams that replay
-      // ([carriedRcLiveHost]), so it offers Live although its host has no live lane of its own.
-      val carriedRcLive =
-        !renderHost.hasLiveStream && donorBackedRcPlayers(renderHost, preview.id).isNotEmpty()
+      // A document-only preview a daemon can play on a server-side player (an Android one, or
+      // cmp-jvm on the desktop player daemon) streams it ([carriedRcLiveHost]), so it offers Live
+      // although its host has no live lane of its own.
+      val carriedRcPlayers =
+        if (renderHost.hasLiveStream) emptyList() else carriedLivePlayers(renderHost, preview.id)
+      val carriedRcLive = carriedRcPlayers.isNotEmpty()
+      // Whether that lane is known to open on a held session that takes input: a player daemon
+      // has run and said it plays carried documents live. Unknown reads as the replay, which is
+      // what a cold daemon's lane opens on; the socket's `lane` message corrects the page either
+      // way ([ServeCarriedRcLane]).
+      val carriedRcTakesInput =
+        listOfNotNull(rcPlayerDaemon, rcDesktopPlayerDaemon).any { daemon ->
+          daemon.knownToPlayCarriedDocumentsLive == true && carriedRcPlayers.any(daemon::offers)
+        }
       val offersLive = renderHost.hasLiveStream || carriedRcLive
       val liveAuthPrompt =
         githubAuth
@@ -10698,7 +10718,7 @@ class ServeHttpServer(
           hasLiveStream = offersLive,
           // …and that replay's stream is a picture of the document's clock, not a held
           // composition, so the page must not invite input it would drop.
-          liveTakesInput = !carriedRcLive,
+          liveTakesInput = !carriedRcLive || carriedRcTakesInput,
           trust = catalogBundleHost(renderHost)?.let { BundleVerifier.summary(it.trust) },
           // Per-preview: the Remote Compose canvas lane needs a captured `.rc` (fetched from
           // `/render/<id>.rc`).
@@ -12257,6 +12277,28 @@ class ServeHttpServer(
   }
 
   /**
+   * The players a document-only preview's live lane ([carriedRcLiveHost]) can stream: its
+   * [donorBackedRcPlayers], plus `cmp-jvm` when the desktop player daemon is configured
+   * ([rcDesktopPlayerDaemon]). Not [donorBackedRcPlayers] itself, which also routes `/render`: a
+   * cmp-jvm render keeps its one-shot subprocess, and only the live lane holds a session.
+   */
+  private fun carriedLivePlayers(host: ServeHost, previewId: String): List<RcPlayerBackend> {
+    val android = donorBackedRcPlayers(host, previewId)
+    if (rcDesktopPlayerDaemon == null) return android
+    if (host.canRenderOverridesFor(previewId)) return android
+    if (!host.hasRemoteComposeDoc(previewId)) return android
+    if (host.remoteComposeRenderSpec(previewId) == null) return android
+    return android + RcPlayerBackend.CMP_JVM
+  }
+
+  /**
+   * The player daemon a carried live lane on [player] asks for a held session:
+   * [rcDesktopPlayerDaemon] for cmp-jvm, else [rcPlayerDaemon] when it offers [player].
+   */
+  private fun livePlayerDaemon(player: RcPlayerBackend): ServeRcPlayerDaemon? =
+    listOfNotNull(rcPlayerDaemon, rcDesktopPlayerDaemon).firstOrNull { it.offers(player) }
+
+  /**
    * [document] drawn by [player] via `overrides.remoteCompose.documentBase64` — the shared tail of
    * shared documents ([respondDocDaemonRender]) and donor-backed catalog previews
    * ([donorBackedRcPlayers]). The server's own player daemon draws it whenever it offers [player]
@@ -12389,7 +12431,11 @@ class ServeHttpServer(
         RemoteComposeOverride.Builder()
           .also {
             it.player = player.playerKind
-            it.playerId = player.daemonPlayerId
+            // The desktop daemon's one player answers to `cmp-jvm`; naming it lets a daemon that
+            // ever grows a second refuse rather than swap.
+            it.playerId =
+              player.daemonPlayerId
+                ?: ServeRcPlayerIds.CMP_JVM.takeIf { player == RcPlayerBackend.CMP_JVM }
             it.documentBase64 = java.util.Base64.getEncoder().encodeToString(document)
             it.namedValues = namedValues
           }
@@ -12398,23 +12444,34 @@ class ServeHttpServer(
 
   /**
    * [renderHost], for one socket, with a live lane for its document-only previews: those whose
-   * Android players only a daemon replaying the document can draw ([donorBackedRcPlayers]). Their
-   * stream is a [ServeCarriedRcStream] drawn exactly where `/render` would draw the same player —
-   * the server's own player daemon when it offers the player, else a resident catalog daemon that
-   * lends itself ([renderCarriedRcFrame]) — because no daemon's `stream/start` can hold a carried
-   * document. Null when [previewId] has no such player, so the socket keeps the host's own lanes.
+   * players only a daemon playing the document can draw ([carriedLivePlayers]). Their stream is a
+   * [ServeCarriedRcLane]:
+   * - a **held** session playing the document on the server's own player daemon for that player
+   *   ([livePlayerDaemon]: the Android one, or the desktop one for `cmp-jvm`), when its daemon
+   *   advertises [ServeRcPlayerDaemon.CARRIED_LIVE_CAPABILITY] ([ServeRcPlayerDaemon.openLive]) —
+   *   input is forwarded to it;
+   * - else a [ServeCarriedRcStream] replay drawn exactly where `/render` would draw the same player
+   *   — for an Android player the player daemon, or a resident catalog daemon that lends itself
+   *   ([renderCarriedRcFrame]); for `cmp-jvm` its one-shot subprocess ([renderCmpJvmFrame]). A
+   *   lending daemon is never asked to hold the document: its one held session is its own catalog's
+   *   live lane, its frames route by preview id alongside that catalog's viewers, and nothing here
+   *   can read its capabilities, so it keeps the replay.
+   *
+   * Null when [previewId] has no such player, so the socket keeps the host's own lanes.
    *
    * Everything but the stream is [renderHost]'s, and closing the wrapper closes nothing: the
-   * socket's lease owns the host. [onError] is the socket's, for a stream whose render fails.
+   * socket's lease owns the host. [onError] is the socket's, for a stream whose render fails;
+   * [onLane] is told whether the lane forwards input each time that changes.
    */
   private fun carriedRcLiveHost(
     renderHost: ServeHost,
     sessionId: String,
     previewId: String,
+    onLane: (takesInput: Boolean) -> Unit = {},
     onError: (String) -> Unit,
   ): ServeHost? {
-    if (donorBackedRcPlayers(renderHost, previewId).isEmpty()) return null
-    val streams = java.util.concurrent.CopyOnWriteArrayList<ServeCarriedRcStream>()
+    if (carriedLivePlayers(renderHost, previewId).isEmpty()) return null
+    val streams = java.util.concurrent.CopyOnWriteArrayList<ServeCarriedRcLane>()
     return object : ServeHost by renderHost {
       override val hasLiveStream: Boolean
         get() = true
@@ -12427,9 +12484,9 @@ class ServeHttpServer(
         onUnavailable: ((String) -> Unit)?,
         onFrame: (StreamFrameParams) -> Unit,
       ): StreamHandle? {
-        val players = donorBackedRcPlayers(renderHost, previewId)
+        val players = carriedLivePlayers(renderHost, previewId)
         if (players.isEmpty()) {
-          onUnavailable?.invoke("no Android player here can draw this document live")
+          onUnavailable?.invoke("no player here can draw this document live")
           return null
         }
         val player =
@@ -12469,12 +12526,37 @@ class ServeHttpServer(
             namedValues = overrides.remoteCompose?.namedValues.orEmpty(),
             fontScale = spec.fontScale.takeIf { it != 1f },
           )
-        return ServeCarriedRcStream(
-            base = base,
-            renderFrame = { renderCarriedRcFrame(player, it) },
-            maxFps = maxFps,
+        val playerDaemon = livePlayerDaemon(player)
+        return ServeCarriedRcLane(
+            openHeld = { frames ->
+              if (playerDaemon == null) ServeCarriedRcLane.Attempt.Never("no player daemon")
+              else
+                when (val live = playerDaemon.openLive(base, codec, maxFps, frames)) {
+                  is ServeRcPlayerDaemon.LiveOutcome.Streaming ->
+                    ServeCarriedRcLane.Attempt.Held(live.handle)
+                  ServeRcPlayerDaemon.LiveOutcome.Warming -> ServeCarriedRcLane.Attempt.NotYet
+                  is ServeRcPlayerDaemon.LiveOutcome.Busy ->
+                    ServeCarriedRcLane.Attempt.Busy(live.reason)
+                  is ServeRcPlayerDaemon.LiveOutcome.Unsupported ->
+                    ServeCarriedRcLane.Attempt.Never(live.reason)
+                }
+            },
+            openReplay = { frames ->
+              ServeCarriedRcStream(
+                base = base,
+                renderFrame =
+                  if (player == RcPlayerBackend.CMP_JVM) {
+                    { renderCmpJvmFrame(document, it, theme) }
+                  } else {
+                    { renderCarriedRcFrame(player, it) }
+                  },
+                maxFps = maxFps,
+                onFrame = frames,
+                onError = onError,
+              )
+            },
             onFrame = onFrame,
-            onError = onError,
+            onLane = onLane,
           )
           .also { streams += it }
       }
@@ -12553,6 +12635,46 @@ class ServeHttpServer(
       }
     } finally {
       renderSemaphore.release()
+    }
+  }
+
+  /**
+   * One frame of a carried `cmp-jvm` replay: [document] drawn by the cmp-jvm render lane's one-shot
+   * subprocess ([RcJvmServerRenderer]), sized and seeded from [overrides], under the shared render
+   * queue. The fallback while the desktop player daemon holds no session; it has no frame clock
+   * (`captureAdvanceMs` is not one of its inputs), so its frames stop changing and the stream
+   * idles.
+   */
+  private fun renderCmpJvmFrame(
+    document: ByteArray,
+    overrides: PreviewOverrides,
+    theme: RcJvmServerRenderer.RenderTheme,
+  ): ServeCarriedRcStream.Tick {
+    if (!renderSemaphore.tryAcquire(CARRIED_RC_QUEUE_WAIT_MILLIS, TimeUnit.MILLISECONDS)) {
+      return ServeCarriedRcStream.Tick.Retry(CARRIED_RC_BUSY_RETRY_MILLIS)
+    }
+    val result =
+      try {
+        RcJvmServerRenderer.render(
+          document,
+          RcJvmRenderSpec(
+            widthPx = overrides.widthPx ?: DOC_RENDER_DEFAULT_PX,
+            heightPx = overrides.heightPx ?: DOC_RENDER_DEFAULT_PX,
+            density = overrides.density ?: 1f,
+            fontScale = overrides.fontScale ?: 1f,
+          ),
+          overrides.remoteCompose?.namedValues.orEmpty(),
+          RcJvmServerRenderer.Format.PNG,
+          theme,
+        )
+      } finally {
+        renderSemaphore.release()
+      }
+    return when (result) {
+      is RcJvmServerRenderer.RenderResult.Ok -> ServeCarriedRcStream.Tick.Frame(result.bytes)
+      is RcJvmServerRenderer.RenderResult.Failed -> ServeCarriedRcStream.Tick.Failed(result.reason)
+      is RcJvmServerRenderer.RenderResult.Unavailable ->
+        ServeCarriedRcStream.Tick.Failed(result.reason)
     }
   }
 
@@ -13153,7 +13275,12 @@ class ServeHttpServer(
         // its document can be streamed. Its session is static, so the seat above was weightless:
         // the stream takes one of its own, under the same capacity rule.
         val carriedHost =
-          carriedRcLiveHost(renderHost, sessionId, previewId) { reason ->
+          carriedRcLiveHost(
+            renderHost,
+            sessionId,
+            previewId,
+            onLane = { takesInput -> send(ServeStreamProtocol.laneMessage(takesInput)) },
+          ) { reason ->
             send(ServeStreamProtocol.errorMessage(reason))
           }
         if (carriedHost != null) {
@@ -13188,6 +13315,9 @@ class ServeHttpServer(
               send,
               system = sessionId,
               frameStats = liveFrameStats,
+              cmpJvmPlayerId =
+                carriedHost != null &&
+                  RcPlayerBackend.CMP_JVM in carriedLivePlayers(renderHost, previewId),
             ) { reason ->
               if (liveUnavailableReason == null) liveUnavailableReason = reason
             }
@@ -17763,6 +17893,8 @@ private data class DaemonSummaryDto(
    * Box-wide, so omitted for a site. Not in [running]: it is no session.
    */
   val rcPlayerDaemon: ServeRcPlayerDaemon.Snapshot? = null,
+  /** The server's own desktop (cmp-jvm) player daemon, likewise. */
+  val rcDesktopPlayerDaemon: ServeRcPlayerDaemon.Snapshot? = null,
 )
 
 /**

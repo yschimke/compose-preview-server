@@ -185,7 +185,8 @@ apply_settings_file "${SERVE_SETTINGS_FILE}" "${SERVE_SETTINGS_SCHEMA}" "${SERVE
 [[ "${SERVE_SETTINGS_FILE}" != "none" ]] && args+=(--settings-file "${SERVE_SETTINGS_FILE}")
 
 # The Remote Compose player the viewer opens on, where a preview enables it (e.g. `cmp-android`,
-# offered only on catalogs whose live bundle carries rc-player-compose). Empty ⇒ the server's
+# offered on catalogs whose live bundle carries rc-player-compose, and on document-only previews
+# through the server's player daemon and its `lib-rc-players-android/`). Empty ⇒ the server's
 # built-in order: androidx-embedded, then androidx-view, then camaelon-js.
 [[ -n "${SERVE_RC_DEFAULT_PLAYER:-}" ]] &&
   args+=(--rc-default-player "${SERVE_RC_DEFAULT_PLAYER}")

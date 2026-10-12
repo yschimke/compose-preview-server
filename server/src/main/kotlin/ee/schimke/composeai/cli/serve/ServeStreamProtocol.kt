@@ -18,7 +18,8 @@ import kotlinx.serialization.json.put
  * (re-render at the current overrides), `switch` (re-point the socket at another preview), `input`
  * (dispatch a pointer/key event into a live composition) and `visibility` (throttle the stream
  * while nobody is looking at it). Server → client: `frame` (a rendered PNG, base64, with its pixel
- * size and a monotonic `seq`) and `error`.
+ * size and a monotonic `seq`), `error`, and `lane` (whether input is forwarded, for a lane that can
+ * change kind mid-socket).
  *
  * This deliberately mirrors the daemon's native streaming protocol (`stream/start` + `streamFrame`,
  * `docs/daemon/STREAMING.md`): base64 frame payloads + a `codec` tag + a monotonic sequence, so the
@@ -161,6 +162,20 @@ object ServeStreamProtocol {
       put("widthPx", widthPx)
       put("heightPx", heightPx)
       put("dataBase64", dataBase64)
+    }
+    return obj.toString()
+  }
+
+  /**
+   * Which kind of live lane the socket is streaming, when that can change under the page: a
+   * document-only preview's lane ([ServeCarriedRcLane]) opens on a replay that takes no input and
+   * may switch to a held session that does. [takesInput] is whether `input` messages now reach a
+   * composition; the viewer mirrors it on `data-live-input`.
+   */
+  fun laneMessage(takesInput: Boolean): String {
+    val obj = buildJsonObject {
+      put("type", "lane")
+      put("input", takesInput)
     }
     return obj.toString()
   }
