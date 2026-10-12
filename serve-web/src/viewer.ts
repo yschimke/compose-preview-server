@@ -21,6 +21,7 @@ import { CONTINUOUS_EDIT_DEBOUNCE_MS, debounced } from "./viewer/debounce.js";
 import { viewParam } from "./spec/views.js";
 import { rcWasmFailureMessage } from "./viewer/rcWasmFailure.js";
 import {
+    RC_SNAPSHOT_HEADER_WAIT_MS,
     RC_SNAPSHOT_REFIT_MS,
     RC_SNAPSHOT_WAIT_MS,
     parseRcDensityAttr,
@@ -3105,19 +3106,26 @@ function openRc() {
         ])
             .then(function (settled) {
                 var buf = settled[1];
-                // The document declares the pixel size it was captured at; only a document that
-                // declares none waits on the snapshot, which on a `?mode=rc` deep link is often
-                // still in flight (or never arrives) and reads a `naturalWidth` of 0.
+                // The baked snapshot is the preview as captured, so its decoded size wins; the
+                // document header's declared size can differ from it (a catalog that pads or
+                // rescales its capture). On a `?mode=rc` deep link the snapshot is often still in
+                // flight (or never arrives) and reads a `naturalWidth` of 0, so a document that
+                // declares a size waits only briefly before drawing at it, and re-fits if the
+                // snapshot decodes later; one that declares none waits longer.
                 var header = rcDocumentHeader(buf);
                 if (!rcDocHeaderPromise)
                     rcDocHeaderPromise = Promise.resolve(header);
                 var declared = header ? header.size : null;
-                return (
-                    declared
-                        ? Promise.resolve(declared)
-                        : whenImageSized(img, RC_SNAPSHOT_WAIT_MS)
-                ).then(function (natural) {
-                    return { buf: buf, header: header, natural: natural };
+                return whenImageSized(
+                    img,
+                    declared ? RC_SNAPSHOT_HEADER_WAIT_MS : RC_SNAPSHOT_WAIT_MS,
+                ).then(function (snapshot) {
+                    return {
+                        buf: buf,
+                        header: header,
+                        natural: snapshot || declared,
+                        fromSnapshot: snapshot !== null,
+                    };
                 });
             })
             .then(function (loaded) {
@@ -3140,9 +3148,9 @@ function openRc() {
                 // page's `data-rc-density`, not at `devicePixelRatio` (which drew a 2.75 widget
                 // tiny on a DPR-1 screen and a density-1 document magnified on a DPR-2 one).
                 var player = rcPlayerFor(loaded.header);
-                // The stand-in size is only a guess at the aspect ratio, so re-fit once the
-                // snapshot does decode.
-                if (!loaded.natural) refitRcWhenSized(buf);
+                // A header or stand-in size is only the best guess until the snapshot decodes;
+                // re-fit to it then.
+                if (!loaded.fromSnapshot) refitRcWhenSized(buf);
                 return player.loadFromArrayBuffer(buf);
             })
             .then(function () {

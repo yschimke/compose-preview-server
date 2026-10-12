@@ -16,6 +16,12 @@ export const RC_FALLBACK_DP: PixelSize = { width: 360, height: 640 };
 /** How long the lane waits for the snapshot to decode before falling back. */
 export const RC_SNAPSHOT_WAIT_MS = 15000;
 
+/**
+ * How long the lane waits for the snapshot when the document declares its own size to fall back
+ * on: short, since the header size is usable at once and a late snapshot re-fits the canvas.
+ */
+export const RC_SNAPSHOT_HEADER_WAIT_MS = 3000;
+
 /** How long a lane that fell back keeps listening for the snapshot so it can re-fit. */
 export const RC_SNAPSHOT_REFIT_MS = 120000;
 
