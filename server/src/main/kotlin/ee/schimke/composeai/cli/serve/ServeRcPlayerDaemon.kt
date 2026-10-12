@@ -82,7 +82,15 @@ class ServeRcPlayerDaemon(
     /** The daemon is starting (this call may have started it); ask again shortly. */
     data object Warming : LiveOutcome
 
-    /** No held session for this document here, now or (for this daemon) ever; replay instead. */
+    /**
+     * The daemon plays carried documents live but cannot hold one right now: its one held session
+     * is taken, its live seat is refused, or a failed start is inside its backoff. Ask again later.
+     */
+    data class Busy(val reason: String) : LiveOutcome
+
+    /**
+     * This daemon never holds a carried document (no [CARRIED_LIVE_CAPABILITY]); replay instead.
+     */
     data class Unsupported(val reason: String) : LiveOutcome
   }
 
@@ -190,9 +198,9 @@ class ServeRcPlayerDaemon(
   /**
    * Hold a live session that plays the document [overrides] carry (`stream/start` with the same
    * overrides [render] takes), frames to [onFrame]. A cold daemon is started, as [render] starts
-   * it, and answers [LiveOutcome.Warming]; a daemon without [CARRIED_LIVE_CAPABILITY], or one that
-   * could not hold the session (it holds one at a time), answers [LiveOutcome.Unsupported].
-   * Blocking while `stream/start` runs.
+   * it, and answers [LiveOutcome.Warming]; a daemon without [CARRIED_LIVE_CAPABILITY] answers
+   * [LiveOutcome.Unsupported], and one that could not hold the session now (it holds one at a time,
+   * or has no seat) answers [LiveOutcome.Busy]. Blocking while `stream/start` runs.
    */
   fun openLive(
     overrides: PreviewOverrides,
@@ -210,12 +218,12 @@ class ServeRcPlayerDaemon(
             else return LiveOutcome.Unsupported(NO_LIVE_DOCUMENTS)
           current == State.Starting -> return LiveOutcome.Warming
           current is State.Failed && clock() - current.atMillis < failureBackoffMillis ->
-            return LiveOutcome.Unsupported(current.reason)
+            return LiveOutcome.Busy(current.reason)
           // Starting a daemon known not to hold a carried document would only warm the replay.
           playsLiveKnown == false -> return LiveOutcome.Unsupported(NO_LIVE_DOCUMENTS)
           else ->
             return when (val started = start(overrides)) {
-              is Outcome.Unavailable -> LiveOutcome.Unsupported(started.reason)
+              is Outcome.Unavailable -> LiveOutcome.Busy(started.reason)
               else -> LiveOutcome.Warming
             }
         }
@@ -235,7 +243,7 @@ class ServeRcPlayerDaemon(
         unavailable = "the Android player daemon closed: ${e.message}"
         null
       }
-        ?: return LiveOutcome.Unsupported(
+        ?: return LiveOutcome.Busy(
           unavailable ?: "the Android player daemon did not hold a live session"
         )
     synchronized(lock) { liveSessions++ }

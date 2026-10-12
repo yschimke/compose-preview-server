@@ -12474,6 +12474,8 @@ class ServeHttpServer(
                   is ServeRcPlayerDaemon.LiveOutcome.Streaming ->
                     ServeCarriedRcLane.Attempt.Held(live.handle)
                   ServeRcPlayerDaemon.LiveOutcome.Warming -> ServeCarriedRcLane.Attempt.NotYet
+                  is ServeRcPlayerDaemon.LiveOutcome.Busy ->
+                    ServeCarriedRcLane.Attempt.Busy(live.reason)
                   is ServeRcPlayerDaemon.LiveOutcome.Unsupported ->
                     ServeCarriedRcLane.Attempt.Never(live.reason)
                 }

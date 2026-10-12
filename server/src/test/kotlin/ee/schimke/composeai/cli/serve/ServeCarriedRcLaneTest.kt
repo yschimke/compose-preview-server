@@ -135,4 +135,40 @@ class ServeCarriedRcLaneTest {
     lane.close()
     assertTrue(held.closed)
   }
+
+  @Test
+  fun `a busy daemon keeps being asked past the warming deadline and upgrades when free`() {
+    val replay = FakeHandle("replay")
+    val held = FakeHandle("held")
+    val attempts = AtomicInteger()
+    val adopted = CountDownLatch(1)
+    val lane =
+      ServeCarriedRcLane(
+        openHeld = {
+          if (attempts.incrementAndGet() < 4) ServeCarriedRcLane.Attempt.Busy("one held session")
+          else {
+            held.frames = it
+            ServeCarriedRcLane.Attempt.Held(held)
+          }
+        },
+        openReplay = {
+          replay.frames = it
+          replay
+        },
+        onFrame = { frames += it.frameStreamId },
+        onLane = {
+          lanes += it
+          if (it) adopted.countDown()
+        },
+        retryMillis = 10,
+        // Already past: a busy daemon is not held to the warming deadline.
+        maxWaitMillis = 0,
+        busyRetryMillis = 10,
+      )
+    assertTrue(adopted.await(5, TimeUnit.SECONDS))
+    assertEquals(listOf(false, true), lanes)
+    assertTrue(replay.closed)
+    lane.close()
+    assertTrue(held.closed)
+  }
 }

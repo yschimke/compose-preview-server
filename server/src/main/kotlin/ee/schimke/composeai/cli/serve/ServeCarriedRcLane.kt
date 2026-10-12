@@ -16,8 +16,11 @@ import java.util.concurrent.TimeUnit
  * decide), and a start takes ~15 s. So the lane opens on the replay — which is what warms the
  * daemon — and keeps asking for the held session every [retryMillis] for up to [maxWaitMillis].
  * When one opens, frames switch to it and the replay closes; when the daemon answers it never will
- * ([Attempt.Never]), the replay simply stays. [onLane] reports each change (true: input is
- * forwarded) so the socket can tell the page which it is looking at.
+ * ([Attempt.Never]), the replay simply stays. A daemon that can hold the document but has no
+ * session free right now ([Attempt.Busy] — it holds one at a time, or a seat is taken) is asked
+ * again every [busyRetryMillis] for as long as the lane is open, so the viewer upgrades once the
+ * other session ends. [onLane] reports each change (true: input is forwarded) so the socket can
+ * tell the page which it is looking at.
  *
  * Frames from both sources go to [onFrame], gated so a replay frame already in flight when the held
  * session takes over is dropped rather than painted over it.
@@ -32,6 +35,7 @@ internal constructor(
   private val onLane: (takesInput: Boolean) -> Unit,
   private val retryMillis: Long = DEFAULT_RETRY_MILLIS,
   private val maxWaitMillis: Long = DEFAULT_MAX_WAIT_MILLIS,
+  private val busyRetryMillis: Long = DEFAULT_BUSY_RETRY_MILLIS,
   private val clock: () -> Long = System::currentTimeMillis,
 ) : StreamHandle {
 
@@ -41,6 +45,9 @@ internal constructor(
 
     /** Not yet (a daemon starting); worth asking again. */
     data object NotYet : Attempt
+
+    /** A daemon that can hold the document, with no session free right now; ask again later. */
+    data class Busy(val reason: String) : Attempt
 
     /** Not here: no daemon, or one that cannot hold this document. */
     data class Never(val reason: String) : Attempt
@@ -60,11 +67,11 @@ internal constructor(
       is Attempt.Held -> adopt(first.handle)
       Attempt.NotYet -> {
         startReplay()
-        val scheduler = Executors.newSingleThreadScheduledExecutor { runnable ->
-          Thread(runnable, "carried-rc-lane").apply { isDaemon = true }
-        }
-        executor = scheduler
-        scheduler.schedule(::retry, retryMillis, TimeUnit.MILLISECONDS)
+        scheduleRetry(retryMillis)
+      }
+      is Attempt.Busy -> {
+        startReplay()
+        scheduleRetry(busyRetryMillis)
       }
       is Attempt.Never -> startReplay()
     }
@@ -115,6 +122,16 @@ internal constructor(
     onLane(true)
   }
 
+  private fun scheduleRetry(delayMillis: Long) {
+    val scheduler =
+      executor
+        ?: Executors.newSingleThreadScheduledExecutor { runnable ->
+            Thread(runnable, "carried-rc-lane").apply { isDaemon = true }
+          }
+          .also { executor = it }
+    scheduler.schedule(::retry, delayMillis, TimeUnit.MILLISECONDS)
+  }
+
   private fun retry() {
     if (isClosed) return
     when (val next = runCatching { openHeld(::onHeldFrame) }.getOrElse { Attempt.Never("") }) {
@@ -125,6 +142,11 @@ internal constructor(
       Attempt.NotYet ->
         if (clock() - startedAt < maxWaitMillis && !isClosed) {
           runCatching { executor?.schedule(::retry, retryMillis, TimeUnit.MILLISECONDS) }
+        } else executor?.shutdown()
+      // No deadline: the session it waits for ends whenever its viewer leaves.
+      is Attempt.Busy ->
+        if (!isClosed) {
+          runCatching { executor?.schedule(::retry, busyRetryMillis, TimeUnit.MILLISECONDS) }
         } else executor?.shutdown()
       is Attempt.Never -> executor?.shutdown()
     }
@@ -170,5 +192,6 @@ internal constructor(
 
     /** A cold Robolectric daemon may download its runtime first; beyond this, keep the replay. */
     const val DEFAULT_MAX_WAIT_MILLIS: Long = 3 * 60_000L
+    const val DEFAULT_BUSY_RETRY_MILLIS: Long = 5_000
   }
 }
