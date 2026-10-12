@@ -11682,11 +11682,11 @@ ${captureControlsHtml().prependIndent("          ")}
     setOf(RcPlayerBackend.CMP_JVM, RcPlayerBackend.ANDROIDX_VIEW, RcPlayerBackend.SWIFT_APPKIT)
 
   /**
-   * A player with no offline lane id, which the wall names itself:
-   * [RcPlayerBackend.ANDROIDX_VIEW], the AOSP view-backed `RemoteComposePlayer` drawing into a
-   * framework `Canvas`, and [RcPlayerBackend.SWIFT_APPKIT], the native Swift player on AppKit —
-   * genuinely different renderers (hence their null `rcCompareLane`). Kept out of [ServeRcCompare.LANES], which
-   * mirrors the offline columns, so the absent-players note never reports it.
+   * A player with no offline lane id, which the wall names itself: [RcPlayerBackend.ANDROIDX_VIEW],
+   * the AOSP view-backed `RemoteComposePlayer` drawing into a framework `Canvas`, and
+   * [RcPlayerBackend.SWIFT_APPKIT], the native Swift player on AppKit — genuinely different
+   * renderers (hence their null `rcCompareLane`). Kept out of [ServeRcCompare.LANES], which mirrors
+   * the offline columns, so the absent-players note never reports it.
    */
   private val LIVE_ONLY_LANES =
     mapOf(

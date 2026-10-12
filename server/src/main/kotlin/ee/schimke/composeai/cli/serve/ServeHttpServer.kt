@@ -12136,9 +12136,9 @@ class ServeHttpServer(
 
   /**
    * `GET /d/{id}/render.png?rcPlayer=cmp-jvm` (or `swift-appkit` on a macOS host): a shared Remote
-   * Compose document drawn server-side.
-   * Needs a real credential ([mayRenderDocServerSide]) even on a public host. Sized from the
-   * document header at `?density=` (default 1); `?uiMode=` and `rc.<name>=` as on `/render`.
+   * Compose document drawn server-side. Needs a real credential ([mayRenderDocServerSide]) even on
+   * a public host. Sized from the document header at `?density=` (default 1); `?uiMode=` and
+   * `rc.<name>=` as on `/render`.
    */
   private suspend fun RoutingContext.handleDocRender(store: ServeDocStore) {
     // A bodyless probe would still take a render worker: Ktor's AutoHeadResponse runs this handler.
