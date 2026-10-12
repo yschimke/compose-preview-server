@@ -137,6 +137,34 @@ class ServeCarriedRcLaneTest {
   }
 
   @Test
+  fun `a daemon still starting at the deadline leaves the replay for good and says so`() {
+    val replay = FakeHandle("replay")
+    val gaveUp = CountDownLatch(1)
+    var now = 0L
+    val lane =
+      ServeCarriedRcLane(
+        openHeld = {
+          now += 50
+          ServeCarriedRcLane.Attempt.NotYet
+        },
+        openReplay = {
+          replay.frames = it
+          replay
+        },
+        onFrame = { frames += it.frameStreamId },
+        onLane = { lanes += it },
+        onGaveUp = { gaveUp.countDown() },
+        retryMillis = 10,
+        maxWaitMillis = 100,
+        clock = { now },
+      )
+    assertTrue(gaveUp.await(5, TimeUnit.SECONDS), "the socket is told the lane is the replay now")
+    assertFalse(lane.takesInput)
+    assertEquals(listOf(false), lanes)
+    lane.close()
+  }
+
+  @Test
   fun `a busy daemon keeps being asked past the warming deadline and upgrades when free`() {
     val replay = FakeHandle("replay")
     val held = FakeHandle("held")

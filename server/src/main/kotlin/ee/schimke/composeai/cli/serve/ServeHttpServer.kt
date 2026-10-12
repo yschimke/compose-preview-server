@@ -119,6 +119,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -12461,12 +12462,18 @@ class ServeHttpServer(
    *
    * Everything but the stream is [renderHost]'s, and closing the wrapper closes nothing: the
    * socket's lease owns the host. [onError] is the socket's, for a stream whose render fails;
-   * [onLane] is told whether the lane forwards input each time that changes.
+   * [onLane] is told whether the lane forwards input each time that changes. [streamSeat] is what
+   * the socket pays for its stream with ([ServeCarriedRcStreamSeat]): a cold player daemon's
+   * held-session start may take it over ([ServeRcPlayerDaemon.openLive]), a held session returns
+   * it, and a lane left on the replay must hold it — when it cannot, [onSeatLost] closes the socket
+   * at capacity.
    */
   private fun carriedRcLiveHost(
     renderHost: ServeHost,
     sessionId: String,
     previewId: String,
+    streamSeat: ServeCarriedRcStreamSeat? = null,
+    onSeatLost: () -> Unit = {},
     onLane: (takesInput: Boolean) -> Unit = {},
     onError: (String) -> Unit,
   ): ServeHost? {
@@ -12529,9 +12536,29 @@ class ServeHttpServer(
         val playerDaemon = livePlayerDaemon(player)
         return ServeCarriedRcLane(
             openHeld = { frames ->
-              if (playerDaemon == null) ServeCarriedRcLane.Attempt.Never("no player daemon")
-              else
-                when (val live = playerDaemon.openLive(base, codec, maxFps, frames)) {
+              if (playerDaemon == null) {
+                if (streamSeat?.ensureCharged() == false) onSeatLost()
+                ServeCarriedRcLane.Attempt.Never("no player daemon")
+              } else {
+                var live = playerDaemon.openLive(base, codec, maxFps, streamSeat, frames)
+                // The other player daemon, idle on the seat a viewer left it warm on, gives it up
+                // for this one's live viewer.
+                if (
+                  live is ServeRcPlayerDaemon.LiveOutcome.Busy &&
+                    live.noSeat &&
+                    releaseIdlePlayerSeats(except = playerDaemon)
+                ) {
+                  live = playerDaemon.openLive(base, codec, maxFps, streamSeat, frames)
+                }
+                // The seat follows what the lane is: a held session is paid for by its daemon's
+                // seat; anything else is (or stays) the replay, which this socket pays for itself.
+                when (live) {
+                  is ServeRcPlayerDaemon.LiveOutcome.Streaming -> streamSeat?.onHeld()
+                  ServeRcPlayerDaemon.LiveOutcome.Warming ->
+                    if (streamSeat?.ensureCharged(startingFor = playerDaemon) == false) onSeatLost()
+                  else -> if (streamSeat?.ensureCharged() == false) onSeatLost()
+                }
+                when (live) {
                   is ServeRcPlayerDaemon.LiveOutcome.Streaming ->
                     ServeCarriedRcLane.Attempt.Held(live.handle)
                   ServeRcPlayerDaemon.LiveOutcome.Warming -> ServeCarriedRcLane.Attempt.NotYet
@@ -12540,6 +12567,7 @@ class ServeHttpServer(
                   is ServeRcPlayerDaemon.LiveOutcome.Unsupported ->
                     ServeCarriedRcLane.Attempt.Never(live.reason)
                 }
+              }
             },
             openReplay = { frames ->
               ServeCarriedRcStream(
@@ -12557,6 +12585,9 @@ class ServeHttpServer(
             },
             onFrame = onFrame,
             onLane = onLane,
+            // Waiting on a start is not charged ([ServeCarriedRcStreamSeat.ensureCharged]); a lane
+            // that stops waiting is the replay, and pays for it.
+            onGaveUp = { if (streamSeat?.ensureCharged() == false) onSeatLost() },
           )
           .also { streams += it }
       }
@@ -12568,6 +12599,34 @@ class ServeHttpServer(
 
       override fun close() {}
     }
+  }
+
+  /**
+   * Ask the player daemons other than [except] to give back a foreground seat they hold with no
+   * viewer ([ServeRcPlayerDaemon.releaseIfIdleForeground]); true when one did.
+   */
+  private fun releaseIdlePlayerSeats(except: ServeRcPlayerDaemon? = null): Boolean =
+    listOfNotNull(rcPlayerDaemon, rcDesktopPlayerDaemon)
+      .filter { it !== except }
+      .map { it.releaseIfIdleForeground() }
+      .any { it }
+
+  /**
+   * The player daemon a carried live lane on [previewId] would ask for a held session: the one for
+   * the player [overrides] names (`rcPlayer`), else for [defaultCarriedRcPlayer].
+   */
+  private fun carriedLaneDaemon(
+    host: ServeHost,
+    previewId: String,
+    overrides: Map<String, String>,
+  ): ServeRcPlayerDaemon? {
+    val players = carriedLivePlayers(host, previewId)
+    if (players.isEmpty()) return null
+    val requested =
+      overrides["rcPlayer"]?.let { RcPlayerBackend.fromWire(ServeRcPlayerIds.normalizeRequest(it)) }
+    val player =
+      requested?.takeIf { it in players } ?: defaultCarriedRcPlayer(host, previewId, players)
+    return livePlayerDaemon(player)
   }
 
   /** The Android player a stream's overrides name, or null when they name none. */
@@ -13252,7 +13311,7 @@ class ServeHttpServer(
       }
       // The extra seat a carried-document stream takes ([carriedRcLiveHost]); released with the
       // lease.
-      var carriedSeat: LiveSeatLimiter.Ticket? = null
+      val carriedSeat = ServeCarriedRcStreamSeat(liveSeats, CARRIED_RC_STREAM_SEAT_WEIGHT)
       try {
         val renderHost = lease.host
         val previewId = call.parameters["name"]
@@ -13279,17 +13338,36 @@ class ServeHttpServer(
             renderHost,
             sessionId,
             previewId,
+            streamSeat = carriedSeat,
+            // A lane left on the replay with no seat free: refused like any viewer at capacity.
+            onSeatLost = {
+              launch {
+                close(CloseReason(1013.toShort(), "live preview at capacity — try again shortly"))
+              }
+            },
             onLane = { takesInput -> send(ServeStreamProtocol.laneMessage(takesInput)) },
           ) { reason ->
             send(ServeStreamProtocol.errorMessage(reason))
           }
         if (carriedHost != null) {
-          carriedSeat =
-            liveSeats.acquire(CARRIED_RC_STREAM_SEAT_WEIGHT, verified = true)
-              ?: run {
-                close(CloseReason(1013.toShort(), "live preview at capacity — try again shortly"))
-                return
-              }
+          val laneDaemon = carriedLaneDaemon(renderHost, previewId, initialOverrides)
+          val admitted =
+            carriedSeat.acquire() ||
+              // Another player's daemon a viewer left warm is holding the seat; this viewer comes
+              // first. Never this lane's own: that is the warm session this viewer may reload onto.
+              (releaseIdlePlayerSeats(except = laneDaemon) && carriedSeat.acquire()) ||
+              // Its player daemon is up or starting, so its held session — paid for by that
+              // daemon's seat — may be this viewer's: admitted without a seat of its own, which
+              // the lane takes ([ServeCarriedRcStreamSeat.ensureCharged]), or closes at capacity
+              // for want of, if it lands on the replay instead. Charging it up front would turn
+              // away a viewer reloading onto the warm daemon they just left.
+              laneDaemon?.holdsSeat == true ||
+              // The last try is the one a refusal is counted on.
+              carriedSeat.acquire(countRefusal = true)
+          if (!admitted) {
+            close(CloseReason(1013.toShort(), "live preview at capacity — try again shortly"))
+            return
+          }
         }
         // Optional stream tuning: codec (WebP is ~30–60% smaller; the daemon falls back to PNG) and
         // an fps cap.
@@ -13360,7 +13438,7 @@ class ServeHttpServer(
           }
         }
       } finally {
-        carriedSeat?.close()
+        carriedSeat.close()
         lease.close()
       }
     } finally {
