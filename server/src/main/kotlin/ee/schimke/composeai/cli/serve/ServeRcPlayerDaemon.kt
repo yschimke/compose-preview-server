@@ -49,6 +49,18 @@ import kotlinx.serialization.json.Json
  * starts it again. A daemon that failed to start is not retried for [failureBackoffMillis], so a
  * broken runtime is not respawned on every poll.
  *
+ * The seat a start takes depends on who asked. A [render] start is background work (it has a
+ * fallback: a resident catalog daemon, or a 503), so it takes the background remainder
+ * ([LiveSeatLimiter.acquireBackground]) and leaves the stream reserve alone. An [openLive] start is
+ * a viewer's interactive stream, which is exactly what that reserve is kept for, so it takes a
+ * foreground seat ([LiveSeatLimiter.acquire]) — and may take over the viewer's own stream seat
+ * (`streamSeat`) to fit, since once held the daemon *is* that stream. On a box whose resident
+ * catalogs fill the background remainder (preview.coo.ee keeps two spare sandboxes and several warm
+ * catalogs), a background-priced live start was refused on every attempt, silently, and the lane
+ * stayed on its input-less replay. A foreground seat is repriced to background once no live session
+ * is open, and when that headroom is not there the daemon closes after [foregroundIdleMillis]
+ * instead of [idleMillis], so it never sits in the stream reserve for long.
+ *
  * The same class fronts the server's **desktop** player daemon ([desktopSubprocess]): a bundle-less
  * `daemon-desktop` with the CMP player's JVM target on its classpath, which plays a carried
  * document in the `cmp-jvm` player. It exists only for [openLive]: the cmp-jvm render lane keeps
@@ -63,6 +75,8 @@ class ServeRcPlayerDaemon(
   /** The live-seat budget the resident daemon holds an Android seat of, or null for none. */
   private val liveSeats: LiveSeatLimiter? = null,
   private val idleMillis: Long = DEFAULT_IDLE_MILLIS,
+  /** How long a daemon on a foreground seat outlives its last live session; see the class doc. */
+  private val foregroundIdleMillis: Long = DEFAULT_FOREGROUND_IDLE_MILLIS,
   private val failureBackoffMillis: Long = DEFAULT_FAILURE_BACKOFF_MILLIS,
   private val clock: () -> Long = System::currentTimeMillis,
   private val onLog: (String) -> Unit = {},
@@ -96,7 +110,14 @@ class ServeRcPlayerDaemon(
      * The daemon plays carried documents live but cannot hold one right now: its one held session
      * is taken, its live seat is refused, or a failed start is inside its backoff. Ask again later.
      */
-    data class Busy(val reason: String) : LiveOutcome
+    data class Busy(
+      val reason: String,
+      /**
+       * Refused only for want of a live seat: another daemon releasing an idle foreground seat
+       * ([releaseIfIdleForeground]) may make room.
+       */
+      val noSeat: Boolean = false,
+    ) : LiveOutcome
 
     /**
      * This daemon never holds a carried document (no [CARRIED_LIVE_CAPABILITY]); replay instead.
@@ -122,6 +143,28 @@ class ServeRcPlayerDaemon(
     val lastError: String? = null,
   )
 
+  /**
+   * The tickets a running daemon's seat is made of: one, or — after a viewer's stream seat was
+   * handed over ([SeatHandOver]) — that ticket plus the rest of the weight. Closed together.
+   */
+  private class Seat(private val tickets: List<LiveSeatLimiter.Ticket>) : AutoCloseable {
+    constructor(ticket: LiveSeatLimiter.Ticket) : this(listOf(ticket))
+
+    override fun close() = tickets.forEach { it.close() }
+  }
+
+  /**
+   * A viewer's own stream seat, offered to a held-session start that would not fit beside it
+   * ([openLive]). [permits] is what [take] would hand over; [take] gives up the ticket for good and
+   * records [daemon] as the one now paying for the stream, or answers null when it has none. Called
+   * under this daemon's lock.
+   */
+  interface SeatHandOver {
+    val permits: Int
+
+    fun take(daemon: ServeRcPlayerDaemon): LiveSeatLimiter.Ticket?
+  }
+
   private sealed interface State {
     data object Idle : State
 
@@ -129,9 +172,14 @@ class ServeRcPlayerDaemon(
 
     class Running(
       val host: ServeHost,
-      val seat: LiveSeatLimiter.Ticket?,
+      var seat: Seat?,
       /** Whether [host]'s daemon holds a live session for a carried document. */
       val playsLive: Boolean,
+      /**
+       * Whether [seat] is a foreground one (taken by [openLive]), which sits in the stream reserve
+       * until [closeIfIdle] reprices it.
+       */
+      var foreground: Boolean,
     ) : State
 
     class Failed(val reason: String, val atMillis: Long) : State
@@ -146,6 +194,9 @@ class ServeRcPlayerDaemon(
   /** Live sessions open on the running daemon; while any is, the daemon is not idle. */
   private var liveSessions = 0
 
+  /** When a live session last opened or closed; a foreground seat's idle clock. */
+  private var lastLiveMillis = 0L
+
   /**
    * Whether this daemon's runtime plays carried documents live, once a start has said; null before
    * the first. The runtime is fixed for the server's life, so it outlives an idle close.
@@ -159,9 +210,13 @@ class ServeRcPlayerDaemon(
 
   init {
     require(players.isNotEmpty()) { "a player-only daemon with no players is no daemon" }
-    val sweep = (idleMillis / 4).coerceIn(1_000, 60_000)
+    val sweep = (minOf(idleMillis, foregroundIdleMillis) / 4).coerceIn(1_000, 60_000)
     executor.scheduleWithFixedDelay(::closeIfIdle, sweep, sweep, TimeUnit.MILLISECONDS)
   }
+
+  /** Whether the daemon holds its live seat now: it is up, or starting. */
+  val holdsSeat: Boolean
+    get() = synchronized(lock) { state is State.Running || state == State.Starting }
 
   /** Whether this daemon can draw [backend] — once started, not whether it is running now. */
   fun offers(backend: RcPlayerBackend): Boolean = backend in players
@@ -180,8 +235,8 @@ class ServeRcPlayerDaemon(
           is State.Failed ->
             return if (clock() - current.atMillis < failureBackoffMillis) {
               Outcome.Unavailable(current.reason)
-            } else start(overrides)
-          State.Idle -> return start(overrides)
+            } else start(overrides, foreground = false)
+          State.Idle -> return start(overrides, foreground = false)
         }
       }
     // A host closed under us (idle, or the server stopping) is a failed render, never a throwable.
@@ -211,11 +266,18 @@ class ServeRcPlayerDaemon(
    * it, and answers [LiveOutcome.Warming]; a daemon without [CARRIED_LIVE_CAPABILITY] answers
    * [LiveOutcome.Unsupported], and one that could not hold the session now (it holds one at a time,
    * or has no seat) answers [LiveOutcome.Busy]. Blocking while `stream/start` runs.
+   *
+   * A cold start here takes a foreground seat (see the class doc). [streamSeat] is the seat the
+   * viewer's stream already holds, if any: when the foreground seat does not fit beside it, the
+   * daemon takes it over as part of its own, since the daemon about to hold the session is that
+   * stream's cost. The hand-over never releases a permit first, so no other admission can slip in
+   * between and leave the viewer's stream uncounted.
    */
   fun openLive(
     overrides: PreviewOverrides,
     codec: StreamCodec?,
     maxFps: Int?,
+    streamSeat: SeatHandOver? = null,
     onFrame: (StreamFrameParams) -> Unit,
   ): LiveOutcome {
     val host =
@@ -232,8 +294,9 @@ class ServeRcPlayerDaemon(
           // Starting a daemon known not to hold a carried document would only warm the replay.
           playsLiveKnown == false -> return LiveOutcome.Unsupported(noLiveDocuments())
           else ->
-            return when (val started = start(overrides)) {
-              is Outcome.Unavailable -> LiveOutcome.Busy(started.reason)
+            return when (val started = start(overrides, foreground = true, streamSeat)) {
+              is Outcome.Unavailable ->
+                LiveOutcome.Busy(started.reason, noSeat = started.reason == noSeat())
               else -> LiveOutcome.Warming
             }
         }
@@ -253,7 +316,10 @@ class ServeRcPlayerDaemon(
         unavailable = "the $label closed: ${e.message}"
         null
       } ?: return LiveOutcome.Busy(unavailable ?: "the $label did not hold a live session")
-    synchronized(lock) { liveSessions++ }
+    synchronized(lock) {
+      liveSessions++
+      lastLiveMillis = clock()
+    }
     return LiveOutcome.Streaming(LiveSession(handle))
   }
 
@@ -286,18 +352,34 @@ class ServeRcPlayerDaemon(
         liveSessions--
         // The idle clock restarts when the last viewer leaves, not when it arrived.
         lastUsedMillis = clock()
+        lastLiveMillis = lastUsedMillis
       }
     }
   }
 
-  /** Start the daemon off the request thread, rendering [overrides] as its warm-up. */
-  private fun start(overrides: PreviewOverrides): Outcome {
+  /**
+   * Start the daemon off the request thread, rendering [overrides] as its warm-up. Caller holds
+   * [lock]. [foreground]: a viewer's [openLive] asked, so the seat is a foreground one, and
+   * [streamSeat] may be given up for it (see [openLive]).
+   */
+  private fun start(
+    overrides: PreviewOverrides,
+    foreground: Boolean,
+    streamSeat: SeatHandOver? = null,
+  ): Outcome {
     // A resident daemon costs what a catalog's of the same backend does, so it holds that seat (an
-    // Android one for Robolectric). A background acquire: a player is an extra lane, and must never
-    // take an interactive stream's.
-    val seat = liveSeats?.let {
-      it.acquireBackground(seatWeight, dedicatedSlice = false)
-        ?: return Outcome.Unavailable("no live seat is free for the $label")
+    // Android one for Robolectric).
+    val seat = liveSeats?.let { seats ->
+      val ticket =
+        if (foreground) acquireForeground(seats, streamSeat)
+        else seats.acquireBackground(seatWeight, dedicatedSlice = false)?.let(::Seat)
+      ticket
+        ?: return Outcome.Unavailable(noSeat()).also {
+          // Said once per reason, so a lane asking every few seconds does not flood the log, and
+          // kept for `/status`, which otherwise reads "idle, renders 0, no error".
+          if (lastError != it.reason) onLog(it.reason)
+          lastError = it.reason
+        }
     }
     state = State.Starting
     executor.execute {
@@ -329,24 +411,89 @@ class ServeRcPlayerDaemon(
       playsLiveKnown = playsLive
       synchronized(lock) {
         renders++
+        // A seat refusal said why the daemon was not running; now it is, that is stale.
+        if (lastError == noSeat()) lastError = null
         if (warm is RenderOutcome.Failed) lastError = warm.reason
         lastUsedMillis = clock()
-        state = State.Running(host, seat, playsLive)
+        lastLiveMillis = lastUsedMillis
+        state = State.Running(host, seat, playsLive, foreground = foreground && seat != null)
       }
     }
     return Outcome.Warming
   }
 
-  /** Close a daemon nobody has asked for in [idleMillis]; the next [render] starts it again. */
-  internal fun closeIfIdle() {
+  /**
+   * A foreground seat for a viewer's held session: from the general lane, without the stream
+   * headroom [LiveSeatLimiter.acquireBackground] keeps (this *is* the stream it keeps it for). When
+   * that does not fit, the viewer's own stream seat makes up part of it: the rest of the weight is
+   * acquired first, and only then is the viewer's ticket taken over — nothing is released in
+   * between, so a refusal leaves the viewer's seat exactly as it was. Not counted as a refusal: the
+   * lane keeps its replay, and asks again.
+   */
+  private fun acquireForeground(seats: LiveSeatLimiter, streamSeat: SeatHandOver?): Seat? {
+    seats.acquire(seatWeight, countRefusal = false)?.let {
+      return Seat(it)
+    }
+    val own = streamSeat?.permits?.takeIf { it > 0 } ?: return null
+    // A weight at or under what the viewer holds needs nothing more (`acquire(0)` is free).
+    val rest =
+      seats.acquire((seatWeight - own).coerceAtLeast(0), countRefusal = false) ?: return null
+    val taken =
+      streamSeat.take(this)
+        ?: run {
+          rest.close()
+          return null
+        }
+    return Seat(listOf(rest, taken))
+  }
+
+  /**
+   * Close the daemon now if it sits on a foreground seat with no live session open — a viewer left
+   * it warm for a reload — so a stream that needs that seat gets it. True when a seat was returned.
+   */
+  fun releaseIfIdleForeground(): Boolean {
     val running =
       synchronized(lock) {
-        val current = state as? State.Running ?: return
-        if (liveSessions > 0 || clock() - lastUsedMillis < idleMillis) return
+        val current = state as? State.Running ?: return false
+        if (!current.foreground || liveSessions > 0) return false
         state = State.Idle
         current
       }
-    onLog("$label idle for ${idleMillis / 1000}s; closing")
+    onLog("$label closing early: a viewer needs the live seat it was keeping warm")
+    running.release()
+    return true
+  }
+
+  /**
+   * Close a daemon nobody has asked for in [idleMillis]; the next [render] starts it again. A
+   * daemon on a foreground seat with no live session open is first repriced to a background seat;
+   * when the box has no background headroom it closes once [foregroundIdleMillis] has passed since
+   * its last live session, so a viewer who left does not keep the stream reserve.
+   */
+  internal fun closeIfIdle() {
+    var idleFor = idleMillis
+    val running =
+      synchronized(lock) {
+        val current = state as? State.Running ?: return
+        if (liveSessions > 0) return
+        if (current.foreground) {
+          val repriced =
+            liveSeats?.acquireBackground(seatWeight, dedicatedSlice = false)?.let(::Seat)
+          if (repriced != null) {
+            current.seat?.close()
+            current.seat = repriced
+            current.foreground = false
+          } else if (clock() - lastLiveMillis >= foregroundIdleMillis) {
+            idleFor = foregroundIdleMillis
+            state = State.Idle
+            return@synchronized current
+          }
+        }
+        if (clock() - lastUsedMillis < idleMillis) return
+        state = State.Idle
+        current
+      }
+    onLog("$label idle for ${idleFor / 1000}s; closing")
     running.release()
   }
 
@@ -376,6 +523,8 @@ class ServeRcPlayerDaemon(
       }
     running?.release()
   }
+
+  private fun noSeat(): String = "no live seat is free for the $label"
 
   private fun noLiveDocuments(): String =
     "this $label cannot hold a carried document live (it does not advertise " +
@@ -427,6 +576,12 @@ class ServeRcPlayerDaemon(
 
     /** Close after five idle minutes: a player lane is bursty, and a cold start costs ~15 s. */
     const val DEFAULT_IDLE_MILLIS: Long = 5 * 60_000L
+
+    /**
+     * How long a daemon still on a foreground seat (no background headroom to reprice into) waits
+     * after its last live session: long enough for a reload to find it warm.
+     */
+    const val DEFAULT_FOREGROUND_IDLE_MILLIS: Long = 60_000L
 
     const val DEFAULT_FAILURE_BACKOFF_MILLIS: Long = 60_000L
 
