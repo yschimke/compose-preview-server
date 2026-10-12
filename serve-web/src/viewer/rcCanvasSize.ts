@@ -16,6 +16,12 @@ export const RC_FALLBACK_DP: PixelSize = { width: 360, height: 640 };
 /** How long the lane waits for the snapshot to decode before falling back. */
 export const RC_SNAPSHOT_WAIT_MS = 15000;
 
+/**
+ * How long the lane waits for the snapshot when the document declares its own size to fall back
+ * on: short, since the header size is usable at once and a late snapshot re-fits the canvas.
+ */
+export const RC_SNAPSHOT_HEADER_WAIT_MS = 3000;
+
 /** How long a lane that fell back keeps listening for the snapshot so it can re-fit. */
 export const RC_SNAPSHOT_REFIT_MS = 120000;
 
@@ -224,4 +230,28 @@ export function rcWasmDensity(
 /** A density as a plain decimal (no exponent), to four places, without trailing zeros. */
 export function formatRcDensity(density: number): string {
     return String(Number(density.toFixed(4)));
+}
+
+/**
+ * Whether the image on stage still shows the preview at its captured layout, so its size can stand
+ * for the document's viewport. [renderedUrl] is the `/render` URL its bytes came from
+ * (`data-cp-src`), absent for the page's own baked snapshot. A render under a layout-changing
+ * override — a device, an orientation, or any `…Px` size bound — is a different viewport from the
+ * base `.rc` the canvas lane plays, so it is not.
+ */
+export function snapshotKeepsCapturedLayout(
+    renderedUrl: string | null,
+): boolean {
+    if (!renderedUrl) return true;
+    var q = renderedUrl.indexOf("?");
+    if (q < 0) return true;
+    var keys = renderedUrl
+        .slice(q + 1)
+        .split("&")
+        .map(function (pair) {
+            return decodeURIComponent(pair.split("=")[0] || "");
+        });
+    return !keys.some(function (key) {
+        return key === "device" || key === "orientation" || /Px$/.test(key);
+    });
 }

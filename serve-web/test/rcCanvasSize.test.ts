@@ -11,6 +11,7 @@ import {
     rcDocumentSize,
     rcLaneDensity,
     rcWasmDensity,
+    snapshotKeepsCapturedLayout,
     whenImageSized,
 } from "../src/viewer/rcCanvasSize.js";
 
@@ -321,5 +322,33 @@ describe("formatRcDensity", () => {
         assert.equal(formatRcDensity(1), "1");
         assert.equal(formatRcDensity(2.75 * (279 / 558)), "1.375");
         assert.equal(formatRcDensity(1 / 3), "0.3333");
+    });
+});
+
+describe("snapshotKeepsCapturedLayout", () => {
+    it("trusts the baked snapshot and renders without layout overrides", () => {
+        assert.equal(snapshotKeepsCapturedLayout(null), true);
+        assert.equal(snapshotKeepsCapturedLayout("/render/x.png"), true);
+        assert.equal(
+            snapshotKeepsCapturedLayout(
+                "/render/x.png?rcPlayer=cmp-android&uiMode=dark&fontScale=1.3",
+            ),
+            true,
+        );
+    });
+
+    it("refuses renders under a size, device or orientation override", () => {
+        for (const q of [
+            "widthPx=300&heightPx=150",
+            "maxWidthPx=400",
+            "device=id%3Apixel_5",
+            "orientation=landscape",
+        ]) {
+            assert.equal(
+                snapshotKeepsCapturedLayout("/render/x.png?" + q),
+                false,
+                q,
+            );
+        }
     });
 });
