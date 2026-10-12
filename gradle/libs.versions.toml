@@ -435,8 +435,9 @@ composeai-ui-builder = "3.108.0"
 # viewer's `cmp-wasm` lane, and offers the CMP player beside the TypeScript one on a `/d/<id>` page.
 # 2.4.0 brings 2.3.0's postMessage driver (the player embeds cross-origin), `rcPlayerLoadBytes`,
 # vendored variable fonts, draw-list sounds and per-frame redraw of clock-driven canvases, then
-# 2.4.0's StateLayout enter/exit and shared elements matched by their AnimationSpec id.
-rc-players = "2.8.0"
+# 2.4.0's StateLayout enter/exit and shared elements matched by their AnimationSpec id. 2.9.0
+# takes `?density=` (CSS px per dp), which the viewer sends so the lane draws at the preview's scale.
+rc-players = "2.9.0"
 # The Android Remote Compose players the server's own player-only Android daemon replays documents
 # with, staged as `lib-rc-players-android/` (`stageRcPlayersAndroidLibs`). The Android daemon
 # sidecar deliberately ships none of this family (a consumer brings it, compose-preview-daemon's
