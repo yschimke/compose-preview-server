@@ -445,7 +445,7 @@ rc-players = "2.9.0"
 # `rc-players-android` is the rc-players release (its BOM) the daemon's connector is built against,
 # and `compose-remote` is the AndroidX line that release's embedded player depends on; move them
 # together.
-rc-players-android = "2.8.0"
+rc-players-android = "2.9.0"
 compose-remote = "1.0.0-alpha19"
 # The TypeScript player's browser bundle (`remote-compose-player-js-dist`, a zip with the `dist`
 # classifier). Its own ref because rc-players publishes only the modules a release changed: the
