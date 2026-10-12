@@ -12439,12 +12439,15 @@ class ServeHttpServer(
    *
    * Everything but the stream is [renderHost]'s, and closing the wrapper closes nothing: the
    * socket's lease owns the host. [onError] is the socket's, for a stream whose render fails;
-   * [onLane] is told whether the lane forwards input each time that changes.
+   * [onLane] is told whether the lane forwards input each time that changes. [streamSeat] is the
+   * seat the socket took for this stream, which a cold player daemon's held-session start may take
+   * over ([ServeRcPlayerDaemon.openLive]).
    */
   private fun carriedRcLiveHost(
     renderHost: ServeHost,
     sessionId: String,
     previewId: String,
+    streamSeat: () -> LiveSeatLimiter.Ticket? = { null },
     onLane: (takesInput: Boolean) -> Unit = {},
     onError: (String) -> Unit,
   ): ServeHost? {
@@ -12509,7 +12512,20 @@ class ServeHttpServer(
             openHeld = { frames ->
               if (playerDaemon == null) ServeCarriedRcLane.Attempt.Never("no player daemon")
               else
-                when (val live = playerDaemon.openLive(base, codec, maxFps, frames)) {
+                when (
+                  val live =
+                    playerDaemon.openLive(base, codec, maxFps, streamSeat, frames).let { first ->
+                      // The other player daemon, idle on the seat a viewer left it warm on, gives
+                      // it up for this one's live viewer.
+                      if (
+                        first is ServeRcPlayerDaemon.LiveOutcome.Busy &&
+                          first.noSeat &&
+                          releaseIdlePlayerSeats(except = playerDaemon)
+                      )
+                        playerDaemon.openLive(base, codec, maxFps, streamSeat, frames)
+                      else first
+                    }
+                ) {
                   is ServeRcPlayerDaemon.LiveOutcome.Streaming ->
                     ServeCarriedRcLane.Attempt.Held(live.handle)
                   ServeRcPlayerDaemon.LiveOutcome.Warming -> ServeCarriedRcLane.Attempt.NotYet
@@ -12546,6 +12562,35 @@ class ServeHttpServer(
 
       override fun close() {}
     }
+  }
+
+  /**
+   * Ask the player daemons other than [except] to give back a foreground seat they hold with no
+   * viewer ([ServeRcPlayerDaemon.releaseIfIdleForeground]); true when one did.
+   */
+  private fun releaseIdlePlayerSeats(except: ServeRcPlayerDaemon? = null): Boolean =
+    listOfNotNull(rcPlayerDaemon, rcDesktopPlayerDaemon)
+      .filter { it !== except }
+      .map { it.releaseIfIdleForeground() }
+      .any { it }
+
+  /**
+   * Whether the player daemon a carried live lane on [previewId] would play on — the player
+   * [overrides] names (`rcPlayer`), else [defaultCarriedRcPlayer] — is up or starting, and so
+   * already holds its seat.
+   */
+  private fun carriedLaneDaemonHoldsSeat(
+    host: ServeHost,
+    previewId: String,
+    overrides: Map<String, String>,
+  ): Boolean {
+    val players = carriedLivePlayers(host, previewId)
+    if (players.isEmpty()) return false
+    val requested =
+      overrides["rcPlayer"]?.let { RcPlayerBackend.fromWire(ServeRcPlayerIds.normalizeRequest(it)) }
+    val player =
+      requested?.takeIf { it in players } ?: defaultCarriedRcPlayer(host, previewId, players)
+    return livePlayerDaemon(player)?.holdsSeat == true
   }
 
   /** The Android player a stream's overrides name, or null when they name none. */
@@ -13257,13 +13302,28 @@ class ServeHttpServer(
             renderHost,
             sessionId,
             previewId,
+            // Read when a held session is first asked for, after the seat below is taken.
+            streamSeat = { carriedSeat },
             onLane = { takesInput -> send(ServeStreamProtocol.laneMessage(takesInput)) },
           ) { reason ->
             send(ServeStreamProtocol.errorMessage(reason))
           }
-        if (carriedHost != null) {
+        // …unless the player daemon it will play on is up or starting: that daemon holds its seat,
+        // and a held session on it is the cost that seat stands for. Charging the stream again
+        // would turn away a viewer reloading the page while the daemon they just left is still
+        // warm on the stream reserve ([ServeRcPlayerDaemon.openLive]).
+        if (
+          carriedHost != null &&
+            !carriedLaneDaemonHoldsSeat(renderHost, previewId, initialOverrides)
+        ) {
           carriedSeat =
-            liveSeats.acquire(CARRIED_RC_STREAM_SEAT_WEIGHT, verified = true)
+            liveSeats.acquire(CARRIED_RC_STREAM_SEAT_WEIGHT, verified = true, countRefusal = false)
+              // A player daemon a viewer left warm is holding the seat; this viewer comes first.
+              ?: liveSeats
+                .takeIf { releaseIdlePlayerSeats() }
+                ?.acquire(CARRIED_RC_STREAM_SEAT_WEIGHT, verified = true, countRefusal = false)
+              // The last try is the one a refusal is counted on.
+              ?: liveSeats.acquire(CARRIED_RC_STREAM_SEAT_WEIGHT, verified = true)
               ?: run {
                 close(CloseReason(1013.toShort(), "live preview at capacity — try again shortly"))
                 return

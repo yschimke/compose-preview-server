@@ -281,10 +281,11 @@ class ServeCarriedRcLiveLaneTest {
   fun `a seatless player daemon streams on a resident catalog daemon instead`() {
     registry.register("remote-catalog", host = donorCatalog, pinned = true)
     // As in [ServeRcPlayerDaemonLaneTest]: the daemon's background seat is refused, a stream's
-    // one-permit seat is not.
+    // one-permit seat is not — and nor is the foreground seat a held session would start it on,
+    // even with the stream's seat given up ([ServeRcPlayerDaemon.openLive]).
     val seats =
       LiveSeatLimiter(totalPermits = 8).also {
-        assertNotNull(it.acquire(4))
+        assertNotNull(it.acquire(6))
         assertEquals(
           null,
           it.acquireBackground(ServeBundleDaemon.ANDROID_LIVE_SEAT_WEIGHT, dedicatedSlice = false),
