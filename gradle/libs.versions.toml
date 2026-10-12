@@ -135,7 +135,7 @@ graphics-shapes = "1.1.0"
 # also adds the engine's `GuidelineCredentials` and `OpenAiCompatibleClient`, which
 # `check_preview_guidelines` uses (compose-ai-tools#5833, #5846).
 # 2.50.0 moves with compose-ui-builder 3.107.0 and contracts 3.30.0 below.
-composeai-tools = "2.53.0"
+composeai-tools = "2.54.0"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
 # in that repository's `docs/design/REPOSITORY_LAYERS.md`: between the contracts and
