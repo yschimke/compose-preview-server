@@ -22,9 +22,10 @@
   .muted { color: var(--color-text-secondary, #666); font-size: 12px; }
   .canvas { min-height: 120px; border: 1px solid var(--color-border, #d8d8dd); border-radius: 10px; background: var(--color-background-secondary, #f8f8fa); display: grid; place-items: center; overflow: auto; }
   .canvas.has-image { min-height: 0; overflow: hidden; }
-  /* Actual size: the image at its own pixels, scrolled inside the canvas at the height the fitted
-     image had (--zoom-height), so the frame does not jump. See the #zoom handler. */
-  .canvas.has-image.zoomed { display: block; height: var(--zoom-height, auto); overflow: auto; text-align: center; }
+  /* Actual size: the image at its own pixels and its full height, so the whole render shows and
+     the frame grows to it (or the page scrolls). Only a render wider than the card scrolls
+     sideways in the canvas. See the #zoom handler. */
+  .canvas.has-image.zoomed { display: block; overflow-x: auto; overflow-y: hidden; text-align: center; }
   .canvas.zoomed .preview-stage, .canvas.zoomed img { max-width: none; max-height: none; }
   .bar #zoom { flex: none; padding: 2px 8px; font-size: 12px; }
   #meta.error { color: var(--color-text-danger, #c5221f); font-weight: 650; }
@@ -2205,12 +2206,10 @@
     const scaled = !!image?.dataset.renderWidth;
     // Offer Actual size only while the fit drew the image smaller than its own pixels.
     zoom.hidden = !image || (!zoomed && !(size.width > image.getBoundingClientRect().width + 1));
-    // Zoomed, the canvas keeps the height it had, so the fit and the size asked for stand.
+    // Zoomed, the image takes its own height and the frame is asked for all of the content.
     if (image && zoomed) {
       if (scaled) image.style.width = `${size.width}px`;
-      return;
-    }
-    if (image) {
+    } else if (image) {
       const shown = image.getBoundingClientRect().height;
       const chrome = Math.max(0, firstScreenBottom - shown);
       const imageMax = Math.max(32, Math.floor(frame - chrome));
@@ -3861,10 +3860,9 @@
       : startViewer();
   // A host may hold the card to a short frame (Antigravity shows a static card at a fixed height),
   // so the fitted image can be well under its own size. Actual size draws it at its own pixels and
-  // scrolls it inside the canvas; Fit goes back.
+  // full height, growing the frame (or letting the page scroll); Fit goes back.
   zoom.addEventListener('click', () => {
     const on = !canvas.classList.contains('zoomed');
-    if (on) canvas.style.setProperty('--zoom-height', `${canvas.clientHeight}px`);
     canvas.classList.toggle('zoomed', on);
     zoom.setAttribute('aria-pressed', String(on));
     zoom.textContent = on ? 'Fit' : 'Actual size';
