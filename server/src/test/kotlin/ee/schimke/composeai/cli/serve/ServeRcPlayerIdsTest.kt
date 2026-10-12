@@ -47,7 +47,11 @@ class ServeRcPlayerIdsTest {
     assertEquals(ids.distinct(), ids, "no two backends share an id")
     for (backend in RcPlayerBackend.UNIVERSE) {
       val id = ServeRcPlayerIds.of(backend)
-      assertTrue(ServeRcPlayerIds.UNIVERSE.any { it.id == id }, "$backend → $id is offered")
+      // Offered on a host that can run it: swift-appkit is only listed on Apple silicon.
+      assertTrue(
+        ServeRcPlayerIds.universe(swiftAppKitHost = true).any { it.id == id },
+        "$backend → $id is offered",
+      )
       assertEquals(backend.playerKind, ServeRcPlayerIds.playerKindOf(id), "$backend → $id")
     }
     // The pinned release spells the EMBEDDED backend `cmp-android`; this server never does.
@@ -101,7 +105,21 @@ class ServeRcPlayerIdsTest {
     for (v in listOf("camaelon-js", "cmp-wasm", "androidx-embedded", "cmp-android", null)) {
       assertNull(ServeRcPlayerIds.subprocessLaneOf(v), v)
     }
-    assertTrue(ServeRcPlayerIds.UNIVERSE.any { it.id == "swift-appkit" && it.serverSide })
+  }
+
+  @Test
+  fun `swift-appkit is listed only on a host that can run it`() {
+    assertTrue(
+      ServeRcPlayerIds.universe(swiftAppKitHost = true).any {
+        it.id == "swift-appkit" && it.serverSide
+      }
+    )
+    assertFalse(ServeRcPlayerIds.universe(swiftAppKitHost = false).any { it.id == "swift-appkit" })
+    assertEquals(
+      ServeRcPlayerIds.universe(swiftAppKitHost = false),
+      ServeRcPlayerIds.universe(swiftAppKitHost = true).filterNot { it.id == "swift-appkit" },
+      "nothing else depends on the host",
+    )
   }
 
   // ---- cmp-android capability: read from the bundle manifest's classpath ----------------------

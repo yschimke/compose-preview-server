@@ -40,19 +40,25 @@ internal object ServeRcPlayerIds {
   data class Player(val id: String, val label: String, val serverSide: Boolean)
 
   /**
-   * Every player the viewer lists, in display order (browser, daemon, desktop subprocess);
-   * unreported ones are listed disabled.
+   * Every player the viewer lists on this host, in display order (browser, daemon, desktop
+   * subprocess); unreported ones are listed disabled.
+   *
+   * [SWIFT_APPKIT] is listed only on a host that can run it at all (macOS on Apple silicon,
+   * [RcSwiftServerRenderer.isSupportedHost]). Anywhere else it is not an unavailable option but no
+   * option: a Linux deployment, and `compose-preview browse` on Linux, never offer it.
    */
-  val UNIVERSE: List<Player> =
-    listOf(
-      Player(CAMAELON_JS, "Camaelon JS", serverSide = false),
-      Player(CMP_WASM, "CMP Wasm", serverSide = false),
-      Player(ANDROIDX_VIEW, "AndroidX View", serverSide = true),
-      Player(ANDROIDX_EMBEDDED, "AndroidX Embedded", serverSide = true),
-      Player(CMP_ANDROID, "CMP Android", serverSide = true),
-      Player(CMP_JVM, "CMP JVM", serverSide = true),
-      Player(SWIFT_APPKIT, "Swift AppKit", serverSide = true),
-    )
+  val UNIVERSE: List<Player> = universe(swiftAppKitHost = RcSwiftServerRenderer.isSupportedHost())
+
+  /** [UNIVERSE] for a host that can ([swiftAppKitHost]) or cannot run the Swift AppKit player. */
+  internal fun universe(swiftAppKitHost: Boolean): List<Player> = buildList {
+    add(Player(CAMAELON_JS, "Camaelon JS", serverSide = false))
+    add(Player(CMP_WASM, "CMP Wasm", serverSide = false))
+    add(Player(ANDROIDX_VIEW, "AndroidX View", serverSide = true))
+    add(Player(ANDROIDX_EMBEDDED, "AndroidX Embedded", serverSide = true))
+    add(Player(CMP_ANDROID, "CMP Android", serverSide = true))
+    add(Player(CMP_JVM, "CMP JVM", serverSide = true))
+    if (swiftAppKitHost) add(Player(SWIFT_APPKIT, "Swift AppKit", serverSide = true))
+  }
 
   private val CANONICAL: Set<String> = UNIVERSE.mapTo(mutableSetOf()) { it.id }
 
