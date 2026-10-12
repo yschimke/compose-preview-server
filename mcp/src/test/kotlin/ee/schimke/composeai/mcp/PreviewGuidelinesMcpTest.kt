@@ -1,6 +1,7 @@
 package ee.schimke.composeai.mcp
 
 import com.google.common.truth.Truth.assertThat
+import ee.schimke.composeai.guidelines.CatalogGuidelinesLoader
 import ee.schimke.composeai.guidelines.GuidelineCredentials
 import ee.schimke.composeai.guidelines.GuidelineModel
 import ee.schimke.composeai.guidelines.ModelResponse
@@ -24,6 +25,20 @@ import kotlinx.serialization.json.put
 import org.junit.Test
 
 class PreviewGuidelinesMcpTest {
+  private companion object {
+    /** Stands in for the fetched packs: one widget rule on the Wear widget profile. */
+    const val WIDGET_PACK =
+      """
+      {"schema":"compose-ui-builder/catalog-guidelines/v1","catalog":"default-wear-widgets",
+       "platform":"wear","version":1,
+       "rules":[{"id":"wear.widgets.background-on-container","kind":"structure",
+         "severity":"warning","surfaces":["widget"],"profiles":["wear-widgets"],
+         "guidance":"Set the background on the widget document.",
+         "check":"Is the background set on the widget document?",
+         "source":"https://developer.android.com/x"}]}
+      """
+  }
+
   private val projectRoot: File = Files.createTempDirectory("project").toFile()
 
   private val buildDir: File =
@@ -75,8 +90,18 @@ class PreviewGuidelinesMcpTest {
     val trustedRoots: Set<File> = emptySet(),
     /** Keys stored per endpoint origin, as `guidelines key set --for` would. */
     val endpointKeys: Map<String, String> = emptyMap(),
+    /** The module build directory; one without a guidelines file asks the default packs. */
+    val dir: File = buildDir,
   ) : PreviewGuidelinesMcp.Host {
     val model = FakeModel()
+
+    /** The catalog text the default guidelines were asked for; no pack is fetched. */
+    var defaultCatalog: String? = null
+
+    override fun loadDefaultGuidelines(text: String): CatalogGuidelinesLoader.Loaded {
+      defaultCatalog = text
+      return CatalogGuidelinesLoader.parse(WIDGET_PACK)
+    }
 
     /** The (base URL, key) each endpoint client was made for. */
     val endpoints = mutableListOf<Pair<String, String?>>()
@@ -102,7 +127,7 @@ class PreviewGuidelinesMcpTest {
           "compose-preview://w/:app/$ref",
           "com.example.$ref",
           ref,
-          buildDir,
+          dir,
           projectRoot,
         )
 
@@ -137,6 +162,21 @@ class PreviewGuidelinesMcpTest {
 
     override fun model(key: String): GuidelineModel = model
   }
+
+  /** A module with a manifest but no guidelines: what a plain app module discovers. */
+  private fun moduleWithoutGuidelines(vararg entries: String): File =
+    Files.createTempDirectory("no-guidelines").toFile().also { dir ->
+      File(dir, "compose-previews").mkdirs()
+      File(dir, "compose-previews/previews.json")
+        .writeText("""{"module": "app", "previews": [${entries.joinToString()}]}""")
+    }
+
+  private fun wearWidget(name: String) =
+    """{"id": "com.example.$name", "params": {"device": null,
+       "previewParameterProviderClassName": "androidx.glance.wear.preview.RoundAllWidgetPreviewParams"}}"""
+
+  private fun phoneScreen(name: String) =
+    """{"id": "com.example.$name", "params": {"device": "id:pixel_9"}}"""
 
   private fun args(vararg previews: String, extra: Map<String, Double> = emptyMap()) =
     JsonObject(
@@ -198,6 +238,107 @@ class PreviewGuidelinesMcpTest {
     assertThat(provenance("surface" to "component")).contains("surface `component`")
     // A preview the manifest does not list is a component, as before.
     assertThat(host.manifestEntry(host.resolve("Stop")!!)).isNull()
+  }
+
+  @Test
+  fun `a module that publishes no guidelines is asked the default packs for its previews`() {
+    val host = FakeHost(key = null, dir = moduleWithoutGuidelines(wearWidget("Weather")))
+    val result = PreviewGuidelinesMcp.prompt(args("Weather"), host)
+    assertThat(result.isError).isNull()
+    // A Glance Wear widget is asked what remote-m3-catalog's Wear widget catalog includes.
+    val catalog =
+      kotlinx.serialization.json.Json.parseToJsonElement(host.defaultCatalog!!).jsonObject
+    assertThat(catalog["platform"]!!.jsonPrimitive.content).isEqualTo("wear")
+    assertThat(catalog["includes"]!!.jsonArray.map { it.jsonObject["url"]!!.jsonPrimitive.content })
+      .containsExactly(
+        DefaultGuidelinePacks.Pack.REMOTE_COMPOSE.url,
+        DefaultGuidelinePacks.Pack.WEAR_WIDGETS.url,
+      )
+      .inOrder()
+    assertThat(
+        catalog["includes"]!!.jsonArray.map { it.jsonObject["sha256"]!!.jsonPrimitive.content }
+      )
+      .containsExactly(
+        DefaultGuidelinePacks.Pack.REMOTE_COMPOSE.sha256,
+        DefaultGuidelinePacks.Pack.WEAR_WIDGETS.sha256,
+      )
+      .inOrder()
+    val texts = result.content.filterIsInstance<ContentBlock.Text>().map { it.text }
+    assertThat(texts.last())
+      .contains("publishes no ui-builder.guidelines.json, so these are the default wear-widgets")
+    assertThat(texts.last()).contains("surface `widget`, profile `wear-widgets`")
+  }
+
+  @Test
+  fun `the default packs follow the preview's surface and device`() {
+    fun choice(entry: String) =
+      kotlinx.serialization.json.Json.parseToJsonElement(entry).jsonObject.let {
+        DefaultGuidelinePacks.choose(ee.schimke.composeai.guidelines.GuidelineSurfaces.of(it), it)
+      }
+    assertThat(choice(wearWidget("W")).packs)
+      .containsExactly(
+        DefaultGuidelinePacks.Pack.REMOTE_COMPOSE,
+        DefaultGuidelinePacks.Pack.WEAR_WIDGETS,
+      )
+    assertThat(choice("""{"id": "a", "params": {"device": "id:wearos_small_round"}}""").packs)
+      .containsExactly(
+        DefaultGuidelinePacks.Pack.COMPOSE_UI,
+        DefaultGuidelinePacks.Pack.WEAR_COMPOSE,
+      )
+      .inOrder()
+    assertThat(choice(phoneScreen("P")).packs)
+      .containsExactly(DefaultGuidelinePacks.Pack.COMPOSE_UI)
+    assertThat(choice("""{"id": "g", "params": {"kind": "GLANCE_APPWIDGET"}}""").packs)
+      .containsExactly(DefaultGuidelinePacks.Pack.LAUNCHER_WIDGETS)
+    assertThat(DefaultGuidelinePacks.choose(null, null).packs)
+      .containsExactly(DefaultGuidelinePacks.Pack.COMPOSE_UI)
+  }
+
+  @Test
+  fun `previews needing different default packs are asked in separate calls`() {
+    val host =
+      FakeHost(
+        key = null,
+        dir = moduleWithoutGuidelines(wearWidget("Weather"), phoneScreen("Home")),
+      )
+    val text = errorText(PreviewGuidelinesMcp.prompt(args("Weather", "Home"), host))
+    assertThat(text).contains("need different default guidelines")
+    assertThat(text).contains("wear-widgets (remote-compose + wear-widgets")
+    assertThat(text).contains("compose-ui (compose-ui")
+    assertThat(host.defaultCatalog).isNull()
+  }
+
+  @Test
+  fun `guidelines that ask a preview nothing say which would`() {
+    // wear-compose's rules are all screen rules; a Wear widget was asked none of them (#149).
+    val screens =
+      File(Files.createTempDirectory("screen-rules").toFile(), "ui-builder.guidelines.json").apply {
+        writeText(
+          """
+            {"schema":"compose-ui-builder/catalog-guidelines/v1","catalog":"wear-compose",
+             "platform":"wear","version":1,
+             "rules":[{"id":"margins","kind":"visual","severity":"warning","surfaces":["screen"],
+               "guidance":"Use proportional margins.","check":"Are margins proportional?",
+               "source":"https://developer.android.com/x"}]}
+            """
+        )
+      }
+    val host = FakeHost(key = "sk-or-test", dir = moduleWithoutGuidelines(wearWidget("Weather")))
+    val call =
+      JsonObject(
+        mapOf(
+          "previews" to JsonArray(listOf(JsonPrimitive("Weather"))),
+          "guidelines" to JsonPrimitive(screens.path),
+        )
+      )
+    val text = errorText(PreviewGuidelinesMcp.prompt(call, host))
+    assertThat(text).contains("applies to surface `widget`, profile `wear-widgets`")
+    assertThat(text).contains("wear-widgets (remote-compose + wear-widgets")
+    // The check still answers, with the same pointer as a note.
+    val check = PreviewGuidelinesMcp.check(call, host)
+    assertThat(check.isError).isNull()
+    assertThat(check.structuredContent!!["notes"]!!.jsonArray.single().jsonPrimitive.content)
+      .contains("wear-widgets (remote-compose + wear-widgets")
   }
 
   @Test
