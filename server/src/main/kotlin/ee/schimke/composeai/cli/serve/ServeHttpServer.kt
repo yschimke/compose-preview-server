@@ -12076,7 +12076,11 @@ class ServeHttpServer(
             .firstOrNull {
               host.hasRemoteComposeDoc(it.id) &&
                 host.canRenderOverridesFor(it.id) &&
-                backend in host.enabledRcPlayersFor(it.id)
+                // A catalog also offers players it only has staged or baked captures of; lending
+                // the daemon needs one it can link.
+                backend in
+                  (if (host is ServeCatalogLiveHost) host.daemonRcPlayersFor(it.id)
+                  else host.enabledRcPlayersFor(it.id))
             }
             ?.id
         }
