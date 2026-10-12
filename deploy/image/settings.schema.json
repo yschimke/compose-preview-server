@@ -41,6 +41,21 @@
             "playground"
           ]
         },
+        "importOrigins": {
+          "description": "Sites whose seed documents a signed-in person may start a UI-builder design from, at `/ui-builder/import?url=<seed URL on that origin>`. The design is created as that person, private to them; the site holds no credential on this server. Off when empty.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?:https://[a-z0-9.-]+(?::[0-9]{1,5})?)$"
+          },
+          "x-env": "SERVE_UI_BUILDER_IMPORT_ORIGINS",
+          "x-apply": "restart",
+          "x-roles": [
+            "preview"
+          ]
+        },
         "hostRoot": {
           "description": "Serve the UI builder at the root of SERVE_UI_BUILDER_HOST (`https://ui.coo.ee/<design>`) instead of under `/ui-builder/`, keeping every server route (`/start`, `/api`, `/mcp`, `/agent-access`, `/auth`, `/admin`, health and status, assets) on that host. Needs an editor bundle that reads the `ui-builder-base-path` meta. Ignored without SERVE_UI_BUILDER_HOST.",
           "type": "boolean",

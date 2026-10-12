@@ -270,6 +270,11 @@ class ServeHttpServer(
   private val sites: ServeSiteRegistry = ServeSiteRegistry.empty(),
   private val uiBuilderHost: String? = null,
   private val uiBuilderStartUrl: String? = null,
+  /** `--ui-builder-import-origins`; see [ServeUiBuilderImport]. Empty: no import route. */
+  private val uiBuilderImportOrigins: List<String> = emptyList(),
+  /** How an import fetches its seed; a test substitutes its own. */
+  private val uiBuilderImportFetch: (java.net.URI) -> ServeUiBuilderImport.Fetched =
+    ServeUiBuilderImport::fetch,
   /** `--ui-builder-host-root`; see [uiBuilderRootMode]. */
   private val uiBuilderHostRoot: Boolean = false,
   /**
@@ -6180,6 +6185,12 @@ class ServeHttpServer(
     // Copy from an existing design. Registered before the compatibility route below, whose
     // `{catalog}` would otherwise swallow `designs`.
     post("${base}/designs/copy") { handleUiBuilderCopy() }
+    // Start a design from a seed document a listed site prepared (--ui-builder-import-origins).
+    // Registered before `{catalog}` and the editor shell, which would otherwise take `import`.
+    if (uiBuilderImportOrigins.isNotEmpty()) {
+      get("${base}/import") { handleUiBuilderImportConfirm() }
+      post("${base}/import") { handleUiBuilderImport() }
+    }
     // Compatibility for creation forms emitted by older builder bundles.
     post("${base}/{catalog}") { handleUiBuilderCreate() }
     // Sharing one design as a page. A literal `access` segment outranks `{path...}`, so other paths
@@ -14341,6 +14352,110 @@ class ServeHttpServer(
         call.response.headers.append(
           HttpHeaders.Location,
           uiBuilderPermalink(designId, call.request.queryParameters),
+        )
+        call.respond(HttpStatusCode.SeeOther)
+      }
+      is ServeUiBuilderCreate.Outcome.Refused ->
+        call.respondText(outcome.reason, status = HttpStatusCode.fromValue(outcome.status))
+    }
+  }
+
+  /**
+   * `GET /ui-builder/import?url=…`: the confirmation page for starting a design from a seed
+   * document on a listed origin ([ServeUiBuilderImport]). Fetches and checks the seed first, so a
+   * bad one is refused here rather than after the person has confirmed.
+   */
+  private suspend fun RoutingContext.handleUiBuilderImportConfirm() {
+    val authorization = uiBuilderAuthorization
+    if (designService == null || uiBuilderDir == null || authorization == null) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    val url =
+      ServeUiBuilderImport.allowed(call.request.queryParameters["url"], uiBuilderImportOrigins)
+    if (url == null) {
+      call.respondText(
+        "url must be a seed document on one of this server's import origins",
+        status = HttpStatusCode.BadRequest,
+      )
+      return
+    }
+    authorizeUiBuilderPage(authorization, UiBuilderRouteCapability.WRITE) ?: return
+    val document =
+      when (val fetched = withContext(Dispatchers.IO) { uiBuilderImportFetch(url) }) {
+        is ServeUiBuilderImport.Fetched.Document -> fetched.document
+        is ServeUiBuilderImport.Fetched.Refused -> {
+          call.respondText(fetched.reason, status = HttpStatusCode.BadGateway)
+          return
+        }
+      }
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    call.respondText(
+      ServeUiBuilderImport.confirmPage(
+        action = uiBuilderPagePath(call, "import"),
+        url = url,
+        document = document,
+        login = githubAuth?.currentLogin(call),
+      ),
+      ContentType.Text.Html,
+    )
+  }
+
+  /**
+   * `POST /ui-builder/import`: create the confirmed seed as the caller's own private design, then
+   * `303` to it. The seed is fetched again rather than taken from the form, and an id that already
+   * exists is left alone, like every other creation route.
+   */
+  private suspend fun RoutingContext.handleUiBuilderImport() {
+    val dir = uiBuilderDir
+    val service = designService
+    val authorization = uiBuilderAuthorization
+    if (dir == null || service == null || authorization == null) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    if (!isSameOriginFormSubmission()) {
+      call.respondText("cross-site design creation is refused", status = HttpStatusCode.Forbidden)
+      return
+    }
+    val actor = authorizeUiBuilderPage(authorization, UiBuilderRouteCapability.WRITE) ?: return
+    val form = call.receiveParameters()
+    val url = ServeUiBuilderImport.allowed(form["url"], uiBuilderImportOrigins)
+    if (url == null) {
+      call.respondText(
+        "url must be a seed document on one of this server's import origins",
+        status = HttpStatusCode.BadRequest,
+      )
+      return
+    }
+    val document =
+      when (val fetched = withContext(Dispatchers.IO) { uiBuilderImportFetch(url) }) {
+        is ServeUiBuilderImport.Fetched.Document -> fetched.document
+        is ServeUiBuilderImport.Fetched.Refused -> {
+          call.respondText(fetched.reason, status = HttpStatusCode.BadGateway)
+          return
+        }
+      }
+    if (!isUiBuilderDesignSegment(document.id)) {
+      call.respondText(
+        "the seed's id must start with a letter or number and use only path-safe characters",
+        status = HttpStatusCode.BadRequest,
+      )
+      return
+    }
+    val outcome =
+      withContext(Dispatchers.IO) {
+        withDesignCreationVisibility(UiBuilderDefaultVisibility.PRIVATE) {
+          ServeUiBuilderCreate(service, dir, canonicalServerOrigin(), uiBuilderSeeds)
+            .install(actor, document)
+        }
+      }
+    when (outcome) {
+      is ServeUiBuilderCreate.Outcome.Created,
+      is ServeUiBuilderCreate.Outcome.AlreadyExists -> {
+        call.response.headers.append(
+          HttpHeaders.Location,
+          uiBuilderPermalink(document.id, call.request.queryParameters),
         )
         call.respond(HttpStatusCode.SeeOther)
       }

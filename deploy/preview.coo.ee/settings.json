@@ -29,6 +29,7 @@
     "hostRoot": true,
     "adminActors": ["github:yschimke"],
     "startUrl": "https://yschimke.github.io/compose-ui-builder/",
+    "importOrigins": ["https://ha.coo.ee"],
     "guidelines": {
       "model": "deepseek/deepseek-v4.1-flash",
       "users": ["yschimke"]

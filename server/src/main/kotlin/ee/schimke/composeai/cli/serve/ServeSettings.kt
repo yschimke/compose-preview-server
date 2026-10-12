@@ -257,6 +257,18 @@ object ServeSettings {
         BOTH,
       ),
       Setting(
+        "uiBuilder.importOrigins",
+        "SERVE_UI_BUILDER_IMPORT_ORIGINS",
+        Type.Names(
+          Regex("https://[a-z0-9.-]+(?::[0-9]{1,5})?"),
+          "an HTTPS origin such as https://ha.coo.ee",
+        ),
+        Apply.RESTART,
+        "Sites whose seed documents a signed-in person may start a UI-builder design from, at " +
+          "`/ui-builder/import?url=<seed URL on that origin>`. The design is created as that " +
+          "person, private to them; the site holds no credential on this server. Off when empty.",
+      ),
+      Setting(
         "uiBuilder.hostRoot",
         "SERVE_UI_BUILDER_HOST_ROOT",
         Type.Flag,

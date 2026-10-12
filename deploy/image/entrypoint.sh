@@ -246,6 +246,8 @@ fi
 # catalogs.json's "sites" says the same thing as durable config.
 [[ -n "${SERVE_UI_BUILDER_HOST:-}" ]] && args+=(--ui-builder-host "${SERVE_UI_BUILDER_HOST}")
 [[ -n "${SERVE_UI_BUILDER_START_URL:-}" ]] && args+=(--ui-builder-start-url "${SERVE_UI_BUILDER_START_URL}")
+[[ -n "${SERVE_UI_BUILDER_IMPORT_ORIGINS:-}" ]] &&
+  args+=(--ui-builder-import-origins "${SERVE_UI_BUILDER_IMPORT_ORIGINS}")
 # The builder at the ROOT of SERVE_UI_BUILDER_HOST (ui.coo.ee/<design>) instead of under /ui-builder/.
 # Opt in once the served editor bundle reads its `ui-builder-base-path` meta; ignored without a host.
 [[ -n "${SERVE_UI_BUILDER_HOST:-}" && ( "${SERVE_UI_BUILDER_HOST_ROOT:-}" == "1" || "${SERVE_UI_BUILDER_HOST_ROOT:-}" == "true" ) ]] &&
