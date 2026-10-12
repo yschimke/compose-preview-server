@@ -39,6 +39,11 @@
       "group": "design-systems"
     },
     {
+      "system": "ha-cards",
+      "repo": "yschimke/homeassistant-remotecompose-out",
+      "listed": false
+    },
+    {
       "system": "m3-catalog",
       "repo": "yschimke/m3-catalog-out",
       "listed": true,
@@ -147,6 +152,7 @@
   "uiBuilder": {
     "catalogs": {
       "remote-widgets": { "serve": true, "published": true, "owned": true },
+      "ha-cards": { "serve": true, "published": true, "owned": true },
       "a2ui-catalog": { "serve": true, "published": true, "owned": true },
       "glimmer-catalog": { "serve": true, "published": true, "owned": true },
       "wear-m3": { "published": true, "owned": true },

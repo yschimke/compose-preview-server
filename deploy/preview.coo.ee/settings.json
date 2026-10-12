@@ -33,7 +33,7 @@
     "profile": {
       "host": "ha.coo.ee",
       "name": "Home Assistant card designer",
-      "catalogs": ["remote-m3"],
+      "catalogs": ["ha-cards"],
       "homeUrl": "https://ha.coo.ee/"
     },
     "guidelines": {
