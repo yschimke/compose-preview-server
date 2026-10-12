@@ -3935,6 +3935,15 @@ const modeHint = may<HTMLElement>("cp-mode-hint");
 function liveOffer() {
     return { daemon: !!(live && !live.disabled), wasm: !!wasmToggle };
 }
+// A document-only preview's live lane replays its document on a clock (server-side
+// `ServeCarriedRcStream`): frames animate, but there is no held composition for input to reach.
+function liveReplayOnly() {
+    return (
+        !!(live && live.checked) &&
+        !!root &&
+        root.getAttribute("data-live-input") === "none"
+    );
+}
 function liveTransportAvailable() {
     return rules.liveTransportAvailable(liveOffer());
 }
@@ -4114,7 +4123,9 @@ function updateLiveToggle() {
                       ? specSourceLabel() + "'s render — not this catalog's"
                       : "a paired catalog's render — not this catalog's"
                 : interactive
-                  ? "interactive — click / scroll the preview"
+                  ? liveReplayOnly()
+                      ? "live replay — animates, but input isn't forwarded"
+                      : "interactive — click / scroll the preview"
                   : // "no live lane" is only true when there is genuinely nothing to switch to. When the lane
                     // exists and is merely behind sign-in, the transport radio is (correctly) disabled, so
                     // liveTransportAvailable() is false and this used to read "no live lane" right beside a

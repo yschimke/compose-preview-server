@@ -3033,6 +3033,18 @@ cp-history-menu { display: contents; }
   background: transparent; color: var(--md-sys-color-on-surface-variant); cursor: pointer;
   max-width: 200px; }
 .cp-lane-select:hover { background: color-mix(in srgb, var(--md-sys-color-on-surface) 8%, transparent); }
+/* The menu the combo opens is painted by the platform from each <option>'s own colours, and those
+   are inherited from the quiet outlined field above: `on-surface-variant` text over `transparent`.
+   A transparent option gives the popup no surface, so it falls back to the UA's light list; on a
+   dark page that put the dark scheme's pale on-surface-variant on white, and every renderer on
+   offer read as disabled although each one worked. The options get a real surface and the full
+   foreground; only a genuinely unavailable one is dimmed (solid, since a popup may drop alpha), and
+   the placeholder keeps the quieter colour of a prompt. */
+.cp-lane-select option { color: var(--md-sys-color-on-surface);
+  background-color: var(--md-sys-color-surface-container-high); }
+.cp-lane-select option:disabled { color: color-mix(in srgb, var(--md-sys-color-on-surface) 38%,
+  var(--md-sys-color-surface-container-high)); }
+.cp-lane-select option[value=""] { color: var(--md-sys-color-on-surface-variant); }
 /* ONE control, in two segments. The chip names the renderer in use and toggles it live; the combo
    chooses a different one — two halves of one fact, driven from one lane value by `syncLaneSelect`
    and, side by side as separate pills, reading as two independent controls while spending a whole
