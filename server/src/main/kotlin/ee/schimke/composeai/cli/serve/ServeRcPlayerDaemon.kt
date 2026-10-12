@@ -234,19 +234,30 @@ class ServeRcPlayerDaemon(
 
     const val DEFAULT_FAILURE_BACKOFF_MILLIS: Long = 60_000L
 
+    /** What [playersIn] needs to see before it offers `cmp-android` (declared before its use). */
+    internal val CMP_ANDROID_MARKERS: List<String> =
+      listOf(
+        "ee/schimke/composeai/rcplayer/compose/RcComposePlayerKt.class",
+        "ee/schimke/composeai/rcplayer/runtime/RcNamedValue.class",
+        "coil3/ImageLoader.class",
+      )
+
     /**
-     * A class each player's own library provides, so a player is offered only when its library is
-     * on the daemon's classpath. Linkage is the connector's to check at first use
-     * (`RemoteComposePlayers`); this only stops offering a player whose library is absent.
+     * Classes each player's libraries provide, so a player is offered only when all of them are on
+     * the daemon's classpath. Linkage is the connector's to check at first use
+     * (`RemoteComposePlayers`); this only stops offering a player whose libraries are absent.
+     *
+     * The CMP player needs more than its own jar: `rc-player-compose` links its runtime and draws a
+     * document's bitmaps through Coil, neither of which the Android sidecar carries, so a directory
+     * holding only the player jar would offer `cmp-android` into a `NoClassDefFoundError`.
      */
-    private val PLAYER_MARKERS: Map<RcPlayerBackend, String> =
+    private val PLAYER_MARKERS: Map<RcPlayerBackend, List<String>> =
       mapOf(
         RcPlayerBackend.ANDROIDX_EMBEDDED to
-          "ee/schimke/composeai/rcembedded/player/RcPlayerKt.class",
+          listOf("ee/schimke/composeai/rcembedded/player/RcPlayerKt.class"),
         RcPlayerBackend.ANDROIDX_VIEW to
-          "androidx/compose/remote/player/view/RemoteComposePlayer.class",
-        RcPlayerBackend.CMP_ANDROID to
-          "ee/schimke/composeai/rcplayer/compose/RcComposePlayerKt.class",
+          listOf("androidx/compose/remote/player/view/RemoteComposePlayer.class"),
+        RcPlayerBackend.CMP_ANDROID to CMP_ANDROID_MARKERS,
       )
 
     /** The players whose libraries [jars] carry, in [PLAYER_MARKERS] order. */
@@ -258,7 +269,7 @@ class ServeRcPlayerDaemon(
               .getOrDefault(emptyList())
           }
           .toSet()
-      return PLAYER_MARKERS.filterValues { it in entries }.keys.toList()
+      return PLAYER_MARKERS.filterValues { entries.containsAll(it) }.keys.toList()
     }
 
     private val json = Json { encodeDefaults = true }

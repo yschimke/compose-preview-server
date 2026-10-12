@@ -488,6 +488,60 @@ class ServeRcPlayerDaemonLaneTest {
   }
 
   @Test
+  fun `the CMP player is offered only with the runtime it links`() {
+    val dir = Files.createTempDirectory("rc-players-cmp").toFile()
+    fun jar(name: String, vararg entries: String) =
+      File(dir, name).also { file ->
+        ZipOutputStream(file.outputStream()).use { zip ->
+          entries.forEach {
+            zip.putNextEntry(ZipEntry(it))
+            zip.closeEntry()
+          }
+        }
+      }
+    val view = jar("view.jar", "androidx/compose/remote/player/view/RemoteComposePlayer.class")
+    val (player, runtime, coil) =
+      ServeRcPlayerDaemon.CMP_ANDROID_MARKERS.mapIndexed { i, entry -> jar("cmp-$i.jar", entry) }
+    // The player jar alone would be offered into a NoClassDefFoundError on its runtime or Coil.
+    assertEquals(
+      listOf(RcPlayerBackend.ANDROIDX_VIEW),
+      ServeRcPlayerDaemon.playersIn(listOf(view, player)),
+    )
+    assertEquals(
+      listOf(RcPlayerBackend.ANDROIDX_VIEW),
+      ServeRcPlayerDaemon.playersIn(listOf(view, player, runtime)),
+    )
+    assertEquals(
+      listOf(RcPlayerBackend.ANDROIDX_VIEW, RcPlayerBackend.CMP_ANDROID),
+      ServeRcPlayerDaemon.playersIn(listOf(coil, view, runtime, player)),
+    )
+    assertEquals(
+      listOf(RcPlayerBackend.CMP_ANDROID),
+      ServeRcPlayerDaemon.playersIn(listOf(player, runtime, coil)),
+    )
+  }
+
+  @Test
+  fun `a daemon carrying the CMP player offers it on the viewer`() {
+    serve(
+      playerDaemon(
+        players =
+          listOf(
+            RcPlayerBackend.ANDROIDX_EMBEDDED,
+            RcPlayerBackend.ANDROIDX_VIEW,
+            RcPlayerBackend.CMP_ANDROID,
+          )
+      )
+    )
+    get("/examples/p/$EXAMPLE_ID").use { response ->
+      val html = response.body.string()
+      for (id in listOf("androidx-embedded", "androidx-view", "cmp-android")) {
+        assertTrue(html.contains("<option value=\"rc:$id\">"), "$id is offered")
+      }
+    }
+  }
+
+  @Test
   fun `a host with no android runtime builds no player daemon`() {
     // No sidecar is staged for the test JVM, so the production builder declines (and says why).
     val reasons = mutableListOf<String>()
