@@ -1,5 +1,6 @@
 package ee.schimke.composeai.mcp
 
+import java.util.Locale
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -110,8 +111,9 @@ internal object RenderDetailReaders {
 
   /**
    * Reads a `layout/inspector` payload (`{root:{displayName?,component?,bounds:{left,top,right,
-   * bottom},children}}`) or a `compose/semantics` payload (`{root:{boundsInRoot:"l,t,r,b",
-   * testTag?,text?,label?,role?,children}}`) into boxes the viewer draws over the render.
+   * bottom},size?,tokens?,transform?,source?,children}}`) or a `compose/semantics` payload
+   * (`{root:{boundsInRoot:"l,t,r,b",testTag?,text?,label?,role?,tokens?,children}}`) into boxes the
+   * viewer draws over the render, each with the `props` its legend row lists.
    */
   fun layout(kind: String, payload: JsonElement?): Layout {
     val root = (payload as? JsonObject)?.get("root") as? JsonObject
@@ -135,6 +137,9 @@ internal object RenderDetailReaders {
           put("label", nodeLabel(node))
           put("depth", depth)
           putJsonArray("bounds") { bounds.forEach { add(it) } }
+          val props = layoutProps(node, bounds)
+          if (props.isNotEmpty()) putJsonArray("props") { props.forEach { add(it) } }
+          (node.string("source") ?: node.string("sourceRef"))?.let { put("source", it.take(120)) }
         }
       }
       (node["children"] as? JsonArray)?.forEach { child ->
@@ -144,6 +149,54 @@ internal object RenderDetailReaders {
     root?.let { visit(it, 0) }
     val summary = "layout: $count node${if (count == 1) "" else "s"} ($kind)"
     return Layout(summary, JsonArray(boxes), count)
+  }
+
+  /**
+   * The legend's layout properties for one node, in the serve viewer's Layout-boxes order:
+   * `120×48px`, `pad 8.0dp 16.0dp` (top/end/bottom/start, collapsed when equal), `gap 8.0dp`, `min
+   * 48.0dp×48.0dp`, `scale 0.82×0.82` when a graphics-layer transform scales the node (Wear's
+   * `SurfaceTransformation` near the bezel). Read from `layout/inspector`'s `size` and `tokens`; a
+   * `compose/semantics` node carries the same `tokens`, so it gets the same lines minus `scale`.
+   */
+  private fun layoutProps(node: JsonObject, bounds: List<Int>): List<String> {
+    val tokens = node["tokens"] as? JsonObject
+    val size = node["size"] as? JsonObject
+    val width = size?.get("width")?.jsonPrimitive?.intOrNull ?: (bounds[2] - bounds[0])
+    val height = size?.get("height")?.jsonPrimitive?.intOrNull ?: (bounds[3] - bounds[1])
+    val transform = node["transform"] as? JsonObject
+    return listOfNotNull(
+      "${width}×${height}px",
+      (tokens?.get("padding") as? JsonObject)?.let { insets(it) }?.let { "pad $it" },
+      tokens?.string("gap")?.let { "gap $it" },
+      minSize(tokens),
+      transform?.let { scale(it) },
+    )
+  }
+
+  /** `scale 0.83×0.83` when the transform reports `scaled`; null otherwise. */
+  private fun scale(transform: JsonObject): String? {
+    if ((transform["scaled"] as? JsonPrimitive)?.contentOrNull != "true") return null
+    val x = (transform["scaleX"] as? JsonPrimitive)?.contentOrNull?.toFloatOrNull() ?: return null
+    val y = (transform["scaleY"] as? JsonPrimitive)?.contentOrNull?.toFloatOrNull() ?: return null
+    return "scale ${"%.2f".format(Locale.ROOT, x)}×${"%.2f".format(Locale.ROOT, y)}"
+  }
+
+  /** CSS order (top end bottom start), collapsed like CSS shorthand; null when no edge resolved. */
+  private fun insets(value: JsonObject): String? {
+    val edges = listOf("top", "end", "bottom", "start").map { value.string(it) ?: "0" }
+    if (listOf("top", "end", "bottom", "start").none { value.string(it) != null }) return null
+    return when {
+      edges.distinct().size == 1 -> edges[0]
+      edges[0] == edges[2] && edges[1] == edges[3] -> "${edges[0]} ${edges[1]}"
+      else -> edges.joinToString(" ")
+    }
+  }
+
+  private fun minSize(tokens: JsonObject?): String? {
+    val width = tokens?.string("minWidth")
+    val height = tokens?.string("minHeight")
+    if (width == null && height == null) return null
+    return "min ${width ?: "–"}×${height ?: "–"}"
   }
 
   /** `TouchTargetSizeCheck` → `TouchTargetSize`; ATF's class names all end in `Check`. */
