@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.132.0](https://github.com/yschimke/compose-preview-server/compare/v3.131.0...v3.132.0) (2026-10-12)
+
+
+### Bug Fixes
+
+* **deps:** move compose-preview-daemon to 3.16.0 for held live sessions on carried documents ([#1621](https://github.com/yschimke/compose-preview-server/issues/1621)) ([0f859f7](https://github.com/yschimke/compose-preview-server/commit/0f859f70761b5c71ddee0a520c6ebc4c63d05657))
+
 ## [3.131.0](https://github.com/yschimke/compose-preview-server/compare/v3.130.0...v3.131.0) (2026-10-12)
 
 
