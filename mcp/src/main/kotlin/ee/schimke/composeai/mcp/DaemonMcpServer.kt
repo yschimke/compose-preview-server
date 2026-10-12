@@ -7976,25 +7976,9 @@ class DaemonMcpServer(
 }
 
 /**
- * The preview function starting near 1-based [line] (its annotation or `fun`): from there to the
- * brace that closes its body, capped at [maxLines]. Null when [line] is unknown.
+ * The preview function starting near 1-based [line] (its annotation or `fun`), then the same-file
+ * declarations it calls, capped at [maxLines]: see [PreviewSourceExcerpt]. Null when [line] is
+ * unknown.
  */
-internal fun previewFunctionSource(lines: List<String>, line: Int?, maxLines: Int = 200): String? {
-  val start = ((line ?: return null) - 1).coerceIn(0, lines.lastIndex.coerceAtLeast(0))
-  if (lines.isEmpty()) return null
-  var depth = 0
-  var opened = false
-  val out = mutableListOf<String>()
-  for (index in start until minOf(lines.size, start + maxLines)) {
-    val text = lines[index]
-    out += text
-    text.forEach { ch ->
-      if (ch == '{') {
-        depth++
-        opened = true
-      } else if (ch == '}') depth--
-    }
-    if (opened && depth <= 0) break
-  }
-  return out.joinToString("\n")
-}
+internal fun previewFunctionSource(lines: List<String>, line: Int?, maxLines: Int = 200): String? =
+  PreviewSourceExcerpt.of(lines, line, maxLines)

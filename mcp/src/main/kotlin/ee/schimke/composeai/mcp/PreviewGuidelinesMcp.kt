@@ -6,6 +6,7 @@ import ee.schimke.composeai.guidelines.GuidelineCredentials
 import ee.schimke.composeai.guidelines.GuidelineEngine
 import ee.schimke.composeai.guidelines.GuidelineModel
 import ee.schimke.composeai.guidelines.GuidelineRunOptions
+import ee.schimke.composeai.guidelines.GuidelineSubjectKind
 import ee.schimke.composeai.guidelines.GuidelineSurfaces
 import ee.schimke.composeai.guidelines.OpenAiCompatibleClient
 import ee.schimke.composeai.guidelines.OpenRouterClient
@@ -14,6 +15,7 @@ import ee.schimke.composeai.guidelines.PreviewGuidelineResult
 import ee.schimke.composeai.guidelines.PreviewNode
 import ee.schimke.composeai.guidelines.PreviewSubject
 import ee.schimke.composeai.guidelines.SubjectPicture
+import ee.schimke.composeai.guidelines.noRulesFor
 import ee.schimke.composeai.guidelines.protocol.CatalogGuidelinesV1
 import ee.schimke.composeai.guidelines.protocol.GuidelinePictureV1
 import ee.schimke.composeai.guidelines.protocol.GuidelineRecordV1
@@ -147,6 +149,10 @@ object PreviewGuidelinesMcp {
       if (location.startsWith("http://") || location.startsWith("https://")) {
         CatalogGuidelinesLoader.load(location)
       } else CatalogGuidelinesLoader.load(File(location))
+
+    /** [DefaultGuidelinePacks.catalogText]'s guidelines, its pinned packs fetched and merged. */
+    fun loadDefaultGuidelines(text: String): CatalogGuidelinesLoader.Loaded =
+      CatalogGuidelinesLoader.parse(text, null, DefaultGuidelinePacks::fetch)
   }
 
   fun promptToolDef(): ToolDef =
@@ -193,7 +199,9 @@ object PreviewGuidelinesMcp {
         put(
           "description",
           "A ui-builder.guidelines.json file (by that name) or an http(s) URL; default: the " +
-            "module's.",
+            "module's, else compose-ai-tools' shared packs for the previews' surface (Wear " +
+            "widgets: remote-compose + wear-widgets; Wear: compose-ui + wear-compose; other " +
+            "widgets: launcher-widgets; anything else: compose-ui).",
         )
       }
       putJsonObject("surface") {
@@ -445,29 +453,76 @@ object PreviewGuidelinesMcp {
       host.resolve(ref) ?: throw IllegalArgumentException("$tool: no preview matches `$ref`")
     }
     beforeRender(resolved)
+    val surfaceArg = (args["surface"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+    val profileArg = (args["profile"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+    // What each preview is to the guidelines: its manifest entry's surface and profile, unless the
+    // caller names them. Read once; it picks the default packs and the subject's rules alike.
+    val entries = resolved.associateWith { host.manifestEntry(it) }
+    val kinds = resolved.associateWith { preview ->
+      val own = entries[preview]?.let(GuidelineSurfaces::of)
+      GuidelineSubjectKind(
+        surfaceArg ?: own?.surface ?: GuidelineSurfaces.COMPONENT,
+        profileArg ?: own?.profile,
+      )
+    }
+    val notes = mutableListOf<String>()
+    // Each preview's module guidelines, or null for a module that publishes none. A batch is asked
+    // one set of rules, so previews from modules that disagree are asked in separate calls rather
+    // than one module's rules (or the defaults) silently standing in for another's.
+    // A preview whose build directory is unknown takes the rest of the batch's, as before.
+    val moduleGuidelines =
+      resolved
+        .mapNotNull { it.buildDir }
+        .map { dir ->
+          File(dir, "compose-previews/${CatalogGuidelinesV1.FILE_NAME}").takeIf { it.isFile }?.path
+        }
+        .distinct()
+        .ifEmpty { listOf(null) }
     val location =
       (args["guidelines"] as? JsonPrimitive)
         ?.contentOrNull
         ?.takeIf { it.isNotBlank() }
         ?.also { requireGuidelinesLocation(tool, it) }
-        ?: resolved
-          .firstNotNullOfOrNull { it.buildDir }
-          ?.let { File(it, "compose-previews/${CatalogGuidelinesV1.FILE_NAME}") }
-          ?.takeIf { it.isFile }
-          ?.path
-        ?: throw IllegalArgumentException(
-          "$tool: the module has no ${CatalogGuidelinesV1.FILE_NAME} (its catalog publishes " +
-            "none, or discovery has not run); pass `guidelines` with a file or URL"
-        )
-    val loaded = host.loadGuidelines(location)
+        ?: run {
+          require(moduleGuidelines.size == 1) {
+            "$tool: these previews come from modules with different guidelines (" +
+              moduleGuidelines.joinToString { it ?: "none" } +
+              "); ask about each module in its own call, or pass `guidelines` with a file or URL"
+          }
+          moduleGuidelines.single()
+        }
+    val defaults =
+      if (location != null) null
+      else {
+        val choices =
+          resolved.map { DefaultGuidelinePacks.choose(kinds[it], entries[it]) }.distinct()
+        require(choices.size == 1) {
+          "$tool: the module has no ${CatalogGuidelinesV1.FILE_NAME}, and these previews need " +
+            "different default guidelines (" +
+            choices.joinToString("; ") { it.description } +
+            "); ask about each kind in its own call, or pass `guidelines` with a file or URL"
+        }
+        choices.single()
+      }
+    val loaded =
+      if (defaults != null) host.loadDefaultGuidelines(DefaultGuidelinePacks.catalogText(defaults))
+      else host.loadGuidelines(location!!)
+    val rulesSource = location ?: "default guidelines ${defaults!!.description}"
     val guidelines =
       loaded.guidelines
         ?: throw IllegalArgumentException(
-          "$tool: ${loaded.problem?.let(::redactedProblem) ?: "no guidelines at $location"}"
+          "$tool: ${loaded.problem?.let(::redactedProblem) ?: "no guidelines at $rulesSource"}" +
+            (if (defaults != null) {
+              "; the module has no ${CatalogGuidelinesV1.FILE_NAME}, so pass `guidelines` with a " +
+                "file or URL"
+            } else "")
         )
-    val surfaceArg = (args["surface"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
-    val profileArg = (args["profile"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
-    val notes = mutableListOf<String>()
+    if (defaults != null) {
+      notes +=
+        "the module publishes no ${CatalogGuidelinesV1.FILE_NAME}, so these are the default " +
+          "${defaults.description} rules for ${describe(kinds.getValue(resolved.first()))}; " +
+          "pass `guidelines` to ask a catalog's own rules instead"
+    }
     val subjects = resolved.map { preview ->
       val png = host.render(preview)
       val hierarchy = host.a11yHierarchy(preview)
@@ -479,20 +534,39 @@ object PreviewGuidelinesMcp {
       }
       // The preview's own surface and profile (a Wear widget is `widget` / `wear-widgets`), unless
       // the caller names them; a preview no manifest lists is a component, as before.
-      val kind = host.manifestEntry(preview)?.let(GuidelineSurfaces::of)
+      val kind = kinds.getValue(preview)
       PreviewSubject(
         previewId = preview.previewId,
         label = preview.label,
-        surface = surfaceArg ?: kind?.surface ?: GuidelineSurfaces.COMPONENT,
-        profile = profileArg ?: kind?.profile,
+        surface = kind.surface,
+        profile = kind.profile,
         renderHash = sha256(png),
         pictures = listOf(SubjectPicture(GuidelinePictureV1.KIND_DEVICE, png, 0, 0)),
         nodes = hierarchy.payload?.let(::nodesOf).orEmpty(),
         source = host.source(preview),
       )
     }
-    Prepared(guidelines, subjects, location, notes)
+    // Rules that match none of the subjects ask nothing, which must not read like a pass: say
+    // what the subjects are and which guidelines would ask them something. The prompt then has
+    // nothing to judge; the check still answers each subject as asked nothing.
+    if (subjects.all { guidelines.noRulesFor(it) != null }) {
+      val kind = kinds.getValue(resolved.first())
+      val suggestion = DefaultGuidelinePacks.choose(kind, entries.getValue(resolved.first()))
+      val problem =
+        "no rule in $rulesSource applies to ${describe(kind)}; " +
+          "${suggestion.description} would" +
+          (if (defaults == null) " (asked when `guidelines` is omitted and the module has none)"
+          else "") +
+          ", as would a catalog whose rules name that surface"
+      require(tool != PROMPT_TOOL) { "$tool: $problem" }
+      notes += problem
+    }
+    Prepared(guidelines, subjects, rulesSource, notes)
   }
+
+  /** `surface `widget`, profile `wear-widgets``, or just `surface `screen``. */
+  private fun describe(kind: GuidelineSubjectKind): String =
+    "surface `${kind.surface}`" + (kind.profile?.let { ", profile `$it`" } ?: "")
 
   /**
    * A caller-named `guidelines` location: an `http(s)` URL, or a local file named
