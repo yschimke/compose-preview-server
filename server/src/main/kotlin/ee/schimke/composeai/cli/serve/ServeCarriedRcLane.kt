@@ -7,10 +7,10 @@ import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 
 /**
- * The live lane of a document-only preview on an Android player: a **held** session playing the
- * carried document when a daemon can hold one ([ServeRcPlayerDaemon.openLive]), so viewer input
- * reaches the document, else the repeated-render replay ([ServeCarriedRcStream]), which animates
- * but takes no input.
+ * The live lane of a document-only preview on a server-side player (an Android player, or `cmp-jvm`
+ * on the desktop player daemon): a **held** session playing the carried document when a daemon can
+ * hold one ([ServeRcPlayerDaemon.openLive]), so viewer input reaches the document, else the
+ * repeated-render replay ([ServeCarriedRcStream]), which takes no input.
  *
  * A cold player daemon cannot say which it is until it has started (its `initialize` capabilities
  * decide), and a start takes ~15 s. So the lane opens on the replay — which is what warms the
