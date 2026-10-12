@@ -48,9 +48,15 @@ import kotlinx.serialization.json.Json
  * [idleMillis] and no live session open — is closed and its live seat returned; the next render
  * starts it again. A daemon that failed to start is not retried for [failureBackoffMillis], so a
  * broken runtime is not respawned on every poll.
+ *
+ * The same class fronts the server's **desktop** player daemon ([desktopSubprocess]): a bundle-less
+ * `daemon-desktop` with the CMP player's JVM target on its classpath, which plays a carried
+ * document in the `cmp-jvm` player. It exists only for [openLive]: the cmp-jvm render lane keeps
+ * its one-shot subprocess (`RcJvmServerRenderer`), and this daemon is the held session that lane
+ * cannot offer.
  */
 class ServeRcPlayerDaemon(
-  /** The Android players this daemon's classpath can draw ([playersIn]); never empty. */
+  /** The players this daemon's classpath can draw ([playersIn]); never empty. */
   val players: List<RcPlayerBackend>,
   /** Spawns the daemon over [PREVIEW]. Blocking; called off the request thread. */
   private val openHost: () -> ServeHost,
@@ -60,6 +66,10 @@ class ServeRcPlayerDaemon(
   private val failureBackoffMillis: Long = DEFAULT_FAILURE_BACKOFF_MILLIS,
   private val clock: () -> Long = System::currentTimeMillis,
   private val onLog: (String) -> Unit = {},
+  /** How messages name this daemon: "the $label closed", "$label started". */
+  private val label: String = ANDROID_LABEL,
+  /** The live-seat weight the running daemon holds ([liveSeats]). */
+  private val seatWeight: Int = ServeBundleDaemon.ANDROID_LIVE_SEAT_WEIGHT,
 ) : AutoCloseable {
 
   /** What a [render] call came to. */
@@ -179,7 +189,7 @@ class ServeRcPlayerDaemon(
       try {
         host.render(PREVIEW_ID, overrides)
       } catch (e: IllegalStateException) {
-        RenderOutcome.Failed("the Android player daemon closed: ${e.message}")
+        RenderOutcome.Failed("the $label closed: ${e.message}")
       }
     synchronized(lock) {
       renders++
@@ -215,12 +225,12 @@ class ServeRcPlayerDaemon(
         when {
           current is State.Running ->
             if (current.playsLive) current.host
-            else return LiveOutcome.Unsupported(NO_LIVE_DOCUMENTS)
+            else return LiveOutcome.Unsupported(noLiveDocuments())
           current == State.Starting -> return LiveOutcome.Warming
           current is State.Failed && clock() - current.atMillis < failureBackoffMillis ->
             return LiveOutcome.Busy(current.reason)
           // Starting a daemon known not to hold a carried document would only warm the replay.
-          playsLiveKnown == false -> return LiveOutcome.Unsupported(NO_LIVE_DOCUMENTS)
+          playsLiveKnown == false -> return LiveOutcome.Unsupported(noLiveDocuments())
           else ->
             return when (val started = start(overrides)) {
               is Outcome.Unavailable -> LiveOutcome.Busy(started.reason)
@@ -240,12 +250,9 @@ class ServeRcPlayerDaemon(
           onFrame = onFrame,
         )
       } catch (e: IllegalStateException) {
-        unavailable = "the Android player daemon closed: ${e.message}"
+        unavailable = "the $label closed: ${e.message}"
         null
-      }
-        ?: return LiveOutcome.Busy(
-          unavailable ?: "the Android player daemon did not hold a live session"
-        )
+      } ?: return LiveOutcome.Busy(unavailable ?: "the $label did not hold a live session")
     synchronized(lock) { liveSessions++ }
     return LiveOutcome.Streaming(LiveSession(handle))
   }
@@ -285,11 +292,12 @@ class ServeRcPlayerDaemon(
 
   /** Start the daemon off the request thread, rendering [overrides] as its warm-up. */
   private fun start(overrides: PreviewOverrides): Outcome {
-    // A resident Robolectric daemon costs what a catalog's does, so it holds an Android seat. A
-    // background acquire: a player is an extra lane, and must never take an interactive stream's.
+    // A resident daemon costs what a catalog's of the same backend does, so it holds that seat (an
+    // Android one for Robolectric). A background acquire: a player is an extra lane, and must never
+    // take an interactive stream's.
     val seat = liveSeats?.let {
-      it.acquireBackground(ServeBundleDaemon.ANDROID_LIVE_SEAT_WEIGHT, dedicatedSlice = false)
-        ?: return Outcome.Unavailable("no live seat is free for the Android player daemon")
+      it.acquireBackground(seatWeight, dedicatedSlice = false)
+        ?: return Outcome.Unavailable("no live seat is free for the $label")
     }
     state = State.Starting
     executor.execute {
@@ -300,7 +308,7 @@ class ServeRcPlayerDaemon(
           // Throwable, not Exception: an incomplete or mismatched staged classpath fails as a
           // LinkageError (NoClassDefFoundError), and that must still back off and return the seat
           // rather than leave the daemon "starting" forever. Only a VM error is rethrown.
-          val reason = "the Android player daemon did not start: ${e.message ?: e.javaClass.name}"
+          val reason = "the $label did not start: ${e.message ?: e.javaClass.name}"
           onLog(reason)
           seat?.close()
           synchronized(lock) {
@@ -310,7 +318,7 @@ class ServeRcPlayerDaemon(
           if (e is VirtualMachineError) throw e
           return@execute
         }
-      onLog("rc player daemon started (${players.joinToString { ServeRcPlayerIds.of(it) }})")
+      onLog("$label started (${players.joinToString { ServeRcPlayerIds.of(it) }})")
       // Its answer lands in the host's render cache, so the request that started the daemon is a
       // cache hit when it asks again; a failure here is that document's, not the daemon's.
       val warm = runCatching { host.render(PREVIEW_ID, overrides) }.getOrNull()
@@ -338,7 +346,7 @@ class ServeRcPlayerDaemon(
         state = State.Idle
         current
       }
-    onLog("rc player daemon idle for ${idleMillis / 1000}s; closing")
+    onLog("$label idle for ${idleMillis / 1000}s; closing")
     running.release()
   }
 
@@ -369,6 +377,10 @@ class ServeRcPlayerDaemon(
     running?.release()
   }
 
+  private fun noLiveDocuments(): String =
+    "this $label cannot hold a carried document live (it does not advertise " +
+      "$CARRIED_LIVE_CAPABILITY)"
+
   private fun State.Running.release() {
     runCatching { host.close() }
     seat?.close()
@@ -390,9 +402,9 @@ class ServeRcPlayerDaemon(
     fun playsCarriedDocumentsLive(capabilities: ServerCapabilities): Boolean =
       capabilities.interactive && CARRIED_LIVE_CAPABILITY in capabilities.supportedOverrides
 
-    private const val NO_LIVE_DOCUMENTS =
-      "this Android player daemon cannot hold a carried document live " +
-        "(it does not advertise $CARRIED_LIVE_CAPABILITY)"
+    const val ANDROID_LABEL: String = "Android player daemon"
+
+    const val DESKTOP_LABEL: String = "desktop player daemon"
 
     /**
      * Sandboxes the daemon boots: a held live session pins one (the in-process slot) and renders
@@ -545,6 +557,129 @@ class ServeRcPlayerDaemon(
         },
         liveSeats = liveSeats,
         onLog = log,
+      )
+    }
+
+    /**
+     * The sidecar the CMP player's JVM target is staged in for the desktop daemon: a delta laid
+     * ahead of `lib-daemon-desktop/` (the player and the Compose line it needs; see
+     * `stageRcPlayerDesktopLibs`), located as [locateBundleSidecarJars] locates any sidecar.
+     */
+    const val DESKTOP_PLAYER_SIDECAR: String = "lib-rc-player-desktop"
+
+    /** A class of rc-players' `rc-player-compose`, so the player is offered only when staged. */
+    internal const val CMP_PLAYER_MARKER: String =
+      "ee/schimke/composeai/rcplayer/compose/RcComposePlayerKt.class"
+
+    /**
+     * The binding compose-preview-daemon's `daemon-desktop` plays a carried document through
+     * (compose-preview-daemon#255). A daemon without it predates carried documents on desktop, so
+     * starting it for one would only cost a JVM.
+     */
+    internal const val DESKTOP_BINDING_MARKER: String =
+      "ee/schimke/composeai/daemon/rcplayer/CmpJvmPlayerBinding.class"
+
+    private val SKIKO_AWT = Regex("""skiko-awt-(\d[^/]*)\.jar""")
+    private val SKIKO_NATIVE = Regex("""skiko-awt-runtime-[a-z]+-[a-z0-9]+-(\d[^/]*)\.jar""")
+
+    /**
+     * Why [classpath] would fail to load Skiko, or null when it pairs: Skiko binds the FIRST
+     * `skiko-awt-<v>.jar` and loads the FIRST `skiko-awt-runtime-<os>-<arch>-*.jar` native, and
+     * nothing compares the two, so a mismatch boots and then throws `UnsatisfiedLinkError` on the
+     * first newer JNI symbol (the image's `check-skiko-pairing.sh` has the history). The player's
+     * Compose line moves Skiko ahead of the daemon's, so the native must come with it.
+     */
+    internal fun skikoPairingProblem(classpath: List<File>): String? {
+      val awt =
+        classpath.firstNotNullOfOrNull { jar ->
+          SKIKO_AWT.matchEntire(jar.name)?.takeUnless { jar.name.startsWith("skiko-awt-runtime-") }
+        } ?: return null
+      val version = awt.groupValues[1]
+      val native =
+        classpath.firstNotNullOfOrNull { SKIKO_NATIVE.matchEntire(it.name) }
+          ?: return "binds Skiko $version but no skiko-awt-runtime-<os>-<arch>-$version.jar is on " +
+            "its classpath — stage the host's native into $DESKTOP_PLAYER_SIDECAR/"
+      if (native.groupValues[1] == version) return null
+      return "binds Skiko $version but would load the ${native.groupValues[1]} native " +
+        "(${native.value}) — stage skiko-awt-runtime-<os>-<arch>-$version.jar into " +
+        "$DESKTOP_PLAYER_SIDECAR/"
+    }
+
+    private fun anyJarHas(jars: List<File>, entry: String): Boolean = jars.any { jar ->
+      runCatching { ZipFile(jar).use { it.getEntry(entry) != null } }.getOrDefault(false)
+    }
+
+    /**
+     * The production desktop player daemon, or null (having said why through [log]) when this host
+     * cannot run one: no staged player ([DESKTOP_PLAYER_SIDECAR]), no desktop daemon sidecar, a
+     * `daemon-desktop` that predates carried documents ([DESKTOP_BINDING_MARKER]), or a classpath
+     * whose Skiko would not load ([skikoPairingProblem]). Its classpath is the player sidecar ahead
+     * of `lib-daemon-desktop/` + `lib-renderer/`, the order the cmp-jvm one-shot lane gives
+     * `lib-rcjvm/`.
+     *
+     * Only for [openLive]: whether a started daemon actually holds a carried document is still its
+     * `initialize` capabilities' to say ([playsCarriedDocumentsLive]).
+     */
+    fun desktopSubprocess(
+      workRoot: File,
+      liveSeats: LiveSeatLimiter?,
+      log: (String) -> Unit,
+    ): ServeRcPlayerDaemon? {
+      val playerJars = locateBundleSidecarJars(DESKTOP_PLAYER_SIDECAR)
+      if (!anyJarHas(playerJars, CMP_PLAYER_MARKER)) {
+        log(
+          "needs the CMP player ($DESKTOP_PLAYER_SIDECAR/) — looked in " +
+            bundleSidecarSearchDescription(DESKTOP_PLAYER_SIDECAR)
+        )
+        return null
+      }
+      val daemonJars = locateBundleSidecarJars("lib-daemon-desktop")
+      val rendererJars = locateBundleSidecarJars("lib-renderer")
+      if (daemonJars.isEmpty() || rendererJars.isEmpty()) {
+        log("needs the desktop daemon sidecar (lib-daemon-desktop/ + lib-renderer/) — not found")
+        return null
+      }
+      if (!anyJarHas(daemonJars, DESKTOP_BINDING_MARKER)) {
+        log(
+          "this daemon-desktop cannot play a carried Remote Compose document " +
+            "(it predates compose-preview-daemon#255); cmp-jvm stays on its one-shot lane"
+        )
+        return null
+      }
+      val classpath = (playerJars + daemonJars + rendererJars).distinctBy { it.absolutePath }
+      skikoPairingProblem(classpath)?.let {
+        log(it)
+        return null
+      }
+      return ServeRcPlayerDaemon(
+        players = listOf(RcPlayerBackend.CMP_JVM),
+        openHost = {
+          val workDir = File(workRoot, "rc-desktop-player-daemon").apply { deleteRecursively() }
+          val classesDir = File(workDir, "classes").apply { mkdirs() }
+          val previewsJson = File(workDir, "previews.json").apply { writeText(manifestJson()) }
+          val session =
+            SubprocessRenderSessions.openBundleDaemon(
+              daemonClasspath = classpath.map { it.absolutePath },
+              classesDir = classesDir,
+              previewsJson = previewsJson,
+              workspaceRoot = workDir,
+              modulePath = MODULE_PATH,
+              // As every desktop daemon launch: native access for Skiko, and on macOS a background
+              // agent rather than a Dock icon.
+              jvmArgs = listOf("--enable-native-access=ALL-UNNAMED", "-Dapple.awt.UIElement=true"),
+            )
+          val playsLive = playsCarriedDocumentsLive(session.initializeResult.capabilities)
+          val host =
+            ServeRenderHost(session, listOf(PREVIEW), label = "CMP JVM player", onLog = log)
+          object : ServeHost by host, LiveDocuments {
+            override val playsCarriedDocumentsLive: Boolean = playsLive
+          }
+        },
+        liveSeats = liveSeats,
+        onLog = log,
+        label = DESKTOP_LABEL,
+        // A desktop catalog daemon's weight: one Skiko JVM, no Robolectric sandboxes.
+        seatWeight = 1,
       )
     }
   }

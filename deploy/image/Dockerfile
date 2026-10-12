@@ -368,6 +368,32 @@ COPY --from=desktop-daemon /opt/lib-rcjvm /opt/lib-rcjvm
 # desktop-daemon stage — so without this directory every Skiko-backed lane on this box dies in a
 # static initialiser and `?rcPlayer=cmp-jvm` answers 500 for every document.
 COPY --from=desktop-daemon /opt/lib-skiko /opt/lib-skiko
+# …and the native for the desktop player daemon's own bindings. The server tarball ships
+# `lib-rc-player-desktop/`: the CMP Remote Compose player and the Compose Multiplatform line it needs,
+# laid ahead of `lib-daemon-desktop/` + `lib-renderer/` so `ServeRcPlayerDaemon.desktopSubprocess` can
+# hold a live, input-taking `cmp-jvm` session for a document-only preview. That line moves Skiko past
+# the daemon's, so — as for `lib-rcjvm/` above — the directory carries the native for its own
+# `skiko-awt`, and the pairing check gains that lane. Without it the server declines to start the
+# daemon (it checks the same pairing) and cmp-jvm keeps its one-shot lane; a server without the
+# directory skips this. Read off the staged jar, never pinned, for the same reason as above.
+COPY check-skiko-pairing.sh /usr/local/bin/check-skiko-pairing.sh
+RUN set -eu; \
+    case "$(dpkg --print-architecture)" in \
+      amd64) platform=linux-x64 ;; \
+      arm64) platform=linux-arm64 ;; \
+      *) echo "no Skiko native for $(dpkg --print-architecture)" >&2; exit 1 ;; \
+    esac; \
+    player=/opt/compose-preview-server/lib-rc-player-desktop; \
+    awt="$(ls "$player"/skiko-awt-*.jar 2>/dev/null | grep -v '/skiko-awt-runtime-' | head -n 1 || true)"; \
+    if [ -n "$awt" ]; then \
+      version="$(basename "$awt" .jar | sed 's/^skiko-awt-//')"; \
+      nativeJar="skiko-awt-runtime-${platform}-${version}.jar"; \
+      curl -fsSL --retry 20 --retry-delay 15 --retry-all-errors -o "$player/${nativeJar}" \
+        "https://repo1.maven.org/maven2/org/jetbrains/skiko/skiko-awt-runtime-${platform}/${version}/${nativeJar}"; \
+      jar tf "$player/${nativeJar}" | grep -qx "libskiko-${platform}.so"; \
+    fi; \
+    chmod +x /usr/local/bin/check-skiko-pairing.sh; \
+    check-skiko-pairing.sh /opt "$platform"
 # …and the Kotlin Build Tools API jars the PLAYGROUND compiles snippets with. Unlike the
 # sidecars above it backs no render lane: without it `--playground` is admitted and then
 # disabled at the last step, which is how preview.coo.ee ran with a playground nobody could

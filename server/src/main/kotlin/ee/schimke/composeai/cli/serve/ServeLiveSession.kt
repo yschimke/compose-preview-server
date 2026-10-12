@@ -27,6 +27,8 @@ private constructor(
    * lanes). One recorder for the socket's whole life — see [LiveFramePerfStats.Socket].
    */
   private val frameStats: LiveFramePerfStats.Socket? = null,
+  /** `cmp-jvm` names a daemon player on this socket ([ServeRcPlayerIds.parseOverrides]). */
+  private val cmpJvmPlayerId: Boolean = false,
 ) {
   @Volatile private var handle: StreamHandle? = null
 
@@ -163,6 +165,7 @@ private constructor(
       ServeThemeReplay.expand(renderHost, id, params).params,
       knobKindsFor(id),
       declaredThemeFqns(),
+      cmpJvmPlayerId,
     )
 
   /**
@@ -235,6 +238,12 @@ private constructor(
       system: String,
       /** Where this socket's frame telemetry lands; null when nothing is collecting it. */
       frameStats: LiveFramePerfStats? = null,
+      /**
+       * Whether [renderHost] streams `cmp-jvm` through a daemon, so `rcPlayer=cmp-jvm` rides
+       * `playerId` instead of being refused: a document-only preview's live lane with the desktop
+       * player daemon configured.
+       */
+      cmpJvmPlayerId: Boolean = false,
       onUnavailable: ((String) -> Unit)? = null,
     ): ServeLiveSession? {
       val knobKinds =
@@ -250,6 +259,7 @@ private constructor(
               ServeThemeReplay.expand(renderHost, previewId, normalizedOverrides).params,
               knobKinds,
               renderHost.declaredThemes.map { it.providerFqn }.toSet(),
+              cmpJvmPlayerId,
             )
         ) {
           is OverrideParse.Invalid -> {
@@ -272,6 +282,7 @@ private constructor(
           send,
           system,
           recorder,
+          cmpJvmPlayerId,
         )
       session.handle =
         renderHost.subscribeStream(

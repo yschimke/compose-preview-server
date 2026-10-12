@@ -445,7 +445,9 @@ rc-players = "2.9.0"
 # `rc-players-android` is the rc-players release (its BOM) the daemon's connector is built against,
 # and `compose-remote` is the AndroidX line that release's embedded player depends on; move them
 # together. The same BOM picks the CMP player (`rc-player-compose`) staged beside them for
-# `cmp-android`.
+# `cmp-android`, and pins its JVM target staged as `lib-rc-player-desktop/` for the desktop player
+# daemon (`stageRcPlayerDesktopLibs`); compose-preview-daemon's desktop binding is compiled against
+# this release's `rc-player-compose`.
 rc-players-android = "2.9.0"
 compose-remote = "1.0.0-alpha19"
 # The TypeScript player's browser bundle (`remote-compose-player-js-dist`, a zip with the `dist`
@@ -572,8 +574,10 @@ compose-remote-player-view = { module = "androidx.compose.remote:remote-player-v
 compose-remote-player-compose = { module = "androidx.compose.remote:remote-player-compose", version.ref = "compose-remote" }
 # Versionless, through the rc-players BOM: rc-players publishes only the modules a release changed.
 rcplayer-embedded-android = { module = "ee.schimke.composeai:third-party-rc-embedded-player" }
-# The CMP player behind `cmp-android`. Transitive at its use site (`rcPlayersAndroidCmp`), unlike the
-# family above: its runtime tail is not the sidecar's.
+# The CMP player behind `cmp-android` and, as its JVM target, the server's own desktop player daemon
+# (the cmp-jvm held session, staged as `lib-rc-player-desktop/`). Transitive at its use sites
+# (`rcPlayersAndroidCmp`, `stageRcPlayerDesktopLibs`), unlike the family above: its runtime tail is
+# not the sidecar's. Versionless, through the same rc-players BOM.
 rcplayer-compose = { module = "ee.schimke.composeai:rc-player-compose" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }

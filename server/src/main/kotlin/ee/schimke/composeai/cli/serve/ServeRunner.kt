@@ -2143,6 +2143,25 @@ public class ServeRunner(
    * where this host has the Android runtime and the staged players; otherwise null (logged), and
    * the Android players are drawn only while a catalog daemon is resident to lend itself.
    */
+  /**
+   * The desktop player daemon ([ServeRcPlayerDaemon.desktopSubprocess]) that holds live `cmp-jvm`
+   * sessions for document-only previews, built but not started. Behind `--allow-render-trusted`
+   * like its Android sibling, and only where the staged CMP player, a desktop daemon that plays
+   * carried documents and a paired Skiko native are all present; otherwise null (logged), and
+   * cmp-jvm keeps only its one-shot render lane.
+   */
+  private fun buildRcDesktopPlayerDaemon(): ServeRcPlayerDaemon? {
+    if (!allowRenderTrusted) return null
+    val workRoot =
+      java.nio.file.Files.createTempDirectory("serve-rc-desktop-player").toFile().also {
+        it.deleteOnExit()
+      }
+    return ServeRcPlayerDaemon.desktopSubprocess(workRoot, liveSeatLimiter) {
+        System.err.println("serve: desktop Remote Compose player daemon: $it")
+      }
+      ?.also { System.err.println("serve: cmp-jvm live sessions on demand") }
+  }
+
   private fun buildRcPlayerDaemon(): ServeRcPlayerDaemon? {
     if (!allowRenderTrusted) return null
     val workRoot =
@@ -3436,6 +3455,7 @@ public class ServeRunner(
           )
       }
     val rcPlayerDaemon = buildRcPlayerDaemon()
+    val rcDesktopPlayerDaemon = buildRcDesktopPlayerDaemon()
     val server =
       ServeHttpServer(
         host = host,
@@ -3521,6 +3541,7 @@ public class ServeRunner(
           playgroundLane?.compile?.takeIf { playgroundExternal && !publicPlayground },
         playgroundHealth = playgroundLane?.health,
         rcPlayerDaemon = rcPlayerDaemon,
+        rcDesktopPlayerDaemon = rcDesktopPlayerDaemon,
         branchFetchStats = catalogStore?.let { store -> { store.branchFetchStats.snapshot() } },
         themeOptimizerStats = { backgroundWork.optimizerAdmissionSnapshot() },
         themeCacheStats = { themeCacheStore?.snapshot() },
@@ -3756,6 +3777,7 @@ public class ServeRunner(
           runCatching { catalogRegistrySync?.close() }
           runCatching { registry.close() }
           runCatching { rcPlayerDaemon?.close() }
+          runCatching { rcDesktopPlayerDaemon?.close() }
           runCatching { commentWebhook?.second?.close() }
           runCatching { commentWebhook?.first?.close() }
           runCatching { push?.close() }
