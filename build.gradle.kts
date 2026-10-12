@@ -80,7 +80,6 @@ tasks.named("check") {
   // `:server:check`.
   dependsOn(
     ":server:check",
-    ":mcp:check",
     ":native-catalog-m3:check",
     ":usage-source-psi:check",
     ":wasm-ui:check",
@@ -149,12 +148,13 @@ subprojects {
   }
 }
 
-// No Maven publishing: this repository ships only the GitHub release tarballs built by
-// `:server:distTar` and `:mcp:distTar`, which `compose-preview serve`/`browse`/`ui-builder`/`mcp
-// serve` launch. The editor archive is compose-ui-builder's own release asset, resolved by
+// No Maven publishing: this repository ships only the GitHub release tarball built by
+// `:server:distTar`, which `compose-preview serve`/`browse`/`ui-builder` launch (`mcp serve`
+// launches yschimke/compose-preview-mcp's). The editor archive is compose-ui-builder's own release asset, resolved by
 // coordinate.
 
-// One compile-time choice for the editor/server and the independently published MCP adapter.
+// One compile-time choice for the editor/server (compose-preview-mcp makes the same choice in its
+// own build).
 // No environment, URL or request parameter can turn a released build's feature set on.
 val remoteComposeAuthoring = providers.gradleProperty("uiBuilderRemoteCompose").orElse("false").map {
   require(it == "true" || it == "false") { "uiBuilderRemoteCompose must be true or false" }
@@ -162,7 +162,6 @@ val remoteComposeAuthoring = providers.gradleProperty("uiBuilderRemoteCompose").
 }
 listOf(
   Triple("generateUiBuilderBuildFeatures", "ee.schimke.composeai.uibuilder", "UiBuilderBuildFeatures"),
-  Triple("generateMcpBuildFeatures", "ee.schimke.composeai.mcp", "McpBuildFeatures"),
 ).forEach { (taskName, packageName, objectName) ->
   tasks.register(taskName) {
     val enabled = remoteComposeAuthoring

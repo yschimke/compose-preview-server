@@ -14,9 +14,9 @@ import org.gradle.api.tasks.TaskAction
  * `remote-compose-player-js-dist` zip as a classpath resource, with
  * `server/src/rc-player/inert-custom-host.js` appended.
  *
- * Both `:server` (`/rc-player/bundle.js`) and `:mcp` (the `.rc` viewer MCP App) play documents
- * they did not write, so both ship the bundle with its custom host made inert; see that file and
- * `server/src/rc-player/README.md`.
+ * Both `:server` (`/rc-player/bundle.js`) and compose-preview-mcp (the `.rc` viewer MCP App, with
+ * its own copy of this task and the shim) play documents they did not write, so both ship the
+ * bundle with its custom host made inert; see that file and `server/src/rc-player/README.md`.
  */
 abstract class StageRcPlayerJs : DefaultTask() {
   @get:InputFile abstract val archiveFile: RegularFileProperty

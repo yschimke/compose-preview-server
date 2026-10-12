@@ -4,8 +4,8 @@ Remote Compose authoring is disabled by default. Enabling it is a build of **bot
 because the flag has two halves:
 
 ```sh
-# The MCP adapter's half is generated in this repository.
-./gradlew -PuiBuilderRemoteCompose=true :mcp:installDist
+# The MCP adapter's half is generated in yschimke/compose-preview-mcp's build.
+(cd ../compose-preview-mcp && ./gradlew -PuiBuilderRemoteCompose=true :mcp:installDist)
 
 # The server's half reads `UiBuilderBuildFeatures` out of the UI-builder export, and a release ships
 # the default (`false`), so this is the only way to turn it on:

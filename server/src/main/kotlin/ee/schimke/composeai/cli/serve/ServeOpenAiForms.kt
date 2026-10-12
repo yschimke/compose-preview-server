@@ -15,17 +15,17 @@ import kotlinx.serialization.json.putJsonObject
  * https://github.com/openai/mcp-extensions/blob/main/docs/spec.md, section "OpenAI Form
  * Elicitation".
  *
- * **A deliberate, minimal duplicate** of the pure schema builders in `:mcp`'s `OpenAiForms`
- * (#1253). `:server` may not depend on `:mcp` — `checkServeModuleBoundary` keeps the two shipping
- * modules apart, and `:mcp`'s copy is typed against the Kotlin MCP SDK's `ClientCapabilities` and
- * `ServerSession`, which the hosted endpoint does not link (it speaks JSON-RPC over its own
- * request-scoped transport, [ServeMcpRequestScopes]). Only what the hosted picker needs is here:
- * the capability check, the single-select field, an option, a thumbnail icon, a preview target and
- * answer validation. The wire shapes are the spec's and must stay byte-identical to `:mcp`'s; both
- * are pinned by tests against the spec's own example.
+ * **A deliberate, minimal duplicate** of the pure schema builders in compose-preview-mcp's
+ * `OpenAiForms` (#1253). The two are separate repositories now, and that copy is typed against the
+ * Kotlin MCP SDK's `ClientCapabilities` and `ServerSession`, which the hosted endpoint does not
+ * link (it speaks JSON-RPC over its own request-scoped transport, [ServeMcpRequestScopes]). Only
+ * what the hosted picker needs is here: the capability check, the single-select field, an option, a
+ * thumbnail icon, a preview target and answer validation. The wire shapes are the spec's and must
+ * stay byte-identical to that copy; both are pinned by tests against the spec's own example.
  *
  * Only the legacy direct-connection `openai/elicitation/create` request is sent — the same gap
- * `:mcp` documents: the MRTR flow of MCP `2026-07-28` is not negotiated by this endpoint.
+ * compose-preview-mcp documents: the MRTR flow of MCP `2026-07-28` is not negotiated by this
+ * endpoint.
  */
 internal object ServeOpenAiForms {
   /** `capabilities.extensions` key a host declares (`{ form: {} }`) when it renders these forms. */

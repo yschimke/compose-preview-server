@@ -129,9 +129,9 @@ jobs:
             echo "nothing to publish in this run"
           fi
 
-  # The distribution lane. Builds and attaches both standalone archives; `compose-preview serve` and
-  # `compose-preview mcp serve` in the CLI fetch THESE, so a release missing either is a command
-  # that cannot start. Deliberately does NOT un-draft - `finish-release` does that once every lane
+  # The distribution lane. Builds and attaches the standalone server archive; `compose-preview serve`
+  # in the CLI fetches it, so a release missing it is a command that cannot start. (`mcp serve`
+  # fetches yschimke/compose-preview-mcp's release instead.) Deliberately does NOT un-draft - `finish-release` does that once every lane
   # this release asked for has succeeded.
   #
   # The editor archive is NOT attached here. It is yschimke/compose-ui-builder's own release asset,
@@ -171,19 +171,28 @@ jobs:
           cache-provider: basic
           cache-read-only: true
       - name: Build the standalone distributions
-        run: ./gradlew :server:distTar :mcp:distTar
+        run: ./gradlew :server:distTar
       - name: Upload standalone server distribution
         run: >-
           gh release upload "${{ needs.release-please.outputs.publish_tag }}"
           "server/build/distributions/compose-preview-server-${PLUGIN_VERSION}.tar.gz"
           --clobber
-      - name: Upload standalone MCP server distribution
-        run: >-
-          gh release upload "${{ needs.release-please.outputs.publish_tag }}"
-          "mcp/build/distributions/compose-preview-mcp-${PLUGIN_VERSION}.tar.gz"
-          --clobber
-      # The same self-contained MCP App both servers embed, as a static file for hosts with no MCP
-      # Apps bridge (for example an Antigravity <agent-embed>): they pass a result in the URL
+      # A bridge for CLIs released before compose-ai-tools#5929, which still fetch
+      # `compose-preview-mcp-<this version>.tar.gz` from the newest release HERE: re-attach
+      # yschimke/compose-preview-mcp's newest distribution under that name. The CLI finds the
+      # distribution by layout, not by the archive's directory name, so the rename is enough. Drop
+      # this step once no supported CLI predates #5929.
+      - name: Re-attach the MCP server for older CLIs
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          gh release download --repo yschimke/compose-preview-mcp \
+            --pattern 'compose-preview-mcp-*.tar.gz' --dir "$work"
+          mv "$work"/compose-preview-mcp-*.tar.gz "$work/compose-preview-mcp-${PLUGIN_VERSION}.tar.gz"
+          gh release upload "${{ needs.release-please.outputs.publish_tag }}" \
+            "$work/compose-preview-mcp-${PLUGIN_VERSION}.tar.gz" --clobber
+      # The same self-contained MCP App the hosted `/mcp` embeds (and compose-preview-mcp copies, by
+      # this release's tag), as a static file for hosts with no MCP Apps bridge (for example an Antigravity <agent-embed>): they pass a result in the URL
       # fragment, `#compose-preview-result=<base64url envelope>`, or inline it in the file as
       # `<script type="application/json" id="compose-preview-result">` (Antigravity renders the file
       # through <iframe srcdoc>, where no fragment arrives). Both are documented in the file itself.
@@ -196,7 +205,7 @@ jobs:
   # One release goes out, or none does. The GitHub release stays a DRAFT until the distribution lane
   # has succeeded, so a failed build cannot leave a tag whose assets do not exist - which is the
   # shape of the 3.3.0 breakage, arrived at by a different road. There is no second lane to wait on
-  # now: the two tarballs ARE the release.
+  # now: the tarball IS the release.
   finish-release:
     needs: [release-please, publish-distributions]
     if: ${{ !cancelled() && needs.publish-distributions.result == 'success' }}

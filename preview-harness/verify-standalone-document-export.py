@@ -16,8 +16,13 @@ url = sys.argv[1] if len(sys.argv) > 1 else 'http://127.0.0.1:5626'
 token = os.environ['UI_BUILDER_TEST_TOKEN']
 env = dict(os.environ, COMPOSE_PREVIEW_UI_BUILDER_TOKEN=token)
 log = open('/tmp/ui-builder-standalone-document-stderr.log', 'w')
+# The MCP server lives in yschimke/compose-preview-mcp; build it there (`:mcp:installDist`), next to
+# this checkout by default, or name the launcher with COMPOSE_PREVIEW_MCP.
+launcher = os.environ.get('COMPOSE_PREVIEW_MCP') or str(
+    root.parent / 'compose-preview-mcp/mcp/build/install/compose-preview-mcp/bin/compose-preview-mcp'
+)
 process = subprocess.Popen(
-    [str(root / 'mcp/build/install/compose-preview-mcp/bin/compose-preview-mcp'),
+    [launcher,
      '--ui-builder-url', url],
     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log, text=True, env=env,
 )

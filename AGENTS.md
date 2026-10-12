@@ -172,22 +172,19 @@ how those artefacts are regenerated, just run through `build-brief`.
   `compose-preview-contracts`; it does not link a Gradle driver
   ([#9](https://github.com/yschimke/compose-preview-server/issues/9),
   [#180](https://github.com/yschimke/compose-preview-server/issues/180)).
-- Three shipping Kotlin modules. `:server` holds the HTTP layer, the runner, the catalog store and
-  the web surfaces; `:mcp` is the Model Context Protocol server; `:usage-source-psi`, `:wasm-ui` and
-  `:native-catalog-m3` are the supporting build modules. The UI builder's service — `:ui-builder-runtime`
+- Shipping Kotlin modules. `:server` holds the HTTP layer, the runner, the catalog store and the
+  web surfaces; `:usage-source-psi`, `:wasm-ui` and `:native-catalog-m3` are the supporting build
+  modules. The UI builder's service — `:ui-builder-runtime`
   — is not here: it is a released coordinate from `yschimke/compose-ui-builder` that `:server` links,
   and it holds persistent design state, catalog validation and renderer-neutral export orchestration
   there. This repository publishes no Maven coordinates; the modules ship inside the standalone
   server archive. `checkServeModuleBoundary` and `checkServerJvmFloor` enforce the graph and the
   floor.
-- `:mcp` is the third, and it depends on neither of the other two. It is the Model Context Protocol
-  server — `compose-preview mcp serve` — moved here from compose-ai-tools because the layer rule
-  places a module that needs an HTTP server in this repository (compose-ai-tools#5176), and it
-  reaches what it needs from layer 1 (`daemon-core`, `daemon-client`, `render-session-api`,
-  `render-matrix`) as published coordinates. It ships as the `compose-preview-mcp` standalone
-  tarball on the GitHub release, which is what the CLI's `mcp` command launches. Keep
-  `checkMcpToolingApiBoundary` passing: driving a Gradle build is layer-1 behaviour and stays off
-  this repository's floor, MCP included.
+- `:mcp`, the local Model Context Protocol server behind `compose-preview mcp serve`, moved on to
+  [yschimke/compose-preview-mcp](https://github.com/yschimke/compose-preview-mcp), a layer-3 leaf
+  on its own release train. It copies `mcp-app/compose-preview-viewer.html` and
+  `mcp-app/preview-library.html` from this repository's releases by tag, so those two pages stay
+  here and a change to either reaches it through a release.
 - `:render-host` was a third, until #180 moved it to compose-ai-tools, where it publishes as
   `ee.schimke.composeai:render-host`. It is offline behaviour that opens no socket, which the layer
   rule places in that repository, and it had zero project dependencies inside this build. `:server`
@@ -235,8 +232,8 @@ how those artefacts are regenerated, just run through `build-brief`.
 
 ## The hosted catalog MCP server
 
-[`.mcp.json`](.mcp.json) registers `compose-preview-catalog`, the deployment of this repository's
-own `:mcp` module at `https://preview.coo.ee/mcp`. It is how an agent reads the hosted catalogs and
+[`.mcp.json`](.mcp.json) registers `compose-preview-catalog`, this repository's hosted catalog MCP
+endpoint (`ServeCatalogMcp`) at `https://preview.coo.ee/mcp`. It is how an agent reads the hosted catalogs and
 drives a UI-builder design — `ui_builder_get_design`, `ui_builder_apply`, `ui_builder_export`,
 `ui_builder_render_native` — against the running server rather than a local one.
 
