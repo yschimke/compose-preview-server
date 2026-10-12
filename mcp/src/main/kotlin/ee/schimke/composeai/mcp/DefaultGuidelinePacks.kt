@@ -77,8 +77,9 @@ internal object DefaultGuidelinePacks {
   fun choose(kind: GuidelineSubjectKind?, entry: JsonObject?): Choice {
     val wear = isWear(kind, entry)
     return when {
-      kind?.surface == GuidelineSurfaces.WIDGET &&
-        kind.profile == GuidelineSurfaces.WEAR_WIDGETS_PROFILE ->
+      // A widget on the wear-widgets profile, or one whose manifest names the Wear host without
+      // recording a profile: either way not a launcher widget.
+      kind?.surface == GuidelineSurfaces.WIDGET && wear ->
         Choice("wear-widgets", "wear", listOf(Pack.REMOTE_COMPOSE, Pack.WEAR_WIDGETS))
       kind?.surface == GuidelineSurfaces.WIDGET ->
         Choice("launcher-widgets", "mobile", listOf(Pack.LAUNCHER_WIDGETS))

@@ -466,16 +466,31 @@ object PreviewGuidelinesMcp {
       )
     }
     val notes = mutableListOf<String>()
+    // Each preview's module guidelines, or null for a module that publishes none. A batch is asked
+    // one set of rules, so previews from modules that disagree are asked in separate calls rather
+    // than one module's rules (or the defaults) silently standing in for another's.
+    // A preview whose build directory is unknown takes the rest of the batch's, as before.
+    val moduleGuidelines =
+      resolved
+        .mapNotNull { it.buildDir }
+        .map { dir ->
+          File(dir, "compose-previews/${CatalogGuidelinesV1.FILE_NAME}").takeIf { it.isFile }?.path
+        }
+        .distinct()
+        .ifEmpty { listOf(null) }
     val location =
       (args["guidelines"] as? JsonPrimitive)
         ?.contentOrNull
         ?.takeIf { it.isNotBlank() }
         ?.also { requireGuidelinesLocation(tool, it) }
-        ?: resolved
-          .firstNotNullOfOrNull { it.buildDir }
-          ?.let { File(it, "compose-previews/${CatalogGuidelinesV1.FILE_NAME}") }
-          ?.takeIf { it.isFile }
-          ?.path
+        ?: run {
+          require(moduleGuidelines.size == 1) {
+            "$tool: these previews come from modules with different guidelines (" +
+              moduleGuidelines.joinToString { it ?: "none" } +
+              "); ask about each module in its own call, or pass `guidelines` with a file or URL"
+          }
+          moduleGuidelines.single()
+        }
     val defaults =
       if (location != null) null
       else {

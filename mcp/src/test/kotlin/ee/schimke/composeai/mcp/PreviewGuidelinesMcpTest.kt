@@ -92,6 +92,8 @@ class PreviewGuidelinesMcpTest {
     val endpointKeys: Map<String, String> = emptyMap(),
     /** The module build directory; one without a guidelines file asks the default packs. */
     val dir: File = buildDir,
+    /** Previews from another module: name to build directory. */
+    val otherModules: Map<String, File> = emptyMap(),
   ) : PreviewGuidelinesMcp.Host {
     val model = FakeModel()
 
@@ -127,7 +129,7 @@ class PreviewGuidelinesMcpTest {
           "compose-preview://w/:app/$ref",
           "com.example.$ref",
           ref,
-          dir,
+          otherModules[ref] ?: dir,
           projectRoot,
         )
 
@@ -306,6 +308,36 @@ class PreviewGuidelinesMcpTest {
     assertThat(text).contains("wear-widgets (remote-compose + wear-widgets")
     assertThat(text).contains("compose-ui (compose-ui")
     assertThat(host.defaultCatalog).isNull()
+  }
+
+  @Test
+  fun `previews from modules with different guidelines are asked in separate calls`() {
+    // The first preview's module publishes none; a later one's catalog must not be ignored.
+    val host =
+      FakeHost(
+        key = null,
+        dir = moduleWithoutGuidelines(wearWidget("Weather")),
+        otherModules = mapOf("Stop" to buildDir),
+      )
+    val text = errorText(PreviewGuidelinesMcp.prompt(args("Weather", "Stop"), host))
+    assertThat(text).contains("modules with different guidelines")
+    assertThat(text).contains("none")
+    assertThat(host.defaultCatalog).isNull()
+  }
+
+  @Test
+  fun `a widget the manifest puts on the Wear host is a Wear widget, profile or not`() {
+    val entry =
+      kotlinx.serialization.json.Json.parseToJsonElement(
+          """{"id": "w", "params": {"device": null}, "widget": {"host": "wear"}}"""
+        )
+        .jsonObject
+    val choice =
+      DefaultGuidelinePacks.choose(
+        ee.schimke.composeai.guidelines.GuidelineSurfaces.of(entry),
+        entry,
+      )
+    assertThat(choice.name).isEqualTo("wear-widgets")
   }
 
   @Test
