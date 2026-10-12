@@ -1,5 +1,24 @@
 # Changelog
 
+## [3.126.0](https://github.com/yschimke/compose-preview-server/compare/v3.125.0...v3.126.0) (2026-10-12)
+
+
+### Features
+
+* **ui-builder:** take compose-ui-builder 3.108.0 for list and object properties ([#1583](https://github.com/yschimke/compose-preview-server/issues/1583)) ([55e8ad8](https://github.com/yschimke/compose-preview-server/commit/55e8ad8b870bbe0a1f414c35c632d786318eba8b))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.51.0 ([#1597](https://github.com/yschimke/compose-preview-server/issues/1597)) ([7c11985](https://github.com/yschimke/compose-preview-server/commit/7c11985091a1b4a5f801f0192628dcd0e87ce77e))
+* **deps:** update dependency org.jmdns:jmdns to v3.6.4 ([#1589](https://github.com/yschimke/compose-preview-server/issues/1589)) ([fc60c4c](https://github.com/yschimke/compose-preview-server/commit/fc60c4c08f82188e6cfeaee7dce27ecd880ec3c6))
+* **deps:** update rc-players to v2.8.0 ([#1598](https://github.com/yschimke/compose-preview-server/issues/1598)) ([eaca8e4](https://github.com/yschimke/compose-preview-server/commit/eaca8e4dd6f6ec23ee3b6682e0b58631b463be14))
+* **image:** give the cmp-jvm worker the Skiko native for its own bindings ([#1594](https://github.com/yschimke/compose-preview-server/issues/1594)) ([0e0bce2](https://github.com/yschimke/compose-preview-server/commit/0e0bce2bc67ec6563cb432b6dcf13cbf60b3063d))
+* **serve-web:** draw browser Remote Compose lanes at the preview's density ([#1600](https://github.com/yschimke/compose-preview-server/issues/1600)) ([11579e3](https://github.com/yschimke/compose-preview-server/commit/11579e38a5a3cef2ec5bf79276d53135db99e064))
+* **serve-web:** never leave the Camaelon JS canvas at the 300×150 default ([#1593](https://github.com/yschimke/compose-preview-server/issues/1593)) ([d242722](https://github.com/yschimke/compose-preview-server/commit/d242722497d6a12ce94f5216243079540531afe0))
+* **serve:** draw a document-only catalog's Remote Compose documents at their own density ([#1584](https://github.com/yschimke/compose-preview-server/issues/1584)) ([ff7c1df](https://github.com/yschimke/compose-preview-server/commit/ff7c1dfd54e94d83ebdc2facb79555fb475ab26e))
+* **serve:** offer only the Android rc players a catalog can draw, and fall back when the player daemon has no seat ([#1595](https://github.com/yschimke/compose-preview-server/issues/1595)) ([aceeac4](https://github.com/yschimke/compose-preview-server/commit/aceeac4746e06968b5073e4d5991b3659f1ca2a5))
+
 ## [3.125.0](https://github.com/yschimke/compose-preview-server/compare/v3.124.0...v3.125.0) (2026-10-11)
 
 
