@@ -1,10 +1,12 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.uibuilder.export.UiBuilderNewDesignSeed
 import ee.schimke.composeai.uibuilder.export.toDesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.*
 import ee.schimke.composeai.uibuilder.service.*
 import java.io.File
+import java.util.zip.GZIPInputStream
 import kotlin.test.*
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -14,12 +16,36 @@ import kotlinx.serialization.json.jsonPrimitive
 
 /** An A2UI catalog's JSON export is its A2UI messages, in every build; nothing else changes. */
 class A2uiJsonExportExecutorTest {
-  private val a2ui =
+  // Captured from a2ui-catalog's published files, as served after the Kotlin catalog was deleted.
+  private fun publishedFile(name: String): String =
+    checkNotNull(javaClass.getResourceAsStream("/catalog-cutover/a2ui-catalog/$name")).use {
+      GZIPInputStream(it).bufferedReader().readText()
+    }
+
+  private val a2ui by lazy {
+    val record = Json.decodeFromString<ComponentRecordFile>(publishedFile("components.json.gz"))
+    val exports =
+      ExportCapabilitiesV1.Builder()
+        .also {
+          it.composeCode = true
+          it.svg = false
+          it.png = false
+        }
+        .build()
+    val result =
+      PublishedUiBuilderCatalog.compose(publishedFile("ui-builder.json.gz"), record, exports)
+    assertTrue(
+      result is PublishedUiBuilderCatalog.Result.Composed,
+      "the published A2UI catalog must compose: ${(result as? PublishedUiBuilderCatalog.Result.Unusable)?.reason}",
+    )
+    val published = (result as PublishedUiBuilderCatalog.Result.Composed).catalog
     CurrentM3UiBuilderCatalogExecutor(
-        catalogSystemIds = setOf(CurrentM3UiBuilderCatalogExecutor.A2UI_CATALOG_SYSTEM_ID)
+        catalogSystemIds = setOf(CurrentM3UiBuilderCatalogExecutor.A2UI_CATALOG_SYSTEM_ID),
+        published = mapOf(CurrentM3UiBuilderCatalogExecutor.A2UI_CATALOG_SYSTEM_ID to published),
       )
       .listCatalogs()
       .single()
+  }
 
   private val seed =
     UiBuilderNewDesignSeed.document(
