@@ -26,8 +26,11 @@ cd "$(dirname "$0")/.."
 # own release build — where the flag is off. Without the checkout the test SKIPS and the two
 # `state-actions` fixtures silently stay as they were, which is the failure mode the `--rerun`
 # comment above exists to prevent. A missing checkout fails the require() in `settings.gradle.kts`
-# rather than skipping, which is the right shape for a regeneration.
-UPDATE_SERVE_WEB_FIXTURES=true UPDATE_UI_BUILDER_BEHAVIOR_FIXTURE=true UPDATE_SERVE_SETTINGS_REFERENCE=true ./gradlew -PcomposeUiBuilderDir=../compose-ui-builder -PuiBuilderRemoteCompose=true :server:test \
+# rather than skipping, which is the right shape for a regeneration. `COMPOSE_UI_BUILDER_CHECKOUT`
+# points it elsewhere: the `Regenerate goldens` workflow cannot check out beside the repository,
+# so it puts the pinned release at `.compose-ui-builder`, as CI's `ui-builder-remote-compose` does.
+ui_builder_checkout="${COMPOSE_UI_BUILDER_CHECKOUT:-../compose-ui-builder}"
+UPDATE_SERVE_WEB_FIXTURES=true UPDATE_UI_BUILDER_BEHAVIOR_FIXTURE=true UPDATE_SERVE_SETTINGS_REFERENCE=true ./gradlew "-PcomposeUiBuilderDir=${ui_builder_checkout}" -PuiBuilderRemoteCompose=true :server:test \
   --tests '*ServeWebFixtureTest*' \
   --tests '*ExplodedSvgFixtureTest*' \
   --tests '*BehaviorScreenExportTest*' \

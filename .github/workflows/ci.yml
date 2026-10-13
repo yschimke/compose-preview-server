@@ -93,8 +93,7 @@ jobs:
   # in all, the longest job in the workflow. `:server:test` now has a runner of its own, where it
   # takes every core (`-Pcomposeai.testForks`), and `gradle-build` runs the rest of `check`
   # without it. `gradle` stays as the check the ruleset requires, and Renovate's automerge waits
-  # on, and passes only if both did; see the note on `visual-harness` for why a gate must run
-  # whatever its `needs` did rather than be skipped.
+  # on, and passes only if both did -- and every other job here; see the note on `gradle`.
   gradle-build:
     if: ${{ !(startsWith(github.head_ref || github.ref_name, 'release-please--') && (github.event.pull_request.user.login || github.actor) == 'github-actions[bot]') }}
     runs-on: ubuntu-latest
@@ -167,20 +166,48 @@ jobs:
           ro-token: ${{ secrets.BUILDFETCH_COMPOSEAI_GRADLE_REMOTE_CACHE_TOKEN_RO || secrets.BUILDFETCH_GRADLE_REMOTE_CACHE_TOKEN_RO }}
       - run: ./gradlew :server:test -Pcomposeai.testForks=4
 
+  # The check the "Protect Main" ruleset requires and Renovate's automerge waits on -- the ONLY CI
+  # check it requires, so it is the verdict for every job in this workflow, not just the Gradle
+  # ones. A job left out of `needs` gates nothing: `serve-web` was red on `main` for a day (the
+  # viewer bundle budget, from the Vue 3.5.44 bump that merged over it) without blocking a merge.
+  # A new job goes in this list unless a comment on it says why it is advisory.
+  #
+  # `visual-harness` stands for its two split jobs, which it already gates. `!cancelled()` so this
+  # runs whatever its `needs` did: a job whose `needs` failed is SKIPPED, and GitHub counts a
+  # skipped required check as passing. Nothing here is path-filtered or event-conditional, so a
+  # skip only ever means a failed dependency -- except on a release-please PR, where the guarded
+  # jobs are skipped on purpose (see the top of `jobs:`), and only a skip is excused there; the
+  # cheap gates that still run on that PR still have to pass.
   gradle:
-    needs: [gradle-build, gradle-server-test]
+    needs:
+      - source-gates
+      - gradle-build
+      - gradle-server-test
+      - ui-builder-remote-compose
+      - selector-fixtures
+      - deployment
+      - serve-web
+      - ui-builder-contract
+      - visual-harness
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
-      - name: Every split Gradle job succeeded
-        if: >-
-          ${{ (contains(needs.*.result, 'failure') || contains(needs.*.result, 'skipped') || contains(needs.*.result, 'cancelled'))
-          && !(startsWith(github.head_ref || github.ref_name, 'release-please--') && (github.event.pull_request.user.login || github.actor) == 'github-actions[bot]') }}
+      - name: No CI job failed
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
         run: |
-          echo "::error::A Gradle job did not succeed: ${NEEDS}"
+          echo "::error::A CI job did not succeed: ${NEEDS}"
           exit 1
         env:
-          NEEDS: ${{ toJSON(needs.*.result) }}
+          NEEDS: ${{ toJSON(needs) }}
+      - name: No CI job was skipped
+        if: >-
+          ${{ contains(needs.*.result, 'skipped')
+          && !(startsWith(github.head_ref || github.ref_name, 'release-please--') && (github.event.pull_request.user.login || github.actor) == 'github-actions[bot]') }}
+        run: |
+          echo "::error::A CI job was skipped: ${NEEDS}"
+          exit 1
+        env:
+          NEEDS: ${{ toJSON(needs) }}
 
   ui-builder-remote-compose:
     if: ${{ !(startsWith(github.head_ref || github.ref_name, 'release-please--') && (github.event.pull_request.user.login || github.actor) == 'github-actions[bot]') }}
@@ -452,11 +479,11 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-  # Also the verdict for the whole lane, because `visual-harness` is the name a ruleset requires. A
-  # job whose `needs` failed is SKIPPED, and GitHub counts a skipped required check as passing, so
-  # a failed build or page capture would otherwise merge. It therefore waits on both split jobs
-  # (`-pages` included, about a minute longer than `-server`; the lane still finishes inside
-  # `gradle-build`'s time), runs whatever they did, and fails first thing unless both succeeded.
+  # Also the verdict for the whole lane, which `gradle` (the check the ruleset requires) gates on. A
+  # job whose `needs` failed is SKIPPED, and `gradle` would then see only a skip, not which split
+  # job failed. It therefore waits on both split jobs (`-pages` included, about a minute longer
+  # than `-server`; the lane still finishes inside `gradle-build`'s time), runs whatever they did,
+  # and fails first thing unless both succeeded.
   visual-harness:
     needs: [visual-harness-server, visual-harness-pages]
     if: ${{ !cancelled() && !(startsWith(github.head_ref || github.ref_name, 'release-please--') && (github.event.pull_request.user.login || github.actor) == 'github-actions[bot]') }}
