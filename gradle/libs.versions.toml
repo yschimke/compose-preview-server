@@ -279,7 +279,7 @@ composeai-preview-daemon = "3.16.1"
 # Builders (compose-ui-builder#617), so the server can take it.
 # 3.30.0 adds a component record's optional `overloads`, so `.github/scripts/decoder-shapes.json`
 # is regenerated with it (`UPDATE_DECODER_SHAPES=1`).
-composeai-contracts = "3.30.0"
+composeai-contracts = "3.31.0"
 
 # The extracted UI builder (yschimke/compose-ui-builder), resolved from its RELEASES. Three jars
 # and a BOM on Maven Central, and the editor archive as a GitHub release asset reached through the
