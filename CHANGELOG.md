@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.136.0](https://github.com/yschimke/compose-preview-server/compare/v3.135.0...v3.136.0) (2026-10-13)
+
+
+### Bug Fixes
+
+* **serve:** withhold a catalog the builder cannot define instead of failing the builder ([#1641](https://github.com/yschimke/compose-preview-server/issues/1641)) ([db77284](https://github.com/yschimke/compose-preview-server/commit/db77284b9428b16e26cdbefa6c07b63fedfa0bba))
+
 ## [3.135.0](https://github.com/yschimke/compose-preview-server/compare/v3.134.0...v3.135.0) (2026-10-13)
 
 
