@@ -361,6 +361,25 @@ class ServeCommandOptionsTest {
   }
 
   @Test
+  fun `unlisted catalogs are none unless named`() {
+    assertEquals(emptySet(), options(emptyList()).uiBuilderUnlistedCatalogs)
+    assertEquals(
+      emptySet(),
+      options(listOf("--ui-builder-unlisted-catalogs", "none")).uiBuilderUnlistedCatalogs,
+    )
+    assertEquals(
+      setOf("wear-m3-typed-pilot", "m3-catalog-typed-pilot"),
+      options(
+          listOf("--ui-builder-unlisted-catalogs", "wear-m3-typed-pilot, m3-catalog-typed-pilot")
+        )
+        .uiBuilderUnlistedCatalogs,
+    )
+    assertFailsWith<IllegalArgumentException> {
+      options(listOf("--ui-builder-unlisted-catalogs", "not/a/catalog"))
+    }
+  }
+
+  @Test
   fun `catalog ownership refuses a catalog it cannot serve from a published file`() {
     // Not served at all: the same silent-typo case the published lever refuses.
     val unserved =

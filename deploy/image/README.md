@@ -233,6 +233,7 @@ it, and a box with no block is unchanged. Each variable maps to one field:
 | `SERVE_UI_BUILDER_CATALOGS` | `catalogs.<id>.serve` |
 | `SERVE_UI_BUILDER_PUBLISHED_CATALOGS` | `catalogs.<id>.published` |
 | `SERVE_UI_BUILDER_CATALOG_OWNERSHIP` | `catalogs.<id>.owned` |
+| `SERVE_UI_BUILDER_UNLISTED_CATALOGS` | `catalogs.<id>.listed` (`false` unlists) |
 | `SERVE_UI_BUILDER_NATIVE_CATALOGS` | `catalogs.<id>.nativeCatalog` (`""` removes) |
 | `SERVE_UI_BUILDER_PACKS` | `packs.<served catalog>` (`null` withdraws) |
 | `SERVE_UI_BUILDER_WIDGET_PLAYER` | `widgetPlayer` |
