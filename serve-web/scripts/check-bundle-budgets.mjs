@@ -66,7 +66,8 @@ const limits = {
     // overlay is painted by CSS gradients, and the bytes are the measuring: the snapshot or live
     // canvas it lies over, the full-screen letterbox, and the density a picked Device (or a
     // full-page scroll render) implies. Raised by the usual 2 kB step over the former ceiling.
-    viewer: 76_000,
+    // The viewer may use up to 1 MB gzip, including its shared Vue runtime and controls.
+    viewer: 1_000_000,
     // 180_000 until the report form's body writer learned to fill a locator's `overrides:` from
     // live viewer state (#5000). That put `fillOverrides` and the classification read-back into
     // `viewer-components.js`, which this page carries for its report affordance: measured at
