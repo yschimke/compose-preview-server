@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.137.0](https://github.com/yschimke/compose-preview-server/compare/v3.136.0...v3.137.0) (2026-10-13)
+
+
+### Features
+
+* **ui-builder:** serve Home Assistant typed catalog from output repo ([#1642](https://github.com/yschimke/compose-preview-server/issues/1642)) ([47904e0](https://github.com/yschimke/compose-preview-server/commit/47904e022ca0056bba64090685f2cbe385f62ff1))
+
 ## [3.136.0](https://github.com/yschimke/compose-preview-server/compare/v3.135.0...v3.136.0) (2026-10-13)
 
 
