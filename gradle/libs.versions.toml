@@ -433,7 +433,7 @@ composeai-contracts = "3.30.0"
 # 3.108.0 renders, edits and validates typed adapters' list and object properties
 # (compose-ui-builder#717) and retires the catalog-cutover shadow comparison (#716), whose server
 # side #1575 already removed. Built on compose-ai-tools 2.49.0; 2.50.0 above wins resolution.
-composeai-ui-builder = "3.111.0"
+composeai-ui-builder = "3.112.0"
 # The CMP/Wasm Remote Compose player (yschimke/rc-players' `rc-player-wasm-dist`, a zip of its
 # static browser bundle). Shipped in the server tarball as `rc-player-wasm/`, which the image's
 # entrypoint already passes as `--rc-player-wasm-dir`: that serves `/rc-player-wasm/`, enables the
