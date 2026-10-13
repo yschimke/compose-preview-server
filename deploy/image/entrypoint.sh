@@ -555,11 +555,6 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html && "${SERVE_ROLE:-}" 
   if [[ -n "${SERVE_UI_BUILDER_CATALOG_OWNERSHIP:-}" ]]; then
     args+=(--ui-builder-catalog-ownership "${SERVE_UI_BUILDER_CATALOG_OWNERSHIP}")
   fi
-  # Served catalogs kept out of the builder's catalog lists, reachable only by URL and MCP: pilots
-  # compared against a production catalog. Passed only when set, like ownership above.
-  if [[ -n "${SERVE_UI_BUILDER_UNLISTED_CATALOGS:-}" ]]; then
-    args+=(--ui-builder-unlisted-catalogs "${SERVE_UI_BUILDER_UNLISTED_CATALOGS}")
-  fi
   # Keep collaborative designs on the deployment's persistent config volume by default. `none`
   # remains an explicit escape hatch for a static-only builder shell.
   args+=(--ui-builder-state-dir "${SERVE_UI_BUILDER_STATE_DIR:-/config/ui-builder-state}")

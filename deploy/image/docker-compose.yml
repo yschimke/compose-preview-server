@@ -394,8 +394,6 @@ services:
       # docs/design/UI_BUILDER_CATALOG_CONTRACT.md asks for.
       SERVE_UI_BUILDER_PUBLISHED_CATALOGS: "${SERVE_UI_BUILDER_PUBLISHED_CATALOGS:-}"
       SERVE_UI_BUILDER_CATALOG_OWNERSHIP: "${SERVE_UI_BUILDER_CATALOG_OWNERSHIP:-}"
-      # Served catalogs the builder's lists leave out; still reachable by URL and MCP.
-      SERVE_UI_BUILDER_UNLISTED_CATALOGS: "${SERVE_UI_BUILDER_UNLISTED_CATALOGS:-}"
       # The component record the Compose export generates from. The image ships one for
       # `m3-catalog` and the entrypoint installs it by default, so this is an override for a box
       # carrying its own discovery output — an empty value keeps the packaged record.

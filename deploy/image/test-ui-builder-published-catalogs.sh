@@ -49,7 +49,6 @@ run_case() {
     SERVE_UI_BUILDER_PUBLISHED_CATALOGS="${2:-}" \
     SERVE_UI_BUILDER_WEAR="${3:-1}" \
     SERVE_UI_BUILDER_CATALOG_OWNERSHIP="${4:-}" \
-    SERVE_UI_BUILDER_UNLISTED_CATALOGS="${5:-}" \
     bash "${script}"
 }
 
@@ -166,10 +165,5 @@ refute "catalog ownership is not passed by default" "--ui-builder-catalog-owners
 owned="$(run_case "" "" "1" "remote-m3")"
 expect "catalog ownership is forwarded verbatim when set" \
   $'--ui-builder-catalog-ownership\nremote-m3' "${owned}"
-
-refute "unlisted catalogs are not passed by default" "--ui-builder-unlisted-catalogs" "${default}"
-unlisted="$(run_case "" "" "1" "" "wear-m3-typed-pilot")"
-expect "unlisted catalogs are forwarded verbatim when set" \
-  $'--ui-builder-unlisted-catalogs\nwear-m3-typed-pilot' "${unlisted}"
 
 exit "${status}"

@@ -57,7 +57,6 @@ declare -A elsewhere=(
   [SERVE_UI_BUILDER_CATALOGS]='catalogs.json "uiBuilder".catalogs.<id>.serve'
   [SERVE_UI_BUILDER_PUBLISHED_CATALOGS]='catalogs.json "uiBuilder".catalogs.<id>.published'
   [SERVE_UI_BUILDER_CATALOG_OWNERSHIP]='catalogs.json "uiBuilder".catalogs.<id>.owned'
-  [SERVE_UI_BUILDER_UNLISTED_CATALOGS]='catalogs.json "uiBuilder".catalogs.<id>.listed'
   [SERVE_UI_BUILDER_NATIVE_CATALOGS]='catalogs.json "uiBuilder".catalogs.<id>.nativeCatalog'
   [SERVE_UI_BUILDER_PACKS]='catalogs.json "uiBuilder".packs'
   [SERVE_UI_BUILDER_WIDGET_PLAYER]='catalogs.json "uiBuilder".widgetPlayer'

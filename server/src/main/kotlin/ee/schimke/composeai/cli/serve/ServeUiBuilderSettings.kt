@@ -16,10 +16,12 @@ import okio.Path.Companion.toPath
  * | `SERVE_UI_BUILDER_CATALOGS`           | `catalogs.<id>.serve`                     |
  * | `SERVE_UI_BUILDER_PUBLISHED_CATALOGS` | `catalogs.<id>.published`                 |
  * | `SERVE_UI_BUILDER_CATALOG_OWNERSHIP`  | `catalogs.<id>.owned`                     |
- * | `SERVE_UI_BUILDER_UNLISTED_CATALOGS`  | `catalogs.<id>.listed` (false = unlisted) |
  * | `SERVE_UI_BUILDER_NATIVE_CATALOGS`    | `catalogs.<id>.nativeCatalog`             |
  * | `SERVE_UI_BUILDER_PACKS`              | `packs.<served catalog>` (null withdraws) |
  * | `SERVE_UI_BUILDER_WIDGET_PLAYER`      | `widgetPlayer`                            |
+ *
+ * `catalogs.<id>.listed` has no variable, only `--ui-builder-unlisted-catalogs`: unlisting a pilot
+ * is deployment behaviour, which belongs in the committed file rather than the box's `.env`.
  *
  * Secrets and machine facts (`SERVE_UI_BUILDER_WEAR`, `…_STATE_DIR`, `…_COMPONENTS`, `…_HOST`, the
  * guidelines key) stay in the environment; other non-secret builder settings live in
