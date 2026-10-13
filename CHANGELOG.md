@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.135.0](https://github.com/yschimke/compose-preview-server/compare/v3.134.0...v3.135.0) (2026-10-13)
+
+
+### Features
+
+* **deploy:** trust the MeshCore and Home Assistant -out repositories' delivery branches ([#1634](https://github.com/yschimke/compose-preview-server/issues/1634)) ([8f73c32](https://github.com/yschimke/compose-preview-server/commit/8f73c32e9f52744487cf63c96f637646f8b53f19))
+* **ui-builder:** seed import from a listed origin, and a white-labelled builder profile per host ([#1632](https://github.com/yschimke/compose-preview-server/issues/1632)) ([eb97021](https://github.com/yschimke/compose-preview-server/commit/eb97021751e34bb4dea865f01d14d93f60586591))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.55.0 ([#1633](https://github.com/yschimke/compose-preview-server/issues/1633)) ([a4b8ea3](https://github.com/yschimke/compose-preview-server/commit/a4b8ea34a4edb8c9634f2acc952d407198aa04c7))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-ui-builder-bom to v3.110.0 ([#1635](https://github.com/yschimke/compose-preview-server/issues/1635)) ([5432591](https://github.com/yschimke/compose-preview-server/commit/54325915787ddb1661803e764cce130adb089a29))
+* **deps:** update dependency io.github.classgraph:classgraph to v4.8.199 ([#1639](https://github.com/yschimke/compose-preview-server/issues/1639)) ([b9c23ae](https://github.com/yschimke/compose-preview-server/commit/b9c23aea1231ddd3db2a3a3875073fb2231ba818))
+* **deps:** update rc-players ([#1630](https://github.com/yschimke/compose-preview-server/issues/1630)) ([125def6](https://github.com/yschimke/compose-preview-server/commit/125def6a751edbaa572b1acb48741dbac8e513b9))
+
 ## [3.134.0](https://github.com/yschimke/compose-preview-server/compare/v3.133.0...v3.134.0) (2026-10-12)
 
 
