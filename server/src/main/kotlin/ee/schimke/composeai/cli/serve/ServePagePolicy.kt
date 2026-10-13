@@ -155,13 +155,17 @@ internal object ServePagePolicy {
    * Where a page may fetch from. The UI-builder editor shell (never its framed runtimes) also
    * reaches OpenRouter for the guidelines check and PKCE key exchange.
    */
-  private fun connectSrc(path: String): List<String> = buildList {
+  private fun connectSrc(path: String, analyticsOrigin: String?): List<String> = buildList {
     add("'self'")
     add("data:")
     add("blob:")
     add(RAW_GITHUB)
     if (isUiBuilderEditor(path)) add(OPENROUTER)
+    analyticsOrigin?.let(::add)
   }
+
+  /** [ServeAnalytics.origin], read once: the deployment's environment does not change. */
+  private val ANALYTICS_ORIGIN: String? by lazy { ServeAnalytics.origin() }
 
   private fun isUiBuilderEditor(path: String): Boolean =
     (path == "/ui-builder" || path.startsWith("/ui-builder/")) &&
@@ -176,11 +180,14 @@ internal object ServePagePolicy {
     formActions: Collection<String> = emptyList(),
     fetchDest: String? = null,
     serverOwned: Boolean = false,
+    analyticsOrigin: String? = ANALYTICS_ORIGIN,
   ): String {
     val scriptSrc = buildList {
       add("'self'")
       add("'unsafe-inline'")
       if (hostsWasmApp(path)) add("'wasm-unsafe-eval'")
+      // The page's analytics tag loads the tracker from its endpoint (`/script.js`).
+      analyticsOrigin?.let(::add)
     }
     val formAction = (listOf("'self'", GITHUB) + formActions).distinct()
     val directives = buildList {
@@ -190,7 +197,7 @@ internal object ServePagePolicy {
       add("font-src 'self' data: $GOOGLE_FONTS_FILES")
       add("img-src 'self' data: blob: $RAW_GITHUB")
       add("media-src 'self' data: blob:")
-      add("connect-src ${connectSrc(path).joinToString(" ")}")
+      add("connect-src ${connectSrc(path, analyticsOrigin).joinToString(" ")}")
       add("worker-src 'self'")
       add("frame-src 'self'")
       add("object-src 'none'")

@@ -232,4 +232,19 @@ class ServePagePolicyTest {
     assertNull(ServePagePolicy.formActionSource("https:///no-host"))
     assertNull(ServePagePolicy.formActionSource("not a uri"))
   }
+
+  @Test
+  fun `a configured analytics origin may serve the tracker and receive its beacon`() {
+    val analytics = "https://preview.test"
+    for (path in pages) {
+      val policy =
+        ServePagePolicy.forPath(path, analyticsOrigin = analytics).split("; ").associate {
+          it.substringBefore(' ') to it.substringAfter(' ', "")
+        }
+      assertTrue(policy.getValue("script-src").split(' ').contains(analytics), path)
+      assertTrue(policy.getValue("connect-src").split(' ').contains(analytics), path)
+    }
+    val none = ServePagePolicy.forPath("/ui-builder/", analyticsOrigin = null)
+    assertFalse(none.contains(analytics))
+  }
 }
