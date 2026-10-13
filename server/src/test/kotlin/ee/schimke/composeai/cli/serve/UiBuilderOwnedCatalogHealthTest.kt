@@ -85,4 +85,40 @@ class UiBuilderOwnedCatalogHealthTest {
     assertEquals(enabled, health.served(enabled))
     assertTrue(health.problems().getValue("wear-m3").startsWith("served, but its templates"))
   }
+
+  /**
+   * What `ServeRunner` wires: built-in catalogs fall back, anything else is withheld when it fails.
+   */
+  private val wired =
+    UiBuilderOwnedCatalogHealth(
+      owns = { false },
+      log = logged::add,
+      builtIn = UI_BUILDER_BUILT_IN_CATALOGS::contains,
+    )
+
+  @Test
+  fun `an unowned catalog this build cannot define is withheld, not handed on to fail the builder`() {
+    val served = setOf("m3-catalog", "a2ui-catalog")
+    wired.withhold("a2ui-catalog", "no published ui-builder.json could be read")
+
+    assertTrue(wired.isWithheld("a2ui-catalog"))
+    assertEquals(setOf("m3-catalog"), wired.served(served))
+    assertTrue(logged.single().contains("has no built-in definition"), logged.toString())
+    // Templates are read only for owned catalogs, so nothing degrades it.
+    wired.degrade("a2ui-catalog", "templates do not read")
+    assertEquals(setOf("a2ui-catalog"), wired.problems().keys)
+  }
+
+  @Test
+  fun `an unowned built-in catalog still falls back to its built-in definition`() {
+    wired.withhold("wear-m3", "no published ui-builder.json could be read")
+
+    assertFalse(wired.isWithheld("wear-m3"))
+    assertTrue(logged.isEmpty(), logged.toString())
+  }
+
+  @Test
+  fun `the built-in set names only what compose-ui-builder still defines in Kotlin`() {
+    assertEquals(setOf("m3-catalog", "remote-m3", "wear-m3"), UI_BUILDER_BUILT_IN_CATALOGS)
+  }
 }

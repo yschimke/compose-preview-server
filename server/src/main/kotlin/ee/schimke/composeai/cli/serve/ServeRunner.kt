@@ -2629,8 +2629,11 @@ public class ServeRunner(
     // Compose one catalog's published definition into the maps below; a function because the
     // refresher calls it again when the branch moves. True when it composed.
     val catalogGuidelines = ServeCatalogGuidelines()
-    // An owned catalog that cannot be composed is withheld, never quietly replaced.
-    val health = UiBuilderOwnedCatalogHealth(ownership::owns).also { uiBuilderCatalogHealth = it }
+    // An owned catalog that cannot be composed is withheld, never quietly replaced; so is one this
+    // build has no built-in definition for, which compose-ui-builder would refuse outright.
+    val health =
+      UiBuilderOwnedCatalogHealth(ownership::owns, builtIn = UI_BUILDER_BUILT_IN_CATALOGS::contains)
+        .also { uiBuilderCatalogHealth = it }
     fun composePublished(systemId: String, refresh: Boolean = false): Boolean {
       if (catalogStore == null || publishedAllowed?.contains(systemId) == false) {
         health.withhold(
@@ -2752,8 +2755,8 @@ public class ServeRunner(
     fun buildCatalogExecutor(): UiBuilderCatalogExecutor =
       CurrentM3UiBuilderCatalogExecutor.Builder()
         .also {
-          // An owned catalog that did not compose is left out rather than allowed to fail the
-          // whole builder: compose-ui-builder refuses an owned catalog with no published file.
+          // An owned or non-built-in catalog that did not compose is left out rather than allowed
+          // to fail the whole builder: compose-ui-builder refuses either with no published file.
           it.catalogSystemIds = health.served(uiBuilderCatalogs)
           it.published = publishedCatalogs
           it.nativeRuntimeIds = publishedRuntimeIds
@@ -5305,3 +5308,15 @@ public class ServeRunner(
     )
   }
 }
+
+/**
+ * The UI-builder catalogs compose-ui-builder still defines in Kotlin, and so can serve with no
+ * published file. Every other catalog serves from what it publishes or not at all. The set only
+ * shrinks: 3.111.0 deleted `a2ui-catalog`'s definition, and `remote-m3` and `wear-m3` follow.
+ */
+internal val UI_BUILDER_BUILT_IN_CATALOGS: Set<String> =
+  setOf(
+    CurrentM3UiBuilderCatalogExecutor.DEFAULT_CATALOG_SYSTEM_ID,
+    CurrentM3UiBuilderCatalogExecutor.REMOTE_M3_CATALOG_SYSTEM_ID,
+    CurrentM3UiBuilderCatalogExecutor.WEAR_M3_CATALOG_SYSTEM_ID,
+  )

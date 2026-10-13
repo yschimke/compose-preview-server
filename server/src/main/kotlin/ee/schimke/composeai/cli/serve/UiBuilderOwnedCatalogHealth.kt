@@ -13,26 +13,39 @@ import java.util.concurrent.ConcurrentHashMap
  * the file composes but its templates do not read, the catalog is **degraded**: still served, new
  * designs start blank. Both clear the moment a publish composes again; every catalog refresh asks.
  *
- * Catalogs that are not owned are never recorded here: they keep today's behaviour.
+ * A catalog this build has no built-in definition for (one compose-ui-builder never had, or
+ * deleted, as it did `a2ui-catalog` in 3.111.0) is withheld the same way, owned or not:
+ * compose-ui-builder refuses to serve it from nothing, and that refusal would otherwise take the
+ * whole builder down with it. Templates are read only for owned catalogs, so only those are ever
+ * degraded.
+ *
+ * Any other catalog is never recorded here: it falls back to its built-in definition.
  *
  * @param owns whether a catalog id is catalog-owned on this box.
+ * @param builtIn whether this build can still define a catalog id itself.
  * @param log where a change of state is said; once per change, so a refresh loop does not repeat
  *   the same error every interval.
  */
 class UiBuilderOwnedCatalogHealth(
   private val owns: (String) -> Boolean,
   private val log: (String) -> Unit = System.err::println,
+  private val builtIn: (String) -> Boolean = { true },
 ) {
   private val withheld = ConcurrentHashMap<String, String>()
   private val degraded = ConcurrentHashMap<String, String>()
 
-  /** [systemId]'s published definition cannot be used: withhold it, if it is owned. */
+  /**
+   * [systemId]'s published definition cannot be used: withhold it, if it is owned or this build
+   * cannot define it itself.
+   */
   fun withhold(systemId: String, reason: String) {
-    if (!owns(systemId)) return
+    val owned = owns(systemId)
+    if (!owned && builtIn(systemId)) return
     degraded.remove(systemId)
     if (withheld.put(systemId, reason) != reason) {
+      val what = if (owned) "is catalog-owned" else "has no built-in definition in this build"
       log(
-        "serve: ERROR UI-builder catalog $systemId is catalog-owned and UNAVAILABLE — $reason. " +
+        "serve: ERROR UI-builder catalog $systemId $what and is UNAVAILABLE — $reason. " +
           "It is not served until a republish composes; there is no built-in fallback."
       )
     }
