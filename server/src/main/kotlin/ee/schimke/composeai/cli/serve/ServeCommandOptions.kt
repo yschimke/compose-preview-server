@@ -577,6 +577,20 @@ public class ServeCommandOptions(
       }
       ?.toSet() ?: emptySet()
 
+  /** `--ui-builder-unlisted-catalogs <id>[,<id>]`; absent, empty or `none` lists everything. */
+  override val uiBuilderUnlistedCatalogs: Set<String> =
+    args
+      .flagValue("--ui-builder-unlisted-catalogs")
+      ?.split(",")
+      ?.map(String::trim)
+      ?.filter { it.isNotEmpty() && it.lowercase() != "none" }
+      ?.also { entries ->
+        require(entries.all(UI_BUILDER_CATALOG_ID::matches)) {
+          "--ui-builder-unlisted-catalogs contains an invalid catalog id"
+        }
+      }
+      ?.toSet() ?: emptySet()
+
   /**
    * `--ui-builder-catalog-ownership <all|none|<id>[,<id>]>`; absent or empty is `none`. An owned
    * catalog must also be allowed to read its published file; the contradiction is refused at
@@ -1236,7 +1250,8 @@ public class ServeCommandOptions(
                           And the UI builder's catalog settings — GET, PUT and DELETE
                           /admin/ui-builder/config — catalogs.json's `uiBuilder` block, which
                           overrides the --ui-builder-catalogs, -published-catalogs,
-                          -catalog-ownership, -native-catalog, -packs and -widget-player flags
+                          -catalog-ownership, -unlisted-catalogs, -native-catalog, -packs and
+                          -widget-player flags
                           per catalog from the next start.
                           And onboarding — POST /admin/onboard ({"url","group","listed"}) takes a
                           GitHub project URL in any spelling, discovers the delivery branches that

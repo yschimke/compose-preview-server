@@ -574,6 +574,15 @@ public interface ServeOptions {
     get() = CatalogOwnership.NONE
 
   /**
+   * Served UI-builder catalogs kept out of the builder UI's catalog lists (the new-design chooser
+   * and catalog switcher) while staying reachable by URL (`?catalog=<id>`) and over MCP, whose
+   * catalog list reports them with `statusSemantics.unlisted`. For pilots compared against a
+   * production catalog without offering them to everyone. Empty (default) lists every catalog.
+   */
+  public val uiBuilderUnlistedCatalogs: Set<String>
+    get() = emptySet()
+
+  /**
    * Discovered component records per UI-builder catalog (`--ui-builder-components
    * <system>=<components.json>,…`). Compose export generates from the record matching the design's
    * pinned catalog; a catalog with none refuses export

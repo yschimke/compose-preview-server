@@ -163,6 +163,39 @@ class ServeUiBuilderSettingsTest {
   }
 
   @Test
+  fun `a pilot is served, published and owned but unlisted, and only while it is served`() {
+    val pilot =
+      UiBuilderCatalogSettings(serve = true, published = true, owned = true, listed = false)
+    val effective =
+      resolve(
+          UiBuilderSettings(
+            catalogs =
+              mapOf(
+                "wear-m3-typed-pilot" to pilot,
+                // Unlisting a catalog nobody serves is dropped rather than carried.
+                "never-served" to UiBuilderCatalogSettings(listed = false),
+              )
+          )
+        )
+        .effective
+    assertTrue("wear-m3-typed-pilot" in effective.catalogs)
+    assertTrue(effective.catalogOwnership.owns("wear-m3-typed-pilot"))
+    assertEquals(setOf("wear-m3-typed-pilot"), effective.unlisted)
+    assertEquals(listOf("wear-m3-typed-pilot"), effective.describe().unlistedCatalogs)
+
+    // `listed: true` takes back an environment's unlisting.
+    val relisted =
+      ServeUiBuilderSettings.resolve(
+          environment.copy(unlisted = setOf("remote-m3")),
+          UiBuilderSettings(
+            catalogs = mapOf("remote-m3" to UiBuilderCatalogSettings(listed = true))
+          ),
+        )
+        .effective
+    assertEquals(emptySet(), relisted.unlisted)
+  }
+
+  @Test
   fun `an environment publishing everything stays that way unless a catalog opts out`() {
     val all = environment.copy(publishedCatalogs = null)
     assertNull(

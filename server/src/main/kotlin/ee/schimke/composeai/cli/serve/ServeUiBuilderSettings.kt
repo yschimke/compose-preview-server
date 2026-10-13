@@ -20,6 +20,9 @@ import okio.Path.Companion.toPath
  * | `SERVE_UI_BUILDER_PACKS`              | `packs.<served catalog>` (null withdraws) |
  * | `SERVE_UI_BUILDER_WIDGET_PLAYER`      | `widgetPlayer`                            |
  *
+ * `catalogs.<id>.listed` has no variable, only `--ui-builder-unlisted-catalogs`: unlisting a pilot
+ * is deployment behaviour, which belongs in the committed file rather than the box's `.env`.
+ *
  * Secrets and machine facts (`SERVE_UI_BUILDER_WEAR`, `…_STATE_DIR`, `…_COMPONENTS`, `…_HOST`, the
  * guidelines key) stay in the environment; other non-secret builder settings live in
  * `settings.json` ([ServeSettings]).
@@ -49,6 +52,8 @@ object ServeUiBuilderSettings {
      * ([ServeOptions.uiBuilderUnavailableCatalogs]); not itself a served setting.
      */
     val unavailable: Set<String> = emptySet(),
+    /** Served but kept out of the UI's lists ([ServeOptions.uiBuilderUnlistedCatalogs]). */
+    val unlisted: Set<String> = emptySet(),
   ) {
     /** As `GET /admin/ui-builder/config` reports it. */
     fun describe(): ServeUiBuilderSettingsDto =
@@ -59,6 +64,7 @@ object ServeUiBuilderSettings {
         nativeCatalogs = nativeCatalogs.toSortedMap(),
         packs = packs.toSortedMap(),
         widgetPlayer = widgetPlayer.flagValue,
+        unlistedCatalogs = unlisted.sorted(),
       )
 
     companion object {
@@ -72,6 +78,7 @@ object ServeUiBuilderSettings {
           widgetPlayer = options.uiBuilderWidgetPlayer,
           publishedDefault = options.uiBuilderPublishedDefault,
           unavailable = options.uiBuilderUnavailableCatalogs,
+          unlisted = options.uiBuilderUnlistedCatalogs,
         )
     }
   }
@@ -210,6 +217,17 @@ object ServeUiBuilderSettings {
       if (platform == null) packs -= pack else packs[pack] = platform.lowercase()
     }
 
+    // Listing only narrows what a served catalog shows, so it needs no reconciling with the rest.
+    val unlisted = base.unlisted.toMutableSet()
+    for ((id, catalog) in settings.catalogs) {
+      when (catalog.listed) {
+        false -> unlisted += id
+        true -> unlisted -= id
+        null -> Unit
+      }
+    }
+    unlisted.retainAll(catalogs)
+
     val player =
       settings.widgetPlayer?.let { raw ->
         UiBuilderWidgetPlayer.fromFlag(raw)
@@ -230,6 +248,7 @@ object ServeUiBuilderSettings {
         player,
         base.publishedDefault,
         base.unavailable,
+        unlisted,
       ),
       problems,
     )
@@ -290,6 +309,9 @@ object ServeUiBuilderSettings {
     override val uiBuilderCatalogOwnership: CatalogOwnership
       get() = effective.catalogOwnership
 
+    override val uiBuilderUnlistedCatalogs: Set<String>
+      get() = effective.unlisted
+
     override val uiBuilderNativeCatalogs: Map<String, String>
       get() = effective.nativeCatalogs
 
@@ -314,6 +336,8 @@ data class ServeUiBuilderSettingsDto(
   val nativeCatalogs: Map<String, String>,
   val packs: Map<String, String>,
   val widgetPlayer: String,
+  /** Served catalogs reachable by URL and MCP but kept out of the UI's catalog lists. */
+  val unlistedCatalogs: List<String> = emptyList(),
 )
 
 /**

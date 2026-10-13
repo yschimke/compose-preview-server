@@ -85,6 +85,11 @@ data class ServeCatalogsConfig(
     /** Seeds and exports from its own declaration (`SERVE_UI_BUILDER_CATALOG_OWNERSHIP`). */
     val owned: Boolean? = null,
     /**
+     * Shown in the builder's catalog lists. False keeps a served catalog reachable by URL and MCP
+     * only (`--ui-builder-unlisted-catalogs`), for a pilot compared against production.
+     */
+    val listed: Boolean? = null,
+    /**
      * Served catalog its designs compile against for native preview
      * (`SERVE_UI_BUILDER_NATIVE_CATALOGS`); empty removes the mapping.
      */

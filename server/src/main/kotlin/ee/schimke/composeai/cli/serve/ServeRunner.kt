@@ -2761,6 +2761,7 @@ public class ServeRunner(
           it.published = publishedCatalogs
           it.nativeRuntimeIds = publishedRuntimeIds
           it.catalogOwnership = ownership
+          it.unlistedCatalogIds = options.uiBuilderUnlistedCatalogs
           // `composeCode` answers a configuration question (is a record configured for this
           // catalog?), not a filesystem one: the value is baked in once, so a disk read would block
           // hot reload of a repaired record. Asked per catalog so a record-less catalog doesn't
