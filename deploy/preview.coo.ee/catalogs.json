@@ -103,12 +103,12 @@
     },
     {
       "system": "meshcore-mobile",
-      "repo": "yschimke/meshcore-mobile",
+      "repo": "yschimke/meshcore-mobile-out",
       "listed": true
     },
     {
       "system": "homeassistant-remotecompose",
-      "repo": "yschimke/homeassistant-remotecompose",
+      "repo": "yschimke/homeassistant-remotecompose-out",
       "listed": true
     },
     {
@@ -153,6 +153,8 @@
     "catalogs": {
       "remote-widgets": { "serve": true, "published": true, "owned": true },
       "ha-cards": { "serve": true, "published": true, "owned": true },
+      "meshcore-mobile": { "serve": true, "published": true, "owned": true },
+      "homeassistant-remotecompose": { "serve": true, "published": true, "owned": true },
       "a2ui-catalog": { "serve": true, "published": true, "owned": true },
       "glimmer-catalog": { "serve": true, "published": true, "owned": true },
       "wear-m3": { "published": true, "owned": true },
