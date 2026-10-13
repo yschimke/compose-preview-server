@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.138.0](https://github.com/yschimke/compose-preview-server/compare/v3.137.0...v3.138.0) (2026-10-13)
+
+
+### Bug Fixes
+
+* **deps:** move the UI builder to 3.112.0 so a white-labelled host asks signed-out visitors to sign in ([#1653](https://github.com/yschimke/compose-preview-server/issues/1653)) ([ae74b4e](https://github.com/yschimke/compose-preview-server/commit/ae74b4ee23349a892aaae134796f2bfd92a9d545))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.57.0 ([#1651](https://github.com/yschimke/compose-preview-server/issues/1651)) ([7493775](https://github.com/yschimke/compose-preview-server/commit/74937758537c6df4b51de3a3919bd14bb1fcca30))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.16.1 ([#1650](https://github.com/yschimke/compose-preview-server/issues/1650)) ([663329c](https://github.com/yschimke/compose-preview-server/commit/663329c9ebb660e6a215a67a9f461585bd4a4057))
+* **serve-web:** allow a 100 kB viewer bundle ([#1649](https://github.com/yschimke/compose-preview-server/issues/1649)) ([861394f](https://github.com/yschimke/compose-preview-server/commit/861394fc84863004eb8561c32fe2f9fa2a1e5f59))
+
+## [3.137.0](https://github.com/yschimke/compose-preview-server/compare/v3.136.0...v3.137.0) (2026-10-13)
+
+
+### Features
+
+* **ui-builder:** serve Home Assistant typed catalog from output repo ([#1642](https://github.com/yschimke/compose-preview-server/issues/1642)) ([47904e0](https://github.com/yschimke/compose-preview-server/commit/47904e022ca0056bba64090685f2cbe385f62ff1))
+
 ## [3.136.0](https://github.com/yschimke/compose-preview-server/compare/v3.135.0...v3.136.0) (2026-10-13)
 
 
