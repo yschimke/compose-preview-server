@@ -2,6 +2,7 @@ package ee.schimke.composeai.cli.serve
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ServeAnalyticsTest {
@@ -52,5 +53,23 @@ class ServeAnalyticsTest {
     assertTrue(tag.contains("analytics.js"))
     assertTrue(tag.contains("data-umami-url=\"https://preview.test/__analytics\""))
     assertTrue(tag.contains("data-website-id=\"$website\""))
+  }
+
+  @Test
+  fun `the endpoint origin is offered only when the tag is`() {
+    val enabled =
+      mapOf(
+        "SERVE_UMAMI_ENABLED" to "1",
+        "SERVE_UMAMI_URL" to "https://Preview.Test/__analytics/",
+        "SERVE_UMAMI_WEBSITE_ID" to website,
+      )
+    assertEquals("https://preview.test", ServeAnalytics.origin(enabled))
+    assertEquals(
+      "https://preview.test:8443",
+      ServeAnalytics.origin(enabled + ("SERVE_UMAMI_URL" to "https://preview.test:8443/a")),
+    )
+    assertNull(ServeAnalytics.origin(enabled - "SERVE_UMAMI_ENABLED"))
+    assertNull(ServeAnalytics.origin(enabled + ("SERVE_UMAMI_URL" to "http://preview.test")))
+    assertNull(ServeAnalytics.origin(enabled + ("SERVE_UMAMI_WEBSITE_ID" to "not-an-id")))
   }
 }
