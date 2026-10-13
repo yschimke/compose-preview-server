@@ -66,7 +66,7 @@ const limits = {
     // overlay is painted by CSS gradients, and the bytes are the measuring: the snapshot or live
     // canvas it lies over, the full-screen letterbox, and the density a picked Device (or a
     // full-page scroll render) implies. Raised by the usual 2 kB step over the former ceiling.
-    // 76_000 until Vue 3.5.44 (#1645). Regenerating the shared runtime adds 474 gzip bytes,
+    // 76_000 until Vue 3.5.44 (#1645). Regenerating the shared runtime adds 474 bytes at gzip level 9,
     // moving this page from 75_841 to 76_315 without changing its authored surface bundles.
     // Raise by the same 2 kB step used above; every other page remains within its current limit.
     viewer: 78_000,
