@@ -36,11 +36,11 @@ class UiBuilderOwnedCatalogHealth(
 
   /**
    * [systemId]'s published definition cannot be used: withhold it, if it is owned or this build
-   * cannot define it itself.
+   * cannot define it itself. False when it is neither, and so keeps its built-in definition.
    */
-  fun withhold(systemId: String, reason: String) {
+  fun withhold(systemId: String, reason: String): Boolean {
     val owned = owns(systemId)
-    if (!owned && builtIn(systemId)) return
+    if (!owned && builtIn(systemId)) return false
     degraded.remove(systemId)
     if (withheld.put(systemId, reason) != reason) {
       val what = if (owned) "is catalog-owned" else "has no built-in definition in this build"
@@ -49,6 +49,7 @@ class UiBuilderOwnedCatalogHealth(
           "It is not served until a republish composes; there is no built-in fallback."
       )
     }
+    return true
   }
 
   /** [systemId] composed, but its own templates do not read. */

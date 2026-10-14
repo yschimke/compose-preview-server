@@ -99,7 +99,7 @@ class UiBuilderOwnedCatalogHealthTest {
   @Test
   fun `an unowned catalog this build cannot define is withheld, not handed on to fail the builder`() {
     val served = setOf("m3-catalog", "a2ui-catalog")
-    wired.withhold("a2ui-catalog", "no published ui-builder.json could be read")
+    assertTrue(wired.withhold("a2ui-catalog", "no published ui-builder.json could be read"))
 
     assertTrue(wired.isWithheld("a2ui-catalog"))
     assertEquals(setOf("m3-catalog"), wired.served(served))
@@ -110,8 +110,31 @@ class UiBuilderOwnedCatalogHealthTest {
   }
 
   @Test
+  fun `an unowned non-built-in catalog whose publish does not compose is withheld`() {
+    // The `PublishedUiBuilderCatalog.Result.Unusable` path: a file was read but did not compose.
+    // Withholding must not depend on ownership, or the catalog reaches the executor with no
+    // published entry and fails the whole builder.
+    val served = setOf("m3-catalog", "glimmer-catalog")
+
+    assertTrue(wired.withhold("glimmer-catalog", "does not compose against its record"))
+
+    assertEquals(setOf("m3-catalog"), wired.served(served))
+    assertEquals(
+      mapOf("glimmer-catalog" to "unavailable: does not compose against its record"),
+      wired.problems(),
+    )
+  }
+
+  @Test
+  fun `withholding an owned catalog reports that it was withheld, even on a repeated reason`() {
+    assertTrue(health.withhold("wear-m3", "does not compose"))
+    assertTrue(health.withhold("wear-m3", "does not compose"))
+    assertFalse(health.withhold("remote-m3", "does not compose"))
+  }
+
+  @Test
   fun `an unowned built-in catalog still falls back to its built-in definition`() {
-    wired.withhold("wear-m3", "no published ui-builder.json could be read")
+    assertFalse(wired.withhold("wear-m3", "no published ui-builder.json could be read"))
 
     assertFalse(wired.isWithheld("wear-m3"))
     assertTrue(logged.isEmpty(), logged.toString())
