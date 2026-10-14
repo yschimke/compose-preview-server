@@ -212,7 +212,14 @@ shows the result without restarting the server. When only the classes changed, t
 swaps them in and its cached renders are dropped; when the daemon's classpath or the preview set
 changed, the session restarts on the new build. A failed build leaves the last good renders on
 screen. The same `POST /{session}/rebuild` serves Bazel workspaces, whose build host answers the
-compile with a rebuild of the module's targets. Automatic rebuild on save is the next step.
+compile with a rebuild of the module's targets.
+
+`browse` also rebuilds on save (`--no-watch` turns it off; `serve` opts in with `--watch`). It
+watches a Gradle module's project directory, skipping `build/` and tool state, or a Bazel module's
+source directories, and rebuilds once a burst of saves has gone quiet. Open pages follow
+`GET /{session}/reload`, a long poll: new renders replace the images in place, a restart reloads the
+page, and a failed build shows `stale:` with the reason while the last good renders stay. A Gradle
+edit outside the module (a sibling module, a shared build script) is not watched; press rebuild.
 
 `ui` needs a build host — the `compose-preview` binary — because discovering and building a local
 Gradle project is work this server asks for over a pipe rather than doing itself. The builder's

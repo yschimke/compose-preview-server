@@ -1988,12 +1988,18 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The Rebuild pill for a local session: `POST`s [url], then reloads the page when the edit
-   * reached the daemon, or says why not (a failed build keeps the last good renders).
+   * The Rebuild pill for a local session, and the page's half of edit-reload.
+   *
+   * The button `POST`s [url]. The page then follows [reloadUrl] (`GET /{session}/reload`, a long
+   * poll), so it hears every rebuild of this session, whether the button, the source watcher or
+   * another tab started it: "building…" while one runs; the images refetched in place when the
+   * daemon reloaded its classes; a full reload when the daemon restarted (the preview set may have
+   * changed); and "stale" with the reason when the build failed, leaving the last good renders.
    */
-  private fun rebuildControl(url: String): String =
+  private fun rebuildControl(url: String, reloadUrl: String?): String =
     "<button type=\"button\" class=\"cp-drawer-toggle cp-axis-toggle cp-rebuild\" " +
       "data-rebuild-url=\"${WebEscaping.htmlEscape(url)}\" " +
+      (reloadUrl?.let { "data-reload-url=\"${WebEscaping.htmlEscape(it)}\" " } ?: "") +
       "title=\"Recompile this module after an edit and show the result\">rebuild</button>" +
       "<span class=\"cp-rebuild-status\" role=\"status\" aria-live=\"polite\"></span>\n" +
       """
@@ -2002,24 +2008,68 @@ ${captureControlsHtml().prependIndent("          ")}
         const button = document.querySelector('.cp-rebuild');
         if (!button) return;
         const status = document.querySelector('.cp-rebuild-status');
+        const show = (result) => {
+          if (result.building) {
+            status.textContent = 'building…';
+            return;
+          }
+          status.textContent = result.status === 'failed' ? 'stale: ' + (result.reason || 'build failed') :
+            result.status === 'busy' ? 'build in progress' : '';
+        };
+        // Refetch every same-origin image with the new generation, so the browser cannot answer from
+        // its cache; the server dropped its own when it reloaded the classes.
+        const refreshImages = (generation) => {
+          for (const image of document.querySelectorAll('img[src]')) {
+            const src = new URL(image.getAttribute('src'), window.location.href);
+            if (src.origin !== window.location.origin) continue;
+            src.searchParams.set('reload', String(generation));
+            image.src = src.toString();
+          }
+        };
+        const follow = async (reloadUrl) => {
+          let version = -1;
+          let generation = null;
+          for (;;) {
+            try {
+              const url = new URL(reloadUrl, window.location.href);
+              url.searchParams.set('after', String(version));
+              const response = await fetch(url, { cache: 'no-store' });
+              if (response.status === 404) return;
+              const result = await response.json();
+              if (generation !== null && result.generation !== generation) {
+                if (result.status === 'restarted') {
+                  window.location.reload();
+                  return;
+                }
+                refreshImages(result.generation);
+              }
+              version = result.version;
+              generation = result.generation;
+              if (version > 0) show(result);
+            } catch (_) {
+              // The server restarted or the network dropped: try again shortly.
+              await new Promise((resolve) => setTimeout(resolve, 5000));
+            }
+          }
+        };
         button.addEventListener('click', async () => {
           button.disabled = true;
           status.textContent = 'building…';
           try {
             const response = await fetch(button.dataset.rebuildUrl, { method: 'POST' });
             const result = await response.json();
-            if (result.status === 'reloaded' || result.status === 'restarted') {
-              status.textContent = 'rebuilt';
+            if (!button.dataset.reloadUrl &&
+                (result.status === 'reloaded' || result.status === 'restarted')) {
               window.location.reload();
               return;
             }
-            status.textContent = result.status === 'busy' ? 'build in progress' :
-              (result.reason || 'build failed');
+            show(result);
           } catch (_) {
             status.textContent = 'build failed';
           }
           button.disabled = false;
         });
+        if (button.dataset.reloadUrl) follow(button.dataset.reloadUrl);
       })();
       </script>
       """
@@ -10510,6 +10560,12 @@ ${captureControlsHtml().prependIndent("          ")}
      */
     rebuildUrl: String? = null,
     /**
+     * Long-poll URL of the same session's reload state (`/{session}/reload`), which the page
+     * follows to show a rebuild started by the source watcher or another tab. Null without
+     * [rebuildUrl].
+     */
+    reloadUrl: String? = null,
+    /**
      * `/playground?catalog=<system>`, opening the playground with this design system preselected.
      * Null when the host has no playground lane.
      */
@@ -11149,7 +11205,7 @@ ${captureControlsHtml().prependIndent("          ")}
     // viewer's title row) with the filter field taking the remaining width, one sticky row on every
     // viewport.
     val headToggles =
-      (themeToggle + primaryActions + (rebuildUrl?.let(::rebuildControl) ?: ""))
+      (themeToggle + primaryActions + (rebuildUrl?.let { rebuildControl(it, reloadUrl) } ?: ""))
         .takeIf { it.isNotBlank() }
         ?.let { "<div class=\"cp-head-toggles\">\n$it</div>\n" } ?: ""
     // The toolbar row exists for the filter. When the filter lives elsewhere (browser mode, or a

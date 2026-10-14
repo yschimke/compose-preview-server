@@ -2393,6 +2393,8 @@ class ServeHttpServer(
 
         post("/rebuild") { handleLocalRebuild(sessionInPath = false) }
         post("/{system}/rebuild") { handleLocalRebuild(sessionInPath = true) }
+        get("/reload") { handleLocalReload(sessionInPath = false) }
+        get("/{system}/reload") { handleLocalReload(sessionInPath = true) }
 
         if (catalogFeed != null) {
           get("/feed.xml") { handleCatalogFeed(sessionInPath = false) }
@@ -2790,6 +2792,40 @@ class ServeHttpServer(
       }
     if (result == LocalRebuildResult.Busy) call.response.headers.append(HttpHeaders.RetryAfter, "2")
     call.respondText(body.toString(), ContentType.Application.Json, code)
+  }
+
+  /**
+   * `GET /{session}/reload?after=<version>`: a local session's [LocalReloadState] as JSON, held
+   * until its version passes `after` or [RELOAD_POLL_MILLIS] go by (a long poll). The page's
+   * rebuild control waits on it, so a rebuild started by the source watcher or by the button in
+   * another tab reaches every open page. Reading it shows no more than the page does, so it is
+   * gated like the page rather than like rebuilding. 404 for a session that is not local.
+   */
+  private suspend fun RoutingContext.handleLocalReload(sessionInPath: Boolean) {
+    if (rejectBadToken()) return
+    val sessionId = selectedSessionId(sessionInPath)
+    val after = call.request.queryParameters["after"]?.toLongOrNull() ?: -1
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    val state =
+      localRebuild
+        ?.takeIf { sessionId.isNotEmpty() && it.canRebuild(sessionId) }
+        ?.awaitReloadState(sessionId, after, RELOAD_POLL_MILLIS)
+    if (state == null) {
+      call.respondText(
+        "{\"status\":\"unavailable\"}",
+        ContentType.Application.Json,
+        HttpStatusCode.NotFound,
+      )
+      return
+    }
+    val body = buildJsonObject {
+      put("version", state.version)
+      put("generation", state.generation)
+      put("building", state.building)
+      state.status?.let { put("status", it) }
+      state.reason?.let { put("reason", it) }
+    }
+    call.respondText(body.toString(), ContentType.Application.Json)
   }
 
   /**
@@ -4193,6 +4229,10 @@ class ServeHttpServer(
           rebuildUrl =
             if (localRebuild?.canRebuild(selectedSessionId) == true)
               "$basePath/rebuild${requestQuerySuffix()}"
+            else null,
+          reloadUrl =
+            if (localRebuild?.canRebuild(selectedSessionId) == true)
+              "$basePath/reload${requestQuerySuffix()}"
             else null,
           // "try in playground": opens the editor with this design system preselected. Omitted
           // without the lane; per-preview handoff is the viewer's `playgroundHref`.
@@ -17605,6 +17645,12 @@ class ServeHttpServer(
 
     /** Variant renders and all token-gated responses stay out of shared and browser caches. */
     private const val DYNAMIC_RESOURCE_CACHE_CONTROL = "no-store"
+
+    /**
+     * How long `GET /{session}/reload` holds a request with nothing new: under common proxy and
+     * browser idle timeouts, long enough that an idle page costs about two requests a minute.
+     */
+    internal const val RELOAD_POLL_MILLIS = 25_000L
 
     /** Default for [maxProjectableDocumentBytes]. See `projectDocument`. */
     private const val DEFAULT_MAX_PROJECTABLE_DOCUMENT_BYTES = 8 * 1024 * 1024

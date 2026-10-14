@@ -1033,11 +1033,13 @@ public class ServeRunner(
     if (wasmCatalogs.isNotEmpty()) {
       System.err.println("serve: in-browser Wasm tier for: ${wasmCatalogs.keys.joinToString(", ")}")
     }
+    val moduleRebuild = localRebuild(registry, listOf(module))
+    val moduleWatcher = watchLocalSources(moduleRebuild)
     bringUpServer(
       registry = registry,
       token = token,
       defaultSessionId = module.gradlePath,
-      localRebuild = localRebuild(registry, listOf(module)),
+      localRebuild = moduleRebuild,
       bundleStore = bundleStore,
       wasmCatalogs = wasmCatalogs,
       bannerLabel = module.gradlePath,
@@ -1047,6 +1049,7 @@ public class ServeRunner(
       closeables =
         listOf(
           spareSandboxPool,
+          moduleWatcher,
           catalogReg?.loader,
           catalogRefresher,
           worktrees,
@@ -1155,6 +1158,8 @@ public class ServeRunner(
     }
 
     val first = opened.first()
+    val browseRebuild = localRebuild(registry, opened.map { it.first })
+    val browseWatcher = watchLocalSources(browseRebuild)
     bringUpServer(
       registry = registry,
       token = tokenOverride ?: ServeUrls.generateToken(),
@@ -1166,12 +1171,27 @@ public class ServeRunner(
       bannerPreviewCount = opened.sumOf { it.second.size },
       mdnsModuleLabel = null,
       mdnsPreviewIds = null,
-      closeables = listOf(spareSandboxPool),
+      closeables = listOfNotNull(spareSandboxPool, browseWatcher),
       catalogLoads = null,
       localCatalogSessions = opened.map { it.first.gradlePath },
       localSourceRoots = opened.associate { it.first.gradlePath to it.first.projectDir },
-      localRebuild = localRebuild(registry, opened.map { it.first }),
+      localRebuild = browseRebuild,
     )
+  }
+
+  /**
+   * Starts rebuilding [rebuild]'s sessions when their sources change, when `--watch` (or `browse`)
+   * asked for it. Null when off, or when no source directory exists to watch.
+   */
+  private fun watchLocalSources(rebuild: ServeLocalRebuild): ServeSourceWatcher? {
+    if (!watchSources) return null
+    val roots = rebuild.modules().mapValues { (_, module) -> ServeSourceWatcher.rootsFor(module) }
+    if (roots.values.all { it.isEmpty() }) return null
+    return ServeSourceWatcher(roots, rebuild = rebuild::rebuild).also {
+      System.err.println(
+        "watch: rebuilding on edits under ${it.watchedDirectories} director(ies); --no-watch to stop"
+      )
+    }
   }
 
   /**
