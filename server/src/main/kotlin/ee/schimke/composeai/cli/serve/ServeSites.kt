@@ -254,6 +254,7 @@ data class ServeSites(private val byHost: Map<String, String>) {
         "parity",
         "parity.json",
         "refresh",
+        "rebuild",
         // `GET /feed.xml`: the catalog change feed (only registered when configured).
         "feed.xml",
         "index.json",
