@@ -1037,6 +1037,7 @@ public class ServeRunner(
       registry = registry,
       token = token,
       defaultSessionId = module.gradlePath,
+      localRebuild = localRebuild(registry, listOf(module)),
       bundleStore = bundleStore,
       wasmCatalogs = wasmCatalogs,
       bannerLabel = module.gradlePath,
@@ -1169,8 +1170,31 @@ public class ServeRunner(
       catalogLoads = null,
       localCatalogSessions = opened.map { it.first.gradlePath },
       localSourceRoots = opened.associate { it.first.gradlePath to it.first.projectDir },
+      localRebuild = localRebuild(registry, opened.map { it.first }),
     )
   }
+
+  /**
+   * Rebuild-after-edit for the local [modules] (`POST /{session}/rebuild`): each session id is its
+   * module's Gradle path, and the compile goes through the build host, so a Bazel workspace's CLI
+   * answers it with a rebuild of the module's selection.
+   */
+  private fun localRebuild(
+    registry: ServeSessionRegistry,
+    modules: List<PreviewModule>,
+  ): ServeLocalRebuild =
+    ServeLocalRebuild(
+      registry = registry,
+      modules = modules.associateBy { it.gradlePath },
+      compile = { module ->
+        runGradleTasks(
+          ":${module.gradlePath}:composePreviewCompile",
+          arguments = gradleBuildArgs(),
+          silenceStdout = true,
+        )
+      },
+      previewsOf = ::servablePreviewsOf,
+    )
 
   /**
    * Module-less mode: a pure preview server with no local project or Gradle build, hosting
@@ -3084,6 +3108,8 @@ public class ServeRunner(
     localCatalogSessions: List<String> = emptyList(),
     /** Module roots used to serve source for local component-browser sessions. */
     localSourceRoots: Map<String, File> = emptyMap(),
+    /** Rebuild-after-edit for local project sessions; null when this server has none. */
+    localRebuild: ServeLocalRebuild? = null,
     /** The catalog store an admin registration fetches through; null ⇒ no runtime admin. */
     catalogStore: ServeCatalogStore? = null,
     /** Immediate branch-head check used by the Refresh control on catalog landing pages. */
@@ -3508,6 +3534,7 @@ public class ServeRunner(
         catalogLoads = catalogLoads,
         heroCacheDir = catalogCacheDirFlag?.takeIf { it != "none" }?.let { File(it, "heroes") },
         catalogRefresh = catalogRefresh,
+        localRebuild = localRebuild,
         catalogFeed = catalogFeed,
         maxLiveSeats = liveSeats,
         liveSeatLimiter = liveSeatLimiter,

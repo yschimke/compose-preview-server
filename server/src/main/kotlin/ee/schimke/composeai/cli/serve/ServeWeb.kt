@@ -1987,6 +1987,45 @@ ${captureControlsHtml().prependIndent("          ")}
       .trimIndent()
   }
 
+  /**
+   * The Rebuild pill for a local session: `POST`s [url], then reloads the page when the edit
+   * reached the daemon, or says why not (a failed build keeps the last good renders).
+   */
+  private fun rebuildControl(url: String): String =
+    "<button type=\"button\" class=\"cp-drawer-toggle cp-axis-toggle cp-rebuild\" " +
+      "data-rebuild-url=\"${WebEscaping.htmlEscape(url)}\" " +
+      "title=\"Recompile this module after an edit and show the result\">rebuild</button>" +
+      "<span class=\"cp-rebuild-status\" role=\"status\" aria-live=\"polite\"></span>\n" +
+      """
+      <script>
+      (() => {
+        const button = document.querySelector('.cp-rebuild');
+        if (!button) return;
+        const status = document.querySelector('.cp-rebuild-status');
+        button.addEventListener('click', async () => {
+          button.disabled = true;
+          status.textContent = 'building…';
+          try {
+            const response = await fetch(button.dataset.rebuildUrl, { method: 'POST' });
+            const result = await response.json();
+            if (result.status === 'reloaded' || result.status === 'restarted') {
+              status.textContent = 'rebuilt';
+              window.location.reload();
+              return;
+            }
+            status.textContent = result.status === 'busy' ? 'build in progress' :
+              (result.reason || 'build failed');
+          } catch (_) {
+            status.textContent = 'build failed';
+          }
+          button.disabled = false;
+        });
+      })();
+      </script>
+      """
+        .trimIndent() +
+      "\n"
+
   private fun provenanceRefreshScript(): String =
     """
     <script>
@@ -10466,6 +10505,11 @@ ${captureControlsHtml().prependIndent("          ")}
     /** POST URL that checks this catalog's delivery branch immediately. Null omits Refresh. */
     refreshUrl: String? = null,
     /**
+     * POST URL that rebuilds a local project session after an edit (`/{session}/rebuild`) and
+     * reloads its classes. Null omits Rebuild: catalogs, bundles and other non-local sessions.
+     */
+    rebuildUrl: String? = null,
+    /**
      * `/playground?catalog=<system>`, opening the playground with this design system preselected.
      * Null when the host has no playground lane.
      */
@@ -11105,7 +11149,7 @@ ${captureControlsHtml().prependIndent("          ")}
     // viewer's title row) with the filter field taking the remaining width, one sticky row on every
     // viewport.
     val headToggles =
-      (themeToggle + primaryActions)
+      (themeToggle + primaryActions + (rebuildUrl?.let(::rebuildControl) ?: ""))
         .takeIf { it.isNotBlank() }
         ?.let { "<div class=\"cp-head-toggles\">\n$it</div>\n" } ?: ""
     // The toolbar row exists for the filter. When the filter lives elsewhere (browser mode, or a

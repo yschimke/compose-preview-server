@@ -126,8 +126,10 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 
 /** The query values a create link carries into the design's permalink: identity, never content. */
 private val UI_BUILDER_IDENTITY_QUERY =
@@ -297,6 +299,8 @@ class ServeHttpServer(
   private val heroCacheDir: File? = null,
   /** Immediate catalog branch check exposed by `POST /{system}/refresh`. */
   private val catalogRefresh: ((system: String, force: Boolean) -> CatalogRefreshResult)? = null,
+  /** Rebuild-after-edit for local project sessions, exposed by `POST /{session}/rebuild`. */
+  private val localRebuild: ServeLocalRebuild? = null,
   /** Demand-activated, expiring background RSS generator for published catalog history. */
   private val catalogFeed: ServeCatalogChangeFeed? = null,
   portRange: Int = DEFAULT_PORT_RANGE,
@@ -2387,6 +2391,9 @@ class ServeHttpServer(
         post("/refresh") { handleCatalogRefresh(sessionInPath = false) }
         post("/{system}/refresh") { handleCatalogRefresh(sessionInPath = true) }
 
+        post("/rebuild") { handleLocalRebuild(sessionInPath = false) }
+        post("/{system}/rebuild") { handleLocalRebuild(sessionInPath = true) }
+
         if (catalogFeed != null) {
           get("/feed.xml") { handleCatalogFeed(sessionInPath = false) }
           get("/{system}/feed.xml") { handleCatalogFeed(sessionInPath = true) }
@@ -2715,6 +2722,57 @@ class ServeHttpServer(
       }
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
     call.respondText("{\"status\":\"$status\"}", ContentType.Application.Json, code)
+  }
+
+  /**
+   * `POST /{session}/rebuild`: recompile a local project session after an edit and load the result
+   * ([ServeLocalRebuild]). Behind the session token like every other local route; 404 for a session
+   * that is not a local module (catalogs, bundles), and 202 while one is already running.
+   */
+  private suspend fun RoutingContext.handleLocalRebuild(sessionInPath: Boolean) {
+    if (rejectBadToken()) return
+    val sessionId = selectedSessionId(sessionInPath)
+    val rebuild = localRebuild
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    if (sessionId.isEmpty() || rebuild == null || !rebuild.canRebuild(sessionId)) {
+      call.respondText(
+        "{\"status\":\"unavailable\"}",
+        ContentType.Application.Json,
+        HttpStatusCode.NotFound,
+      )
+      return
+    }
+    val result = withContext(Dispatchers.IO) { rebuild.rebuild(sessionId) }
+    val body = buildJsonObject {
+      when (result) {
+        is LocalRebuildResult.Reloaded -> {
+          put("status", "reloaded")
+          put("durationMs", result.durationMs)
+        }
+        is LocalRebuildResult.Restarted -> {
+          put("status", "restarted")
+          put("durationMs", result.durationMs)
+          put("reason", result.reason)
+        }
+        is LocalRebuildResult.Failed -> {
+          put("status", "failed")
+          put("durationMs", result.durationMs)
+          put("reason", result.reason)
+        }
+        LocalRebuildResult.Busy -> put("status", "busy")
+        LocalRebuildResult.NotFound -> put("status", "unavailable")
+      }
+    }
+    val code =
+      when (result) {
+        is LocalRebuildResult.Reloaded,
+        is LocalRebuildResult.Restarted -> HttpStatusCode.OK
+        is LocalRebuildResult.Failed -> HttpStatusCode.UnprocessableEntity
+        LocalRebuildResult.Busy -> HttpStatusCode.Accepted
+        LocalRebuildResult.NotFound -> HttpStatusCode.NotFound
+      }
+    if (result == LocalRebuildResult.Busy) call.response.headers.append(HttpHeaders.RetryAfter, "2")
+    call.respondText(body.toString(), ContentType.Application.Json, code)
   }
 
   /**
@@ -4115,6 +4173,10 @@ class ServeHttpServer(
           provenance = catalogBundleHost(renderHost)?.provenance,
           refreshUrl =
             if (catalogRefresh != null) "$basePath/refresh${requestQuerySuffix()}" else null,
+          rebuildUrl =
+            if (localRebuild?.canRebuild(selectedSessionId) == true)
+              "$basePath/rebuild${requestQuerySuffix()}"
+            else null,
           // "try in playground": opens the editor with this design system preselected. Omitted
           // without the lane; per-preview handoff is the viewer's `playgroundHref`.
           playgroundHref = catalogPlaygroundHref,

@@ -206,6 +206,14 @@ The binary has five commands, and `help` lists them:
 Flags may still be passed with no command in front of them: `compose-preview-server --module app`
 is exactly `compose-preview-server serve --module app`, and stays supported.
 
+A local module's page (`serve --module` / `--discover`, and `compose-preview browse`) has a
+**rebuild** button: after an edit it asks the build host for `:<module>:composePreviewCompile` and
+shows the result without restarting the server. When only the classes changed, the running daemon
+swaps them in and its cached renders are dropped; when the daemon's classpath or the preview set
+changed, the session restarts on the new build. A failed build leaves the last good renders on
+screen. The same `POST /{session}/rebuild` serves Bazel workspaces, whose build host answers the
+compile with a rebuild of the module's targets. Automatic rebuild on save is the next step.
+
 `ui` needs a build host — the `compose-preview` binary — because discovering and building a local
 Gradle project is work this server asks for over a pipe rather than doing itself. The builder's
 palette is a packaged design-system catalog; what `ui` adds is the project, by pointing
