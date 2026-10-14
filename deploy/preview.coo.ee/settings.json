@@ -13,9 +13,6 @@
     "mcp": true,
     "registry": "yschimke/compose-preview-imports-out"
   },
-  "cli": {
-    "startUrl": "https://yschimke.github.io/compose-ai-tools/"
-  },
   "uploads": {
     "acceptDocs": true,
     "acceptImages": true,
