@@ -30,6 +30,7 @@ import ee.schimke.composeai.remotecompose.json.RemoteComposeJsonException
 import ee.schimke.composeai.uibuilder.export.NewDesignNames
 import ee.schimke.composeai.uibuilder.export.UiBuilderNewDesignSeed
 import ee.schimke.composeai.uibuilder.export.decodeNewDesignStates
+import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessControlV1
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessRoleV1
@@ -227,6 +228,8 @@ class ServeHttpServer(
   private val uiBuilderDir: File? = null,
   /** Explicit builder-instance allowlist. A served catalog is not authoring-enabled by default. */
   private val uiBuilderCatalogs: Set<String> = setOf("m3-catalog"),
+  /** Current published capabilities, also served to sandboxed MCP App editors. */
+  private val uiBuilderCapabilities: (() -> List<CatalogCapabilityV1>)? = null,
   /** What a new design can start as; built in unless a catalog owns its seeds. */
   private val uiBuilderSeeds: UiBuilderCatalogSeeds = UiBuilderCatalogSeeds.BUILT_IN,
   /** Retained native renderer directories, snapshotted before this server accepts requests. */
@@ -1308,6 +1311,30 @@ class ServeHttpServer(
         }
       }
       routing {
+        if (uiBuilderCapabilities != null) {
+          // Public catalog definitions. An MCP App iframe has an opaque origin and reads these
+          // without a design credential; the same capabilities are already in the editor archive.
+          // The filename matches McpAppCatalogs' hosted-base contract exactly.
+          get("/api/ui-builder/v1/catalog-capabilities/{file}") {
+            call.response.headers.append(HttpHeaders.AccessControlAllowOrigin, "*")
+            call.response.headers.append(HttpHeaders.CacheControl, "public, max-age=60")
+            val file = call.parameters["file"].orEmpty()
+            val suffix = "-capabilities-v1.json"
+            val system = if (file.endsWith(suffix)) file.removeSuffix(suffix) else ""
+            val catalog =
+              uiBuilderCapabilities().firstOrNull {
+                it.benchmark.catalogSystemId == system && system in uiBuilderCatalogsFor(call)
+              }
+            if (catalog == null) {
+              call.respondText("not found", status = HttpStatusCode.NotFound)
+            } else {
+              call.respondText(
+                UI_BUILDER_JSON.encodeToString(CatalogCapabilityV1.serializer(), catalog),
+                ContentType.Application.Json,
+              )
+            }
+          }
+        }
         if (designService != null && uiBuilderAuthorization != null) {
           // The REST and protocol routes below read the same credentials the form routes do, and a
           // write carried by the session cookie is accepted only from a page this server served.
