@@ -7,11 +7,13 @@ import ee.schimke.composeai.uibuilder.protocol.StringValueV1
  * What `ui_builder_check_design` with `rendered: true` makes of a native render that drew nothing
  * (#1666).
  *
- * A render that failed because the exported Kotlin does not compile, or compiled and threw, is a
- * fact about the design: the same source fails in a project with the same dependencies. Reporting
- * it as "no native render was available" and then "No problems found" told an agent the design was
- * clean when its code could not be built, so it is an error finding here. A host that produced no
- * frame for a design that compiled is the host's problem and stays a skip, with its reason.
+ * A render that failed because the exported Kotlin does not compile is a fact about the design: the
+ * same source fails in a project with the same dependencies. Reporting it as "no native render was
+ * available" and then "No problems found" told an agent the design was clean when its code could
+ * not be built, so it is an error finding here. Everything else stays a skip with its reason: an
+ * exception (the daemon, its session I/O and the first frame all report through it, so it cannot be
+ * told apart from the composable throwing), a compiler that was busy or could not start (an ERROR
+ * with no source file), or a host that drew nothing for Kotlin that compiled.
  */
 internal object ServeUiBuilderNativeCheck {
 
@@ -21,17 +23,11 @@ internal object ServeUiBuilderNativeCheck {
     response: PlaygroundRunResponse,
     reason: String,
   ): UiBuilderCheckFindingV1? {
-    if (!response.exception.isNullOrBlank()) {
-      return UiBuilderCheckFindingV1(
-        severity = SEVERITY_ERROR,
-        check = CHECK_NATIVE,
-        code = CODE_NATIVE_RENDER_FAILED,
-        message =
-          "the exported Kotlin compiled but threw when this host drew it, so the rendered checks " +
-            "did not run: $reason",
-      )
+    if (!response.exception.isNullOrBlank()) return null
+    // A compiler error is anchored in the generated file; admission and sandbox failures are not.
+    if (response.diagnostics.none { it.severity == PlaygroundSeverity.ERROR && it.file != null }) {
+      return null
     }
-    if (response.diagnostics.none { it.severity == PlaygroundSeverity.ERROR }) return null
     val icon = missingIcon(document, reason)
     val message = buildString {
       append(
@@ -78,6 +74,7 @@ internal object ServeUiBuilderNativeCheck {
     for (member in unresolved) {
       for ((nodeId, node) in document.nodes.toSortedMap()) {
         for ((field, value) in node.properties) {
+          if (!ICON_FIELD.containsMatchIn(field)) continue
           val key = (value as? StringValueV1)?.value ?: continue
           val last = key.substringAfterLast('/')
           if (last.isNotEmpty() && last.replaceFirstChar { it.uppercase() } == member) {
@@ -89,6 +86,8 @@ internal object ServeUiBuilderNativeCheck {
     return null
   }
 
+  /** Properties that carry an icon key (`imageVector`, `iconKey`, `leadingIcon`, …). */
+  private val ICON_FIELD = Regex("icon|imageVector", RegexOption.IGNORE_CASE)
   private val UNRESOLVED = Regex("Unresolved reference:? '?([A-Z][A-Za-z0-9_]*)'?")
   private const val MATERIAL_ICONS_EXTENDED = "androidx.compose.material:material-icons-extended"
 }
@@ -96,4 +95,3 @@ internal object ServeUiBuilderNativeCheck {
 /** Findings about the exported Kotlin itself, from the native render `rendered: true` asks for. */
 internal const val CHECK_NATIVE = "native"
 internal const val CODE_NATIVE_COMPILE_FAILED = "nativeCompileFailed"
-internal const val CODE_NATIVE_RENDER_FAILED = "nativeRenderFailed"

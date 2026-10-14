@@ -1064,6 +1064,80 @@ class ServeUiBuilderAgentErgonomicsTest {
   }
 
   @Test
+  fun `a busy compiler or a host exception is a skip, and only icon fields are blamed`() {
+    fun serverAnswering(response: PlaygroundRunResponse) =
+      start(
+        nativePreview =
+          UiBuilderNativePreviewLane { _, _ ->
+            UiBuilderNativePreviewOutcome.Rendered(
+              response,
+              taggedNodeIds = emptyList(),
+              failure = response.noFrameReason(),
+            )
+          }
+      )
+    // Admission control answers with an ERROR that names no file: the source was never compiled.
+    val busy =
+      serverAnswering(
+        PlaygroundRunResponse(
+          diagnostics =
+            listOf(
+              PlaygroundDiagnostic(
+                PlaygroundSeverity.ERROR,
+                "the playground is busy compiling (all 1 compile slots in use) — try again shortly",
+              )
+            )
+        )
+      )
+    create(busy, cleanDocument())
+    val busyReply = check(busy, """{"designId":"agent-screen","rendered":true}""")
+    assertEquals(true, busyReply["ok"]!!.jsonPrimitive.booleanOrNull, busyReply.toString())
+    assertTrue(busyReply["findings"]!!.jsonArray.isEmpty(), busyReply.toString())
+    assertTrue(busyReply.text("summary").contains("busy compiling"), busyReply.toString())
+    // The daemon, its session and the first frame all fail through `exception`.
+    val failing = serverAnswering(PlaygroundRunResponse(exception = "session I/O timed out"))
+    create(failing, cleanDocument())
+    val failingReply = check(failing, """{"designId":"agent-screen","rendered":true}""")
+    assertEquals(true, failingReply["ok"]!!.jsonPrimitive.booleanOrNull, failingReply.toString())
+    assertTrue(failingReply["findings"]!!.jsonArray.isEmpty(), failingReply.toString())
+    // A text that happens to read like the unresolved name is not an icon key.
+    val unresolved =
+      serverAnswering(
+        PlaygroundRunResponse(
+          diagnostics =
+            listOf(
+              PlaygroundDiagnostic(
+                PlaygroundSeverity.ERROR,
+                "Unresolved reference 'Card'.",
+                "UiBuilderGeneratedScreen.kt",
+                line = 3,
+              )
+            )
+        )
+      )
+    val base = cleanDocument()
+    val document =
+      base.copy(
+        nodes =
+          base.nodes +
+            ("session" to
+              base.nodes
+                .getValue("session")
+                .copy(properties = mapOf("text" to StringValueV1("card"))))
+      )
+    val reply =
+      check(
+        unresolved,
+        """{"document":${documentJson(document)},"checks":["a11y"],"rendered":true}""",
+      )
+    val finding =
+      reply["findings"]!!.jsonArray.map { it.jsonObject }.single { it.text("check") == "native" }
+    assertEquals("nativeCompileFailed", finding.text("code"))
+    assertNull(finding["nodeId"], finding.toString())
+    assertFalse(finding.text("message").contains("material-icons-extended"), finding.toString())
+  }
+
+  @Test
   fun `a host that drew nothing for compiling Kotlin is a skip, not a finding`() {
     val server =
       start(

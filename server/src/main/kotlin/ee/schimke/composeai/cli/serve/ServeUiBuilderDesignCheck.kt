@@ -781,8 +781,8 @@ internal data class UiBuilderCheckFindingV1(
   /** `error`, `warning` or `info`. */
   val severity: String,
   /**
-   * `schema`, `catalog`, `a11y` or `guidelines`; `native` for exported Kotlin that failed to build
-   * or draw.
+   * `schema`, `catalog`, `a11y` or `guidelines`; `native` for exported Kotlin that failed to
+   * compile.
    */
   val check: String,
   val code: String,

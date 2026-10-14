@@ -4871,7 +4871,7 @@ class ServeUiBuilderMcp(
             "operations":{"type":"array","items":{"type":"object"},"description":"DesignMutationV1 objects to apply to a scratch copy of `designId` and check — a dry run."},
             "baseRevision":{"type":"integer","description":"The revision `operations` were written against; a stale one is a warning."},
             "$CHECKS_ARGUMENT":{"type":"array","items":{"type":"string","enum":[${ALL_DESIGN_CHECKS.joinToString(",") { "\"$it\"" }}]},"description":"Which checks to run. Defaults to ${DESIGN_CHECKS.joinToString(", ")}; `$CHECK_GUIDELINES` runs only when named."},
-            "$RENDERED_ARGUMENT":{"type":"boolean","description":"Measure touch targets on a native render, and show it to the guidelines model. Exported Kotlin that fails to compile or draw there is an error finding (check `native`). Defaults to false."}
+            "$RENDERED_ARGUMENT":{"type":"boolean","description":"Measure touch targets on a native render, and show it to the guidelines model. Exported Kotlin that fails to compile there is an error finding (check `native`). Defaults to false."}
           },"additionalProperties":false}
           """,
         ),
