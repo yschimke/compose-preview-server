@@ -2294,6 +2294,8 @@ public class ServeRunner(
    */
   private data class UiBuilderLane(
     val service: PersistentUiBuilderService,
+    /** Live catalog generation, swapped when a delivery branch refreshes. */
+    val catalogs: SwappableUiBuilderCatalogExecutor,
     val renderer: AutoCloseable?,
     /**
      * Reference overlays, beside (not inside) the state file, which is rewritten on every operation
@@ -2905,6 +2907,7 @@ public class ServeRunner(
     }
     return UiBuilderLane(
       service = service,
+      catalogs = catalogs,
       renderer = renderer,
       refreshPublished = refreshPublished,
       seeds = UiBuilderCatalogSeeds(ownership) { publishedTemplates[it] },
@@ -3479,6 +3482,8 @@ public class ServeRunner(
         wasmUiDir = usableWasmUiDir(),
         uiBuilderDir = uiBuilderAppDir,
         uiBuilderCatalogs = uiBuilderCatalogs,
+        uiBuilderCapabilities =
+          uiBuilderLane?.catalogs?.let { catalogs -> { catalogs.listCatalogs() } },
         uiBuilderSeeds = uiBuilderLane?.seeds ?: UiBuilderCatalogSeeds.BUILT_IN,
         uiBuilderRuntimeDirs = uiBuilderRuntimeDirs,
         catalogUiBuilderRuntimeAsset = { runtimeId, segments ->
