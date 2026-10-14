@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.agentgrants.AgentGrantScope
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.daemon.protocol.StreamCodec
 import ee.schimke.composeai.daemon.protocol.StreamFrameParams
@@ -224,6 +225,152 @@ class ServeLocalRebuildTest {
     } finally {
       executor.shutdownNow()
     }
+  }
+
+  @Test
+  fun `a changed label or theme on the same preview restarts with the new metadata`() {
+    val host = register(listOf("Red"))
+
+    val result = rebuild {
+      true
+    }
+      .let {
+        ServeLocalRebuild(
+          registry = registry,
+          modules = mapOf("app" to module),
+          compile = { true },
+          previewsOf = { _, manifest ->
+            manifest.previews.map { ServePreview(it.id, "${it.id} (renamed)") }
+          },
+        )
+      }
+      .rebuild("app")
+
+    val restarted = assertIs<LocalRebuildResult.Restarted>(result)
+    assertTrue(restarted.reason.contains("metadata"), restarted.reason)
+    assertTrue(host.closed.get())
+    assertEquals("Red (renamed)", registry.peekState("app")!!.previews.single().label)
+  }
+
+  @Test
+  fun `removing the last preview is a change, not an unreadable manifest`() {
+    val host = register(listOf("Red"))
+
+    val result = rebuild {
+      writeOutput(previews = emptyList())
+      true
+    }
+      .rebuild("app")
+
+    assertIs<LocalRebuildResult.Restarted>(result)
+    assertTrue(host.closed.get())
+    assertEquals(emptyList(), registry.peekState("app")!!.previews)
+  }
+
+  @Test
+  fun `an unreadable manifest keeps the previews the session has`() {
+    val host = register(listOf("Red"))
+
+    val result = rebuild {
+      File(output, "previews.json").writeText("{ not json")
+      true
+    }
+      .rebuild("app")
+
+    assertIs<LocalRebuildResult.Reloaded>(result)
+    assertEquals(listOf("Red"), registry.peekState("app")!!.previews.map { it.id })
+    assertFalse(host.closed.get())
+  }
+
+  @Test
+  fun `rebuilds of different modules never run together on the shared build host`() {
+    register(listOf("Red"))
+    val compiling = CountDownLatch(1)
+    val release = CountDownLatch(1)
+    val other = PreviewModule("lib", Files.createTempDirectory("other").toFile())
+    val local =
+      ServeLocalRebuild(
+        registry = registry,
+        modules = mapOf("app" to module, "lib" to other),
+        compile = {
+          compiling.countDown()
+          release.await(10, TimeUnit.SECONDS)
+        },
+        previewsOf = { _, manifest -> manifest.previews.map { ServePreview(it.id, it.id) } },
+      )
+    val executor = Executors.newSingleThreadExecutor()
+    try {
+      val first = executor.submit<LocalRebuildResult> { local.rebuild("app") }
+      assertTrue(compiling.await(10, TimeUnit.SECONDS))
+      assertEquals(LocalRebuildResult.Busy, local.rebuild("lib"))
+      release.countDown()
+      assertIs<LocalRebuildResult.Reloaded>(first.get(10, TimeUnit.SECONDS))
+    } finally {
+      executor.shutdownNow()
+    }
+  }
+
+  @Test
+  fun `building needs playground authority, not just the right to browse`() {
+    register(listOf("Red"))
+    val grants =
+      ServeAgentGrantStore(maxScope = AgentGrantScope.PLAYGROUND, maxGrantTtlSeconds = 3600)
+    fun grant(scope: AgentGrantScope): String {
+      val request = grants.openRequest("rebuild test", "127.0.0.1", scope, 600)!!
+      return grants.approve(request.id, "operator", scope, 600)!!.token
+    }
+    val compiles = java.util.concurrent.atomic.AtomicInteger(0)
+    fun serve(isPublic: Boolean) =
+      ServeHttpServer(
+          host = "127.0.0.1",
+          requestedPort = 0,
+          token = operatorToken,
+          sessions = registry,
+          defaultSessionId = "app",
+          isPublic = isPublic,
+          agentGrants = grants,
+          machineAuthorization =
+            ServeMachineAuthorization(operatorToken, githubAuth = null, agentGrants = grants),
+          localRebuild =
+            rebuild {
+              compiles.incrementAndGet()
+              true
+            },
+        )
+        .also { it.start() }
+    val client = OkHttpClient()
+    fun post(server: ServeHttpServer, token: String?): Int =
+      client
+        .newCall(
+          Request.Builder()
+            .url("http://127.0.0.1:${server.port}/app/rebuild")
+            .apply { token?.let { header(ServeHttpServer.TOKEN_HEADER, it) } }
+            .post("".toRequestBody("application/json".toMediaType()))
+            .build()
+        )
+        .execute()
+        .use { it.code }
+
+    val private = serve(isPublic = false)
+    try {
+      assertEquals(
+        403,
+        post(private, grant(AgentGrantScope.PREVIEW)),
+        "a preview grant cannot build",
+      )
+      assertEquals(200, post(private, grant(AgentGrantScope.PLAYGROUND)))
+      assertEquals(200, post(private, operatorToken))
+    } finally {
+      private.stop()
+    }
+    val public = serve(isPublic = true)
+    try {
+      assertEquals(403, post(public, null), "seeing a public page is not authority to build")
+      assertEquals(200, post(public, operatorToken))
+    } finally {
+      public.stop()
+    }
+    assertEquals(3, compiles.get(), "only the authorised requests reached the build host")
   }
 
   @Test

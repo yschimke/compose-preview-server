@@ -2726,11 +2726,28 @@ class ServeHttpServer(
 
   /**
    * `POST /{session}/rebuild`: recompile a local project session after an edit and load the result
-   * ([ServeLocalRebuild]). Behind the session token like every other local route; 404 for a session
-   * that is not a local module (catalogs, bundles), and 202 while one is already running.
+   * ([ServeLocalRebuild]). 404 for a session that is not a local module (catalogs, bundles), and
+   * 202 while a rebuild is already running.
+   *
+   * Compiling is compute at the top of the `preview -> live -> playground` ladder, so it is gated
+   * like the playground compile lane, not like browsing: a grant must carry `playground`, and with
+   * GitHub sign-in a person needs repository access. On a `--public` server with no sign-in, seeing
+   * the page proves nothing about the caller, so only the operator's token or a playground grant
+   * may build.
    */
   private suspend fun RoutingContext.handleLocalRebuild(sessionInPath: Boolean) {
     if (rejectBadToken()) return
+    if (rejectMissingGithubRepoAccess(api = true)) return
+    if (isPublic && githubAuth == null && agentGrantFor(call) == null) {
+      val provided = call.request.queryParameters["token"] ?: call.request.headers[TOKEN_HEADER]
+      if (!isAuthorized(serverToken, provided, isPublic = false)) {
+        call.respondText(
+          "Rebuilding needs the operator's token or a playground grant on a public server.",
+          status = HttpStatusCode.Forbidden,
+        )
+        return
+      }
+    }
     val sessionId = selectedSessionId(sessionInPath)
     val rebuild = localRebuild
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
