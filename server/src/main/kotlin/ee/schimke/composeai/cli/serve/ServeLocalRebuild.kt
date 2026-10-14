@@ -107,7 +107,8 @@ class ServeLocalRebuild(
 
   private fun File.readTextOrNull(): String? = takeIf {
     it.isFile
-  }?.let { runCatching { it.readText() }.getOrNull() }
+  }
+    ?.let { runCatching { it.readText() }.getOrNull() }
 
   private companion object {
     const val OUTPUT_DIR = "build/compose-previews"
