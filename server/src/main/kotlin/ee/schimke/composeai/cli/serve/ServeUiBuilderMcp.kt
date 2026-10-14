@@ -480,7 +480,7 @@ class ServeUiBuilderMcp(
         SET_LINKS -> return linksTool(tool, args, actor)
         VALIDATE -> return validate(args, actor)
         CHECK_DESIGN -> return checkDesign(args, actor)
-        RENDER_DESIGN_MATRIX -> return renderDesignMatrix(args, actor)
+        RENDER_DESIGN_MATRIX -> return renderDesignMatrix(args, actor, mayExport)
         RECORD_DECISION,
         AWAIT_DECISION,
         SET_IMPLEMENTATION,
@@ -3277,6 +3277,7 @@ class ServeUiBuilderMcp(
   private suspend fun renderDesignMatrix(
     args: JsonObject,
     actor: AuthenticatedUiBuilderActor,
+    mayExport: () -> Boolean = { false },
   ): String {
     val designId = args.requiredText("designId")
     val snapshot =
@@ -3289,7 +3290,7 @@ class ServeUiBuilderMcp(
       }
     val document = snapshot.state.document
     val platform = snapshot.catalog.statusSemantics[PLATFORM_KEY]?.jsonPrimitive?.contentOrNull
-    val devices = matrixDevices(args, platform)
+    val devices = matrixDevices(args, platform, document)
     val themes =
       args.stringList(THEMES_ARGUMENT).ifEmpty {
         listOf(
@@ -3330,9 +3331,10 @@ class ServeUiBuilderMcp(
       )
     }
     val variants = combinations.map { (device, theme, scale) ->
-      document.copy(
+      val drawn = UiBuilderDesignMatrix.forWidgetHost(document, device)
+      drawn.copy(
         environment =
-          document.environment.copy(
+          drawn.environment.copy(
             widthDp = device.widthDp,
             heightDp = device.heightDp,
             theme = if (theme == UiBuilderDesignMatrix.THEME_DARK) ThemeV1.DARK else ThemeV1.LIGHT,
@@ -3340,19 +3342,43 @@ class ServeUiBuilderMcp(
           )
       )
     }
+    // A widget host cell is drawn by the native lane, in that host, for a caller who may compile
+    // (the export grant gates the lane everywhere else). The editor's export draws a widget's
+    // content without any host, so it is only the fallback. Each is a compile, so they are drawn
+    // one after another, as the guidelines frames are.
+    val widgetCells = combinations.any { it.first.widgetHostShape != null }
+    val nativeCells =
+      if (nativePreview == null || !widgetCells || !mayExport()) emptyMap()
+      else
+        combinations
+          .withIndex()
+          .filter { it.value.first.widgetHostShape != null }
+          .associate { (index, combination) ->
+            index to
+              withContext(Dispatchers.IO) {
+                nativeRenderAttempt(variants[index], combination.first.widgetHostShape!!)
+              }
+          }
+    val exported = variants.indices.filter { nativeCells[it]?.render?.png == null }
     val pictures =
-      validator?.exportPngs(actor, variants)
-        ?: throw McpRequestException(
-          "this host cannot render a design under another environment without saving it; use " +
-            "$VIEW for the design as it is"
-        )
+      if (exported.isEmpty()) emptyMap()
+      else
+        (validator?.exportPngs(actor, exported.map { variants[it] })
+            ?: throw McpRequestException(
+              "this host cannot render a design under another environment without saving it; " +
+                "use $VIEW for the design as it is"
+            ))
+          .withIndex()
+          .associate { (position, picture) -> exported[position] to picture }
     val cells = combinations.mapIndexed { index, (device, theme, scale) ->
+      val native = nativeCells[index]?.render?.png
       UiBuilderDesignMatrix.Cell(
         device,
         theme,
         scale,
-        pictures.getOrNull(index)?.png,
-        pictures.getOrNull(index)?.problem ?: "not rendered",
+        native ?: pictures[index]?.png,
+        pictures[index]?.problem ?: "not rendered",
+        native = native != null,
       )
     }
     val sheet = UiBuilderDesignMatrix.compose(cells)
@@ -3391,8 +3417,10 @@ class ServeUiBuilderMcp(
               widthDp = cell.device.widthDp,
               heightDp = cell.device.heightDp,
               round = cell.device.round,
+              widgetHostShape = cell.device.widgetHostShape?.id,
               theme = cell.theme,
               fontScale = cell.fontScale,
+              renderer = if (cell.native) ServeUiBuilderView.RENDERER_NATIVE else null,
               x = placed.x,
               y = placed.y,
               width = placed.width,
@@ -3406,10 +3434,14 @@ class ServeUiBuilderMcp(
     )
   }
 
-  /** The devices a matrix call asked for: by preset id, by size, by form factor, or by default. */
+  /**
+   * The devices a matrix call asked for: by preset id, by size, by form factor, or by default. A
+   * Wear widget's default, and its `widget` form factor, are its own container in each host.
+   */
   private fun matrixDevices(
     args: JsonObject,
     platform: String?,
+    document: DesignDocumentV1,
   ): List<UiBuilderDesignMatrix.Device> {
     val formFactor = args.text(FORM_FACTOR_ARGUMENT)
     val listed = args[DEVICES_ARGUMENT]?.takeIf { it !is JsonNull }
@@ -3417,6 +3449,12 @@ class ServeUiBuilderMcp(
       throw McpRequestException("pass `$DEVICES_ARGUMENT` or `$FORM_FACTOR_ARGUMENT`, not both")
     }
     if (listed == null) {
+      val widget = UiBuilderDesignMatrix.widgetDefaults(document)
+      if (
+        widget != null && (formFactor == null || formFactor == UiBuilderDesignMatrix.FORM_WIDGET)
+      ) {
+        return widget.mapNotNull(UiBuilderDesignMatrix::preset)
+      }
       val chosen = formFactor ?: UiBuilderDesignMatrix.defaultFormFactor(platform)
       val ids =
         UiBuilderDesignMatrix.FORM_FACTOR_DEFAULTS[chosen]
@@ -4875,7 +4913,12 @@ class ServeUiBuilderMcp(
               "{widthDp, heightDp, label?, round?}; or a `$FORM_FACTOR_ARGUMENT` " +
               "(${UiBuilderDesignMatrix.FORM_FACTORS.joinToString(", ")}) for its default set; " +
               "with neither you get the design's own form factor — phone, foldable and tablet for a " +
-              "mobile catalog, the round watches for Wear. Add `$THEMES_ARGUMENT: [\"light\",\"dark\"]` " +
+              "mobile catalog, the round watches for Wear, and for a Wear widget (a " +
+              "`remote-m3/widget-container-*` root) its own container in each widget host: Samsung " +
+              "round, Pixel Watch squircle and rectangular, at the container's frame. Widget host " +
+              "cells are drawn natively in that host when the caller holds ui-builder-export and " +
+              "the host has a native lane (`renderer: \"native\"`); otherwise by the editor's " +
+              "export, masked to the host's outline. Add `$THEMES_ARGUMENT: [\"light\",\"dark\"]` " +
               "and `$FONT_SCALES_ARGUMENT: [1, 2]` to cross them; at most " +
               "${UiBuilderDesignMatrix.MAX_CELLS} cells. The sheet is a short-lived signed https " +
               "link kept under 3.5 MB, so a chat surface can show it inline; `$INLINE_ARGUMENT: " +

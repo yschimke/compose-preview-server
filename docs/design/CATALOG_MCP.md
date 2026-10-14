@@ -497,9 +497,20 @@ contact sheet — the design's own PNG export per cell, with the environment swa
 copy, so nothing is written and nobody watching the design is woken. Name `devices` by preset
 (`phone_small`, `phone`, `phone_landscape`, `foldable_folded`, `foldable_unfolded`,
 `tablet_portrait`, `tablet_landscape`, `wear_small_round`, `wear_large_round`, `wear_square`,
-`tv_1080p`) or as `{widthDp, heightDp, label?, round?}`, or a `formFactor` (`phone`, `foldable`,
-`tablet`, `wear`, `tv`, `adaptive`) for its default set; with neither, a mobile catalog gets
-`adaptive` (phone, unfolded foldable, landscape tablet) and a Wear catalog the two round watches.
+`tv_1080p`, and the Wear widget hosts `widget_{small,large}_{round,squircle,rectangular}`) or as
+`{widthDp, heightDp, label?, round?}`, or a `formFactor` (`phone`, `foldable`, `tablet`, `wear`,
+`tv`, `adaptive`, `widget`) for its default set; with neither, a mobile catalog gets `adaptive`
+(phone, unfolded foldable, landscape tablet) and a Wear catalog the two round watches.
+
+A Wear widget (a `remote-m3/widget-container-*` root) defaults to its own container in each host the
+widget export previews: Samsung's round, the Pixel Watch's squircle and the rectangular frame, each
+at that host's whole frame from the export's `hostSpec` table (small: 230×76, 216×76, 224×84; large:
+230×168, 216×124, 232×144), and both sizes for the adaptive container, resolved to the fixed design
+each size gets. On a round watch screen a widget is a band across a watch face, which is not where
+anybody sees it. A widget host cell is drawn by the native lane in that host when the caller holds
+`ui-builder-export` and the host has a lane (the cell says `renderer: "native"`); otherwise it is the
+editor's export at the host's frame, which draws the content without the host, masked on the sheet
+to the host's outline. Every widget cell names its `widgetHostShape`.
 `themes` and `fontScales` cross with the devices, up to 16 cells. The sheet is a short-lived signed
 https link, as `ui_builder_view`'s picture is, and is kept under 3.5 MB so a chat surface (#1254)
 can show it inline; `inline: true` adds the bytes as an image block. Each cell reports its device,
