@@ -315,6 +315,55 @@ class RecordFreeComposeExportTest {
     )
   }
 
+  /**
+   * The emitters' own diagnostics reach the artifact: `pauseCircle` exports
+   * `Icons.Filled.PauseCircle`, which only `material-icons-extended` ships, so the export says so
+   * instead of returning `[]` for Kotlin a core-icons classpath cannot compile (#1666).
+   */
+  @Test
+  fun `an extended-only icon key is a warning on the export, naming the dependency`() {
+    val artifact = export(widgetAroundRemoteIcon("pauseCircle"))
+
+    val diagnostic = artifact.diagnostics.single()
+    assertEquals(
+      "MATERIAL_ICONS_EXTENDED_REQUIRED",
+      diagnostic.code,
+      artifact.diagnostics.toString(),
+    )
+    assertEquals("hello-text", diagnostic.nodeId)
+    assertTrue(
+      "androidx.compose.material:material-icons-extended" in diagnostic.message,
+      diagnostic.message,
+    )
+    assertTrue("Icons.Filled.PauseCircle" in artifact.content, artifact.content)
+
+    // A core icon raises nothing.
+    assertEquals(emptyList(), export(widgetAroundRemoteIcon("add")).diagnostics)
+  }
+
+  /** The Hello widget with its text swapped for a `RemoteIcon` drawing [iconKey]. */
+  private fun widgetAroundRemoteIcon(iconKey: String): DesignDocumentV1 {
+    val document = helloWidgetUiBuilderDocument("widget-1", pin("remote-m3"), environment)
+    val text = document.nodes.getValue("hello-text")
+    return document
+      .copy(
+        nodes =
+          document.nodes +
+            ("hello-text" to
+              text.copy(
+                componentId = "remote-m3/remote-icon",
+                properties =
+                  JsonObject(
+                    mapOf(
+                      "imageVector" to
+                        json.parseToJsonElement("""{"type":"string","value":"$iconKey"}""")
+                    )
+                  ),
+              ))
+      )
+      .toDesignDocumentV1()
+  }
+
   /** The Hello widget with its text swapped for the catalog's own `RemoteText`. */
   private fun widgetAroundRemoteText(): DesignDocumentV1 {
     val document = helloWidgetUiBuilderDocument("widget-1", pin("remote-m3"), environment)
