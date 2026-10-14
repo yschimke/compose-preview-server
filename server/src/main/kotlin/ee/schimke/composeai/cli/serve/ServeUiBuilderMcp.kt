@@ -4952,7 +4952,7 @@ class ServeUiBuilderMcp(
               "(${UiBuilderDesignMatrix.FORM_FACTORS.joinToString(", ")}) for its default set; " +
               "with neither you get the design's own form factor — phone, foldable and tablet for a " +
               "mobile catalog, the round watches for Wear, and for a Wear widget (a " +
-              "`remote-m3/widget-container-*` root) its own container in each widget host: Samsung " +
+              "`widget-container-*` root) its own container in each widget host: Samsung " +
               "round, Pixel Watch squircle and rectangular, at the container's frame. Widget host " +
               "cells are drawn natively in that host when the caller holds ui-builder-export and " +
               "the host has a native lane (`renderer: \"native\"`); otherwise by the editor's " +
