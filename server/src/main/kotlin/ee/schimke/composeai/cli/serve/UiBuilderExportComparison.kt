@@ -213,6 +213,18 @@ internal object UiBuilderExportComparison {
     for (verdict in Verdict.entries) {
       appendLine("| ${verdict.label} | ${rows.count { it.verdict == verdict }} |")
     }
+    for ((side, label) in listOf("A" to a.catalogId, "B" to b.catalogId)) {
+      val reasons = refusals(rows, side)
+      if (reasons.isEmpty()) continue
+      appendLine()
+      appendLine("Why $side (`$label`) refuses, by design count:")
+      appendLine()
+      appendLine("| Designs | Reason |")
+      appendLine("| ---: | --- |")
+      reasons.forEach { (reason, count) ->
+        appendLine("| $count | ${reason.replace("|", "\\|")} |")
+      }
+    }
     appendLine()
     appendLine("| Design | Verdict |")
     appendLine("| --- | --- |")
@@ -239,6 +251,26 @@ internal object UiBuilderExportComparison {
       }
     }
   }
+
+  /**
+   * Each refusal reason [side] (`A` or `B`) gives, with node ids elided so one cause across many
+   * designs reads as one line, and the number of designs it refuses; most common first.
+   */
+  fun refusals(rows: List<Row>, side: String): List<Pair<String, Int>> =
+    rows
+      .flatMap { row ->
+        val outcome = if (side == "A") row.a else row.b
+        (outcome as? Outcome.Refused)
+          ?.reasons
+          ?.map { it.lines().joinToString(" ").replace(NODE_ID, "node `…`") }
+          ?.distinct()
+          .orEmpty()
+      }
+      .groupingBy { it }
+      .eachCount()
+      .entries
+      .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+      .map { it.key to it.value }
 
   /** Writes the report and each side's source under [out]. */
   fun write(out: File, title: String, a: Side, b: Side, rows: List<Row>) {
@@ -297,11 +329,21 @@ internal object UiBuilderExportComparison {
       "$title: " +
         Verdict.entries.joinToString(", ") { v -> "${rows.count { it.verdict == v }} ${v.label}" }
     )
+    // The reasons, in the log too: the report's artifact is not always where a reader is.
+    for ((side, id) in listOf("A" to a.catalogId, "B" to b.catalogId)) {
+      refusals(rows, side).take(LOGGED_REASONS).forEach { (reason, count) ->
+        println("  $side ($id) refuses $count design(s): $reason")
+      }
+    }
   }
 
   private const val ACTOR = "export-comparison"
 
   private const val DOCUMENT_SCHEMA_PREFIX = "compose-ui-builder-document/"
+
+  private const val LOGGED_REASONS = 25
+
+  private val NODE_ID = Regex("node `[^`]*`")
 
   private val JSON = Json { ignoreUnknownKeys = true }
 
