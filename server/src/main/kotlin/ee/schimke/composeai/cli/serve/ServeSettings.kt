@@ -362,6 +362,14 @@ object ServeSettings {
           "large-font render, the accessibility tree). Default `on`.",
       ),
       Setting(
+        "cli.startUrl",
+        "SERVE_CLI_START_URL",
+        Type.Text(pattern = HTTPS_URL, patternHint = "an HTTPS URL without credentials"),
+        Apply.RESTART,
+        "Where /start sends a visitor on the catalog host: the CLI and project-previews guide.",
+        BOTH,
+      ),
+      Setting(
         "catalogs.registry",
         "SERVE_CATALOG_REGISTRY",
         Type.Text(),

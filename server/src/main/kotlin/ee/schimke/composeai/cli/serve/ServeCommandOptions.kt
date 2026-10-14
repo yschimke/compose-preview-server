@@ -277,6 +277,14 @@ public class ServeCommandOptions(
       }
     }
 
+  override val cliStartUrl: String? =
+    args.flagValue("--cli-start-url")?.also { raw ->
+      val uri = java.net.URI(raw)
+      require(uri.scheme == "https" && uri.host != null && uri.userInfo == null) {
+        "--cli-start-url must be an HTTPS URL without credentials"
+      }
+    }
+
   /** Raw `--catalogs-file` path; the server opens it. */
   override val catalogsFilePath: String? =
     args.flagValue("--catalogs-file")?.takeIf { it.isNotBlank() }
@@ -1199,6 +1207,9 @@ public class ServeCommandOptions(
                           Include it in the TLS proxy and configure a shared auth cookie domain.
         --ui-builder-start-url <https-url>
                           Optional /start guide redirect on the builder hostname.
+        --cli-start-url <https-url>
+                          Optional /start guide redirect on every other hostname: the CLI and
+                          project-previews guide.
         --ui-builder-import-origins <https-origin>[,…]
                           Sites whose seed documents a signed-in person may start a design from,
                           at /ui-builder/designs/import?url=<seed URL on that origin>. The design

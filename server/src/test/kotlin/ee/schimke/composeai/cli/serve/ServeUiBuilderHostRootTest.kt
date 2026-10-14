@@ -64,6 +64,7 @@ class ServeUiBuilderHostRootTest {
         uiBuilderDir = bundle,
         uiBuilderHost = BUILDER,
         uiBuilderStartUrl = START,
+        cliStartUrl = CLI_START,
         uiBuilderHostRoot = rooted,
         uiBuilderService =
           if (projects)
@@ -159,10 +160,14 @@ class ServeUiBuilderHostRootTest {
       assertEquals(elsewhere, onBuilder, "$path must not change meaning on the builder host")
       assertFalse("app.mjs" in onBuilder.second, "$path is not the editor shell")
     }
-    // `/start` is the builder host's guide, as before.
+    // `/start` is the builder host's guide, as before; every other host's is the CLI's.
     server.call("/start", BUILDER).use { response ->
       assertEquals(302, response.code)
       assertEquals(START, response.header("Location"))
+    }
+    server.call("/start", OTHER).use { response ->
+      assertEquals(302, response.code)
+      assertEquals(CLI_START, response.header("Location"))
     }
   }
 
@@ -319,6 +324,7 @@ class ServeUiBuilderHostRootTest {
     const val BUILDER = "ui.coo.ee"
     const val OTHER = "preview.coo.ee"
     const val START = "https://yschimke.github.io/compose-ui-builder/"
+    const val CLI_START = "https://yschimke.github.io/compose-ai-tools/"
     const val SHELL =
       """<html><head></head><body><script type="module" src="app.mjs"></script></body></html>"""
     const val BASE_PATH_META = """<meta name="ui-builder-base-path" content="/">"""

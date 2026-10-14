@@ -49,6 +49,7 @@ SERVE_UI_BUILDER_NATIVE_CATALOGS=wear-m3=wear-m3-catalog
 SERVE_UI_BUILDER_PUBLISHED_CATALOGS=m3-catalog
 SERVE_UI_BUILDER_PACKS=confetti-mobile=mobile
 SERVE_UI_BUILDER_START_URL=https://preview.example.test/ui-builder/
+SERVE_CLI_START_URL=https://guide.example.test/cli/
 SERVE_CATALOG_MCP=1
 SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports-out
 SERVE_AGENT_GRANT_CAPABILITIES=images
@@ -85,6 +86,7 @@ field() { jq -r "$1" <<< "${draft}"; }
 [[ "$(field .uploads.acceptDocs)" == "true" ]] || fail "'true' is true"
 [[ "$(field .auth.github.scope)" == "read:user read:org" ]] || fail "quotes are stripped"
 [[ "$(field '.analytics.umami.url')" == "https://umami.example.test" ]] || fail "umami url"
+[[ "$(field .cli.startUrl)" == "https://guide.example.test/cli/" ]] || fail "cli start url"
 grep -q 'SERVE_UI_BUILDER_CATALOGS is managed in catalogs.json' "${work}/notes" ||
   fail "a catalogs.json setting was not pointed at"
 grep -q 'SERVE_SITES is managed in catalogs.json' "${work}/notes" || fail "SERVE_SITES not pointed at"

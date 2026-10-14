@@ -847,6 +847,7 @@ SERVE_UI_BUILDER_HOST=ui.coo.ee
 SERVE_GITHUB_AUTH_COOKIE_DOMAIN=coo.ee
 SERVE_GITHUB_AUTH_CALLBACK_BASE_URL=https://preview.coo.ee
 SERVE_UI_BUILDER_START_URL=https://yschimke.github.io/compose-ui-builder/
+SERVE_CLI_START_URL=https://yschimke.github.io/compose-ai-tools/
 ```
 
 Keep the OAuth app's callback at `https://preview.coo.ee/auth/github/callback`.
@@ -863,6 +864,9 @@ domain whenever it sees them, and the callback accepts a state matching any `cp_
 the browser sends, so existing visitors sign in again without clearing cookies by hand.
 
 The optional start URL makes `/start` on the builder hostname redirect to the guide.
+`SERVE_CLI_START_URL` (settings.json's `cli.startUrl`) does the same for `/start` on every other
+host — `preview.coo.ee/start` and each top-level site — sending it to the CLI and project-previews
+guide; unset, `/start` there stays the default catalog's landing.
 It does not relocate GitHub Pages. Serving the guide directly at `/start/` requires a
 separate static-site build with its asset base set to `/start/`, deployed alongside
 this proxy; leave the redirect unset when using that arrangement. No settings here
