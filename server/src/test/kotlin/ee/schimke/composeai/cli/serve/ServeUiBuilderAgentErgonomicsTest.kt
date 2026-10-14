@@ -965,6 +965,96 @@ class ServeUiBuilderAgentErgonomicsTest {
     assertEquals("a11y.rendered", reply["skipped"]!!.jsonArray.single().jsonObject.text("check"))
   }
 
+  @Test
+  fun `exported Kotlin that does not compile natively is an error, naming the icon key`() {
+    // #1666: `pauseCircle` exported `Icons.Filled.PauseCircle`, which only material-icons-extended
+    // carries, and the check said "No problems found" because the render was merely unavailable.
+    val server =
+      start(
+        nativePreview =
+          UiBuilderNativePreviewLane { _, _ ->
+            val response =
+              PlaygroundRunResponse(
+                diagnostics =
+                  listOf(
+                    PlaygroundDiagnostic(
+                      PlaygroundSeverity.ERROR,
+                      "Unresolved reference 'PauseCircle'.",
+                      "UiBuilderGeneratedScreen.kt",
+                      line = 7,
+                      ch = 46,
+                    )
+                  )
+              )
+            UiBuilderNativePreviewOutcome.Rendered(
+              response,
+              taggedNodeIds = emptyList(),
+              failure = response.noFrameReason(),
+            )
+          }
+      )
+    val base = cleanDocument()
+    val document =
+      base.copy(
+        nodes =
+          base.nodes +
+            ("session" to
+              base.nodes
+                .getValue("session")
+                .copy(
+                  properties =
+                    mapOf(
+                      "text" to StringValueV1("Opening keynote"),
+                      "imageVector" to StringValueV1("pauseCircle"),
+                    )
+                ))
+      )
+
+    val reply =
+      check(
+        server,
+        """{"document":${documentJson(document)},"checks":["a11y"],"rendered":true}""",
+      )
+
+    assertEquals(false, reply["ok"]!!.jsonPrimitive.booleanOrNull, reply.toString())
+    val finding =
+      reply["findings"]!!.jsonArray.map { it.jsonObject }.single { it.text("check") == "native" }
+    assertEquals("nativeCompileFailed", finding.text("code"))
+    assertEquals("error", finding.text("severity"))
+    assertEquals("session", finding.text("nodeId"))
+    assertEquals("imageVector", finding.text("field"))
+    assertTrue(finding.text("message").contains("material-icons-extended"), finding.toString())
+    assertTrue(finding.text("message").contains("Unresolved reference"), finding.toString())
+    assertFalse(reply.text("summary").startsWith("No problems found"), reply.toString())
+    // The fallback says why, rather than that no render was available.
+    val skip = reply["skipped"]!!.jsonArray.single().jsonObject
+    assertTrue(skip.text("reason").contains("nativeCompileFailed"), skip.toString())
+  }
+
+  @Test
+  fun `a host that drew nothing for compiling Kotlin is a skip, not a finding`() {
+    val server =
+      start(
+        nativePreview =
+          UiBuilderNativePreviewLane { _, _ ->
+            val response = PlaygroundRunResponse()
+            UiBuilderNativePreviewOutcome.Rendered(
+              response,
+              taggedNodeIds = emptyList(),
+              failure = response.noFrameReason(),
+            )
+          }
+      )
+    create(server, cleanDocument())
+
+    val reply = check(server, """{"designId":"agent-screen","rendered":true}""")
+
+    assertEquals(true, reply["ok"]!!.jsonPrimitive.booleanOrNull, reply.toString())
+    assertTrue(reply["findings"]!!.jsonArray.isEmpty(), reply.toString())
+    val skip = reply["skipped"]!!.jsonArray.single().jsonObject
+    assertTrue(skip.text("reason").contains("produced no frame"), skip.toString())
+  }
+
   // ---- ui_builder_render_design_matrix ----------------------------------------------------------
 
   @Test

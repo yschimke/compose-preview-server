@@ -2334,7 +2334,17 @@ class ServeUiBuilderMcp(
     }
 
     // One native render serves both touch-target measurement and the guidelines model's picture.
-    val render by lazy { if (rendered && document != null) nativeRender(document!!) else null }
+    val attemptOnce = lazy {
+      if (rendered && document != null) nativeRenderAttempt(document!!) else null
+    }
+    val attempt by attemptOnce
+    val render by lazy { attempt?.render }
+    // Why a rendered check fell back, in its skip reason: the lane's own sentence when it has one.
+    fun noRender(fallback: String): String =
+      attempt
+        ?.let { it.failure?.code ?: it.unavailable }
+        ?.let { "no native render ($it), so $fallback" }
+        ?: "no native render was available, so $fallback"
     if (CHECK_A11Y in checks && skipped.none { it.check == CHECK_A11Y }) {
       val checked = document
       if (checked == null) {
@@ -2357,8 +2367,7 @@ class ServeUiBuilderMcp(
                 skipped +=
                   UiBuilderCheckSkippedV1(
                     "$CHECK_A11Y.$RENDERED_ARGUMENT",
-                    "no native render was available, so touch targets were checked from the " +
-                      "sizes the document declares",
+                    noRender("touch targets were checked from the sizes the document declares"),
                   )
               }
             }
@@ -2398,8 +2407,7 @@ class ServeUiBuilderMcp(
           skipped +=
             UiBuilderCheckSkippedV1(
               "$CHECK_GUIDELINES.$RENDERED_ARGUMENT",
-              "no native render was available, so only the guidelines judged from the design " +
-                "tree ran",
+              noRender("only the guidelines judged from the design tree ran"),
             )
         }
         // The code the design exports to, so code-shaped rules are judged on real calls. A
@@ -2456,6 +2464,8 @@ class ServeUiBuilderMcp(
       }
     }
 
+    // Only when a check drew it: reporting a failure must not start a render nobody asked for.
+    if (attemptOnce.isInitialized()) attempt?.failure?.let { findings += it }
     val ordered = findings.sortedBy { SEVERITY_ORDER.indexOf(it.severity) }
     val errors = ordered.count { it.severity == SEVERITY_ERROR }
     val warnings = ordered.count { it.severity == SEVERITY_WARNING }
@@ -3175,25 +3185,63 @@ class ServeUiBuilderMcp(
     val rendered: UiBuilderNativePreviewOutcome.Rendered,
   )
 
+  /**
+   * A native render, or why there is none: [failure] is a finding when the exported Kotlin itself
+   * failed (#1666), and [unavailable] the reason when this host could not draw it.
+   */
+  private class NativeRenderAttempt(
+    val render: NativeRender?,
+    val failure: UiBuilderCheckFindingV1? = null,
+    val unavailable: String? = null,
+  )
+
   private fun nativeRender(
     document: DesignDocumentV1,
     widgetHostShape: WearWidgetHostShape = WearWidgetHostShape.Default,
-  ): NativeRender? {
-    val lane = nativePreview ?: return null
+  ): NativeRender? = nativeRenderAttempt(document, widgetHostShape).render
+
+  private fun nativeRenderAttempt(
+    document: DesignDocumentV1,
+    widgetHostShape: WearWidgetHostShape = WearWidgetHostShape.Default,
+  ): NativeRenderAttempt {
+    val lane =
+      nativePreview
+        ?: return NativeRenderAttempt(null, unavailable = "this host has no native render lane")
     val outcome =
       try {
         lane.render(document, widgetHostShape)
       } catch (cancelled: CancellationException) {
         throw cancelled
-      } catch (_: Exception) {
-        return null
+      } catch (e: Exception) {
+        return NativeRenderAttempt(
+          null,
+          unavailable = "the native render failed on this host: ${e.message ?: e.javaClass.name}",
+        )
       }
-    val rendered = outcome as? UiBuilderNativePreviewOutcome.Rendered ?: return null
+    val rendered =
+      when (outcome) {
+        is UiBuilderNativePreviewOutcome.Refused ->
+          return NativeRenderAttempt(
+            null,
+            unavailable =
+              "the native render was refused (${outcome.code}): " +
+                outcome.reasons.joinToString("; "),
+          )
+        is UiBuilderNativePreviewOutcome.Rendered -> outcome
+      }
     val bytes =
       rendered.response.image?.removePrefix("data:image/png;base64,")?.let {
         runCatching { java.util.Base64.getDecoder().decode(it) }.getOrNull()
       }
-    return NativeRender(document, bytes, rendered)
+    val failure = rendered.failure
+    if (bytes == null && failure != null) {
+      return NativeRenderAttempt(
+        null,
+        failure = ServeUiBuilderNativeCheck.finding(document, rendered.response, failure),
+        unavailable = failure,
+      )
+    }
+    return NativeRenderAttempt(NativeRender(document, bytes, rendered))
   }
 
   /** Node boxes from a native render, in dp-convertible form, or null without them. */
@@ -4747,7 +4795,7 @@ class ServeUiBuilderMcp(
             "operations":{"type":"array","items":{"type":"object"},"description":"DesignMutationV1 objects to apply to a scratch copy of `designId` and check — a dry run."},
             "baseRevision":{"type":"integer","description":"The revision `operations` were written against; a stale one is a warning."},
             "$CHECKS_ARGUMENT":{"type":"array","items":{"type":"string","enum":[${ALL_DESIGN_CHECKS.joinToString(",") { "\"$it\"" }}]},"description":"Which checks to run. Defaults to ${DESIGN_CHECKS.joinToString(", ")}; `$CHECK_GUIDELINES` runs only when named."},
-            "$RENDERED_ARGUMENT":{"type":"boolean","description":"Measure touch targets on a native render, and show it to the guidelines model. Defaults to false."}
+            "$RENDERED_ARGUMENT":{"type":"boolean","description":"Measure touch targets on a native render, and show it to the guidelines model. Exported Kotlin that fails to compile or draw there is an error finding (check `native`). Defaults to false."}
           },"additionalProperties":false}
           """,
         ),
