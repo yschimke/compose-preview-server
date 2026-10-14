@@ -142,6 +142,7 @@ class UiBuilderOwnedCatalogHealthTest {
 
   @Test
   fun `the built-in set names only what compose-ui-builder still defines in Kotlin`() {
-    assertEquals(setOf("m3-catalog", "remote-m3", "wear-m3"), UI_BUILDER_BUILT_IN_CATALOGS)
+    assertEquals(setOf("m3-catalog", "wear-m3"), UI_BUILDER_BUILT_IN_CATALOGS)
+    assertTrue(wired.withhold("remote-m3", "no published ui-builder.json could be read"))
   }
 }

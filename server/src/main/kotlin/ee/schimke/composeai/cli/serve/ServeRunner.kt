@@ -5317,13 +5317,12 @@ public class ServeRunner(
 }
 
 /**
- * The UI-builder catalogs compose-ui-builder still defines in Kotlin, and so can serve with no
- * published file. Every other catalog serves from what it publishes or not at all. The set only
- * shrinks: 3.111.0 deleted `a2ui-catalog`'s definition, and `remote-m3` and `wear-m3` follow.
+ * The builder definitions that can serve without published files. Remote must publish its
+ * capability and record once the server pins the builder release that removed its generator; Wear
+ * follows in its own release bump.
  */
 internal val UI_BUILDER_BUILT_IN_CATALOGS: Set<String> =
   setOf(
     CurrentM3UiBuilderCatalogExecutor.DEFAULT_CATALOG_SYSTEM_ID,
-    CurrentM3UiBuilderCatalogExecutor.REMOTE_M3_CATALOG_SYSTEM_ID,
     CurrentM3UiBuilderCatalogExecutor.WEAR_M3_CATALOG_SYSTEM_ID,
   )
