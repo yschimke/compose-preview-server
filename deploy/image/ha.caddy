@@ -17,6 +17,7 @@
 # takes HA_DOMAIN out of SITE_DOMAINS, so the name is never claimed by both blocks.
 {$HA_DOMAIN} {
 	import edge_common
+	import crawler_block
 
 	@designs path / /designs /designs/* /site/* /schema /embed/* /studio/* /api/designs /api/designs/* /api/schema /api/studio/* /edit /healthz
 	handle @designs {

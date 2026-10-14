@@ -100,9 +100,8 @@
 	header @sameOriginFramesOnly ?X-Frame-Options SAMEORIGIN
 }
 
-{$DOMAIN} {$SITE_DOMAINS:} {
-	import edge_common
-
+# Shared by every site this box serves (ha.caddy imports it too), so no hostname is a way round it.
+(crawler_block) {
 	# meta-externalagent is blocked outright. It ignores robots.txt, and on this box it
 	# was not a tax on serving — it WAS the load.
 	#
@@ -131,6 +130,13 @@
 	handle @metabot {
 		respond "blocked: this crawler ignores robots.txt" 403
 	}
+}
+
+{$DOMAIN} {$SITE_DOMAINS:} {
+	import edge_common
+
+	# meta-externalagent is refused before anything else; see the crawler_block snippet above.
+	import crawler_block
 
 	# Deploy webhook: the image-publish CI POSTs here to roll `preview` immediately
 	# when a new image is published (instead of waiting for the rollout poll). Routed
