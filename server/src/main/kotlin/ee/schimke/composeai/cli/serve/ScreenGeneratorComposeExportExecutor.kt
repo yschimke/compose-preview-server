@@ -121,8 +121,10 @@ internal class ScreenGeneratorComposeExportExecutor(
         )
         ?.let { recordFree ->
           return when (recordFree) {
+            // The emitters' own notes (a dependency the source needs, a setting it leaves out),
+            // so the export says what the Kotlin alone cannot (#1666).
             is RecordFreeExport.Generated.Emitted ->
-              emitted(provenance(request) + recordFree.source)
+              emitted(provenance(request) + recordFree.source, recordFree.diagnostics)
             // The document's own fault, named node by node: the emitter reached a node it cannot
             // write.
             is RecordFreeExport.Generated.Refused ->

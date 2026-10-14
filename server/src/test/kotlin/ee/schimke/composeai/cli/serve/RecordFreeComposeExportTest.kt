@@ -315,6 +315,47 @@ class RecordFreeComposeExportTest {
     )
   }
 
+  /**
+   * The emitters' own diagnostics reach the artifact (#1666). Which keys draw a warning, and what
+   * it says, is compose-ui-builder's: this asserts the server hands back exactly what the library
+   * call returns, so a builder change to the wording or the key set cannot turn the next bump red.
+   */
+  @Test
+  fun `the export carries the record-free emitter's diagnostics unchanged`() {
+    // An icon key outside `material-icons-core`; any design the emitter has something to say about
+    // serves, as long as it says something, or the comparison below would pass on an empty list.
+    val design = widgetAroundRemoteIcon("pauseCircle")
+    val expected =
+      assertIs<RecordFreeExport.Generated.Emitted>(
+          RecordFreeExport.generate(design, UiBuilderCatalogPlatform.REMOTE_COMPOSE, PACKAGE_NAME)
+        )
+        .diagnostics
+    assertTrue(expected.isNotEmpty(), "the emitter reported nothing for this design")
+
+    assertEquals(expected, export(design.toDesignDocumentV1()).diagnostics)
+  }
+
+  /** The Hello widget with its text swapped for a `RemoteIcon` drawing [iconKey]. */
+  private fun widgetAroundRemoteIcon(iconKey: String): UiBuilderDocument {
+    val document = helloWidgetUiBuilderDocument("widget-1", pin("remote-m3"), environment)
+    val text = document.nodes.getValue("hello-text")
+    return document.copy(
+      nodes =
+        document.nodes +
+          ("hello-text" to
+            text.copy(
+              componentId = "remote-m3/remote-icon",
+              properties =
+                JsonObject(
+                  mapOf(
+                    "imageVector" to
+                      json.parseToJsonElement("""{"type":"string","value":"$iconKey"}""")
+                  )
+                ),
+            ))
+    )
+  }
+
   /** The Hello widget with its text swapped for the catalog's own `RemoteText`. */
   private fun widgetAroundRemoteText(): DesignDocumentV1 {
     val document = helloWidgetUiBuilderDocument("widget-1", pin("remote-m3"), environment)
