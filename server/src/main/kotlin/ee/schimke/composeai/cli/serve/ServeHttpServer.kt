@@ -2270,9 +2270,12 @@ class ServeHttpServer(
           if (isUiBuilderRootCall(call)) {
             // The editor's home IS this host's root page.
             handleUiBuilderAsset()
-          } else if (isUiBuilderHost(call) || uiBuilderProfileFor(call) != null) {
+          } else if (
+            isUiBuilderHost(call) || (uiBuilderProfileFor(call) != null && siteSystem() == null)
+          ) {
             // A profile host's root is normally the other product's, and its edge never sends it
-            // here; reached directly, it is the builder, never the catalogs' front door.
+            // here; reached directly, it is the builder, never the catalogs' front door. A profile
+            // host that is also a top-level site keeps the site's catalog landing at its root.
             call.respondRedirect("/ui-builder/" + call.request.queryString().prefixedQuery())
           } else {
             handleLanding(sessionInPath = false)
