@@ -33,7 +33,7 @@
     "profile": {
       "host": "ha.preview.coo.ee",
       "name": "Home Assistant card designer",
-      "catalogs": ["ha-cards", "homeassistant-remotecompose"],
+      "catalogs": ["ha-cards"],
       "homeUrl": "https://ha.preview.coo.ee/"
     },
     "guidelines": {
