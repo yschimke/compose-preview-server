@@ -2279,8 +2279,10 @@ class ServeHttpServer(
         // host, which is the builder too, as its `/` above), the CLI and project-previews guide on
         // every other host — the catalog host and every top-level site host alike, since `start` is
         // reserved and can never be a site's catalog. A host whose guide is unset keeps the old
-        // fallback, the default catalog's landing.
-        if ((uiBuilderHost != null && uiBuilderStartUrl != null) || cliStartUrl != null) {
+        // fallback, the default catalog's landing. A profile host needs no `--ui-builder-host`, so
+        // the
+        // builder's guide alone registers the route.
+        if (uiBuilderStartUrl != null || cliStartUrl != null) {
           get("/start") {
             val builder = isUiBuilderHost(call) || uiBuilderProfileFor(call) != null
             val guide = if (builder) uiBuilderStartUrl else cliStartUrl

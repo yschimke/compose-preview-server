@@ -296,6 +296,42 @@ class ServeUiBuilderProfileRoutesTest {
   }
 
   @Test
+  fun `a profile host without a builder host or CLI guide still serves the builder's start`() {
+    val profileOnly =
+      ServeHttpServer(
+          host = "127.0.0.1",
+          requestedPort = 0,
+          canonicalOrigin = "https://preview.coo.ee",
+          token = "unused-in-public",
+          isPublic = true,
+          sessions = registry,
+          defaultSessionId = "unused",
+          githubAuth = githubAuth,
+          uiBuilderDir = builderDir,
+          uiBuilderCatalogs = setOf("m3-catalog", "remote-m3"),
+          uiBuilderService = service,
+          uiBuilderAuthorization = authorization,
+          uiBuilderProfile = profile,
+          uiBuilderStartUrl = BUILDER_GUIDE,
+        )
+        .also(ServeHttpServer::start)
+    try {
+      val response =
+        client
+          .newCall(
+            Request.Builder()
+              .url("http://127.0.0.1:${profileOnly.port}/start")
+              .header("Host", "ha.coo.ee")
+              .build()
+          )
+          .execute()
+      response.use { assertEquals(302 to BUILDER_GUIDE, it.code to it.header("Location")) }
+    } finally {
+      profileOnly.stop()
+    }
+  }
+
+  @Test
   fun `the editor shell carries the profile's name, metas and manifest on its host only`() {
     val (code, shell) = get("/ui-builder/", "ha.coo.ee")
     assertEquals(200, code, shell)
