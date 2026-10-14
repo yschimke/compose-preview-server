@@ -1,0 +1,48 @@
+# The Home Assistant project's hostname (HA_DOMAIN, e.g. ha.coo.ee), served from this box and split
+# by path between two services:
+#
+#   * the HA design server (`ha-designs`, ghcr.io/yschimke/ha-card-design-server): the app's front
+#     page, the template browser, the card library the app reads (/designs/v1), the card embed and
+#     Card Studio's handoffs from the app;
+#   * the preview server: everything else, which on this host is the white-labelled Home Assistant
+#     card designer (/ui-builder, its APIs, /auth, /mcp) and the catalog
+#     (/homeassistant-remotecompose and the rooted routes its pages draw from).
+#
+# The design server's list is the explicit one because both services have routes under /auth and
+# /ui-builder. Here those belong to the preview server (its sign-in and its New design form), so the
+# design server runs without its own GitHub sign-in and without a bundled UI Builder.
+#
+# INERT UNLESS HA_DOMAIN IS SET. caddy-entrypoint.sh copies this file into /run/caddy-sites/ only
+# then, and the Caddyfile imports that directory with a glob that matches nothing otherwise. It also
+# takes HA_DOMAIN out of SITE_DOMAINS, so the name is never claimed by both blocks.
+{$HA_DOMAIN} {
+	import edge_common
+
+	@designs path / /designs /designs/* /site/* /schema /embed/* /studio/* /api/designs /api/designs/* /api/schema /api/studio/* /edit /healthz
+	handle @designs {
+		reverse_proxy {$HA_DESIGNS_UPSTREAM:ha-designs:8080} {
+			transport http {
+				dial_timeout 30s
+			}
+		}
+	}
+
+	# Everything else → the preview server, as the main block proxies it (see there for why the
+	# upstream is resolved dynamically and why there is no read timeout).
+	handle {
+		reverse_proxy {
+			dynamic a {
+				name preview
+				port 8080
+				refresh 3s
+				resolvers 127.0.0.11
+			}
+			lb_policy least_conn
+			lb_try_duration 10s
+			lb_try_interval 250ms
+			transport http {
+				dial_timeout 30s
+			}
+		}
+	}
+}

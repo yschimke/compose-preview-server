@@ -21,6 +21,8 @@
 # truth that silently disagree.
 FROM caddy:2
 COPY Caddyfile /etc/caddy/Caddyfile
+# The optional HA_DOMAIN site; caddy-entrypoint.sh installs it only when that name is set.
+COPY ha.caddy /etc/caddy/ha.caddy
 COPY site-domains.sh /usr/local/bin/site-domains.sh
 COPY caddy-entrypoint.sh /usr/local/bin/caddy-entrypoint.sh
 RUN chmod +x /usr/local/bin/site-domains.sh /usr/local/bin/caddy-entrypoint.sh
