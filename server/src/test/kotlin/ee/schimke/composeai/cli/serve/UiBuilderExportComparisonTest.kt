@@ -67,4 +67,28 @@ class UiBuilderExportComparisonTest {
     assertEquals(false, UiBuilderExportComparison.isDesignDocument(index))
     assertEquals(false, UiBuilderExportComparison.isDesignDocument(broken))
   }
+
+  @Test
+  fun `refusals group one cause across designs, with node ids elided`() {
+    val emitted = Outcome.Emitted("Text()")
+    fun refused(vararg reasons: String) = Outcome.Refused(reasons.toList())
+    val rows =
+      listOf(
+        Row(
+          "one",
+          emitted,
+          refused("UNEXPRESSIBLE: node `card-1` is not projected", "UNEXPRESSIBLE: no frame"),
+        ),
+        Row("two", emitted, refused("UNEXPRESSIBLE: node `card-7` is not projected")),
+        Row("three", emitted, emitted),
+      )
+    assertEquals(
+      listOf(
+        "UNEXPRESSIBLE: node `…` is not projected" to 2,
+        "UNEXPRESSIBLE: no frame" to 1,
+      ),
+      UiBuilderExportComparison.refusals(rows, "B"),
+    )
+    assertEquals(emptyList(), UiBuilderExportComparison.refusals(rows, "A"))
+  }
 }
