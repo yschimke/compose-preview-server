@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.export.CatalogListing
 import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import kotlin.test.AfterTest
@@ -38,7 +39,8 @@ class ServeUiBuilderCapabilityRouteTest {
       assertEquals("*", it.header("Access-Control-Allow-Origin"))
       assertTrue(it.body.string().contains("\"wear-m3\""))
     }
-    current = listOf(capability("remote-m3"))
+    // Unlisted catalogs stay in the executor's list with a marker; only chooser readers filter it.
+    current = listOf(CatalogListing.markUnlisted(capability("remote-m3")))
     request("wear-m3").use {
       assertEquals(404, it.code)
       assertEquals("*", it.header("Access-Control-Allow-Origin"))
