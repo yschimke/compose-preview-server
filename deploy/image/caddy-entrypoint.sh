@@ -36,6 +36,21 @@ resolved="$(
 # to whitespace is the difference between "one domain on this block" and a Caddyfile parse error.
 resolved="$(printf '%s' "${resolved}" | sed 's/[[:space:]]*$//')"
 
+# The Home Assistant project's hostname (HA_DOMAIN) is served by its own block, ha.caddy, which the
+# Caddyfile imports from OPTIONAL_SITES_DIR. Install it only when the name is set — the import's glob
+# then matches nothing and the config is exactly the main block — and take the name out of
+# SITE_DOMAINS, because Caddy refuses a hostname claimed by two blocks. The .env that served
+# ha.coo.ee as a plain site before HA_DOMAIN existed keeps working unchanged after it is set.
+OPTIONAL_SITES_DIR="${OPTIONAL_SITES_DIR:-/run/caddy-sites}"
+HA_SITE_FILE="${HA_SITE_FILE:-/etc/caddy/ha.caddy}"
+mkdir -p "${OPTIONAL_SITES_DIR}"
+rm -f "${OPTIONAL_SITES_DIR}/ha.caddy"
+if [ -n "${HA_DOMAIN:-}" ]; then
+  cp "${HA_SITE_FILE}" "${OPTIONAL_SITES_DIR}/ha.caddy"
+  resolved="$(printf '%s' "${resolved}" | tr ' ' '\n' | awk -v ha="${HA_DOMAIN}" 'NF && $0 != ha' | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+  echo "caddy: ${HA_DOMAIN} served by ha.caddy (design server + preview server, split by path)" >&2
+fi
+
 export SITE_DOMAINS="${resolved}"
 if [ -n "${SITE_DOMAINS}" ]; then
   echo "caddy: top-level site hostnames: ${SITE_DOMAINS}" >&2

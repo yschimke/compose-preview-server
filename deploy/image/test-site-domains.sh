@@ -108,6 +108,9 @@ entry_of() { # entry_of <json> [SITE_DOMAINS] -> the stub's report
   PATH="${work}/bin:${PATH}" \
     CATALOGS_FILE="${work}/catalogs.json" \
     SITE_DOMAINS="${2:-}" \
+    HA_DOMAIN="${HA_DOMAIN:-}" \
+    HA_SITE_FILE="${here}/ha.caddy" \
+    OPTIONAL_SITES_DIR="${work}/sites" \
     sh "${entrypoint}" run --config /etc/caddy/Caddyfile --adapter caddyfile 2>/dev/null
 }
 
@@ -138,6 +141,21 @@ check "builder hostname is included in TLS addresses" "SITE_DOMAINS=[ui.coo.ee]"
 check "builder hostname is deduplicated with explicit domains" "SITE_DOMAINS=[ui.coo.ee]" \
   "$(SERVE_UI_BUILDER_HOST=ui.coo.ee entry_of '{"catalogs":[]}' 'ui.coo.ee' | head -1)"
 
+# ha.caddy is the box's one optional site: installed only when HA_DOMAIN names it, and its name
+# taken out of the main block's addresses, since Caddy refuses a hostname defined twice — which
+# would take every site on the box down with it.
+check "no HA_DOMAIN ⇒ no HA site installed" "" \
+  "$(entry_of '{"catalogs":[]}' > /dev/null; ls "${work}/sites")"
+
+check "HA_DOMAIN installs ha.caddy" "ha.caddy" \
+  "$(HA_DOMAIN=ha.coo.ee entry_of '{"catalogs":[]}' > /dev/null; ls "${work}/sites")"
+
+check "HA_DOMAIN is taken out of SITE_DOMAINS" "SITE_DOMAINS=[m3.preview.coo.ee]" \
+  "$(HA_DOMAIN=ha.coo.ee entry_of '{"sites":[{"host":"m3.preview.coo.ee","system":"m3"}]}' 'ha.coo.ee' | head -1)"
+
+check "unsetting HA_DOMAIN removes a previously installed ha.caddy" "" \
+  "$(HA_DOMAIN=ha.coo.ee entry_of '{"catalogs":[]}' > /dev/null; entry_of '{"catalogs":[]}' > /dev/null; ls "${work}/sites")"
+
 # The image's CMD has to survive: the entrypoint replaces `caddy` as PID 1's program, so dropping
 # the arguments would start Caddy with no config at all.
 check "the caddy command line is passed through" \
@@ -151,6 +169,7 @@ check "no arguments still starts Caddy with the standard config" \
   "ARGS=[run --config /etc/caddy/Caddyfile --adapter caddyfile]" \
   "$(printf '%s' '{"catalogs":[]}' > "${work}/catalogs.json"
      PATH="${work}/bin:${PATH}" CATALOGS_FILE="${work}/catalogs.json" SITE_DOMAINS="" \
+       HA_DOMAIN="" OPTIONAL_SITES_DIR="${work}/sites" \
        sh "${entrypoint}" 2>/dev/null | sed -n 2p)"
 
 # …and the image must not rely on that fallback: Docker RESETS an inherited CMD to empty when a
