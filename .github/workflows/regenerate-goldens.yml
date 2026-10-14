@@ -169,7 +169,27 @@ jobs:
         with:
           cache-provider: basic
           cache-read-only: true
+      # `scripts/regenerate-goldens.sh` builds against a UI-builder checkout (its comment says why),
+      # and the require() in `settings.gradle.kts` fails the build when there is none -- which is
+      # what this job did every time it got this far. At the release the branch pins, and after
+      # `setup-gradle` so the cache key stays `gradle-build`'s: both as CI's
+      # `ui-builder-remote-compose` does it.
+      - name: Read the pinned UI-builder release
+        id: ui-builder-pin
+        run: |
+          version="$(sed -n 's/^composeai-ui-builder = "\(.*\)"$/\1/p' gradle/libs.versions.toml)"
+          test -n "$version"
+          echo "ref=v$version" >> "$GITHUB_OUTPUT"
+      - name: Check out the UI builder
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: yschimke/compose-ui-builder
+          ref: ${{ steps.ui-builder-pin.outputs.ref }}
+          path: .compose-ui-builder
+          persist-credentials: false
       - name: Regenerate
+        env:
+          COMPOSE_UI_BUILDER_CHECKOUT: .compose-ui-builder
         run: ./scripts/regenerate-goldens.sh
       - name: Commit and push
         id: push
