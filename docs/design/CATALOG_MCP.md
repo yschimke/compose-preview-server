@@ -177,7 +177,7 @@ that protocol/SDK migration is deliberately not bundled into the compatibility t
 | --- | --- | --- |
 | `initialize`, `ping`, `tools/list` | none | Handshake and discovery; reads no catalog |
 | `request_access`, `poll_access` | none | Obtain a grant without leaving MCP (above) |
-| `status` | `preview` | Report readiness and the aggregate catalog set |
+| `status` | `preview` | Report readiness, the aggregate catalog set, and which host this is: `origin` (the configured public origin designs are homed at) and `originAliases` (other hostnames reaching the same server, today `--ui-builder-host`, so `https://ui.coo.ee` beside `https://preview.coo.ee`). The handshake's `instructions` say the same in a sentence |
 | `resources/list`, `resources/read` | `preview` | List and read published preview PNGs |
 | `resources/read` of `compose-preview://schemas/…` | none | The UI-builder document and mutation JSON Schemas (below); listed only where a UI builder is served |
 | `catalog_list_projects`, `catalog_list_previews` | `preview` | Discover catalogs, then one catalog's preview metadata (`catalog_list_previews` requires `catalog` unless the server holds only one) |

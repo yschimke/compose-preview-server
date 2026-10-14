@@ -68,6 +68,12 @@ class ServeCatalogMcp(
    */
   private val publicOrigin: () -> String? = { null },
   /**
+   * Other origins that reach this same server ([publicOrigin]'s aliases, e.g. the UI builder's own
+   * hostname), so an agent told about both does not take them for two hosts with two sets of
+   * designs.
+   */
+  private val publicOriginAliases: () -> List<String> = { emptyList() },
+  /**
    * Configured catalogs not loaded yet, so after a restart a request for one isn't answered "no
    * such catalog".
    */
@@ -317,6 +323,7 @@ class ServeCatalogMcp(
           "them — an MCP client fixes its headers when it connects — pass the token as the " +
           "'token' argument of each gated tool instead, and access approved during this session " +
           "works in it." +
+          originInstruction() +
           accessElicitationInstruction(params) +
           if (uiBuilder == null) ""
           else
@@ -331,6 +338,31 @@ class ServeCatalogMcp(
                   "discussion.",
       )
     }
+  }
+
+  /** [publicOriginAliases] other than [origin] itself, normalised and without repeats. */
+  private fun originAliases(origin: String): List<String> {
+    val own = normalizeServerHomeUrl(origin)
+    return publicOriginAliases()
+      .mapNotNull(::normalizeServerHomeUrl)
+      .filter { it != own }
+      .distinct()
+  }
+
+  /**
+   * Names this server's canonical origin and its aliases in `initialize`'s instructions, so an
+   * agent that was configured with one hostname and shown a link on another knows they are one
+   * server. Empty without a configured public origin.
+   */
+  private fun originInstruction(): String {
+    val origin = publicOrigin() ?: return ""
+    val aliases = originAliases(origin)
+    return " This server's canonical origin is $origin" +
+      (if (aliases.isEmpty()) ""
+      else
+        "; ${aliases.joinToString(" and ")} ${if (aliases.size == 1) "is" else "are"} the same " +
+          "server, not another host") +
+      (if (uiBuilder == null) "." else ", the origin a design homed here records in its `home`.")
   }
 
   /**
@@ -607,7 +639,9 @@ class ServeCatalogMcp(
     add(
       tool(
         "status",
-        "Report readiness and the aggregate catalog set.",
+        "Report readiness, the aggregate catalog set, and which host this is: `origin`, the " +
+          "canonical origin designs here are homed at, and `originAliases`, other hostnames " +
+          "that reach this same server.",
         EMPTY_SCHEMA,
       )
     )
@@ -2166,6 +2200,14 @@ class ServeCatalogMcp(
     put("ready", pendingCatalogs().isEmpty())
     put("remote", true)
     put("aggregate", true)
+    // Which host this is: the origin designs here are canonical at, and the others reaching it.
+    publicOrigin()?.let { origin ->
+      put("origin", origin)
+      val aliases = originAliases(origin)
+      if (aliases.isNotEmpty()) {
+        put("originAliases", buildJsonArray { aliases.forEach { add(JsonPrimitive(it)) } })
+      }
+    }
     put("toolCatalog", buildJsonObject { put("status", "ready") })
     put("projects", projectsJson()["projects"]!!)
     putLoading()
