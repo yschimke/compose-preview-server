@@ -7,6 +7,8 @@ import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.discovery.ScreenGenerator
 import ee.schimke.composeai.uibuilder.export.CatalogComposeSourceExportAdapter
 import ee.schimke.composeai.uibuilder.export.CatalogComposeSourceExportAdapters
+import ee.schimke.composeai.uibuilder.export.CatalogExportProjections
+import ee.schimke.composeai.uibuilder.export.CatalogScreenStructure
 import ee.schimke.composeai.uibuilder.export.FlexpressVariableFontSources
 import ee.schimke.composeai.uibuilder.export.RecordFreeExport
 import ee.schimke.composeai.uibuilder.export.ScreenDocumentProjection
@@ -95,6 +97,17 @@ internal class ScreenGeneratorComposeExportExecutor(
     require(request.revision == request.document.revision) { "export revision/document mismatch" }
     require(request.document.id == request.designId) { "export design/document mismatch" }
 
+    // A catalog that selects the component-record export and publishes typed export projections
+    // (`exportProjection` on its component policies, a typed catalog such as a pilot) is exported
+    // the way its own repository proves it: through `ScreenExportGate` with those projections and
+    // its screen structure, so each component is written as the real library call its projection
+    // names rather than its record's wrapper. Asked before the record-free emitters, which would
+    // otherwise route a Wear-platform typed catalog to the hand-written Wear screen exporter.
+    // Catalogs publishing no projection, every production catalog among them, keep the paths below.
+    projectedExport(request)?.let {
+      return it
+    }
+
     // Record-free designs (Wear widgets and screens) go through their own emitter first, since
     // `remote-m3` and `wear-m3` have no record and the generator below could only refuse them. Same
     // `RecordFreeExport` entry as the Code pane, so they can't disagree. With [packageName], since
@@ -156,6 +169,45 @@ internal class ScreenGeneratorComposeExportExecutor(
           provenance(request) + generated.assetPlaceholders.commentedNotes() + generated.source,
           generated.assetPlaceholders.map { it.warning() },
         )
+    }
+  }
+
+  /**
+   * [request] exported through its catalog's published export projections, or null when the catalog
+   * does not select the component-record export or publishes no projection. Packs are not joined
+   * here: a typed catalog names its own vocabulary.
+   */
+  private fun projectedExport(request: RevisionPinnedUiBuilderExport): ExportArtifactV1? {
+    val adapter =
+      (CatalogComposeSourceExportAdapters.resolve(request.catalog)
+          as? CatalogComposeSourceExportAdapters.Resolution.Supported)
+        ?.adapter ?: return null
+    if (adapter.id != CatalogComposeSourceExportAdapters.COMPONENT_RECORDS) return null
+    val semantics = request.catalog.statusSemantics
+    val projections = CatalogExportProjections.from(semantics)
+    if (projections.isEmpty()) return null
+    val catalogSystemId = request.document.catalogPin.systemId
+    val record =
+      exportRecord(catalogSystemId)
+        ?: return refused(
+          NO_COMPONENT_RECORD,
+          listOf(
+            "catalog `$catalogSystemId` publishes export projections but this host has no " +
+              "usable component record for it, so no call site can be proven"
+          ),
+        )
+    return when (
+      val outcome =
+        ScreenExportGate.export(
+          request.document,
+          record,
+          projections,
+          CatalogScreenStructure.from(semantics),
+          variableFonts = VariableFontExport(variableFontSources),
+        )
+    ) {
+      is ScreenExportGate.Outcome.Emitted -> emitted(provenance(request) + outcome.source)
+      is ScreenExportGate.Outcome.Refused -> refused(UNPROVEN_CALL_SITE, outcome.reasons)
     }
   }
 
