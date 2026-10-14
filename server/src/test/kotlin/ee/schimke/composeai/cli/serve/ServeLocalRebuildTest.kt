@@ -468,6 +468,10 @@ class ServeLocalRebuildTest {
       assertTrue(page.second.contains("data-rebuild-url=\"/app/rebuild"), page.second.take(3000))
       assertTrue(page.second.contains("data-reload-url=\"/app/reload"), page.second.take(3000))
 
+      val viewer = call("/app/p/Red", post = false)
+      assertEquals(200, viewer.first, viewer.second.take(3000))
+      assertTrue(viewer.second.contains("data-reload-url=\"/app/reload"), "the viewer follows too")
+
       val state = call("/app/reload?after=-1", post = false)
       assertEquals(200, state.first, state.second)
       assertTrue(state.second.contains("\"generation\":1"), state.second)

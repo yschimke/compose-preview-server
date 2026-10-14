@@ -11139,6 +11139,11 @@ class ServeHttpServer(
               // surface that falls back to a full-resolution render when the pixels are not local.
               .also { if (it == null) thumbWarmer.enqueue(renderHost, id) }
           },
+          // An open preview follows its local session's rebuilds, as the grid does.
+          reloadUrl =
+            if (localRebuild?.canRebuild(sessionId) == true)
+              "$basePath/reload${requestQuerySuffix()}"
+            else null,
         ),
         ContentType.Text.Html,
       )
