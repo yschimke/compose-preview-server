@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.139.0](https://github.com/yschimke/compose-preview-server/compare/v3.138.0...v3.139.0) (2026-10-14)
+
+
+### Features
+
+* **deploy:** serve the typed pilots on preview.coo.ee, unlisted ([#1661](https://github.com/yschimke/compose-preview-server/issues/1661)) ([8f3a940](https://github.com/yschimke/compose-preview-server/commit/8f3a940523a29a4919a13c81e009d6d16658fe6b))
+* **serve:** serve UI-builder catalogs unlisted for pilots ([#1654](https://github.com/yschimke/compose-preview-server/issues/1654)) ([1f8f18f](https://github.com/yschimke/compose-preview-server/commit/1f8f18f23f530bf99b456ba2e7bd0b07ca2dd3e9))
+* **ui-builder:** serve MeshCore's published typed catalog from its output repository ([#1647](https://github.com/yschimke/compose-preview-server/issues/1647)) ([674a3a7](https://github.com/yschimke/compose-preview-server/commit/674a3a753620a93dc43f38b337c029c685acf65d))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-preview-contracts-bom to v3.31.0 ([#1659](https://github.com/yschimke/compose-preview-server/issues/1659)) ([201c084](https://github.com/yschimke/compose-preview-server/commit/201c0843ba9ea9ac0de19bb83e654b8007cfdf53))
+* **serve:** let pages load the analytics tracker from its configured origin ([#1655](https://github.com/yschimke/compose-preview-server/issues/1655)) ([9115dba](https://github.com/yschimke/compose-preview-server/commit/9115dba37ad5917656ca5212419c17b8c8810486))
+* **serve:** withhold an unusable unowned catalog instead of failing the builder ([#1660](https://github.com/yschimke/compose-preview-server/issues/1660)) ([041b8bb](https://github.com/yschimke/compose-preview-server/commit/041b8bb35ddec5c1b1506ae565fb1f6f3c797ec2))
+
 ## [3.138.0](https://github.com/yschimke/compose-preview-server/compare/v3.137.0...v3.138.0) (2026-10-13)
 
 
