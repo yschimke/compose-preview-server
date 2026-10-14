@@ -377,7 +377,11 @@ class ServeUiBuilderMcp(
         tool,
         args,
         actor,
-        withLinks(tool, args, run(tool, args, actor, callId, clientInteraction, mayExport)),
+        withLinks(
+          tool,
+          args,
+          withHome(tool, run(tool, args, actor, callId, clientInteraction, mayExport)),
+        ),
       )
     } finally {
       leave?.invoke()
@@ -480,7 +484,7 @@ class ServeUiBuilderMcp(
         SET_LINKS -> return linksTool(tool, args, actor)
         VALIDATE -> return validate(args, actor)
         CHECK_DESIGN -> return checkDesign(args, actor)
-        RENDER_DESIGN_MATRIX -> return renderDesignMatrix(args, actor)
+        RENDER_DESIGN_MATRIX -> return renderDesignMatrix(args, actor, mayExport)
         RECORD_DECISION,
         AWAIT_DECISION,
         SET_IMPLEMENTATION,
@@ -1798,6 +1802,33 @@ class ServeUiBuilderMcp(
   }
 
   /**
+   * [GET_DESIGN]'s reply with the design's recorded `home` repeated at the top, beside `links`.
+   *
+   * The home is already in the document, but four levels down (`response.snapshot.state.document`)
+   * in a reply that is mostly nodes, and the collaboration contract tells an agent to "read its
+   * `home`" before anything else: an agent that looked at the top of the reply reported that the
+   * server recorded none (yschimke/skills#156). Absent, as in the document, when none is recorded:
+   * a design made before homes existed, or on a host with no public origin to stamp.
+   */
+  private fun withHome(tool: String, reply: String): String {
+    if (tool != GET_DESIGN) return reply
+    val parsed =
+      try {
+        UI_BUILDER_JSON.parseToJsonElement(reply) as? JsonObject ?: return reply
+      } catch (_: SerializationException) {
+        return reply
+      }
+    if (!parsed.isSnapshotReply()) return reply
+    val home =
+      (((parsed[RESPONSE_KEY] as? JsonObject)?.get("snapshot") as? JsonObject)?.get("state")
+          as? JsonObject)
+        ?.let { it["document"] as? JsonObject }
+        ?.get(HOME_KEY)
+        ?.takeIf { it !is JsonNull } ?: return reply
+    return JsonObject(parsed + (HOME_KEY to home)).toString()
+  }
+
+  /**
    * [GET_DESIGN]'s reply plus the design's links, spliced in because an agent mid-task won't ask
    * what a screen is for. Only on a successful snapshot with a record; non-JSON replies pass
    * through untouched.
@@ -2334,7 +2365,17 @@ class ServeUiBuilderMcp(
     }
 
     // One native render serves both touch-target measurement and the guidelines model's picture.
-    val render by lazy { if (rendered && document != null) nativeRender(document!!) else null }
+    val attemptOnce = lazy {
+      if (rendered && document != null) nativeRenderAttempt(document!!) else null
+    }
+    val attempt by attemptOnce
+    val render by lazy { attempt?.render }
+    // Why a rendered check fell back, in its skip reason: the lane's own sentence when it has one.
+    fun noRender(fallback: String): String =
+      attempt
+        ?.let { it.failure?.code ?: it.unavailable }
+        ?.let { "no native render ($it), so $fallback" }
+        ?: "no native render was available, so $fallback"
     if (CHECK_A11Y in checks && skipped.none { it.check == CHECK_A11Y }) {
       val checked = document
       if (checked == null) {
@@ -2357,8 +2398,7 @@ class ServeUiBuilderMcp(
                 skipped +=
                   UiBuilderCheckSkippedV1(
                     "$CHECK_A11Y.$RENDERED_ARGUMENT",
-                    "no native render was available, so touch targets were checked from the " +
-                      "sizes the document declares",
+                    noRender("touch targets were checked from the sizes the document declares"),
                   )
               }
             }
@@ -2398,8 +2438,7 @@ class ServeUiBuilderMcp(
           skipped +=
             UiBuilderCheckSkippedV1(
               "$CHECK_GUIDELINES.$RENDERED_ARGUMENT",
-              "no native render was available, so only the guidelines judged from the design " +
-                "tree ran",
+              noRender("only the guidelines judged from the design tree ran"),
             )
         }
         // The code the design exports to, so code-shaped rules are judged on real calls. A
@@ -2456,6 +2495,8 @@ class ServeUiBuilderMcp(
       }
     }
 
+    // Only when a check drew it: reporting a failure must not start a render nobody asked for.
+    if (attemptOnce.isInitialized()) attempt?.failure?.let { findings += it }
     val ordered = findings.sortedBy { SEVERITY_ORDER.indexOf(it.severity) }
     val errors = ordered.count { it.severity == SEVERITY_ERROR }
     val warnings = ordered.count { it.severity == SEVERITY_WARNING }
@@ -3175,25 +3216,63 @@ class ServeUiBuilderMcp(
     val rendered: UiBuilderNativePreviewOutcome.Rendered,
   )
 
+  /**
+   * A native render, or why there is none: [failure] is a finding when the exported Kotlin itself
+   * failed (#1666), and [unavailable] the reason when this host could not draw it.
+   */
+  private class NativeRenderAttempt(
+    val render: NativeRender?,
+    val failure: UiBuilderCheckFindingV1? = null,
+    val unavailable: String? = null,
+  )
+
   private fun nativeRender(
     document: DesignDocumentV1,
     widgetHostShape: WearWidgetHostShape = WearWidgetHostShape.Default,
-  ): NativeRender? {
-    val lane = nativePreview ?: return null
+  ): NativeRender? = nativeRenderAttempt(document, widgetHostShape).render
+
+  private fun nativeRenderAttempt(
+    document: DesignDocumentV1,
+    widgetHostShape: WearWidgetHostShape = WearWidgetHostShape.Default,
+  ): NativeRenderAttempt {
+    val lane =
+      nativePreview
+        ?: return NativeRenderAttempt(null, unavailable = "this host has no native render lane")
     val outcome =
       try {
         lane.render(document, widgetHostShape)
       } catch (cancelled: CancellationException) {
         throw cancelled
-      } catch (_: Exception) {
-        return null
+      } catch (e: Exception) {
+        return NativeRenderAttempt(
+          null,
+          unavailable = "the native render failed on this host: ${e.message ?: e.javaClass.name}",
+        )
       }
-    val rendered = outcome as? UiBuilderNativePreviewOutcome.Rendered ?: return null
+    val rendered =
+      when (outcome) {
+        is UiBuilderNativePreviewOutcome.Refused ->
+          return NativeRenderAttempt(
+            null,
+            unavailable =
+              "the native render was refused (${outcome.code}): " +
+                outcome.reasons.joinToString("; "),
+          )
+        is UiBuilderNativePreviewOutcome.Rendered -> outcome
+      }
     val bytes =
       rendered.response.image?.removePrefix("data:image/png;base64,")?.let {
         runCatching { java.util.Base64.getDecoder().decode(it) }.getOrNull()
       }
-    return NativeRender(document, bytes, rendered)
+    val failure = rendered.failure
+    if (bytes == null && failure != null) {
+      return NativeRenderAttempt(
+        null,
+        failure = ServeUiBuilderNativeCheck.finding(document, rendered.response, failure),
+        unavailable = failure,
+      )
+    }
+    return NativeRenderAttempt(NativeRender(document, bytes, rendered))
   }
 
   /** Node boxes from a native render, in dp-convertible form, or null without them. */
@@ -3229,6 +3308,7 @@ class ServeUiBuilderMcp(
   private suspend fun renderDesignMatrix(
     args: JsonObject,
     actor: AuthenticatedUiBuilderActor,
+    mayExport: () -> Boolean = { false },
   ): String {
     val designId = args.requiredText("designId")
     val snapshot =
@@ -3241,7 +3321,7 @@ class ServeUiBuilderMcp(
       }
     val document = snapshot.state.document
     val platform = snapshot.catalog.statusSemantics[PLATFORM_KEY]?.jsonPrimitive?.contentOrNull
-    val devices = matrixDevices(args, platform)
+    val devices = matrixDevices(args, platform, document)
     val themes =
       args.stringList(THEMES_ARGUMENT).ifEmpty {
         listOf(
@@ -3282,9 +3362,10 @@ class ServeUiBuilderMcp(
       )
     }
     val variants = combinations.map { (device, theme, scale) ->
-      document.copy(
+      val drawn = UiBuilderDesignMatrix.forWidgetHost(document, device)
+      drawn.copy(
         environment =
-          document.environment.copy(
+          drawn.environment.copy(
             widthDp = device.widthDp,
             heightDp = device.heightDp,
             theme = if (theme == UiBuilderDesignMatrix.THEME_DARK) ThemeV1.DARK else ThemeV1.LIGHT,
@@ -3292,19 +3373,43 @@ class ServeUiBuilderMcp(
           )
       )
     }
+    // A widget host cell is drawn by the native lane, in that host, for a caller who may compile
+    // (the export grant gates the lane everywhere else). The editor's export draws a widget's
+    // content without any host, so it is only the fallback. Each is a compile, so they are drawn
+    // one after another, as the guidelines frames are.
+    val widgetCells = combinations.any { it.first.widgetHostShape != null }
+    val nativeCells =
+      if (nativePreview == null || !widgetCells || !mayExport()) emptyMap()
+      else
+        combinations
+          .withIndex()
+          .filter { it.value.first.widgetHostShape != null }
+          .associate { (index, combination) ->
+            index to
+              withContext(Dispatchers.IO) {
+                nativeRenderAttempt(variants[index], combination.first.widgetHostShape!!)
+              }
+          }
+    val exported = variants.indices.filter { nativeCells[it]?.render?.png == null }
     val pictures =
-      validator?.exportPngs(actor, variants)
-        ?: throw McpRequestException(
-          "this host cannot render a design under another environment without saving it; use " +
-            "$VIEW for the design as it is"
-        )
+      if (exported.isEmpty()) emptyMap()
+      else
+        (validator?.exportPngs(actor, exported.map { variants[it] })
+            ?: throw McpRequestException(
+              "this host cannot render a design under another environment without saving it; " +
+                "use $VIEW for the design as it is"
+            ))
+          .withIndex()
+          .associate { (position, picture) -> exported[position] to picture }
     val cells = combinations.mapIndexed { index, (device, theme, scale) ->
+      val native = nativeCells[index]?.render?.png
       UiBuilderDesignMatrix.Cell(
         device,
         theme,
         scale,
-        pictures.getOrNull(index)?.png,
-        pictures.getOrNull(index)?.problem ?: "not rendered",
+        native ?: pictures[index]?.png,
+        pictures[index]?.problem ?: "not rendered",
+        native = native != null,
       )
     }
     val sheet = UiBuilderDesignMatrix.compose(cells)
@@ -3343,8 +3448,10 @@ class ServeUiBuilderMcp(
               widthDp = cell.device.widthDp,
               heightDp = cell.device.heightDp,
               round = cell.device.round,
+              widgetHostShape = cell.device.widgetHostShape?.id,
               theme = cell.theme,
               fontScale = cell.fontScale,
+              renderer = if (cell.native) ServeUiBuilderView.RENDERER_NATIVE else null,
               x = placed.x,
               y = placed.y,
               width = placed.width,
@@ -3358,10 +3465,14 @@ class ServeUiBuilderMcp(
     )
   }
 
-  /** The devices a matrix call asked for: by preset id, by size, by form factor, or by default. */
+  /**
+   * The devices a matrix call asked for: by preset id, by size, by form factor, or by default. A
+   * Wear widget's default, and its `widget` form factor, are its own container in each host.
+   */
   private fun matrixDevices(
     args: JsonObject,
     platform: String?,
+    document: DesignDocumentV1,
   ): List<UiBuilderDesignMatrix.Device> {
     val formFactor = args.text(FORM_FACTOR_ARGUMENT)
     val listed = args[DEVICES_ARGUMENT]?.takeIf { it !is JsonNull }
@@ -3369,6 +3480,12 @@ class ServeUiBuilderMcp(
       throw McpRequestException("pass `$DEVICES_ARGUMENT` or `$FORM_FACTOR_ARGUMENT`, not both")
     }
     if (listed == null) {
+      val widget = UiBuilderDesignMatrix.widgetDefaults(document)
+      if (
+        widget != null && (formFactor == null || formFactor == UiBuilderDesignMatrix.FORM_WIDGET)
+      ) {
+        return widget.mapNotNull(UiBuilderDesignMatrix::preset)
+      }
       val chosen = formFactor ?: UiBuilderDesignMatrix.defaultFormFactor(platform)
       val ids =
         UiBuilderDesignMatrix.FORM_FACTOR_DEFAULTS[chosen]
@@ -4152,6 +4269,9 @@ class ServeUiBuilderMcp(
     /** The key [StoredLinks] is spliced onto a $GET_DESIGN reply under. */
     internal const val LINKS_KEY = "links"
 
+    /** The key a $GET_DESIGN reply repeats the document's recorded home under. */
+    internal const val HOME_KEY = "home"
+
     /**
      * Tool declarations, built with the caller's `tool` helper so they share the surface's shape.
      */
@@ -4220,7 +4340,11 @@ class ServeUiBuilderMcp(
             "variables and catalog pin — plus the revision to quote as `baseRevision` when " +
             "editing it. The catalog the design pins is left out unless `$INCLUDE_CATALOG_ARGUMENT` " +
             "is true: it is the same for every design on the pin, $LIST_CATALOGS serves it, and " +
-            "it is most of the bytes. On hosts with design discussions, " +
+            "it is most of the bytes. `$HOME_KEY`, at the top of the reply, is where the design " +
+            "is canonical (`{kind: server, url, designId}` or `{kind: repo, path}`): edit it " +
+            "there. It is absent when none is recorded (a design made before homes existed, or " +
+            "on a host with no public origin), and then the canonical home cannot be verified. " +
+            "On hosts with design discussions, " +
             "`$UNACKNOWLEDGED_COMMENTS_KEY` is the number of comment threads this actor has not " +
             "acknowledged; a nonzero count also carries the bounded `comments` notice.",
           """
@@ -4747,7 +4871,7 @@ class ServeUiBuilderMcp(
             "operations":{"type":"array","items":{"type":"object"},"description":"DesignMutationV1 objects to apply to a scratch copy of `designId` and check — a dry run."},
             "baseRevision":{"type":"integer","description":"The revision `operations` were written against; a stale one is a warning."},
             "$CHECKS_ARGUMENT":{"type":"array","items":{"type":"string","enum":[${ALL_DESIGN_CHECKS.joinToString(",") { "\"$it\"" }}]},"description":"Which checks to run. Defaults to ${DESIGN_CHECKS.joinToString(", ")}; `$CHECK_GUIDELINES` runs only when named."},
-            "$RENDERED_ARGUMENT":{"type":"boolean","description":"Measure touch targets on a native render, and show it to the guidelines model. Defaults to false."}
+            "$RENDERED_ARGUMENT":{"type":"boolean","description":"Measure touch targets on a native render, and show it to the guidelines model. Exported Kotlin that fails to compile there is an error finding (check `native`). Defaults to false."}
           },"additionalProperties":false}
           """,
         ),
@@ -4827,7 +4951,12 @@ class ServeUiBuilderMcp(
               "{widthDp, heightDp, label?, round?}; or a `$FORM_FACTOR_ARGUMENT` " +
               "(${UiBuilderDesignMatrix.FORM_FACTORS.joinToString(", ")}) for its default set; " +
               "with neither you get the design's own form factor — phone, foldable and tablet for a " +
-              "mobile catalog, the round watches for Wear. Add `$THEMES_ARGUMENT: [\"light\",\"dark\"]` " +
+              "mobile catalog, the round watches for Wear, and for a Wear widget (a " +
+              "`widget-container-*` root) its own container in each widget host: Samsung " +
+              "round, Pixel Watch squircle and rectangular, at the container's frame. Widget host " +
+              "cells are drawn natively in that host when the caller holds ui-builder-export and " +
+              "the host has a native lane (`renderer: \"native\"`); otherwise by the editor's " +
+              "export, masked to the host's outline. Add `$THEMES_ARGUMENT: [\"light\",\"dark\"]` " +
               "and `$FONT_SCALES_ARGUMENT: [1, 2]` to cross them; at most " +
               "${UiBuilderDesignMatrix.MAX_CELLS} cells. The sheet is a short-lived signed https " +
               "link kept under 3.5 MB, so a chat surface can show it inline; `$INLINE_ARGUMENT: " +

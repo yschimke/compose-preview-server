@@ -2236,8 +2236,16 @@ class ServeUiBuilderMcpIntegrationTest {
     return text
   }
 
+  /**
+   * The released envelope, without the `home` a `ui_builder_get_design` reply repeats beside it.
+   */
   private fun response(envelope: String) =
-    json.decodeFromString(McpResponseEnvelopeV1.serializer(), envelope).response
+    json
+      .decodeFromJsonElement(
+        McpResponseEnvelopeV1.serializer(),
+        JsonObject(json.parseToJsonElement(envelope).jsonObject - ServeUiBuilderMcp.HOME_KEY),
+      )
+      .response
 
   private fun tools(server: RunningServer): List<String> =
     toolDefinitions(server).map { it["name"]!!.jsonPrimitive.content }

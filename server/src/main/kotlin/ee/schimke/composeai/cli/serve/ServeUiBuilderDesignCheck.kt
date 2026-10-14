@@ -780,7 +780,10 @@ internal data class UiBuilderDesignCheckV1(
 internal data class UiBuilderCheckFindingV1(
   /** `error`, `warning` or `info`. */
   val severity: String,
-  /** `schema`, `catalog`, `a11y` or `guidelines`. */
+  /**
+   * `schema`, `catalog`, `a11y` or `guidelines`; `native` for exported Kotlin that failed to
+   * compile.
+   */
   val check: String,
   val code: String,
   val message: String,

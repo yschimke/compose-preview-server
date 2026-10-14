@@ -880,6 +880,9 @@ class ServeHttpServer(
         uiBuilder = uiBuilderMcp,
         uiBuilderNative = uiBuilderNativePreview != null,
         publicOrigin = ::canonicalServerOrigin,
+        // The builder's own hostname (`--ui-builder-host`, ui.coo.ee beside preview.coo.ee) is
+        // this same server under another name.
+        publicOriginAliases = { listOfNotNull(uiBuilderHost?.let { "https://$it" }) },
         pendingCatalogs = {
           catalogLoads
             ?.snapshot()

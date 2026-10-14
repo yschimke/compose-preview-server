@@ -177,7 +177,7 @@ that protocol/SDK migration is deliberately not bundled into the compatibility t
 | --- | --- | --- |
 | `initialize`, `ping`, `tools/list` | none | Handshake and discovery; reads no catalog |
 | `request_access`, `poll_access` | none | Obtain a grant without leaving MCP (above) |
-| `status` | `preview` | Report readiness and the aggregate catalog set |
+| `status` | `preview` | Report readiness, the aggregate catalog set, and which host this is: `origin` (the configured public origin designs are homed at) and `originAliases` (other hostnames reaching the same server, today `--ui-builder-host`, so `https://ui.coo.ee` beside `https://preview.coo.ee`). The handshake's `instructions` say the same in a sentence |
 | `resources/list`, `resources/read` | `preview` | List and read published preview PNGs |
 | `resources/read` of `compose-preview://schemas/…` | none | The UI-builder document and mutation JSON Schemas (below); listed only where a UI builder is served |
 | `catalog_list_projects`, `catalog_list_previews` | `preview` | Discover catalogs, then one catalog's preview metadata (`catalog_list_previews` requires `catalog` unless the server holds only one) |
@@ -497,9 +497,20 @@ contact sheet — the design's own PNG export per cell, with the environment swa
 copy, so nothing is written and nobody watching the design is woken. Name `devices` by preset
 (`phone_small`, `phone`, `phone_landscape`, `foldable_folded`, `foldable_unfolded`,
 `tablet_portrait`, `tablet_landscape`, `wear_small_round`, `wear_large_round`, `wear_square`,
-`tv_1080p`) or as `{widthDp, heightDp, label?, round?}`, or a `formFactor` (`phone`, `foldable`,
-`tablet`, `wear`, `tv`, `adaptive`) for its default set; with neither, a mobile catalog gets
-`adaptive` (phone, unfolded foldable, landscape tablet) and a Wear catalog the two round watches.
+`tv_1080p`, and the Wear widget hosts `widget_{small,large}_{round,squircle,rectangular}`) or as
+`{widthDp, heightDp, label?, round?}`, or a `formFactor` (`phone`, `foldable`, `tablet`, `wear`,
+`tv`, `adaptive`, `widget`) for its default set; with neither, a mobile catalog gets `adaptive`
+(phone, unfolded foldable, landscape tablet) and a Wear catalog the two round watches.
+
+A Wear widget (a `remote-m3/widget-container-*` root) defaults to its own container in each host the
+widget export previews: Samsung's round, the Pixel Watch's squircle and the rectangular frame, each
+at that host's whole frame from the export's `hostSpec` table (small: 230×76, 216×76, 224×84; large:
+230×168, 216×124, 232×144), and both sizes for the adaptive container, resolved to the fixed design
+each size gets. On a round watch screen a widget is a band across a watch face, which is not where
+anybody sees it. A widget host cell is drawn by the native lane in that host when the caller holds
+`ui-builder-export` and the host has a lane (the cell says `renderer: "native"`); otherwise it is the
+editor's export at the host's frame, which draws the content without the host, masked on the sheet
+to the host's outline. Every widget cell names its `widgetHostShape`.
 `themes` and `fontScales` cross with the devices, up to 16 cells. The sheet is a short-lived signed
 https link, as `ui_builder_view`'s picture is, and is kept under 3.5 MB so a chat surface (#1254)
 can show it inline; `inline: true` adds the bytes as an image block. Each cell reports its device,
@@ -687,6 +698,15 @@ continues — whenever anybody has recorded one, so an agent opening somebody el
 brief behind it without a second call. Read it on its own with `ui_builder_get_links` and write it
 with `ui_builder_set_links`, which replaces the whole record.
 [`UI_BUILDER_LINKS.md`](UI_BUILDER_LINKS.md) has the record and its routes.
+
+**And where the design is canonical, at the top.** The design's recorded `home` (`{kind: server,
+url, designId}` or `{kind: repo, path}`) is in the document, four levels down
+(`response.snapshot.state.document.home`), and `ui_builder_get_design` repeats it as a top-level
+`home` beside `links`, because the collaboration contract tells an agent to read it before anything
+else and an agent that looked at the top of the reply reported none (yschimke/skills#156). It is
+absent, as in the document, when none is recorded: a design made before homes existed, or on a host
+with no public origin to stamp one with. A strict decoder of `McpResponseEnvelopeV1` drops `home`,
+`links` and the comment keys before decoding.
 
 **Why a blocking call and not an MCP notification.** MCP has server-to-client notifications, but
 this endpoint does not advertise subscriptions: `GET /mcp` answers `405`, and `initialize`
