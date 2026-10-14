@@ -246,6 +246,8 @@ fi
 # catalogs.json's "sites" says the same thing as durable config.
 [[ -n "${SERVE_UI_BUILDER_HOST:-}" ]] && args+=(--ui-builder-host "${SERVE_UI_BUILDER_HOST}")
 [[ -n "${SERVE_UI_BUILDER_START_URL:-}" ]] && args+=(--ui-builder-start-url "${SERVE_UI_BUILDER_START_URL}")
+# /start on every other host (the catalog host and top-level sites): the CLI and project-previews guide.
+[[ -n "${SERVE_CLI_START_URL:-}" ]] && args+=(--cli-start-url "${SERVE_CLI_START_URL}")
 [[ -n "${SERVE_UI_BUILDER_IMPORT_ORIGINS:-}" ]] &&
   args+=(--ui-builder-import-origins "${SERVE_UI_BUILDER_IMPORT_ORIGINS}")
 # A white-labelled builder on one more hostname (settings uiBuilder.profile.*). The rest of the

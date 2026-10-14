@@ -34,6 +34,22 @@ class ServeCommandOptionsTest {
   }
 
   @Test
+  fun `the CLI guide redirect is opt in and validated`() {
+    assertNull(options(emptyList()).cliStartUrl)
+    assertEquals(
+      "https://yschimke.github.io/compose-ai-tools/",
+      options(listOf("--cli-start-url", "https://yschimke.github.io/compose-ai-tools/"))
+        .cliStartUrl,
+    )
+    assertFailsWith<IllegalArgumentException> {
+      options(listOf("--cli-start-url", "http://guide.example/"))
+    }
+    assertFailsWith<IllegalArgumentException> {
+      options(listOf("--cli-start-url", "https://user@guide.example/"))
+    }
+  }
+
+  @Test
   fun `rooting the builder on its host is opt in and needs the host`() {
     assertFalse(options(emptyList()).uiBuilderHostRoot)
     assertFalse(options(listOf("--ui-builder-host", "ui.coo.ee")).uiBuilderHostRoot)

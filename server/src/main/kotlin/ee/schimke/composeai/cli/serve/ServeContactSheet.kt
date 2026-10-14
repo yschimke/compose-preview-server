@@ -4,6 +4,7 @@ import java.awt.Color
 import java.awt.Font
 import java.awt.RenderingHints
 import java.awt.geom.Ellipse2D
+import java.awt.geom.RoundRectangle2D
 import java.awt.image.BufferedImage
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -27,8 +28,8 @@ import kotlin.math.sqrt
  *   it: a 30 px badge drawn on the picture hid most of a 40 px component (measured on
  *   preview.coo.ee in compose-preview-server#1262).
  * - `ui_builder_render_design_matrix` captions each tile with its device, theme and font scale,
- *   masks a round watch to its circle, and needs to know where each tile landed, which [compose]
- *   reports as [Placement]s.
+ *   masks a round watch to its circle and a Wear widget to its host's outline, and needs to know
+ *   where each tile landed, which [compose] reports as [Placement]s.
  *
  * Bounded so it fits where it is going: tiles are scaled down (never up) to a longest edge of
  * [MAX_TILE_EDGE], the sheet is at most [MAX_COLUMNS] wide, and [compose] halves the tile edge
@@ -60,8 +61,16 @@ internal object ServeContactSheet {
   private val CAPTION_COLOR = Color(0x30, 0x30, 0x30)
   private val FRAME = Color(0xBD, 0xBD, 0xBD)
 
-  /** One tile: its PNG (null or undecodable keeps the slot, drawn empty), and how to label it. */
-  class Tile(val png: ByteArray?, val caption: String? = null, val round: Boolean = false)
+  /**
+   * One tile: its PNG (null or undecodable keeps the slot, drawn empty), and how to label it.
+   * [cornerRadiusFraction] rounds its corners by that share of its width, clamped to a stadium.
+   */
+  class Tile(
+    val png: ByteArray?,
+    val caption: String? = null,
+    val round: Boolean = false,
+    val cornerRadiusFraction: Double = 0.0,
+  )
 
   /** Where a tile's picture sits on the sheet, in sheet pixels. */
   data class Placement(val x: Int, val y: Int, val width: Int, val height: Int)
@@ -170,6 +179,9 @@ internal object ServeContactSheet {
           val x = left + (slotWidth - size.first) / 2
           val y = top + (slotHeight - size.second) / 2
           val clip = g.clip
+          // The arc is a diameter: twice the radius, never more than the shorter edge.
+          val arc =
+            min(2 * tile.cornerRadiusFraction * size.first, min(size.first, size.second).toDouble())
           if (tile.round) {
             g.clip(
               Ellipse2D.Double(
@@ -179,13 +191,35 @@ internal object ServeContactSheet {
                 size.second.toDouble(),
               )
             )
+          } else if (arc > 0) {
+            g.clip(
+              RoundRectangle2D.Double(
+                x.toDouble(),
+                y.toDouble(),
+                size.first.toDouble(),
+                size.second.toDouble(),
+                arc,
+                arc,
+              )
+            )
           }
           g.drawImage(image, x, y, size.first, size.second, null)
           g.clip = clip
           if (captioned) {
             g.color = FRAME
-            if (tile.round) g.drawOval(x, y, size.first - 1, size.second - 1)
-            else g.drawRect(x, y, size.first - 1, size.second - 1)
+            when {
+              tile.round -> g.drawOval(x, y, size.first - 1, size.second - 1)
+              arc > 0 ->
+                g.drawRoundRect(
+                  x,
+                  y,
+                  size.first - 1,
+                  size.second - 1,
+                  arc.roundToInt(),
+                  arc.roundToInt(),
+                )
+              else -> g.drawRect(x, y, size.first - 1, size.second - 1)
+            }
           }
           placed += Placement(x, y, size.first, size.second)
         } else {

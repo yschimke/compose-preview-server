@@ -270,6 +270,11 @@ class ServeHttpServer(
   private val sites: ServeSiteRegistry = ServeSiteRegistry.empty(),
   private val uiBuilderHost: String? = null,
   private val uiBuilderStartUrl: String? = null,
+  /**
+   * `--cli-start-url`: the CLI and project-previews guide `/start` sends a visitor to on every host
+   * but the builder's. Null keeps `/start` a catalog landing there.
+   */
+  private val cliStartUrl: String? = null,
   /** `--ui-builder-import-origins`; see [ServeUiBuilderImport]. Empty: no import route. */
   private val uiBuilderImportOrigins: List<String> = emptyList(),
   /** How an import fetches its seed; a test substitutes its own. */
@@ -875,6 +880,9 @@ class ServeHttpServer(
         uiBuilder = uiBuilderMcp,
         uiBuilderNative = uiBuilderNativePreview != null,
         publicOrigin = ::canonicalServerOrigin,
+        // The builder's own hostname (`--ui-builder-host`, ui.coo.ee beside preview.coo.ee) is
+        // this same server under another name.
+        publicOriginAliases = { listOfNotNull(uiBuilderHost?.let { "https://$it" }) },
         pendingCatalogs = {
           catalogLoads
             ?.snapshot()
@@ -2273,10 +2281,18 @@ class ServeHttpServer(
             handleLanding(sessionInPath = false)
           }
         }
-        if (uiBuilderHost != null && uiBuilderStartUrl != null) {
+        // `/start` is each product's guide: the UI builder's on the builder host (and on a profile
+        // host, which is the builder too, as its `/` above), the CLI and project-previews guide on
+        // every other host — the catalog host and every top-level site host alike, since `start` is
+        // reserved and can never be a site's catalog. A host whose guide is unset keeps the old
+        // fallback, the default catalog's landing. A profile host needs no `--ui-builder-host`, so
+        // the
+        // builder's guide alone registers the route.
+        if (uiBuilderStartUrl != null || cliStartUrl != null) {
           get("/start") {
-            if (isUiBuilderHost(call)) call.respondRedirect(uiBuilderStartUrl)
-            else handleLanding(sessionInPath = true)
+            val builder = isUiBuilderHost(call) || uiBuilderProfileFor(call) != null
+            val guide = if (builder) uiBuilderStartUrl else cliStartUrl
+            if (guide != null) call.respondRedirect(guide) else handleLanding(sessionInPath = true)
           }
         }
         get("/{system}") { handleLanding(sessionInPath = true) }

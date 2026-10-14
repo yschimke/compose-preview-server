@@ -201,6 +201,24 @@
         }
       }
     },
+    "cli": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "startUrl": {
+          "description": "Where /start sends a visitor on the catalog host: the CLI and project-previews guide.",
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?:https://[^\\s/?#@]+(?:/[^\\s]*)?)$",
+          "x-env": "SERVE_CLI_START_URL",
+          "x-apply": "restart",
+          "x-roles": [
+            "preview",
+            "playground"
+          ]
+        }
+      }
+    },
     "catalogs": {
       "type": "object",
       "additionalProperties": false,
