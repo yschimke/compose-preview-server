@@ -8,7 +8,6 @@ import java.io.File
 import java.util.Base64
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.LinkedBlockingQueue
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.zip.ZipEntry
@@ -261,11 +260,15 @@ class ServeCarriedRcCmpJvmLiveTest {
     type: String,
     where: (JsonObject) -> Boolean = { true },
   ): JsonObject {
+    // The earliest match, leaving every other message queued. Messages of different types are not
+    // ordered: the replay's first frame can reach the socket before the lane message, and a replay
+    // of an unchanging document sends no second frame, so skipping past it would wait forever.
     val deadline = System.currentTimeMillis() + 15_000
     while (true) {
-      val left = deadline - System.currentTimeMillis()
-      val message = assertNotNull(poll(left.coerceAtLeast(1), TimeUnit.MILLISECONDS), "no $type")
-      if (message["type"]?.jsonPrimitive?.content == type && where(message)) return message
+      firstOrNull { it["type"]?.jsonPrimitive?.content == type && where(it) }
+        ?.let { if (remove(it)) return it }
+      assertTrue(System.currentTimeMillis() < deadline, "no $type")
+      Thread.sleep(20)
     }
   }
 
