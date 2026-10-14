@@ -3496,6 +3496,7 @@ public class ServeRunner(
         sites = sites,
         uiBuilderHost = uiBuilderHost,
         uiBuilderStartUrl = uiBuilderStartUrl,
+        cliStartUrl = cliStartUrl,
         uiBuilderImportOrigins = uiBuilderImportOrigins,
         uiBuilderProfile = uiBuilderProfile,
         uiBuilderHostRoot = uiBuilderHostRoot,

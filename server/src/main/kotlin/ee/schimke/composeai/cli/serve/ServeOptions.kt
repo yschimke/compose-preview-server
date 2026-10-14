@@ -318,6 +318,12 @@ public interface ServeOptions {
   public val uiBuilderStartUrl: String?
 
   /**
+   * Optional HTTPS guide URL for the CLI and project previews, served at /start on every host
+   * except the builder host.
+   */
+  public val cliStartUrl: String?
+
+  /**
    * HTTPS origins whose seed documents a signed-in person may import as a design of their own, at
    * `/ui-builder/designs/import` ([ServeUiBuilderImport]). Empty turns the route off.
    */

@@ -88,7 +88,11 @@ class ServeGithubSiteAuthTest {
 
   private var server: ServeHttpServer? = null
 
-  private fun serverWith(cookieDomain: String? = "preview.coo.ee"): ServeHttpServer =
+  private fun serverWith(
+    cookieDomain: String? = "preview.coo.ee",
+    uiBuilderStartUrl: String? = "https://yschimke.github.io/compose-ui-builder/",
+    cliStartUrl: String? = null,
+  ): ServeHttpServer =
     server
       ?: ServeHttpServer(
           host = "127.0.0.1",
@@ -101,7 +105,8 @@ class ServeGithubSiteAuthTest {
           trustForwardedFor = true,
           sites = sites,
           uiBuilderHost = "ui.coo.ee",
-          uiBuilderStartUrl = "https://yschimke.github.io/compose-ui-builder/",
+          uiBuilderStartUrl = uiBuilderStartUrl,
+          cliStartUrl = cliStartUrl,
         )
         .also {
           it.start()
@@ -230,6 +235,48 @@ class ServeGithubSiteAuthTest {
     get("/", "preview.coo.ee").use { assertFalse(it.header("Location") == "/ui-builder/") }
     get("/start", "preview.coo.ee").use { assertEquals(404, it.code) }
     get("/", "unknown.coo.ee").use { assertFalse(it.header("Location") == "/ui-builder/") }
+  }
+
+  @Test
+  fun `start is the CLI guide on the catalog host and every site host, the builder's on its own`() {
+    serverWith(cliStartUrl = "https://yschimke.github.io/compose-ai-tools/")
+    for (host in listOf("preview.coo.ee", "m3.preview.coo.ee", "wear.preview.coo.ee", null)) {
+      get("/start", host).use {
+        assertEquals(302, it.code, "$host")
+        assertEquals("https://yschimke.github.io/compose-ai-tools/", it.header("Location"), "$host")
+      }
+    }
+    get("/start", "ui.coo.ee").use {
+      assertEquals(302, it.code)
+      assertEquals("https://yschimke.github.io/compose-ui-builder/", it.header("Location"))
+    }
+  }
+
+  @Test
+  fun `the CLI guide alone leaves the builder host's start as before`() {
+    serverWith(
+      uiBuilderStartUrl = null,
+      cliStartUrl = "https://yschimke.github.io/compose-ai-tools/",
+    )
+    get("/start", "preview.coo.ee").use {
+      assertEquals(302, it.code)
+      assertEquals("https://yschimke.github.io/compose-ai-tools/", it.header("Location"))
+    }
+    get("/start", "ui.coo.ee").use {
+      assertEquals(404, it.code)
+      assertEquals(null, it.header("Location"))
+    }
+  }
+
+  @Test
+  fun `with no guide configured start is not a redirect anywhere`() {
+    serverWith(uiBuilderStartUrl = null)
+    for (host in listOf("preview.coo.ee", "ui.coo.ee", "m3.preview.coo.ee")) {
+      get("/start", host).use {
+        assertEquals(null, it.header("Location"), "$host")
+        assertEquals(404, it.code, "$host")
+      }
+    }
   }
 
   @Test

@@ -191,6 +191,8 @@ class ServeUiBuilderProfileRoutesTest {
         uiBuilderService = service,
         uiBuilderAuthorization = authorization,
         uiBuilderProfile = profile,
+        uiBuilderStartUrl = BUILDER_GUIDE,
+        cliStartUrl = CLI_GUIDE,
       )
       .also(ServeHttpServer::start)
   private val client = OkHttpClient.Builder().followRedirects(false).build()
@@ -285,6 +287,13 @@ class ServeUiBuilderProfileRoutesTest {
       """
         .trimIndent(),
     )
+
+  @Test
+  fun `start on the profile host is the builder's guide, elsewhere the CLI's`() {
+    // A profile host is the builder, as its `/` is; it never sends a visitor to the CLI guide.
+    assertEquals(302 to BUILDER_GUIDE, location("/start", "ha.coo.ee"))
+    assertEquals(302 to CLI_GUIDE, location("/start", "preview.coo.ee"))
+  }
 
   @Test
   fun `the editor shell carries the profile's name, metas and manifest on its host only`() {
@@ -515,5 +524,10 @@ class ServeUiBuilderProfileRoutesTest {
       ServeUiBuilderProfile("ha.coo.ee", "Home Assistant card designer", listOf("remote-m3")),
       options.uiBuilderProfile,
     )
+  }
+
+  private companion object {
+    const val BUILDER_GUIDE = "https://yschimke.github.io/compose-ui-builder/"
+    const val CLI_GUIDE = "https://yschimke.github.io/compose-ai-tools/"
   }
 }
