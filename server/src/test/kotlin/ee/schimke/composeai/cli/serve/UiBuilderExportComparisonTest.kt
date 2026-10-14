@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.cli.serve.UiBuilderExportComparison.Outcome
 import ee.schimke.composeai.cli.serve.UiBuilderExportComparison.Row
 import ee.schimke.composeai.cli.serve.UiBuilderExportComparison.Verdict
+import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -46,5 +47,24 @@ class UiBuilderExportComparisonTest {
     )
     // Identical sources have no hunk at all.
     assertEquals("", UiBuilderExportComparison.lineDiff("x", "x"))
+  }
+
+  @Test
+  fun `only design documents are compared, not an app's design index beside them`() {
+    val dir = createTempDirectory("designs").toFile()
+    val design =
+      dir.resolve("contacts.uid").apply {
+        writeText(
+          "{\"schema\": \"compose-ui-builder-document/v1-candidate\", \"id\": \"contacts\"}"
+        )
+      }
+    val index =
+      dir.resolve("index.json").apply {
+        writeText("{\"schema\": \"compose-ui-builder-design-index/v1\", \"designs\": []}")
+      }
+    val broken = dir.resolve("broken.json").apply { writeText("{") }
+    assertEquals(true, UiBuilderExportComparison.isDesignDocument(design))
+    assertEquals(false, UiBuilderExportComparison.isDesignDocument(index))
+    assertEquals(false, UiBuilderExportComparison.isDesignDocument(broken))
   }
 }

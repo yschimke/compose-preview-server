@@ -149,6 +149,14 @@ internal object UiBuilderExportComparison {
     Row(file.name, a.export(document), b.export(document))
   }
 
+  /** Whether [file] is a UI-builder design document, by its `schema`. */
+  fun isDesignDocument(file: File): Boolean = runCatching {
+    ((JSON.parseToJsonElement(file.readText()) as? JsonObject)?.get("schema") as? JsonPrimitive)
+      ?.contentOrNull
+      ?.startsWith(DOCUMENT_SCHEMA_PREFIX) == true
+  }
+    .getOrDefault(false)
+
   /** The provenance comment block the executor prepends, which names the pin and always differs. */
   fun withoutProvenance(source: String): String {
     val lines = source.lines()
@@ -277,6 +285,9 @@ internal object UiBuilderExportComparison {
           File(dir).listFiles { f -> f.isFile && f.extension in setOf("json", "uid") }?.toList()
             ?: error("$dir is not a directory of designs")
         }
+        // A designs directory may carry other JSON beside the documents (an app's `index.json`
+        // manifest); only a design document is compared.
+        .filter(::isDesignDocument)
         .sortedBy { it.name }
     val out = File(requireNotNull(flag("--out")) { usage })
     val title = flag("--title") ?: "UI-builder export A/B: ${a.catalogId} vs ${b.catalogId}"
@@ -289,6 +300,8 @@ internal object UiBuilderExportComparison {
   }
 
   private const val ACTOR = "export-comparison"
+
+  private const val DOCUMENT_SCHEMA_PREFIX = "compose-ui-builder-document/"
 
   private val JSON = Json { ignoreUnknownKeys = true }
 
