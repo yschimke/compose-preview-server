@@ -410,6 +410,46 @@ class ServeUiBuilderProfileRoutesTest {
   }
 
   @Test
+  fun `a profile host that is also a top-level site keeps the site's root`() {
+    val siteRegistry = ServeSessionRegistry(open = { null })
+    val shared =
+      ServeHttpServer(
+          host = "127.0.0.1",
+          requestedPort = 0,
+          canonicalOrigin = "https://preview.coo.ee",
+          token = "unused-in-public",
+          isPublic = true,
+          sessions = siteRegistry,
+          defaultSessionId = "unused",
+          uiBuilderDir = builderDir,
+          uiBuilderCatalogs = setOf("m3-catalog", "remote-m3"),
+          uiBuilderService = service,
+          uiBuilderAuthorization = authorization,
+          uiBuilderProfile = profile,
+          sites = ServeSiteRegistry.of(listOf("ha.coo.ee" to "remote-m3")),
+        )
+        .also(ServeHttpServer::start)
+    try {
+      fun at(path: String) =
+        client
+          .newCall(
+            Request.Builder()
+              .url("http://127.0.0.1:${shared.port}$path")
+              .header("Host", "ha.coo.ee")
+              .get()
+              .build()
+          )
+          .execute()
+          .use { it.code to it.header("Location") }
+      assertFalse(at("/").second == "/ui-builder/", "the site's landing, not the builder")
+      assertEquals(302 to "/ui-builder/", at("/ui-builder"), "the builder is still on the host")
+    } finally {
+      shared.stop()
+      siteRegistry.close()
+    }
+  }
+
+  @Test
   fun `a sign-in may return to an absolute URL on the profile host, and to no other host`() {
     fun signIn(returnTo: String): String? {
       val started =
