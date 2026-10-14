@@ -31,10 +31,10 @@
     "startUrl": "https://yschimke.github.io/compose-ui-builder/",
     "importOrigins": ["https://ha.coo.ee"],
     "profile": {
-      "host": "ha.preview.coo.ee",
+      "host": "ha.coo.ee",
       "name": "Home Assistant card designer",
       "catalogs": ["ha-cards"],
-      "homeUrl": "https://ha.preview.coo.ee/"
+      "homeUrl": "https://ha.coo.ee/"
     },
     "guidelines": {
       "model": "deepseek/deepseek-v4.1-flash",

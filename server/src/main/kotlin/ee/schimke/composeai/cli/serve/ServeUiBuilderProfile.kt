@@ -8,11 +8,11 @@ import java.net.URI
  * A white-labelled UI builder on one more hostname: `--ui-builder-profile-host` and its siblings
  * (settings `uiBuilder.profile.*`). Off unless a host is set.
  *
- * The Home Assistant card designer is the case it was made for. It is on `ha.preview.coo.ee`, which
- * is also that project's top-level catalog site ([ServeSites]); the host can equally be another
- * product's own server whose edge sends only the builder's paths (`/ui-builder`, `/api/ui-builder`,
- * `/auth`, `/mcp`, the assets, …) here, unchanged. A request whose host ([requestHost]) is [host]
- * then sees a builder that looks like that product rather than like compose-preview:
+ * The Home Assistant card designer is the case it was made for: `ha.coo.ee/` is that project's own
+ * server, and its edge sends only the builder's paths (`/ui-builder`, `/api/ui-builder`, `/auth`,
+ * `/mcp`, the assets, …) here, unchanged, with the catalog's own `/<system>/` pages and the routes
+ * they draw from. A request whose host ([requestHost]) is [host] then sees a builder that looks like
+ * that product rather than like compose-preview:
  * - every builder page, and the editor shell, carries [name] in its `<title>`, headings and web app
  *   manifest; the shell also carries the brand `<meta>`s ([shellMetaTags]) a new enough editor
  *   reads;
