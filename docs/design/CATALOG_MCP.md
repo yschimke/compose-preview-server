@@ -699,6 +699,15 @@ brief behind it without a second call. Read it on its own with `ui_builder_get_l
 with `ui_builder_set_links`, which replaces the whole record.
 [`UI_BUILDER_LINKS.md`](UI_BUILDER_LINKS.md) has the record and its routes.
 
+**And where the design is canonical, at the top.** The design's recorded `home` (`{kind: server,
+url, designId}` or `{kind: repo, path}`) is in the document, four levels down
+(`response.snapshot.state.document.home`), and `ui_builder_get_design` repeats it as a top-level
+`home` beside `links`, because the collaboration contract tells an agent to read it before anything
+else and an agent that looked at the top of the reply reported none (yschimke/skills#156). It is
+absent, as in the document, when none is recorded: a design made before homes existed, or on a host
+with no public origin to stamp one with. A strict decoder of `McpResponseEnvelopeV1` drops `home`,
+`links` and the comment keys before decoding.
+
 **Why a blocking call and not an MCP notification.** MCP has server-to-client notifications, but
 this endpoint does not advertise subscriptions: `GET /mcp` answers `405`, and `initialize`
 advertises `resources: {"subscribe": false}`. The optional elicitation scope does not change that:

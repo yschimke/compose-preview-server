@@ -377,7 +377,11 @@ class ServeUiBuilderMcp(
         tool,
         args,
         actor,
-        withLinks(tool, args, run(tool, args, actor, callId, clientInteraction, mayExport)),
+        withLinks(
+          tool,
+          args,
+          withHome(tool, run(tool, args, actor, callId, clientInteraction, mayExport)),
+        ),
       )
     } finally {
       leave?.invoke()
@@ -1795,6 +1799,33 @@ class ServeUiBuilderMcp(
       )
     }
     return links
+  }
+
+  /**
+   * [GET_DESIGN]'s reply with the design's recorded `home` repeated at the top, beside `links`.
+   *
+   * The home is already in the document, but four levels down (`response.snapshot.state.document`)
+   * in a reply that is mostly nodes, and the collaboration contract tells an agent to "read its
+   * `home`" before anything else: an agent that looked at the top of the reply reported that the
+   * server recorded none (yschimke/skills#156). Absent, as in the document, when none is recorded:
+   * a design made before homes existed, or on a host with no public origin to stamp.
+   */
+  private fun withHome(tool: String, reply: String): String {
+    if (tool != GET_DESIGN) return reply
+    val parsed =
+      try {
+        UI_BUILDER_JSON.parseToJsonElement(reply) as? JsonObject ?: return reply
+      } catch (_: SerializationException) {
+        return reply
+      }
+    if (!parsed.isSnapshotReply()) return reply
+    val home =
+      (((parsed[RESPONSE_KEY] as? JsonObject)?.get("snapshot") as? JsonObject)?.get("state")
+          as? JsonObject)
+        ?.let { it["document"] as? JsonObject }
+        ?.get(HOME_KEY)
+        ?.takeIf { it !is JsonNull } ?: return reply
+    return JsonObject(parsed + (HOME_KEY to home)).toString()
   }
 
   /**
@@ -4238,6 +4269,9 @@ class ServeUiBuilderMcp(
     /** The key [StoredLinks] is spliced onto a $GET_DESIGN reply under. */
     internal const val LINKS_KEY = "links"
 
+    /** The key a $GET_DESIGN reply repeats the document's recorded home under. */
+    internal const val HOME_KEY = "home"
+
     /**
      * Tool declarations, built with the caller's `tool` helper so they share the surface's shape.
      */
@@ -4306,7 +4340,11 @@ class ServeUiBuilderMcp(
             "variables and catalog pin — plus the revision to quote as `baseRevision` when " +
             "editing it. The catalog the design pins is left out unless `$INCLUDE_CATALOG_ARGUMENT` " +
             "is true: it is the same for every design on the pin, $LIST_CATALOGS serves it, and " +
-            "it is most of the bytes. On hosts with design discussions, " +
+            "it is most of the bytes. `$HOME_KEY`, at the top of the reply, is where the design " +
+            "is canonical (`{kind: server, url, designId}` or `{kind: repo, path}`): edit it " +
+            "there. It is absent when none is recorded (a design made before homes existed, or " +
+            "on a host with no public origin), and then the canonical home cannot be verified. " +
+            "On hosts with design discussions, " +
             "`$UNACKNOWLEDGED_COMMENTS_KEY` is the number of comment threads this actor has not " +
             "acknowledged; a nonzero count also carries the bounded `comments` notice.",
           """

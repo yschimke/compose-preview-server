@@ -496,8 +496,16 @@ class ServeUiBuilderDecisionElicitationTest {
   private fun text(result: JsonObject): String =
     result["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
 
+  /**
+   * The released envelope, without the `home` a `ui_builder_get_design` reply repeats beside it.
+   */
   private fun response(envelope: String) =
-    json.decodeFromString(McpResponseEnvelopeV1.serializer(), envelope).response
+    json
+      .decodeFromJsonElement(
+        McpResponseEnvelopeV1.serializer(),
+        JsonObject(json.parseToJsonElement(envelope).jsonObject - ServeUiBuilderMcp.HOME_KEY),
+      )
+      .response
 
   private fun createAuthoritative() {
     val created =

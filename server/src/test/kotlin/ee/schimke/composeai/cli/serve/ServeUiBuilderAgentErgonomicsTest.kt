@@ -25,6 +25,7 @@ import ee.schimke.composeai.uibuilder.protocol.SizeModifierV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
 import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
+import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
@@ -44,6 +45,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -943,6 +945,36 @@ class ServeUiBuilderAgentErgonomicsTest {
     assertEquals("schema", reply["findings"]!!.jsonArray.first().jsonObject.text("check"))
     // With no document there is nothing for the accessibility pass to read, and it says so.
     assertEquals("a11y", reply["skipped"]!!.jsonArray.single().jsonObject.text("check"))
+  }
+
+  @Test
+  fun `get_design repeats the recorded home at the top, and leaves it out when there is none`() {
+    val actor = AuthenticatedUiBuilderActor(OPERATOR_ACTOR)
+    fun reply(mcp: ServeUiBuilderMcp, tool: String, arguments: String) = runBlocking {
+      Json.parseToJsonElement(
+          mcp.call(tool, Json.parseToJsonElement(arguments).jsonObject, actor, callId = "1")
+        )
+        .jsonObject
+    }
+    val create = """{"designId":"agent-screen","document":${documentJson(cleanDocument())}}"""
+    val get = """{"designId":"agent-screen"}"""
+
+    val homed = ServeUiBuilderMcp(service(stateDirectory.resolve("homed")), { PUBLIC_ORIGIN })
+    reply(homed, ServeUiBuilderMcp.CREATE_DESIGN, create)
+    val home = assertNotNull(reply(homed, ServeUiBuilderMcp.GET_DESIGN, get)["home"]).jsonObject
+    assertEquals("server", home.text("kind"))
+    assertEquals(PUBLIC_ORIGIN, home.text("url"))
+    assertEquals("agent-screen", home.text("designId"))
+
+    // A host with no public origin stamps nothing, and the reply does not invent a home.
+    val unhomed = ServeUiBuilderMcp(service(stateDirectory.resolve("unhomed")))
+    reply(unhomed, ServeUiBuilderMcp.CREATE_DESIGN, create)
+    val bare = reply(unhomed, ServeUiBuilderMcp.GET_DESIGN, get)
+    assertEquals("snapshot", bare["response"]!!.jsonObject.text("type"))
+    assertNull(bare["home"])
+
+    // A refused read gets nothing spliced onto it.
+    assertNull(reply(homed, ServeUiBuilderMcp.GET_DESIGN, """{"designId":"nobody"}""")["home"])
   }
 
   @Test
