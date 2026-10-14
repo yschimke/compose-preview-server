@@ -245,6 +245,38 @@ class ScreenGeneratorComposeExportExecutorTest {
     assertFalse(unprojected.content.orEmpty().contains("Text(text = \"Go\")"), unprojected.content)
   }
 
+  /**
+   * A projection-publishing catalog with no record refuses as the record path does, naming the flag
+   * that configures one rather than a generic "no usable record".
+   */
+  @Test
+  fun `a projected catalog with no record says how to configure one`() {
+    val projection =
+      Json.parseToJsonElement(
+        """{ "targets": [ { "record": "test-catalog/androidx.compose.material3.TextKt.Text" } ] }"""
+      )
+    val semantics =
+      JsonObject(
+        mapOf(
+          "components" to
+            JsonObject(mapOf("m3/text" to JsonObject(mapOf("exportProjection" to projection))))
+        )
+      )
+
+    val artifact =
+      export(
+        catalog = recordsCatalog(semantics),
+        components = { ComponentRecordSource.Lookup.Unconfigured },
+      )
+
+    val diagnostic = artifact.diagnostics.single()
+    assertEquals(ScreenGeneratorComposeExportExecutor.NO_COMPONENT_RECORD, diagnostic.code)
+    assertTrue(
+      diagnostic.message.contains("--ui-builder-components test-catalog="),
+      diagnostic.message,
+    )
+  }
+
   /** The same adapter with no projection published keeps the record path, byte for byte. */
   @Test
   fun `a component-record catalog publishing no projection keeps the record export`() {
