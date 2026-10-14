@@ -2729,9 +2729,9 @@ public class ServeRunner(
           System.err.println("serve: UI-builder catalog ${composed.note}")
         }
         is PublishedUiBuilderCatalog.Result.Unusable -> {
-          if (ownership.owns(systemId)) {
-            health.withhold(systemId, composed.reason)
-          } else {
+          // Withheld when owned or not built in (served without a published entry, it would fail
+          // the whole builder); only a built-in catalog falls back.
+          if (!health.withhold(systemId, composed.reason)) {
             System.err.println(
               "serve: UI-builder catalog $systemId keeps its built-in definition — " +
                 composed.reason
