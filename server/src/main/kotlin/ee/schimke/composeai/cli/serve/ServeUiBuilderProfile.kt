@@ -11,8 +11,8 @@ import java.net.URI
  * The Home Assistant card designer is the case it was made for: `ha.coo.ee/` is that project's own
  * server, and its edge sends only the builder's paths (`/ui-builder`, `/api/ui-builder`, `/auth`,
  * `/mcp`, the assets, …) here, unchanged, with the catalog's own `/<system>/` pages and the routes
- * they draw from. A request whose host ([requestHost]) is [host] then sees a builder that looks like
- * that product rather than like compose-preview:
+ * they draw from. A request whose host ([requestHost]) is [host] then sees a builder that looks
+ * like that product rather than like compose-preview:
  * - every builder page, and the editor shell, carries [name] in its `<title>`, headings and web app
  *   manifest; the shell also carries the brand `<meta>`s ([shellMetaTags]) a new enough editor
  *   reads;
