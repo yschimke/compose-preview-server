@@ -1,0 +1,173 @@
+name: UI-builder export A/B
+
+# The typed-export pilots against the production catalogs they would replace: the same designs
+# exported through both published catalogs, as preview.coo.ee serves them, and a report of where the
+# Kotlin differs. `:server:uiBuilderExportComparison` (UiBuilderExportComparison.kt) composes each
+# delivery branch with PublishedUiBuilderCatalog and exports through the host's own
+# ScreenGeneratorComposeExportExecutor, so a difference here is a difference a user would see.
+#
+#   m3-catalog  vs m3-catalog-typed-pilot   the m3-catalog templates, and the adaptive designs
+#                                           homeassistant-remotecompose and meshcore-mobile pin to
+#                                           m3-catalog
+#   wear-m3     vs wear-m3-typed-pilot      the wear-m3-catalog templates
+#
+# A report, not a gate: the run fails only when an input cannot be read. The verdicts are in the
+# job summary and the full sources in the `ui-builder-export-ab` artifact.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Daily, after the catalogs' own overnight publishes.
+    - cron: '17 6 * * *'
+  pull_request:
+    paths:
+      - 'server/src/main/kotlin/ee/schimke/composeai/cli/serve/UiBuilderExportComparison.kt'
+      - 'server/src/main/kotlin/ee/schimke/composeai/cli/serve/ScreenGeneratorComposeExportExecutor.kt'
+      - '.github/workflows/ui-builder-export-ab.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-builder-export-ab-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The four delivery branches, as the box fetches them.
+      - name: Check out m3-catalog (production)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: yschimke/m3-catalog-out
+          ref: design-artifacts/m3-catalog
+          path: .ab/branches/m3-catalog
+          sparse-checkout: |
+            catalog.json
+            ui-builder.json
+            components.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Check out m3-catalog-typed-pilot
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: yschimke/m3-catalog-out
+          ref: design-artifacts/m3-catalog-typed-pilot
+          path: .ab/branches/m3-catalog-typed-pilot
+          sparse-checkout: |
+            catalog.json
+            ui-builder.json
+            components.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Check out wear-m3 (production)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: yschimke/wear-m3-catalog-out
+          ref: design-artifacts/wear-m3-catalog
+          path: .ab/branches/wear-m3
+          sparse-checkout: |
+            catalog.json
+            ui-builder.json
+            components.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Check out wear-m3-typed-pilot
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: yschimke/wear-m3-catalog-out
+          ref: design-artifacts/wear-m3-typed-pilot
+          path: .ab/branches/wear-m3-typed-pilot
+          sparse-checkout: |
+            catalog.json
+            ui-builder.json
+            components.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      # The designs: each catalog's committed templates, and the app designs pinned to m3-catalog.
+      - name: Check out the m3-catalog templates
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: yschimke/m3-catalog
+          path: .ab/designs/m3-catalog
+          sparse-checkout: ui-builder/designs
+          persist-credentials: false
+      - name: Check out the wear-m3-catalog templates
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: yschimke/wear-m3-catalog
+          path: .ab/designs/wear-m3-catalog
+          sparse-checkout: ui-builder/designs
+          persist-credentials: false
+      - name: Check out the homeassistant-remotecompose designs
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: yschimke/homeassistant-remotecompose
+          path: .ab/designs/homeassistant-remotecompose
+          sparse-checkout: adaptive-uid-pilot/ui-builder/designs
+          persist-credentials: false
+      - name: Check out the meshcore-mobile designs
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: yschimke/meshcore-mobile
+          path: .ab/designs/meshcore-mobile
+          sparse-checkout: adaptive-uid-pilot/ui-builder/designs
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          # The same two JDKs as ci.yml's gradle-build, for the same reason.
+          java-version: |
+            21
+            17
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+          cache-read-only: true
+      - name: Compare m3-catalog with m3-catalog-typed-pilot
+        run: |
+          set -euo pipefail
+          d="$GITHUB_WORKSPACE/.ab/designs"
+          ./gradlew --no-configuration-cache :server:uiBuilderExportComparison --args="\
+          --a $GITHUB_WORKSPACE/.ab/branches/m3-catalog \
+          --b $GITHUB_WORKSPACE/.ab/branches/m3-catalog-typed-pilot \
+          --designs $d/m3-catalog/ui-builder/designs,$d/homeassistant-remotecompose/adaptive-uid-pilot/ui-builder/designs,$d/meshcore-mobile/adaptive-uid-pilot/ui-builder/designs \
+          --out $RUNNER_TEMP/ab/m3 \
+          --title 'm3-catalog vs m3-catalog-typed-pilot'"
+      - name: Compare wear-m3 with wear-m3-typed-pilot
+        run: |
+          set -euo pipefail
+          d="$GITHUB_WORKSPACE/.ab/designs"
+          ./gradlew --no-configuration-cache :server:uiBuilderExportComparison --args="\
+          --a $GITHUB_WORKSPACE/.ab/branches/wear-m3 \
+          --b $GITHUB_WORKSPACE/.ab/branches/wear-m3-typed-pilot \
+          --designs $d/wear-m3-catalog/ui-builder/designs \
+          --out $RUNNER_TEMP/ab/wear \
+          --title 'wear-m3 vs wear-m3-typed-pilot'"
+      # The summary carries the verdict tables and diffs; it is capped at 1 MiB, so a report too
+      # large for it says so and points at the artifact.
+      - name: Write the job summary
+        if: always()
+        run: |
+          for r in "$RUNNER_TEMP"/ab/*/report.md; do
+            [ -f "$r" ] || continue
+            if [ "$(wc -c < "$r")" -lt 450000 ]; then
+              cat "$r" >> "$GITHUB_STEP_SUMMARY"
+            else
+              { sed -n '1,/^## /p' "$r" | sed '$d'
+                echo; echo "_Diffs are too large for the summary; see the \`ui-builder-export-ab\` artifact._"
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+            echo >> "$GITHUB_STEP_SUMMARY"
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: ui-builder-export-ab
+          path: ${{ runner.temp }}/ab/
+          if-no-files-found: warn

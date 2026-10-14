@@ -1226,3 +1226,14 @@ val stageFoundationRecord =
   }
 
 sourceSets.main.get().resources.srcDir(stageFoundationRecord)
+
+// The A/B export report (`UiBuilderExportComparison`): the same designs exported through two
+// published catalog checkouts, as a box serving them would. Inputs come from `--args`, e.g.
+// `--args="--a <branch> --b <branch> --designs <dir> --out <dir>"`; see
+// .github/workflows/ui-builder-export-ab.yml.
+tasks.register<JavaExec>("uiBuilderExportComparison") {
+  description = "Export designs through two published UI-builder catalogs and report the diff."
+  group = "verification"
+  classpath = sourceSets.main.get().runtimeClasspath
+  mainClass.set("ee.schimke.composeai.cli.serve.UiBuilderExportComparison")
+}
