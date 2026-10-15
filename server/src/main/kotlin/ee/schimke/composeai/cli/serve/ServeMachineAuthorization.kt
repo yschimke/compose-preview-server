@@ -45,7 +45,16 @@ class ServeMachineAuthorization(
      * grant. Nothing else reads it: a scope ladder asks how much of the machine may be spent, not
      * whose it is.
      */
-    data class Authorized(val actorId: String, val onBehalfOfActorId: String? = null) : Decision
+    data class Authorized(
+      val actorId: String,
+      val onBehalfOfActorId: String? = null,
+      /**
+       * True when the agent grant behind this decision carries `ui-builder-destructive`: the human
+       * who approved it also let it delete their designs, not only the ones it created. Only a
+       * grant sets it, and it means nothing without [onBehalfOfActorId].
+       */
+      val mayDeleteForPrincipal: Boolean = false,
+    ) : Decision
 
     data object Missing : Decision
 
@@ -219,10 +228,10 @@ class ServeMachineAuthorization(
       .any { ServeUrls.tokensMatch(serverToken, it) }
   }
 
-  private companion object {
-    const val BEARER_PREFIX = "Bearer "
+  internal companion object {
+    private const val BEARER_PREFIX = "Bearer "
 
-    const val OPERATOR_ACTOR_ID = ServeAgentGrants.OPERATOR_ACTOR_ID
+    private const val OPERATOR_ACTOR_ID = ServeAgentGrants.OPERATOR_ACTOR_ID
 
     /**
      * The agent's own identity, and the approver it acts for.
@@ -239,6 +248,7 @@ class ServeMachineAuthorization(
         // [ServeUiBuilderGrantScope] — because only there is the design known.
         actorId = holderActorId,
         onBehalfOfActorId = approvedByActorId.takeIf { it.isNotBlank() },
+        mayDeleteForPrincipal = allows(AgentGrantCapability.UI_BUILDER_DESTRUCTIVE),
       )
   }
 }
