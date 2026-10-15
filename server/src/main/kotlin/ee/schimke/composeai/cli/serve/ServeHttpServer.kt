@@ -11549,7 +11549,9 @@ class ServeHttpServer(
       // The subprocess lanes render the captured document in an isolated process: cmp-jvm with the
       // embedded desktop player for `.png` and `.svg`, swift-appkit with the native Swift player
       // (`rc-swift-render`) for `.png` only; slots stay a daemon product.
-      val subprocessLane = ServeRcPlayerIds.subprocessLaneOf(renderParams()["rcPlayer"])
+      val subprocessLane =
+        ServeRcPlayerIds.subprocessLaneOf(renderParams()["rcPlayer"])
+          ?: themeReplayLane(renderHost, previewId)
       if (!wantSlots && !wantA11y && !wantAnnotations && subprocessLane != null) {
         if (wantSvg && subprocessLane == RcPlayerBackend.SWIFT_APPKIT) {
           call.respondText(
@@ -12191,6 +12193,26 @@ class ServeHttpServer(
         status = HttpStatusCode.Conflict,
       )
     }
+  }
+
+  /**
+   * The lane a declared theme takes on a replayed preview with no live render lane: cmp-jvm, which
+   * draws the captured document with the theme's colours seeded ([ServeThemeReplay.expand]). The
+   * default lane there can only answer with the baked snapshot, which ignores the seeds, so the
+   * request would be refused for dropping them. Null when the preview recomposes, has a live lane
+   * to apply the theme, the host maps no colours for it, or the desktop player is not installed.
+   */
+  private fun RoutingContext.themeReplayLane(
+    renderHost: ServeHost,
+    previewId: String,
+  ): RcPlayerBackend? {
+    val provider =
+      renderParams()[ServeThemeReplay.THEME_PROVIDER_PARAM]?.takeIf { it.isNotBlank() }
+        ?: return null
+    if (renderHost.canRenderOverridesFor(previewId)) return null
+    if (!ServeThemeReplay.isReplayed(renderHost, previewId)) return null
+    if (renderHost.themeReplayColors(provider).isEmpty()) return null
+    return if (RcJvmServerRenderer.isAvailable()) RcPlayerBackend.CMP_JVM else null
   }
 
   /**

@@ -469,7 +469,15 @@ class ServeCatalogLiveHost(
    * App `@ThemeCatalog` themes come from the daemon lane; forwarded so the viewer's theme selector
    * appears and re-renders via the daemon.
    */
-  override val declaredThemes: List<ServeTheme> = live.declaredThemes
+  override val declaredThemes: List<ServeTheme> =
+    live.declaredThemes.ifEmpty { baked.declaredThemes }
+
+  /**
+   * A published catalog's theme colours ride the baked host (`catalog.json`'s `themes[]`), like the
+   * document they apply to; without this a replayed preview here would offer no theme at all.
+   */
+  override fun themeReplayColors(providerFqn: String): Map<String, String> =
+    baked.themeReplayColors(providerFqn)
 
   override fun themeOptimizationSnapshot(): ThemeOptimizationSnapshot? =
     catalogThemeCache.snapshot().takeIf { it.total > 0 }
