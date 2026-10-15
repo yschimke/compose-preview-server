@@ -140,7 +140,7 @@ graphics-shapes = "1.1.0"
 # 2.60.1 is the first published BOM with `ServeHost.sourcesChanged` (compose-ai-tools#5979),
 # which the local rebuild (`ServeLocalRebuild`, #1682) calls to reload a module's classes in place.
 # The 2.60.0 BOM did not reach Central because of bundle-producer's POM (compose-ai-tools#5981).
-composeai-tools = "2.60.1"
+composeai-tools = "2.61.1"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
 # in that repository's `docs/design/REPOSITORY_LAYERS.md`: between the contracts and
