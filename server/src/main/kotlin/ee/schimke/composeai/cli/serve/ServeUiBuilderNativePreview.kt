@@ -181,17 +181,28 @@ internal class ServeUiBuilderNativePreview(
           widgetPlayer = player,
         )
       )
-    // Bounds only for a rendered frame, and not for widgets or Remote content, whose nodes carry no
-    // test tags; avoids a pointless second daemon session.
-    val bounds =
-      if (response.image == null || widget != null || generated.remoteContent) emptyMap()
-      else captureNodeBounds(response)
+    // A widget's nodes are tagged with content descriptions, which only the CMP player turns into
+    // semantics nodes; the AndroidX player builds none. Other Remote content is not tagged.
+    val tagged =
+      when {
+        generated.remoteContent -> false
+        widget != null -> player == UiBuilderWidgetPlayer.CMP
+        else -> true
+      }
+    // Bounds only for a rendered frame whose nodes carry tags; avoids a pointless second daemon
+    // session.
+    val bounds = if (response.image == null || !tagged) emptyMap() else captureNodeBounds(response)
     // The tag set is reported, not inferred by clients, since it keys the bounds lookup.
     return UiBuilderNativePreviewOutcome.Rendered(
       response,
-      // Recorded Remote content (including widgets) has no tags; claiming them would make the
-      // overlay look broken.
-      if (widget != null || generated.remoteContent) emptyList() else document.nodes.keys.sorted(),
+      when {
+        !tagged -> emptyList()
+        // Not every widget node can carry a tag (the container scaffold, the theme wrapper, draw
+        // ops, calls without a modifier), so report the ones the render placed rather than claim
+        // nodes the overlay would show as missing.
+        widget != null -> bounds.keys.sorted()
+        else -> document.nodes.keys.sorted()
+      },
       bounds,
       failure = if (response.image == null) response.noFrameReason() else null,
       warnings = generated.systemFontFamilies.map(SystemFontLookups::note),

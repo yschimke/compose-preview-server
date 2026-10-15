@@ -24,7 +24,8 @@ class RemoteM3VocabularyParityTest {
   private val catalog =
     CurrentM3UiBuilderCatalogExecutor(
         catalogSystemIds =
-          linkedSetOf("m3-catalog", CurrentM3UiBuilderCatalogExecutor.REMOTE_M3_CATALOG_SYSTEM_ID)
+          linkedSetOf("m3-catalog", CurrentM3UiBuilderCatalogExecutor.REMOTE_M3_CATALOG_SYSTEM_ID),
+        published = mapOf("remote-m3" to PublishedCutoverCatalogs.remote),
       )
       .listCatalogs()
       .single {
@@ -33,11 +34,15 @@ class RemoteM3VocabularyParityTest {
       }
 
   /**
-   * The scaffolds are excluded because they are not body content: the launcher draws the container
-   * and the generated code names it nowhere, so no emitter case is owed for one.
+   * The scaffolds and theme specimen are preview frames rather than authored body content. The
+   * launcher draws the container and the specimen showcases the catalog's theme; neither needs an
+   * emitter case. The specimen is being excluded upstream in remote-m3-catalog#129.
    */
   private val authoringComponents =
-    catalog.components.filterNot { it.componentId.startsWith("remote-m3/widget-container-") }
+    catalog.components.filterNot {
+      it.componentId.startsWith("remote-m3/widget-container-") ||
+        it.componentId == "remote-m3/theme-specimen"
+    }
 
   @Test
   fun `every component the palette offers has an authored answer in the generator`() {

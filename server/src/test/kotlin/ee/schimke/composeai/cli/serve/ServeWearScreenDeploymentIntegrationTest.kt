@@ -233,6 +233,7 @@ class ServeWearScreenDeploymentIntegrationTest {
                   it.png = false
                 }
                 .build(),
+            published = PublishedCutoverCatalogs.remoteAndWear,
           ),
         // No component record, deliberately: a Wear screen is written by `RecordFreeExport`'s
         // emitter rather than from a recovered signature, and the packaged image passes a record
