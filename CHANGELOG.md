@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.141.0](https://github.com/yschimke/compose-preview-server/compare/v3.140.0...v3.141.0) (2026-10-15)
+
+
+### Features
+
+* open every local module on one page and follow edits there ([#1694](https://github.com/yschimke/compose-preview-server/issues/1694)) ([da2991a](https://github.com/yschimke/compose-preview-server/commit/da2991a899abab06ad80cdd1a1f04684923f4988))
+* **ui-builder:** report node bounds for Wear widgets on the CMP player ([#1688](https://github.com/yschimke/compose-preview-server/issues/1688)) ([fbe1b8e](https://github.com/yschimke/compose-preview-server/commit/fbe1b8ee4ca66aef19d1033f067fd22642d24f1a))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.17.0 ([#1697](https://github.com/yschimke/compose-preview-server/issues/1697)) ([e51d81e](https://github.com/yschimke/compose-preview-server/commit/e51d81e382ea78e9438116780d8b4cc382acb71e))
+
 ## [3.140.0](https://github.com/yschimke/compose-preview-server/compare/v3.139.0...v3.140.0) (2026-10-15)
 
 
