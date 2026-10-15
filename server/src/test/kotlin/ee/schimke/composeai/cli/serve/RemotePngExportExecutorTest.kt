@@ -16,8 +16,7 @@ class RemotePngExportExecutorTest {
         Path.of("../docs/design/evidence/ui-builder-remote-native-preview/document.json")
       )
     )
-  private val remote =
-    CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = setOf("remote-m3")).listCatalogs().single()
+  private val remote = PublishedCutoverCatalogs.remote
 
   private fun request(doc: DesignDocumentV1 = document) =
     RevisionPinnedUiBuilderExport(

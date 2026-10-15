@@ -43,7 +43,10 @@ class RemotePngExportProofTest {
         for (density in listOf(1.0, 2.0)) {
           val document = source.copy(environment = source.environment.copy(density = density))
           val catalog =
-            CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = setOf("remote-m3"))
+            CurrentM3UiBuilderCatalogExecutor(
+                catalogSystemIds = setOf("remote-m3"),
+                published = mapOf("remote-m3" to PublishedCutoverCatalogs.remote),
+              )
               .listCatalogs()
               .single()
           val exporter =
@@ -196,6 +199,7 @@ class RemotePngExportProofTest {
     val catalogs =
       CurrentM3UiBuilderCatalogExecutor(
         catalogSystemIds = setOf("remote-m3"),
+        published = mapOf("remote-m3" to PublishedCutoverCatalogs.remote),
         exportCapabilities =
           ee.schimke.composeai.uibuilder.export.RemoteDocumentExportSupport.capabilities(
             ExportCapabilitiesV1.Builder()
