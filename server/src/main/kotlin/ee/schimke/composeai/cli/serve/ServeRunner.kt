@@ -5368,6 +5368,4 @@ public class ServeRunner(
  * their capability and record because builder 3.115.0 removed their Kotlin generators.
  */
 internal val UI_BUILDER_BUILT_IN_CATALOGS: Set<String> =
-  setOf(
-    CurrentM3UiBuilderCatalogExecutor.DEFAULT_CATALOG_SYSTEM_ID,
-  )
+  setOf(CurrentM3UiBuilderCatalogExecutor.DEFAULT_CATALOG_SYSTEM_ID)
