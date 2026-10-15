@@ -68,6 +68,12 @@ public interface ServeOptions {
   public val discover: Boolean
 
   /**
+   * Rebuild a local module when its sources change ([ServeSourceWatcher]). On for `browse` unless
+   * `--no-watch`; `serve` opts in with `--watch`.
+   */
+  public val watchSources: Boolean
+
+  /**
    * Trusted server-side re-render (SECURITY/RCE, opt-in, default off): a Trusted `--catalogs`
    * catalog that declares a `source` is served by a daemon-backed session built from that source.
    * Building runs Gradle, so it is gated three ways: the catalog must be Trusted, `source.ref` must

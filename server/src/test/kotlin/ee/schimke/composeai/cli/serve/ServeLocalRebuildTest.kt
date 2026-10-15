@@ -23,6 +23,8 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -374,6 +376,56 @@ class ServeLocalRebuildTest {
   }
 
   @Test
+  fun `the reload state moves on every rebuild and its generation on every one that shows`() {
+    register(listOf("Red"))
+    val compiles = AtomicBoolean(true)
+    val rebuild = rebuild { compiles.get() }
+    assertEquals(LocalReloadState(), rebuild.reloadState("app"))
+    assertNull(rebuild.reloadState("compose-m3"))
+
+    rebuild.rebuild("app")
+    assertEquals(
+      LocalReloadState(version = 2, generation = 1, status = "reloaded"),
+      rebuild.reloadState("app"),
+    )
+
+    compiles.set(false)
+    rebuild.rebuild("app")
+    val failed = assertNotNull(rebuild.reloadState("app"))
+    assertEquals(4, failed.version)
+    assertEquals(1, failed.generation, "a failed build shows nothing new")
+    assertEquals("failed", failed.status)
+    assertTrue(failed.reason.orEmpty().contains("composePreviewCompile failed"), failed.reason)
+  }
+
+  @Test
+  fun `a page waiting on the reload state hears the build start and finish`() = runBlocking {
+    register(listOf("Red"))
+    val release = CountDownLatch(1)
+    val rebuild = rebuild { release.await(10, TimeUnit.SECONDS) }
+    val idle = rebuild.awaitReloadState("app", afterVersion = 0, timeoutMillis = 50)
+    assertEquals(0, idle?.version, "nothing new times out with the current state")
+
+    val waiting = async {
+      rebuild.awaitReloadState("app", afterVersion = 0, timeoutMillis = 10_000)
+    }
+    val pool = Executors.newSingleThreadExecutor()
+    try {
+      val done = pool.submit<LocalRebuildResult> { rebuild.rebuild("app") }
+      val started = assertNotNull(waiting.await())
+      assertTrue(started.building, "$started")
+      release.countDown()
+      done.get(10, TimeUnit.SECONDS)
+      val finished =
+        assertNotNull(rebuild.awaitReloadState("app", started.version, timeoutMillis = 10_000))
+      assertFalse(finished.building)
+      assertEquals(1, finished.generation)
+    } finally {
+      pool.shutdownNow()
+    }
+  }
+
+  @Test
   fun `the rebuild route reports each outcome and the page offers the button`() {
     val host = register(listOf("Red"))
     val compiles = AtomicBoolean(true)
@@ -414,6 +466,17 @@ class ServeLocalRebuildTest {
       val page = call("/app/", post = false)
       assertEquals(200, page.first)
       assertTrue(page.second.contains("data-rebuild-url=\"/app/rebuild"), page.second.take(3000))
+      assertTrue(page.second.contains("data-reload-url=\"/app/reload"), page.second.take(3000))
+
+      val viewer = call("/app/p/Red", post = false)
+      assertEquals(200, viewer.first, viewer.second.take(3000))
+      assertTrue(viewer.second.contains("data-reload-url=\"/app/reload"), "the viewer follows too")
+
+      val state = call("/app/reload?after=-1", post = false)
+      assertEquals(200, state.first, state.second)
+      assertTrue(state.second.contains("\"generation\":1"), state.second)
+      assertTrue(state.second.contains("\"status\":\"failed\""), state.second)
+      assertEquals(404, call("/compose-m3/reload", post = false).first)
     } finally {
       server.stop()
     }

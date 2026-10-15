@@ -467,6 +467,21 @@ class ServeCommandOptionsTest {
     assertFalse("not-a-key" in refused.message.orEmpty())
   }
 
+  @Test
+  fun `browse watches sources unless told not to, serve only when asked`() {
+    fun browse(vararg args: String) =
+      ServeCommandOptions(
+        args = args.toList(),
+        browseProject = true,
+        defaultTimeoutSeconds = 600L,
+        previewMatcher = { _, _, _, _, _, _ -> true },
+      )
+    assertTrue(browse().watchSources)
+    assertFalse(browse("--no-watch").watchSources)
+    assertFalse(options(listOf("--discover")).watchSources)
+    assertTrue(options(listOf("--discover", "--watch")).watchSources)
+  }
+
   private fun options(args: List<String>): ServeCommandOptions =
     ServeCommandOptions(
       args = args,
