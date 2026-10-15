@@ -700,6 +700,35 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     command: --label-enable --cleanup --interval 1200
 
+  # The Home Assistant card design server (yschimke/homeassistant-remotecompose's design-server):
+  # ha.coo.ee's front page, its card template browser, and the card library the app reads. Only
+  # runs with COMPOSE_PROFILES=ha, and only reached through HA_DOMAIN's block (ha.caddy), which
+  # sends it an explicit list of paths and everything else to `preview`. It runs without a bundled
+  # UI Builder and without its own GitHub sign-in, because on that host the builder and /auth are
+  # the preview server's. HA_DESIGNS_UI_BUILDER_URL + HA_DESIGNS_UI_BUILDER_TOKEN (an operator
+  # token for this box's builder) let Card Studio hand a card from the app to the builder; leave
+  # both empty and the server still serves everything else.
+  ha-designs:
+    logging: *default-logging
+    profiles: [ha]
+    image: "ghcr.io/yschimke/ha-card-design-server:${HA_DESIGNS_IMAGE_TAG:-latest}"
+    restart: always
+    environment:
+      PORT: "8080"
+      UI_BUILDER_BINARY: ""
+      UI_BUILDER_URL: "${HA_DESIGNS_UI_BUILDER_URL:-}"
+      UI_BUILDER_TOKEN: "${HA_DESIGNS_UI_BUILDER_TOKEN:-}"
+      # Where browsers reach the builder: this same host, whose /ui-builder is the preview server.
+      UI_BUILDER_BROWSER_URL: "https://${HA_DOMAIN:-ha.coo.ee}"
+      PUBLIC_URL: "https://${HA_DOMAIN:-ha.coo.ee}"
+      DESIGNER_URL: "${HA_DESIGNS_DESIGNER_URL:-}"
+      CATALOG_URL: "${HA_DESIGNS_CATALOG_URL:-}"
+      STORE_URL: "${HA_DESIGNS_STORE_URL:-}"
+    volumes:
+      - ha_designs_data:/data
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+
   caddy:
     logging: *default-logging
     # The Caddyfile is BAKED into this image (preview-caddy-image.yml) instead of
@@ -728,6 +757,11 @@ services:
       # Which service serves the public playground's paths: `preview` (the default, which answers
       # with its disabled page) or `playground` once that profile is running.
       PLAYGROUND_UPSTREAM: "${PLAYGROUND_UPSTREAM:-preview}"
+      # The Home Assistant project's hostname (ha.coo.ee), split by path between `ha-designs` and
+      # `preview` (ha.caddy). Empty, the default, leaves the edge exactly as it was. Set it together
+      # with COMPOSE_PROFILES=ha so the `ha-designs` service it routes to is running.
+      HA_DOMAIN: "${HA_DOMAIN:-}"
+      HA_DESIGNS_UPSTREAM: "${HA_DESIGNS_UPSTREAM:-ha-designs:8080}"
     volumes:
       - caddy_data:/data
       - caddy_config:/config
@@ -754,3 +788,5 @@ volumes:
   preview_config:
   caddy_data:
   caddy_config:
+  # The HA design server's state (its UI Builder state dir, unused without a bundled builder).
+  ha_designs_data:

@@ -70,6 +70,9 @@ public class ServeCommandOptions(
 
   override val discover: Boolean = "--discover" in args
 
+  override val watchSources: Boolean =
+    if (browseProject) "--no-watch" !in args else "--watch" in args
+
   override val allowRenderTrusted: Boolean = "--allow-render-trusted" in args
 
   override val catalogSourceRoot: File? =
@@ -934,6 +937,11 @@ public class ServeCommandOptions(
                           stray `serve` at a repo root can't trigger a full — possibly hanging —
                           module build). Pass --discover to build every module's previews and host
                           one, or --module <path> to scope to a single module.
+        --watch / --no-watch
+                          Rebuild a local module when its sources change and refresh open pages,
+                          as the rebuild button does. On by default for `browse`; `serve` needs
+                          --watch. A Gradle module watches its project directory; a Bazel module
+                          the directories of its targets' sources.
         --bundle <url|path>[, --bundle <name>=<url|path>, …]
                           Serve one or more fetched preview bundles directly — no --module, no
                           build. A URL is fetched at startup (operator-supplied, so no SSRF gate;

@@ -137,7 +137,10 @@ graphics-shapes = "1.1.0"
 # 2.50.0 moves with compose-ui-builder 3.107.0 and contracts 3.30.0 below.
 # 2.55.0 adds the swift-appkit player: `RcPlayerBackend.SWIFT_APPKIT`, `RcSwiftServerRenderer` and
 # `ServeHost.supportsSwiftAppKit` (compose-ai-tools#5921), which the server routes and offers.
-composeai-tools = "2.57.0"
+# 2.60.0 adds `ServeHost.sourcesChanged` (compose-ai-tools#5979), which the local rebuild
+# (`ServeLocalRebuild`, #1682) calls to reload a module's classes in place. 2.60.1, because Maven
+# Central rejected the 2.59.0 and 2.60.0 uploads whole (bundle-producer's POM, compose-ai-tools#5981).
+composeai-tools = "2.60.1"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
 # in that repository's `docs/design/REPOSITORY_LAYERS.md`: between the contracts and
@@ -433,7 +436,8 @@ composeai-contracts = "3.32.0"
 # 3.108.0 renders, edits and validates typed adapters' list and object properties
 # (compose-ui-builder#717) and retires the catalog-cutover shadow comparison (#716), whose server
 # side #1575 already removed. Built on compose-ai-tools 2.49.0; 2.50.0 above wins resolution.
-composeai-ui-builder = "3.114.0"
+# 3.115.0 removes the Remote M3 Kotlin generator (#842); Remote must use its published catalog.
+composeai-ui-builder = "3.115.0"
 # The CMP/Wasm Remote Compose player (yschimke/rc-players' `rc-player-wasm-dist`, a zip of its
 # static browser bundle). Shipped in the server tarball as `rc-player-wasm/`, which the image's
 # entrypoint already passes as `--rc-player-wasm-dir`: that serves `/rc-player-wasm/`, enables the

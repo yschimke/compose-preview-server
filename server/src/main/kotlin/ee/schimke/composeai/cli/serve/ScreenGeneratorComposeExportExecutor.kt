@@ -7,6 +7,8 @@ import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.discovery.ScreenGenerator
 import ee.schimke.composeai.uibuilder.export.CatalogComposeSourceExportAdapter
 import ee.schimke.composeai.uibuilder.export.CatalogComposeSourceExportAdapters
+import ee.schimke.composeai.uibuilder.export.CatalogExportProjections
+import ee.schimke.composeai.uibuilder.export.CatalogScreenStructure
 import ee.schimke.composeai.uibuilder.export.FlexpressVariableFontSources
 import ee.schimke.composeai.uibuilder.export.RecordFreeExport
 import ee.schimke.composeai.uibuilder.export.ScreenDocumentProjection
@@ -95,6 +97,17 @@ internal class ScreenGeneratorComposeExportExecutor(
     require(request.revision == request.document.revision) { "export revision/document mismatch" }
     require(request.document.id == request.designId) { "export design/document mismatch" }
 
+    // A catalog that selects the component-record export and publishes typed export projections
+    // (`exportProjection` on its component policies, a typed catalog such as a pilot) is exported
+    // the way its own repository proves it: through `ScreenExportGate` with those projections and
+    // its screen structure, so each component is written as the real library call its projection
+    // names rather than its record's wrapper. Asked before the record-free emitters, which would
+    // otherwise route a Wear-platform typed catalog to the hand-written Wear screen exporter.
+    // Catalogs publishing no projection, every production catalog among them, keep the paths below.
+    projectedExport(request)?.let {
+      return it
+    }
+
     // Record-free designs (Wear widgets and screens) go through their own emitter first, since
     // `remote-m3` and `wear-m3` have no record and the generator below could only refuse them. Same
     // `RecordFreeExport` entry as the Code pane, so they can't disagree. With [packageName], since
@@ -156,6 +169,41 @@ internal class ScreenGeneratorComposeExportExecutor(
           provenance(request) + generated.assetPlaceholders.commentedNotes() + generated.source,
           generated.assetPlaceholders.map { it.warning() },
         )
+    }
+  }
+
+  /**
+   * [request] exported through its catalog's published export projections, or null when the catalog
+   * does not select the component-record export or publishes no projection. Packs are not joined
+   * here: a typed catalog names its own vocabulary.
+   */
+  private fun projectedExport(request: RevisionPinnedUiBuilderExport): ExportArtifactV1? {
+    val adapter =
+      (CatalogComposeSourceExportAdapters.resolve(request.catalog)
+          as? CatalogComposeSourceExportAdapters.Resolution.Supported)
+        ?.adapter ?: return null
+    if (adapter.id != CatalogComposeSourceExportAdapters.COMPONENT_RECORDS) return null
+    val semantics = request.catalog.statusSemantics
+    val projections = CatalogExportProjections.from(semantics)
+    if (projections.isEmpty()) return null
+    val catalogSystemId = request.document.catalogPin.systemId
+    val record =
+      when (val usable = usableRecord(catalogSystemId)) {
+        is UsableRecord.Found -> resolvableRecord(usable.record, catalogSystemId)
+        is UsableRecord.Refused -> return refused(usable.refusal.code, usable.refusal.reasons)
+      }
+    return when (
+      val outcome =
+        ScreenExportGate.export(
+          request.document,
+          record,
+          projections,
+          CatalogScreenStructure.from(semantics),
+          variableFonts = VariableFontExport(variableFontSources),
+        )
+    ) {
+      is ScreenExportGate.Outcome.Emitted -> emitted(provenance(request) + outcome.source)
+      is ScreenExportGate.Outcome.Refused -> refused(UNPROVEN_CALL_SITE, outcome.reasons)
     }
   }
 
@@ -390,41 +438,10 @@ internal class ScreenGeneratorComposeExportExecutor(
     }
     val catalogSystemId = document.catalogPin.systemId
     val record =
-      when (val lookup = components(catalogSystemId)) {
-        is ComponentRecordSource.Lookup.Found -> lookup.record
-        // Unconfigured and unusable records need different messages; the latter names the path and
-        // the problem.
-        ComponentRecordSource.Lookup.Unconfigured ->
-          return Generated.Refused(
-            NO_COMPONENT_RECORD,
-            listOf(
-              "this host has no discovered component record for catalog `$catalogSystemId`, so " +
-                "no call site can be proven; run a preview bundle for that catalog's module and " +
-                "pass it as `--ui-builder-components $catalogSystemId=<components.json>`"
-            ),
-          )
-        is ComponentRecordSource.Lookup.Unusable ->
-          return Generated.Refused(
-            NO_COMPONENT_RECORD,
-            listOf(
-              "the component record configured for catalog `$catalogSystemId` could not be " +
-                "loaded: ${lookup.reason}"
-            ),
-          )
+      when (val usable = usableRecord(catalogSystemId)) {
+        is UsableRecord.Found -> usable.record
+        is UsableRecord.Refused -> return usable.refusal
       }
-    if (!generatesFrom(record)) {
-      // Version-checked here, where the version can be named; `ScreenGenerator` would report it as
-      // an unproven call site.
-      return Generated.Refused(
-        NO_COMPONENT_RECORD,
-        listOf(
-          "the component record for catalog `$catalogSystemId` is schema " +
-            "${record.schemaVersion}, and this build generates from " +
-            "$COMPONENT_RECORD_OPT_IN_MECHANISM_SCHEMA to $COMPONENT_RECORD_SCHEMA_VERSION; " +
-            "re-run discovery against a matching plugin version"
-        ),
-      )
-    }
     val packRecords =
       when (val packs = packRecordsFor(document)) {
         is PackRecords.Refused -> return Generated.Refused(packs.code, packs.reasons)
@@ -608,16 +625,73 @@ internal class ScreenGeneratorComposeExportExecutor(
   }
 
   /**
+   * The component record a [catalogSystemId] design generates from, or the refusal naming why this
+   * host has none it can use: unconfigured, unloadable (with the path's problem), or on a schema
+   * this build does not generate from. One answer for [generate] and the projected export, so both
+   * tell an operator what to repair.
+   */
+  private fun usableRecord(catalogSystemId: String): UsableRecord {
+    val record =
+      when (val lookup = components(catalogSystemId)) {
+        is ComponentRecordSource.Lookup.Found -> lookup.record
+        // Unconfigured and unusable records need different messages; the latter names the path and
+        // the problem.
+        ComponentRecordSource.Lookup.Unconfigured ->
+          return UsableRecord.Refused(
+            Generated.Refused(
+              NO_COMPONENT_RECORD,
+              listOf(
+                "this host has no discovered component record for catalog `$catalogSystemId`, so " +
+                  "no call site can be proven; run a preview bundle for that catalog's module and " +
+                  "pass it as `--ui-builder-components $catalogSystemId=<components.json>`"
+              ),
+            )
+          )
+        is ComponentRecordSource.Lookup.Unusable ->
+          return UsableRecord.Refused(
+            Generated.Refused(
+              NO_COMPONENT_RECORD,
+              listOf(
+                "the component record configured for catalog `$catalogSystemId` could not be " +
+                  "loaded: ${lookup.reason}"
+              ),
+            )
+          )
+      }
+    if (!generatesFrom(record)) {
+      // Version-checked here, where the version can be named; `ScreenGenerator` would report it as
+      // an unproven call site.
+      return UsableRecord.Refused(
+        Generated.Refused(
+          NO_COMPONENT_RECORD,
+          listOf(
+            "the component record for catalog `$catalogSystemId` is schema " +
+              "${record.schemaVersion}, and this build generates from " +
+              "$COMPONENT_RECORD_OPT_IN_MECHANISM_SCHEMA to $COMPONENT_RECORD_SCHEMA_VERSION; " +
+              "re-run discovery against a matching plugin version"
+          ),
+        )
+      )
+    }
+    return UsableRecord.Found(record)
+  }
+
+  private sealed interface UsableRecord {
+    data class Found(val record: ComponentRecordFile) : UsableRecord
+
+    data class Refused(val refusal: Generated.Refused) : UsableRecord
+  }
+
+  /**
    * The record a [catalogSystemId] design is generated from, or null when this host can't generate
    * for it. Shared with the browser's `ScreenExportGate` (code pane, problems panel) via
    * [installUiBuilderCatalogRecordRoutes][ee.schimke.composeai.cli.serve.installUiBuilderCatalogRecordRoutes],
-   * so the two exporters read one record. Null covers [generate]'s three refusal cases; the
+   * so the two exporters read one record. Null covers [usableRecord]'s three refusal cases; the
    * explanation belongs to the export. Packs are not included (per-document; see [packRecordsFor]).
    */
   fun exportRecord(catalogSystemId: String): ComponentRecordFile? {
-    val record = (components(catalogSystemId) as? ComponentRecordSource.Lookup.Found)?.record
-    if (record == null || !generatesFrom(record)) return null
-    return resolvableRecord(record, catalogSystemId)
+    val usable = usableRecord(catalogSystemId) as? UsableRecord.Found ?: return null
+    return resolvableRecord(usable.record, catalogSystemId)
   }
 
   /**
