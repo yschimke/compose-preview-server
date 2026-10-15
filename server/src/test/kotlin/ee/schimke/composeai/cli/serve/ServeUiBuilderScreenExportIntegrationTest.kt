@@ -189,6 +189,7 @@ class ServeUiBuilderScreenExportIntegrationTest {
                 }
                 .build(),
             composeExportFor = { systemId -> systemId in records.keys },
+            published = mapOf("remote-m3" to PublishedCutoverCatalogs.remote),
           ),
         exporter = ScreenGeneratorComposeExportExecutor(source::record),
       )
