@@ -188,6 +188,8 @@ data class ServeSites(private val byHost: Map<String, String>) {
         "push-sw.js",
         "assets",
         "ui-builder",
+        // Every local module's previews on one page (`ServeWeb.ALL_MODULES_PATH`).
+        "modules",
         // Optional guide redirect (the builder's on its host, the CLI's elsewhere). Reserve it even
         // when neither guide URL is set.
         "start",
