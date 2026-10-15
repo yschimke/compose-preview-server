@@ -3,13 +3,24 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.daemon.protocol.StreamCodec
 import ee.schimke.composeai.daemon.protocol.StreamFrameParams
+import ee.schimke.composeai.previewdata.PreviewModule
 import java.io.File
 import java.nio.file.Files
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -64,7 +75,7 @@ class ServeAllModulesTest {
     return id to dir
   }
 
-  private fun serve(roots: Map<String, File>): ServeHttpServer =
+  private fun serve(roots: Map<String, File>, rebuild: ServeLocalRebuild? = null): ServeHttpServer =
     ServeHttpServer(
         host = "127.0.0.1",
         requestedPort = 0,
@@ -73,6 +84,7 @@ class ServeAllModulesTest {
         defaultSessionId = roots.keys.first(),
         isPublic = false,
         localSourceRoots = roots,
+        localRebuild = rebuild,
       )
       .also {
         it.start()
@@ -106,6 +118,8 @@ class ServeAllModulesTest {
       assertTrue("href=\"/$session/p/$preview?token=$token\"" in page, page.take(4000))
     }
     assertTrue("loading=\"lazy\"" in page)
+    assertFalse("data-reload-url" in page, "nothing to follow without a rebuild")
+    assertEquals(404, get(server, "/modules/reload?token=$token").first)
     assertEquals(301, get(server, "/modules").first.let { if (it == 302) 301 else it })
 
     val (landingCode, landing) = get(server, "/ui/?token=$token")
@@ -119,5 +133,77 @@ class ServeAllModulesTest {
 
     assertEquals(404, get(server, "/modules/").first)
     assertFalse("href=\"/modules/" in get(server, "/ui/").second)
+  }
+
+  /** A rebuild whose compile is [compile]; it never reaches a manifest, so only failures show. */
+  private fun rebuild(roots: Map<String, File>, compile: () -> Boolean = { false }) =
+    ServeLocalRebuild(
+      registry = registry,
+      modules = roots.mapValues { (id, dir) -> PreviewModule(id, dir) },
+      compile = { compile() },
+      previewsOf = { _, manifest -> manifest.previews.map { ServePreview(it.id, it.id) } },
+    )
+
+  @Test
+  fun `the page follows edits to every module over one long poll`() {
+    val roots = mapOf(module("ui", "UI", "Button"), module("feature", "Feature", "Login"))
+    val rebuild = rebuild(roots)
+    val server = serve(roots, rebuild)
+
+    val (_, page) = get(server, "/modules/?token=$token")
+    assertTrue("data-reload-url=\"/modules/reload?token=$token\"" in page, page.take(4000))
+    for (session in listOf("ui", "feature")) {
+      assertTrue("data-session=\"$session\"" in page, page.take(4000))
+    }
+    assertTrue("cp-rebuild-status" in page)
+
+    fun reload(after: Long): Map<String, Long> {
+      val (code, body) = get(server, "/modules/reload?after=$after&token=$token")
+      assertEquals(200, code, body)
+      val json = Json.parseToJsonElement(body).jsonObject
+      return json.getValue("modules").jsonObject.mapValues { (_, state) ->
+        state.jsonObject.getValue("version").jsonPrimitive.long
+      } + ("" to json.getValue("version").jsonPrimitive.long)
+    }
+    assertEquals(mapOf("ui" to 0L, "feature" to 0L, "" to 0L), reload(after = -1))
+
+    rebuild.rebuild("feature")
+    val (_, body) = get(server, "/modules/reload?after=0&token=$token")
+    assertTrue("\"status\":\"failed\"" in body, body)
+    assertEquals(mapOf("ui" to 0L, "feature" to 2L, "" to 2L), reload(after = 0))
+  }
+
+  @Test
+  fun `a wait on every module returns when any one of them moves`() = runBlocking {
+    val roots = mapOf(module("ui", "UI", "Button"), module("feature", "Feature", "Login"))
+    val release = CountDownLatch(1)
+    val rebuild = rebuild(roots) { release.await(10, TimeUnit.SECONDS) }
+
+    val idle = rebuild.awaitReloadStates(roots.keys, afterVersion = 0, timeoutMillis = 50)
+    assertEquals(setOf("ui", "feature"), idle?.keys, "nothing new times out with every state")
+    assertEquals(null, rebuild.awaitReloadStates(listOf("compose-m3"), -1, 50))
+
+    val waiting = async {
+      rebuild.awaitReloadStates(roots.keys, afterVersion = 0, timeoutMillis = 10_000)
+    }
+    val pool = Executors.newSingleThreadExecutor()
+    try {
+      val done = pool.submit<LocalRebuildResult> { rebuild.rebuild("ui") }
+      val states = assertNotNull(waiting.await())
+      assertTrue(states.getValue("ui").building, "$states")
+      assertEquals(0, states.getValue("feature").version)
+      release.countDown()
+      done.get(10, TimeUnit.SECONDS)
+    } finally {
+      release.countDown()
+      pool.shutdownNow()
+    }
+  }
+
+  @Test
+  fun `browse opens every module on one page when it opened several`() {
+    assertEquals("/modules/", browseOpenPath("/", localModules = 3))
+    assertEquals("/", browseOpenPath("/", localModules = 1))
+    assertEquals("/ui-builder/", browseOpenPath("/ui-builder/", localModules = 3))
   }
 }

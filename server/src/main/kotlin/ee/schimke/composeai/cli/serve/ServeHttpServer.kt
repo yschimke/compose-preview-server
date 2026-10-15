@@ -130,6 +130,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 
 /** The query values a create link carries into the design's permalink: identity, never content. */
 private val UI_BUILDER_IDENTITY_QUERY =
@@ -2394,6 +2395,7 @@ class ServeHttpServer(
         // [ServeWeb.ALL_MODULES_PATH], spelled out so the reserved-route check can read it.
         get("/modules") { call.respondRedirect("/modules/" + requestQuerySuffix()) }
         get("/modules/") { handleAllModules() }
+        get("/modules/reload") { handleAllModulesReload() }
 
         post("/rebuild") { handleLocalRebuild(sessionInPath = false) }
         post("/{system}/rebuild") { handleLocalRebuild(sessionInPath = true) }
@@ -7198,10 +7200,54 @@ class ServeHttpServer(
       return
     }
     markGeneration("static-page", pageCacheControl())
+    val followsEdits = sections.any { localRebuild?.canRebuild(it.sessionId) == true }
     call.respondText(
-      ServeWeb.allModulesPage(sections, linkToken(), SERVE_VERSION),
+      ServeWeb.allModulesPage(
+        sections,
+        linkToken(),
+        SERVE_VERSION,
+        reloadUrl =
+          if (followsEdits) "/${ServeWeb.ALL_MODULES_PATH}/reload${requestQuerySuffix()}" else null,
+      ),
       ContentType.Text.Html,
     )
+  }
+
+  /**
+   * `GET /modules/reload?after=<version>`: every local module's [LocalReloadState] in one long
+   * poll, held until the sum of their versions passes `after` or [RELOAD_POLL_MILLIS] go by. The
+   * all-modules page waits on it, so the page follows edits to any module with one connection
+   * rather than one per module (a browser allows only six to a host). 404 when no local module can
+   * rebuild.
+   */
+  private suspend fun RoutingContext.handleAllModulesReload() {
+    if (rejectBadToken()) return
+    val after = call.request.queryParameters["after"]?.toLongOrNull() ?: -1
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    val states = localRebuild?.awaitReloadStates(localSourceRoots.keys, after, RELOAD_POLL_MILLIS)
+    if (states == null) {
+      call.respondText(
+        "{\"status\":\"unavailable\"}",
+        ContentType.Application.Json,
+        HttpStatusCode.NotFound,
+      )
+      return
+    }
+    val body = buildJsonObject {
+      put("version", states.values.sumOf { it.version })
+      putJsonObject("modules") {
+        for ((sessionId, state) in states) {
+          putJsonObject(sessionId) {
+            put("version", state.version)
+            put("generation", state.generation)
+            put("building", state.building)
+            state.status?.let { put("status", it) }
+            state.reason?.let { put("reason", it) }
+          }
+        }
+      }
+    }
+    call.respondText(body.toString(), ContentType.Application.Json)
   }
 
   /**

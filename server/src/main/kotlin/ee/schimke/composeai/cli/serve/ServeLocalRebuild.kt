@@ -7,6 +7,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withTimeoutOrNull
@@ -100,6 +101,28 @@ class ServeLocalRebuild(
     val state = stateOf(sessionId) ?: return null
     return withTimeoutOrNull(timeoutMillis) { state.first { it.version > afterVersion } }
       ?: state.value
+  }
+
+  /**
+   * The reload states of every local session among [sessionIds], once the sum of their versions
+   * passes [afterVersion], or as they stand after [timeoutMillis] with nothing new: the long poll
+   * behind `GET /modules/reload`. A version only grows, so the sum moves whenever any session's
+   * does, and one poll serves a page showing every module. Null when none of them is local.
+   */
+  suspend fun awaitReloadStates(
+    sessionIds: Collection<String>,
+    afterVersion: Long,
+    timeoutMillis: Long,
+  ): Map<String, LocalReloadState>? {
+    val flows = sessionIds.mapNotNull { id -> stateOf(id)?.let { id to it } }
+    if (flows.isEmpty()) return null
+    val ids = flows.map { it.first }
+    val states =
+      withTimeoutOrNull(timeoutMillis) {
+        combine(flows.map { it.second }) { it.toList() }
+          .first { all -> all.sumOf { it.version } > afterVersion }
+      } ?: flows.map { it.second.value }
+    return ids.zip(states).toMap()
   }
 
   private fun stateOf(sessionId: String): MutableStateFlow<LocalReloadState>? =
