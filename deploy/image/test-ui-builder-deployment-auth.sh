@@ -8,16 +8,16 @@ compose="${COMPOSE_FILE_UNDER_TEST:-${here}/docker-compose.yml}"
 entrypoint="${ENTRYPOINT_FILE:-${here}/entrypoint.sh}"
 example="${ENV_EXAMPLE_FILE:-${here}/.env.example}"
 
-# The three UI-builder capabilities are unconditional — the image always packages that lane. The
+# The four UI-builder capabilities are unconditional — the image always packages that lane. The
 # `images` half is conditional on the upload repo being named, because the server refuses to start
 # when the capability is offered without the lane; `test-agent-grant-image-capability.sh` owns that
 # half. Written as one literal because that is how the entrypoint reads it.
-expected_capabilities='ui-builder-read,ui-builder-write,ui-builder-export${SERVE_IMAGE_UPLOAD_REPO:+,images}'
+expected_capabilities='ui-builder-read,ui-builder-write,ui-builder-export,ui-builder-destructive${SERVE_IMAGE_UPLOAD_REPO:+,images}'
 
 grep -Fq \
   ": \"\${SERVE_AGENT_GRANT_CAPABILITIES:=${expected_capabilities}}\"" \
   "${entrypoint}" || {
-  echo "FAIL: the entrypoint does not offer the three UI-builder grant capabilities by default" >&2
+  echo "FAIL: the entrypoint does not offer the four UI-builder grant capabilities by default" >&2
   exit 1
 }
 
