@@ -96,6 +96,7 @@ class ServeAgentGrantsTest {
             AgentGrantCapability.UI_BUILDER_READ,
             AgentGrantCapability.UI_BUILDER_WRITE,
             AgentGrantCapability.UI_BUILDER_EXPORT,
+            AgentGrantCapability.UI_BUILDER_DESTRUCTIVE,
           ),
         opensUiBuilder = true,
       )
