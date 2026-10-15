@@ -47,6 +47,12 @@ class ServeBundleHost(
    */
   val isCatalog: Boolean = false,
   /**
+   * The themes a published catalog declares in `catalog.json` (`themes[]`), each with the named
+   * colours that apply it to a replayed document ([ServeThemeReplay.colorsFromDtcg]). A published
+   * catalog stages no `previews.json`, so this is where its Theme control comes from.
+   */
+  private val catalogThemes: List<CatalogTheme> = emptyList(),
+  /**
    * Display title from `catalog.json`'s `title`; null for a plain bundle. Shown on the home index
    * cards.
    */
@@ -709,13 +715,14 @@ class ServeBundleHost(
   }
 
   /**
-   * App-declared `@ThemeCatalog` themes from `previews.json`. A static bundle can't apply a
-   * `themeProvider`, so the viewer shows them as a disabled, informational list. Empty without a
-   * manifest.
+   * App-declared `@ThemeCatalog` themes from `previews.json`, or a published catalog's
+   * [catalogThemes] when there is no manifest. A static bundle can't apply a `themeProvider`; a
+   * replayed preview can still be shown under a theme it has [themeReplayColors] for, and the
+   * viewer lists the rest as disabled and informational.
    */
   override val declaredThemes: List<ServeTheme> = run {
     val previewsJson = File(bundleDir, PREVIEWS_JSON).toOkioPath()
-    if (!fileSystem.exists(previewsJson)) return@run emptyList()
+    if (!fileSystem.exists(previewsJson)) return@run catalogThemes.map { it.theme }
     try {
       val text = fileSystem.read(previewsJson) { readUtf8() }
       val manifest =
@@ -728,6 +735,9 @@ class ServeBundleHost(
       emptyList()
     }
   }
+
+  override fun themeReplayColors(providerFqn: String): Map<String, String> =
+    catalogThemes.firstOrNull { it.theme.providerFqn == providerFqn }?.replayColors.orEmpty()
 
   /**
    * Editable knobs from `previews/<id>.overrides.json`; absent → none. Shown as disabled controls
@@ -1724,3 +1734,6 @@ internal class BundleGuidelineResults(private val results: ServeGuidelineResults
 internal fun bundleSafeId(id: String): String = buildString {
   for (c in id) append(if (c.isLetterOrDigit() || c == '.' || c == '_' || c == '-') c else '_')
 }
+
+/** A theme a published catalog declares, with the named colours that apply it to a replay. */
+data class CatalogTheme(val theme: ServeTheme, val replayColors: Map<String, String>)

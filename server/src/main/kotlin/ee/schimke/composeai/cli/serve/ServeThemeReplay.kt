@@ -1,5 +1,10 @@
 package ee.schimke.composeai.cli.serve
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+
 /**
  * Applying a declared `@ThemeCatalog` theme to a preview that is **replayed** from a captured
  * Remote Compose document rather than recomposed.
@@ -22,6 +27,33 @@ internal object ServeThemeReplay {
 
   /** The query/message key carrying a declared theme's provider FQN. */
   const val THEME_PROVIDER_PARAM: String = "themeProvider"
+
+  /** Remote Material 3's namespace for the named colours its scheme writes into a document. */
+  const val WEAR_M3_NAMESPACE: String = "WearM3"
+
+  private val CSS_HEX = Regex("^#([0-9A-Fa-f]{6})([0-9A-Fa-f]{2})?$")
+
+  /**
+   * A published theme's colour tokens as the named values a replayed Remote Material 3 document
+   * carries: `WearM3.<role>` → `#AARRGGBB`, from a DTCG token file's `color.<role>.$value`
+   * (`#rrggbb` / `#rrggbbaa`, the form the export writes).
+   *
+   * The roles are taken as they are named: a Wear theme's are exactly the `WearM3` names, and a
+   * document only changes the names it actually draws through, so a role it lacks is inert. Empty
+   * on anything unparseable, which keeps the theme refused rather than half-applied.
+   */
+  fun colorsFromDtcg(text: String): Map<String, String> {
+    val root = runCatching { Json.parseToJsonElement(text) }.getOrNull() as? JsonObject
+    val color = root?.get("color") as? JsonObject ?: return emptyMap()
+    return buildMap {
+      for ((role, token) in color) {
+        val value = ((token as? JsonObject)?.get("\$value") as? JsonPrimitive)?.contentOrNull
+        val match = value?.let { CSS_HEX.matchEntire(it.trim()) } ?: continue
+        val (rgb, alpha) = match.destructured
+        put("$WEAR_M3_NAMESPACE.$role", "#${alpha.ifEmpty { "FF" }}$rgb".uppercase())
+      }
+    }
+  }
 
   /**
    * [params] after [expand], plus the provider it consumed (null when it expanded nothing).

@@ -808,6 +808,7 @@ class ServeCatalogStore(
     // The catalog's own palette for page chrome ([ServeThemeCss]). Best-effort: any failure leaves
     // the built-in chrome.
     val webThemeCss = fetchWebThemeCss(catalog.tokensFile, base)
+    val catalogThemes = fetchCatalogThemes(catalog.themes, base)
 
     // The static baked-PNG host is always the browse surface; a live builder fronts it with a
     // daemon rather than replacing it, so `/p/<id>` links keep resolving. Built lazily so the
@@ -833,6 +834,7 @@ class ServeCatalogStore(
           // The one construction site with a `catalog.json` behind it. See
           // [ServeBundleHost.isCatalog].
           isCatalog = true,
+          catalogThemes = catalogThemes,
           title = catalog.title?.takeIf { it.isNotBlank() },
           subtitle =
             catalog.library.filter { it.isNotBlank() }.take(2).joinToString(" · ").ifBlank { null },
@@ -2849,6 +2851,42 @@ class ServeCatalogStore(
   }
 
   /**
+   * The catalog's declared themes, each with the named colours its token file maps onto a replayed
+   * document ([ServeThemeReplay.colorsFromDtcg]). Best-effort per theme: one whose file is missing
+   * or unreadable is still listed, with no colours, so the Theme control shows it as unavailable
+   * rather than dropping it.
+   */
+  private fun fetchCatalogThemes(
+    themes: List<CatalogManifestTheme>,
+    base: String,
+  ): List<CatalogTheme> =
+    themes
+      .filter { it.id.isNotBlank() }
+      .distinctBy { it.id }
+      .map { entry ->
+        val name = entry.name?.takeIf { it.isNotBlank() } ?: entry.id.substringAfterLast('.')
+        val colors =
+          entry.tokensFile
+            ?.trim()
+            ?.takeIf { isBranchRelative(it) }
+            ?.let { path -> runCatching { fetchCatalogAsset(base + path) }.getOrNull() }
+            ?.let { ServeThemeReplay.colorsFromDtcg(it.decodeToString()) }
+            .orEmpty()
+        val group = entry.group?.takeIf { it.isNotBlank() }
+        // `dark` is the export's own judgement of the theme's surface; absent, the name decides.
+        val theme =
+          when (val dark = entry.dark) {
+            null -> ServeTheme(name, entry.id, group)
+            else -> ServeTheme(name, entry.id, group, if (dark) "dark" else "light")
+          }
+        CatalogTheme(theme, colors)
+      }
+
+  /** Branch-relative only: a garbled or hostile path must not leave the catalog or the host. */
+  private fun isBranchRelative(path: String): Boolean =
+    path.isNotBlank() && !path.startsWith("/") && "://" !in path && ".." !in path.split("/")
+
+  /**
    * The catalog's design tokens projected onto serve chrome ([ServeThemeCss]), or null on any
    * failure, in which case pages use the built-in chrome.
    */
@@ -2860,6 +2898,16 @@ class ServeCatalogStore(
     val bytes = runCatching { fetchCatalogAsset(base + path) }.getOrNull() ?: return null
     return runCatching { ServeThemeCss.fromDtcg(bytes.decodeToString()) }.getOrNull()
   }
+
+  /** One `catalog.json` `themes[]` entry: a declared theme, keyed by its provider FQN. */
+  @Serializable
+  private data class CatalogManifestTheme(
+    val id: String = "",
+    val name: String? = null,
+    val group: String? = null,
+    val dark: Boolean? = null,
+    val tokensFile: String? = null,
+  )
 
   /** Minimal mirror of the `design-parity-catalog/v1` schema: only the fields we serve. */
   @Serializable
@@ -2898,6 +2946,11 @@ class ServeCatalogStore(
      * when none is published.
      */
     val tokensFile: String? = null,
+    /**
+     * The themes the catalog declares (`@ThemeCatalog` / `@WearThemeCatalog` providers), each with
+     * a branch-relative DTCG token file; read by [fetchCatalogThemes].
+     */
+    val themes: List<CatalogManifestTheme> = emptyList(),
     /**
      * Branch-relative component record (`components.json`), staged by [writeComponentRecord] for
      * UI-builder packs and export. May instead come from the live bundle
