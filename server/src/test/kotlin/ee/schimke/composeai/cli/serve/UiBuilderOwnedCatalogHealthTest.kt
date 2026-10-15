@@ -134,15 +134,16 @@ class UiBuilderOwnedCatalogHealthTest {
 
   @Test
   fun `an unowned built-in catalog still falls back to its built-in definition`() {
-    assertFalse(wired.withhold("wear-m3", "no published ui-builder.json could be read"))
+    assertFalse(wired.withhold("m3-catalog", "no published ui-builder.json could be read"))
 
-    assertFalse(wired.isWithheld("wear-m3"))
+    assertFalse(wired.isWithheld("m3-catalog"))
     assertTrue(logged.isEmpty(), logged.toString())
   }
 
   @Test
   fun `the built-in set names only what compose-ui-builder still defines in Kotlin`() {
-    assertEquals(setOf("m3-catalog", "wear-m3"), UI_BUILDER_BUILT_IN_CATALOGS)
+    assertEquals(setOf("m3-catalog"), UI_BUILDER_BUILT_IN_CATALOGS)
     assertTrue(wired.withhold("remote-m3", "no published ui-builder.json could be read"))
+    assertTrue(wired.withhold("wear-m3", "no published ui-builder.json could be read"))
   }
 }

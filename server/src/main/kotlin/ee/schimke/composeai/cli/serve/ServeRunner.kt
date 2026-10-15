@@ -5364,12 +5364,10 @@ public class ServeRunner(
 }
 
 /**
- * The builder definitions that can serve without published files. Remote must publish its
- * capability and record once the server pins the builder release that removed its generator; Wear
- * follows in its own release bump.
+ * The builder definitions that can serve without published files. Remote and Wear must publish
+ * their capability and record because builder 3.115.0 removed their Kotlin generators.
  */
 internal val UI_BUILDER_BUILT_IN_CATALOGS: Set<String> =
   setOf(
     CurrentM3UiBuilderCatalogExecutor.DEFAULT_CATALOG_SYSTEM_ID,
-    CurrentM3UiBuilderCatalogExecutor.WEAR_M3_CATALOG_SYSTEM_ID,
   )
