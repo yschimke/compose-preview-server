@@ -3853,7 +3853,7 @@ public class ServeRunner(
     catalogRegistrySync?.start()
     onStarted()
     printBanner(bannerLabel, server.port, token, bannerPreviewCount)
-    if (openBrowser) openBrowser(server.port, token)
+    if (openBrowser) openBrowser(server.port, token, openPathFor(localSourceRoots.size))
     val watchdog = if (exitWhenIdle) startIdleWatchdog(registry, done) else null
     done.await()
     watchdog?.shutdownNow()
@@ -3932,10 +3932,13 @@ public class ServeRunner(
       .getOrNull()
   }
 
-  private fun openBrowser(port: Int, token: String) {
+  private fun openPathFor(localModules: Int): String =
+    browseOpenPath(effectiveOpenPath, localModules)
+
+  private fun openBrowser(port: Int, token: String, path: String) {
     val localHost =
       if (ServeUrls.isExposed(host) || host == ServeUrls.LOOPBACK) ServeUrls.LOOPBACK else host
-    val url = localUrlFor(localHost, port, token, effectiveOpenPath)
+    val url = localUrlFor(localHost, port, token, path)
     val opened = runCatching {
       if (!Desktop.isDesktopSupported()) return@runCatching false
       val desktop = Desktop.getDesktop()
@@ -3949,11 +3952,7 @@ public class ServeRunner(
       // supplied token stays out of the log, as in [ServeBanner].
       val shown =
         if (public || tokenOverride == null) url
-        else
-          ServeUrls.origin(localHost, port) +
-            effectiveOpenPath +
-            "?token=" +
-            ServeBanner.redact(token)
+        else ServeUrls.origin(localHost, port) + path + "?token=" + ServeBanner.redact(token)
       System.err.println("browse: could not open a desktop browser; open $shown")
     }
   }
@@ -5369,3 +5368,11 @@ public class ServeRunner(
  */
 internal val UI_BUILDER_BUILT_IN_CATALOGS: Set<String> =
   setOf(CurrentM3UiBuilderCatalogExecutor.DEFAULT_CATALOG_SYSTEM_ID)
+
+/**
+ * The page `--open-browser` opens: [configured], except that a `browse` over two or more local
+ * modules opens them all on one page (`/modules/`) rather than the front door's list of them. Any
+ * other configured page (`--open-path`, the builder) is kept.
+ */
+internal fun browseOpenPath(configured: String, localModules: Int): String =
+  if (localModules >= 2 && configured == "/") "/${ServeWeb.ALL_MODULES_PATH}/" else configured

@@ -5855,11 +5855,16 @@ ${captureControlsHtml().prependIndent("          ")}
    * reads as one. Each module keeps its own session: a section's cards render from that module's
    * daemon, exactly as on its own page, and open its own viewer. Thumbnails load lazily, so a
    * module's daemon starts only once its section is scrolled to.
+   *
+   * With [reloadUrl] (`GET /modules/reload`) the page follows edits as each module's own page does
+   * ([allModulesReloadScript]): a section shows its module's build status and refetches only its
+   * own images.
    */
   fun allModulesPage(
     sections: List<ModuleSection>,
     token: String,
     version: String? = null,
+    reloadUrl: String? = null,
   ): String {
     val tokenParam = if (token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
     val suffix = querySuffix(tokenParam)
@@ -5874,11 +5879,16 @@ ${captureControlsHtml().prependIndent("          ")}
         val base = "/" + WebEscaping.urlEncodeSegment(section.sessionId)
         val label = WebEscaping.htmlEscape(section.label)
         append(
-          "<section class=\"cp-all-module\" id=\"module-${WebEscaping.htmlEscape(section.sessionId)}\">\n"
+          "<section class=\"cp-all-module\" id=\"module-${WebEscaping.htmlEscape(section.sessionId)}\" " +
+            "data-session=\"${WebEscaping.htmlEscape(section.sessionId)}\">\n"
         )
         append(
           "<h2 class=\"cp-all-module-head\"><a href=\"$base/$suffix\">$label</a> " +
-            "<span class=\"cp-sub\">${counted(section.previews.size, "preview(s)")}</span></h2>\n"
+            "<span class=\"cp-sub\">${counted(section.previews.size, "preview(s)")}</span>" +
+            (if (reloadUrl != null)
+              " <span class=\"cp-sub cp-rebuild-status\" role=\"status\" aria-live=\"polite\"></span>"
+            else "") +
+            "</h2>\n"
         )
         append("<div class=\"cp-grid\">\n")
         for (preview in section.previews) {
@@ -5894,6 +5904,7 @@ ${captureControlsHtml().prependIndent("          ")}
         }
         append("</div>\n</section>\n")
       }
+      reloadUrl?.let { append(allModulesReloadScript(it)) }
     }
     return document(
       title = "All modules — compose-preview",
@@ -5903,6 +5914,74 @@ ${captureControlsHtml().prependIndent("          ")}
       version = version,
     )
   }
+
+  /**
+   * [allModulesPage]'s half of edit-reload: [localReloadScript] for every module at once, over one
+   * long poll of [reloadUrl] (`GET /modules/reload`), since a browser holds only six connections to
+   * a host and a poll per module would starve the thumbnails. Each section shows its own module's
+   * "building…" or `stale:` status. When a module's classes change, only that section's images are
+   * refetched; when its daemon restarted (its preview set may have changed), the page reloads.
+   */
+  internal fun allModulesReloadScript(reloadUrl: String): String =
+    "<script data-reload-url=\"${WebEscaping.htmlEscape(reloadUrl)}\">\n" +
+      """
+      (() => {
+        const script = document.currentScript;
+        const reloadUrl = script && script.dataset.reloadUrl;
+        if (!reloadUrl) return;
+        const sections = new Map();
+        for (const section of document.querySelectorAll('section[data-session]')) {
+          sections.set(section.dataset.session, section);
+        }
+        const show = (section, state) => {
+          const status = section.querySelector('.cp-rebuild-status');
+          if (!status) return;
+          status.textContent = state.building ? 'building…' :
+            state.status === 'failed' ? 'stale: ' + (state.reason || 'build failed') : '';
+        };
+        const refreshImages = (section, generation) => {
+          for (const image of section.querySelectorAll('img[src]')) {
+            const src = new URL(image.getAttribute('src'), window.location.href);
+            if (src.origin !== window.location.origin) continue;
+            src.searchParams.set('reload', String(generation));
+            image.src = src.toString();
+          }
+        };
+        (async () => {
+          let version = -1;
+          const generations = new Map();
+          for (;;) {
+            try {
+              const url = new URL(reloadUrl, window.location.href);
+              url.searchParams.set('after', String(version));
+              const response = await fetch(url, { cache: 'no-store' });
+              if (response.status === 404) return;
+              const result = await response.json();
+              for (const [session, state] of Object.entries(result.modules || {})) {
+                const section = sections.get(session);
+                if (!section) continue;
+                const seen = generations.get(session);
+                if (seen !== undefined && state.generation !== seen) {
+                  if (state.status === 'restarted') {
+                    window.location.reload();
+                    return;
+                  }
+                  refreshImages(section, state.generation);
+                }
+                generations.set(session, state.generation);
+                if (state.version > 0) show(section, state);
+              }
+              version = result.version;
+            } catch (_) {
+              // The server restarted or the network dropped: try again shortly.
+              await new Promise((resolve) => setTimeout(resolve, 5000));
+            }
+          }
+        })();
+      })();
+      """
+        .trimIndent() +
+      "\n</script>\n"
 
   /**
    * The header bar's collapsed search: a `⌕` button and the field it expands. The field is rendered
