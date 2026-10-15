@@ -1988,10 +1988,11 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
-   * The Rebuild pill for a local session: `POST`s [url], then reloads the page when the edit
-   * reached the daemon, or says why not (a failed build keeps the last good renders).
+   * The Rebuild pill for a local session. It `POST`s [url]; what the page then shows comes from
+   * [localReloadScript] following [reloadUrl], which hears every rebuild of this session, whoever
+   * started it. Without [reloadUrl] a successful rebuild reloads the page itself.
    */
-  private fun rebuildControl(url: String): String =
+  private fun rebuildControl(url: String, reloadUrl: String?): String =
     "<button type=\"button\" class=\"cp-drawer-toggle cp-axis-toggle cp-rebuild\" " +
       "data-rebuild-url=\"${WebEscaping.htmlEscape(url)}\" " +
       "title=\"Recompile this module after an edit and show the result\">rebuild</button>" +
@@ -2002,6 +2003,7 @@ ${captureControlsHtml().prependIndent("          ")}
         const button = document.querySelector('.cp-rebuild');
         if (!button) return;
         const status = document.querySelector('.cp-rebuild-status');
+        const followed = ${reloadUrl != null};
         button.addEventListener('click', async () => {
           button.disabled = true;
           status.textContent = 'building…';
@@ -2009,12 +2011,14 @@ ${captureControlsHtml().prependIndent("          ")}
             const response = await fetch(button.dataset.rebuildUrl, { method: 'POST' });
             const result = await response.json();
             if (result.status === 'reloaded' || result.status === 'restarted') {
-              status.textContent = 'rebuilt';
-              window.location.reload();
-              return;
+              if (!followed) {
+                window.location.reload();
+                return;
+              }
+            } else {
+              status.textContent = result.status === 'busy' ? 'build in progress' :
+                'stale: ' + (result.reason || 'build failed');
             }
-            status.textContent = result.status === 'busy' ? 'build in progress' :
-              (result.reason || 'build failed');
           } catch (_) {
             status.textContent = 'build failed';
           }
@@ -2024,7 +2028,72 @@ ${captureControlsHtml().prependIndent("          ")}
       </script>
       """
         .trimIndent() +
-      "\n"
+      "\n" +
+      (reloadUrl?.let(::localReloadScript) ?: "")
+
+  /**
+   * The page's half of edit-reload for a local session: follows [reloadUrl] (`GET
+   * /{session}/reload`, a long poll) and shows each rebuild. "building…" while one runs, in the
+   * rebuild control's status when the page has one. When the daemon reloaded its classes, every
+   * server-rendered image is refetched in place; when it restarted (the preview set may have
+   * changed), or the page holds images it assembled itself (a theme preview's object URL, which a
+   * query cannot refresh), the page reloads, and the URL and storage keep its theme and overrides.
+   * A failed build shows `stale:` with the reason and keeps the last good renders.
+   */
+  internal fun localReloadScript(reloadUrl: String): String =
+    "<script data-reload-url=\"${WebEscaping.htmlEscape(reloadUrl)}\">\n" +
+      """
+      (() => {
+        const script = document.currentScript;
+        const reloadUrl = script && script.dataset.reloadUrl;
+        if (!reloadUrl) return;
+        const show = (result) => {
+          const status = document.querySelector('.cp-rebuild-status');
+          if (!status) return;
+          status.textContent = result.building ? 'building…' :
+            result.status === 'failed' ? 'stale: ' + (result.reason || 'build failed') : '';
+        };
+        // True when every image is one a URL can refresh: same-origin http(s), not an object URL.
+        const refreshImages = (generation) => {
+          const images = [];
+          for (const image of document.querySelectorAll('img[src]')) {
+            const src = new URL(image.getAttribute('src'), window.location.href);
+            if (src.protocol === 'blob:' || src.protocol === 'data:') return false;
+            if (src.origin !== window.location.origin) continue;
+            src.searchParams.set('reload', String(generation));
+            images.push([image, src.toString()]);
+          }
+          for (const [image, src] of images) image.src = src;
+          return true;
+        };
+        (async () => {
+          let version = -1;
+          let generation = null;
+          for (;;) {
+            try {
+              const url = new URL(reloadUrl, window.location.href);
+              url.searchParams.set('after', String(version));
+              const response = await fetch(url, { cache: 'no-store' });
+              if (response.status === 404) return;
+              const result = await response.json();
+              if (generation !== null && result.generation !== generation &&
+                  (result.status === 'restarted' || !refreshImages(result.generation))) {
+                window.location.reload();
+                return;
+              }
+              version = result.version;
+              generation = result.generation;
+              if (version > 0) show(result);
+            } catch (_) {
+              // The server restarted or the network dropped: try again shortly.
+              await new Promise((resolve) => setTimeout(resolve, 5000));
+            }
+          }
+        })();
+      })();
+      """
+        .trimIndent() +
+      "\n</script>\n"
 
   private fun provenanceRefreshScript(): String =
     """
@@ -10510,6 +10579,12 @@ ${captureControlsHtml().prependIndent("          ")}
      */
     rebuildUrl: String? = null,
     /**
+     * Long-poll URL of the same session's reload state (`/{session}/reload`), which the page
+     * follows to show a rebuild started by the source watcher or another tab. Null without
+     * [rebuildUrl].
+     */
+    reloadUrl: String? = null,
+    /**
      * `/playground?catalog=<system>`, opening the playground with this design system preselected.
      * Null when the host has no playground lane.
      */
@@ -11149,7 +11224,7 @@ ${captureControlsHtml().prependIndent("          ")}
     // viewer's title row) with the filter field taking the remaining width, one sticky row on every
     // viewport.
     val headToggles =
-      (themeToggle + primaryActions + (rebuildUrl?.let(::rebuildControl) ?: ""))
+      (themeToggle + primaryActions + (rebuildUrl?.let { rebuildControl(it, reloadUrl) } ?: ""))
         .takeIf { it.isNotBlank() }
         ?.let { "<div class=\"cp-head-toggles\">\n$it</div>\n" } ?: ""
     // The toolbar row exists for the filter. When the filter lives elsewhere (browser mode, or a
@@ -14299,6 +14374,11 @@ ${scriptTag("known-differences.js")}
      * ([navDrawerHtml]). The default `{ null }` keeps plain render URLs for fixture goldens.
      */
     navThumbHash: (String) -> String? = { null },
+    /**
+     * A local session's reload state (`/{session}/reload`): the viewer follows it so an edit
+     * reaches an open preview ([localReloadScript]). Null for every other session.
+     */
+    reloadUrl: String? = null,
   ): String {
     // A samples catalog drops every comparison lane, since a sample is not a rendition of a
     // reference ([PageRole.SAMPLES]). Shadowed here so nothing below can read a comparison input.
@@ -16044,7 +16124,8 @@ ${scriptTag("known-differences.js")}
       """
         .trimIndent()
         .lineSequence()
-        .joinToString("\n") { it.trimEnd() }
+        .joinToString("\n") { it.trimEnd() } +
+        (reloadUrl?.let { "\n" + localReloadScript(it) } ?: "")
     return document(
       changelogHref = changelogHref,
       title = "$displayName — compose-preview",
