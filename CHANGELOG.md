@@ -1,5 +1,34 @@
 # Changelog
 
+## [3.140.0](https://github.com/yschimke/compose-preview-server/compare/v3.139.0...v3.140.0) (2026-10-15)
+
+
+### Features
+
+* **catalogs:** offer a published catalog's declared themes, applied to replayed documents ([#1689](https://github.com/yschimke/compose-preview-server/issues/1689)) ([f757584](https://github.com/yschimke/compose-preview-server/commit/f7575846aa57446cce548479d9b59733469d72d8))
+* **deploy:** offer only ha-cards in the Home Assistant card designer, catalog under ha.coo.ee ([#1669](https://github.com/yschimke/compose-preview-server/issues/1669)) ([d760df0](https://github.com/yschimke/compose-preview-server/commit/d760df0a6b3cd38ec5e5d1ba800d0167f7a10f5b))
+* **deploy:** serve ha.coo.ee from the committed edge, split between the HA design server and the preview server ([#1680](https://github.com/yschimke/compose-preview-server/issues/1680)) ([218d7ea](https://github.com/yschimke/compose-preview-server/commit/218d7ea0d23c6097f9809c055921ffb9205fac05))
+* rebuild a local module after an edit without restarting ([#1682](https://github.com/yschimke/compose-preview-server/issues/1682)) ([0d29cf7](https://github.com/yschimke/compose-preview-server/commit/0d29cf78427c6d5076593538e6924ca7ede7ff52))
+* rebuild a local module when its sources change and refresh open pages ([#1684](https://github.com/yschimke/compose-preview-server/issues/1684)) ([4296f80](https://github.com/yschimke/compose-preview-server/commit/4296f8075333d26d0062ab23e4b1a3629fe7b621))
+* **serve:** /start on the catalog host redirects to a CLI guide ([#1665](https://github.com/yschimke/compose-preview-server/issues/1665)) ([3477732](https://github.com/yschimke/compose-preview-server/commit/3477732d1305a37d51a27f1a56e0fc2b1424a60d))
+* show every local module's previews on one page ([#1690](https://github.com/yschimke/compose-preview-server/issues/1690)) ([ece0909](https://github.com/yschimke/compose-preview-server/commit/ece09092b1689e95a2b68e4f1ef97aff93eb14b0))
+* **ui-builder:** A/B export report for the typed pilots ([#1673](https://github.com/yschimke/compose-preview-server/issues/1673)) ([71cc11e](https://github.com/yschimke/compose-preview-server/commit/71cc11eb95453e5a824b2a0a7542c45a3251d273))
+* **ui-builder:** group the A/B report's refusal reasons ([#1676](https://github.com/yschimke/compose-preview-server/issues/1676)) ([646bd16](https://github.com/yschimke/compose-preview-server/commit/646bd16900f1e3f50d2607fb65c2216bb13ff72b))
+* **ui-builder:** report native compile failures, draw widgets in their hosts, surface home and canonical origin ([#1668](https://github.com/yschimke/compose-preview-server/issues/1668)) ([7fb76f6](https://github.com/yschimke/compose-preview-server/commit/7fb76f66cdc3c08ed72fa15f95d898911bd4bc90))
+* **ui-builder:** serve live catalog capabilities for MCP apps ([#1675](https://github.com/yschimke/compose-preview-server/issues/1675)) ([1a7885c](https://github.com/yschimke/compose-preview-server/commit/1a7885c75386588d5575f2ebdb27a3b62c1ec896))
+
+
+### Bug Fixes
+
+* **deploy:** hold cli.startUrl back until the box runs a release that knows it ([#1678](https://github.com/yschimke/compose-preview-server/issues/1678)) ([07b8276](https://github.com/yschimke/compose-preview-server/commit/07b8276e16e9a71c04dbfb66a6a125a68937a3d2))
+* **deps:** bump compose-ai-tools to 2.60.0 and fix the cmp-jvm live test flake ([#1683](https://github.com/yschimke/compose-preview-server/issues/1683)) ([c5b4a71](https://github.com/yschimke/compose-preview-server/commit/c5b4a7161957ec23f06d388cdc60fec6adc8b18e))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-contracts-bom to v3.32.0 ([#1672](https://github.com/yschimke/compose-preview-server/issues/1672)) ([da46176](https://github.com/yschimke/compose-preview-server/commit/da4617699e1e3c89f49836997e86af22ad3226e4))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-contracts-bom to v3.33.0 ([#1691](https://github.com/yschimke/compose-preview-server/issues/1691)) ([4a53e17](https://github.com/yschimke/compose-preview-server/commit/4a53e17e7fcda5471f4914278b4b56db044956ac))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.16.2 ([#1662](https://github.com/yschimke/compose-preview-server/issues/1662)) ([bf39067](https://github.com/yschimke/compose-preview-server/commit/bf39067bbbd1cd7f8a01bd3d30919384b806322d))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-ui-builder-bom to v3.113.0 ([#1663](https://github.com/yschimke/compose-preview-server/issues/1663)) ([a3ffade](https://github.com/yschimke/compose-preview-server/commit/a3ffade6f600a1099fad5499103a48d3124087f7))
+* **ui-builder:** export catalogs publishing typed projections through them ([#1679](https://github.com/yschimke/compose-preview-server/issues/1679)) ([ea3f241](https://github.com/yschimke/compose-preview-server/commit/ea3f2419f29691ad0975bf36eb44f1a8dd59b54f))
+* **ui-builder:** report the export's own diagnostics on ui_builder_export ([#1670](https://github.com/yschimke/compose-preview-server/issues/1670)) ([10a6933](https://github.com/yschimke/compose-preview-server/commit/10a6933143521e2ef67f1f00a145f0fb37bfba88))
+
 ## [3.139.0](https://github.com/yschimke/compose-preview-server/compare/v3.138.0...v3.139.0) (2026-10-14)
 
 
