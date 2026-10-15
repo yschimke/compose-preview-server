@@ -26,6 +26,7 @@ class RemoteDocumentExportExecutorTest {
     val catalogs =
       CurrentM3UiBuilderCatalogExecutor(
         catalogSystemIds = setOf("remote-m3"),
+        published = mapOf("remote-m3" to PublishedCutoverCatalogs.remote),
         exportCapabilities =
           RemoteDocumentExportSupport.capabilities(
             ExportCapabilitiesV1.Builder().build(),
@@ -331,6 +332,7 @@ class RemoteDocumentExportExecutorTest {
     val catalogs =
       CurrentM3UiBuilderCatalogExecutor(
           catalogSystemIds = setOf("m3-catalog", "remote-m3"),
+          published = mapOf("remote-m3" to PublishedCutoverCatalogs.remote),
           exportCapabilities =
             RemoteDocumentExportSupport.capabilities(
               ExportCapabilitiesV1.Builder().build(),

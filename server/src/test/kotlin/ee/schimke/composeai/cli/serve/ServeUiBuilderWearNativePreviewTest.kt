@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.export.NativeNodeTags
 import ee.schimke.composeai.uibuilder.export.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.export.WearWidgetHostShape
 import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
@@ -49,6 +50,7 @@ class ServeUiBuilderWearNativePreviewTest {
     },
     widgetPlayer: UiBuilderWidgetPlayer = UiBuilderWidgetPlayer.DEFAULT,
     carriesCmpWidgetPlayer: (String) -> Boolean = { true },
+    captureNodeBounds: (PlaygroundRunResponse) -> Map<String, AnnotationBounds> = { emptyMap() },
   ) =
     ServeUiBuilderNativePreview(
       executor = executor,
@@ -56,6 +58,7 @@ class ServeUiBuilderWearNativePreviewTest {
         submitted += generated
         PlaygroundRunResponse(previewId = "generated", previewToken = "token", image = "png")
       },
+      captureNodeBounds = captureNodeBounds,
       nativeTarget = nativeTarget,
       widgetPlayer = widgetPlayer,
       carriesCmpWidgetPlayer = carriesCmpWidgetPlayer,
@@ -170,7 +173,54 @@ class ServeUiBuilderWearNativePreviewTest {
     // rather than the 192×496 watch screen this design's environment describes.
     assertEquals(232, request.widthDp)
     assertEquals(144, request.heightDp)
-    // Remote Compose carries no test tags, so no overlay ids are reported.
+    // No bounds were captured (the seam's default), so no overlay ids are reported.
+    assertEquals(emptyList(), rendered.taggedNodeIds)
+    assertEquals(emptyMap(), rendered.nodeBounds)
+  }
+
+  /**
+   * Remote Compose has no `testTag`, so a widget's nodes carry their ids as leading content
+   * descriptions, which the CMP player turns into semantics nodes with the component's bounds. The
+   * lane reports the ids the render placed, since not every node can carry a tag.
+   */
+  @Test
+  fun `a widget on the CMP player reports the bounds its tagged nodes drew`() {
+    val box = AnnotationBounds(x = 4, y = 8, width = 40, height = 20)
+    val captured = mutableListOf<PlaygroundRunResponse>()
+    val rendered =
+      assertIs<UiBuilderNativePreviewOutcome.Rendered>(
+        lane(
+            captureNodeBounds = {
+              captured += it
+              mapOf("art" to box)
+            }
+          )
+          .render(wearWidget(assetKey = "picture"))
+      )
+
+    assertEquals(1, captured.size)
+    assertEquals(listOf("art"), rendered.taggedNodeIds)
+    assertEquals(mapOf("art" to box), rendered.nodeBounds)
+    assertTrue(NativeNodeTags.tag("art") in submitted.single().source, submitted.single().source)
+  }
+
+  /** The AndroidX player builds no semantics nodes, so there is nothing to capture. */
+  @Test
+  fun `a widget on the androidx player asks for no bounds`() {
+    var asked = false
+    val rendered =
+      assertIs<UiBuilderNativePreviewOutcome.Rendered>(
+        lane(
+            widgetPlayer = UiBuilderWidgetPlayer.ANDROIDX,
+            captureNodeBounds = {
+              asked = true
+              mapOf("art" to AnnotationBounds(x = 0, y = 0, width = 1, height = 1))
+            },
+          )
+          .render(wearWidget(assetKey = "picture"))
+      )
+
+    assertEquals(false, asked)
     assertEquals(emptyList(), rendered.taggedNodeIds)
     assertEquals(emptyMap(), rendered.nodeBounds)
   }

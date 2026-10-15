@@ -105,7 +105,11 @@ class RemoteNativeRenderProofTest {
           UiBuilderNativeTarget("local-remote", UiBuilderGeneratedCompose.COMPOSE_ANDROID)
         },
       )
-    val catalogs = CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = setOf("remote-m3"))
+    val catalogs =
+      CurrentM3UiBuilderCatalogExecutor(
+        catalogSystemIds = setOf("remote-m3"),
+        published = mapOf("remote-m3" to PublishedCutoverCatalogs.remote),
+      )
     val catalog = catalogs.listCatalogs().single()
     val json = Json {
       encodeDefaults = true
