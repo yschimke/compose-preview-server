@@ -2134,6 +2134,9 @@ class ServeUiBuilderMcpIntegrationTest {
                       document = withRemoteExports,
                     )
                   },
+              // Builder 3.115.0 serves `remote-m3` and `wear-m3` only from what they publish.
+              published =
+                PublishedCutoverCatalogs.remoteAndWear.filterKeys { it == catalogSystemId },
             ),
           exporter =
             ScreenGeneratorComposeExportExecutor(
