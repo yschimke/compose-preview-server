@@ -2391,6 +2391,10 @@ class ServeHttpServer(
         post("/refresh") { handleCatalogRefresh(sessionInPath = false) }
         post("/{system}/refresh") { handleCatalogRefresh(sessionInPath = true) }
 
+        // [ServeWeb.ALL_MODULES_PATH], spelled out so the reserved-route check can read it.
+        get("/modules") { call.respondRedirect("/modules/" + requestQuerySuffix()) }
+        get("/modules/") { handleAllModules() }
+
         post("/rebuild") { handleLocalRebuild(sessionInPath = false) }
         post("/{system}/rebuild") { handleLocalRebuild(sessionInPath = true) }
         get("/reload") { handleLocalReload(sessionInPath = false) }
@@ -4226,6 +4230,10 @@ class ServeHttpServer(
           provenance = catalogBundleHost(renderHost)?.provenance,
           refreshUrl =
             if (catalogRefresh != null) "$basePath/refresh${requestQuerySuffix()}" else null,
+          allModulesHref =
+            if (localSourceRoots.size > 1 && selectedSessionId in localSourceRoots)
+              "/${ServeWeb.ALL_MODULES_PATH}/${requestQuerySuffix()}"
+            else null,
           rebuildUrl =
             if (localRebuild?.canRebuild(selectedSessionId) == true)
               "$basePath/rebuild${requestQuerySuffix()}"
@@ -7168,7 +7176,30 @@ class ServeHttpServer(
         unfurl = unfurl,
         githubAuth = githubAuthStatus(),
         uiBuilder = uiBuilderInvite(),
+        localModules = localSourceRoots.size,
       ),
+      ContentType.Text.Html,
+    )
+  }
+
+  /**
+   * `GET /modules/`: every local module's previews on one page ([ServeWeb.allModulesPage]), each
+   * section rendering from its own session. 404 unless this server opened two or more local modules
+   * (`browse` over a project or a Bazel selection kept as separate modules).
+   */
+  private suspend fun RoutingContext.handleAllModules() {
+    if (rejectBadToken()) return
+    val sections =
+      localSourceRoots.keys.mapNotNull { id ->
+        sessions.peekState(id)?.let { ServeWeb.ModuleSection(id, it.label, it.previews) }
+      }
+    if (sections.size < 2) {
+      call.respondText("Not found", status = HttpStatusCode.NotFound)
+      return
+    }
+    markGeneration("static-page", pageCacheControl())
+    call.respondText(
+      ServeWeb.allModulesPage(sections, linkToken(), SERVE_VERSION),
       ContentType.Text.Html,
     )
   }

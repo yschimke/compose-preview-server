@@ -5556,6 +5556,11 @@ ${captureControlsHtml().prependIndent("          ")}
      */
     uiBuilder: UiBuilderInvite? = null,
     componentBrowser: Boolean = false,
+    /**
+     * How many local modules this server opened (`browse`); two or more link [allModulesPage],
+     * which shows them together. Zero on a catalog server.
+     */
+    localModules: Int = 0,
   ): String {
     val headerSessionSettings = if (componentBrowser) "" else githubSessionSettings(githubAuth)
     // Public routes are open — no token param on the cards; a token-gated box keeps it.
@@ -5819,9 +5824,83 @@ ${captureControlsHtml().prependIndent("          ")}
       headerSessionSettings = headerSessionSettings,
       headerSearch = if (systems.isEmpty()) "" else headerSearchControl(),
       version = version,
-      body = body + if (globalComponents.isEmpty()) "" else "\n$globalComponents",
+      body =
+        allModulesLink(localModules, suffix) +
+          body +
+          if (globalComponents.isEmpty()) "" else "\n$globalComponents",
       componentBrowser = componentBrowser,
       interfaceModeControl = true,
+    )
+  }
+
+  /** The front door's way to [allModulesPage]; empty with fewer than two local modules. */
+  private fun allModulesLink(modules: Int, suffix: String): String =
+    if (modules < 2) ""
+    else
+      "<p class=\"cp-sub cp-all-modules-link\"><a href=\"/$ALL_MODULES_PATH/$suffix\">" +
+        "All $modules modules on one page</a></p>\n"
+
+  /** A local module on [allModulesPage]: its session and the previews it serves. */
+  data class ModuleSection(
+    val sessionId: String,
+    val label: String,
+    val previews: List<ServePreview>,
+  )
+
+  /** The top-level path of [allModulesPage]; reserved, so no catalog can claim it. */
+  const val ALL_MODULES_PATH: String = "modules"
+
+  /**
+   * Every local module's previews on one page (`GET /modules/`), so a `browse` over several modules
+   * reads as one. Each module keeps its own session: a section's cards render from that module's
+   * daemon, exactly as on its own page, and open its own viewer. Thumbnails load lazily, so a
+   * module's daemon starts only once its section is scrolled to.
+   */
+  fun allModulesPage(
+    sections: List<ModuleSection>,
+    token: String,
+    version: String? = null,
+  ): String {
+    val tokenParam = if (token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+    val suffix = querySuffix(tokenParam)
+    val total = sections.sumOf { it.previews.size }
+    val body = buildString {
+      append("<h1 class=\"cp-head\">All modules</h1>\n")
+      append(
+        "<p class=\"cp-sub\">${counted(sections.size, "module(s)")} · " +
+          "${counted(total, "preview(s)")}</p>\n"
+      )
+      for (section in sections) {
+        val base = "/" + WebEscaping.urlEncodeSegment(section.sessionId)
+        val label = WebEscaping.htmlEscape(section.label)
+        append(
+          "<section class=\"cp-all-module\" id=\"module-${WebEscaping.htmlEscape(section.sessionId)}\">\n"
+        )
+        append(
+          "<h2 class=\"cp-all-module-head\"><a href=\"$base/$suffix\">$label</a> " +
+            "<span class=\"cp-sub\">${counted(section.previews.size, "preview(s)")}</span></h2>\n"
+        )
+        append("<div class=\"cp-grid\">\n")
+        for (preview in section.previews) {
+          val id = WebEscaping.urlEncodeSegment(preview.id)
+          val name = WebEscaping.htmlEscape(preview.label.ifBlank { preview.id })
+          append(
+            "<a class=\"cp-card\" href=\"$base/p/$id$suffix\" aria-label=\"$name\">" +
+              "<div class=\"cp-imgwrap\"><img loading=\"lazy\" decoding=\"async\" alt=\"$name\" " +
+              "src=\"$base/render/$id.png$suffix\"></div>" +
+              "<div class=\"cp-meta\"><div class=\"cp-label\" title=\"$name\">$name</div></div>" +
+              "</a>\n"
+          )
+        }
+        append("</div>\n</section>\n")
+      }
+    }
+    return document(
+      title = "All modules — compose-preview",
+      body = body,
+      navSuffix = suffix,
+      headerBreadcrumb = crumbHtml("/$suffix", "Modules", "All modules"),
+      version = version,
     )
   }
 
@@ -10578,6 +10657,8 @@ ${captureControlsHtml().prependIndent("          ")}
      * reloads its classes. Null omits Rebuild: catalogs, bundles and other non-local sessions.
      */
     rebuildUrl: String? = null,
+    /** `/modules/` when this module is one of several local ones ([allModulesPage]); else null. */
+    allModulesHref: String? = null,
     /**
      * Long-poll URL of the same session's reload state (`/{session}/reload`), which the page
      * follows to show a rebuild started by the source watcher or another tab. Null without
@@ -11224,7 +11305,14 @@ ${captureControlsHtml().prependIndent("          ")}
     // viewer's title row) with the filter field taking the remaining width, one sticky row on every
     // viewport.
     val headToggles =
-      (themeToggle + primaryActions + (rebuildUrl?.let { rebuildControl(it, reloadUrl) } ?: ""))
+      (themeToggle +
+          primaryActions +
+          (allModulesHref?.let {
+            "<a class=\"cp-drawer-toggle cp-axis-toggle cp-all-modules\" " +
+              "href=\"${WebEscaping.htmlEscape(it)}\" " +
+              "title=\"Every local module's previews on one page\">all modules</a>\n"
+          } ?: "") +
+          (rebuildUrl?.let { rebuildControl(it, reloadUrl) } ?: ""))
         .takeIf { it.isNotBlank() }
         ?.let { "<div class=\"cp-head-toggles\">\n$it</div>\n" } ?: ""
     // The toolbar row exists for the filter. When the filter lives elsewhere (browser mode, or a
