@@ -330,6 +330,9 @@ internal class ScreenGeneratorComposeExportExecutor(
                 return Generated.Refused(resolved.code, resolved.reasons)
               is RecordFreeComponents.Found -> resolved.components
             },
+            // Each node's id as a leading content description, which the CMP player turns into a
+            // semantics node with the component's bounds (NativeNodeTagSemantics).
+            tagNodes,
           )
       ) {
         // Unreachable: `isWearWidget` was true, so the widget emitter owns this document. Reported

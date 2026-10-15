@@ -125,7 +125,9 @@ class PlaygroundNodeBoundsService(
         }
           .getOrNull() ?: return@use emptyMap()
       val payload = runCatching { decode(fetched) }.getOrNull() ?: return@use emptyMap()
-      ServeSemanticsTags.index(payload)
+      // A Remote Compose render (a Wear widget on the CMP player) carries its node ids as content
+      // descriptions rather than test tags; read them as tags so one index serves both.
+      ServeSemanticsTags.index(NativeNodeTagSemantics.retag(payload))
         .mapNotNull { (tag, entry) ->
           // `count > 1` is a tag two nodes carry, which no longer identifies one of them. Compose
           // does not enforce uniqueness and the projection tags by node id, so this should not
