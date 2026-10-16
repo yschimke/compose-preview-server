@@ -448,7 +448,7 @@ composeai-ui-builder = "3.115.0"
 # takes `?density=` (CSS px per dp), which the viewer sends so the lane draws at the preview's scale.
 # 2.11.0 sizes a CanvasContent's ComponentValue bindings from its own geometry (rc-players#644), so
 # the pressure gauges that bind their width/height there draw their ring and needle on the CMP lanes.
-rc-players = "2.12.0"
+rc-players = "2.13.0"
 # The Android Remote Compose players the server's own player-only Android daemon replays documents
 # with, staged as `lib-rc-players-android/` (`stageRcPlayersAndroidLibs`). The Android daemon
 # sidecar deliberately ships none of this family (a consumer brings it, compose-preview-daemon's
@@ -459,12 +459,12 @@ rc-players = "2.12.0"
 # `cmp-android`, and pins its JVM target staged as `lib-rc-player-desktop/` for the desktop player
 # daemon (`stageRcPlayerDesktopLibs`); compose-preview-daemon's desktop binding is compiled against
 # this release's `rc-player-compose`.
-rc-players-android = "2.12.0"
+rc-players-android = "2.13.0"
 compose-remote = "1.0.0-alpha21"
 # The TypeScript player's browser bundle (`remote-compose-player-js-dist`, a zip with the `dist`
 # classifier). Its own ref because rc-players publishes only the modules a release changed: the
 # bundle last changed in 2.1.2, and 2.1.3–2.4.0 never published this coordinate.
-remote-compose-player-js = "2.11.0"
+remote-compose-player-js = "2.13.0"
 kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.11.0"
 ktor = "3.6.0"
