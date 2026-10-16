@@ -239,7 +239,7 @@ composeai-tools = "2.63.0"
 # 3.16.0 plays a carried Remote Compose document in a held live session, so input reaches it: the
 # Android players (compose-preview-daemon#254, the player daemon's interactive lane, #1609) and the
 # CMP JVM player on daemon-desktop (compose-preview-daemon#255, the desktop player daemon, #1616).
-composeai-preview-daemon = "3.18.0"
+composeai-preview-daemon = "3.18.1"
 # 2.9.0 is the first release carrying `DesignEnvironmentV1.exportDevices` and its Set/Reset
 # changes, which is the field a design names its export devices in. 2.14.0 adds the components a
 # design defines — `DesignDocumentV1.components`, `DesignNodeV1.component` and the `binding` value
