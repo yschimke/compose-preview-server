@@ -439,7 +439,9 @@ composeai-contracts = "3.35.0"
 # (compose-ui-builder#717) and retires the catalog-cutover shadow comparison (#716), whose server
 # side #1575 already removed. Built on compose-ai-tools 2.49.0; 2.50.0 above wins resolution.
 # 3.115.0 removes the Remote M3 Kotlin generator (#842); Remote must use its published catalog.
-composeai-ui-builder = "3.115.0"
+# 3.116.0 adds `AuthenticatedUiBuilderActor.mayDeleteForPrincipal` (compose-ui-builder#864) for the
+# `ui-builder-destructive` grant, and the editor's report of nodes a canvas did not draw (#867).
+composeai-ui-builder = "3.117.0"
 # The CMP/Wasm Remote Compose player (yschimke/rc-players' `rc-player-wasm-dist`, a zip of its
 # static browser bundle). Shipped in the server tarball as `rc-player-wasm/`, which the image's
 # entrypoint already passes as `--rc-player-wasm-dir`: that serves `/rc-player-wasm/`, enables the
