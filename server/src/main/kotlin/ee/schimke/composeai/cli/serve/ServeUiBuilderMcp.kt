@@ -4650,11 +4650,13 @@ class ServeUiBuilderMcp(
           "Delete a design: it moves to the trash with its history, access list, overlay and " +
             "discussion, and is gone from every listing and tool until $RESTORE_DESIGN brings " +
             "it back, which works until `restorableUntilEpochMillis` in the reply (a day). After " +
-            "that it is purged for good. Only the owner may delete, or an agent deleting a " +
-            "design it created itself under its current grant — not an editor, not a viewer, " +
-            "and not anybody merely holding a write grant — so a session can clean up the " +
-            "designs it made and cannot reach anybody else's. A trashed id cannot be reused " +
-            "until it is restored or purged. Not the released envelope: the contract has no " +
+            "that it is purged for good. Only the owner may delete, or an agent acting for the " +
+            "owner: on a design it created itself under its current grant, or on any of the " +
+            "owner's designs when the approver also ticked `ui-builder-destructive` — never an " +
+            "editor, a viewer, or anybody merely holding a write grant. Without that capability " +
+            "a session can clean up the designs it made and nobody else's; ask for it with " +
+            "request_access when you are asked to delete existing designs. A trashed id cannot " +
+            "be reused until it is restored or purged. Not the released envelope: the contract has no " +
             "delete, so the reply names the design and its restore deadline.",
           """
           {"type":"object","properties":{

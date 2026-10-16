@@ -995,11 +995,12 @@ if [[ "${SERVE_AGENT_GRANTS:-}" == "1" || "${SERVE_AGENT_GRANTS:-}" == "true" ]]
   [[ -n "${SERVE_AGENT_GRANT_SCOPES:-}" ]] &&
     args+=(--agent-grant-scopes "${SERVE_AGENT_GRANT_SCOPES}")
   # Independent of the scope ceiling above. Each named capability is admitted only when its
-  # backing lane is enabled; the prebuilt image always carries the UI-builder lane, so those three
-  # are the default. The default is here rather than in docker-compose.yml so settings.json
+  # backing lane is enabled; the prebuilt image always carries the UI-builder lane, so its four are
+  # the default. Offering `ui-builder-destructive` only puts its box on the approval page: a grant
+  # carries it only when the approver ticks it, and its deletes stay restorable from the trash. The default is here rather than in docker-compose.yml so settings.json
   # (`agents.grantCapabilities`) can set it: it fills only what compose leaves empty.
   # >>> agent-grant-capabilities-default
-  : "${SERVE_AGENT_GRANT_CAPABILITIES:=ui-builder-read,ui-builder-write,ui-builder-export${SERVE_IMAGE_UPLOAD_REPO:+,images}}"
+  : "${SERVE_AGENT_GRANT_CAPABILITIES:=ui-builder-read,ui-builder-write,ui-builder-export,ui-builder-destructive${SERVE_IMAGE_UPLOAD_REPO:+,images}}"
   # <<< agent-grant-capabilities-default
   #
   # `images` is the one that can be fatal: the server refuses to start when it is offered on a box

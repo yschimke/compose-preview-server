@@ -285,6 +285,9 @@ object ServeAgentGrants {
       AgentGrantCapability.UI_BUILDER_READ,
       AgentGrantCapability.UI_BUILDER_WRITE,
       AgentGrantCapability.UI_BUILDER_EXPORT,
+      // No route asks for it; it rides on a grant to the design service. An open-UI-builder
+      // approver may delete their own designs, so they may let an agent do it for them too.
+      AgentGrantCapability.UI_BUILDER_DESTRUCTIVE,
     )
 
   /** How [ServeMachineAuthorization] names the holder of `--token`. */

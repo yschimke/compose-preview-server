@@ -15,8 +15,12 @@ sealed interface UiBuilderAuthorizationDecision {
    * [onBehalfOfActorId] is the human an agent grant delegates for — see
    * [ServeMachineAuthorization.Decision.Authorized]. Null for a credential that speaks for itself.
    */
-  data class Authorized(val actorId: String, val onBehalfOfActorId: String? = null) :
-    UiBuilderAuthorizationDecision {
+  data class Authorized(
+    val actorId: String,
+    val onBehalfOfActorId: String? = null,
+    /** See [ServeMachineAuthorization.Decision.Authorized.mayDeleteForPrincipal]. */
+    val mayDeleteForPrincipal: Boolean = false,
+  ) : UiBuilderAuthorizationDecision {
     init {
       require(actorId.isNotBlank()) { "UI-builder actor id must not be blank" }
     }
@@ -29,11 +33,14 @@ sealed interface UiBuilderAuthorizationDecision {
      * answered, and it can only answer it if the whole identity gets there.
      */
     val actor: AuthenticatedUiBuilderActor
-      get() =
-        AuthenticatedUiBuilderActor(
+      get() {
+        val principal = onBehalfOfActorId?.takeIf { it.isNotBlank() && it != actorId }
+        return AuthenticatedUiBuilderActor(
           actorId,
-          onBehalfOfActorId?.takeIf { it.isNotBlank() && it != actorId },
+          principal,
+          mayDeleteForPrincipal = principal != null && mayDeleteForPrincipal,
         )
+      }
   }
 
   data object Missing : UiBuilderAuthorizationDecision
@@ -69,7 +76,11 @@ fun interface ServeUiBuilderAuthorization {
           authorization.authorizeCapability(call, capability.agentGrantCapability(), presented)
       ) {
         is ServeMachineAuthorization.Decision.Authorized ->
-          UiBuilderAuthorizationDecision.Authorized(decision.actorId, decision.onBehalfOfActorId)
+          UiBuilderAuthorizationDecision.Authorized(
+            decision.actorId,
+            decision.onBehalfOfActorId,
+            decision.mayDeleteForPrincipal,
+          )
         ServeMachineAuthorization.Decision.Missing -> UiBuilderAuthorizationDecision.Missing
         is ServeMachineAuthorization.Decision.Forbidden -> UiBuilderAuthorizationDecision.Forbidden
       }

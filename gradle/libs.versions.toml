@@ -282,6 +282,8 @@ composeai-preview-daemon = "3.18.3"
 # Builders (compose-ui-builder#617), so the server can take it.
 # 3.30.0 adds a component record's optional `overloads`, so `.github/scripts/decoder-shapes.json`
 # is regenerated with it (`UPDATE_DECODER_SHAPES=1`).
+# 3.34.0 adds the `ui-builder-destructive` agent-grant capability (compose-preview-contracts#187),
+# which grants carry into the design service as `mayDeleteForPrincipal`.
 composeai-contracts = "3.35.0"
 
 # The extracted UI builder (yschimke/compose-ui-builder), resolved from its RELEASES. Three jars
@@ -437,6 +439,8 @@ composeai-contracts = "3.35.0"
 # (compose-ui-builder#717) and retires the catalog-cutover shadow comparison (#716), whose server
 # side #1575 already removed. Built on compose-ai-tools 2.49.0; 2.50.0 above wins resolution.
 # 3.115.0 removes the Remote M3 Kotlin generator (#842); Remote must use its published catalog.
+# 3.116.0 adds `AuthenticatedUiBuilderActor.mayDeleteForPrincipal` (compose-ui-builder#864) for the
+# `ui-builder-destructive` grant, and the editor's report of nodes a canvas did not draw (#867).
 composeai-ui-builder = "3.118.0"
 # The CMP/Wasm Remote Compose player (yschimke/rc-players' `rc-player-wasm-dist`, a zip of its
 # static browser bundle). Shipped in the server tarball as `rc-player-wasm/`, which the image's

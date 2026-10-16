@@ -54,7 +54,7 @@ without_repo="$(resolve_default '')"
   echo "FAIL: a box with no upload repo would be offered images and refuse to start: ${without_repo}" >&2
   exit 1
 }
-for want in ui-builder-read ui-builder-write ui-builder-export; do
+for want in ui-builder-read ui-builder-write ui-builder-export ui-builder-destructive; do
   [[ "${with_repo}" == *"${want}"* && "${without_repo}" == *"${want}"* ]] || {
     echo "FAIL: ${want} is not offered unconditionally" >&2
     exit 1
