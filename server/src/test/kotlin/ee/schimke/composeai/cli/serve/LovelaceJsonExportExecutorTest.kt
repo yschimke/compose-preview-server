@@ -58,6 +58,7 @@ class LovelaceJsonExportExecutorTest {
     }
       .export(request())
     assertEquals(expected.source, artifact.content)
+    assertEquals(document.revision.toString(), artifact.servedRevision())
     assertEquals("application/json; charset=utf-8", artifact.mediaType)
     assertEquals(ExportEncodingV1.UTF8, artifact.encoding)
     assertEquals(

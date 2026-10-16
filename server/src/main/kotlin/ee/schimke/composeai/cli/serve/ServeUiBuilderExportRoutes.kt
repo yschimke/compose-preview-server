@@ -79,9 +79,8 @@ internal fun Route.installUiBuilderLiveExportRoutes(
       call.serveSuppliedDocument(service, authorization, ExportFormatV1.PNG)
     }
   }
-  // JSON in every build: an A2UI catalog's JSON is its A2UI messages, which no build flag gates.
-  // A design on any other catalog is refused by the service's capability gate unless this is a
-  // Remote Compose build, exactly as before.
+  // Data targets (A2UI and Lovelace) use JSON in every build. The service capability gate
+  // admits the formats appropriate to the design's catalog.
   (RemoteDocumentExportSupport.formats + ExportFormatV1.JSON).distinct().forEach { format ->
     post("/api/ui-builder/v1/documents/export.${format.name.lowercase()}") {
       call.serveSuppliedDocument(service, authorization, format)
@@ -322,7 +321,9 @@ internal fun ExportArtifactV1.servedRevision(): String? =
   diagnostics
     .asSequence()
     .filter {
-      it.code == REVISION_PINNED_DIAGNOSTIC_CODE || it.code == "REVISION_PINNED_REMOTE_EXPORT"
+      it.code == REVISION_PINNED_DIAGNOSTIC_CODE ||
+        it.code == "REVISION_PINNED_REMOTE_EXPORT" ||
+        it.code == "REVISION_PINNED_LOVELACE_EXPORT"
     }
     .mapNotNull { REVISION_IN_DIAGNOSTIC.find(it.message)?.groupValues?.get(1) }
     .firstOrNull()

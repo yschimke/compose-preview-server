@@ -795,6 +795,41 @@ class ServeUiBuilderRoutesTest {
     }
   }
 
+  @Test
+  fun `live Lovelace JSON preserves provenance headers without a requested revision`() {
+    val content = "{\"views\":[]}"
+    exportAnswer = { request ->
+      assertEquals(ExportFormatV1.JSON, request.format)
+      assertNull(request.revision)
+      UiBuilderServiceResponse.Export(
+        ExportArtifactV1(
+          format = ExportFormatV1.JSON,
+          mediaType = "application/json; charset=utf-8",
+          encoding = ExportEncodingV1.UTF8,
+          content = content,
+          contentDigest = "lovelace-digest",
+          diagnostics =
+            listOf(
+              ExportDiagnosticV1(
+                DiagnosticSeverityV1.INFO,
+                "REVISION_PINNED_LOVELACE_EXPORT",
+                "Exported design design-1 revision 12 (hash).",
+              )
+            ),
+        )
+      )
+    }
+    assertEquals(401, liveExport(null, "export.json").use { it.code })
+    liveExport("actor", "export.json?download=1").use { response ->
+      assertEquals(200, response.code)
+      assertEquals("12", response.header(UI_BUILDER_REVISION_HEADER))
+      assertEquals("\"lovelace-digest\"", response.header("ETag"))
+      assertEquals("application/json; charset=utf-8", response.header("Content-Type"))
+      assertEquals("attachment; filename=\"design-1.json\"", response.header("Content-Disposition"))
+      assertEquals(content, response.body.string())
+    }
+  }
+
   private fun liveExport(
     authenticatedActor: String?,
     suffix: String,
