@@ -11,7 +11,6 @@ import ee.schimke.composeai.uibuilder.protocol.LayoutDirectionV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
 import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
-import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import java.io.File
@@ -42,7 +41,7 @@ class ServeUiBuilderHistoryAndUnfurlTest {
     explicitNulls = false
   }
   private val client = OkHttpClient.Builder().followRedirects(false).build()
-  private val catalogs = CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = linkedSetOf(CATALOG))
+  private val catalogs = benchmarkCatalogExecutor(catalogSystemIds = linkedSetOf(CATALOG))
   private val links by lazy { ServeUiBuilderLinksStore(stateDirectory.resolve("links")) }
 
   private fun withServer(

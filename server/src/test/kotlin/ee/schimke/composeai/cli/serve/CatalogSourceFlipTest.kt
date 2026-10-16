@@ -21,13 +21,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.Json
 
-/**
- * A design pinned to one catalog source still resolves after the server restarts on the other.
- * Flipping `--ui-builder-published-catalogs` changes the catalog's reference, and stored designs
- * pinned to the other source used to become `CATALOG_UNAVAILABLE`. Only synthesised → published is
- * fixed; the reverse is asserted as a known gap, because a server that flipped back never fetched
- * the published file.
- */
+/** A design made against the historical benchmark still resolves to the served publication. */
 class CatalogSourceFlipTest {
 
   private val json = Json { ignoreUnknownKeys = true }
@@ -54,11 +48,11 @@ class CatalogSourceFlipTest {
     (result as PublishedUiBuilderCatalog.Result.Composed).catalog
   }
 
-  private fun synthesisedServer() =
-    CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = linkedSetOf("m3-catalog"))
+  private fun historicalFixtureServer() =
+    benchmarkCatalogExecutor(catalogSystemIds = linkedSetOf("m3-catalog"))
 
   private fun publishedServer() =
-    CurrentM3UiBuilderCatalogExecutor(
+    benchmarkCatalogExecutor(
       catalogSystemIds = linkedSetOf("m3-catalog"),
       published = mapOf("m3-catalog" to published),
     )
@@ -73,14 +67,14 @@ class CatalogSourceFlipTest {
   @Test
   fun `the two sources really do produce different references`() {
     assertTrue(
-      referenceOf(synthesisedServer()) != referenceOf(publishedServer()),
+      referenceOf(historicalFixtureServer()) != referenceOf(publishedServer()),
       "the sources agree on a reference, so these tests prove nothing about a flip",
     )
   }
 
   @Test
   fun `a design pinned to the synthesised catalog still resolves after the flip to published`() {
-    val pinnedBeforeFlip = referenceOf(synthesisedServer())
+    val pinnedBeforeFlip = referenceOf(historicalFixtureServer())
     val afterFlip = publishedServer()
 
     val resolved = afterFlip.resolve(pinnedBeforeFlip)
@@ -96,31 +90,12 @@ class CatalogSourceFlipTest {
   }
 
   /**
-   * The unfixed direction, asserted so the gap is visible. The synthesised catalog is always
-   * resident, but a server flipped back to synthesised has never fetched the published file, so it
-   * cannot know the published reference. Closing it means fetching withheld catalogs or keeping a
-   * reference history; re-pinning on load is the real fix. If this starts failing, invert it —
-   * don't delete it.
-   */
-  @Test
-  fun `flipping BACK to synthesised still strands a published-pinned design, for now`() {
-    val pinnedBeforeFlip = referenceOf(publishedServer())
-    val afterFlip = synthesisedServer()
-
-    assertNull(
-      afterFlip.resolve(pinnedBeforeFlip),
-      "the reverse direction now resolves -- invert this assertion and update #818",
-    )
-    assertEquals("synthesised", afterFlip.catalogSources["m3-catalog"])
-  }
-
-  /**
    * `unusableReason` calls `resolve` then `validate`; both must accept the pin, or the design is
    * still dead and reported as an invalid document.
    */
   @Test
   fun `validate accepts the other source's pin too, not just resolve`() {
-    val pinnedBeforeFlip = referenceOf(synthesisedServer())
+    val pinnedBeforeFlip = referenceOf(historicalFixtureServer())
     val afterFlip = publishedServer()
     val resolved = assertNotNull(afterFlip.resolve(pinnedBeforeFlip))
     val document = boxScreen(pinnedBeforeFlip)

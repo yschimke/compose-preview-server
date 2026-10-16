@@ -14,7 +14,6 @@ import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
 import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
-import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
@@ -397,7 +396,7 @@ class ServeUiBuilderComponentDriftRoutesTest {
     val service =
       PersistentUiBuilderService(
         storage = FileUiBuilderStateStorage(stateDirectory),
-        catalogs = CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = setOf(SYSTEM)),
+        catalogs = benchmarkCatalogExecutor(catalogSystemIds = setOf(SYSTEM)),
         // Never exercised here — this route reads a snapshot and exports nothing — but the service
         // requires one, so it gets the same one the rest of the server runs.
         exporter =

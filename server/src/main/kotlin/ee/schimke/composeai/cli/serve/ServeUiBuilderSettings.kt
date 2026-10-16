@@ -1,6 +1,5 @@
 package ee.schimke.composeai.cli.serve
 
-import ee.schimke.composeai.uibuilder.export.CatalogOwnership
 import okio.Path.Companion.toPath
 
 /**
@@ -15,7 +14,6 @@ import okio.Path.Companion.toPath
  * |---------------------------------------|-------------------------------------------|
  * | `SERVE_UI_BUILDER_CATALOGS`           | `catalogs.<id>.serve`                     |
  * | `SERVE_UI_BUILDER_PUBLISHED_CATALOGS` | `catalogs.<id>.published`                 |
- * | `SERVE_UI_BUILDER_CATALOG_OWNERSHIP`  | `catalogs.<id>.owned`                     |
  * | `SERVE_UI_BUILDER_NATIVE_CATALOGS`    | `catalogs.<id>.nativeCatalog`             |
  * | `SERVE_UI_BUILDER_PACKS`              | `packs.<served catalog>` (null withdraws) |
  * | `SERVE_UI_BUILDER_WIDGET_PLAYER`      | `widgetPlayer`                            |
@@ -41,7 +39,6 @@ object ServeUiBuilderSettings {
     val catalogs: Set<String>,
     /** Null ⇒ `all`, as `--ui-builder-published-catalogs` means it. */
     val publishedCatalogs: Set<String>?,
-    val catalogOwnership: CatalogOwnership,
     val nativeCatalogs: Map<String, String>,
     val packs: Map<String, String>,
     val widgetPlayer: UiBuilderWidgetPlayer,
@@ -60,7 +57,6 @@ object ServeUiBuilderSettings {
       ServeUiBuilderSettingsDto(
         catalogs = catalogs.sorted(),
         publishedCatalogs = publishedCatalogs?.sorted(),
-        catalogOwnership = catalogOwnership.wireValue,
         nativeCatalogs = nativeCatalogs.toSortedMap(),
         packs = packs.toSortedMap(),
         widgetPlayer = widgetPlayer.flagValue,
@@ -72,7 +68,6 @@ object ServeUiBuilderSettings {
         Effective(
           catalogs = options.uiBuilderCatalogs,
           publishedCatalogs = options.uiBuilderPublishedCatalogs,
-          catalogOwnership = options.uiBuilderCatalogOwnership,
           nativeCatalogs = options.uiBuilderNativeCatalogs,
           packs = options.uiBuilderPacks,
           widgetPlayer = options.uiBuilderWidgetPlayer,
@@ -98,10 +93,6 @@ object ServeUiBuilderSettings {
       val native = catalog.nativeCatalog
       if (!native.isNullOrEmpty() && !ServeCommandOptions.UI_BUILDER_CATALOG_ID.matches(native)) {
         return "catalog `$id` names an invalid native catalog `$native`"
-      }
-      if (catalog.owned == true && catalog.published == false) {
-        return "catalog `$id` is owned but not published: owning a catalog means serving it from " +
-          "nothing but its published file"
       }
     }
     for ((pack, platform) in settings.packs) {
@@ -176,33 +167,6 @@ object ServeUiBuilderSettings {
         set
       }
 
-    // Ownership: only a catalog that reads its published file can be owned.
-    val readsPublished = published ?: catalogs
-    val owned =
-      if (
-        base.catalogOwnership == CatalogOwnership.ALL &&
-          settings.catalogs.values.none { it.owned == false }
-      ) {
-        CatalogOwnership.ALL
-      } else {
-        val set = catalogs.filterTo(mutableSetOf(), base.catalogOwnership::owns)
-        for ((id, catalog) in settings.catalogs) {
-          when (catalog.owned) {
-            true -> set += id
-            false -> set -= id
-            null -> Unit
-          }
-        }
-        val contradictions = set.filterNot { it in catalogs && it in readsPublished }
-        if (contradictions.isNotEmpty()) {
-          problems +=
-            "uiBuilder owns ${contradictions.sorted().joinToString()}, which " +
-              "is not served from its published file; not owning it"
-          set.removeAll(contradictions.toSet())
-        }
-        if (set.isEmpty()) CatalogOwnership.NONE else CatalogOwnership.of(set)
-      }
-
     val native = base.nativeCatalogs.toMutableMap()
     for ((id, catalog) in settings.catalogs) {
       when (val value = catalog.nativeCatalog) {
@@ -242,7 +206,6 @@ object ServeUiBuilderSettings {
       Effective(
         catalogs,
         published,
-        owned,
         native,
         packs,
         player,
@@ -306,9 +269,6 @@ object ServeUiBuilderSettings {
     override val uiBuilderPublishedCatalogs: Set<String>?
       get() = effective.publishedCatalogs
 
-    override val uiBuilderCatalogOwnership: CatalogOwnership
-      get() = effective.catalogOwnership
-
     override val uiBuilderUnlistedCatalogs: Set<String>
       get() = effective.unlisted
 
@@ -332,7 +292,6 @@ data class ServeUiBuilderSettingsDto(
   val catalogs: List<String>,
   /** Null ⇒ every served catalog reads its published file (`all`). */
   val publishedCatalogs: List<String>?,
-  val catalogOwnership: String,
   val nativeCatalogs: Map<String, String>,
   val packs: Map<String, String>,
   val widgetPlayer: String,

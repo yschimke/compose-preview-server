@@ -1,7 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.protocol.*
-import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import ee.schimke.composeai.uibuilder.service.RevisionPinnedUiBuilderExport
@@ -74,7 +73,7 @@ class ServeUiBuilderProductionIntegrationTest {
     val service =
       PersistentUiBuilderService(
         storage = FileUiBuilderStateStorage(stateDirectory),
-        catalogs = CurrentM3UiBuilderCatalogExecutor(),
+        catalogs = benchmarkCatalogExecutor(),
         exporter = EchoingComposeExportExecutor(),
       )
     val server =

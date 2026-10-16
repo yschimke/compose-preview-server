@@ -16,7 +16,6 @@ import ee.schimke.composeai.uibuilder.protocol.StringValueV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
 import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
-import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import ee.schimke.composeai.uibuilder.service.UiBuilderRevisionSummary
@@ -54,7 +53,7 @@ class ServeUiBuilderPublicReadersTest {
     ServeUiBuilderVisibility.withDefault(
       PersistentUiBuilderService(
         storage = FileUiBuilderStateStorage(stateDirectory),
-        catalogs = CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = setOf(CATALOG)),
+        catalogs = benchmarkCatalogExecutor(catalogSystemIds = setOf(CATALOG)),
         exporter =
           ScreenGeneratorComposeExportExecutor(
             ComponentRecordSource(mapOf(CATALOG to ScreenGeneratorScreenFixture.componentsFile()))::

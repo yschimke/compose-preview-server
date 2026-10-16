@@ -3,49 +3,22 @@ package ee.schimke.composeai.cli.serve
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * What is wrong, right now, with each catalog-owned UI-builder catalog — the replacement for the
- * quiet fallback to a built-in definition.
+ * Publication and template failures for every UI-builder catalog. Missing definitions are withheld;
+ * unreadable templates degrade the catalog to a generic blank. A refresh clears either failure as
+ * soon as the publication recovers.
  *
- * An owned catalog is served from nothing but what it publishes, and compose-ui-builder refuses to
- * synthesise one for it. So when its published file is missing or does not compose, the catalog is
- * **withheld** — left out of the builder, with the reason reported — rather than replaced by a
- * stale Kotlin definition, which is how the catalog template regression stayed hidden (#1526). When
- * the file composes but its templates do not read, the catalog is **degraded**: still served, new
- * designs start blank. Both clear the moment a publish composes again; every catalog refresh asks.
- *
- * A catalog this build has no built-in definition for (one compose-ui-builder never had, or
- * deleted, as it did `a2ui-catalog` in 3.111.0) is withheld the same way, owned or not:
- * compose-ui-builder refuses to serve it from nothing, and that refusal would otherwise take the
- * whole builder down with it. Templates are read only for owned catalogs, so only those are ever
- * degraded.
- *
- * Any other catalog is never recorded here: it falls back to its built-in definition.
- *
- * @param owns whether a catalog id is catalog-owned on this box.
- * @param builtIn whether this build can still define a catalog id itself.
- * @param log where a change of state is said; once per change, so a refresh loop does not repeat
- *   the same error every interval.
+ * @param log where a state change is reported; repeated identical failures are logged once.
  */
-class UiBuilderOwnedCatalogHealth(
-  private val owns: (String) -> Boolean,
-  private val log: (String) -> Unit = System.err::println,
-  private val builtIn: (String) -> Boolean = { true },
-) {
+class UiBuilderOwnedCatalogHealth(private val log: (String) -> Unit = System.err::println) {
   private val withheld = ConcurrentHashMap<String, String>()
   private val degraded = ConcurrentHashMap<String, String>()
 
-  /**
-   * [systemId]'s published definition cannot be used: withhold it, if it is owned or this build
-   * cannot define it itself. False when it is neither, and so keeps its built-in definition.
-   */
+  /** Withhold a catalog whose published definition cannot be used. */
   fun withhold(systemId: String, reason: String): Boolean {
-    val owned = owns(systemId)
-    if (!owned && builtIn(systemId)) return false
     degraded.remove(systemId)
     if (withheld.put(systemId, reason) != reason) {
-      val what = if (owned) "is catalog-owned" else "has no built-in definition in this build"
       log(
-        "serve: ERROR UI-builder catalog $systemId $what and is UNAVAILABLE — $reason. " +
+        "serve: ERROR UI-builder catalog $systemId is UNAVAILABLE — $reason. " +
           "It is not served until a republish composes; there is no built-in fallback."
       )
     }
@@ -54,7 +27,6 @@ class UiBuilderOwnedCatalogHealth(
 
   /** [systemId] composed, but its own templates do not read. */
   fun degrade(systemId: String, reason: String) {
-    if (!owns(systemId)) return
     if (degraded.put(systemId, reason) != reason) {
       log(
         "serve: ERROR UI-builder catalog $systemId templates do not read — $reason; " +

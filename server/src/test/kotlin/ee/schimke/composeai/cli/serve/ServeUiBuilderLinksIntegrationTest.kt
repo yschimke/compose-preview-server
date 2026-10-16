@@ -15,7 +15,6 @@ import ee.schimke.composeai.uibuilder.protocol.StringValueV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
 import ee.schimke.composeai.uibuilder.protocol.UpdateDesignAccessRequestV1
 import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
-import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import java.nio.file.Path
@@ -456,7 +455,7 @@ class ServeUiBuilderLinksIntegrationTest {
       PersistentUiBuilderService(
         storage = FileUiBuilderStateStorage(stateDirectory),
         catalogs =
-          CurrentM3UiBuilderCatalogExecutor(
+          benchmarkCatalogExecutor(
             catalogSystemIds = setOf(CATALOG_SYSTEM_ID),
             exportCapabilities =
               ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1.Builder()

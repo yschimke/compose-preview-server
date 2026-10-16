@@ -1,16 +1,11 @@
 package ee.schimke.composeai.cli.serve
 
-import ee.schimke.composeai.uibuilder.export.CatalogOwnership
 import ee.schimke.composeai.uibuilder.export.CatalogSeedTemplates
 import ee.schimke.composeai.uibuilder.export.UiBuilderNewDesignSeed
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-/**
- * The server's one answer to "what can a new design start as", with the catalog-owned flag off and
- * on. Off must be exactly the built-in seeds every surface used before; on, an owned catalog offers
- * the templates it publishes and nothing the builder's Kotlin knows about it.
- */
+/** Every surface offers exactly the catalog's published templates, or a generic blank. */
 class UiBuilderCatalogSeedsTest {
 
   private val published: CatalogSeedTemplates =
@@ -32,29 +27,20 @@ class UiBuilderCatalogSeedsTest {
       .templates
 
   @Test
-  fun `built in, every catalog keeps the seeds and default it always had`() {
-    val seeds = UiBuilderCatalogSeeds.BUILT_IN
-    for (catalog in listOf("m3-catalog", "wear-m3", "remote-m3", "a2ui-catalog")) {
-      assertEquals(UiBuilderNewDesignSeed.templateIds(catalog), seeds.templateIds(catalog))
-      assertEquals(UiBuilderNewDesignSeed.DEFAULT_TEMPLATE, seeds.defaultTemplate(catalog))
+  fun `a catalog without published templates starts with a generic blank`() {
+    val seeds = UiBuilderCatalogSeeds.EMPTY
+    for (catalog in listOf("m3-catalog", "wear-m3", "remote-m3", "a2ui-catalog", "new-catalog")) {
+      assertEquals(setOf(UiBuilderNewDesignSeed.BLANK_TEMPLATE), seeds.templateIds(catalog))
+      assertEquals(UiBuilderNewDesignSeed.BLANK_TEMPLATE, seeds.defaultTemplate(catalog))
     }
   }
 
   @Test
-  fun `the flag off ignores published templates even when it has them`() {
-    val seeds = UiBuilderCatalogSeeds(CatalogOwnership.NONE) { published }
-    assertEquals(UiBuilderNewDesignSeed.templateIds("wear-m3"), seeds.templateIds("wear-m3"))
-  }
-
-  @Test
   fun `an owned catalog offers what it publishes, in its order, and starts from the first`() {
-    val seeds =
-      UiBuilderCatalogSeeds(CatalogOwnership.of(setOf("wear-m3"))) {
-        published.takeIf { _ -> it == "wear-m3" }
-      }
+    val seeds = UiBuilderCatalogSeeds() { published.takeIf { _ -> it == "wear-m3" } }
     assertEquals(listOf("wear-screen", "wear-list"), seeds.templateIds("wear-m3").toList())
     assertEquals("wear-screen", seeds.defaultTemplate("wear-m3"))
-    // A catalog the flag does not name is untouched beside it.
-    assertEquals(UiBuilderNewDesignSeed.templateIds("m3-catalog"), seeds.templateIds("m3-catalog"))
+    // Catalogs without published templates use a generic blank.
+    assertEquals(setOf(UiBuilderNewDesignSeed.BLANK_TEMPLATE), seeds.templateIds("m3-catalog"))
   }
 }

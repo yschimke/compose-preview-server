@@ -7,7 +7,6 @@ import ee.schimke.composeai.uibuilder.protocol.LayoutDirectionV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
 import ee.schimke.composeai.uibuilder.protocol.UploadedAssetSourceV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
-import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderAssetStore
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
@@ -51,7 +50,7 @@ class ServeUiBuilderAssetRoutesTest {
       PersistentUiBuilderService(
         storage = FileUiBuilderStateStorage(stateDirectory.resolve("state")),
         catalogs =
-          CurrentM3UiBuilderCatalogExecutor(
+          benchmarkCatalogExecutor(
             catalogSystemIds = setOf(CATALOG_SYSTEM_ID),
             exportCapabilities =
               ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1.Builder()

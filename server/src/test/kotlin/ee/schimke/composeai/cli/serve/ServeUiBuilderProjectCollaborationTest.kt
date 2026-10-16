@@ -18,7 +18,7 @@ class ServeUiBuilderProjectCollaborationTest {
   private val raw by lazy {
     PersistentUiBuilderService(
       storage = FileUiBuilderStateStorage(directory.resolve("designs")),
-      catalogs = CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = setOf("m3-catalog")),
+      catalogs = benchmarkCatalogExecutor(catalogSystemIds = setOf("m3-catalog")),
       exporter = { error("this test never exports") },
     )
   }

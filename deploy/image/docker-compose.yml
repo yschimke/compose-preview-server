@@ -383,18 +383,10 @@ services:
       SERVE_UI_BUILDER_CATALOGS: "${SERVE_UI_BUILDER_CATALOGS:-m3-catalog}"
       # Explicitly drop the Wear/Android lane from whatever list is in force.
       SERVE_UI_BUILDER_WEAR: "${SERVE_UI_BUILDER_WEAR:-1}"
-      # Which of the served builder catalogs may take their definition from the catalog repository's
-      # own published `ui-builder.json` instead of this server's built-in one: `all`, `none`, or a
-      # comma-separated subset of SERVE_UI_BUILDER_CATALOGS. Empty keeps the entrypoint's default,
-      # which is `remote-m3` — the one catalog whose published file the gate scores clean under
-      # `--strict`. The entrypoint records, per catalog, what the other two are waiting on and what
-      # serving remote-m3 this way costs: `remote-m3/lottie` is no longer offered (#795), and a box
-      # with persisted remote-m3 designs may strand them on the restart that flips this (#796).
-      # Name a catalog here once its gate is green, or drop one to put it back on the packaged
-      # catalog. This is the per-catalog reversible lever
-      # docs/design/UI_BUILDER_CATALOG_CONTRACT.md asks for.
+      # Which served catalogs may read their published definition: all, none, or a subset.
+      # A catalog excluded here is withheld; every catalog seeds and exports from its publication.
+      # Empty keeps the entrypoint's configured published set.
       SERVE_UI_BUILDER_PUBLISHED_CATALOGS: "${SERVE_UI_BUILDER_PUBLISHED_CATALOGS:-}"
-      SERVE_UI_BUILDER_CATALOG_OWNERSHIP: "${SERVE_UI_BUILDER_CATALOG_OWNERSHIP:-}"
       # The component record the Compose export generates from. The image ships one for
       # `m3-catalog` and the entrypoint installs it by default, so this is an override for a box
       # carrying its own discovery output — an empty value keeps the packaged record.

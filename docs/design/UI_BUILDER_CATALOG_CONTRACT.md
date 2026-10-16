@@ -753,11 +753,14 @@ returning it to its synthesised definition. `--ui-builder-published-catalogs` is
 is a startup error rather than a silent no-op. `SERVE_UI_BUILDER_PUBLISHED_CATALOGS` reaches it from
 the deployment image.
 
-**Its finer sibling, `--ui-builder-catalog-ownership` (`SERVE_UI_BUILDER_CATALOG_OWNERSHIP`), defaults
-to `none`.** A catalog it names also seeds new designs from the `templates` documents it publishes,
-exports by its own `composeSourceExport` declaration, and is never synthesised, even as a fallback.
-It must be a catalog this flag lets read its published file. The plan, the readiness test and the
-per-catalog gap ledger are compose-ui-builder's `docs/design/UI_BUILDER_CATALOG_CUTOVER.md`.
+**Ownership is now unconditional.** Every catalog seeds from its published templates and exports
+by its `composeSourceExport` declaration. A missing or unusable publication withholds that catalog
+until it recovers. The ownership CLI/environment switch and `catalogs.<id>.owned` overrides are
+retired; older JSON fields are ignored when a box reloads its configuration. The server continues
+sending the `all` meta tag for compatibility with released editors. Keep `owned: true` in the committed
+preview.coo.ee config until a server release carrying this change is deployed: its config workflow
+can publish before the binary rolls, and older servers still need those fields. Remove the entries
+in a follow-up after verifying the deployed binary.
 
 **It defaults to `remote-m3`, now served from its own published file.** It defaulted to `none`
 while no catalog was ready and one of them would have broken. `remote-m3` measures clean: 0

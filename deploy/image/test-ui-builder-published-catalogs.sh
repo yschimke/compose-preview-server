@@ -159,11 +159,9 @@ named="$(run_case "m3-catalog,remote-m3" "m3-catalog")"
 expect "a named subset is forwarded verbatim" $'--ui-builder-published-catalogs\nm3-catalog' \
   "${named}"
 
-# The catalog-owned cutover rides the same block and is off unless an operator names it: an image
-# nobody configured must not even pass the flag, so the server's own default (`none`) decides.
+# The retired environment switch must not reintroduce a partial-ownership server.
 refute "catalog ownership is not passed by default" "--ui-builder-catalog-ownership" "${default}"
 owned="$(run_case "" "" "1" "remote-m3")"
-expect "catalog ownership is forwarded verbatim when set" \
-  $'--ui-builder-catalog-ownership\nremote-m3' "${owned}"
+refute "the retired ownership environment switch is ignored" "--ui-builder-catalog-ownership" "${owned}"
 
 exit "${status}"

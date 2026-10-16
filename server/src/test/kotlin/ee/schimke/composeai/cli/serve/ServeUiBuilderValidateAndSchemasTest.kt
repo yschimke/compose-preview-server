@@ -16,7 +16,6 @@ import ee.schimke.composeai.uibuilder.protocol.SetPropertyMutationV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
 import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
-import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import java.io.File
@@ -484,7 +483,7 @@ class ServeUiBuilderValidateAndSchemasTest {
       }
 
   private fun catalogs() =
-    CurrentM3UiBuilderCatalogExecutor(
+    benchmarkCatalogExecutor(
       catalogSystemIds = setOf(CATALOG_SYSTEM_ID),
       exportCapabilities =
         ExportCapabilitiesV1.Builder()

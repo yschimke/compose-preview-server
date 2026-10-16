@@ -99,7 +99,7 @@ class RemotePngExportExecutorTest {
         },
         null,
       )
-    val mobile = CurrentM3UiBuilderCatalogExecutor().listCatalogs().single()
+    val mobile = benchmarkCatalogExecutor().listCatalogs().single()
     assertSame(sentinel, executor.export(request().copy(catalog = mobile)))
     val embedded = DesignNodeV1("imported", "remote-compose/document")
     assertSame(
