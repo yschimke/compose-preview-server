@@ -44,6 +44,11 @@
       "listed": false
     },
     {
+      "system": "lovelace",
+      "repo": "yschimke/homeassistant-remotecompose-out",
+      "listed": false
+    },
+    {
       "system": "m3-catalog",
       "repo": "yschimke/m3-catalog-out",
       "listed": true,
@@ -163,6 +168,7 @@
     "catalogs": {
       "remote-widgets": { "serve": true, "published": true, "owned": true },
       "ha-cards": { "serve": true, "published": true, "owned": true },
+      "lovelace": { "serve": true, "published": true, "owned": true },
       "meshcore-mobile": { "serve": true, "published": true, "owned": true },
       "homeassistant-remotecompose": { "serve": true, "published": true, "owned": true },
       "a2ui-catalog": { "serve": true, "published": true, "owned": true },
