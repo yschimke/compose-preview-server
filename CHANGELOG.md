@@ -1,5 +1,26 @@
 # Changelog
 
+## [3.143.0](https://github.com/yschimke/compose-preview-server/compare/v3.142.0...v3.143.0) (2026-10-17)
+
+
+### Features
+
+* **deploy:** add independent deployment and stage site extraction ([#1729](https://github.com/yschimke/compose-preview-server/issues/1729)) ([76392ca](https://github.com/yschimke/compose-preview-server/commit/76392ca38a79314e0be4576f5133eb9d6ebb14f0))
+* **deploy:** route optional read-only Home Assistant demo ([#1724](https://github.com/yschimke/compose-preview-server/issues/1724)) ([3c77022](https://github.com/yschimke/compose-preview-server/commit/3c77022f6beb5d7ad707bea9c5652d7437ad7ecc))
+* **deploy:** route the public WASM dashboard demo ([#1725](https://github.com/yschimke/compose-preview-server/issues/1725)) ([085e3a9](https://github.com/yschimke/compose-preview-server/commit/085e3a98e342e1b7ccfd456f2d422874d8520ffa))
+
+
+### Bug Fixes
+
+* **catalogs:** register declaration-only builder catalogs ([#1733](https://github.com/yschimke/compose-preview-server/issues/1733)) ([7d60f3d](https://github.com/yschimke/compose-preview-server/commit/7d60f3d16e1d1bff3630978e6a6e4c548316a881))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.68.2 ([#1731](https://github.com/yschimke/compose-preview-server/issues/1731)) ([1ad11a4](https://github.com/yschimke/compose-preview-server/commit/1ad11a480659725b2678de7658f1a423f3000d99))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-contracts-bom to v3.36.0 ([#1735](https://github.com/yschimke/compose-preview-server/issues/1735)) ([915c348](https://github.com/yschimke/compose-preview-server/commit/915c348a5b939e60a0a7438f8b3e76492a4d5690))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.18.6 ([#1730](https://github.com/yschimke/compose-preview-server/issues/1730)) ([d377a8a](https://github.com/yschimke/compose-preview-server/commit/d377a8a574e4ab21b1c364b070fcaa701ee2d282))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-ui-builder-bom to v3.120.0 ([#1721](https://github.com/yschimke/compose-preview-server/issues/1721)) ([acf754a](https://github.com/yschimke/compose-preview-server/commit/acf754a97dc47ab3f4d2ea06edea1ebc3f6995aa))
+* **deps:** update rc-players to v2.14.0 ([#1732](https://github.com/yschimke/compose-preview-server/issues/1732)) ([819c3f4](https://github.com/yschimke/compose-preview-server/commit/819c3f48b1e5370bb7f7e59fc799184d00a7a52c))
+* **deps:** update rc-players to v2.15.0 ([#1734](https://github.com/yschimke/compose-preview-server/issues/1734)) ([b978394](https://github.com/yschimke/compose-preview-server/commit/b9783943182b672f14b8bc2c06190bd22a8fa26c))
+* **lovelace:** allow dashboard catalog on the HA editor host ([#1728](https://github.com/yschimke/compose-preview-server/issues/1728)) ([b748b52](https://github.com/yschimke/compose-preview-server/commit/b748b52a47ea807a905d8f4e0b051a04bf329b11))
+
 ## [3.142.0](https://github.com/yschimke/compose-preview-server/compare/v3.141.0...v3.142.0) (2026-10-17)
 
 
