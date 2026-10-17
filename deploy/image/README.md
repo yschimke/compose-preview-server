@@ -1778,7 +1778,8 @@ docker compose up -d --no-deps caddy
 ```
 
 The overlay joins Caddy to the pre-existing `public-demo-ha_edge` network and mounts a route snippet
-into the optional import in `ha.caddy`. It strips `/demo-ha` and forwards only to
+into the optional import in `ha.caddy` (also mounted by the overlay, so staging this does not
+require publishing a Caddy image first). It strips `/demo-ha` and forwards only to
 `demo-ha-gateway:8080`. Caddy is **not** on HA's private network, and native HA's 8123 API, onboarding
 and admin interface are not routed. No administrative credential belongs in Caddy, this repository,
 the frontend or a URL. Without the overlay this route is absent; existing designs/auth/builder and

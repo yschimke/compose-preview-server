@@ -13,6 +13,7 @@ assert ha.index('import /run/caddy-ha-routes/*.caddy') < ha.index('handle @desig
 assert 'handle_path /demo-ha/*' in route
 assert 'reverse_proxy demo-ha-gateway:8080' in route
 assert '8123' not in route and 'homeassistant:' not in route
+assert './ha.caddy:/etc/caddy/ha.caddy:ro' in overlay
 assert './demo-ha.caddy:/run/caddy-ha-routes/demo-ha.caddy:ro' in overlay
 assert 'networks: [default, demo-ha]' in overlay
 assert 'external: true' in overlay and 'name: public-demo-ha_edge' in overlay

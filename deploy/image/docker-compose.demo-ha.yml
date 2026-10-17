@@ -7,6 +7,8 @@
 services:
   caddy:
     volumes:
+      # Also mount the optional import so an operator can stage this before a Caddy image roll.
+      - ./ha.caddy:/etc/caddy/ha.caddy:ro
       - ./demo-ha.caddy:/run/caddy-ha-routes/demo-ha.caddy:ro
     networks: [default, demo-ha]
 networks:
