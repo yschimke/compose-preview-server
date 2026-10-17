@@ -59,9 +59,9 @@ grep -Fq \
 }
 
 grep -Fq \
-  ': "${SERVE_UI_BUILDER_ADMIN_ACTORS:=github:yschimke}"' \
+  ': "${SERVE_UI_BUILDER_ADMIN_ACTORS:=none}"' \
   "${entrypoint}" || {
-  echo "FAIL: the image entrypoint does not repair an empty legacy compose pass-through" >&2
+  echo "FAIL: the image entrypoint grants an administrator by default" >&2
   exit 1
 }
 
@@ -79,8 +79,7 @@ grep -Fq \
   exit 1
 }
 
-# The example names it only as an override of settings.json (`uiBuilder.adminActors`); the
-# entrypoint's default above is what makes github:yschimke the administrator.
+# The retained site example is an explicit deployment override, never a process default.
 grep -Fxq '# SERVE_UI_BUILDER_ADMIN_ACTORS=github:yschimke' "${example}" || {
   echo "FAIL: the preview host example does not show github:yschimke as the UI-builder admin" >&2
   exit 1

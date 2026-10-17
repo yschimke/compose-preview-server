@@ -1,0 +1,7 @@
+{$DOMAIN} {
+	encode zstd gzip
+	header Referrer-Policy same-origin
+	header X-Content-Type-Options nosniff
+	# Keep upstream cancellation and WebSocket upgrades at Caddy defaults.
+	reverse_proxy preview:8080
+}

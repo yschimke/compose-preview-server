@@ -27,7 +27,7 @@ if [[ ! -f .env ]]; then
   TOKEN="$(openssl rand -hex 24)"
   # DEPLOY_HOOK_TOKEN gates the /__hooks/rollout webhook that lets image-publish CI
   # roll this box the instant a new image ships (else it waits for the poll loop).
-  # Add the SAME value as the repo's DEPLOY_HOOK_TOKEN Actions secret (printed below).
+  # Add the SAME value as the repo's DEPLOY_HOOK_TOKEN Actions secret (read locally from .env).
   HOOK_TOKEN="$(openssl rand -hex 24)"
   printf 'DOMAIN=%s\nSERVE_TOKEN=%s\nDEPLOY_HOOK_TOKEN=%s\n' "${DOMAIN}" "${TOKEN}" "${HOOK_TOKEN}" > .env
   chmod 600 .env
@@ -75,7 +75,6 @@ echo "==> Pulling the prebuilt images and starting the stack"
 sudo docker compose pull
 sudo docker compose up -d
 
-TOKEN="$(grep '^SERVE_TOKEN=' .env | cut -d= -f2-)"
 # Match the compose default (SERVE_PUBLIC defaults to 1) so we print the URL this
 # box actually serves: open in public mode, the ?token= gate only when SERVE_PUBLIC=0.
 SERVE_PUBLIC="$( (grep '^SERVE_PUBLIC=' .env || true) | cut -d= -f2- )"
@@ -84,9 +83,9 @@ echo
 echo "==> Up. Once DNS for ${DOMAIN} resolves here and Caddy has a cert:"
 if [[ "${SERVE_PUBLIC}" == "1" ]]; then
   echo "    https://${DOMAIN}/        (public mode — open, no token needed)"
-  echo "    To lock it down: set SERVE_PUBLIC=0 in .env, re-run, and use the ?token= URL it prints."
+  echo "    To lock it down: set SERVE_PUBLIC=0 in .env, re-run, and read SERVE_TOKEN locally from .env."
 else
-  echo "    https://${DOMAIN}/?token=${TOKEN}   (token-gated — SERVE_PUBLIC=0)"
+  echo "    https://${DOMAIN}/   (token-gated; read SERVE_TOKEN locally from .env)"
 fi
 echo "    Logs: sudo docker compose logs -f preview"
 
@@ -96,12 +95,12 @@ if [[ -n "${HOOK_TOKEN}" ]]; then
   echo
   echo "==> Instant-roll webhook: to have image-publish CI roll this box the moment a"
   echo "    new image ships (instead of waiting for the poll), add this repo Actions secret:"
-  echo "      DEPLOY_HOOK_TOKEN=${HOOK_TOKEN}"
-  echo "    (and, if this box isn't preview.coo.ee, a DEPLOY_HOOK_URL variable ="
-  echo "     https://${DOMAIN}/__hooks/rollout). Until then the box still rolls on its poll."
+  echo "      DEPLOY_HOOK_TOKEN (read its value locally from .env)"
+  echo "    and a DEPLOY_HOOK_URL variable ="
+  echo "     https://${DOMAIN}/__hooks/rollout. Until then the box still rolls on its poll."
 fi
 
-if [[ "${DOMAIN}" == "preview.coo.ee" ]]; then
+if [[ -n "${DOMAIN}" ]]; then
   echo
   echo "==> GitHub auth for live preview/playground:"
   echo "    Create a GitHub OAuth app with callback:"
@@ -109,7 +108,7 @@ if [[ "${DOMAIN}" == "preview.coo.ee" ]]; then
   echo "    Then add these to .env and run: sudo docker compose up -d"
   echo "      SERVE_GITHUB_AUTH_CLIENT_ID=..."
   echo "      SERVE_GITHUB_AUTH_CLIENT_SECRET=..."
-  echo "      SERVE_GITHUB_AUTH_COOKIE_SECRET=$(openssl rand -hex 32)"
-  echo "    The compose file defaults SERVE_GITHUB_AUTH_REPO=yschimke/compose-ai-tools"
+  echo "      SERVE_GITHUB_AUTH_COOKIE_SECRET=<generate and store a random secret locally>"
+  echo "    Set SERVE_GITHUB_AUTH_REPO to your own repository if gating repository access,"
   echo "    and SERVE_GITHUB_AUTH_CALLBACK_BASE_URL=https://${DOMAIN}."
 fi

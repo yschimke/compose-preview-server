@@ -116,7 +116,7 @@ services:
       SERVE_ADMIN_READ_TOKEN: "${SERVE_ADMIN_READ_TOKEN:-}"
       # UI Builder-only administrators. These GitHub actors can administer every shared design
       # and its folder placement, but gain no catalog/trust/site/onboarding authority. Empty takes
-      # the entrypoint's default (the hosted box's operator); set `none` to disable it.
+      # the deployment's settings.json; no administrator is granted by default.
       SERVE_UI_BUILDER_ADMIN_ACTORS: "${SERVE_UI_BUILDER_ADMIN_ACTORS:-}"
       # `public` starts new UI-builder designs readable by anyone with the link (owners can make one
       # private); `private` (the default) keeps them to their owner and whoever they share with.

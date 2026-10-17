@@ -14,7 +14,7 @@
       "additionalProperties": false,
       "properties": {
         "adminActors": {
-          "description": "GitHub actors who administer every shared UI-builder design and its folder placement. They gain no catalog, trust or site authority. An empty list turns off the image's default (`github:yschimke`).",
+          "description": "GitHub actors who administer every shared UI-builder design and its folder placement. They gain no catalog, trust or site authority. No actors are granted by default; an empty list disables cross-owner administration.",
           "type": "array",
           "uniqueItems": true,
           "items": {
@@ -121,7 +121,7 @@
           }
         },
         "hostRoot": {
-          "description": "Serve the UI builder at the root of SERVE_UI_BUILDER_HOST (`https://ui.coo.ee/<design>`) instead of under `/ui-builder/`, keeping every server route (`/start`, `/api`, `/mcp`, `/agent-access`, `/auth`, `/admin`, health and status, assets) on that host. Needs an editor bundle that reads the `ui-builder-base-path` meta. Ignored without SERVE_UI_BUILDER_HOST.",
+          "description": "Serve the UI builder at the root of SERVE_UI_BUILDER_HOST (`https://ui.example.com/<design>`) instead of under `/ui-builder/`, keeping every server route (`/start`, `/api`, `/mcp`, `/agent-access`, `/auth`, `/admin`, health and status, assets) on that host. Needs an editor bundle that reads the `ui-builder-base-path` meta. Ignored without SERVE_UI_BUILDER_HOST.",
           "type": "boolean",
           "x-env": "SERVE_UI_BUILDER_HOST_ROOT",
           "x-apply": "restart",
