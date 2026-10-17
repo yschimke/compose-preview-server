@@ -1,0 +1,17 @@
+# OPT-IN: dedicated public demo backend owned by homeassistant-remotecompose/deploy/demo-ha.
+# Provision that stack first; its external edge network must already exist.
+# Add this overlay to the box's existing COMPOSE_FILE (retain any deploy-config overlay):
+# COMPOSE_FILE=docker-compose.yml:docker-compose.deploy-config.yml:docker-compose.demo-ha.yml
+# Then: docker compose up -d --no-deps caddy
+# This does not start, upgrade or recreate any preview/design service.
+services:
+  caddy:
+    volumes:
+      # Also mount the optional import so an operator can stage this before a Caddy image roll.
+      - ./ha.caddy:/etc/caddy/ha.caddy:ro
+      - ./demo-ha.caddy:/run/caddy-ha-routes/demo-ha.caddy:ro
+    networks: [default, demo-ha]
+networks:
+  demo-ha:
+    external: true
+    name: public-demo-ha_edge

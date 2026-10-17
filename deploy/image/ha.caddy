@@ -19,6 +19,10 @@
 	import edge_common
 	import crawler_block
 
+	# Optional read-only demo backend. Empty glob keeps the deployment unchanged unless
+	# docker-compose.demo-ha.yml mounts its route and joins the isolated edge network.
+	import /run/caddy-ha-routes/*.caddy
+
 	@designs path / /demo /demo/* /designs /designs/* /site/* /schema /embed/* /studio/* /api/designs /api/designs/* /api/schema /api/cards/resolve /api/studio/* /edit /healthz
 	handle @designs {
 		reverse_proxy {$HA_DESIGNS_UPSTREAM:ha-designs:8080} {
