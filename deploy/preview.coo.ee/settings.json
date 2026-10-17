@@ -23,7 +23,7 @@
     "rcDefaultPlayer": "cmp-android"
   },
   "agents": {
-    "grantCapabilities": ["ui-builder-read", "ui-builder-write", "ui-builder-export", "images"]
+    "grantCapabilities": ["ui-builder-read", "ui-builder-write", "ui-builder-export", "ui-builder-destructive", "images"]
   },
   "uiBuilder": {
     "hostRoot": true,

@@ -140,7 +140,7 @@ graphics-shapes = "1.1.0"
 # 2.60.1 is the first published BOM with `ServeHost.sourcesChanged` (compose-ai-tools#5979),
 # which the local rebuild (`ServeLocalRebuild`, #1682) calls to reload a module's classes in place.
 # The 2.60.0 BOM did not reach Central because of bundle-producer's POM (compose-ai-tools#5981).
-composeai-tools = "2.64.2"
+composeai-tools = "2.67.0"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
 # in that repository's `docs/design/REPOSITORY_LAYERS.md`: between the contracts and
@@ -239,7 +239,7 @@ composeai-tools = "2.64.2"
 # 3.16.0 plays a carried Remote Compose document in a held live session, so input reaches it: the
 # Android players (compose-preview-daemon#254, the player daemon's interactive lane, #1609) and the
 # CMP JVM player on daemon-desktop (compose-preview-daemon#255, the desktop player daemon, #1616).
-composeai-preview-daemon = "3.18.2"
+composeai-preview-daemon = "3.18.5"
 # 2.9.0 is the first release carrying `DesignEnvironmentV1.exportDevices` and its Set/Reset
 # changes, which is the field a design names its export devices in. 2.14.0 adds the components a
 # design defines — `DesignDocumentV1.components`, `DesignNodeV1.component` and the `binding` value
@@ -282,6 +282,8 @@ composeai-preview-daemon = "3.18.2"
 # Builders (compose-ui-builder#617), so the server can take it.
 # 3.30.0 adds a component record's optional `overloads`, so `.github/scripts/decoder-shapes.json`
 # is regenerated with it (`UPDATE_DECODER_SHAPES=1`).
+# 3.34.0 adds the `ui-builder-destructive` agent-grant capability (compose-preview-contracts#187),
+# which grants carry into the design service as `mayDeleteForPrincipal`.
 composeai-contracts = "3.35.0"
 
 # The extracted UI builder (yschimke/compose-ui-builder), resolved from its RELEASES. Three jars
@@ -437,6 +439,9 @@ composeai-contracts = "3.35.0"
 # (compose-ui-builder#717) and retires the catalog-cutover shadow comparison (#716), whose server
 # side #1575 already removed. Built on compose-ai-tools 2.49.0; 2.50.0 above wins resolution.
 # 3.115.0 removes the Remote M3 Kotlin generator (#842); Remote must use its published catalog.
+# 3.116.0 adds `AuthenticatedUiBuilderActor.mayDeleteForPrincipal` (compose-ui-builder#864) for the
+# `ui-builder-destructive` grant, and the editor's report of nodes a canvas did not draw (#867).
+# 3.119.0 adds the shared Lovelace JSON exporter (compose-ui-builder#908).
 composeai-ui-builder = "3.119.0"
 # The CMP/Wasm Remote Compose player (yschimke/rc-players' `rc-player-wasm-dist`, a zip of its
 # static browser bundle). Shipped in the server tarball as `rc-player-wasm/`, which the image's
@@ -448,7 +453,7 @@ composeai-ui-builder = "3.119.0"
 # takes `?density=` (CSS px per dp), which the viewer sends so the lane draws at the preview's scale.
 # 2.11.0 sizes a CanvasContent's ComponentValue bindings from its own geometry (rc-players#644), so
 # the pressure gauges that bind their width/height there draw their ring and needle on the CMP lanes.
-rc-players = "2.12.0"
+rc-players = "2.13.1"
 # The Android Remote Compose players the server's own player-only Android daemon replays documents
 # with, staged as `lib-rc-players-android/` (`stageRcPlayersAndroidLibs`). The Android daemon
 # sidecar deliberately ships none of this family (a consumer brings it, compose-preview-daemon's
@@ -459,12 +464,12 @@ rc-players = "2.12.0"
 # `cmp-android`, and pins its JVM target staged as `lib-rc-player-desktop/` for the desktop player
 # daemon (`stageRcPlayerDesktopLibs`); compose-preview-daemon's desktop binding is compiled against
 # this release's `rc-player-compose`.
-rc-players-android = "2.12.0"
+rc-players-android = "2.13.1"
 compose-remote = "1.0.0-alpha21"
 # The TypeScript player's browser bundle (`remote-compose-player-js-dist`, a zip with the `dist`
 # classifier). Its own ref because rc-players publishes only the modules a release changed: the
 # bundle last changed in 2.1.2, and 2.1.3–2.4.0 never published this coordinate.
-remote-compose-player-js = "2.11.0"
+remote-compose-player-js = "2.13.1"
 kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.11.0"
 ktor = "3.6.0"
