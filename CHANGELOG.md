@@ -1,5 +1,49 @@
 # Changelog
 
+## [3.142.0](https://github.com/yschimke/compose-preview-server/compare/v3.141.0...v3.142.0) (2026-10-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **ui-builder:** retire catalog ownership switches ([#1716](https://github.com/yschimke/compose-preview-server/issues/1716))
+
+### Features
+
+* let an agent grant carry ui-builder-destructive into the design service ([#1701](https://github.com/yschimke/compose-preview-server/issues/1701)) ([4c8add2](https://github.com/yschimke/compose-preview-server/commit/4c8add2c6db11976ed9ba4b4becc53f462ca9db0))
+* **lovelace:** serve the dashboard JSON export lane and catalog ([#1708](https://github.com/yschimke/compose-preview-server/issues/1708)) ([2f39b18](https://github.com/yschimke/compose-preview-server/commit/2f39b185f5c4d878a39fd8d321d8de38e801a4d4))
+
+
+### Bug Fixes
+
+* **deps:** update compose-multiplatform to v1.12.2 ([#1695](https://github.com/yschimke/compose-preview-server/issues/1695)) ([31a0462](https://github.com/yschimke/compose-preview-server/commit/31a046216995e8341b5b2959586a6d79a01cc1ea))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.61.0 ([#1696](https://github.com/yschimke/compose-preview-server/issues/1696)) ([e31431a](https://github.com/yschimke/compose-preview-server/commit/e31431a4489ff9eade4a5021fb65a4f416425fd3))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.61.2 ([#1700](https://github.com/yschimke/compose-preview-server/issues/1700)) ([1f96e7c](https://github.com/yschimke/compose-preview-server/commit/1f96e7ce8035769a785283f46bce8c337c7203cf))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.62.0 ([#1702](https://github.com/yschimke/compose-preview-server/issues/1702)) ([58d742e](https://github.com/yschimke/compose-preview-server/commit/58d742e57694f9665d67e843601e6a925173a220))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.63.0 ([#1704](https://github.com/yschimke/compose-preview-server/issues/1704)) ([346a6d0](https://github.com/yschimke/compose-preview-server/commit/346a6d0a422dff7e726611526071f9ebd712799f))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.64.2 ([#1707](https://github.com/yschimke/compose-preview-server/issues/1707)) ([3fb8128](https://github.com/yschimke/compose-preview-server/commit/3fb8128de54bd754b59d00a6fb7f4badb24ab6d0))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.64.3 ([#1709](https://github.com/yschimke/compose-preview-server/issues/1709)) ([1e29af2](https://github.com/yschimke/compose-preview-server/commit/1e29af23b8dcd9b96c8912e86f4c8fdf7223d1e2))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.64.4 ([#1713](https://github.com/yschimke/compose-preview-server/issues/1713)) ([e2ef41e](https://github.com/yschimke/compose-preview-server/commit/e2ef41e5e423ed9f175a1c15af75591e2395efba))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.64.5 ([#1715](https://github.com/yschimke/compose-preview-server/issues/1715)) ([2696480](https://github.com/yschimke/compose-preview-server/commit/26964800073582b63d59f70bd0abfca838620c92))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.66.0 ([#1718](https://github.com/yschimke/compose-preview-server/issues/1718)) ([3382335](https://github.com/yschimke/compose-preview-server/commit/33823352001ab0b06456c187606851ffcc88ef1b))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.67.0 ([#1720](https://github.com/yschimke/compose-preview-server/issues/1720)) ([e9b479f](https://github.com/yschimke/compose-preview-server/commit/e9b479f680a3d6eabd4cc5a67f57956bf964ff63))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-contracts-bom to v3.35.0 ([#1703](https://github.com/yschimke/compose-preview-server/issues/1703)) ([0b1f144](https://github.com/yschimke/compose-preview-server/commit/0b1f144d236ac9f40f7cd71a5cdb81d5ebdf0059))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.17.1 ([#1699](https://github.com/yschimke/compose-preview-server/issues/1699)) ([7a3ae6f](https://github.com/yschimke/compose-preview-server/commit/7a3ae6f8351487e1f72f9d763d280afa3f31d136))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.18.0 ([#1705](https://github.com/yschimke/compose-preview-server/issues/1705)) ([2a86b7b](https://github.com/yschimke/compose-preview-server/commit/2a86b7baf03c5b6215eb807b85b016770d924a52))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.18.1 ([#1706](https://github.com/yschimke/compose-preview-server/issues/1706)) ([4548c97](https://github.com/yschimke/compose-preview-server/commit/4548c97867666c659be686603c2379d144aee6f3))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.18.2 ([#1710](https://github.com/yschimke/compose-preview-server/issues/1710)) ([9bb8c5e](https://github.com/yschimke/compose-preview-server/commit/9bb8c5ecb9e463f784937439be3ac3cd2722c81e))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.18.3 ([#1712](https://github.com/yschimke/compose-preview-server/issues/1712)) ([f3d6e79](https://github.com/yschimke/compose-preview-server/commit/f3d6e79fb95d5386fa1c499830465ddb355f43fb))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.18.4 ([#1714](https://github.com/yschimke/compose-preview-server/issues/1714)) ([5a97c86](https://github.com/yschimke/compose-preview-server/commit/5a97c86d4cbb8c9e8d62ff1134a9679e31ae7e1d))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-ui-builder-bom to v3.118.0 ([#1692](https://github.com/yschimke/compose-preview-server/issues/1692)) ([9185e59](https://github.com/yschimke/compose-preview-server/commit/9185e5988a0d3dbf95ad24a160a6fe5dbf10674a))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-ui-builder-bom to v3.119.0 ([#1719](https://github.com/yschimke/compose-preview-server/issues/1719)) ([f8b8324](https://github.com/yschimke/compose-preview-server/commit/f8b8324a440da18e97872c49dd73e19f2d98c686))
+* **deps:** update dependency ee.schimke.composeai:rc-players-bom to v2.13.1 ([#1717](https://github.com/yschimke/compose-preview-server/issues/1717)) ([79e4018](https://github.com/yschimke/compose-preview-server/commit/79e4018fb07fdeda6447ecece91e34682420d2c2))
+* **deps:** update rc-players to v2.13.0 ([#1711](https://github.com/yschimke/compose-preview-server/issues/1711)) ([ee80c4e](https://github.com/yschimke/compose-preview-server/commit/ee80c4ee9e52d8ecb2e2eb67fb9d6b1c462fd373))
+* **ui-builder:** accept legacy ownership fields during rollout ([#1722](https://github.com/yschimke/compose-preview-server/issues/1722)) ([b6cfb65](https://github.com/yschimke/compose-preview-server/commit/b6cfb65de550cada8426e1ee41764c878b2238b4))
+
+
+### Code Refactoring
+
+* **ui-builder:** retire catalog ownership switches ([#1716](https://github.com/yschimke/compose-preview-server/issues/1716)) ([c0bd7eb](https://github.com/yschimke/compose-preview-server/commit/c0bd7eba491b430fdfd454ae88164c115a5a7c7e))
+
 ## [3.141.0](https://github.com/yschimke/compose-preview-server/compare/v3.140.0...v3.141.0) (2026-10-15)
 
 
