@@ -436,7 +436,7 @@ jobs:
         with:
           rw-token: ${{ github.event_name == 'push' && (secrets.BUILDFETCH_COMPOSEAI_GRADLE_REMOTE_CACHE_TOKEN || secrets.BUILDFETCH_GRADLE_REMOTE_CACHE_TOKEN) || '' }}
           ro-token: ${{ secrets.BUILDFETCH_COMPOSEAI_GRADLE_REMOTE_CACHE_TOKEN_RO || secrets.BUILDFETCH_GRADLE_REMOTE_CACHE_TOKEN_RO }}
-      - run: ./gradlew :server:installDist
+      - run: ./gradlew :server:installVisualHarness
       # Tarred so the launcher keeps its executable bit; an artifact does not carry modes.
       - run: tar -czf "${RUNNER_TEMP}/server.tgz" server/build/install
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

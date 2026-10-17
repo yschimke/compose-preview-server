@@ -86,6 +86,8 @@ public class ServeRunner(
    * event hook: it fires once on the discovery path, and a throw fails the run.
    */
   private val onDiscovered: (ServeDiscovery) -> Unit = {},
+  /** Catalog transport supplied by embedded hosts, including the deterministic visual harness. */
+  private val catalogFetch: ((String) -> ByteArray?)? = null,
 ) : ServeOptions by options, ServeBuildHost by build {
 
   private val catalogBlobPool: CatalogBlobPool by lazy {
@@ -4278,6 +4280,7 @@ public class ServeRunner(
         root = dir,
         register = { id, host -> publishStaticCatalog(id, host, registry) },
         trust = { trustStore.get() },
+        fetch = catalogFetch,
         repo = catalogRepo,
         branchPrefix = catalogBranchPrefix,
         maxImages = catalogMaxImages,

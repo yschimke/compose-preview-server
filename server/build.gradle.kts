@@ -1237,3 +1237,31 @@ tasks.register<JavaExec>("uiBuilderExportComparison") {
   classpath = sourceSets.main.get().runtimeClasspath
   mainClass.set("ee.schimke.composeai.cli.serve.UiBuilderExportComparison")
 }
+
+// Only the visual harness gets this launcher. The released distribution always uses real catalog
+// transport; the harness supplies the committed benchmark publication through ServeRunner's seam.
+val visualHarness =
+  sourceSets.create("visualHarness") {
+    compileClasspath += sourceSets.main.get().output + sourceSets.main.get().compileClasspath
+    runtimeClasspath += sourceSets.main.get().runtimeClasspath
+  }
+val visualHarnessJar =
+  tasks.register<Jar>("visualHarnessJar") {
+    archiveClassifier.set("visual-harness")
+    from(visualHarness.output)
+  }
+val visualHarnessStartScripts =
+  tasks.register<CreateStartScripts>("visualHarnessStartScripts") {
+    applicationName = "compose-preview-visual-harness"
+    mainClass.set("ee.schimke.composeai.cli.serve.VisualHarnessMain")
+    classpath = files(visualHarnessJar, tasks.named("jar")) + configurations.runtimeClasspath.get()
+    outputDir = layout.buildDirectory.dir("visual-harness-scripts").get().asFile
+  }
+
+tasks.register<Sync>("installVisualHarness") {
+  dependsOn(tasks.named("installDist"))
+  into(layout.buildDirectory.dir("install/compose-preview-visual-harness"))
+  from(tasks.named("installDist"))
+  from(visualHarnessJar) { into("lib") }
+  from(visualHarnessStartScripts) { into("bin") }
+}

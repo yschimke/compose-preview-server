@@ -1,3 +1,4 @@
+import { pinFixtureDocument, prepareCatalogFixtures } from "./_ui-builder-catalog-fixtures.mjs";
 import { expect, test } from "@playwright/test";
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
@@ -10,7 +11,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
 const launcher = resolve(
     root,
-    "server/build/install/compose-preview-server/bin/compose-preview-server",
+    "server/build/install/compose-preview-visual-harness/bin/compose-preview-visual-harness",
 );
 const app = resolve(root, "server/build/install/compose-preview-server/ui-builder");
 const token = "ui-builder-performance-token";
@@ -51,7 +52,10 @@ async function waitUntilReady(origin, process) {
 
 async function startProductServer(port, stateDirectory, logPath) {
     const output = [];
-    const environment = { ...process.env };
+    const environment = {
+        ...process.env,
+        UI_BUILDER_HARNESS_FIXTURES: await prepareCatalogFixtures(),
+    };
     delete environment.JAVA_OPTS;
     delete environment.UI_BUILDER_REAL_RENDER_APP_HOME;
     const child = spawn(
@@ -131,7 +135,7 @@ async function seedDesign(origin) {
     responseOf(
         await apiCall(origin, {
             type: "createDesign",
-            document: {
+            document: await pinFixtureDocument(origin, token, {
                 schema: fixture.documentSchema,
                 id: designId,
                 title: create.title,
@@ -143,7 +147,7 @@ async function seedDesign(origin) {
                 nodes: {},
                 assets: {},
                 tokenBindings: {},
-            },
+            }),
         }),
         "snapshot",
     );
