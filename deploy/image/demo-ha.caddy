@@ -1,0 +1,4 @@
+# Only the read-only facade is reachable here. Never proxy this prefix to native HA.
+handle_path /demo-ha/* {
+	reverse_proxy demo-ha-gateway:8080
+}

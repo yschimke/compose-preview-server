@@ -1,5 +1,10 @@
 # Prebuilt preview-host image (instant deploy)
 
+New deployments should start with the independent [Compose example](../example/README.md).
+This directory also retains the existing hosted site stack during the
+[staged extraction](../../docs/deployment/OWNERSHIP.md); its HA services, rollout and analytics
+routes are operator topology, rather than requirements of the server image.
+
 A **prebuilt** Docker image that runs the standalone `compose-preview-server` with **no build on
 the host**. It installs the released server distribution and serves published catalogs/live
 bundles without a local Gradle project. Built once in CI and pushed to GHCR, so hosts just pull it.
@@ -1757,3 +1762,36 @@ should never show two different typefaces.
 and collection routes through Caddy. Set `SERVE_UMAMI_ENABLED=1`, `SERVE_UMAMI_URL` and
 `SERVE_UMAMI_WEBSITE_ID` to enable the browser integration. The switch defaults to `0`;
 configured URL/ID values alone never enable analytics. The normal stack does not install Umami.
+
+### Public read-only Home Assistant demo (opt-in)
+
+The `/demo-ha/*` API for `https://ha.coo.ee/demo` is a separate, dedicated Home Assistant instance
+with only generic simulated data. Its provisioning, public protocol, private token handling and
+security verifier live in
+[`homeassistant-remotecompose/deploy/demo-ha`](https://github.com/yschimke/homeassistant-remotecompose/tree/main/deploy/demo-ha).
+The frontend `/demo` route is owned by that repository's Wasm frontend work.
+
+First provision that stack **on this host**, run its edge-network verifier, and only then add
+`docker-compose.demo-ha.yml` to this box's existing `COMPOSE_FILE`, keeping all existing overlays:
+
+```sh
+# Example; preserve whatever overlays this deployment already uses.
+COMPOSE_FILE=docker-compose.yml:docker-compose.deploy-config.yml:docker-compose.demo-ha.yml
+# Save the choice in the host's .env, then recreate only Caddy:
+docker compose config --quiet
+docker compose up -d --no-deps caddy
+```
+
+The overlay joins Caddy to the pre-existing `public-demo-ha_edge` network and mounts a route snippet
+into the optional import in `ha.caddy` (also mounted by the overlay, so staging this does not
+require publishing a Caddy image first). It strips `/demo-ha` and forwards only to
+`demo-ha-gateway:8080`. Caddy is **not** on HA's private network, and native HA's 8123 API, onboarding
+and admin interface are not routed. No administrative credential belongs in Caddy, this repository,
+the frontend or a URL. Without the overlay this route is absent; existing designs/auth/builder and
+frontend routes are unchanged. Backend changes can be staged without reloading preview services.
+
+After enabling the route, run the backend's `verify_public.py https://ha.coo.ee/demo-ha --stream`
+from an external client. It verifies reads, rejects REST/WebSocket mutations and observes an actual
+simulated state update. Record the result; the configuration by itself does not prove a deployment.
+Rollback: remove this overlay from `COMPOSE_FILE`, recreate only Caddy, and stop the dedicated demo
+stack while retaining its volume and private credential files.

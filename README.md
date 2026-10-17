@@ -239,7 +239,7 @@ generated source to a file, which is what a session otherwise re-invents as a `c
 
 ```shell
 export COMPOSE_PREVIEW_TOKEN=...          # or let the command ask a human to approve a grant
-compose-preview-server design list --server https://preview.coo.ee
+compose-preview-server design list --server https://preview.example.com
 compose-preview-server design status --workspace . --summary
 compose-preview-server design render spotify-wear-widget -o cover.png
 compose-preview-server design export spotify-wear-widget -o Widget.kt
@@ -267,7 +267,7 @@ broken host debuggable: `design get` captures its document (a read, not the rend
 suspicion) and the file replays anywhere.
 
 ```shell
-compose-preview-server design get spotify-wear-widget --server https://preview.coo.ee > doc.json
+compose-preview-server design get spotify-wear-widget --server https://preview.example.com > doc.json
 compose-preview-server design render --document doc.json --local \
   --catalog wear-m3.bundle --assets ./assets -o replay.png
 compose-preview-server design export --document doc.json --local   # the generated Kotlin, no server
@@ -302,10 +302,13 @@ component pack (`--ui-builder-packs confetti-mobile=mobile,confetti-wear=wear`),
 author from the editor's settings; see
 [`docs/design/UI_BUILDER_COMPONENT_PACKS.md`](docs/design/UI_BUILDER_COMPONENT_PACKS.md).
 
-Releases attach that distribution to the GitHub release, then build the production
-`ghcr.io/yschimke/compose-preview-host` image. The canonical Docker and `preview.coo.ee`
-configuration lives in [`deploy/image`](deploy/image/) and
-[`deploy/preview.coo.ee`](deploy/preview.coo.ee/).
+Releases attach that distribution to the GitHub release, then publish the reusable
+`ghcr.io/yschimke/compose-preview-host` image. Start your own instance with
+[`deploy/example`](deploy/example/), an independent Compose example with persistent state and
+optional HTTPS. See [deployment ownership and migration](docs/deployment/OWNERSHIP.md) for the
+image, operator configuration and integration boundaries. The existing site stack in `deploy/image`
+and `deploy/preview.coo.ee` remains operational during a staged move to the private
+`yschimke/preview-coo-ee` repository; it is not the recommended starting point for a new deployment.
 
 ## Releasing
 

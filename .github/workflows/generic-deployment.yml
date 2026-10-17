@@ -1,0 +1,59 @@
+name: Generic deployment example
+on:
+  pull_request:
+    paths: ['deploy/example/**', 'deploy/image/entrypoint.sh', '.github/workflows/generic-deployment.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: deploy/example
+    env:
+      IMAGE_TAG: 3.142.0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Validate independent configuration
+        run: |
+          docker compose -f compose.yml config --quiet
+          docker run --rm --entrypoint caddy -e DOMAIN=preview.example.com -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2 validate --config /etc/caddy/Caddyfile --adapter caddyfile
+      - name: Start released image on disposable volumes
+        run: docker compose -f compose.yml up -d preview
+      - name: Verify catalog, editor and a published render
+        run: |
+          python3 - <<'PY'
+          import json, time, urllib.request
+          from urllib.parse import quote
+          def get(path):
+              with urllib.request.urlopen('http://localhost:8080' + path, timeout=30) as response:
+                  return response.read()
+          for attempt in range(120):
+              try:
+                  status = json.loads(get('/status.json'))
+                  if status['catalogs']['failed']:
+                      raise SystemExit('catalog failed to load')
+                  if status['catalogs']['loaded'] == 1 and not status['catalogs']['pending']:
+                      break
+              except (OSError, ValueError):
+                  pass
+              time.sleep(5)
+          else:
+              raise SystemExit('catalog did not become loaded')
+          assert json.loads(get('/version'))['version'] == '3.142.0'
+          assert b'<html' in get('/ui-builder/').lower()
+          previews = json.loads(get('/m3-catalog/api/previews'))['previews']
+          assert previews, 'no published previews'
+          data = get('/m3-catalog/render/' + quote(previews[0]['id'], safe='') + '.png')
+          assert data.startswith(b'\x89PNG\r\n\x1a\n'), 'published render is not PNG'
+          print('PASS: released image serves one catalog, the editor and published pixels')
+          PY
+      - name: Logs and cleanup
+        if: always()
+        run: |
+          docker compose -f compose.yml logs --tail=120 preview
+          docker compose -f compose.yml down -v
