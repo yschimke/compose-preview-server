@@ -1766,7 +1766,7 @@ security verifier live in
 [`homeassistant-remotecompose/deploy/demo-ha`](https://github.com/yschimke/homeassistant-remotecompose/tree/main/deploy/demo-ha).
 The frontend `/demo` route is owned by that repository's Wasm frontend work.
 
-First provision that stack **on this host**, verify its loopback health endpoint, and only then add
+First provision that stack **on this host**, run its edge-network verifier, and only then add
 `docker-compose.demo-ha.yml` to this box's existing `COMPOSE_FILE`, keeping all existing overlays:
 
 ```sh
