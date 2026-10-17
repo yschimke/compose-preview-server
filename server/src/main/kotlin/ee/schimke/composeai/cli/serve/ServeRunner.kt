@@ -22,6 +22,7 @@ import ee.schimke.composeai.uibuilder.export.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.export.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.export.UiBuilderPreviewSurfaces
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
+import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderAssetStore
@@ -2313,7 +2314,6 @@ public class ServeRunner(
     if (ServeCatalogsConfig.validateEditor(pin) != null) return bundled // reported by problems()
     return when (val resolved = store.resolve(pin)) {
       is ServeUiBuilderEditorStore.Result.Ready -> {
-        resolved.warning?.let { System.err.println("serve: $it") }
         System.err.println(
           "serve: UI-builder editor ${pin.version} (pinned in catalogs.json)" +
             (bundledVersion?.let { "; bundled is $it" } ?: "")
@@ -2652,6 +2652,8 @@ public class ServeRunner(
     // and export declaration. Operators no longer choose an ownership subset.
     val ownership = ee.schimke.composeai.uibuilder.export.CatalogOwnership.ALL
     val publishedTemplates = ConcurrentHashMap<String, CatalogSeedTemplates>()
+    val templatePublications =
+      ConcurrentHashMap<String, Pair<CatalogReferenceV1, CatalogSeedTemplates?>>()
     // Null allows every enabled catalog, empty turns the path off, a named set opts in one at a
     // time.
     val publishedAllowed = options.uiBuilderPublishedCatalogs
@@ -2770,6 +2772,13 @@ public class ServeRunner(
               health.degrade(systemId, read.reason)
             }
           }
+          templatePublications[systemId] =
+            CatalogReferenceV1(
+              systemId,
+              composed.catalog.benchmark.catalogRevision,
+              CurrentM3UiBuilderCatalogExecutor.CURRENT_CAPABILITY_DIGEST,
+              published.runtimeId ?: composed.catalog.benchmark.nativeRuntimeId,
+            ) to publishedTemplates[systemId]
           if (health.isWithheld(systemId)) health.healthy(systemId)
           System.err.println("serve: UI-builder catalog ${composed.note}")
         }
@@ -2784,6 +2793,7 @@ public class ServeRunner(
           publishedRecords.remove(systemId)
           // The seeds belonged to the publication that just stopped composing.
           publishedTemplates.remove(systemId)
+          templatePublications.remove(systemId)
           return false
         }
       }
@@ -2797,7 +2807,6 @@ public class ServeRunner(
           it.catalogSystemIds = health.served(uiBuilderCatalogs)
           it.published = publishedCatalogs
           it.nativeRuntimeIds = publishedRuntimeIds
-          it.catalogOwnership = ownership
           it.unlistedCatalogIds = options.uiBuilderUnlistedCatalogs
           // `composeCode` answers a configuration question (is a record configured for this
           // catalog?), not a filesystem one: the value is baked in once, so a disk read would block
@@ -2925,7 +2934,10 @@ public class ServeRunner(
       catalogs = catalogs,
       renderer = renderer,
       refreshPublished = refreshPublished,
-      seeds = UiBuilderCatalogSeeds() { publishedTemplates[it] },
+      seeds =
+        UiBuilderCatalogSeeds(publication = { templatePublications[it] }) {
+          publishedTemplates[it]
+        },
       references =
         runCatching { ServeUiBuilderReferenceStore(directory.resolve("references").toPath()) }
           .onFailure {

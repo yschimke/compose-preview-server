@@ -5,6 +5,7 @@ import ee.schimke.composeai.uibuilder.export.CatalogSeedTemplates
 import ee.schimke.composeai.uibuilder.export.NewDesignState
 import ee.schimke.composeai.uibuilder.export.UiBuilderDocument
 import ee.schimke.composeai.uibuilder.export.UiBuilderNewDesignSeed
+import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
 import kotlinx.serialization.json.JsonObject
 
 /**
@@ -15,8 +16,21 @@ import kotlinx.serialization.json.JsonObject
  * delivery branch beside `ui-builder.json`). With none, the builder supplies a generic blank.
  */
 class UiBuilderCatalogSeeds(
-  private val templates: (catalogSystemId: String) -> CatalogSeedTemplates? = { null }
+  private val publication: ((String) -> Pair<CatalogReferenceV1, CatalogSeedTemplates?>?)? = null,
+  private val templates: (catalogSystemId: String) -> CatalogSeedTemplates? = { null },
 ) {
+
+  /** Published starting documents, without synthesizing a catalog-specific fallback. */
+  internal fun publishedDocuments(pin: CatalogReferenceV1): Map<String, UiBuilderDocument>? {
+    val catalogSystemId = pin.systemId
+    val documents =
+      if (publication != null) {
+        val current = publication.invoke(catalogSystemId) ?: return null
+        if (current.first != pin) return null
+        current.second
+      } else templates(catalogSystemId)
+    return documents?.templates.orEmpty().associate { it.id to it.document }
+  }
 
   fun templateIds(catalogSystemId: String): Set<String> =
     UiBuilderNewDesignSeed.templateIds(
