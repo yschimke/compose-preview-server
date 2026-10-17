@@ -21,7 +21,7 @@ jobs:
       - name: Validate independent configuration
         run: |
           docker compose -f compose.yml config --quiet
-          docker run --rm -e DOMAIN=preview.example.com -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2 validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          docker run --rm --entrypoint caddy -e DOMAIN=preview.example.com -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2 validate --config /etc/caddy/Caddyfile --adapter caddyfile
       - name: Start released image on disposable volumes
         run: docker compose -f compose.yml up -d preview
       - name: Verify catalog, editor and a published render
