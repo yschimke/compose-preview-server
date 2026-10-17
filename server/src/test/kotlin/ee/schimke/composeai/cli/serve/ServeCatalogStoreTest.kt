@@ -190,6 +190,116 @@ class ServeCatalogStoreTest {
   }
 
   @Test
+  fun `a declaration-only builder catalog registers without preview images`() {
+    val catalog =
+      """{"schema":"design-parity-catalog/v1","system":"lovelace","components":[],"uiBuilderFile":"ui-builder.json"}"""
+    val builder =
+      """{"schema":"compose-ui-builder-catalog/v1","statusSemantics":{"platform":"lovelace"}}"""
+    var declaration: String? = builder
+    val store =
+      store(TrustStore.EMPTY) { url ->
+        when {
+          url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") -> catalog.encodeToByteArray()
+          url.endsWith("/ui-builder.json") -> declaration?.encodeToByteArray()
+          else -> null
+        }
+      }
+
+    assertTrue(store.load("lovelace") is ServeCatalogStore.Result.Ok)
+    assertTrue(registered.getValue("lovelace").previews.isEmpty())
+    val served = assertNotNull(store.uiBuilderCatalog("lovelace"))
+    assertEquals(builder, served.readText())
+
+    // Losing the only usable asset cannot replace the working generation with an empty one.
+    for (invalid in
+      listOf(
+        null,
+        "{}",
+        """{"schema":"compose-ui-builder-catalog/v1","statusSemantics":{}}""",
+        """{"schema":"compose-ui-builder-catalog/v1","statusSemantics":{"platform":"  "}}""",
+      )) {
+      declaration = invalid
+      assertTrue(store.load("lovelace") is ServeCatalogStore.Result.Failed)
+      assertEquals(builder, assertNotNull(store.uiBuilderCatalog("lovelace")).readText())
+    }
+  }
+
+  @Test
+  fun `empty inventories require a usable builder declaration`() {
+    val catalog =
+      """{"schema":"design-parity-catalog/v1","system":"lovelace","components":[],"uiBuilderFile":"ui-builder.json"}"""
+    for (declaration in
+      listOf(
+        null,
+        "not json",
+        "{}",
+        """{"schema":"compose-ui-builder-catalog/v1","statusSemantics":{}}""",
+        """{"schema":"compose-ui-builder-catalog/v1","statusSemantics":{"platform":""}}""",
+        """{"schema":"compose-ui-builder-catalog/v1","statusSemantics":{"platform":"  "}}""",
+        """{"schema":"compose-ui-builder-catalog/v1","statusSemantics":{"platform":null}}""",
+      )) {
+      val store =
+        store(TrustStore.EMPTY) { url ->
+          when {
+            url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") -> catalog.encodeToByteArray()
+            url.endsWith("/ui-builder.json") -> declaration?.encodeToByteArray()
+            else -> null
+          }
+        }
+      assertTrue(store.load("lovelace") is ServeCatalogStore.Result.Failed)
+      assertNull(store.uiBuilderCatalog("lovelace"))
+    }
+  }
+
+  @Test
+  fun `invalid image declarations cannot replace the working preview generation`() {
+    var imagePath = "images/card.png"
+    val builder =
+      """{"schema":"compose-ui-builder-catalog/v1","statusSemantics":{"platform":"lovelace"}}"""
+    val store =
+      store(TrustStore.EMPTY) { url ->
+        when {
+          url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") ->
+            """{"schema":"design-parity-catalog/v1","system":"lovelace","uiBuilderFile":"ui-builder.json",
+              "components":[{"componentId":"Card","images":[{"path":"$imagePath"}]}]}"""
+              .encodeToByteArray()
+          url.endsWith("/ui-builder.json") -> builder.encodeToByteArray()
+          url.endsWith("/images/card.png") -> png()
+          else -> null
+        }
+      }
+    assertTrue(store.load("lovelace") is ServeCatalogStore.Result.Ok)
+    val servedDir = assertNotNull(store.liveDir("lovelace"))
+    val servedPreview = registered.getValue("lovelace").previews.single().id
+
+    for (invalid in listOf("outside/card.png", "images/card.jpg", "images/../card.png")) {
+      imagePath = invalid
+      assertTrue(store.load("lovelace") is ServeCatalogStore.Result.Failed, invalid)
+      assertEquals(servedDir, store.liveDir("lovelace"))
+      assertEquals(servedPreview, registered.getValue("lovelace").previews.single().id)
+      assertEquals(builder, assertNotNull(store.uiBuilderCatalog("lovelace")).readText())
+    }
+  }
+
+  @Test
+  fun `a builder declaration cannot hide an outage of declared preview images`() {
+    val catalog =
+      """{"schema":"design-parity-catalog/v1","system":"lovelace","uiBuilderFile":"ui-builder.json",
+      "components":[{"componentId":"Card","images":[{"path":"images/card.png"}]}]}"""
+    val builder =
+      """{"schema":"compose-ui-builder-catalog/v1","statusSemantics":{"platform":"lovelace"}}"""
+    val store =
+      store(TrustStore.EMPTY) { url ->
+        when {
+          url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") -> catalog.encodeToByteArray()
+          url.endsWith("/ui-builder.json") -> builder.encodeToByteArray()
+          else -> null
+        }
+      }
+    assertTrue(store.load("lovelace") is ServeCatalogStore.Result.Failed)
+  }
+
+  @Test
   fun `failure-only catalog registers visible diagnostic cards`() {
     val broken =
       """
