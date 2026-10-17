@@ -1353,6 +1353,7 @@ class ServeHttpServer(
             ::canonicalServerOrigin,
             uiBuilderNativePreview,
             uiBuilderInlineCapture,
+            seeds = uiBuilderSeeds,
             identityDetails = ::uiBuilderIdentityDetails,
             agentPresence = uiBuilderAgentPresence,
             // A white-labelled host lists and creates only its own catalogs.

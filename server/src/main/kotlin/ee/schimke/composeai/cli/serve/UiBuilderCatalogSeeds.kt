@@ -15,8 +15,24 @@ import kotlinx.serialization.json.JsonObject
  * delivery branch beside `ui-builder.json`). With none, the builder supplies a generic blank.
  */
 class UiBuilderCatalogSeeds(
-  private val templates: (catalogSystemId: String) -> CatalogSeedTemplates? = { null }
+  private val publication: ((String) -> Triple<String, String, CatalogSeedTemplates?>?)? = null,
+  private val templates: (catalogSystemId: String) -> CatalogSeedTemplates? = { null },
 ) {
+
+  /** Published starting documents, without synthesizing a catalog-specific fallback. */
+  internal fun publishedDocuments(
+    catalogSystemId: String,
+    catalogRevision: String,
+    nativeRuntimeId: String,
+  ): Map<String, UiBuilderDocument>? {
+    val documents =
+      if (publication != null) {
+        val current = publication.invoke(catalogSystemId) ?: return null
+        if (current.first != catalogRevision || current.second != nativeRuntimeId) return null
+        current.third
+      } else templates(catalogSystemId)
+    return documents?.templates.orEmpty().associate { it.id to it.document }
+  }
 
   fun templateIds(catalogSystemId: String): Set<String> =
     UiBuilderNewDesignSeed.templateIds(

@@ -2,7 +2,10 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.agentgrants.AgentGrantCapability
 import ee.schimke.composeai.agentgrants.AgentGrantScope
+import ee.schimke.composeai.uibuilder.export.CatalogSeedTemplates
 import ee.schimke.composeai.uibuilder.export.UiBuilderBuildFeatures
+import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
+import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
 import ee.schimke.composeai.uibuilder.protocol.ErrorResponseV1
@@ -59,13 +62,27 @@ class ServeUiBuilderRoutesTest {
   private val subscriptionOpened = CountDownLatch(1)
   private val subscriptionClosed = CountDownLatch(1)
   @Volatile private var updateListener: ((UiBuilderServiceUpdate) -> Unit)? = null
+  private var publicationRevision = "revision-7"
+  private var publicationRuntime = "runtime-7"
+  private var listedCatalogs = emptyList<CatalogCapabilityV1>()
+  private val published =
+    (CatalogSeedTemplates.read(
+        "custom-kit",
+        listOf("ui-builder/designs/card.json"),
+      ) {
+        """{"schema":"compose-ui-builder-document/v1-candidate","id":"card","title":"Published card","revision":0,
+      "catalogPin":{"systemId":"custom-kit","catalogRevision":"candidate","capabilityDigest":"candidate","nativeRuntimeId":"candidate"},
+      "environment":{"widthDp":192,"heightDp":192,"density":2.0},"stateVariables":{},"roots":["root"],
+      "nodes":{"root":{"id":"root","componentId":"custom/card","properties":{},"modifiers":[],"slots":{}}}}"""
+      } as CatalogSeedTemplates.Result.Read)
+      .templates
   private val service =
     object : UiBuilderServicePort {
       override suspend fun execute(call: UiBuilderServiceCall): UiBuilderServiceResponse {
         calls += call
         val request = call.request
         if (request is UiBuilderServiceRequest.ExportDesign) return exportAnswer(request)
-        return UiBuilderServiceResponse.Catalogs(emptyList())
+        return UiBuilderServiceResponse.Catalogs(listedCatalogs)
       }
 
       override fun subscribe(
@@ -105,6 +122,12 @@ class ServeUiBuilderRoutesTest {
         sessions = registry,
         defaultSessionId = "unused",
         uiBuilderService = service,
+        uiBuilderSeeds =
+          UiBuilderCatalogSeeds(
+            publication = { Triple(publicationRevision, publicationRuntime, published) }
+          ) {
+            published.takeIf { _ -> it == "custom-kit" }
+          },
         uiBuilderAuthorization = authorization,
       )
       .also(ServeHttpServer::start)
@@ -114,6 +137,73 @@ class ServeUiBuilderRoutesTest {
   fun tearDown() {
     server.stop()
     registry.close()
+  }
+
+  @Test
+  fun `published templates are readable without write access and carry the served catalog pin`() {
+    listedCatalogs =
+      listOf(
+        CatalogCapabilityV1.Builder(
+            "compose-ui-builder-catalog/v1",
+            CatalogBenchmarkV1.Builder(
+                "custom-kit",
+                "source",
+                "custom-kit",
+                "revision-7",
+                "runtime-7",
+              )
+              .build(),
+            emptyList(),
+          )
+          .build()
+      )
+    client
+      .newCall(
+        Request.Builder()
+          .url("http://127.0.0.1:${server.port}/api/ui-builder/v1/catalogs/custom-kit/templates")
+          .header(ACTOR_HEADER, "reader")
+          .build()
+      )
+      .execute()
+      .use { response ->
+        assertEquals(200, response.code)
+        val payload =
+          UI_BUILDER_JSON.decodeFromString<UiBuilderTemplateDocuments>(response.body.string())
+        assertEquals("custom-kit", payload.catalogSystemId)
+        assertEquals("revision-7", payload.catalogRevision)
+        assertEquals("runtime-7", payload.nativeRuntimeId)
+        assertEquals(mapOf("card" to published["card"]!!.document), payload.templates)
+        assertEquals("no-store", response.header("Cache-Control"))
+      }
+    assertEquals(UiBuilderRouteCapability.READ, capabilities.last())
+    // Refreshing templates must not be cached under a capability that still names the old pin.
+    for (runtimeChanged in listOf(false, true)) {
+      publicationRevision = if (runtimeChanged) "revision-7" else "revision-8"
+      publicationRuntime = if (runtimeChanged) "runtime-8" else "runtime-7"
+      client
+        .newCall(
+          Request.Builder()
+            .url("http://127.0.0.1:${server.port}/api/ui-builder/v1/catalogs/custom-kit/templates")
+            .header(ACTOR_HEADER, "reader")
+            .build()
+        )
+        .execute()
+        .use { response ->
+          assertEquals(409, response.code)
+          assertEquals("no-store", response.header("Cache-Control"))
+        }
+    }
+  }
+
+  @Test
+  fun `templates refuse missing credentials forbidden identities and unknown catalogs`() {
+    for ((actor, expected) in listOf(null to 401, "forbidden" to 403, "reader" to 404)) {
+      val request =
+        Request.Builder()
+          .url("http://127.0.0.1:${server.port}/api/ui-builder/v1/catalogs/missing/templates")
+      if (actor != null) request.header(ACTOR_HEADER, actor)
+      client.newCall(request.build()).execute().use { assertEquals(expected, it.code) }
+    }
   }
 
   @Test
