@@ -8,6 +8,7 @@ import ee.schimke.composeai.data.overrides.PreviewOverrideDeclaration
 import ee.schimke.composeai.data.remotecompose.RemoteComposeKnobDeclaration
 import ee.schimke.composeai.designpages.DesignPagesJson
 import ee.schimke.composeai.designpages.DesignPagesManifest
+import ee.schimke.composeai.uibuilder.export.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.protocol.UiBuilderRuntimeArtifactV1
 import ee.schimke.composeai.uibuilder.protocol.validateContract
 import java.io.ByteArrayInputStream
@@ -437,7 +438,7 @@ class ServeCatalogStore(
     var count = 0
     // How many baked images the catalog DECLARES (before any fetch) — see the check after the
     // loops.
-    var declaredImages = 0
+    val declaredImages = catalog.components.sumOf { it.images.size }
     // The component slugs whose baked figma-svg to fetch (a slug is the preview id up to `__`).
     val slugs = LinkedHashSet<String>()
     // Exact vectors mirror each successfully fetched images/<slug>/<variant>.png. Carrying these
@@ -447,9 +448,8 @@ class ServeCatalogStore(
     // into one card and the viewer can offer a switcher. Only previews with a state or theme are
     // recorded.
     val variants = LinkedHashMap<String, VariantMeta>()
-    // Every declared baked image, flattened into catalog order with its component context, without
-    // fetching. An image whose destination escapes the previews dir is planned with a null target
-    // so it still counts toward `declaredImages`.
+    // Valid baked images, flattened into catalog order with their component context, without
+    // fetching. `declaredImages` counts the raw inventory, including paths this plan rejects.
     // Captions are per component, so live-only records and failures borrow their component's
     // caption. A wholly deferred component carries its caption on the deferred record, so both are
     // read, components first.
@@ -528,9 +528,6 @@ class ServeCatalogStore(
         imageLimitExceeded = true
         break
       }
-      // Counted as declared so the completeness check can tell an all-deferred catalog (legal) from
-      // one whose images the branch can't serve (an outage).
-      declaredImages++
       if (planned.target == null) continue
       run {
         val id = planned.id
@@ -706,8 +703,7 @@ class ServeCatalogStore(
     // A declaration-only builder catalog (for example Lovelace) has no preview inventory. Stage
     // its declaration before deciding whether there is anything to serve. Missing or malformed
     // metadata cannot turn an empty catalog into a successful generation.
-    writeUiBuilderCatalog(base, staging, catalog)
-    val hasBuilderDeclaration = File(staging, UI_BUILDER_CATALOG_FILE).isFile
+    val hasBuilderDeclaration = writeUiBuilderCatalog(base, staging, catalog)
 
     // Declared baked images still have to work: a declaration cannot mask an image outage. A
     // wholly live-only catalog is also legal; its deferred ids are registered by the live builder.
@@ -1412,15 +1408,22 @@ class ServeCatalogStore(
 
   /**
    * Stage the declared builder catalog at `<staging>/ui-builder.json`. Fail-soft and
-   * structural-only, like [writeComponentRecord].
+   * structural-only, like [writeComponentRecord]. Returns whether the declaration also names a
+   * platform, as required by the builder at startup, so it can stand alone without previews.
    */
-  private fun writeUiBuilderCatalog(base: String, staging: File, catalog: Catalog) {
-    val name = catalog.uiBuilderFile?.trim('/')?.takeIf { it.isNotEmpty() } ?: return
-    if (".." in name.split("/")) return
-    val bytes = runCatching { fetchCatalogAsset("$base$name") }.getOrNull() ?: return
-    if (!looksLikeUiBuilderCatalog(bytes)) return
+  private fun writeUiBuilderCatalog(base: String, staging: File, catalog: Catalog): Boolean {
+    val name = catalog.uiBuilderFile?.trim('/')?.takeIf { it.isNotEmpty() } ?: return false
+    if (".." in name.split("/")) return false
+    val bytes = runCatching { fetchCatalogAsset("$base$name") }.getOrNull() ?: return false
+    if (!looksLikeUiBuilderCatalog(bytes)) return false
     staging.mkdirs()
     File(staging, UI_BUILDER_CATALOG_FILE).writeBytes(bytes)
+    val root = json.parseToJsonElement(bytes.decodeToString()) as JsonObject
+    val semantics = root["statusSemantics"] as JsonObject
+    return (semantics[UiBuilderCatalogPlatform.KEY] as? JsonPrimitive)
+      ?.contentOrNull
+      ?.trim()
+      ?.isNotEmpty() == true
   }
 
   private fun looksLikeUiBuilderCatalog(bytes: ByteArray): Boolean = runCatching {
