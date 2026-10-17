@@ -185,6 +185,10 @@ providers.gradleProperty("composeUiBuilderDir").orNull?.let { path ->
   logger.lifecycle("Composite build: uiBuilder -> $directory")
   includeBuild(directory) {
     dependencySubstitution {
+      // The platform is part of the same released set. Without this substitution a checkout
+      // cannot validate the next, not-yet-published builder release even when every jar is local.
+      substitute(module("ee.schimke.composeai:compose-preview-ui-builder-bom"))
+        .using(project(":bom"))
       substitute(module("ee.schimke.composeai:compose-preview-ui-builder-runtime"))
         .using(project(":ui-builder-runtime"))
       substitute(module("ee.schimke.composeai:compose-preview-ui-builder-export"))

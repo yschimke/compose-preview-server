@@ -2616,8 +2616,10 @@ public class ServeRunner(
     // An A2UI catalog's JSON (its A2UI messages) is written whatever the Remote Compose flag says;
     // every other design passes through to the Remote Compose / picture chain below it.
     val exporter =
-      A2uiJsonExportExecutor(
-        documentExporter?.let { RemotePngExportExecutor(it, renderer, fonts) } ?: pictureExporter
+      LovelaceJsonExportExecutor(
+        A2uiJsonExportExecutor(
+          documentExporter?.let { RemotePngExportExecutor(it, renderer, fonts) } ?: pictureExporter
+        )
       )
     val pictureExports =
       ((pictureExporter as? ProductionUiBuilderExportExecutor)?.capabilities
