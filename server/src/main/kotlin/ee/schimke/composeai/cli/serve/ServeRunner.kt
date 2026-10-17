@@ -14,7 +14,6 @@ import ee.schimke.composeai.previewdata.PreviewModule
 import ee.schimke.composeai.render.session.RenderSessionException
 import ee.schimke.composeai.render.session.RenderSessionFactory
 import ee.schimke.composeai.render.session.subprocess.SubprocessRenderSessions
-import ee.schimke.composeai.uibuilder.export.CatalogComposeSourceExportAdapters
 import ee.schimke.composeai.uibuilder.export.CatalogExportRouting
 import ee.schimke.composeai.uibuilder.export.CatalogSeedTemplates
 import ee.schimke.composeai.uibuilder.export.RecordFreeExport
@@ -46,6 +45,7 @@ import kotlin.system.exitProcess
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import okio.Path.Companion.toPath
 
 /**
@@ -86,6 +86,8 @@ public class ServeRunner(
    * event hook: it fires once on the discovery path, and a throw fails the run.
    */
   private val onDiscovered: (ServeDiscovery) -> Unit = {},
+  /** Catalog transport supplied by embedded hosts, including the deterministic visual harness. */
+  private val catalogFetch: ((String) -> ByteArray?)? = null,
 ) : ServeOptions by options, ServeBuildHost by build {
 
   private val catalogBlobPool: CatalogBlobPool by lazy {
@@ -2376,8 +2378,8 @@ public class ServeRunner(
      * result; called when that branch moves.
      */
     val refreshPublished: (sourceSystem: String) -> Unit,
-    /** What a new design starts as: built in, or the published templates of a catalog-owned one. */
-    val seeds: UiBuilderCatalogSeeds = UiBuilderCatalogSeeds.BUILT_IN,
+    /** What a new design starts as: the catalog's published templates, or a generic blank. */
+    val seeds: UiBuilderCatalogSeeds = UiBuilderCatalogSeeds.EMPTY,
     /**
      * The Compose exporter, kept so the native lane can call it with node tagging (the service's
      * exporter may wrap several formats).
@@ -2646,17 +2648,9 @@ public class ServeRunner(
         .build()
     val publishedCatalogs = ConcurrentHashMap<String, CatalogCapabilityV1>()
     val publishedRuntimeIds = ConcurrentHashMap<String, String>()
-    // The catalog-owned cutover (compose-ui-builder's UI_BUILDER_CATALOG_CUTOVER.md); every read
-    // below is a no-op at `none`.
-    val ownership = options.uiBuilderCatalogOwnership
-    if (!ownership.isNone) {
-      System.err.println(
-        "serve: UI-builder catalogs owned by their repositories " +
-          "(--ui-builder-catalog-ownership ${ownership.wireValue}): ${
-            uiBuilderCatalogs.filter(ownership::owns).sorted().joinToString()
-          } seed from their published templates and export by their own declaration"
-      )
-    }
+    // Compatibility with the released builder API: every catalog owns its definition, seeds
+    // and export declaration. Operators no longer choose an ownership subset.
+    val ownership = ee.schimke.composeai.uibuilder.export.CatalogOwnership.ALL
     val publishedTemplates = ConcurrentHashMap<String, CatalogSeedTemplates>()
     // Null allows every enabled catalog, empty turns the path off, a named set opts in one at a
     // time.
@@ -2668,20 +2662,17 @@ public class ServeRunner(
       System.err.println(
         if (publishedAllowed.isEmpty())
           "serve: no UI-builder catalog reads its published ui-builder.json " +
-            "(--ui-builder-published-catalogs none); every catalog keeps its built-in definition"
+            "(--ui-builder-published-catalogs none); every catalog is withheld"
         else
           "serve: only ${publishedAllowed.sorted().joinToString()} may read a published " +
-            "ui-builder.json; ${withheld.joinToString()} keep their built-in definition"
+            "ui-builder.json; ${withheld.joinToString()} are withheld"
       )
     }
     // Compose one catalog's published definition into the maps below; a function because the
     // refresher calls it again when the branch moves. True when it composed.
     val catalogGuidelines = ServeCatalogGuidelines()
-    // An owned catalog that cannot be composed is withheld, never quietly replaced; so is one this
-    // build has no built-in definition for, which compose-ui-builder would refuse outright.
-    val health =
-      UiBuilderOwnedCatalogHealth(ownership::owns, builtIn = UI_BUILDER_BUILT_IN_CATALOGS::contains)
-        .also { uiBuilderCatalogHealth = it }
+    // Missing or unusable publications are withheld and reported until they recover.
+    val health = UiBuilderOwnedCatalogHealth().also { uiBuilderCatalogHealth = it }
     fun composePublished(systemId: String, refresh: Boolean = false): Boolean {
       if (catalogStore == null || publishedAllowed?.contains(systemId) == false) {
         health.withhold(
@@ -2703,7 +2694,7 @@ public class ServeRunner(
           system = sourceSystem,
           sourceRepo = config?.repo,
           sourceBranchPrefix = config?.branch?.removeSuffix(sourceSystem),
-          templates = ownership.owns(systemId),
+          templates = true,
         )
           ?: run {
             health.withhold(
@@ -2746,6 +2737,14 @@ public class ServeRunner(
           PublishedUiBuilderCatalog.compose(published.file.readText(), record, uiBuilderExports)
       ) {
         is PublishedUiBuilderCatalog.Result.Composed -> {
+          val platform =
+            (composed.catalog.statusSemantics[UiBuilderCatalogPlatform.KEY] as? JsonPrimitive)
+              ?.contentOrNull
+              ?.trim()
+          if (platform.isNullOrEmpty()) {
+            health.withhold(systemId, "published ui-builder.json declares no platform")
+            return false
+          }
           publishedCatalogs[systemId] = composed.catalog
           // The runtime is the executable half of the document pin; never substitute a host
           // default. A republish that drops its runtime returns to the built-in renderer.
@@ -2754,37 +2753,28 @@ public class ServeRunner(
           // The published file maps builder ids to record components; without it the Remote
           // emitter's record fallback is unreachable.
           publishedRecords[systemId] = composed.records
-          if (ownership.owns(systemId)) {
-            when (
-              val read =
-                CatalogSeedTemplates.read(systemId, published.templates.keys.toList()) {
-                  published.templates[it]
-                }
-            ) {
-              is CatalogSeedTemplates.Result.Read -> {
-                publishedTemplates[systemId] = read.templates
-                health.templatesRead(systemId)
+          when (
+            val read =
+              CatalogSeedTemplates.read(systemId, published.templates.keys.toList()) {
+                published.templates[it]
               }
-              is CatalogSeedTemplates.Result.Unusable -> {
-                // Owned, so there is no built-in seed to fall back to: the catalog is offered the
-                // generic blank until it republishes, and reported as degraded.
-                publishedTemplates.remove(systemId)
-                health.degrade(systemId, read.reason)
-              }
+          ) {
+            is CatalogSeedTemplates.Result.Read -> {
+              publishedTemplates[systemId] = read.templates
+              health.templatesRead(systemId)
+            }
+            is CatalogSeedTemplates.Result.Unusable -> {
+              // Owned, so there is no built-in seed to fall back to: the catalog is offered the
+              // generic blank until it republishes, and reported as degraded.
+              publishedTemplates.remove(systemId)
+              health.degrade(systemId, read.reason)
             }
           }
           if (health.isWithheld(systemId)) health.healthy(systemId)
           System.err.println("serve: UI-builder catalog ${composed.note}")
         }
         is PublishedUiBuilderCatalog.Result.Unusable -> {
-          // Withheld when owned or not built in (served without a published entry, it would fail
-          // the whole builder); only a built-in catalog falls back.
-          if (!health.withhold(systemId, composed.reason)) {
-            System.err.println(
-              "serve: UI-builder catalog $systemId keeps its built-in definition — " +
-                composed.reason
-            )
-          }
+          health.withhold(systemId, composed.reason)
           // The served record did not compose this file, so a configured one stays the catalog's.
           publishedRecordCatalogs -= systemId
           // On a refresh this is a fall back, not a no-op: the policy an earlier publish composed
@@ -2803,8 +2793,7 @@ public class ServeRunner(
     fun buildCatalogExecutor(): UiBuilderCatalogExecutor =
       CurrentM3UiBuilderCatalogExecutor.Builder()
         .also {
-          // An owned or non-built-in catalog that did not compose is left out rather than allowed
-          // to fail the whole builder: compose-ui-builder refuses either with no published file.
+          // A catalog that did not compose is withheld until its publication recovers.
           it.catalogSystemIds = health.served(uiBuilderCatalogs)
           it.published = publishedCatalogs
           it.nativeRuntimeIds = publishedRuntimeIds
@@ -2820,30 +2809,11 @@ public class ServeRunner(
           // widgets via `WearWidgetCodeExporter`). `composeCode` now means "exports Kotlin source";
           // a new `ExportFormatV1` member would be a cross-repo wire change.
           it.composeExportFor = { systemId ->
-            val owned = publishedCatalogs[systemId]?.takeIf { ownership.owns(systemId) }
-            // A catalog that owns its export states it, and is answered by that declaration
-            // alone: no record, id or platform test below speaks for it.
-            if (owned != null)
-              CatalogExportRouting.exportsCompose(CatalogExportRouting.route(owned, ownership)) {
+            publishedCatalogs[systemId]?.let { catalog ->
+              CatalogExportRouting.exportsCompose(CatalogExportRouting.route(catalog, ownership)) {
                 false
               }
-            else
-              systemId in uiBuilderComponents.keys ||
-                publishedCatalogs[systemId]?.let { catalog ->
-                  CatalogComposeSourceExportAdapters.resolve(catalog) is
-                    CatalogComposeSourceExportAdapters.Resolution.Supported
-                } == true ||
-                systemId in RecordFreeExport.CATALOG_SYSTEM_IDS ||
-                // An A2UI catalog, packaged or published: `RecordFreeExport` routes its designs to
-                // `A2uiComposeExporter` by platform, so every one of them has Kotlin.
-                systemId == CurrentM3UiBuilderCatalogExecutor.A2UI_CATALOG_SYSTEM_ID ||
-                publishedCatalogs[systemId]?.statusSemantics?.let {
-                  UiBuilderCatalogPlatform.from(it) == UiBuilderCatalogPlatform.A2UI
-                } == true ||
-                (UiBuilderBuildFeatures.remoteCompose &&
-                  publishedCatalogs[systemId]?.statusSemantics?.let {
-                    UiBuilderCatalogPlatform.from(it) == UiBuilderCatalogPlatform.REMOTE_COMPOSE
-                  } == true)
+            } ?: false
           }
           it.packs = packs
         }
@@ -2855,8 +2825,7 @@ public class ServeRunner(
     val nativeBackends = ConcurrentHashMap<String, String>()
     fun deriveRouting() {
       catalogs.listCatalogs().forEach { catalog ->
-        // An owned catalog reaches the record-free emitter its `composeSourceExport` names,
-        // whatever platform word it states; every other catalog is routed by that word.
+        // The catalog's declaration chooses its export emitter.
         catalogPlatforms[catalog.benchmark.catalogSystemId] =
           CatalogExportRouting.recordFreePlatform(CatalogExportRouting.route(catalog, ownership))
             ?: UiBuilderCatalogPlatform.from(catalog.statusSemantics)
@@ -2956,7 +2925,7 @@ public class ServeRunner(
       catalogs = catalogs,
       renderer = renderer,
       refreshPublished = refreshPublished,
-      seeds = UiBuilderCatalogSeeds(ownership) { publishedTemplates[it] },
+      seeds = UiBuilderCatalogSeeds() { publishedTemplates[it] },
       references =
         runCatching { ServeUiBuilderReferenceStore(directory.resolve("references").toPath()) }
           .onFailure {
@@ -3532,7 +3501,7 @@ public class ServeRunner(
         uiBuilderCatalogs = uiBuilderCatalogs,
         uiBuilderCapabilities =
           uiBuilderLane?.catalogs?.let { catalogs -> { catalogs.listCatalogs() } },
-        uiBuilderSeeds = uiBuilderLane?.seeds ?: UiBuilderCatalogSeeds.BUILT_IN,
+        uiBuilderSeeds = uiBuilderLane?.seeds ?: UiBuilderCatalogSeeds.EMPTY,
         uiBuilderRuntimeDirs = uiBuilderRuntimeDirs,
         catalogUiBuilderRuntimeAsset = { runtimeId, segments ->
           catalogStore?.uiBuilderRuntimeAsset(runtimeId, segments)?.let { asset ->
@@ -4313,6 +4282,7 @@ public class ServeRunner(
         root = dir,
         register = { id, host -> publishStaticCatalog(id, host, registry) },
         trust = { trustStore.get() },
+        fetch = catalogFetch,
         repo = catalogRepo,
         branchPrefix = catalogBranchPrefix,
         maxImages = catalogMaxImages,
@@ -5363,13 +5333,6 @@ public class ServeRunner(
     )
   }
 }
-
-/**
- * The builder definitions that can serve without published files. Remote and Wear must publish
- * their capability and record because builder 3.115.0 removed their Kotlin generators.
- */
-internal val UI_BUILDER_BUILT_IN_CATALOGS: Set<String> =
-  setOf(CurrentM3UiBuilderCatalogExecutor.DEFAULT_CATALOG_SYSTEM_ID)
 
 /**
  * The page `--open-browser` opens: [configured], except that a `browse` over two or more local

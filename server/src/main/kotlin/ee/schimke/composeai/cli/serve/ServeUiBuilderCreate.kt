@@ -36,7 +36,7 @@ internal class ServeUiBuilderCreate(
    */
   private val serverOrigin: String?,
   /** Where a new design's starting document comes from: built in, or the catalog's own. */
-  private val seeds: UiBuilderCatalogSeeds = UiBuilderCatalogSeeds.BUILT_IN,
+  private val seeds: UiBuilderCatalogSeeds = UiBuilderCatalogSeeds.EMPTY,
 ) {
 
   sealed interface Outcome {

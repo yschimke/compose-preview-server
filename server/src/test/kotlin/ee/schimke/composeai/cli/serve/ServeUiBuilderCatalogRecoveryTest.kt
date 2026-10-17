@@ -46,6 +46,7 @@ class ServeUiBuilderCatalogRecoveryTest {
     CurrentM3UiBuilderCatalogExecutor.Builder()
       .also {
         it.catalogSystemIds = setOf(SYSTEM)
+        it.published = mapOf(SYSTEM to benchmarkCatalog())
         it.nativeRuntimeIds = mapOf(SYSTEM to runtimeId)
       }
       .build()

@@ -185,7 +185,6 @@ class ServeAdminRoutingTest {
     ServeUiBuilderSettings.Effective(
       catalogs = setOf("m3-catalog", "remote-m3"),
       publishedCatalogs = setOf("m3-catalog", "remote-m3"),
-      catalogOwnership = ee.schimke.composeai.uibuilder.export.CatalogOwnership.NONE,
       nativeCatalogs = emptyMap(),
       packs = emptyMap(),
       widgetPlayer = UiBuilderWidgetPlayer.DEFAULT,

@@ -1,6 +1,5 @@
 package ee.schimke.composeai.cli.serve
 
-import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import java.io.File
@@ -70,7 +69,7 @@ class ServeUiBuilderHostRootTest {
           if (projects)
             PersistentUiBuilderService(
               storage = FileUiBuilderStateStorage(bundle.toPath().resolve("state")),
-              catalogs = CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = setOf("m3-catalog")),
+              catalogs = benchmarkCatalogExecutor(catalogSystemIds = setOf("m3-catalog")),
               exporter = { error("this test never exports") },
             )
           else null,

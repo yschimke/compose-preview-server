@@ -2,7 +2,6 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.cli.serve.ServeCatalogsConfig.UiBuilderCatalogSettings
 import ee.schimke.composeai.cli.serve.ServeCatalogsConfig.UiBuilderSettings
-import ee.schimke.composeai.uibuilder.export.CatalogOwnership
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -21,7 +20,6 @@ class ServeUiBuilderSettingsTest {
     ServeUiBuilderSettings.Effective(
       catalogs = setOf("m3-catalog", "remote-m3", "wear-m3"),
       publishedCatalogs = setOf("m3-catalog", "remote-m3", "wear-m3"),
-      catalogOwnership = CatalogOwnership.NONE,
       nativeCatalogs = mapOf("wear-m3" to "wear-m3-catalog"),
       packs = mapOf("confetti-mobile" to "mobile"),
       widgetPlayer = UiBuilderWidgetPlayer.DEFAULT,
@@ -56,7 +54,7 @@ class ServeUiBuilderSettingsTest {
   }
 
   @Test
-  fun `a catalog outside the published default is served from the build's own definition`() {
+  fun `a catalog outside the published default is not allowed to read its definition`() {
     val effective =
       resolve(
           UiBuilderSettings(
@@ -72,16 +70,12 @@ class ServeUiBuilderSettingsTest {
   fun `withdrawing a catalog also drops what only made sense while it was served`() {
     val resolution =
       resolve(
-        UiBuilderSettings(
-          catalogs = mapOf("wear-m3" to UiBuilderCatalogSettings(serve = false, owned = true))
-        )
+        UiBuilderSettings(catalogs = mapOf("wear-m3" to UiBuilderCatalogSettings(serve = false)))
       )
     val effective = resolution.effective
     assertEquals(setOf("m3-catalog", "remote-m3"), effective.catalogs)
     assertEquals(setOf("m3-catalog", "remote-m3"), effective.publishedCatalogs)
-    // An owned catalog that is no longer served is reported and dropped, not a boot failure.
-    assertTrue(!effective.catalogOwnership.owns("wear-m3"))
-    assertTrue(resolution.problems.isNotEmpty())
+    assertEquals(emptyList(), resolution.problems)
   }
 
   @Test
@@ -141,22 +135,16 @@ class ServeUiBuilderSettingsTest {
   }
 
   @Test
-  fun `ownership, native catalogs, packs and the widget player override per entry`() {
+  fun `native catalogs, packs and the widget player override per entry`() {
     val effective =
       resolve(
           UiBuilderSettings(
-            catalogs =
-              mapOf(
-                "remote-m3" to UiBuilderCatalogSettings(owned = true),
-                "wear-m3" to UiBuilderCatalogSettings(nativeCatalog = ""),
-              ),
+            catalogs = mapOf("wear-m3" to UiBuilderCatalogSettings(nativeCatalog = "")),
             packs = mapOf("confetti-mobile" to null, "confetti-wear" to "wear"),
             widgetPlayer = "androidx",
           )
         )
         .effective
-    assertTrue(effective.catalogOwnership.owns("remote-m3"))
-    assertTrue(!effective.catalogOwnership.owns("m3-catalog"))
     assertEquals(emptyMap(), effective.nativeCatalogs)
     assertEquals(mapOf("confetti-wear" to "wear"), effective.packs)
     assertEquals("androidx", effective.widgetPlayer.flagValue)
@@ -164,8 +152,7 @@ class ServeUiBuilderSettingsTest {
 
   @Test
   fun `a pilot is served, published and owned but unlisted, and only while it is served`() {
-    val pilot =
-      UiBuilderCatalogSettings(serve = true, published = true, owned = true, listed = false)
+    val pilot = UiBuilderCatalogSettings(serve = true, published = true, listed = false)
     val effective =
       resolve(
           UiBuilderSettings(
@@ -179,7 +166,6 @@ class ServeUiBuilderSettingsTest {
         )
         .effective
     assertTrue("wear-m3-typed-pilot" in effective.catalogs)
-    assertTrue(effective.catalogOwnership.owns("wear-m3-typed-pilot"))
     assertEquals(setOf("wear-m3-typed-pilot"), effective.unlisted)
     assertEquals(listOf("wear-m3-typed-pilot"), effective.describe().unlistedCatalogs)
 
@@ -232,13 +218,6 @@ class ServeUiBuilderSettingsTest {
       ServeUiBuilderSettings.validate(UiBuilderSettings(packs = mapOf("confetti" to "toaster")))
     )
     assertNotNull(ServeUiBuilderSettings.validate(UiBuilderSettings(widgetPlayer = "vlc")))
-    assertNotNull(
-      ServeUiBuilderSettings.validate(
-        UiBuilderSettings(
-          catalogs = mapOf("remote-m3" to UiBuilderCatalogSettings(published = false, owned = true))
-        )
-      )
-    )
     assertNull(
       ServeUiBuilderSettings.validate(
         UiBuilderSettings(
@@ -252,14 +231,13 @@ class ServeUiBuilderSettingsTest {
   fun `a block the server cannot resolve is refused by the admin and leaves the file alone`() {
     val fs = okio.fakefilesystem.FakeFileSystem()
     val file = ServeCatalogsConfigFile("/config/catalogs.json".toPath(), fs)
-    // Every served catalog reads its published file, so ownership reaches the cutover's id check.
     val all = environment.copy(publishedCatalogs = null)
     val admin = ServeUiBuilderSettingsAdmin(file, all, all)
-    // Upper case passes the flag's id pattern but not the cutover's.
+    // Invalid catalog ids must be refused before persisting any settings.
     val result =
       admin.set(
         UiBuilderSettings(
-          catalogs = mapOf("Remote-M3" to UiBuilderCatalogSettings(serve = true, owned = true))
+          catalogs = mapOf("../Remote-M3" to UiBuilderCatalogSettings(serve = true))
         )
       )
     assertTrue(result is ServeUiBuilderSettingsAdmin.Result.Invalid, result.toString())
@@ -291,5 +269,15 @@ class ServeUiBuilderSettingsTest {
     val resolution = resolve(config.uiBuilder)
     assertEquals(emptyList(), resolution.problems)
     assertEquals(environment, resolution.effective)
+  }
+
+  @Test
+  fun `retired owned settings are ignored when a box reloads an older config`() {
+    for (owned in listOf(true, false)) {
+      val config =
+        ServeCatalogsConfig.parse("""{"uiBuilder":{"catalogs":{"wear-m3":{"owned":$owned}}}}""")
+      assertEquals(environment, resolve(config.uiBuilder).effective)
+      assertEquals(emptyList(), resolve(config.uiBuilder).problems)
+    }
   }
 }

@@ -22,7 +22,7 @@ import kotlin.test.assertEquals
  */
 class RemoteM3VocabularyParityTest {
   private val catalog =
-    CurrentM3UiBuilderCatalogExecutor(
+    benchmarkCatalogExecutor(
         catalogSystemIds =
           linkedSetOf("m3-catalog", CurrentM3UiBuilderCatalogExecutor.REMOTE_M3_CATALOG_SYSTEM_ID),
         published = mapOf("remote-m3" to PublishedCutoverCatalogs.remote),

@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.export.CatalogSeedTemplates
 import ee.schimke.composeai.uibuilder.protocol.CatalogsResponseV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
@@ -11,7 +12,6 @@ import ee.schimke.composeai.uibuilder.protocol.OpenDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.SnapshotResponseV1
 import ee.schimke.composeai.uibuilder.protocol.UiBuilderRequestV1
 import ee.schimke.composeai.uibuilder.protocol.UiBuilderResponseV1
-import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import java.io.File
@@ -62,8 +62,46 @@ class ServeWearScreenDeploymentIntegrationTest {
   }
   private val client = OkHttpClient()
 
+  // Test publications have names and node ids no built-in seed factory knows. This checks the
+  // server transports a catalog's templates; the builder owns the Wear emitter's exact output.
+  private val publishedTemplates =
+    assertIs<CatalogSeedTemplates.Result.Read>(
+        CatalogSeedTemplates.read(
+          "wear-m3",
+          listOf(
+            "ui-builder/designs/deployment-list.json",
+            "ui-builder/designs/deployment-empty.json",
+          ),
+        ) { path ->
+          val id = path.substringAfterLast('/').removeSuffix(".json")
+          val populated = id == "deployment-list"
+          val items = if (populated) "\"published-text\"" else ""
+          val extra =
+            if (populated)
+              """,
+          "published-text":{"id":"published-text","componentId":"wear-m3/text",
+            "properties":{"text":{"type":"string","value":"Published by deployment"}},
+            "modifiers":[],"slots":{}}
+        """
+            else ""
+          """
+        {"schema":"compose-ui-builder-document/v1-candidate","id":"$id","title":"$id","revision":0,
+         "catalogPin":{"systemId":"wear-m3","catalogRevision":"candidate",
+           "capabilityDigest":"candidate","nativeRuntimeId":"candidate"},
+         "environment":{"widthDp":192,"heightDp":192,"density":2.0,"theme":"dark",
+           "locale":"en-US","fontScale":1.0,"layoutDirection":"ltr"},
+         "stateVariables":{},"roots":["published-screen"],"nodes":{
+           "published-screen":{"id":"published-screen","componentId":"wear-m3/screen-scaffold",
+             "properties":{},"modifiers":[],"slots":{"content":["published-list"]}},
+           "published-list":{"id":"published-list","componentId":"wear-m3/transforming-lazy-column",
+             "properties":{},"modifiers":[],"slots":{"items":[$items]}}$extra}}
+        """
+        }
+      )
+      .templates
+
   @Test
-  fun `the packaged catalog default creates, opens and exports a Wear screen`() {
+  fun `a published template creates, opens and exports a Wear screen`() {
     val running = startServer()
     try {
       // 1. The adapter is served at all. `wear-m3` reaching the wire is what the deployment
@@ -76,38 +114,39 @@ class ServeWearScreenDeploymentIntegrationTest {
 
       // 2. Make a screen, through the form the New design chooser submits.
       val created =
-        createDesign(running, catalog = "wear-m3", designId = "activity", template = "wear-list")
+        createDesign(
+          running,
+          catalog = "wear-m3",
+          designId = "activity",
+          template = "deployment-list",
+        )
       assertEquals(303, created.first, created.second)
       // The redirect goes to the permalink a person opens, not to the API path that made it.
       assertEquals("/ui-builder/activity", created.second)
 
-      // 3. Read it back: a scaffold over a list, with more than a screenful in it.
+      // 3. The server preserves the nodes from the supplied publication.
       val snapshot =
         assertIs<SnapshotResponseV1>(response(running, OpenDesignRequestV1("activity")))
       val document = snapshot.snapshot.state.document
       assertEquals("wear-m3", document.catalogPin.systemId)
-      assertEquals(listOf("wear-screen"), document.roots)
-      assertEquals("wear-m3/screen-scaffold", document.nodes.getValue("wear-screen").componentId)
-      val list = document.nodes.getValue("wear-list")
+      assertEquals(listOf("published-screen"), document.roots)
+      assertEquals(
+        "wear-m3/screen-scaffold",
+        document.nodes.getValue("published-screen").componentId,
+      )
+      val list = document.nodes.getValue("published-list")
       assertEquals("wear-m3/transforming-lazy-column", list.componentId)
-      // A header and six rows: 48 + 4 + 6 * 64 + 5 * 4 = 452dp of content, against a 192dp screen.
-      assertEquals(7, list.slots.getValue("items").size)
+      assertEquals(listOf("published-text"), list.slots.getValue("items"))
       assertEquals(192, document.environment.widthDp)
 
-      // 4. Export the code the Code pane shows. Both previews, because they answer different
-      //    questions and the LONG one is what a parity render is taken from.
+      // 4. Export the saved design through the host's configured exporter.
       val exported =
         assertIs<ExportResponseV1>(
           response(running, ExportDesignRequestV1("activity", format = ExportFormatV1.COMPOSE))
         )
       val source = exported.artifact?.content.orEmpty()
-      assertTrue("ScreenScaffold(scrollState = listState" in source, source)
-      assertTrue("TransformingLazyColumn(" in source, source)
-      assertTrue("ListHeader(" in source, source)
-      assertTrue("Modifier.transformedHeight(this, spec)" in source, source)
-      assertTrue("@WearPreviewDevices" in source, source)
-      assertTrue("@ScrollingPreview(modes = [ScrollMode.LONG])" in source, source)
-      assertTrue("LocalScrollCaptureInProgress" in source, source)
+      assertTrue(source.isNotBlank(), "the server must delegate to the configured Wear exporter")
+      assertTrue("Published by deployment" in source, source)
     } finally {
       running.close()
     }
@@ -118,18 +157,19 @@ class ServeWearScreenDeploymentIntegrationTest {
   fun `the empty Wear template creates a scaffold over an empty list`() {
     val running = startServer()
     try {
-      assertEquals(303, createDesign(running, "wear-m3", "blank-watch", "wear-screen").first)
+      val created = createDesign(running, "wear-m3", "blank-watch", "deployment-empty")
+      assertEquals(303, created.first, created.second)
 
       val snapshot =
         assertIs<SnapshotResponseV1>(response(running, OpenDesignRequestV1("blank-watch")))
       val document = snapshot.snapshot.state.document
-      assertTrue(document.nodes.getValue("wear-list").slots.getValue("items").isEmpty())
+      assertTrue(document.nodes.getValue("published-list").slots.getValue("items").isEmpty())
 
       val exported =
         assertIs<ExportResponseV1>(
           response(running, ExportDesignRequestV1("blank-watch", format = ExportFormatV1.COMPOSE))
         )
-      assertTrue("TransformingLazyColumn(" in exported.artifact?.content.orEmpty())
+      assertTrue(exported.artifact?.content.orEmpty().isNotBlank())
     } finally {
       running.close()
     }
@@ -223,8 +263,8 @@ class ServeWearScreenDeploymentIntegrationTest {
       PersistentUiBuilderService(
         storage = FileUiBuilderStateStorage(stateDirectory),
         catalogs =
-          CurrentM3UiBuilderCatalogExecutor(
-            catalogSystemIds = PACKAGED_DEFAULT,
+          benchmarkCatalogExecutor(
+            catalogSystemIds = DEPLOYMENT_CATALOGS,
             exportCapabilities =
               ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1.Builder()
                 .also {
@@ -255,7 +295,9 @@ class ServeWearScreenDeploymentIntegrationTest {
           // The route serves a catalog only if the server was told to serve it, separately from
           // the service knowing the adapter. Passing the packaged default to both is the wiring
           // under test: an operator setting `SERVE_UI_BUILDER_CATALOGS` sets exactly these two.
-          uiBuilderCatalogs = PACKAGED_DEFAULT,
+          uiBuilderCatalogs = DEPLOYMENT_CATALOGS,
+          uiBuilderSeeds =
+            UiBuilderCatalogSeeds { publishedTemplates.takeIf { _ -> it == "wear-m3" } },
         )
         .also(ServeHttpServer::start)
     return RunningServer(server, registry)
@@ -274,7 +316,7 @@ class ServeWearScreenDeploymentIntegrationTest {
   private companion object {
     const val OPERATOR_TOKEN = "operator-token"
 
-    /** `SERVE_UI_BUILDER_CATALOGS`' default in `deploy/image/entrypoint.sh`. */
-    val PACKAGED_DEFAULT = setOf("m3-catalog", "remote-m3", "wear-m3")
+    /** A deployment that enables all three authoring catalogs. */
+    val DEPLOYMENT_CATALOGS = setOf("m3-catalog", "remote-m3", "wear-m3")
   }
 }

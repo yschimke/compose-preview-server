@@ -14,7 +14,6 @@ import ee.schimke.composeai.uibuilder.protocol.SnapshotResponseV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
 import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
-import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderStateStorage
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import ee.schimke.composeai.uibuilder.service.UiBuilderExportExecutor
@@ -443,7 +442,7 @@ class ServeUiBuilderDecisionElicitationTest {
     val service =
       PersistentUiBuilderService(
         storage = FileUiBuilderStateStorage(stateDirectory),
-        catalogs = CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = setOf(CATALOG_SYSTEM_ID)),
+        catalogs = benchmarkCatalogExecutor(catalogSystemIds = setOf(CATALOG_SYSTEM_ID)),
         exporter = UiBuilderExportExecutor { error("export is not exercised here") },
       )
     server =

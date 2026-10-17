@@ -59,8 +59,7 @@ data class ServeCatalogsConfig(
   data class UiBuilderSettings(
     /**
      * Per-catalog overrides by builder catalog id, replacing that catalog's share of
-     * `SERVE_UI_BUILDER_CATALOGS`, `…_PUBLISHED_CATALOGS`, `…_CATALOG_OWNERSHIP` and
-     * `…_NATIVE_CATALOGS`.
+     * `SERVE_UI_BUILDER_CATALOGS`, `…_PUBLISHED_CATALOGS` and `…_NATIVE_CATALOGS`.
      */
     val catalogs: Map<String, UiBuilderCatalogSettings> = emptyMap(),
     /**
@@ -78,12 +77,10 @@ data class ServeCatalogsConfig(
     /** Offered in the builder (`SERVE_UI_BUILDER_CATALOGS`). False withdraws it. */
     val serve: Boolean? = null,
     /**
-     * Defined by its repository's published `ui-builder.json` rather than the built-in Kotlin
-     * catalog (`SERVE_UI_BUILDER_PUBLISHED_CATALOGS`).
+     * Read its repository's published `ui-builder.json` (`SERVE_UI_BUILDER_PUBLISHED_CATALOGS`).
+     * False withholds the catalog; every served definition must come from its publication.
      */
     val published: Boolean? = null,
-    /** Seeds and exports from its own declaration (`SERVE_UI_BUILDER_CATALOG_OWNERSHIP`). */
-    val owned: Boolean? = null,
     /**
      * Shown in the builder's catalog lists. False keeps a served catalog reachable by URL and MCP
      * only (`--ui-builder-unlisted-catalogs`), for a pilot compared against production.

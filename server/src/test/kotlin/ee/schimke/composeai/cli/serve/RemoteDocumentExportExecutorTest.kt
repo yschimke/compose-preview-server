@@ -24,7 +24,7 @@ class RemoteDocumentExportExecutorTest {
   fun `persistent service exports the saved revision through protocol and download routes`() {
     val formats = formats()
     val catalogs =
-      CurrentM3UiBuilderCatalogExecutor(
+      benchmarkCatalogExecutor(
         catalogSystemIds = setOf("remote-m3"),
         published = mapOf("remote-m3" to PublishedCutoverCatalogs.remote),
         exportCapabilities =
@@ -268,7 +268,7 @@ class RemoteDocumentExportExecutorTest {
       document.revision,
       "document-hash",
       document,
-      CurrentM3UiBuilderCatalogExecutor().listCatalogs().single(),
+      benchmarkCatalogExecutor().listCatalogs().single(),
       format,
     )
 
@@ -330,7 +330,7 @@ class RemoteDocumentExportExecutorTest {
   fun `host capabilities are only advertised for declared Remote catalogs`() {
     val formats = formats()
     val catalogs =
-      CurrentM3UiBuilderCatalogExecutor(
+      benchmarkCatalogExecutor(
           catalogSystemIds = setOf("m3-catalog", "remote-m3"),
           published = mapOf("remote-m3" to PublishedCutoverCatalogs.remote),
           exportCapabilities =

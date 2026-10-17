@@ -21,7 +21,6 @@ import ee.schimke.composeai.uibuilder.protocol.StringValueV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
 import ee.schimke.composeai.uibuilder.protocol.UiValueV1
 import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
-import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.PublishedUiBuilderCatalog
 import java.io.File
 import kotlin.test.Test
@@ -365,7 +364,7 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
   @Test
   fun `a published m3 catalog is still served the builder's own vocabulary`() {
     val served =
-      CurrentM3UiBuilderCatalogExecutor(
+      benchmarkCatalogExecutor(
           catalogSystemIds = linkedSetOf("m3-catalog"),
           published = mapOf("m3-catalog" to composed),
         )

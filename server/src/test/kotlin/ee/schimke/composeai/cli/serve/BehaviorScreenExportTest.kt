@@ -4,7 +4,6 @@ import ee.schimke.composeai.discovery.ComponentRecordFile
 import ee.schimke.composeai.uibuilder.export.ScreenExportGate
 import ee.schimke.composeai.uibuilder.export.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.protocol.*
-import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -88,7 +87,7 @@ class BehaviorScreenExportTest {
 
   @Test
   fun `state and ordered handlers export exactly the compiled interaction fixture`() {
-    val catalogs = CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = setOf("m3-catalog"))
+    val catalogs = benchmarkCatalogExecutor(catalogSystemIds = setOf("m3-catalog"))
     assertNull(catalogs.validate(document(), catalogs.listCatalogs().single()))
     val result = ScreenExportGate.export(document(), record)
     val source = assertIs<ScreenExportGate.Outcome.Emitted>(result, result.toString()).source

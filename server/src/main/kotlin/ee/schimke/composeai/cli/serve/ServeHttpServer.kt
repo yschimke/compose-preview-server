@@ -234,7 +234,7 @@ class ServeHttpServer(
   /** Current published capabilities, also served to sandboxed MCP App editors. */
   private val uiBuilderCapabilities: (() -> List<CatalogCapabilityV1>)? = null,
   /** What a new design can start as; built in unless a catalog owns its seeds. */
-  private val uiBuilderSeeds: UiBuilderCatalogSeeds = UiBuilderCatalogSeeds.BUILT_IN,
+  private val uiBuilderSeeds: UiBuilderCatalogSeeds = UiBuilderCatalogSeeds.EMPTY,
   /** Retained native renderer directories, snapshotted before this server accepts requests. */
   uiBuilderRuntimeDirs: Map<String, File> = emptyMap(),
   /** Runtime assets activated atomically with a refreshed catalog generation. */
@@ -14406,19 +14406,9 @@ class ServeHttpServer(
     if (isUiBuilderRootCall(call)) "<meta name=\"$UI_BUILDER_BASE_PATH_META\" content=\"/\">"
     else ""
 
-  /**
-   * The catalog-owned cutover flag for the editor's new-design chooser, as a `<meta>`; nothing at
-   * `none`.
-   */
+  /** Compatibility for released editors that still read the ownership meta tag. */
   private fun uiBuilderCatalogOwnershipTag(): String =
-    uiBuilderSeeds.ownership
-      .takeUnless { it.isNone }
-      ?.let {
-        "<meta name=\"ui-builder-catalog-ownership\" content=\"${
-          WebEscaping.htmlEscape(it.wireValue)
-        }\">"
-      }
-      .orEmpty()
+    "<meta name=\"ui-builder-catalog-ownership\" content=\"all\">"
 
   /**
    * The `<title>` and unfurl tags for the builder shell: `(title, meta tags)`. A public design
@@ -15571,9 +15561,8 @@ class ServeHttpServer(
         templates =
           uiBuilderSeeds
             .templateIds(catalog)
-            // A catalog-owned catalog's order is its own, and its first is the default the
-            // create route falls back to; the built-in set has no order, so it stays sorted.
-            .let { if (uiBuilderSeeds.ownership.owns(catalog)) it.toList() else it.sorted() }
+            // The catalog's first published template is also the create route's default.
+            .toList()
             .map { template ->
               ServeWeb.UiBuilderNewDesignTemplate(
                 id = template,

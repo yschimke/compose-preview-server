@@ -5,7 +5,6 @@ import ee.schimke.composeai.uibuilder.export.SHOW_BY_STATE
 import ee.schimke.composeai.uibuilder.export.ScreenExportGate
 import ee.schimke.composeai.uibuilder.export.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.protocol.*
-import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import java.io.File
 import kotlin.test.*
 import kotlinx.serialization.json.*
@@ -93,7 +92,7 @@ class StateSelectionExportTest {
 
   @Test
   fun `selection is catalog valid and exported through the shared generator without losing branches`() {
-    val catalogs = CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = setOf("m3-catalog"))
+    val catalogs = benchmarkCatalogExecutor(catalogSystemIds = setOf("m3-catalog"))
     assertNull(catalogs.validate(document(), catalogs.listCatalogs().single()))
     val result = ScreenExportGate.export(document(), record)
     // The released floor used to give a located refusal here, and `VERIFY_LOCAL_STATE_SELECTION`
@@ -138,7 +137,7 @@ class StateSelectionExportTest {
                   )
               ))
       )
-    val catalogs = CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = setOf("m3-catalog"))
+    val catalogs = benchmarkCatalogExecutor(catalogSystemIds = setOf("m3-catalog"))
     val issue = assertNotNull(catalogs.validate(invalid, catalogs.listCatalogs().single()))
     assertTrue(issue.toString().contains(SHOW_BY_STATE), issue.toString())
     assertIs<ScreenExportGate.Outcome.Refused>(ScreenExportGate.export(invalid, record))

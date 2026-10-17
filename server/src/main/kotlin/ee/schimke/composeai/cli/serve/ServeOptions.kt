@@ -3,7 +3,6 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.bundle.TrustStore
 import ee.schimke.composeai.previewdata.PreviewManifest
 import ee.schimke.composeai.previewdata.PreviewModule
-import ee.schimke.composeai.uibuilder.export.CatalogOwnership
 import java.io.File
 
 /**
@@ -555,10 +554,9 @@ public interface ServeOptions {
     get() = setOf("m3-catalog")
 
   /**
-   * Enabled catalogs that may be served from their published `ui-builder.json` instead of the
-   * built-in Kotlin definition. Null (default) allows all, empty allows none. The per-catalog,
-   * reversible switch, since the two definitions can differ; check with
-   * `.github/scripts/ui-builder-equivalence.sh` before flipping one.
+   * Enabled catalogs permitted to read their published `ui-builder.json`. Null (default) allows
+   * all, empty allows none. A catalog whose definition cannot be read is withheld until it
+   * recovers; there is no Kotlin definition to substitute.
    */
   public val uiBuilderPublishedCatalogs: Set<String>?
     get() = null
@@ -576,14 +574,6 @@ public interface ServeOptions {
    */
   public val uiBuilderUnavailableCatalogs: Set<String>
     get() = emptySet()
-
-  /**
-   * Which UI-builder catalogs answer for themselves: seed templates, chooser card and export route
-   * come from what they publish, and their synthesised Kotlin definition is never built.
-   * [CatalogOwnership.NONE] (default) changes nothing.
-   */
-  public val uiBuilderCatalogOwnership: CatalogOwnership
-    get() = CatalogOwnership.NONE
 
   /**
    * Served UI-builder catalogs kept out of the builder UI's catalog lists (the new-design chooser

@@ -23,6 +23,13 @@ npm run harness:playground
 npm run harness:bundle-upload
 ```
 
+Live UI-builder specs use `:server:installVisualHarness`. Its separate launcher runs the production
+`ServeRunner` with a catalog transport backed by the checked-in historical capability fixtures. The visual
+replay does not depend on a delivery branch or a built-in catalog fallback. The harness translates
+those capabilities into a local publication, preserving their properties and slot constraints.
+The release distribution does not carry this launcher. Seed documents take their revision pin from the composed
+catalog; the Jetcaster nodes and independent oracle stay unchanged.
+
 CI also runs `npm run harness:ui-builder-visual-replay` after assembling the standalone server and
 downloading the independent Jetcaster reference. The UI builder's four Wasm distributions (editor,
 renderer, both Jetcaster fixtures) come from the release `gradle/libs.versions.toml` pins, laid out
@@ -35,7 +42,7 @@ The UI-builder convergence gate additionally needs the standalone server distrib
 UI-builder Wasm, and the real compose-ai-tools MCP executable:
 
 ```
-./gradlew :server:installDist
+scripts/agent-gradle.sh --exclusive :server:installVisualHarness
 preview-harness/fetch-ui-builder-dists.sh build/ui-builder-dists
 COMPOSE_UI_BUILDER_DIR="$PWD/build/ui-builder-dists" \
   GATE2_MCP_LAUNCHER=/absolute/path/to/compose-preview-mcp \
@@ -61,7 +68,7 @@ need MCP. Its default CI lane runs a bounded marker-correctness sample. Opt into
 useful acceptance run locally with:
 
 ```
-./gradlew :server:installDist
+scripts/agent-gradle.sh --exclusive :server:installVisualHarness
 UI_BUILDER_PERF=1 npm --prefix preview-harness run harness:ui-builder-performance
 ```
 

@@ -106,7 +106,7 @@ class RemoteNativeRenderProofTest {
         },
       )
     val catalogs =
-      CurrentM3UiBuilderCatalogExecutor(
+      benchmarkCatalogExecutor(
         catalogSystemIds = setOf("remote-m3"),
         published = mapOf("remote-m3" to PublishedCutoverCatalogs.remote),
       )

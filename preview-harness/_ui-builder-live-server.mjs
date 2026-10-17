@@ -7,10 +7,12 @@
 // checked-in Jetcaster fixture over the v1 envelope endpoint — pulled out here so the assertion
 // lane and the evidence capture boot the *same* server rather than two that drift apart.
 //
-// Needs `./gradlew :server:installDist` and the builder distributions (a built checkout of
-// yschimke/compose-ui-builder, or `fetch-ui-builder-dists.sh <dir>`), with `COMPOSE_UI_BUILDER_DIR`
+// Needs `scripts/agent-gradle.sh --exclusive :server:installVisualHarness` and the builder
+// distributions (a built checkout of yschimke/compose-ui-builder, or `fetch-ui-builder-dists.sh <dir>`),
+// with `COMPOSE_UI_BUILDER_DIR`
 // pointing there, and JDK 21 on JAVA_HOME: the start script resolves `java` from it, and the builder's
 // renderer is compiled for 21. CI's `visual-harness` job already does all of that.
+import { pinFixtureDocument, prepareCatalogFixtures } from "./_ui-builder-catalog-fixtures.mjs";
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -23,7 +25,7 @@ export const harnessRoot = resolve(here, "..");
 
 const launcher = resolve(
   harnessRoot,
-  "server/build/install/compose-preview-server/bin/compose-preview-server",
+  "server/build/install/compose-preview-visual-harness/bin/compose-preview-visual-harness",
 );
 const app = resolve(
   harnessRoot,
@@ -70,7 +72,10 @@ async function waitUntilReady(origin, child) {
 export async function startUiBuilderServer(token) {
   const port = await freePort();
   const stateDirectory = await mkdtemp(`${tmpdir()}/ui-builder-live-`);
-  const environment = { ...process.env };
+  const environment = {
+    ...process.env,
+    UI_BUILDER_HARNESS_FIXTURES: await prepareCatalogFixtures(),
+  };
   delete environment.JAVA_OPTS;
   delete environment.UI_BUILDER_REAL_RENDER_APP_HOME;
   const child = spawn(
@@ -162,7 +167,7 @@ export async function seedJetcasterDesign(server, designId) {
     throw new Error("fixture does not open with createDesign");
   await apiCall(server, {
     type: "createDesign",
-    document: {
+    document: await pinFixtureDocument(server.origin, server.token, {
       schema: fixture.documentSchema,
       id: designId,
       title: create.title,
@@ -174,7 +179,7 @@ export async function seedJetcasterDesign(server, designId) {
       nodes: {},
       assets: {},
       tokenBindings: {},
-    },
+    }),
   });
   const response = await apiCall(server, {
     type: "applyOperation",

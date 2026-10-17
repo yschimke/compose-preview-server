@@ -1,6 +1,5 @@
 package ee.schimke.composeai.cli.serve
 
-import ee.schimke.composeai.uibuilder.export.CatalogOwnership
 import java.io.File
 
 /**
@@ -601,35 +600,6 @@ public class ServeCommandOptions(
         }
       }
       ?.toSet() ?: emptySet()
-
-  /**
-   * `--ui-builder-catalog-ownership <all|none|<id>[,<id>]>`; absent or empty is `none`. An owned
-   * catalog must also be allowed to read its published file; the contradiction is refused at
-   * startup.
-   */
-  override val uiBuilderCatalogOwnership: CatalogOwnership =
-    args.flagValue("--ui-builder-catalog-ownership").let { raw ->
-      val ownership = CatalogOwnership.parse(raw)
-      val readsPublished = uiBuilderPublishedCatalogs ?: uiBuilderCatalogs
-      val contradictions = uiBuilderCatalogs.filter { ownership.owns(it) && it !in readsPublished }
-      require(contradictions.isEmpty()) {
-        "--ui-builder-catalog-ownership owns ${contradictions.sorted().joinToString()}, which " +
-          "--ui-builder-published-catalogs does not let read a published file"
-      }
-      if (raw != null && raw.trim().lowercase() !in setOf("", "all", "none")) {
-        val unknown =
-          raw
-            .split(',')
-            .map(String::trim)
-            .filter(String::isNotEmpty)
-            .filterNot(uiBuilderCatalogs::contains)
-        require(unknown.isEmpty()) {
-          "--ui-builder-catalog-ownership names ${unknown.joinToString()}, which " +
-            "--ui-builder-catalogs does not serve"
-        }
-      }
-      ownership
-    }
 
   /** `<system>=<path>` pairs, since a host serving several catalogs has several records. */
   override val uiBuilderComponents: Map<String, File> =
@@ -1269,7 +1239,7 @@ public class ServeCommandOptions(
                           And the UI builder's catalog settings — GET, PUT and DELETE
                           /admin/ui-builder/config — catalogs.json's `uiBuilder` block, which
                           overrides the --ui-builder-catalogs, -published-catalogs,
-                          -catalog-ownership, -unlisted-catalogs, -native-catalog, -packs and
+                          -unlisted-catalogs, -native-catalog, -packs and
                           -widget-player flags
                           per catalog from the next start.
                           And onboarding — POST /admin/onboard ({"url","group","listed"}) takes a

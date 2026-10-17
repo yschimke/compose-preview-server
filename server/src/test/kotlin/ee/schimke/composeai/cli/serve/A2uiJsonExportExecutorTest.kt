@@ -39,7 +39,7 @@ class A2uiJsonExportExecutorTest {
       "the published A2UI catalog must compose: ${(result as? PublishedUiBuilderCatalog.Result.Unusable)?.reason}",
     )
     val published = (result as PublishedUiBuilderCatalog.Result.Composed).catalog
-    CurrentM3UiBuilderCatalogExecutor(
+    benchmarkCatalogExecutor(
         catalogSystemIds = setOf(CurrentM3UiBuilderCatalogExecutor.A2UI_CATALOG_SYSTEM_ID),
         published = mapOf(CurrentM3UiBuilderCatalogExecutor.A2UI_CATALOG_SYSTEM_ID to published),
       )
@@ -113,9 +113,7 @@ class A2uiJsonExportExecutorTest {
     val executor = A2uiJsonExportExecutor { passedThrough }
     assertSame(passedThrough, executor.export(request(ExportFormatV1.COMPOSE)))
     val m3 =
-      CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = setOf("m3-catalog"))
-        .listCatalogs()
-        .single()
+      benchmarkCatalogExecutor(catalogSystemIds = setOf("m3-catalog")).listCatalogs().single()
     assertSame(passedThrough, executor.export(request(ExportFormatV1.JSON, m3)))
   }
 }
