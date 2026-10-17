@@ -299,11 +299,12 @@ test("an unknown ?revision= opens the latest design and says so", async ({
 });
 
 test("a selected layer offers Copy link in its own menu", async ({ page }) => {
-  // `main-scrim` rather than the grid the thread is pinned to, for a reason about the test and
-  // not the feature: the Layers tree holds 108 rows and only the first handful are on screen.
-  await openDesign(page, { node: "main-scrim" });
+  // The root is the first row and has no ancestors to expand in the virtualized tree.
+  // This checks the selected layer's menu; deep-node navigation is covered above.
+  const selectors = await openDesign(page, { node: "root-surface" });
+  expect(selectors.nodeId).toBe("root-surface");
   await openDock(page, "layers");
-  const layerRow = page.getByRole("button", { name: /Select main-scrim/ });
+  const layerRow = page.getByRole("button", { name: /Select root-surface/ });
   await expect(layerRow).toBeVisible();
   const layer = await layerRow.boundingBox();
   expect(layer).not.toBeNull();
