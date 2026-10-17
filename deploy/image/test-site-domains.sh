@@ -196,6 +196,18 @@ if [ -f "${deploy_config}" ] && command -v jq > /dev/null 2>&1; then
     "${expected}" "$(sh "${scan}" "${deploy_config}" | tr '\n' ' ' | sed 's/ *$//')"
 fi
 
+# The WASM demo must reach ha-designs, including its scripts and WASM modules.
+route="$(sed -n '/@designs path /p' "${here}/ha.caddy")"
+case "${route}" in
+  *" /demo /demo/* "*) pass=$((pass + 1)) ;;
+  *) fail=$((fail + 1)); echo "FAIL: /demo and its assets must route to ha-designs" >&2 ;;
+esac
+
+case "${route}" in
+  *" /api/cards/resolve "*) pass=$((pass + 1)) ;;
+  *) fail=$((fail + 1)); echo "FAIL: design resolver must reach ha-designs" >&2 ;;
+esac
+
 if [ "${fail}" -gt 0 ]; then
   echo "${fail} check(s) failed, ${pass} passed." >&2
   exit 1
