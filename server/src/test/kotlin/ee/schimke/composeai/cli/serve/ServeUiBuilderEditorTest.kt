@@ -49,7 +49,7 @@ class ServeUiBuilderEditorTest {
   private fun sha(bytes: ByteArray) =
     MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
-  private fun manifest(version: String, serverApi: Int = 1) =
+  private fun manifest(version: String, serverApi: Int = 2) =
     """{"schema":"compose-ui-builder-web/v1","version":"$version","serverApi":$serverApi}"""
 
   /** Publish an editor archive at its GitHub release URL and return a pin that matches it. */
@@ -64,12 +64,23 @@ class ServeUiBuilderEditorTest {
   }
 
   @Test
+  fun `the server accepts the original editor API during the cache rollout`() {
+    val pin =
+      release(
+        "3.48.1",
+        mapOf("index.html" to "<html/>", "ui-builder-web.json" to manifest("3.48.1", 1)),
+      )
+    val ready = assertIs<ServeUiBuilderEditorStore.Result.Ready>(store().resolve(pin))
+    assertEquals(1, ready.manifest.serverApi)
+    assertTrue(ready.dir.isDirectory)
+  }
+
+  @Test
   fun `a pinned editor is fetched once, unpacked and served from the cache`() {
     val pin = release("3.48.0")
     val first = assertIs<ServeUiBuilderEditorStore.Result.Ready>(store().resolve(pin))
     assertEquals("<html>3.48.0</html>", File(first.dir, "index.html").readText())
-    assertEquals("3.48.0", first.manifest?.version)
-    assertNull(first.warning)
+    assertEquals("3.48.0", first.manifest.version)
 
     // A restart: a new store over the same cache. No second download.
     val second = assertIs<ServeUiBuilderEditorStore.Result.Ready>(store().resolve(pin))
@@ -111,11 +122,17 @@ class ServeUiBuilderEditorTest {
   }
 
   @Test
-  fun `an editor predating the manifest is served with a warning`() {
-    val pin = release("3.47.0", mapOf("index.html" to "<html/>"))
-    val ready = assertIs<ServeUiBuilderEditorStore.Result.Ready>(store().resolve(pin))
-    assertNull(ready.manifest)
-    assertNotNull(ready.warning)
+  fun `an editor without a readable manifest is refused`() {
+    for (entries in
+      listOf(
+        mapOf("index.html" to "<html/>"),
+        mapOf("index.html" to "<html/>", "ui-builder-web.json" to "invalid"),
+      )) {
+      val pin = release("3.47.0", entries)
+      val failed = assertIs<ServeUiBuilderEditorStore.Result.Failed>(store().resolve(pin))
+      assertTrue("no readable ui-builder-web.json" in failed.reason, failed.reason)
+      assertFalse(store().dirFor(pin).exists())
+    }
   }
 
   @Test

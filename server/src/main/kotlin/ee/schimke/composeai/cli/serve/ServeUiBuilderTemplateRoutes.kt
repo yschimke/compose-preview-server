@@ -1,7 +1,10 @@
 package ee.schimke.composeai.cli.serve
 
-import ee.schimke.composeai.uibuilder.export.UiBuilderDocument
+import ee.schimke.composeai.uibuilder.export.toDesignDocumentV1
+import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
+import ee.schimke.composeai.uibuilder.protocol.CatalogTemplateDocumentsV1
 import ee.schimke.composeai.uibuilder.protocol.ListCatalogsRequestV1
+import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import io.ktor.http.ContentType
@@ -11,7 +14,6 @@ import io.ktor.server.application.ApplicationCall
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 
 /**
@@ -60,8 +62,14 @@ internal fun Route.installUiBuilderTemplateRoutes(
       call.respondText("catalog not found", status = HttpStatusCode.NotFound)
       return@get
     }
-    val documents =
-      seeds.publishedDocuments(system, benchmark.catalogRevision, benchmark.nativeRuntimeId)
+    val pin =
+      CatalogReferenceV1(
+        system,
+        benchmark.catalogRevision,
+        CurrentM3UiBuilderCatalogExecutor.CURRENT_CAPABILITY_DIGEST,
+        benchmark.nativeRuntimeId,
+      )
+    val documents = seeds.publishedDocuments(pin)
     if (documents == null) {
       call.respondText("catalog templates are refreshing; retry", status = HttpStatusCode.Conflict)
       return@get
@@ -70,22 +78,15 @@ internal fun Route.installUiBuilderTemplateRoutes(
     // fetching must never silently attach the new templates to the old remembered capability.
     call.respondText(
       UI_BUILDER_JSON.encodeToString(
-        UiBuilderTemplateDocuments(
-          system,
-          benchmark.catalogRevision,
-          benchmark.nativeRuntimeId,
-          documents,
-        )
+        CatalogTemplateDocumentsV1.Builder(pin)
+          .also { response ->
+            response.templates = documents.mapValues { (_, document) ->
+              document.toDesignDocumentV1()
+            }
+          }
+          .build()
       ),
       ContentType.Application.Json,
     )
   }
 }
-
-@Serializable
-internal data class UiBuilderTemplateDocuments(
-  val catalogSystemId: String,
-  val catalogRevision: String,
-  val nativeRuntimeId: String,
-  val templates: Map<String, UiBuilderDocument>,
-)

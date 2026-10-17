@@ -40,10 +40,11 @@ object ServeUiBuilderEditor {
 
   /**
    * Editor↔server HTTP API versions this server speaks. Bumped with `serverApi` in
-   * compose-ui-builder's `ui-builder-web/build.gradle.kts` only for breaking route changes; widen
-   * the set while both shapes are served.
+   * compose-ui-builder's `ui-builder-web/build.gradle.kts` for changes to the routes required by
+   * the editor. API 1 remains supported while deployments roll out the API 2 editor with published
+   * template caching.
    */
-  val SUPPORTED_SERVER_API: Set<Int> = setOf(1)
+  val SUPPORTED_SERVER_API: Set<Int> = setOf(1, 2)
 
   /** Where compose-ui-builder publishes the editor archive for [version]. */
   fun releaseUrl(version: String): String =
@@ -100,11 +101,10 @@ class ServeUiBuilderEditorStore(
   private val onLog: (String) -> Unit = { System.err.println(it) },
 ) {
   sealed interface Result {
-    /** The editor is unpacked at [dir]. [warning] notes a non-fatal gap (no manifest). */
+    /** The editor is unpacked at [dir]. The manifest has passed the server API check. */
     data class Ready(
       val dir: File,
-      val manifest: ServeUiBuilderEditor.EditorManifest?,
-      val warning: String? = null,
+      val manifest: ServeUiBuilderEditor.EditorManifest,
     ) : Result
 
     /** The pin could not be served; [reason] says why. The bundled editor stays in force. */
@@ -151,12 +151,8 @@ class ServeUiBuilderEditorStore(
   private fun ready(target: File, pin: ServeCatalogsConfig.EditorPin): Result {
     val manifest = ServeUiBuilderEditor.readManifest(target)
     if (manifest == null) {
-      return Result.Ready(
-        target,
-        null,
-        warning =
-          "editor ${pin.version} carries no ${ServeUiBuilderEditor.MANIFEST_FILE}; its server API " +
-            "is unchecked",
+      return Result.Failed(
+        "editor ${pin.version} has no readable ${ServeUiBuilderEditor.MANIFEST_FILE}"
       )
     }
     ServeUiBuilderEditor.contractProblem(manifest, pin.version)?.let {
@@ -183,10 +179,13 @@ class ServeUiBuilderEditorStore(
       if (!File(staging, "index.html").isFile) {
         return Result.Failed("editor ${pin.version} archive has no index.html")
       }
-      ServeUiBuilderEditor.readManifest(staging)?.let { manifest ->
-        ServeUiBuilderEditor.contractProblem(manifest, pin.version)?.let {
-          return Result.Failed(it)
-        }
+      val manifest =
+        ServeUiBuilderEditor.readManifest(staging)
+          ?: return Result.Failed(
+            "editor ${pin.version} has no readable ${ServeUiBuilderEditor.MANIFEST_FILE}"
+          )
+      ServeUiBuilderEditor.contractProblem(manifest, pin.version)?.let {
+        return Result.Failed(it)
       }
       File(staging, COMPLETE_MARKER).writeText(pin.sha256.lowercase() + "\n")
       target.deleteRecursively()
@@ -354,14 +353,11 @@ class ServeUiBuilderEditorAdmin(
     if (configuredPin() == normalized) {
       return Result.Conflict("editor ${pin.version} is already pinned")
     }
-    val warning =
-      when (val resolved = store.resolve(normalized)) {
-        is ServeUiBuilderEditorStore.Result.Failed -> return Result.Invalid(resolved.reason)
-        is ServeUiBuilderEditorStore.Result.Ready -> resolved.warning
-      }
+    val resolved = store.resolve(normalized)
+    if (resolved is ServeUiBuilderEditorStore.Result.Failed) return Result.Invalid(resolved.reason)
     file.update { it.copy(editor = normalized) }
     onLog("serve: UI-builder editor pinned to ${pin.version} via admin API")
-    return Result.Ok(normalized, restartRequired = normalized != servingState().servingPin, warning)
+    return Result.Ok(normalized, restartRequired = normalized != servingState().servingPin)
   }
 
   fun clear(): Result {

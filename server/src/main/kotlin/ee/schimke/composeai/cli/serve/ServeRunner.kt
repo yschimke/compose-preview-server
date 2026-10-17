@@ -22,6 +22,7 @@ import ee.schimke.composeai.uibuilder.export.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.export.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.export.UiBuilderPreviewSurfaces
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
+import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.FileUiBuilderAssetStore
@@ -2313,7 +2314,6 @@ public class ServeRunner(
     if (ServeCatalogsConfig.validateEditor(pin) != null) return bundled // reported by problems()
     return when (val resolved = store.resolve(pin)) {
       is ServeUiBuilderEditorStore.Result.Ready -> {
-        resolved.warning?.let { System.err.println("serve: $it") }
         System.err.println(
           "serve: UI-builder editor ${pin.version} (pinned in catalogs.json)" +
             (bundledVersion?.let { "; bundled is $it" } ?: "")
@@ -2653,7 +2653,7 @@ public class ServeRunner(
     val ownership = ee.schimke.composeai.uibuilder.export.CatalogOwnership.ALL
     val publishedTemplates = ConcurrentHashMap<String, CatalogSeedTemplates>()
     val templatePublications =
-      ConcurrentHashMap<String, Triple<String, String, CatalogSeedTemplates?>>()
+      ConcurrentHashMap<String, Pair<CatalogReferenceV1, CatalogSeedTemplates?>>()
     // Null allows every enabled catalog, empty turns the path off, a named set opts in one at a
     // time.
     val publishedAllowed = options.uiBuilderPublishedCatalogs
@@ -2773,11 +2773,12 @@ public class ServeRunner(
             }
           }
           templatePublications[systemId] =
-            Triple(
+            CatalogReferenceV1(
+              systemId,
               composed.catalog.benchmark.catalogRevision,
+              CurrentM3UiBuilderCatalogExecutor.CURRENT_CAPABILITY_DIGEST,
               published.runtimeId ?: composed.catalog.benchmark.nativeRuntimeId,
-              publishedTemplates[systemId],
-            )
+            ) to publishedTemplates[systemId]
           if (health.isWithheld(systemId)) health.healthy(systemId)
           System.err.println("serve: UI-builder catalog ${composed.note}")
         }

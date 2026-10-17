@@ -24,8 +24,10 @@
 > (`editor`), fetched from the same GitHub release and checked by digest. So an editor-only fix
 > reaches a box as a compose-ui-builder release plus a config change, with no server release. The
 > archive's `ui-builder-web.json` carries the editor↔server API version (`serverApi`), and
-> `ServeUiBuilderEditor.SUPPORTED_SERVER_API` must contain it. A change to the routes the editor
-> calls that an older editor cannot survive bumps that number in both repositories, server first.
+> `ServeUiBuilderEditor.SUPPORTED_SERVER_API` must contain it. A change to the routes required by
+> the editor bumps that number in both repositories.
+> The server supports APIs 1 and 2 during the published-template cache rollout and requires
+> a readable manifest for pinned archives. API 1 retirement follows deployment verification.
 
 
 **Status: normative.** The rule is enforced by
