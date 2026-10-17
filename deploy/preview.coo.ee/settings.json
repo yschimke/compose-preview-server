@@ -33,7 +33,7 @@
     "profile": {
       "host": "ha.coo.ee",
       "name": "Home Assistant card designer",
-      "catalogs": ["ha-cards"],
+      "catalogs": ["ha-cards", "lovelace"],
       "homeUrl": "https://ha.coo.ee/"
     },
     "guidelines": {
