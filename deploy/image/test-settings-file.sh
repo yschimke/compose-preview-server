@@ -94,6 +94,16 @@ JSON
   echo "PASS: the UI-builder profile reaches its variables"
 )
 
+# Exercise the deployed HA profile, not a synthetic catalog list: both the card studio and
+# dashboard host use this allowlist when asking the preview server for catalogs.
+(
+  unset SERVE_UI_BUILDER_PROFILE_CATALOGS SERVE_SETTINGS_SOURCES
+  apply_settings_file "${here}/../preview.coo.ee/settings.json" "${schema}" preview 2> /dev/null
+  [[ "${SERVE_UI_BUILDER_PROFILE_CATALOGS}" == "ha-cards,lovelace" ]] ||
+    fail "HA profile must offer the card and dashboard catalogs"
+  echo "PASS: the deployed HA profile offers card and dashboard editing"
+)
+
 # A broken file is reported and skipped; the box still comes up.
 (
   printf '{"uiBuilder": ' > "${work}/broken.json"
