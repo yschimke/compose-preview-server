@@ -703,10 +703,19 @@ class ServeCatalogStore(
       return Result.Failed(system, "catalog exceeds the $maxImages image limit")
     }
 
-    // Nothing to serve is a failure only when the catalog declared baked images and none fetched
-    // (an outage; leave the served dir untouched). A wholly live-only catalog is legal: the live
-    // builders register its deferred ids, or the baked host explains it via `deferred-not-served`.
-    if (count == 0 && failedIds.isEmpty() && (declaredImages > 0 || deferredIds.isEmpty())) {
+    // A declaration-only builder catalog (for example Lovelace) has no preview inventory. Stage
+    // its declaration before deciding whether there is anything to serve. Missing or malformed
+    // metadata cannot turn an empty catalog into a successful generation.
+    writeUiBuilderCatalog(base, staging, catalog)
+    val hasBuilderDeclaration = File(staging, UI_BUILDER_CATALOG_FILE).isFile
+
+    // Declared baked images still have to work: a declaration cannot mask an image outage. A
+    // wholly live-only catalog is also legal; its deferred ids are registered by the live builder.
+    if (
+      count == 0 &&
+        failedIds.isEmpty() &&
+        (declaredImages > 0 || (deferredIds.isEmpty() && !hasBuilderDeclaration))
+    ) {
       staging.deleteRecursively()
       return Result.Failed(system, "catalog had no usable images")
     }
@@ -756,7 +765,6 @@ class ServeCatalogStore(
     writeDesignPages(base, staging)
     writeKnownDifferences(base, staging)
     writeComponentRecord(base, staging, catalog)
-    writeUiBuilderCatalog(base, staging, catalog)
     writeUiBuilderRuntime(base, staging, catalog)?.let { failure ->
       staging.deleteRecursively()
       return Result.Failed(system, failure)
@@ -1411,6 +1419,7 @@ class ServeCatalogStore(
     if (".." in name.split("/")) return
     val bytes = runCatching { fetchCatalogAsset("$base$name") }.getOrNull() ?: return
     if (!looksLikeUiBuilderCatalog(bytes)) return
+    staging.mkdirs()
     File(staging, UI_BUILDER_CATALOG_FILE).writeBytes(bytes)
   }
 
