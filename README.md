@@ -277,6 +277,16 @@ A local render prints the classpath it resolved, the daemon opener it built and 
 diagnostics; `--components <catalog>=<components.json>` names the record a record-driven catalog's
 call sites are proven against, exactly as `serve --ui-builder-components` does.
 
+Browser clients can read a catalog's published starting documents with
+`GET /api/ui-builder/v1/catalogs/{system}/templates`. It requires UI-builder read access and
+respects the host's catalog restrictions. The shared `CatalogTemplateDocumentsV1` response includes
+a schema version, the complete `catalogPin` (system, revision, capability digest and runtime), and a
+`templates` map keyed by template id. Chooser order comes from the catalog's ordered metadata, rather
+than the document map. A catalog refresh that has not yet aligned the documents with the served
+capability returns 409; clients should retry and retain their last matching set. Responses use
+`Cache-Control: no-store`; an offline editor explicitly stores validated documents under the complete
+catalog pin in its browser store.
+
 A signed-in person can browse every design the service permits them to read at
 `/ui-builder/designs`. The page separates owned designs from designs shared by somebody else,
 shows the exact service reason when one cannot open, and lets an owner manage sharing inline. It is

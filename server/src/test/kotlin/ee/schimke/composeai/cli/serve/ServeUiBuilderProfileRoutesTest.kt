@@ -289,6 +289,16 @@ class ServeUiBuilderProfileRoutesTest {
     )
 
   @Test
+  fun `published templates respect the host catalog scope`() {
+    assertEquals(404, get("/api/ui-builder/v1/catalogs/m3-catalog/templates", "ha.coo.ee").first)
+    assertEquals(200, get("/api/ui-builder/v1/catalogs/remote-m3/templates", "ha.coo.ee").first)
+    assertEquals(
+      200,
+      get("/api/ui-builder/v1/catalogs/m3-catalog/templates", "preview.coo.ee").first,
+    )
+  }
+
+  @Test
   fun `start on the profile host is the builder's guide, elsewhere the CLI's`() {
     // A profile host is the builder, as its `/` is; it never sends a visitor to the CLI guide.
     assertEquals(302 to BUILDER_GUIDE, location("/start", "ha.coo.ee"))

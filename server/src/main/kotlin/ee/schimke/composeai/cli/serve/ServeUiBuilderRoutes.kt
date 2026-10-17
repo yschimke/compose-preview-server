@@ -89,7 +89,9 @@ internal fun Route.installUiBuilderRoutes(
    * the caller may read stays readable by its id.
    */
   catalogScope: (ApplicationCall) -> Set<String>? = { null },
+  seeds: UiBuilderCatalogSeeds = UiBuilderCatalogSeeds.EMPTY,
 ) {
+  installUiBuilderTemplateRoutes(service, authorization, seeds, catalogScope)
   if (agentPresence != null) {
     get("/api/ui-builder/v1/designs/{designId}/agents") {
       call.response.headers.append(HttpHeaders.CacheControl, "no-store")
