@@ -19,7 +19,7 @@
 	import edge_common
 	import crawler_block
 
-	@designs path / /designs /designs/* /site/* /schema /embed/* /studio/* /api/designs /api/designs/* /api/schema /api/studio/* /edit /healthz
+	@designs path / /demo /demo/* /designs /designs/* /site/* /schema /embed/* /studio/* /api/designs /api/designs/* /api/schema /api/cards/resolve /api/studio/* /edit /healthz
 	handle @designs {
 		reverse_proxy {$HA_DESIGNS_UPSTREAM:ha-designs:8080} {
 			transport http {
