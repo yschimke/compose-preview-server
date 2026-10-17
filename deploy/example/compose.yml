@@ -1,0 +1,50 @@
+# Independent deployment; no checkout of the operator's site repository is needed.
+name: compose-preview-example
+services:
+  preview:
+    image: ghcr.io/yschimke/compose-preview-host:${IMAGE_TAG:?Set IMAGE_TAG to a reviewed release tag or digest}
+    init: true
+    restart: unless-stopped
+    environment:
+      SERVE_PUBLIC: "1"
+      SERVE_SETTINGS_FILE: /deployment/settings.json
+      SERVE_CATALOGS_FILE: /deployment/catalogs.json
+      SERVE_TRUST_STORE: /deployment/producers.json
+      SERVE_UI_BUILDER_ADMIN_ACTORS: none
+      SERVE_GITHUB_AUTH_REPO: ""
+      SERVE_UI_BUILDER_CATALOGS: m3-catalog
+      SERVE_UI_BUILDER_PUBLISHED_CATALOGS: all
+      SERVE_UI_BUILDER_STATE_DIR: /config/ui-builder-state
+      SERVE_ALLOW_RENDER_TRUSTED: "0"
+      SERVE_CATALOG_CACHE_DIR: /catalog-cache
+      SERVE_THEME_CACHE_DIR: /theme-cache
+      SERVE_ADMIN_TOKEN: ${SERVE_ADMIN_TOKEN:-}
+    volumes:
+      - ./settings.json:/deployment/settings.json:ro
+      - ./catalogs.json:/deployment/catalogs.json:ro
+      - ./producers.json:/deployment/producers.json:ro
+      - state:/config
+      - catalog-cache:/catalog-cache
+      - theme-cache:/theme-cache
+    ports:
+      - "127.0.0.1:${PORT:-8080}:8080"
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+  edge:
+    image: caddy:2
+    profiles: [https]
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - certificates:/data
+      - caddy-config:/config
+volumes:
+  state:
+  catalog-cache:
+  theme-cache:
+  certificates:
+  caddy-config:

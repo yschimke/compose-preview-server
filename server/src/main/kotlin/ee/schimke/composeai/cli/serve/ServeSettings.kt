@@ -14,7 +14,7 @@ import kotlinx.serialization.json.put
 
 /**
  * A deployment's **non-secret** settings, as one checked-in, reviewable `settings.json`
- * (`deploy/preview.coo.ee/settings.json`) instead of lines in the box's private `.env`.
+ * (`deploy/example/settings.json`) instead of lines in the box's private `.env`.
  *
  * ## Why the image entrypoint applies them, not this process
  *
@@ -245,8 +245,8 @@ object ServeSettings {
         ),
         Apply.RESTART,
         "GitHub actors who administer every shared UI-builder design and its folder placement. " +
-          "They gain no catalog, trust or site authority. An empty list turns off the image's " +
-          "default (`github:yschimke`).",
+          "They gain no catalog, trust or site authority. No actors are granted by default; " +
+          "an empty list disables cross-owner administration.",
       ),
       Setting(
         "uiBuilder.startUrl",
@@ -261,7 +261,7 @@ object ServeSettings {
         "SERVE_UI_BUILDER_IMPORT_ORIGINS",
         Type.Names(
           Regex("https://[a-z0-9.-]+(?::[0-9]{1,5})?"),
-          "an HTTPS origin such as https://ha.coo.ee",
+          "an HTTPS origin such as https://integration.example.com",
         ),
         Apply.RESTART,
         "Sites whose seed documents a signed-in person may start a UI-builder design from, at " +
@@ -272,7 +272,7 @@ object ServeSettings {
       Setting(
         "uiBuilder.profile.host",
         "SERVE_UI_BUILDER_PROFILE_HOST",
-        Type.Text(pattern = HOSTNAME, patternHint = "a hostname such as ha.coo.ee"),
+        Type.Text(pattern = HOSTNAME, patternHint = "a hostname such as integration.example.com"),
         Apply.RESTART,
         "A white-labelled UI builder on one more hostname, whose edge sends only the builder's " +
           "paths here: its pages keep `/ui-builder/`, carry `uiBuilder.profile.name`, link to no " +
@@ -316,7 +316,7 @@ object ServeSettings {
         "SERVE_UI_BUILDER_HOST_ROOT",
         Type.Flag,
         Apply.RESTART,
-        "Serve the UI builder at the root of SERVE_UI_BUILDER_HOST (`https://ui.coo.ee/<design>`) " +
+        "Serve the UI builder at the root of SERVE_UI_BUILDER_HOST (`https://ui.example.com/<design>`) " +
           "instead of under `/ui-builder/`, keeping every server route (`/start`, `/api`, `/mcp`, " +
           "`/agent-access`, `/auth`, `/admin`, health and status, assets) on that host. Needs an " +
           "editor bundle that reads the `ui-builder-base-path` meta. Ignored without " +
@@ -676,7 +676,7 @@ object ServeSettings {
     appendLine()
     appendLine(
       "Non-secret settings live in a deployment's `settings.json` " +
-        "(preview.coo.ee: [`deploy/preview.coo.ee/settings.json`](../preview.coo.ee/settings.json)), " +
+        "(see [`deploy/example/settings.json`](../example/settings.json)), " +
         "validated against [`settings.schema.json`](settings.schema.json) and published to the box " +
         "through `PUT /admin/settings`. Precedence is built-in default, then `settings.json`, " +
         "then the environment (`.env`): an `.env` line still wins, and `GET /admin/settings` says " +

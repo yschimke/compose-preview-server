@@ -1,5 +1,10 @@
 # Prebuilt preview-host image (instant deploy)
 
+New deployments should start with the independent [Compose example](../example/README.md).
+This directory also retains the existing hosted site stack during the
+[staged extraction](../../docs/deployment/OWNERSHIP.md); its HA services, rollout and analytics
+routes are operator topology, rather than requirements of the server image.
+
 A **prebuilt** Docker image that runs the standalone `compose-preview-server` with **no build on
 the host**. It installs the released server distribution and serves published catalogs/live
 bundles without a local Gradle project. Built once in CI and pushed to GHCR, so hosts just pull it.

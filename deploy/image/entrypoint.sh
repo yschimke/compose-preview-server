@@ -273,12 +273,9 @@ fi
 # Unset (the default) means the admin routes don't exist at all.
 [[ -n "${SERVE_ADMIN_TOKEN:-}" ]] && args+=(--admin-token "${SERVE_ADMIN_TOKEN}")
 [[ -n "${SERVE_ADMIN_READ_TOKEN:-}" ]] && args+=(--admin-read-token "${SERVE_ADMIN_READ_TOKEN}")
-# The image default belongs here, not only in docker-compose.yml. Long-lived hosts keep the Compose
-# file they were installed with, and the pre-3.52 file forwards an empty value when its .env has no
-# override. Defaulting at the process boundary lets an image pull upgrade those hosts too. As with
-# SERVE_TRUST_STORE below, `none` is the explicit opt-out because empty is indistinguishable from
-# that legacy pass-through.
-: "${SERVE_UI_BUILDER_ADMIN_ACTORS:=github:yschimke}"
+# Administrator identities are deployment policy. Empty disables cross-owner administration;
+# settings.json's uiBuilder.adminActors or an explicit environment override enables it.
+: "${SERVE_UI_BUILDER_ADMIN_ACTORS:=none}"
 [[ "${SERVE_UI_BUILDER_ADMIN_ACTORS}" != "none" ]] &&
   args+=(--ui-builder-admin-actors "${SERVE_UI_BUILDER_ADMIN_ACTORS}")
 # New UI-builder designs start `private` (the default) or `public` — readable by anyone with the
@@ -309,7 +306,7 @@ if [[ -n "${SERVE_GITHUB_AUTH_CLIENT_ID:-}" ||
   args+=(--github-auth-client-id "${SERVE_GITHUB_AUTH_CLIENT_ID:-}")
   args+=(--github-auth-client-secret "${SERVE_GITHUB_AUTH_CLIENT_SECRET:-}")
   args+=(--github-auth-cookie-secret "${SERVE_GITHUB_AUTH_COOKIE_SECRET:-}")
-  args+=(--github-auth-repo "${SERVE_GITHUB_AUTH_REPO:-yschimke/compose-ai-tools}")
+  [[ -n "${SERVE_GITHUB_AUTH_REPO:-}" ]] && args+=(--github-auth-repo "${SERVE_GITHUB_AUTH_REPO}")
   # Scope the auth cookies to the parent domain so ONE sign-in covers this host and every
   # SERVE_SITES hostname under it. Without it the cookies are host-only, the state cookie written on
   # a site host never reaches the pinned callback origin, and the server withholds the sign-in
