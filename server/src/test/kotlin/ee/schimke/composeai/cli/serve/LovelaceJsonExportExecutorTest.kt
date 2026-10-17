@@ -11,9 +11,7 @@ import kotlinx.serialization.json.*
 /** This host selects the JSON lane; the builder owns its content and validation. */
 class LovelaceJsonExportExecutorTest {
   private val catalog =
-    CurrentM3UiBuilderCatalogExecutor(catalogSystemIds = setOf("m3-catalog"))
-      .listCatalogs()
-      .single()
+    benchmarkCatalog()
       .newBuilder()
       .also { it.statusSemantics = buildJsonObject { put("platform", "lovelace") } }
       .build()
