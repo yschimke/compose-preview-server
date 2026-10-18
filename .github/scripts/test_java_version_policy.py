@@ -33,7 +33,9 @@ def allowed(datasource, package, current, candidate):
 
 class JavaVersionPolicyTest(unittest.TestCase):
     def test_each_ci_lane_stays_on_its_selected_major(self):
-        for package in ['java-jdk', 'java-jre']:
+        for package in ['java', 'java-jdk', 'java-jre', 'java?system=true',
+                        'java-jdk?os=linux&architecture=x64',
+                        'java-jre?os=linux&architecture=x64']:
             for current in ['17', '17.0.20+101', '21', '21.0.12+101.0.LTS']:
                 major = current.split('.')[0]
                 for candidate in [major, major + '.0.99+102.0.LTS']:

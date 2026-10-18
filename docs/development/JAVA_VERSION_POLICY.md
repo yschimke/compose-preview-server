@@ -13,7 +13,8 @@ dependency update or a newer LTS becoming available.
 `renovate.json` keeps JDK/JRE dependencies currently on 17 or 21 on that same
 major, and keeps the `eclipse-temurin` image on 21. Maintenance releases remain
 eligible, including build metadata and Docker tag/digest updates. These rules
-do not constrain `actions/setup-java` action releases or ordinary Java libraries.
+also cover Renovate's `java` alias and platform-qualified JDK/JRE package names.
+They do not constrain `actions/setup-java` action releases or ordinary Java libraries.
 The shared preset also suppresses JDK/JRE major proposals; the local constraints
 state the repository's selected lanes independently of that default.
 
