@@ -443,7 +443,7 @@ composeai-contracts = "3.36.0"
 # 3.116.0 adds `AuthenticatedUiBuilderActor.mayDeleteForPrincipal` (compose-ui-builder#864) for the
 # `ui-builder-destructive` grant, and the editor's report of nodes a canvas did not draw (#867).
 # 3.119.0 adds the shared Lovelace JSON exporter (compose-ui-builder#908).
-composeai-ui-builder = "3.120.0"
+composeai-ui-builder = "3.121.0"
 # The CMP/Wasm Remote Compose player (yschimke/rc-players' `rc-player-wasm-dist`, a zip of its
 # static browser bundle). Shipped in the server tarball as `rc-player-wasm/`, which the image's
 # entrypoint already passes as `--rc-player-wasm-dir`: that serves `/rc-player-wasm/`, enables the
