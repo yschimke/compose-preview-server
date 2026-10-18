@@ -7427,7 +7427,9 @@ class ServeHttpServer(
 
   /**
    * `push-sw.js` from the serve-web bundle. Uncached, since a worker is identified by URL and must
-   * pick up each release. `Service-Worker-Allowed: /` allows whole-origin scope.
+   * pick up each release. `Service-Worker-Allowed: /` allows whole-origin scope. A capable
+   * root-host editor shares this registration: the response imports its offline handler, passing
+   * the server's reserved route list. Every other host keeps the notification-only worker.
    */
   private suspend fun RoutingContext.respondPushServiceWorker() {
     val asset = ServeWebAssets.load(PUSH_SERVICE_WORKER_ASSET)
@@ -7435,14 +7437,36 @@ class ServeHttpServer(
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return
     }
+    // One registration owns root scope: keep the notification worker URL and subscription when
+    // a root-host editor opts into offline loading. Older editors never run at broad scope.
+    val offline = isUiBuilderRootCall(call) && uiBuilderRootOfflineSupported
+    val bytes =
+      if (offline) {
+        val config = buildJsonObject {
+          put("assetBase", "/ui-builder/")
+          // Change the wrapper's bytes too, so a new editor installs a new worker.
+          put("bundleVersion", uiBuilderBundleVersion)
+          put(
+            "reservedPaths",
+            kotlinx.serialization.json.JsonArray(
+              ServeSites.RESERVED_SYSTEMS.sorted().map(::JsonPrimitive)
+            ),
+          )
+        }
+        ("self.composeUiBuilderOffline = $config;\n" +
+            asset.bytes.toString(Charsets.UTF_8) +
+            "\nimportScripts('/ui-builder/ui-builder-sw.js');\n")
+          .toByteArray()
+      } else asset.bytes
+    val etag = if (offline) contentEtag(bytes) else asset.etag
     call.response.headers.append(HttpHeaders.CacheControl, "no-cache")
-    call.response.headers.append(HttpHeaders.ETag, asset.etag)
+    call.response.headers.append(HttpHeaders.ETag, etag)
     call.response.headers.append(SERVICE_WORKER_ALLOWED, "/")
-    if (call.request.headers[HttpHeaders.IfNoneMatch] == asset.etag) {
+    if (call.request.headers[HttpHeaders.IfNoneMatch] == etag) {
       call.respond(HttpStatusCode.NotModified)
       return
     }
-    call.respondBytes(asset.bytes, ContentType.parse("text/javascript"))
+    call.respondBytes(bytes, ContentType.parse("text/javascript"))
   }
 
   private suspend fun RoutingContext.respondScreenshot() {
@@ -14403,9 +14427,18 @@ class ServeHttpServer(
    * Where the editor's pages live, as a `<meta>`: `/` on the rooted builder host, nothing elsewhere
    * (the editor keeps its `/ui-builder/` default). See [UI_BUILDER_BASE_PATH_META].
    */
+  private val uiBuilderRootOfflineSupported: Boolean by lazy {
+    uiBuilderDir?.let(ServeUiBuilderEditor::readManifest)?.rootOffline == 1 &&
+      File(uiBuilderDir, UI_BUILDER_SERVICE_WORKER).isFile
+  }
+
   private fun uiBuilderBasePathTag(call: ApplicationCall): String =
-    if (isUiBuilderRootCall(call)) "<meta name=\"$UI_BUILDER_BASE_PATH_META\" content=\"/\">"
-    else ""
+    if (isUiBuilderRootCall(call)) {
+      "<meta name=\"$UI_BUILDER_BASE_PATH_META\" content=\"/\">" +
+        if (uiBuilderRootOfflineSupported)
+          "<meta name=\"ui-builder-offline-worker\" content=\"/push-sw.js\">"
+        else ""
+    } else ""
 
   /** Compatibility for released editors that still read the ownership meta tag. */
   private fun uiBuilderCatalogOwnershipTag(): String =

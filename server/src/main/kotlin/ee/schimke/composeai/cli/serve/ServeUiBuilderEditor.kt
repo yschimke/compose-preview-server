@@ -58,6 +58,8 @@ object ServeUiBuilderEditor {
     val version: String,
     /** The editor↔server HTTP API this editor was built against. See [SUPPORTED_SERVER_API]. */
     val serverApi: Int,
+    /** Root-aware offline handlers can share the host's notification registration. */
+    val rootOffline: Int = 0,
   )
 
   private val JSON = Json {

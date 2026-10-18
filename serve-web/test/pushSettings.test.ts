@@ -325,7 +325,7 @@ describe("Settings → Notifications", () => {
         );
     });
 
-    it("saves a kind change while on, and turning off unsubscribes and unregisters", async () => {
+    it("saves a kind change while on, and turning off unsubscribes while retaining the shared offline worker", async () => {
         page();
         const f = fake({ permission: "granted", subscribed: true });
         await installPushSettings(document, READY, f.browser);
@@ -343,7 +343,7 @@ describe("Settings → Notifications", () => {
         const del = f.requests.find((r) => r.method === "DELETE")!;
         assert.equal(del.url, "/api/push/subscribe");
         assert.ok(f.log.includes("unsubscribe"));
-        assert.equal(f.unregistered, true);
+        assert.equal(f.unregistered, false);
         assert.equal(toggle().textContent, "Turn on notifications");
     });
 
@@ -421,7 +421,6 @@ describe("Settings → Notifications", () => {
         assert.deepEqual(f.log, [
             "DELETE /api/push/subscribe",
             "unsubscribe",
-            "unregister",
             "submit",
         ]);
         const del = f.requests.find((r) => r.method === "DELETE")!;
