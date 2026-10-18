@@ -83,6 +83,8 @@ jobs:
       # in the job that needs no JDK rather than in `gradle`.
       - name: Design render lane tests
         run: python3 .github/scripts/test_design_renders.py
+      - name: Java version policy tests
+        run: python3 .github/scripts/test_java_version_policy.py
       - run: python3 scripts/local-dependencies/test_stage.py
       # The catalog names, which shrink to nothing over phases 4 and 5. Scoped to `:server` now;
       # the builder modules' half of the rule went with them.
