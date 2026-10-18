@@ -254,7 +254,11 @@ internal fun Route.installUiBuilderRoutes(
           }
         is ProtocolRequestMapping.Rejected -> UiBuilderServiceResponse.Error(mapping.error)
       }
-    val protocol = UiBuilderProtocolMapper.toProtocolResponse(response.withinCatalogs(scope))
+    val protocol =
+      UiBuilderProtocolMapper.toProtocolResponse(
+        response.exportTransportResponse().withinCatalogs(scope)
+      )
+    call.exportRetryAfter(response)
     call.respondText(
       UI_BUILDER_JSON.encodeToString(
         HttpResponseEnvelopeV1(requestId = envelope.requestId, response = protocol)
@@ -514,7 +518,13 @@ internal fun Route.installUiBuilderRoutes(
           return@post
         }
       val hostShape = WearWidgetHostShape.fromId(decoded.hostShape)
-      val result = withContext(Dispatchers.IO) { nativePreview.render(document, hostShape) }
+      val result =
+        try {
+          withContext(Dispatchers.IO) { nativePreview.render(document, hostShape) }
+        } catch (overloaded: ExportOverloadedException) {
+          call.respondExportOverload(overloaded)
+          return@post
+        }
       when (result) {
         is UiBuilderNativePreviewOutcome.Refused ->
           call.respondText(
@@ -808,21 +818,23 @@ internal suspend fun UiBuilderServicePort.executeMapped(
 internal fun UiBuilderServiceResponse.httpStatusValue(): Int = httpStatus().value
 
 private fun UiBuilderServiceResponse.httpStatus(): HttpStatusCode =
-  when (this) {
-    is UiBuilderServiceResponse.Error ->
-      when (error.code) {
-        ServiceErrorCodeV1.BAD_REQUEST -> HttpStatusCode.BadRequest
-        ServiceErrorCodeV1.ACCESS_REVISION_MISMATCH -> HttpStatusCode.Conflict
-        ServiceErrorCodeV1.UNAUTHORIZED -> HttpStatusCode.Unauthorized
-        ServiceErrorCodeV1.FORBIDDEN -> HttpStatusCode.Forbidden
-        ServiceErrorCodeV1.NOT_FOUND -> HttpStatusCode.NotFound
-        ServiceErrorCodeV1.CATALOG_UNAVAILABLE,
-        ServiceErrorCodeV1.MIGRATION_REQUIRED,
-        ServiceErrorCodeV1.SNAPSHOT_REQUIRED -> HttpStatusCode.Conflict
-        ServiceErrorCodeV1.INTERNAL -> HttpStatusCode.InternalServerError
-      }
-    else -> HttpStatusCode.OK
-  }
+  if (exportOverloadReason() != null) HttpStatusCode.ServiceUnavailable
+  else
+    when (this) {
+      is UiBuilderServiceResponse.Error ->
+        when (error.code) {
+          ServiceErrorCodeV1.BAD_REQUEST -> HttpStatusCode.BadRequest
+          ServiceErrorCodeV1.ACCESS_REVISION_MISMATCH -> HttpStatusCode.Conflict
+          ServiceErrorCodeV1.UNAUTHORIZED -> HttpStatusCode.Unauthorized
+          ServiceErrorCodeV1.FORBIDDEN -> HttpStatusCode.Forbidden
+          ServiceErrorCodeV1.NOT_FOUND -> HttpStatusCode.NotFound
+          ServiceErrorCodeV1.CATALOG_UNAVAILABLE,
+          ServiceErrorCodeV1.MIGRATION_REQUIRED,
+          ServiceErrorCodeV1.SNAPSHOT_REQUIRED -> HttpStatusCode.Conflict
+          ServiceErrorCodeV1.INTERNAL -> HttpStatusCode.InternalServerError
+        }
+      else -> HttpStatusCode.OK
+    }
 
 private suspend fun io.ktor.server.application.ApplicationCall.respondProtocolError(
   requestId: String,

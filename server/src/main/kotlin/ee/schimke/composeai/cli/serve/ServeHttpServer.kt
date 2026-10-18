@@ -564,7 +564,7 @@ class ServeHttpServer(
    * Compiles and renders a design with real Compose. Non-null only when both the builder and the
    * playground compile lane are configured.
    */
-  private val uiBuilderNativePreview: UiBuilderNativePreviewLane? = null,
+  uiBuilderNativePreview: UiBuilderNativePreviewLane? = null,
   /**
    * Captures a design's inline Remote Compose content into its document. Non-null on the same hosts
    * as [uiBuilderNativePreview].
@@ -707,6 +707,8 @@ class ServeHttpServer(
   }
   private val branchParents: ServeUiBuilderGrantScope.Parents? =
     projectBranches?.let(ServeUiBuilderGrantScope::parentsOf)
+
+  private val admittedNativePreview = uiBuilderNativePreview?.let(::BoundedUiBuilderNativePreview)
 
   /**
    * The design service every route, sidecar, stream and MCP tool uses, with grants held to the
@@ -855,7 +857,7 @@ class ServeHttpServer(
       ServeUiBuilderMcp(
         it,
         ::canonicalServerOrigin,
-        uiBuilderNativePreview,
+        admittedNativePreview,
         uiBuilderCommentStore,
         references = uiBuilderReferenceStore,
         links = uiBuilderLinksStore,
@@ -886,7 +888,7 @@ class ServeHttpServer(
         renderSemaphore,
         projectHistory = projectHistory,
         uiBuilder = uiBuilderMcp,
-        uiBuilderNative = uiBuilderNativePreview != null,
+        uiBuilderNative = admittedNativePreview != null,
         publicOrigin = ::canonicalServerOrigin,
         // The builder's own hostname (`--ui-builder-host`, ui.coo.ee beside preview.coo.ee) is
         // this same server under another name.
@@ -1351,7 +1353,7 @@ class ServeHttpServer(
             designService,
             sameOriginUiBuilderAuthorization,
             ::canonicalServerOrigin,
-            uiBuilderNativePreview,
+            admittedNativePreview,
             uiBuilderInlineCapture,
             seeds = uiBuilderSeeds,
             identityDetails = ::uiBuilderIdentityDetails,
@@ -8392,7 +8394,7 @@ class ServeHttpServer(
 
   init {
     // Widget thumbnails are drawn in their host container wherever this server can render one.
-    uiBuilderThumbnails?.nativePreview = uiBuilderNativePreview
+    uiBuilderThumbnails?.nativePreview = admittedNativePreview
     // Snapshot a catalog's facts as its daemon goes idle — the last moment they're readable.
     sessions.addSuspendListener { id, host -> rememberCatalogMeta(id, host) }
     // A retired catalog's status snapshot goes with it. A listener rather than a registry

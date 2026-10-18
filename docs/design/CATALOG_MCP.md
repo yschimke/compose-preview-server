@@ -956,3 +956,35 @@ panel, with model and revision freshness. The viewer's accessibility findings
 and layout overlays are measured render details, separate from model
 guideline verdicts. See [browser evidence](../evidence/mcp-audit-action/README.md);
 live host delivery must be verified before claiming support in Codex Desktop.
+
+### Concurrent exports and retrying overload
+
+The design export runtime admits at most **four exports per server**, shared across REST,
+MCP, actors and grants. Admission is immediate: excess requests start no export worker and do
+not wait in an HTTP queue. A timed-out task that ignores interruption can keep its worker until
+it exits; the worker pool remains bounded at four and further worker admission is retryable.
+Native rendering has a separate four-request bound shared by REST, MCP and rendered checks.
+`catalog_render_preview` keeps the HTTP render semaphore and its two-second admission wait;
+its busy/queue refusals carry the same MCP retry metadata.
+Reads (`tools/list`, `ui_builder_get_design`) do not consume either budget. These are server-wide
+limits, not four additional slots per grant. Clients should send at most four expensive requests
+at once, and reduce concurrency when another client is using the same server.
+
+REST export admission failures return **503** and `Retry-After: 1`, including the request-envelope
+and supplied-document routes. The request envelope uses `internal` with `retryable: true`
+(the released wire enum has no overload member). MCP execution overload keeps HTTP 200 and the JSON-RPC result
+(the request was valid), with `isError: true` and structured content:
+
+```json
+{"code":"export_overloaded","retryable":true,"retryAfterSeconds":1}
+```
+
+Wait at least the indicated interval, add jitter, and retry. Do not retry a malformed request
+(400) unchanged. An export timeout or genuine exporter/renderer failure remains an internal
+failure; a refused artifact retains its diagnostics (422 on the artifact download route).
+The server adapter recognizes only the released runtime's two exact retryable admission
+refusals and the render adapter's explicit Busy outcome; it does not reinterpret every `BAD_REQUEST` or retryable internal error as overload.
+Cold thumbnails use their existing 512-job queue and 60-second wait bound; a full queue, export admission refusal or
+expired queue wait returns 503 with the same retry advice. Cached thumbnails can still be served.
+
+See [the isolated load fixture](../development/EXPORT_LOAD_TEST.md) for reproduction and measurement.

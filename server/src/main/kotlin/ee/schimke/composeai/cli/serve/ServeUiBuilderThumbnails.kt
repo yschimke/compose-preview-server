@@ -168,6 +168,10 @@ internal constructor(
                 runBlocking {
                   retrying { render(job.designId, job.actor, job.revision, job.native) }
                 }
+              } catch (overloaded: ExportOverloadedException) {
+                pending.remove(job.key, job)
+                job.result.completeExceptionally(overloaded)
+                continue
               } catch (failure: Exception) {
                 onLog("serve: UI-builder thumbnail for ${job.designId} failed: ${failure.message}")
                 null
@@ -336,7 +340,7 @@ internal constructor(
     val offered = if (urgent) jobs.offerFirst(job) else jobs.offerLast(job)
     if (!offered) {
       pending.remove(job.key, job)
-      job.result.complete(null)
+      job.result.completeExceptionally(ExportOverloadedException("thumbnail queue is full"))
     }
     return job.result
   }
@@ -376,6 +380,7 @@ internal constructor(
         onLog("serve: UI-builder thumbnail for $designId not drawn: ${failure.message}")
         return null
       }
+    response.exportOverloadReason()?.let { throw ExportOverloadedException(it) }
     val artifact = (response as? UiBuilderServiceResponse.Export)?.artifact ?: return null
     if (artifact.diagnostics.any { it.severity == DiagnosticSeverityV1.ERROR }) return null
     if (artifact.encoding != ExportEncodingV1.BASE64) return null
@@ -423,6 +428,8 @@ internal constructor(
     val outcome =
       try {
         lane.render(document, WearWidgetHostShape.Squircle)
+      } catch (overloaded: ExportOverloadedException) {
+        throw overloaded
       } catch (failure: Exception) {
         onLog("serve: UI-builder widget thumbnail for $designId not drawn: ${failure.message}")
         return null
@@ -573,17 +580,19 @@ internal suspend fun ApplicationCall.serveUiBuilderThumbnail(
   val cached = thumbnails.cached(designId)
   val current = revision != null && thumbnails.isCurrent(designId, revision, native)
   val entry =
-    when {
-      current -> cached
-      cached != null -> {
-        thumbnails.warm(designId, actor, native = native)
-        cached
-      }
-      // Drawn by the one worker, ahead of any redraw, and shared with the listing's own request.
-      else ->
-        withTimeoutOrNull(COLD_RENDER_TIMEOUT_MS) {
-          thumbnails.submit(designId, actor, urgent = true, native = native).await()
+    try {
+      when {
+        current -> cached
+        cached != null -> {
+          thumbnails.warm(designId, actor, native = native)
+          cached
         }
+        // Drawn by the one worker, ahead of any redraw, and shared with the listing's own request.
+        else -> thumbnails.submit(designId, actor, urgent = true, native = native).awaitThumbnail()
+      }
+    } catch (overloaded: ExportOverloadedException) {
+      respondExportOverload(overloaded)
+      return
     }
   if (entry == null) {
     response.headers.append(HttpHeaders.CacheControl, "no-store")
@@ -629,13 +638,20 @@ internal suspend fun ApplicationCall.serveUiBuilderRevisionThumbnail(
   }
   val cached = thumbnails.cachedRevision(designId, revision)
   val entry =
-    if (cached != null && !thumbnails.awaitsNativeRedraw(cached, designId, revision, native)) cached
-    else
-      withTimeoutOrNull(COLD_RENDER_TIMEOUT_MS) {
+    try {
+      if (cached != null && !thumbnails.awaitsNativeRedraw(cached, designId, revision, native))
+        cached
+      else
         thumbnails
           .submit(designId, actor, urgent = false, revision = revision, native = native)
-          .await()
-      } ?: cached
+          .awaitThumbnail() ?: cached
+    } catch (overloaded: ExportOverloadedException) {
+      if (cached != null) cached
+      else {
+        respondExportOverload(overloaded)
+        return
+      }
+    }
   if (entry == null || entry.revision != revision) {
     response.headers.append(HttpHeaders.CacheControl, "no-store")
     respondText("no thumbnail", status = HttpStatusCode.NotFound)
@@ -650,6 +666,14 @@ internal suspend fun ApplicationCall.serveUiBuilderRevisionThumbnail(
   response.headers.append(UI_BUILDER_REVISION_HEADER, entry.revision.toString())
   respondBytes(entry.png, ContentType.Image.PNG, HttpStatusCode.OK)
 }
+
+private data class ThumbnailWait(val entry: ServeUiBuilderThumbnails.Entry?)
+
+private suspend fun CompletableFuture<ServeUiBuilderThumbnails.Entry?>.awaitThumbnail():
+  ServeUiBuilderThumbnails.Entry? =
+  (withTimeoutOrNull(COLD_RENDER_TIMEOUT_MS) { ThumbnailWait(await()) }
+      ?: throw ExportOverloadedException("thumbnail queue wait expired"))
+    .entry
 
 private suspend fun <T : Any> retrying(block: suspend () -> T?): T? {
   repeat(THUMBNAIL_RENDER_ATTEMPTS - 1) {
