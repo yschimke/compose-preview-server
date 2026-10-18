@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.145.0](https://github.com/yschimke/compose-preview-server/compare/v3.144.0...v3.145.0) (2026-10-18)
+
+
+### Bug Fixes
+
+* **deps:** retain supported Java runtime lanes ([#1744](https://github.com/yschimke/compose-preview-server/issues/1744)) ([aea8c5a](https://github.com/yschimke/compose-preview-server/commit/aea8c5a9d73c6758af8783c540965b14f6f9e142))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.68.5 ([#1751](https://github.com/yschimke/compose-preview-server/issues/1751)) ([6425d11](https://github.com/yschimke/compose-preview-server/commit/6425d1111622a38419c3ab283cdf2ed873b31109))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.18.8 ([#1752](https://github.com/yschimke/compose-preview-server/issues/1752)) ([85f6e4f](https://github.com/yschimke/compose-preview-server/commit/85f6e4f98e909f57aab1aa8ecfea60819bab066e))
+* **deps:** update rc-players to v2.16.0 ([#1750](https://github.com/yschimke/compose-preview-server/issues/1750)) ([6d07f2f](https://github.com/yschimke/compose-preview-server/commit/6d07f2fce68ed65894121e482a0f3502c07a78cf))
+* **server:** return retryable overload for concurrent exports ([#1748](https://github.com/yschimke/compose-preview-server/issues/1748)) ([df9b549](https://github.com/yschimke/compose-preview-server/commit/df9b549c645a7a4154fff7744e4b9ce8a05616e6))
+* **ui-builder:** preserve root offline creation and stage config cleanup ([#1745](https://github.com/yschimke/compose-preview-server/issues/1745)) ([ca0a47f](https://github.com/yschimke/compose-preview-server/commit/ca0a47fc95d2cd0ffb3306fa039230340a3ebe07))
+
 ## [3.144.0](https://github.com/yschimke/compose-preview-server/compare/v3.143.0...v3.144.0) (2026-10-18)
 
 
