@@ -100,6 +100,26 @@
         "io.github.classgraph:classgraph"
       ],
       "allowedVersions": "(,6.0.0)"
+    },
+    {
+      "description": "Keep the Java 17 compatibility/build lane on 17 while allowing maintenance releases. The distribution's declared runtime floor and checkServerJvmFloor remain 17; replacing this lane with a newer JVM would remove coverage of that contract. Change only with an intentional floor migration and packaged startup verification. See docs/development/JAVA_VERSION_POLICY.md.",
+      "matchDatasources": ["java-version"],
+      "matchPackageNames": ["java-jdk", "java-jre"],
+      "matchCurrentValue": "/^17([.+-]|$)/",
+      "allowedVersions": "/^17([.+-]|$)/"
+    },
+    {
+      "description": "Keep the UI-builder render/visual-harness Java lane on 21, including maintenance releases. PR #1738 passed CI on 25 but did not migrate the Java 17 distribution floor or the Temurin 21 image. Adopt a new runtime in a separate reviewed migration with render/distribution evidence; an LTS label alone is not that decision. See docs/development/JAVA_VERSION_POLICY.md.",
+      "matchDatasources": ["java-version"],
+      "matchPackageNames": ["java-jdk", "java-jre"],
+      "matchCurrentValue": "/^21([.+-]|$)/",
+      "allowedVersions": "/^21([.+-]|$)/"
+    },
+    {
+      "description": "The shipped host image uses Java 21 for the UI-builder render bundle. Keep Temurin 21 maintenance tags and digest refreshes; moving to 25 requires the same deliberate runtime/render validation as the visual-harness lane. This does not change the distribution's Java 17 minimum. See docs/development/JAVA_VERSION_POLICY.md.",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["eclipse-temurin"],
+      "allowedVersions": "/^21([._+-]|$)/"
     }
   ]
 }

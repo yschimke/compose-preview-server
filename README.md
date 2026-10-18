@@ -90,6 +90,11 @@ Both floors are declared once, as `java-server` and `java-ui-builder` in
 distribution's classpath, and the render bundle carries `java-ui-builder` as data so the startup
 message cannot drift from the bytes it describes.
 
+Renovate retains each Java 17/21 lane and the Temurin 21 image on its selected
+major while allowing maintenance updates. The rationale, evidence from the
+Java 25 proposal, and requirements for adopting a newer runtime are documented
+in [Java version policy](docs/development/JAVA_VERSION_POLICY.md).
+
 ## Build
 
 `./gradlew check` needs one JDK: 17. The UI builder's frontend lane compiles at 21 in its own
