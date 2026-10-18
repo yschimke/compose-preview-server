@@ -153,7 +153,7 @@ check_absent "and issues no delete" "DELETE /admin/trust" "${out}"
 mkdir -p "${work}/restart"
 cat > "${work}/restart/catalogs.json" <<'JSON'
 { "catalogs": [], "sites": [],
-  "uiBuilder": { "catalogs": { "remote-m3": { "owned": true } } } }
+  "uiBuilder": { "catalogs": { "remote-m3": { "published": true } } } }
 JSON
 cat > "${work}/restart/producers.json" <<'JSON'
 { "producers": [] }

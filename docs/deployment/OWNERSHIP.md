@@ -74,3 +74,26 @@ must survive the deployment-source move.
 Still unknown until host access: active local overrides, whether HA demo networking has been
 provisioned, exact running editor/runtime pin, secret delivery and backup/restore mechanism.
 The deployment runbook must be updated with observed facts before cutover.
+
+## Catalog ownership compatibility retirement
+
+The 2026-10-18 production check observed server 3.144.0 and editor 3.121.0. Published Material 3
+templates loaded and browser-local creation from the published `hello` document preserved its
+catalog pin and five node IDs. The release workflow's admin config reconcile reported the builder
+catalog settings already serving. Evidence is in
+[`published-catalog-rollout/result.json`](../evidence/published-catalog-rollout/result.json).
+
+The fresh-tab offline gate failed on the deployed root editor host: `ui.coo.ee` emits
+`ui-builder-base-path=/`, and the editor explicitly skips service-worker registration in that mode.
+With networking disabled, a new tab cannot load its shell, despite the templates reaching IndexedDB.
+This is tracked in [SCH-11](https://linear.app/yschimke/issue/SCH-11). The earlier standalone/prefixed
+editor smoke test does not establish parity for this host. HA and Meshcore template-pin failures
+remain tracked in SCH-8.
+
+Remove the ignored `owned` fields from configuration writers first. The public deployment config
+cleanup retains the compatible server decoder: the staged private deployment copy also needs its
+fields removed before it can become authoritative. After the offline gate passes, publish the clean
+configuration through the active writer, verify the admin round trip and persisted configuration,
+and reconcile the private copy before cutover. Only then remove the `owned` decoder and its rolling
+upgrade tests in a subsequent server release. Removing that decoder alongside only one writer
+would make the other writer's strict admin requests fail.

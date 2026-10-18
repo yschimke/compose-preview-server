@@ -1,0 +1,40 @@
+{
+  "serverVersion": "3.144.0",
+  "editorVersion": "3.121.0",
+  "origin": "https://ui.coo.ee",
+  "onlineCreation": {
+    "publishedTemplate": "hello",
+    "matchingCatalogPin": true,
+    "matchingNodeIds": true,
+    "nodeCount": 5,
+    "newId": true,
+    "revision": 0
+  },
+  "httpErrors": [
+    {
+      "url": "https://ui.coo.ee/api/ui-builder/v1/designs/smug-rascal/component-drift",
+      "status": 404
+    },
+    {
+      "url": "https://ui.coo.ee/m3-catalog/api/previews",
+      "status": 404
+    }
+  ],
+  "serviceWorkerRegistrations": [],
+  "freshTabOffline": {
+    "networkDisabled": true,
+    "error": "Error: page.goto: net::ERR_INTERNET_DISCONNECTED at https://ui.coo.ee/?session=live&storage=local&catalog=m3-catalog"
+  },
+  "verifiedAt": "2026-10-18",
+  "adminConfigPublication": {
+    "result": "already serving",
+    "workflowRun": "https://github.com/yschimke/compose-preview-server/actions/runs/39112172557",
+    "logTimestamp": "2026-10-18T08:46:52.4799287Z",
+    "directAdminAccessInSession": false
+  },
+  "notes": [
+    "Browser creation used storage=local; no server design was created.",
+    "The offline failure is tracked as SCH-11. HA/Meshcore publication failures remain tracked as SCH-8.",
+    "HTTP 404 responses are preserved as diagnostics; successful native rendering is not asserted."
+  ]
+}
