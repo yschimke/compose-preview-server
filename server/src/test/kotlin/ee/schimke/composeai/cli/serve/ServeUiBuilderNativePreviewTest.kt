@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.export.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
@@ -67,6 +68,55 @@ class ServeUiBuilderNativePreviewTest {
         mapOf("heading" to AnnotationBounds(x = 8, y = 16, width = 200, height = 24))
       },
     )
+
+  @Test
+  fun `native document capture uses the RC terminal and accepts a document without a still image`() {
+    val generated = mutableListOf<UiBuilderGeneratedCompose>()
+    val source =
+      ScreenGeneratorComposeExportExecutor(
+        ComponentRecordSource(emptyMap())::record,
+        catalogPlatform = { UiBuilderCatalogPlatform.REMOTE_COMPOSE },
+      )
+    val capture =
+      ServeUiBuilderNativePreview(
+        source,
+        compile = {
+          generated += it
+          PlaygroundRunResponse(documentUrl = "/d/captured")
+        },
+        nativeTarget = {
+          UiBuilderNativeTarget("actual-remote-runtime", UiBuilderGeneratedCompose.COMPOSE_ANDROID)
+        },
+      )
+    val doc =
+      document()
+        .copy(
+          catalogPin = CatalogReferenceV1("remote-m3", "candidate", "candidate", "candidate"),
+          roots = listOf("text"),
+          nodes =
+            mapOf(
+              "text" to
+                DesignNodeV1(
+                  "text",
+                  "remote-m3/remote-text",
+                  properties = mapOf("text" to StringValueV1("Live card")),
+                )
+            ),
+        )
+    val outcome = assertIs<UiBuilderNativePreviewOutcome.Rendered>(capture.capture(doc))
+    assertNull(outcome.failure)
+    assertEquals("/d/captured", outcome.response.documentUrl)
+    assertEquals("remote-compose", generated.single().confType)
+    assertEquals("actual-remote-runtime", generated.single().catalog)
+    assertTrue(generated.single().remoteCapture)
+    assertTrue(outcome.taggedNodeIds.isEmpty())
+  }
+
+  @Test
+  fun `native document capture refuses ordinary Compose instead of publishing a screenshot`() {
+    assertIs<UiBuilderNativePreviewOutcome.Refused>(lane.capture(document()))
+    assertTrue(submitted.isEmpty())
+  }
 
   @Test
   fun `the rendered source carries every design node id as a test tag`() {

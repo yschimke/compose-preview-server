@@ -206,6 +206,60 @@ class ServeUiBuilderAgentErgonomicsTest {
       .trimIndent()
 
   @Test
+  fun `supplied native capture checks export admission and retains the exact source revision without saving`() {
+    val captures = mutableListOf<DesignDocumentV1>()
+    val lane =
+      object : UiBuilderNativePreviewLane {
+        override fun render(
+          document: DesignDocumentV1,
+          widgetHostShape: WearWidgetHostShape,
+        ): UiBuilderNativePreviewOutcome = error("capture must not call the still renderer")
+
+        override fun capture(document: DesignDocumentV1): UiBuilderNativePreviewOutcome {
+          captures += document
+          return UiBuilderNativePreviewOutcome.Rendered(
+            PlaygroundRunResponse(documentUrl = "/d/captured"),
+            emptyList(),
+          )
+        }
+      }
+    val server = start(nativePreview = lane)
+    val document = cleanDocument().copy(revision = 17)
+    val (status, body) =
+      http(server, "POST", "/api/ui-builder/v1/documents/native-capture", documentJson(document))
+    assertEquals(200, status, body)
+    val result = Json.parseToJsonElement(body).jsonObject
+    assertEquals("/d/captured", result.text("documentUrl"))
+    assertEquals(17, result["revision"]!!.jsonPrimitive.long)
+    assertEquals(listOf(document), captures)
+    assertEquals(404, http(server, "GET", "/api/ui-builder/v1/designs/${document.id}", null).first)
+    val unknown =
+      document.copy(
+        catalogPin = CatalogReferenceV1("missing", "candidate", "candidate", "candidate")
+      )
+    assertEquals(
+      409,
+      http(server, "POST", "/api/ui-builder/v1/documents/native-capture", documentJson(unknown))
+        .first,
+    )
+    assertEquals(1, captures.size)
+    val anonymous =
+      client
+        .newCall(
+          Request.Builder()
+            .url(
+              "http://127.0.0.1:${server.server.port}/api/ui-builder/v1/documents/native-capture"
+            )
+            .post(documentJson(document).toRequestBody("application/json".toMediaType()))
+            .build()
+        )
+        .execute()
+        .use { it.code }
+    assertEquals(401, anonymous)
+    assertEquals(1, captures.size)
+  }
+
+  @Test
   fun `a catalog's own guidelines decide the rules and the pictures, and are served`() {
     val drawn = mutableListOf<Pair<Int, Int>>()
     val own = ServeCatalogGuidelines(log = {})
