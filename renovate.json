@@ -90,6 +90,16 @@
         "at any time"
       ],
       "minimumReleaseAge": null
+    },
+    {
+      "description": "ClassGraph 6 requires Java 25 and a new scanning API. PR #1741 fails checkServerJvmFloor (Java 17) and compilation at overrideClasspath. Keep updates below 6 while the server distribution supports Java 17; ClassGraph 5 remains eligible for a reviewed API migration. Remove this ceiling only after intentionally raising the server JVM floor to Java 25 and porting/verifying preview discovery. See https://github.com/yschimke/compose-preview-server/pull/1741 and https://github.com/classgraph/classgraph#classgraph-6-is-released.",
+      "matchManagers": [
+        "gradle"
+      ],
+      "matchPackageNames": [
+        "io.github.classgraph:classgraph"
+      ],
+      "allowedVersions": "(,6.0.0)"
     }
   ]
 }
