@@ -3241,6 +3241,8 @@ class ServeUiBuilderMcp(
     val outcome =
       try {
         lane.render(document, widgetHostShape)
+      } catch (overloaded: ExportOverloadedException) {
+        throw overloaded
       } catch (cancelled: CancellationException) {
         throw cancelled
       } catch (e: Exception) {
@@ -3853,7 +3855,11 @@ class ServeUiBuilderMcp(
     when (val mapping = UiBuilderProtocolMapper.toServiceCall(actor, request)) {
       is ProtocolRequestMapping.Mapped ->
         try {
-          service.shapeForReader(actor, service.execute(mapping.call))
+          service.shapeForReader(actor, service.execute(mapping.call)).also { response ->
+            response.exportOverloadReason()?.let { throw ExportOverloadedException(it) }
+          }
+        } catch (overloaded: ExportOverloadedException) {
+          throw overloaded
         } catch (cancelled: CancellationException) {
           throw cancelled
         } catch (failure: Exception) {
@@ -3880,6 +3886,7 @@ class ServeUiBuilderMcp(
     response: UiBuilderServiceResponse,
     includeCatalog: Boolean = true,
   ): String {
+    response.exportOverloadReason()?.let { throw ExportOverloadedException(it) }
     val envelope =
       UI_BUILDER_JSON.encodeToJsonElement(
         McpResponseEnvelopeV1.serializer(),

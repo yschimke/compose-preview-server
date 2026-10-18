@@ -1,0 +1,1519 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-18",
+  "origin": "http://127.0.0.1:18081",
+  "mainChecked": "ca0a47fc95d2cd0ffb3306fa039230340a3ebe07",
+  "baseline": "server 3.144.0 release; same relevant resolved dependencies as checked main",
+  "candidate": "checked main plus this change, source-built server jar in the same isolated release installation",
+  "dependencies": {
+    "uiBuilder": "3.121.0",
+    "renderHost": "2.67.0",
+    "daemonClientAndCore": "3.18.6",
+    "daemonBom": "3.18.7"
+  },
+  "runtime": {
+    "java": "Temurin 21.0.12.1+1",
+    "serverHeapLimitMiB": 512,
+    "fixture": "one committed benchmark Text design; real packaged PNG/SVG renderer; one synthetic baked catalog preview",
+    "nativeCompiler": "not installed in this fixture; native admission and rendered checks exercised by controlled HTTP/MCP regression lanes"
+  },
+  "runs": {
+    "before": {
+      "measurements": [
+        {
+          "startedAtMillis": 1792331202592,
+          "mode": "compose",
+          "concurrency": 1,
+          "recovery": false,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 465.13,
+          "p99_ms": 465.13
+        },
+        {
+          "startedAtMillis": 1792331203060,
+          "mode": "compose",
+          "concurrency": 4,
+          "recovery": false,
+          "statuses": {
+            "200": 4
+          },
+          "toolErrors": 0,
+          "p50_ms": 32.14,
+          "p99_ms": 45.31
+        },
+        {
+          "startedAtMillis": 1792331203111,
+          "mode": "compose",
+          "concurrency": 16,
+          "recovery": false,
+          "statuses": {
+            "200": 11,
+            "400": 5
+          },
+          "toolErrors": 0,
+          "p50_ms": 58.32,
+          "p99_ms": 101.5
+        },
+        {
+          "startedAtMillis": 1792331203225,
+          "mode": "compose",
+          "concurrency": 64,
+          "recovery": false,
+          "statuses": {
+            "400": 54,
+            "200": 10
+          },
+          "toolErrors": 0,
+          "p50_ms": 55.63,
+          "p99_ms": 105.04
+        },
+        {
+          "startedAtMillis": 1792331203381,
+          "mode": "compose",
+          "concurrency": 128,
+          "recovery": false,
+          "statuses": {
+            "400": 97,
+            "200": 31
+          },
+          "toolErrors": 0,
+          "p50_ms": 87.24,
+          "p99_ms": 243.88
+        },
+        {
+          "startedAtMillis": 1792331203678,
+          "mode": "compose",
+          "concurrency": 1,
+          "recovery": true,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 9.27,
+          "p99_ms": 9.27
+        },
+        {
+          "startedAtMillis": 1792331203691,
+          "mode": "png",
+          "concurrency": 1,
+          "recovery": false,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 1816.52,
+          "p99_ms": 1816.52
+        },
+        {
+          "startedAtMillis": 1792331205511,
+          "mode": "png",
+          "concurrency": 4,
+          "recovery": false,
+          "statuses": {
+            "200": 4
+          },
+          "toolErrors": 0,
+          "p50_ms": 66.16,
+          "p99_ms": 76.33
+        },
+        {
+          "startedAtMillis": 1792331205593,
+          "mode": "png",
+          "concurrency": 16,
+          "recovery": false,
+          "statuses": {
+            "400": 12,
+            "200": 4
+          },
+          "toolErrors": 0,
+          "p50_ms": 13.74,
+          "p99_ms": 67.04
+        },
+        {
+          "startedAtMillis": 1792331205681,
+          "mode": "png",
+          "concurrency": 64,
+          "recovery": false,
+          "statuses": {
+            "400": 57,
+            "200": 7
+          },
+          "toolErrors": 0,
+          "p50_ms": 49.51,
+          "p99_ms": 128.47
+        },
+        {
+          "startedAtMillis": 1792331205855,
+          "mode": "png",
+          "concurrency": 128,
+          "recovery": false,
+          "statuses": {
+            "400": 114,
+            "200": 14
+          },
+          "toolErrors": 0,
+          "p50_ms": 73.04,
+          "p99_ms": 178.69
+        },
+        {
+          "startedAtMillis": 1792331206130,
+          "mode": "png",
+          "concurrency": 1,
+          "recovery": true,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 14.89,
+          "p99_ms": 14.89
+        },
+        {
+          "startedAtMillis": 1792331206151,
+          "mode": "svg",
+          "concurrency": 1,
+          "recovery": false,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 211.26,
+          "p99_ms": 211.26
+        },
+        {
+          "startedAtMillis": 1792331206368,
+          "mode": "svg",
+          "concurrency": 4,
+          "recovery": false,
+          "statuses": {
+            "200": 4
+          },
+          "toolErrors": 0,
+          "p50_ms": 34.32,
+          "p99_ms": 41.18
+        },
+        {
+          "startedAtMillis": 1792331206423,
+          "mode": "svg",
+          "concurrency": 16,
+          "recovery": false,
+          "statuses": {
+            "400": 11,
+            "200": 5
+          },
+          "toolErrors": 0,
+          "p50_ms": 10.1,
+          "p99_ms": 54.14
+        },
+        {
+          "startedAtMillis": 1792331206509,
+          "mode": "svg",
+          "concurrency": 64,
+          "recovery": false,
+          "statuses": {
+            "400": 54,
+            "200": 10
+          },
+          "toolErrors": 0,
+          "p50_ms": 43.03,
+          "p99_ms": 128.69
+        },
+        {
+          "startedAtMillis": 1792331206667,
+          "mode": "svg",
+          "concurrency": 128,
+          "recovery": false,
+          "statuses": {
+            "400": 114,
+            "200": 14
+          },
+          "toolErrors": 0,
+          "p50_ms": 76.73,
+          "p99_ms": 177.38
+        },
+        {
+          "startedAtMillis": 1792331206904,
+          "mode": "svg",
+          "concurrency": 1,
+          "recovery": true,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 16.46,
+          "p99_ms": 16.46
+        },
+        {
+          "startedAtMillis": 1792331206929,
+          "mode": "thumbnail",
+          "concurrency": 1,
+          "recovery": false,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 26.64,
+          "p99_ms": 26.64
+        },
+        {
+          "startedAtMillis": 1792331206963,
+          "mode": "thumbnail",
+          "concurrency": 4,
+          "recovery": false,
+          "statuses": {
+            "200": 4
+          },
+          "toolErrors": 0,
+          "p50_ms": 4.23,
+          "p99_ms": 4.95
+        },
+        {
+          "startedAtMillis": 1792331206980,
+          "mode": "thumbnail",
+          "concurrency": 16,
+          "recovery": false,
+          "statuses": {
+            "200": 16
+          },
+          "toolErrors": 0,
+          "p50_ms": 7.58,
+          "p99_ms": 17.3
+        },
+        {
+          "startedAtMillis": 1792331207030,
+          "mode": "thumbnail",
+          "concurrency": 64,
+          "recovery": false,
+          "statuses": {
+            "200": 64
+          },
+          "toolErrors": 0,
+          "p50_ms": 34.04,
+          "p99_ms": 72.85
+        },
+        {
+          "startedAtMillis": 1792331207134,
+          "mode": "thumbnail",
+          "concurrency": 128,
+          "recovery": false,
+          "statuses": {
+            "200": 128
+          },
+          "toolErrors": 0,
+          "p50_ms": 76.11,
+          "p99_ms": 141.19
+        },
+        {
+          "startedAtMillis": 1792331207329,
+          "mode": "thumbnail",
+          "concurrency": 1,
+          "recovery": true,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 3.31,
+          "p99_ms": 3.31
+        },
+        {
+          "startedAtMillis": 1792331207343,
+          "mode": "mcp-compose",
+          "concurrency": 1,
+          "recovery": false,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 48.37,
+          "p99_ms": 48.37
+        },
+        {
+          "startedAtMillis": 1792331207404,
+          "mode": "mcp-compose",
+          "concurrency": 4,
+          "recovery": false,
+          "statuses": {
+            "200": 4
+          },
+          "toolErrors": 0,
+          "p50_ms": 28.32,
+          "p99_ms": 46.4
+        },
+        {
+          "startedAtMillis": 1792331207465,
+          "mode": "mcp-compose",
+          "concurrency": 16,
+          "recovery": false,
+          "statuses": {
+            "200": 16
+          },
+          "toolErrors": 10,
+          "p50_ms": 43.51,
+          "p99_ms": 77.12
+        },
+        {
+          "startedAtMillis": 1792331207558,
+          "mode": "mcp-compose",
+          "concurrency": 64,
+          "recovery": false,
+          "statuses": {
+            "200": 64
+          },
+          "toolErrors": 49,
+          "p50_ms": 58.52,
+          "p99_ms": 142.35
+        },
+        {
+          "startedAtMillis": 1792331207744,
+          "mode": "mcp-compose",
+          "concurrency": 128,
+          "recovery": false,
+          "statuses": {
+            "200": 128
+          },
+          "toolErrors": 104,
+          "p50_ms": 83.73,
+          "p99_ms": 171.16
+        },
+        {
+          "startedAtMillis": 1792331208039,
+          "mode": "mcp-compose",
+          "concurrency": 1,
+          "recovery": true,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 10.97,
+          "p99_ms": 10.97
+        },
+        {
+          "startedAtMillis": 1792331208064,
+          "mode": "mcp-png",
+          "concurrency": 1,
+          "recovery": false,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 18.03,
+          "p99_ms": 18.03
+        },
+        {
+          "startedAtMillis": 1792331208096,
+          "mode": "mcp-png",
+          "concurrency": 4,
+          "recovery": false,
+          "statuses": {
+            "200": 4
+          },
+          "toolErrors": 0,
+          "p50_ms": 25.44,
+          "p99_ms": 46.1
+        },
+        {
+          "startedAtMillis": 1792331208163,
+          "mode": "mcp-png",
+          "concurrency": 16,
+          "recovery": false,
+          "statuses": {
+            "200": 16
+          },
+          "toolErrors": 10,
+          "p50_ms": 31.07,
+          "p99_ms": 79.91
+        },
+        {
+          "startedAtMillis": 1792331208268,
+          "mode": "mcp-png",
+          "concurrency": 64,
+          "recovery": false,
+          "statuses": {
+            "200": 64
+          },
+          "toolErrors": 54,
+          "p50_ms": 58.69,
+          "p99_ms": 133.75
+        },
+        {
+          "startedAtMillis": 1792331208473,
+          "mode": "mcp-png",
+          "concurrency": 128,
+          "recovery": false,
+          "statuses": {
+            "200": 128
+          },
+          "toolErrors": 113,
+          "p50_ms": 85.79,
+          "p99_ms": 209.12
+        },
+        {
+          "startedAtMillis": 1792331208760,
+          "mode": "mcp-png",
+          "concurrency": 1,
+          "recovery": true,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 17.35,
+          "p99_ms": 17.35
+        },
+        {
+          "startedAtMillis": 1792331208793,
+          "mode": "tools",
+          "concurrency": 1,
+          "recovery": false,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 73.19,
+          "p99_ms": 73.19
+        },
+        {
+          "startedAtMillis": 1792331208893,
+          "mode": "tools",
+          "concurrency": 4,
+          "recovery": false,
+          "statuses": {
+            "200": 4
+          },
+          "toolErrors": 0,
+          "p50_ms": 14.05,
+          "p99_ms": 18.57
+        },
+        {
+          "startedAtMillis": 1792331208933,
+          "mode": "tools",
+          "concurrency": 16,
+          "recovery": false,
+          "statuses": {
+            "200": 16
+          },
+          "toolErrors": 0,
+          "p50_ms": 42.73,
+          "p99_ms": 63.85
+        },
+        {
+          "startedAtMillis": 1792331209031,
+          "mode": "tools",
+          "concurrency": 64,
+          "recovery": false,
+          "statuses": {
+            "200": 64
+          },
+          "toolErrors": 0,
+          "p50_ms": 106.55,
+          "p99_ms": 228.14
+        },
+        {
+          "startedAtMillis": 1792331209306,
+          "mode": "tools",
+          "concurrency": 128,
+          "recovery": false,
+          "statuses": {
+            "200": 128
+          },
+          "toolErrors": 0,
+          "p50_ms": 164.43,
+          "p99_ms": 323.42
+        },
+        {
+          "startedAtMillis": 1792331209718,
+          "mode": "tools",
+          "concurrency": 1,
+          "recovery": true,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 11.92,
+          "p99_ms": 11.92
+        },
+        {
+          "startedAtMillis": 1792331209750,
+          "mode": "get",
+          "concurrency": 1,
+          "recovery": false,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 30.18,
+          "p99_ms": 30.18
+        },
+        {
+          "startedAtMillis": 1792331209811,
+          "mode": "get",
+          "concurrency": 4,
+          "recovery": false,
+          "statuses": {
+            "200": 4
+          },
+          "toolErrors": 0,
+          "p50_ms": 13.96,
+          "p99_ms": 22.78
+        },
+        {
+          "startedAtMillis": 1792331209856,
+          "mode": "get",
+          "concurrency": 16,
+          "recovery": false,
+          "statuses": {
+            "200": 16
+          },
+          "toolErrors": 0,
+          "p50_ms": 49.21,
+          "p99_ms": 62.75
+        },
+        {
+          "startedAtMillis": 1792331209946,
+          "mode": "get",
+          "concurrency": 64,
+          "recovery": false,
+          "statuses": {
+            "200": 64
+          },
+          "toolErrors": 0,
+          "p50_ms": 35.47,
+          "p99_ms": 125.9
+        },
+        {
+          "startedAtMillis": 1792331210124,
+          "mode": "get",
+          "concurrency": 128,
+          "recovery": false,
+          "statuses": {
+            "200": 128
+          },
+          "toolErrors": 0,
+          "p50_ms": 84.43,
+          "p99_ms": 194.45
+        },
+        {
+          "startedAtMillis": 1792331210401,
+          "mode": "get",
+          "concurrency": 1,
+          "recovery": true,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 9.41,
+          "p99_ms": 9.41
+        },
+        {
+          "startedAtMillis": 1792331210434,
+          "mode": "mixed",
+          "concurrency": 50,
+          "recovery": false,
+          "statuses": {
+            "200": 150
+          },
+          "toolErrors": 81,
+          "p50_ms": 44.19,
+          "p99_ms": 171.64
+        },
+        {
+          "startedAtMillis": 1792331210737,
+          "mode": "mixed",
+          "concurrency": 1,
+          "recovery": true,
+          "statuses": {
+            "200": 3
+          },
+          "toolErrors": 0,
+          "p50_ms": 9.55,
+          "p99_ms": 14.07
+        },
+        {
+          "startedAtMillis": 1792331210790,
+          "mode": "catalog",
+          "concurrency": 1,
+          "recovery": false,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 11.43,
+          "p99_ms": 11.43
+        },
+        {
+          "startedAtMillis": 1792331210848,
+          "mode": "catalog",
+          "concurrency": 4,
+          "recovery": false,
+          "statuses": {
+            "200": 4
+          },
+          "toolErrors": 0,
+          "p50_ms": 6.3,
+          "p99_ms": 8.48
+        },
+        {
+          "startedAtMillis": 1792331210893,
+          "mode": "catalog",
+          "concurrency": 16,
+          "recovery": false,
+          "statuses": {
+            "200": 16
+          },
+          "toolErrors": 0,
+          "p50_ms": 36.78,
+          "p99_ms": 66.02
+        },
+        {
+          "startedAtMillis": 1792331211020,
+          "mode": "catalog",
+          "concurrency": 64,
+          "recovery": false,
+          "statuses": {
+            "200": 64
+          },
+          "toolErrors": 0,
+          "p50_ms": 88.55,
+          "p99_ms": 178.79
+        },
+        {
+          "startedAtMillis": 1792331211276,
+          "mode": "catalog",
+          "concurrency": 128,
+          "recovery": false,
+          "statuses": {
+            "200": 128
+          },
+          "toolErrors": 0,
+          "p50_ms": 67.01,
+          "p99_ms": 175.94
+        },
+        {
+          "startedAtMillis": 1792331211554,
+          "mode": "catalog",
+          "concurrency": 1,
+          "recovery": true,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 4.72,
+          "p99_ms": 4.72
+        }
+      ],
+      "errorBodies": [
+        {
+          "mode": "compose",
+          "httpStatus": "400",
+          "retryAfter": null,
+          "count": 156,
+          "body": "concurrent export limit reached"
+        },
+        {
+          "mode": "mcp-compose",
+          "httpStatus": "200",
+          "retryAfter": null,
+          "count": 203,
+          "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"schemaVersion\\\":1,\\\"callId\\\":\\\"ui_builder_export\\\",\\\"response\\\":{\\\"type\\\":\\\"error\\\",\\\"error\\\":{\\\"code\\\":\\\"badRequest\\\",\\\"message\\\":\\\"concurrent export limit reached\\\",\\\"retryable\\\":true}}}\"}],\"structuredContent\":{\"schemaVersion\":1,\"callId\":\"ui_builder_export\",\"response\":{\"type\":\"error\",\"error\":{\"code\":\"badRequest\",\"message\":\"concurrent export limit reached\",\"retryable\":true}}}}}"
+        },
+        {
+          "mode": "mcp-png",
+          "httpStatus": "200",
+          "retryAfter": null,
+          "count": 218,
+          "body": "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"schemaVersion\\\":1,\\\"callId\\\":\\\"ui_builder_export\\\",\\\"response\\\":{\\\"type\\\":\\\"error\\\",\\\"error\\\":{\\\"code\\\":\\\"badRequest\\\",\\\"message\\\":\\\"concurrent export limit reached\\\",\\\"retryable\\\":true}}}\"}],\"structuredContent\":{\"schemaVersion\":1,\"callId\":\"ui_builder_export\",\"response\":{\"type\":\"error\",\"error\":{\"code\":\"badRequest\",\"message\":\"concurrent export limit reached\",\"retryable\":true}}}}}"
+        },
+        {
+          "mode": "png",
+          "httpStatus": "400",
+          "retryAfter": null,
+          "count": 183,
+          "body": "concurrent export limit reached"
+        },
+        {
+          "mode": "svg",
+          "httpStatus": "400",
+          "retryAfter": null,
+          "count": 179,
+          "body": "concurrent export limit reached"
+        }
+      ],
+      "resources": {
+        "samplingMillis": 50,
+        "samples": 199,
+        "peak": {
+          "heapUsed": 219482560,
+          "activeExports": 4,
+          "peakExports": 4,
+          "exportWorkers": 4,
+          "childProcesses": 1
+        },
+        "last": {
+          "atMillis": 1792331212516,
+          "heapUsed": 219482560,
+          "activeExports": 0,
+          "peakExports": 4,
+          "exportWorkers": 4,
+          "childProcesses": 1
+        }
+      }
+    },
+    "after": {
+      "measurements": [
+        {
+          "startedAtMillis": 1792331284110,
+          "mode": "compose",
+          "concurrency": 1,
+          "recovery": false,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 481.19,
+          "p99_ms": 481.19
+        },
+        {
+          "startedAtMillis": 1792331284594,
+          "mode": "compose",
+          "concurrency": 4,
+          "recovery": false,
+          "statuses": {
+            "200": 4
+          },
+          "toolErrors": 0,
+          "p50_ms": 27.63,
+          "p99_ms": 45.42
+        },
+        {
+          "startedAtMillis": 1792331284644,
+          "mode": "compose",
+          "concurrency": 16,
+          "recovery": false,
+          "statuses": {
+            "200": 8,
+            "503": 8
+          },
+          "toolErrors": 0,
+          "p50_ms": 43.05,
+          "p99_ms": 70.89
+        },
+        {
+          "startedAtMillis": 1792331284732,
+          "mode": "compose",
+          "concurrency": 64,
+          "recovery": false,
+          "statuses": {
+            "503": 56,
+            "200": 8
+          },
+          "toolErrors": 0,
+          "p50_ms": 31.17,
+          "p99_ms": 89.68
+        },
+        {
+          "startedAtMillis": 1792331284857,
+          "mode": "compose",
+          "concurrency": 128,
+          "recovery": false,
+          "statuses": {
+            "503": 111,
+            "200": 17
+          },
+          "toolErrors": 0,
+          "p50_ms": 89.14,
+          "p99_ms": 195.1
+        },
+        {
+          "startedAtMillis": 1792331285117,
+          "mode": "compose",
+          "concurrency": 1,
+          "recovery": true,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 11.17,
+          "p99_ms": 11.17
+        },
+        {
+          "startedAtMillis": 1792331285131,
+          "mode": "png",
+          "concurrency": 1,
+          "recovery": false,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 1585.62,
+          "p99_ms": 1585.62
+        },
+        {
+          "startedAtMillis": 1792331286720,
+          "mode": "png",
+          "concurrency": 4,
+          "recovery": false,
+          "statuses": {
+            "200": 4
+          },
+          "toolErrors": 0,
+          "p50_ms": 72.8,
+          "p99_ms": 89.93
+        },
+        {
+          "startedAtMillis": 1792331286822,
+          "mode": "png",
+          "concurrency": 16,
+          "recovery": false,
+          "statuses": {
+            "200": 4,
+            "503": 12
+          },
+          "toolErrors": 0,
+          "p50_ms": 15.37,
+          "p99_ms": 68.7
+        },
+        {
+          "startedAtMillis": 1792331286958,
+          "mode": "png",
+          "concurrency": 64,
+          "recovery": false,
+          "statuses": {
+            "503": 51,
+            "200": 13
+          },
+          "toolErrors": 0,
+          "p50_ms": 78.92,
+          "p99_ms": 167.17
+        },
+        {
+          "startedAtMillis": 1792331287168,
+          "mode": "png",
+          "concurrency": 128,
+          "recovery": false,
+          "statuses": {
+            "503": 110,
+            "200": 18
+          },
+          "toolErrors": 0,
+          "p50_ms": 114.71,
+          "p99_ms": 235.82
+        },
+        {
+          "startedAtMillis": 1792331287516,
+          "mode": "png",
+          "concurrency": 1,
+          "recovery": true,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 26.37,
+          "p99_ms": 26.37
+        },
+        {
+          "startedAtMillis": 1792331287549,
+          "mode": "svg",
+          "concurrency": 1,
+          "recovery": false,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 195.07,
+          "p99_ms": 195.07
+        },
+        {
+          "startedAtMillis": 1792331287749,
+          "mode": "svg",
+          "concurrency": 4,
+          "recovery": false,
+          "statuses": {
+            "200": 4
+          },
+          "toolErrors": 0,
+          "p50_ms": 27.32,
+          "p99_ms": 34.94
+        },
+        {
+          "startedAtMillis": 1792331287803,
+          "mode": "svg",
+          "concurrency": 16,
+          "recovery": false,
+          "statuses": {
+            "503": 12,
+            "200": 4
+          },
+          "toolErrors": 0,
+          "p50_ms": 22.89,
+          "p99_ms": 55.71
+        },
+        {
+          "startedAtMillis": 1792331287876,
+          "mode": "svg",
+          "concurrency": 64,
+          "recovery": false,
+          "statuses": {
+            "503": 53,
+            "200": 11
+          },
+          "toolErrors": 0,
+          "p50_ms": 34.33,
+          "p99_ms": 107.83
+        },
+        {
+          "startedAtMillis": 1792331288021,
+          "mode": "svg",
+          "concurrency": 128,
+          "recovery": false,
+          "statuses": {
+            "503": 101,
+            "200": 27
+          },
+          "toolErrors": 0,
+          "p50_ms": 112.61,
+          "p99_ms": 253.27
+        },
+        {
+          "startedAtMillis": 1792331288348,
+          "mode": "svg",
+          "concurrency": 1,
+          "recovery": true,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 14.3,
+          "p99_ms": 14.3
+        },
+        {
+          "startedAtMillis": 1792331288370,
+          "mode": "thumbnail",
+          "concurrency": 1,
+          "recovery": false,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 26.72,
+          "p99_ms": 26.72
+        },
+        {
+          "startedAtMillis": 1792331288405,
+          "mode": "thumbnail",
+          "concurrency": 4,
+          "recovery": false,
+          "statuses": {
+            "200": 4
+          },
+          "toolErrors": 0,
+          "p50_ms": 6.25,
+          "p99_ms": 8.12
+        },
+        {
+          "startedAtMillis": 1792331288422,
+          "mode": "thumbnail",
+          "concurrency": 16,
+          "recovery": false,
+          "statuses": {
+            "200": 16
+          },
+          "toolErrors": 0,
+          "p50_ms": 13.79,
+          "p99_ms": 26.96
+        },
+        {
+          "startedAtMillis": 1792331288471,
+          "mode": "thumbnail",
+          "concurrency": 64,
+          "recovery": false,
+          "statuses": {
+            "200": 64
+          },
+          "toolErrors": 0,
+          "p50_ms": 37.13,
+          "p99_ms": 84.77
+        },
+        {
+          "startedAtMillis": 1792331288595,
+          "mode": "thumbnail",
+          "concurrency": 128,
+          "recovery": false,
+          "statuses": {
+            "200": 128
+          },
+          "toolErrors": 0,
+          "p50_ms": 55.35,
+          "p99_ms": 112.6
+        },
+        {
+          "startedAtMillis": 1792331288785,
+          "mode": "thumbnail",
+          "concurrency": 1,
+          "recovery": true,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 2.41,
+          "p99_ms": 2.41
+        },
+        {
+          "startedAtMillis": 1792331288798,
+          "mode": "mcp-compose",
+          "concurrency": 1,
+          "recovery": false,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 46.96,
+          "p99_ms": 46.96
+        },
+        {
+          "startedAtMillis": 1792331288854,
+          "mode": "mcp-compose",
+          "concurrency": 4,
+          "recovery": false,
+          "statuses": {
+            "200": 4
+          },
+          "toolErrors": 0,
+          "p50_ms": 21.38,
+          "p99_ms": 34.1
+        },
+        {
+          "startedAtMillis": 1792331288900,
+          "mode": "mcp-compose",
+          "concurrency": 16,
+          "recovery": false,
+          "statuses": {
+            "200": 16
+          },
+          "toolErrors": 9,
+          "p50_ms": 23.09,
+          "p99_ms": 51.7
+        },
+        {
+          "startedAtMillis": 1792331288974,
+          "mode": "mcp-compose",
+          "concurrency": 64,
+          "recovery": false,
+          "statuses": {
+            "200": 64
+          },
+          "toolErrors": 50,
+          "p50_ms": 59.2,
+          "p99_ms": 122.57
+        },
+        {
+          "startedAtMillis": 1792331289155,
+          "mode": "mcp-compose",
+          "concurrency": 128,
+          "recovery": false,
+          "statuses": {
+            "200": 128
+          },
+          "toolErrors": 106,
+          "p50_ms": 66.19,
+          "p99_ms": 162.61
+        },
+        {
+          "startedAtMillis": 1792331289381,
+          "mode": "mcp-compose",
+          "concurrency": 1,
+          "recovery": true,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 10.98,
+          "p99_ms": 10.98
+        },
+        {
+          "startedAtMillis": 1792331289404,
+          "mode": "mcp-png",
+          "concurrency": 1,
+          "recovery": false,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 15.4,
+          "p99_ms": 15.4
+        },
+        {
+          "startedAtMillis": 1792331289433,
+          "mode": "mcp-png",
+          "concurrency": 4,
+          "recovery": false,
+          "statuses": {
+            "200": 4
+          },
+          "toolErrors": 0,
+          "p50_ms": 23.14,
+          "p99_ms": 33.05
+        },
+        {
+          "startedAtMillis": 1792331289482,
+          "mode": "mcp-png",
+          "concurrency": 16,
+          "recovery": false,
+          "statuses": {
+            "200": 16
+          },
+          "toolErrors": 10,
+          "p50_ms": 33.99,
+          "p99_ms": 74.78
+        },
+        {
+          "startedAtMillis": 1792331289575,
+          "mode": "mcp-png",
+          "concurrency": 64,
+          "recovery": false,
+          "statuses": {
+            "200": 64
+          },
+          "toolErrors": 48,
+          "p50_ms": 47.16,
+          "p99_ms": 162.48
+        },
+        {
+          "startedAtMillis": 1792331289777,
+          "mode": "mcp-png",
+          "concurrency": 128,
+          "recovery": false,
+          "statuses": {
+            "200": 128
+          },
+          "toolErrors": 115,
+          "p50_ms": 68.64,
+          "p99_ms": 168.05
+        },
+        {
+          "startedAtMillis": 1792331290013,
+          "mode": "mcp-png",
+          "concurrency": 1,
+          "recovery": true,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 16.81,
+          "p99_ms": 16.81
+        },
+        {
+          "startedAtMillis": 1792331290045,
+          "mode": "tools",
+          "concurrency": 1,
+          "recovery": false,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 69.45,
+          "p99_ms": 69.45
+        },
+        {
+          "startedAtMillis": 1792331290132,
+          "mode": "tools",
+          "concurrency": 4,
+          "recovery": false,
+          "statuses": {
+            "200": 4
+          },
+          "toolErrors": 0,
+          "p50_ms": 13.5,
+          "p99_ms": 22.52
+        },
+        {
+          "startedAtMillis": 1792331290178,
+          "mode": "tools",
+          "concurrency": 16,
+          "recovery": false,
+          "statuses": {
+            "200": 16
+          },
+          "toolErrors": 0,
+          "p50_ms": 49.26,
+          "p99_ms": 67.22
+        },
+        {
+          "startedAtMillis": 1792331290266,
+          "mode": "tools",
+          "concurrency": 64,
+          "recovery": false,
+          "statuses": {
+            "200": 64
+          },
+          "toolErrors": 0,
+          "p50_ms": 93.04,
+          "p99_ms": 204.24
+        },
+        {
+          "startedAtMillis": 1792331290507,
+          "mode": "tools",
+          "concurrency": 128,
+          "recovery": false,
+          "statuses": {
+            "200": 128
+          },
+          "toolErrors": 0,
+          "p50_ms": 192.5,
+          "p99_ms": 380.63
+        },
+        {
+          "startedAtMillis": 1792331290956,
+          "mode": "tools",
+          "concurrency": 1,
+          "recovery": true,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 5.2,
+          "p99_ms": 5.2
+        },
+        {
+          "startedAtMillis": 1792331290980,
+          "mode": "get",
+          "concurrency": 1,
+          "recovery": false,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 18.57,
+          "p99_ms": 18.57
+        },
+        {
+          "startedAtMillis": 1792331291020,
+          "mode": "get",
+          "concurrency": 4,
+          "recovery": false,
+          "statuses": {
+            "200": 4
+          },
+          "toolErrors": 0,
+          "p50_ms": 29.84,
+          "p99_ms": 35.98
+        },
+        {
+          "startedAtMillis": 1792331291073,
+          "mode": "get",
+          "concurrency": 16,
+          "recovery": false,
+          "statuses": {
+            "200": 16
+          },
+          "toolErrors": 0,
+          "p50_ms": 35.25,
+          "p99_ms": 49.62
+        },
+        {
+          "startedAtMillis": 1792331291152,
+          "mode": "get",
+          "concurrency": 64,
+          "recovery": false,
+          "statuses": {
+            "200": 64
+          },
+          "toolErrors": 0,
+          "p50_ms": 45.93,
+          "p99_ms": 111.27
+        },
+        {
+          "startedAtMillis": 1792331291298,
+          "mode": "get",
+          "concurrency": 128,
+          "recovery": false,
+          "statuses": {
+            "200": 128
+          },
+          "toolErrors": 0,
+          "p50_ms": 82.42,
+          "p99_ms": 215.54
+        },
+        {
+          "startedAtMillis": 1792331291568,
+          "mode": "get",
+          "concurrency": 1,
+          "recovery": true,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 6.97,
+          "p99_ms": 6.97
+        },
+        {
+          "startedAtMillis": 1792331291596,
+          "mode": "mixed",
+          "concurrency": 50,
+          "recovery": false,
+          "statuses": {
+            "200": 150
+          },
+          "toolErrors": 76,
+          "p50_ms": 66.25,
+          "p99_ms": 206.95
+        },
+        {
+          "startedAtMillis": 1792331291912,
+          "mode": "mixed",
+          "concurrency": 1,
+          "recovery": true,
+          "statuses": {
+            "200": 3
+          },
+          "toolErrors": 0,
+          "p50_ms": 10.89,
+          "p99_ms": 13.23
+        },
+        {
+          "startedAtMillis": 1792331291963,
+          "mode": "catalog",
+          "concurrency": 1,
+          "recovery": false,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 13.91,
+          "p99_ms": 13.91
+        },
+        {
+          "startedAtMillis": 1792331291999,
+          "mode": "catalog",
+          "concurrency": 4,
+          "recovery": false,
+          "statuses": {
+            "200": 4
+          },
+          "toolErrors": 0,
+          "p50_ms": 9.8,
+          "p99_ms": 12.16
+        },
+        {
+          "startedAtMillis": 1792331292035,
+          "mode": "catalog",
+          "concurrency": 16,
+          "recovery": false,
+          "statuses": {
+            "200": 16
+          },
+          "toolErrors": 0,
+          "p50_ms": 44.28,
+          "p99_ms": 63.98
+        },
+        {
+          "startedAtMillis": 1792331292146,
+          "mode": "catalog",
+          "concurrency": 64,
+          "recovery": false,
+          "statuses": {
+            "200": 64
+          },
+          "toolErrors": 0,
+          "p50_ms": 39.4,
+          "p99_ms": 119.12
+        },
+        {
+          "startedAtMillis": 1792331292329,
+          "mode": "catalog",
+          "concurrency": 128,
+          "recovery": false,
+          "statuses": {
+            "200": 128
+          },
+          "toolErrors": 0,
+          "p50_ms": 61.78,
+          "p99_ms": 146.93
+        },
+        {
+          "startedAtMillis": 1792331292552,
+          "mode": "catalog",
+          "concurrency": 1,
+          "recovery": true,
+          "statuses": {
+            "200": 1
+          },
+          "toolErrors": 0,
+          "p50_ms": 3.01,
+          "p99_ms": 3.01
+        }
+      ],
+      "errorBodies": [
+        {
+          "mode": "compose",
+          "httpStatus": "503",
+          "retryAfter": "1",
+          "count": 175,
+          "body": "concurrent export limit reached"
+        },
+        {
+          "mode": "mcp-compose",
+          "httpStatus": "200",
+          "retryAfter": null,
+          "count": 199,
+          "body": "{\"jsonrpc\":\"2.0\",\"id\":0,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"concurrent export limit reached\"}],\"isError\":true,\"structuredContent\":{\"code\":\"export_overloaded\",\"retryable\":true,\"retryAfterSeconds\":1}}}"
+        },
+        {
+          "mode": "mcp-png",
+          "httpStatus": "200",
+          "retryAfter": null,
+          "count": 215,
+          "body": "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"concurrent export limit reached\"}],\"isError\":true,\"structuredContent\":{\"code\":\"export_overloaded\",\"retryable\":true,\"retryAfterSeconds\":1}}}"
+        },
+        {
+          "mode": "png",
+          "httpStatus": "503",
+          "retryAfter": "1",
+          "count": 173,
+          "body": "concurrent export limit reached"
+        },
+        {
+          "mode": "svg",
+          "httpStatus": "503",
+          "retryAfter": "1",
+          "count": 166,
+          "body": "concurrent export limit reached"
+        }
+      ],
+      "resources": {
+        "samplingMillis": 50,
+        "samples": 189,
+        "peak": {
+          "heapUsed": 211789152,
+          "activeExports": 4,
+          "peakExports": 4,
+          "exportWorkers": 4,
+          "childProcesses": 1
+        },
+        "last": {
+          "atMillis": 1792331293526,
+          "heapUsed": 196301624,
+          "activeExports": 0,
+          "peakExports": 4,
+          "exportWorkers": 4,
+          "childProcesses": 1
+        }
+      }
+    }
+  },
+  "errorBodyGrouping": "Bodies grouped ignoring only JSON-RPC request id; each example body is unmodified.",
+  "validation": {
+    "focusedTestsPassed": 9,
+    "agentErgonomicsTestsPassed": 36,
+    "wasmBrowserTestsPassed": 26,
+    "fullServerSuite": {
+      "tests": 4385,
+      "passed": 4354,
+      "failed": 1,
+      "skipped": 30
+    },
+    "unrelatedFailure": "ThemeCachePersistenceTest: only the old build's render is DIRTY ==> expected: <1> but was: <2>",
+    "tracking": "https://linear.app/yschimke/issue/SCH-31",
+    "formattingAndModuleBoundaryAndJvmFloor": "passed"
+  }
+}

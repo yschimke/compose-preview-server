@@ -179,6 +179,7 @@ private suspend fun ApplicationCall.serveExportArtifact(
     when (outcome) {
       is UiBuilderServiceResponse.Export -> outcome.artifact
       is UiBuilderServiceResponse.Error -> {
+        exportRetryAfter(outcome)
         respondText(
           outcome.error.message,
           status = HttpStatusCode.fromValue(outcome.httpStatusValue()),

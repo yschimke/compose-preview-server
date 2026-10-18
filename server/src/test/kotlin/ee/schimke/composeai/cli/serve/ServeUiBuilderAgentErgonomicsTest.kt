@@ -1063,7 +1063,7 @@ class ServeUiBuilderAgentErgonomicsTest {
   }
 
   @Test
-  fun `a busy compiler or a host exception is a skip, and only icon fields are blamed`() {
+  fun `a busy compiler is retryable while host exceptions are skips and only icon fields are blamed`() {
     fun serverAnswering(response: PlaygroundRunResponse) =
       start(
         nativePreview =
@@ -1089,10 +1089,13 @@ class ServeUiBuilderAgentErgonomicsTest {
         )
       )
     create(busy, cleanDocument())
-    val busyReply = check(busy, """{"designId":"agent-screen","rendered":true}""")
-    assertEquals(true, busyReply["ok"]!!.jsonPrimitive.booleanOrNull, busyReply.toString())
-    assertTrue(busyReply["findings"]!!.jsonArray.isEmpty(), busyReply.toString())
-    assertTrue(busyReply.text("summary").contains("busy compiling"), busyReply.toString())
+    val busyReply =
+      call(busy, ServeUiBuilderMcp.CHECK_DESIGN, """{"designId":"agent-screen","rendered":true}""")
+    assertEquals(true, busyReply["isError"]!!.jsonPrimitive.booleanOrNull, busyReply.toString())
+    val busyMetadata = busyReply["structuredContent"]!!.jsonObject
+    assertEquals("export_overloaded", busyMetadata.text("code"))
+    assertEquals(true, busyMetadata["retryable"]!!.jsonPrimitive.booleanOrNull)
+    assertEquals("1", busyMetadata["retryAfterSeconds"]!!.jsonPrimitive.content)
     // The daemon, its session and the first frame all fail through `exception`.
     val failing = serverAnswering(PlaygroundRunResponse(exception = "session I/O timed out"))
     create(failing, cleanDocument())

@@ -268,6 +268,16 @@ class ServeCatalogMcp(
                 uiBuilderAuthorization,
                 clientInteraction,
               )
+            } catch (e: ExportOverloadedException) {
+              JsonObject(
+                toolError(e.message.orEmpty()) +
+                  ("structuredContent" to
+                    buildJsonObject {
+                      put("code", "export_overloaded")
+                      put("retryable", true)
+                      put("retryAfterSeconds", EXPORT_RETRY_AFTER_SECONDS)
+                    })
+              )
             } catch (e: McpRequestException) {
               toolError(e.message ?: "Tool call failed")
             }
@@ -325,6 +335,10 @@ class ServeCatalogMcp(
           "works in it." +
           originInstruction() +
           accessElicitationInstruction(params) +
+          " Export and native-render lanes each admit at most four concurrent requests per server, " +
+          "shared across callers; send at most four at once. Overload is a tool result with " +
+          "isError=true, code=export_overloaded, retryable=true and retryAfterSeconds; back off " +
+          "for at least that interval with jitter, then retry. Cheap reads need no export slot." +
           if (uiBuilder == null) ""
           else
             " UI-builder tools accept optional agentName and agentModel for the participant toolbar; report your client name and current model only when known. Active tool calls and the last 30 seconds of activity appear on that design. A UI-builder document's `home` is canonical: edit that original, and never " +
@@ -1944,7 +1958,7 @@ class ServeCatalogMcp(
       when (val outcome = host.render(previewId, overrides)) {
         is RenderOutcome.Ok -> Rendered(outcome.png, outcome.generation)
         RenderOutcome.NotFound -> throw McpRequestException("no such preview '$previewId'")
-        RenderOutcome.Busy -> throw McpRequestException("render busy; retry shortly")
+        RenderOutcome.Busy -> throw ExportOverloadedException("render busy; retry shortly")
         is RenderOutcome.Failed -> throw McpRequestException(outcome.reason)
       }
     }
@@ -2015,7 +2029,7 @@ class ServeCatalogMcp(
       when (val outcome = host.renderScrollPng(previewId, overrides)) {
         is RenderOutcome.Ok -> outcome.png
         RenderOutcome.NotFound -> throw McpRequestException("no such preview '$previewId'")
-        RenderOutcome.Busy -> throw McpRequestException("render busy; retry shortly")
+        RenderOutcome.Busy -> throw ExportOverloadedException("render busy; retry shortly")
         is RenderOutcome.Failed -> throw McpRequestException(outcome.reason)
       }
     }
@@ -2024,7 +2038,7 @@ class ServeCatalogMcp(
   private suspend fun <T> withRenderPermit(block: () -> T): T =
     withContext(Dispatchers.IO) {
       if (!renderSemaphore.tryAcquire(renderQueueWaitSeconds, TimeUnit.SECONDS)) {
-        throw McpRequestException("render queue saturated; retry shortly")
+        throw ExportOverloadedException("render queue saturated; retry shortly")
       }
       try {
         block()
