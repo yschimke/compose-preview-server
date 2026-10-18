@@ -5,8 +5,8 @@
 // - **Permission is asked only from the click**, first in the handler, so the gesture counts
 //   (Safari) and nobody is prompted on load.
 // - **The worker is registered only when turning on**, at `/push-sw.js` with scope `/`; it handles
-//   only `push` and `notificationclick` (no `fetch`), and the UI builder's narrower `/ui-builder/`
-//   worker keeps the editor. Turning off unregisters it.
+//   notifications and may also serve the root editor offline. Turning off only unsubscribes;
+//   registration lifecycle belongs to the offline editor.
 // - **Nothing about a subscription is shown**; the page reads back only kinds and a device count.
 //
 // A subscription belongs to the origin, not the signed-in person, so every load re-posts it to bind
@@ -250,7 +250,6 @@ async function turnOff(group: Group, browser: PushBrowser): Promise<void> {
         });
         await subscription.unsubscribe();
     }
-    await registration?.unregister();
     setToggle(group, false);
     setStatus(group, "Notifications are off for this browser.");
 }
@@ -409,7 +408,6 @@ function wireSignOut(
                 })
                 .catch(() => undefined);
             await subscription.unsubscribe();
-            await registration?.unregister();
         })().catch(() => undefined);
         let timer: ReturnType<typeof setTimeout> | undefined;
         const grace = new Promise<void>((resolve) => {
