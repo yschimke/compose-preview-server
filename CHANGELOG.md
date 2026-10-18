@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.144.0](https://github.com/yschimke/compose-preview-server/compare/v3.143.0...v3.144.0) (2026-10-18)
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.18.7 ([#1736](https://github.com/yschimke/compose-preview-server/issues/1736)) ([433a36b](https://github.com/yschimke/compose-preview-server/commit/433a36b8852b267f52187402efe317389e9c6ed4))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-ui-builder-bom to v3.121.0 ([#1737](https://github.com/yschimke/compose-preview-server/issues/1737)) ([54d7bf5](https://github.com/yschimke/compose-preview-server/commit/54d7bf5dfed753f1d41a791b7ee2981cb8ae92b4))
+* **renovate:** keep ClassGraph below Java 25-only v6 ([#1743](https://github.com/yschimke/compose-preview-server/issues/1743)) ([a14cc85](https://github.com/yschimke/compose-preview-server/commit/a14cc85f0feb329c5938661fc1e861cc2b477180))
+
 ## [3.143.0](https://github.com/yschimke/compose-preview-server/compare/v3.142.0...v3.143.0) (2026-10-17)
 
 
