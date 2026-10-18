@@ -10,6 +10,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -88,6 +91,64 @@ class ServeUiBuilderHostRootTest {
   private val client = OkHttpClient.Builder().followRedirects(false).build()
 
   @Test
+  fun `root offline shares the notification worker only with a capable editor on its own host`() {
+    val dir = bundle()
+    File(dir, ServeUiBuilderEditor.MANIFEST_FILE)
+      .writeText("""{"version":"$UI_BUILDER_BASE_PATH_MIN_EDITOR","serverApi":2,"rootOffline":1}""")
+    server(bundle = dir).call("/push-sw.js", BUILDER).use {
+      assertFalse("importScripts" in it.body.string(), "the declared worker must exist")
+    }
+    File(dir, "ui-builder-sw.js").writeText("self.addEventListener('fetch', () => {})")
+    val server = server(bundle = dir)
+    server.call("/", BUILDER).use {
+      assertTrue("name=\"ui-builder-offline-worker\" content=\"/push-sw.js\"" in it.body.string())
+    }
+    val rootEtag =
+      server.call("/push-sw.js", BUILDER).use {
+        assertEquals(200, it.code)
+        assertEquals("no-cache", it.header("Cache-Control"))
+        assertEquals("/", it.header("Service-Worker-Allowed"))
+        val body = it.body.string()
+        assertTrue("notificationclick" in body)
+        assertTrue("importScripts('/ui-builder/ui-builder-sw.js')" in body)
+        val config =
+          kotlinx.serialization.json.Json.parseToJsonElement(
+              body.substringAfter("self.composeUiBuilderOffline = ").substringBefore(";\n")
+            )
+            .jsonObject
+        assertEquals("/ui-builder/", config.getValue("assetBase").jsonPrimitive.content)
+        assertEquals(
+          ServeSites.RESERVED_SYSTEMS,
+          config
+            .getValue("reservedPaths")
+            .jsonArray
+            .map { value -> value.jsonPrimitive.content }
+            .toSet(),
+        )
+        it.header("ETag")
+      }
+    server.call("/push-sw.js", BUILDER, etag = rootEtag).use { assertEquals(304, it.code) }
+    File(dir, "app.mjs").appendText("; export const updated = true")
+    server(bundle = dir).call("/push-sw.js", BUILDER, etag = rootEtag).use {
+      assertEquals(200, it.code, "an editor-only update must invalidate the shared worker")
+      assertFalse(rootEtag == it.header("ETag"))
+      assertEquals(ServeHttpServer.contentEtag(it.body.bytes()), it.header("ETag"))
+    }
+    server.call("/push-sw.js", OTHER).use {
+      val body = it.body.string()
+      assertTrue("notificationclick" in body)
+      assertFalse("importScripts" in body)
+      assertFalse(rootEtag == it.header("ETag"))
+    }
+    server(bundle = bundle()).call("/", BUILDER).use {
+      assertFalse("ui-builder-offline-worker" in it.body.string())
+    }
+    server(bundle = bundle()).call("/push-sw.js", BUILDER).use {
+      assertFalse("importScripts" in it.body.string())
+    }
+  }
+
+  @Test
   fun `the project workspace follows the rooted host instead of opening a design called projects`() {
     val server = server(projects = true)
     val query = "?project=app&design=login"
@@ -116,10 +177,12 @@ class ServeUiBuilderHostRootTest {
     host: String?,
     html: Boolean = true,
     method: String = "GET",
+    etag: String? = null,
   ): Response {
     val builder = Request.Builder().url("http://127.0.0.1:$port$path")
     if (host != null) builder.header("X-Forwarded-Host", host)
     if (html) builder.header("Accept", "text/html,application/xhtml+xml")
+    if (etag != null) builder.header("If-None-Match", etag)
     if (method == "POST")
       builder.post("".toRequestBody("application/x-www-form-urlencoded".toMediaType()))
     return client.newCall(builder.build()).execute()

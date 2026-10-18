@@ -91,8 +91,20 @@ editor smoke test does not establish parity for this host. HA and Meshcore templ
 remain tracked in SCH-8.
 
 Remove the ignored `owned` fields from configuration writers first. The public deployment config
-cleanup retains the compatible server decoder: the staged private deployment copy also needs its
-fields removed before it can become authoritative. After the offline gate passes, publish the clean
+cleanup retains the compatible server decoder; the matching staged private deployment cleanup
+removes the same fields and updates its source manifest without changing effective settings.
+Both cleanups must land before the private copy can become authoritative.
+
+The prepared root-host fix shares `/push-sw.js` with the editor's offline handler, preserving the
+notification registration. It requires an editor archive advertising `rootOffline: 1`; older
+archives and other hosts retain their existing behavior. Local Chromium verification passes:
+after warming the published document cache, closing the tab and disabling networking, a fresh
+tab loads and creates a design from the cached publication with its pin intact. This local
+HTTP-contract harness is not production verification. Release the compatible builder, consume its
+released archive, then verify this behavior on the deployed root host before retiring seed factories
+or chooser tables. The host fix alone does not enable offline loading with editor 3.121.0.
+
+After the production offline gate passes, publish the clean
 configuration through the active writer, verify the admin round trip and persisted configuration,
 and reconcile the private copy before cutover. Only then remove the `owned` decoder and its rolling
 upgrade tests in a subsequent server release. Removing that decoder alongside only one writer
