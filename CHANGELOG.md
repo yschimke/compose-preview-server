@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.146.0](https://github.com/yschimke/compose-preview-server/compare/v3.145.0...v3.146.0) (2026-10-19)
+
+
+### Bug Fixes
+
+* **deps:** bump composeai-tools to 2.69.2 for the bundle daemon R-class union ([#1761](https://github.com/yschimke/compose-preview-server/issues/1761)) ([564653f](https://github.com/yschimke/compose-preview-server/commit/564653f572691044d99d935e1cbb1873d641781a))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.68.6 ([#1753](https://github.com/yschimke/compose-preview-server/issues/1753)) ([5e1c898](https://github.com/yschimke/compose-preview-server/commit/5e1c89828788af3e715b525e79a0873aa8104c22))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.69.2 ([#1763](https://github.com/yschimke/compose-preview-server/issues/1763)) ([4691d20](https://github.com/yschimke/compose-preview-server/commit/4691d208b992432e20741999a3c53c59c294b29c))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-contracts-bom to v3.37.0 ([#1764](https://github.com/yschimke/compose-preview-server/issues/1764)) ([59e341f](https://github.com/yschimke/compose-preview-server/commit/59e341feafa2a96055eaf76ea909d00160c159af))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.18.9 ([#1759](https://github.com/yschimke/compose-preview-server/issues/1759)) ([1d912d6](https://github.com/yschimke/compose-preview-server/commit/1d912d6037f8fa4445f30904b49ad56759b5b689))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.20.0 ([#1765](https://github.com/yschimke/compose-preview-server/issues/1765)) ([1faa907](https://github.com/yschimke/compose-preview-server/commit/1faa9075cb8bafaf58cc2392121e35e54297e75e))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.20.1 ([#1766](https://github.com/yschimke/compose-preview-server/issues/1766)) ([748ba78](https://github.com/yschimke/compose-preview-server/commit/748ba78771b348d444bbb6b9d99610b34cb133df))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-ui-builder-bom to v3.122.0 ([#1756](https://github.com/yschimke/compose-preview-server/issues/1756)) ([aba52e0](https://github.com/yschimke/compose-preview-server/commit/aba52e057a34ea31c496e3845217abd68a63006a))
+* **deps:** update dependency org.jetbrains.kotlinx:kotlinx-serialization-json to v1.12.0 ([#1767](https://github.com/yschimke/compose-preview-server/issues/1767)) ([635ddbf](https://github.com/yschimke/compose-preview-server/commit/635ddbfda4dd2d219be757498c712cc055826763))
+* **deps:** update rc-players to v2.16.1 ([#1755](https://github.com/yschimke/compose-preview-server/issues/1755)) ([270bab3](https://github.com/yschimke/compose-preview-server/commit/270bab3dffadd902a53e9e9a492bfa795c12aeef))
+* reject incompatible build-host handshake responses ([#1758](https://github.com/yschimke/compose-preview-server/issues/1758)) ([07e2038](https://github.com/yschimke/compose-preview-server/commit/07e2038cc323aaaa180b25dfa03644b70179f561))
+
 ## [3.145.0](https://github.com/yschimke/compose-preview-server/compare/v3.144.0...v3.145.0) (2026-10-18)
 
 
