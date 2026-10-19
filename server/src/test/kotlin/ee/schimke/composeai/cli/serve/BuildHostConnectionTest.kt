@@ -55,6 +55,18 @@ class BuildHostConnectionTest {
     assertContains(sent.toString(), "handshake")
   }
 
+  @Test
+  fun `a handshake advertising a different version is refused`() {
+    for (version in listOf(BuildHostProtocol.VERSION - 1, BuildHostProtocol.VERSION + 1)) {
+      val (connection, sent) = connect(response(1, BuildHostResponse.Handshake(version, "other")))
+      assertTrue(!connection.handshake(), "accepted protocol version $version")
+      assertContains(assertNotNull(connection.unusable), "protocol mismatch")
+      assertContains(assertNotNull(connection.unusable), version.toString())
+      assertNull(connection.exchange(BuildHostRequest.GradleProjects))
+      assertEquals(1, sent.toString().lineSequence().count { it.isNotBlank() })
+    }
+  }
+
   /** A version that disagrees means the messages mean different things. Stop asking. */
   @Test
   fun `a refused handshake makes the connection unusable`() {

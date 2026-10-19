@@ -44,7 +44,14 @@ internal class BuildHostConnection(
   fun handshake(): Boolean {
     val response = exchange(BuildHostRequest.Handshake()) ?: return false
     return when (response) {
-      is BuildHostResponse.Handshake -> true
+      is BuildHostResponse.Handshake -> {
+        if (response.protocolVersion == PROTOCOL_VERSION) {
+          true
+        } else {
+          unusable = "protocol mismatch: host ${response.protocolVersion}, server $PROTOCOL_VERSION"
+          false
+        }
+      }
       is BuildHostResponse.Failure -> {
         unusable = response.message
         false
