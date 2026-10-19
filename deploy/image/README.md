@@ -1802,7 +1802,13 @@ stack while retaining its volume and private credential files.
 directory, at `/workspace`. A `COMPOSE_FILE` entry given by an absolute host path elsewhere — the
 native demo's `/root/public-demo-ha/caddy.native.yaml`, say — loads on the host and fails in both
 of them, and with it every rollout. Mount that directory into both services at the same path, in the
-box's `docker-compose.override.yml`, then recreate only those two:
+box's `docker-compose.override.yml`, then recreate only those two. An explicit `COMPOSE_FILE` turns
+off Compose's automatic override discovery, so the override must itself be one of its entries:
+
+```sh
+COMPOSE_FILE=docker-compose.yml:docker-compose.override.yml:docker-compose.demo-ha.yml:/root/public-demo-ha/caddy.native.yaml
+```
+
 
 ```yaml
 services:
