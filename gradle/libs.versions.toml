@@ -474,7 +474,7 @@ compose-remote = "1.0.0-alpha21"
 # bundle last changed in 2.1.2, and 2.1.3–2.4.0 never published this coordinate.
 remote-compose-player-js = "2.16.1"
 kotlinx-coroutines = "1.11.0"
-kotlinx-serialization = "1.11.0"
+kotlinx-serialization = "1.12.0"
 ktor = "3.6.0"
 # The Model Context Protocol Kotlin SDK, behind `:mcp`. Same version compose-ai-tools' `:mcp` was
 # on when the module moved here (compose-ai-tools#5176) — a move is not the moment to also change
