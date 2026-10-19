@@ -285,7 +285,7 @@ composeai-preview-daemon = "3.18.9"
 # 3.34.0 adds the `ui-builder-destructive` agent-grant capability (compose-preview-contracts#187),
 # which grants carry into the design service as `mayDeleteForPrincipal`.
 # 3.36.0 shares the versioned published template-document envelope (contracts #191).
-composeai-contracts = "3.36.0"
+composeai-contracts = "3.37.0"
 
 # The extracted UI builder (yschimke/compose-ui-builder), resolved from its RELEASES. Three jars
 # and a BOM on Maven Central, and the editor archive as a GitHub release asset reached through the
