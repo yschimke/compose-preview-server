@@ -43,11 +43,27 @@ export DEPLOY_HOOK_LOCK="${work}/lock"
 export DEPLOY_HOOK_ROLL_LOG="${work}/roll.log"
 export DEPLOY_HOOK_ROLLOUT_SCRIPT="${work}/rollout-stub.sh"
 
+# The handler checks the compose project loads before it accepts a rollout. $COMPOSE_BROKEN stands
+# in for a project that does not: an overlay listed by an absolute host path the container does not
+# mount, which is what kept preview.coo.ee on 3.144.0 through the 3.145.0 release.
+mkdir -p "${work}/hookbin"
+cat > "${work}/hookbin/docker" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1 $2" == "compose config" && -n "${COMPOSE_BROKEN:-}" ]]; then
+  echo "stat /root/overlay.yaml: no such file or directory" >&2
+  exit 1
+fi
+exit 0
+STUB
+chmod +x "${work}/hookbin/docker"
+
+hook() { # raw HTTP on stdin → the full response
+  PATH="${work}/hookbin:${PATH}" sh "${here}/deploy-hook.sh" --handle 2>/dev/null
+}
 request() { # request <method> <path> [token]
   local auth=""
   [[ -n "${3:-}" ]] && auth="Authorization: Bearer $3"$'\r\n'
-  printf '%s %s HTTP/1.1\r\nHost: x\r\n%s\r\n' "$1" "$2" "${auth}" |
-    sh "${here}/deploy-hook.sh" --handle 2>/dev/null | head -n1 | tr -d '\r'
+  printf '%s %s HTTP/1.1\r\nHost: x\r\n%s\r\n' "$1" "$2" "${auth}" | hook | head -n1 | tr -d '\r'
 }
 wait_for_roll() { # the rollout is detached; give it a moment to record and free the lock
   for _ in $(seq 1 50); do
@@ -70,6 +86,21 @@ check "restart is accepted" "202" "$(request POST '/__hooks/restart?from=ci' s3c
 wait_for_roll
 check "restart runs rollout.sh forced" "force=1" "$(cat "${ROLL_RECORD}")"
 
+# A project that does not load is refused with compose's own error, and nothing is started: the
+# rollout would fail detached, after a 202 had sent CI to wait for a version that cannot arrive.
+: > "${ROLL_RECORD}"
+check "a broken compose project refuses the rollout" "500" \
+  "$(COMPOSE_BROKEN=1 request POST /__hooks/rollout s3cret)"
+check "and says why in the body" "compose project does not load on the box: stat /root/overlay.yaml" \
+  "$(printf 'POST /__hooks/rollout HTTP/1.1\r\nAuthorization: Bearer s3cret\r\n\r\n' |
+    COMPOSE_BROKEN=1 hook)"
+check "a restart is refused the same way" "500" \
+  "$(COMPOSE_BROKEN=1 request POST /__hooks/restart s3cret)"
+[[ ! -s "${ROLL_RECORD}" && ! -d "${DEPLOY_HOOK_LOCK}" ]] && started=no || started=yes
+check "and no rollout is started" "no" "${started}"
+check "an unauthorized caller learns nothing about the project" "401" \
+  "$(COMPOSE_BROKEN=1 request POST /__hooks/rollout wrong)"
+
 # Single flight: with the lock held, a second rollout folds in, a restart is refused.
 mkdir "${DEPLOY_HOOK_LOCK}"
 check "a rollout during a rollout folds into it" "200" "$(request POST /__hooks/rollout s3cret)"
@@ -90,8 +121,17 @@ echo "docker $*" >> "$DOCKER_LOG"
 case "$1 $2" in
   "compose version") exit 0 ;;
   "compose ps") echo cid ;;
-  "compose config") echo ghcr.io/x/compose-preview-host:latest ;;
-  "image inspect") echo sha256:same ;;
+  "compose config")
+    if [[ -n "${COMPOSE_BROKEN:-}" ]]; then
+      echo "stat /root/overlay.yaml: no such file or directory" >&2
+      exit 1
+    fi
+    echo ghcr.io/x/compose-preview-host:latest ;;
+  "compose pull")
+    if [[ -n "${PULL_BROKEN:-}" ]]; then echo "pull access denied" >&2; exit 1; fi ;;
+  "image inspect")
+    [[ -z "${IMAGE_MISSING:-}" ]] || exit 1
+    echo sha256:same ;;
   "inspect --format")
     # The lock marker answers "running" when LOCK_BUSY is set, otherwise the preview container's image.
     if [[ "${!#}" == compose-preview-rollout-lock ]]; then echo running; else echo sha256:same; fi ;;
@@ -136,6 +176,27 @@ check "and then rolls" "docker rollout --timeout" "$(cat "${DOCKER_LOG}")"
 echo 1000 > "${work}/busy"
 out="$(LOCK_BUSY="${work}/busy" ROLLOUT_LOCK_POLL=1 ROLLOUT_LOCK_WAIT=2 roll --force; echo "exit=$?")"
 check "but gives up on a lock that never frees" "giving up" "${out}"
+
+# A project that does not load fails the run with compose's error, before the lock or any rollout.
+: > "${DOCKER_LOG}"
+status=0
+out="$(COMPOSE_BROKEN=1 roll)" || status=$?
+check "a broken compose project is reported" "compose project does not load" "${out}"
+check "with compose's own error" "stat /root/overlay.yaml: no such file or directory" "${out}"
+check "and fails the run" "1" "${status}"
+[[ "$(cat "${DOCKER_LOG}")" != *"run -d"* && "$(cat "${DOCKER_LOG}")" != *"docker rollout"* ]] &&
+  untouched=yes || untouched=no
+check "without taking the lock or rolling" "yes" "${untouched}"
+
+# A pull failure shows the registry's error, and an image that does not resolve is a failure, not
+# a skip that reads like "already up to date".
+status=0
+out="$(PULL_BROKEN=1 IMAGE_MISSING=1 roll)" || status=$?
+check "a failed pull shows why" "pull access denied" "${out}"
+check "an unresolved image is reported" "could not resolve pulled image" "${out}"
+check "and fails the run" "1" "${status}"
+[[ "$(cat "${work}/docker.log")" != *"docker rollout"* ]] && rolled=no || rolled=yes
+check "and nothing is rolled" "no" "${rolled}"
 
 echo "deploy hook + rollout --force: ${pass} passed, ${fail} failed"
 [[ "${fail}" -eq 0 ]]

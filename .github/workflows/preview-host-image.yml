@@ -112,11 +112,22 @@ jobs:
             echo "DEPLOY_HOOK_TOKEN is unset; skipping rollout notification"
             exit 0
           fi
-          code=$(curl -sS -o /dev/null -w '%{http_code}' -m 30 \
+          hook_body="$(mktemp)"
+          code=$(curl -sS -o "${hook_body}" -w '%{http_code}' -m 30 \
             -X POST -H "Authorization: Bearer ${HOOK_TOKEN}" "${HOOK_URL}" 2>/dev/null || echo 000)
           case "${code}" in
             200|202) ;;
-            *) echo "::warning::deploy hook returned ${code}; waiting for the box poller" ;;
+            *)
+              # The hook refuses with this body only when the box's compose project does not load.
+              # The poller runs the same project and fails the same way, so waiting would only
+              # spend the whole convergence window; anything else (a 502 while the hook restarts,
+              # a timeout) may still be picked up by the poller.
+              if grep -q 'compose project does not load' "${hook_body}"; then
+                echo "::error::deploy hook refused the rollout: $(head -c 2000 "${hook_body}")"
+                exit 1
+              fi
+              echo "::warning::deploy hook returned ${code}; waiting for the box poller"
+              ;;
           esac
           base="${HOOK_URL%/__hooks/rollout}"
           # CONVERGED, as a function, so `.github/scripts/test-preview-host-rollout.sh` can extract
