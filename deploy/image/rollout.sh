@@ -156,6 +156,16 @@ pulled_image_id() {
 
 roll_once() {
   ensure_compose
+  # Every compose call below runs against the project `COMPOSE_FILE` selects, and the two that
+  # resolve the image discard their stderr. A project that does not load — most often an overlay
+  # listed by an absolute host path that this container does not mount — made every one of them
+  # fail quietly: the pull "failed (using cached image)", the image did not resolve, and the run
+  # skipped with status 0, poll after poll, while the hook told CI it was rolling. Say why, and fail.
+  if ! config_error="$(docker compose config --quiet 2>&1)"; then
+    log "compose project does not load, so '$SERVICE' cannot roll:"
+    printf '%s\n' "$config_error" | sed 's/^/rollout:   /'
+    return 1
+  fi
   # The hook and poller can notice the same image seconds apart. Without one host-wide lock both
   # call docker-rollout, each treats the other's new replica as an old replica, and the steady-state
   # count doubles. A skipped contender is success: the lock holder is already deploying that image.
@@ -174,14 +184,19 @@ roll_once() {
       waited=$((waited + LOCK_POLL))
     done
   fi
-  docker compose pull "$SERVICE" >/dev/null 2>&1 || log "pull failed (using cached image)"
+  if ! pull_error="$(docker compose pull --quiet "$SERVICE" 2>&1)"; then
+    log "pull failed (using cached image):"
+    printf '%s\n' "$pull_error" | sed 's/^/rollout:   /'
+  fi
   before="$(running_image_id)"
   after="$(pulled_image_id)"
   if [ -z "$after" ]; then
-    log "could not resolve pulled image for '$SERVICE' — skipping"
+    # Not a skip: nothing is rolled and nothing will be until this is fixed, so the caller must see
+    # a failure rather than a run that looks like "already up to date".
+    log "could not resolve pulled image for '$SERVICE'"
     release_rollout_lock
     trap - EXIT INT TERM
-    return 0
+    return 1
   fi
   if [ -n "$before" ] && [ "$before" = "$after" ] && [ "$FORCE" != 1 ]; then
     log "'$SERVICE' already up to date"

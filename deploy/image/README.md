@@ -1795,3 +1795,30 @@ from an external client. It verifies reads, rejects REST/WebSocket mutations and
 simulated state update. Record the result; the configuration by itself does not prove a deployment.
 Rollback: remove this overlay from `COMPOSE_FILE`, recreate only Caddy, and stop the dedicated demo
 stack while retaining its volume and private credential files.
+
+#### An overlay outside this directory must be mounted into `rollout` and `hook`
+
+`rollout` and `hook` run `docker compose` from inside their own containers, which mount only this
+directory, at `/workspace`. A `COMPOSE_FILE` entry given by an absolute host path elsewhere — the
+native demo's `/root/public-demo-ha/caddy.native.yaml`, say — loads on the host and fails in both
+of them, and with it every rollout. Mount that directory into both services at the same path, in the
+box's `docker-compose.override.yml`, then recreate only those two:
+
+```yaml
+services:
+  rollout:
+    volumes:
+      - /root/public-demo-ha:/root/public-demo-ha:ro
+  hook:
+    volumes:
+      - /root/public-demo-ha:/root/public-demo-ha:ro
+```
+
+```sh
+docker compose up -d --no-deps rollout hook
+docker compose exec -T rollout docker compose config --quiet   # must print nothing
+```
+
+Left unmounted, the hook answers the publish CI's `POST /__hooks/rollout` with a 500 naming the
+missing file and the release fails at once. Before that check it answered 202, the poller skipped every
+cycle in silence, and the 3.145.0 release waited out its ten minutes against a box still on 3.144.0.

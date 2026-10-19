@@ -110,6 +110,17 @@ handle() {
     return 0
   fi
 
+  # The rollout runs detached, after this answers, so its failure never reaches the caller. A
+  # compose project that does not load is the one failure knowable now and certain to fail every
+  # rollout until fixed, the poller's too: answer 500 with compose's own words, not a 202 that sends
+  # CI to wait out its whole convergence window for a version that cannot arrive.
+  if ! config_error="$(docker compose config --quiet 2>&1)"; then
+    config_error="$(printf '%s' "$config_error" | tr '\n' ' ')"
+    log "authorized — refusing ${mode}, compose project does not load: ${config_error}"
+    respond "500 Internal Server Error" "compose project does not load on the box: ${config_error}"
+    return 0
+  fi
+
   # Single-flight: mkdir is atomic. Got it → start a detached rollout; else a
   # rollout is already running and this call folds into it.
   if mkdir "$LOCK" 2>/dev/null; then
