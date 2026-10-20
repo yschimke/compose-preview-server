@@ -1,12 +1,10 @@
 package ee.schimke.composeai.cli.serve
 
-import ee.schimke.composeai.uibuilder.export.CatalogOwnership
 import ee.schimke.composeai.uibuilder.export.CatalogSeedTemplates
 import ee.schimke.composeai.uibuilder.export.NewDesignState
 import ee.schimke.composeai.uibuilder.export.UiBuilderDocument
 import ee.schimke.composeai.uibuilder.export.UiBuilderNewDesignSeed
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
-import kotlinx.serialization.json.JsonObject
 
 /**
  * What a new design can start as, for every surface that asks: the create route, the New design
@@ -33,33 +31,24 @@ class UiBuilderCatalogSeeds(
   }
 
   fun templateIds(catalogSystemId: String): Set<String> =
-    UiBuilderNewDesignSeed.templateIds(
-      catalogSystemId,
-      CatalogOwnership.ALL,
-      templates(catalogSystemId),
-    )
+    templates(catalogSystemId)?.ids?.takeIf { it.isNotEmpty() }?.toCollection(LinkedHashSet())
+      ?: setOf(UiBuilderNewDesignSeed.BLANK_TEMPLATE)
 
   /** The first template the catalog lists, or the generic blank when none are published. */
   fun defaultTemplate(catalogSystemId: String): String = templateIds(catalogSystemId).first()
 
   fun document(
     designId: String,
-    catalogSystemId: String,
+    catalogPin: CatalogReferenceV1,
     templateId: String,
-    catalogRevision: String,
-    nativeRuntimeId: String,
-    fixture: JsonObject,
     state: List<NewDesignState>,
   ): UiBuilderDocument =
     UiBuilderNewDesignSeed.document(
       designId = designId,
-      catalogSystemId = catalogSystemId,
       templateId = templateId,
-      catalogRevision = catalogRevision,
-      nativeRuntimeId = nativeRuntimeId,
-      fixture = fixture,
-      ownership = CatalogOwnership.ALL,
-      published = templates(catalogSystemId),
+      catalogPin = catalogPin,
+      published =
+        templates(catalogPin.systemId) ?: CatalogSeedTemplates(catalogPin.systemId, emptyList()),
       state = state,
     )
 

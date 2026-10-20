@@ -41,10 +41,10 @@ object ServeUiBuilderEditor {
   /**
    * Editor↔server HTTP API versions this server speaks. Bumped with `serverApi` in
    * compose-ui-builder's `ui-builder-web/build.gradle.kts` for changes to the routes required by
-   * the editor. API 1 remains supported while deployments roll out the API 2 editor with published
-   * template caching.
+   * the editor. Published-template caching is required now that production has verified cold
+   * offline creation with the API 2 editor.
    */
-  val SUPPORTED_SERVER_API: Set<Int> = setOf(1, 2)
+  val SUPPORTED_SERVER_API: Set<Int> = setOf(2)
 
   /** Where compose-ui-builder publishes the editor archive for [version]. */
   fun releaseUrl(version: String): String =
@@ -73,6 +73,13 @@ object ServeUiBuilderEditor {
     if (!file.isFile) return null
     return runCatching { JSON.decodeFromString(EditorManifest.serializer(), file.readText()) }
       .getOrNull()
+  }
+
+  /** The bundled or explicitly supplied editor must meet the same contract as a pinned one. */
+  fun directoryProblem(dir: File): String? {
+    if (!File(dir, "index.html").isFile) return "has no index.html"
+    val manifest = readManifest(dir) ?: return "has no readable $MANIFEST_FILE"
+    return contractProblem(manifest, pinnedVersion = null)
   }
 
   /**

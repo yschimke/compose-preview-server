@@ -91,9 +91,6 @@ data class ServeCatalogsConfig(
      * (`SERVE_UI_BUILDER_NATIVE_CATALOGS`); empty removes the mapping.
      */
     val nativeCatalog: String? = null,
-    /** Accepted during rolling upgrades; every catalog is owned regardless of this value. */
-    @Deprecated("Catalog ownership is unconditional; this compatibility field is ignored")
-    val owned: Boolean? = null,
   )
 
   /**

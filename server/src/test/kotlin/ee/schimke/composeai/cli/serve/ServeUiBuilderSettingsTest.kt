@@ -4,6 +4,7 @@ import ee.schimke.composeai.cli.serve.ServeCatalogsConfig.UiBuilderCatalogSettin
 import ee.schimke.composeai.cli.serve.ServeCatalogsConfig.UiBuilderSettings
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -272,12 +273,13 @@ class ServeUiBuilderSettingsTest {
   }
 
   @Test
-  fun `retired owned settings are ignored when a box reloads an older config`() {
+  fun `retired ownership fields are ignored on read and dropped when settings are saved`() {
     for (owned in listOf(true, false)) {
       val config =
         ServeCatalogsConfig.parse("""{"uiBuilder":{"catalogs":{"wear-m3":{"owned":$owned}}}}""")
       assertEquals(environment, resolve(config.uiBuilder).effective)
       assertEquals(emptyList(), resolve(config.uiBuilder).problems)
+      assertFalse("\"owned\"" in ServeCatalogsConfig.encode(config))
     }
   }
 }

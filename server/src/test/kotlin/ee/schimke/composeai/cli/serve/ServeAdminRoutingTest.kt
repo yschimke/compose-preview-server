@@ -338,7 +338,8 @@ class ServeAdminRoutingTest {
   }
 
   @Test
-  fun `the config publish route accepts retired owned fields without changing effective settings`() {
+  fun `the config publish route rejects retired ownership without changing saved settings`() {
+    val original = configFile.load()
     for (owned in listOf(true, false)) {
       val (code, body) =
         send(
@@ -346,12 +347,20 @@ class ServeAdminRoutingTest {
           "PUT",
           """{"catalogs":{"remote-m3":{"owned":$owned}}}""",
         )
-      assertEquals(200, code, body)
+      assertEquals(400, code, body)
+      assertTrue("unknown key 'owned'" in body, body)
+      assertEquals(original, configFile.load())
       assertEquals(
         uiBuilderEnvironment,
         ServeUiBuilderSettings.resolve(uiBuilderEnvironment, configFile.load().uiBuilder).effective,
       )
     }
+    val (code, body) = send("/admin/ui-builder/config", "PUT", """{"catalogs":{"remote-m3":{}}}""")
+    assertEquals(200, code, body)
+    assertEquals(
+      uiBuilderEnvironment,
+      ServeUiBuilderSettings.resolve(uiBuilderEnvironment, configFile.load().uiBuilder).effective,
+    )
   }
 
   @Test

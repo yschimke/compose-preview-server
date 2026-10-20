@@ -64,15 +64,37 @@ class ServeUiBuilderEditorTest {
   }
 
   @Test
-  fun `the server accepts the original editor API during the cache rollout`() {
+  fun `bundled and custom directories require a readable supported manifest and shell`() {
+    val dir = File(tmp, "custom").apply { mkdirs() }
+    assertEquals("has no index.html", ServeUiBuilderEditor.directoryProblem(dir))
+    File(dir, "index.html").writeText("<html/>")
+    val file = File(dir, ServeUiBuilderEditor.MANIFEST_FILE)
+    for (invalid in listOf(null, "not json")) {
+      if (invalid != null) file.writeText(invalid)
+      assertEquals(
+        "has no readable ui-builder-web.json",
+        ServeUiBuilderEditor.directoryProblem(dir),
+      )
+    }
+    for (api in listOf(1, 99)) {
+      file.writeText(manifest("3.48.1", api))
+      assertTrue("speaks server API $api" in ServeUiBuilderEditor.directoryProblem(dir).orEmpty())
+    }
+    file.writeText(manifest("3.122.0").replace(ServeUiBuilderEditor.MANIFEST_SCHEMA, "unsupported"))
+    assertTrue("schema" in ServeUiBuilderEditor.directoryProblem(dir).orEmpty())
+    file.writeText(manifest("3.122.0"))
+    assertNull(ServeUiBuilderEditor.directoryProblem(dir))
+  }
+
+  @Test
+  fun `the server refuses the retired editor API without published template caching`() {
     val pin =
       release(
         "3.48.1",
         mapOf("index.html" to "<html/>", "ui-builder-web.json" to manifest("3.48.1", 1)),
       )
-    val ready = assertIs<ServeUiBuilderEditorStore.Result.Ready>(store().resolve(pin))
-    assertEquals(1, ready.manifest.serverApi)
-    assertTrue(ready.dir.isDirectory)
+    val failed = assertIs<ServeUiBuilderEditorStore.Result.Failed>(store().resolve(pin))
+    assertTrue("speaks server API 1" in failed.reason, failed.reason)
   }
 
   @Test

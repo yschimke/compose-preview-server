@@ -2,6 +2,7 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.export.CatalogSeedTemplates
 import ee.schimke.composeai.uibuilder.export.UiBuilderNewDesignSeed
+import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -42,5 +43,19 @@ class UiBuilderCatalogSeedsTest {
     assertEquals("wear-screen", seeds.defaultTemplate("wear-m3"))
     // Catalogs without published templates use a generic blank.
     assertEquals(setOf(UiBuilderNewDesignSeed.BLANK_TEMPLATE), seeds.templateIds("m3-catalog"))
+  }
+
+  @Test
+  fun `published creation delegates with the served pin and needs no benchmark fixture`() {
+    val seeds = UiBuilderCatalogSeeds() { published }
+    val pin =
+      CatalogReferenceV1("wear-m3", "released-revision", "served-digest", "released-runtime")
+    val actual = seeds.document("new-design", pin, "wear-list", emptyList())
+    assertEquals(
+      UiBuilderNewDesignSeed.document("new-design", "wear-list", pin, published),
+      actual,
+    )
+    assertEquals("new-design", actual.id)
+    assertEquals(0, actual.revision)
   }
 }
