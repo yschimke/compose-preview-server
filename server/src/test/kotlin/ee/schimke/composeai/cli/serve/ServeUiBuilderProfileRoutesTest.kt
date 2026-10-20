@@ -123,14 +123,6 @@ class ServeUiBuilderProfileRoutesTest {
       dir.deleteOnExit()
       File(dir, "index.html")
         .writeText("<!doctype html><html><head><title>Compose UI builder</title></head></html>")
-      File(dir, ServeUiBuilderCreate.NEW_DESIGN_FIXTURE)
-        .writeText(
-          File("../docs/design/fixtures/ui-builder/${ServeUiBuilderCreate.NEW_DESIGN_FIXTURE}")
-            .takeIf { it.isFile }
-            ?.readText()
-            ?: File("docs/design/fixtures/ui-builder/${ServeUiBuilderCreate.NEW_DESIGN_FIXTURE}")
-              .readText()
-        )
     }
 
   private val profile =

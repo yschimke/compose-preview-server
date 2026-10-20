@@ -41,10 +41,10 @@ object ServeUiBuilderEditor {
   /**
    * Editor↔server HTTP API versions this server speaks. Bumped with `serverApi` in
    * compose-ui-builder's `ui-builder-web/build.gradle.kts` for changes to the routes required by
-   * the editor. API 1 remains supported while deployments roll out the API 2 editor with published
-   * template caching.
+   * the editor. Published-template caching is required now that production has verified cold
+   * offline creation with the API 2 editor.
    */
-  val SUPPORTED_SERVER_API: Set<Int> = setOf(1, 2)
+  val SUPPORTED_SERVER_API: Set<Int> = setOf(2)
 
   /** Where compose-ui-builder publishes the editor archive for [version]. */
   fun releaseUrl(version: String): String =

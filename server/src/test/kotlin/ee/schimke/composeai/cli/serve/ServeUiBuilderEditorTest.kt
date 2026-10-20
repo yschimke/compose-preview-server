@@ -64,15 +64,14 @@ class ServeUiBuilderEditorTest {
   }
 
   @Test
-  fun `the server accepts the original editor API during the cache rollout`() {
+  fun `the server refuses the retired editor API without published template caching`() {
     val pin =
       release(
         "3.48.1",
         mapOf("index.html" to "<html/>", "ui-builder-web.json" to manifest("3.48.1", 1)),
       )
-    val ready = assertIs<ServeUiBuilderEditorStore.Result.Ready>(store().resolve(pin))
-    assertEquals(1, ready.manifest.serverApi)
-    assertTrue(ready.dir.isDirectory)
+    val failed = assertIs<ServeUiBuilderEditorStore.Result.Failed>(store().resolve(pin))
+    assertTrue("speaks server API 1" in failed.reason, failed.reason)
   }
 
   @Test

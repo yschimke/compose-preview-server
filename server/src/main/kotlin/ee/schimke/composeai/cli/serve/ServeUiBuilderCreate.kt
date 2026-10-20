@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.uibuilder.export.NewDesignState
 import ee.schimke.composeai.uibuilder.export.UiBuilderNewDesignSeed
 import ee.schimke.composeai.uibuilder.export.toDesignDocumentV1
+import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
 import ee.schimke.composeai.uibuilder.protocol.CreateDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignHomeV1
@@ -12,10 +13,7 @@ import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
-import java.io.File
 import java.net.URI
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonObject
 
 /**
  * Creating a design from intent — an id, a catalog, a template — rather than from a document.
@@ -24,18 +22,17 @@ import kotlinx.serialization.json.jsonObject
  * design*, and the server produces the document, pinned to the catalog revision it actually serves.
  * The seeding itself is [UiBuilderNewDesignSeed] in `:ui-builder-export`, shared with the browser
  * so a template means one thing on both sides; what lives here is the part that needs a server —
- * the served catalog's revision, the fixture on disk, and the authenticated write.
+ * the served catalog's revision, its published templates, and the authenticated write.
  */
 internal class ServeUiBuilderCreate(
   private val service: UiBuilderServicePort,
-  private val uiBuilderDir: File,
   /**
    * This server's configured public origin, normalized; null when the operator has not stated one.
    * Without it no document is stamped with a server home, because a bind address (loopback, an
    * auto-picked port) is not an identity another copy can find its way back to.
    */
   private val serverOrigin: String?,
-  /** Where a new design's starting document comes from: built in, or the catalog's own. */
+  /** The catalog's published starting documents, or a generic blank. */
   private val seeds: UiBuilderCatalogSeeds = UiBuilderCatalogSeeds.EMPTY,
 ) {
 
@@ -73,24 +70,19 @@ internal class ServeUiBuilderCreate(
     val benchmark =
       catalogs.map { it.benchmark }.singleOrNull { it.catalogSystemId == catalogSystemId }
         ?: return Outcome.Refused(409, "$catalogSystemId is not a catalog this server authors")
-    val fixtureFile = File(uiBuilderDir, NEW_DESIGN_FIXTURE)
-    if (!fixtureFile.isFile) {
-      return Outcome.Refused(
-        500,
-        "the builder distribution is missing $NEW_DESIGN_FIXTURE, which every template reads its " +
-          "environment from",
-      )
-    }
     val document =
       try {
         seeds
           .document(
             designId = designId,
-            catalogSystemId = catalogSystemId,
+            catalogPin =
+              CatalogReferenceV1(
+                catalogSystemId,
+                benchmark.catalogRevision,
+                "candidate",
+                benchmark.nativeRuntimeId,
+              ),
             templateId = templateId,
-            catalogRevision = benchmark.catalogRevision,
-            nativeRuntimeId = benchmark.nativeRuntimeId,
-            fixture = Json.parseToJsonElement(fixtureFile.readText()).jsonObject,
             state = state,
           )
           .toDesignDocumentV1()
@@ -190,10 +182,6 @@ internal class ServeUiBuilderCreate(
       else -> return Outcome.Refused(500, "the design service did not list its catalogs")
     }
     return createOutcome(actor, homed)
-  }
-
-  internal companion object {
-    const val NEW_DESIGN_FIXTURE = "jetcaster-discover-operations-v1.json"
   }
 }
 

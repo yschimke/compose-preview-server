@@ -143,14 +143,6 @@ class ServeUiBuilderCreateRoutesTest {
     Files.createTempDirectory("serve-ui-builder-create").toFile().also { dir ->
       dir.deleteOnExit()
       File(dir, "index.html").writeText("<!doctype html><title>Compose UI builder</title>")
-      File(dir, "jetcaster-discover-operations-v1.json")
-        .writeText(
-          File("../docs/design/fixtures/ui-builder/jetcaster-discover-operations-v1.json")
-            .takeIf { it.isFile }
-            ?.readText()
-            ?: File("docs/design/fixtures/ui-builder/jetcaster-discover-operations-v1.json")
-              .readText()
-        )
     }
 
   private val registry = ServeSessionRegistry(open = { null })
@@ -481,7 +473,7 @@ class ServeUiBuilderCreateRoutesTest {
         """
           .trimIndent(),
       )
-    val creator = ServeUiBuilderCreate(service, builderDir, PUBLIC_ORIGIN)
+    val creator = ServeUiBuilderCreate(service, PUBLIC_ORIGIN)
     val actor = ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor("library")
 
     assertIs<ServeUiBuilderCreate.Outcome.Created>(creator.installPublished(actor, document))
@@ -509,7 +501,7 @@ class ServeUiBuilderCreateRoutesTest {
       createdDocuments.getValue("published").home,
     )
     // With no configured public origin nothing is stamped: a bind address is not an identity.
-    val unconfigured = ServeUiBuilderCreate(service, builderDir, serverOrigin = null)
+    val unconfigured = ServeUiBuilderCreate(service, serverOrigin = null)
     assertIs<ServeUiBuilderCreate.Outcome.Created>(
       unconfigured.installPublished(actor, document.copy(id = "unhomed"))
     )

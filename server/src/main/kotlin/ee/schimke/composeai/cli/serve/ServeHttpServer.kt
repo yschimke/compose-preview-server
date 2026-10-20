@@ -6107,7 +6107,6 @@ class ServeHttpServer(
       withContext(Dispatchers.IO) {
         ServeUiBuilderCreate(
             designService!!,
-            uiBuilderDir!!,
             canonicalServerOrigin(),
             uiBuilderSeeds,
           )
@@ -14401,7 +14400,6 @@ class ServeHttpServer(
     val head =
       title to
         (shellHead.second +
-          uiBuilderCatalogOwnershipTag() +
           uiBuilderBasePathTag(call) +
           profile?.shellMetaTags(uiBuilderCatalogsFor(call).toList()).orEmpty() +
           ServeAnalytics.scriptTag())
@@ -14441,10 +14439,6 @@ class ServeHttpServer(
           "<meta name=\"ui-builder-offline-worker\" content=\"/push-sw.js\">"
         else ""
     } else ""
-
-  /** Compatibility for released editors that still read the ownership meta tag. */
-  private fun uiBuilderCatalogOwnershipTag(): String =
-    "<meta name=\"ui-builder-catalog-ownership\" content=\"all\">"
 
   /**
    * The `<title>` and unfurl tags for the builder shell: `(title, meta tags)`. A public design
@@ -14732,7 +14726,7 @@ class ServeHttpServer(
     val outcome =
       withContext(Dispatchers.IO) {
         withDesignCreationVisibility(creationVisibility) {
-          ServeUiBuilderCreate(service, dir, canonicalServerOrigin(), uiBuilderSeeds)
+          ServeUiBuilderCreate(service, canonicalServerOrigin(), uiBuilderSeeds)
             .create(
               actor = actor,
               catalogSystemId = catalog,
@@ -14852,7 +14846,7 @@ class ServeHttpServer(
     val outcome =
       withContext(Dispatchers.IO) {
         withDesignCreationVisibility(UiBuilderDefaultVisibility.PRIVATE) {
-          ServeUiBuilderCreate(service, dir, canonicalServerOrigin(), uiBuilderSeeds)
+          ServeUiBuilderCreate(service, canonicalServerOrigin(), uiBuilderSeeds)
             .install(actor, document)
         }
       }
@@ -14952,7 +14946,7 @@ class ServeHttpServer(
     val outcome =
       withContext(Dispatchers.IO) {
         withDesignCreationVisibility(creationVisibility) {
-          ServeUiBuilderCreate(service, dir, canonicalServerOrigin(), uiBuilderSeeds)
+          ServeUiBuilderCreate(service, canonicalServerOrigin(), uiBuilderSeeds)
             .install(actor, copy)
         }
       }
@@ -15182,7 +15176,7 @@ class ServeHttpServer(
     when (
       val outcome =
         withContext(Dispatchers.IO) {
-          ServeUiBuilderCreate(service, dir, canonicalServerOrigin(), uiBuilderSeeds)
+          ServeUiBuilderCreate(service, canonicalServerOrigin(), uiBuilderSeeds)
             .install(actor, fork)
         }
     ) {
