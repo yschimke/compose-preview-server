@@ -2282,8 +2282,8 @@ public class ServeRunner(
   /** Validate the independently packaged builder once; it is not a catalog Wasm fallback. */
   private fun usableBundledUiBuilderDir(): File? {
     val dir = uiBuilderDir ?: return null
-    if (File(dir, "index.html").isFile) return dir
-    System.err.println("serve: --ui-builder-dir ${dir.path} has no index.html — skipping")
+    val problem = ServeUiBuilderEditor.directoryProblem(dir) ?: return dir
+    System.err.println("serve: --ui-builder-dir ${dir.path} $problem — skipping")
     return null
   }
 

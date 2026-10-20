@@ -75,6 +75,13 @@ object ServeUiBuilderEditor {
       .getOrNull()
   }
 
+  /** The bundled or explicitly supplied editor must meet the same contract as a pinned one. */
+  fun directoryProblem(dir: File): String? {
+    if (!File(dir, "index.html").isFile) return "has no index.html"
+    val manifest = readManifest(dir) ?: return "has no readable $MANIFEST_FILE"
+    return contractProblem(manifest, pinnedVersion = null)
+  }
+
   /**
    * Why an editor carrying [manifest] can't be served, or null. [pinnedVersion] catches a URL
    * override or pasted digest naming a different release than the operator believes.
