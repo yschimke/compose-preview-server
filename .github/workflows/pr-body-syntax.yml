@@ -96,7 +96,7 @@ jobs:
       # because the hosted image moved to a new major.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24.22.0
+          node-version: 24.22.1
 
       - name: Repair the description
         env:
@@ -182,7 +182,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24.22.0
+          node-version: 24.22.1
 
       - name: Run the PR-body repair self-test
         run: node --test .github/scripts/fix-pr-body-markdown.test.mjs

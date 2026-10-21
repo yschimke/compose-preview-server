@@ -293,7 +293,7 @@ jobs:
       # an open PR's evidence, and it cannot be checked by reading the tree.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24.22.0
+          node-version: 24.22.1
       - name: Evidence pruner tests
         run: node --test scripts/prune-evidence.test.mjs
 
@@ -328,7 +328,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24.22.0
+          node-version: 24.22.1
           cache: npm
           cache-dependency-path: serve-web/package-lock.json
       - run: npm ci
@@ -347,7 +347,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24.22.0
+          node-version: 24.22.1
       - run: npm test
         working-directory: scripts/ui-builder
       # The readiness gate's own tests. They existed for several rounds and nothing ran them, which
@@ -460,7 +460,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24.22.0
+          node-version: 24.22.1
           cache: npm
           cache-dependency-path: preview-harness/package-lock.json
       - run: npm ci
@@ -507,7 +507,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24.22.0
+          node-version: 24.22.1
           cache: npm
           cache-dependency-path: preview-harness/package-lock.json
       # The harness servers run on 21; nothing here builds any more. The UI builder's renderer is
