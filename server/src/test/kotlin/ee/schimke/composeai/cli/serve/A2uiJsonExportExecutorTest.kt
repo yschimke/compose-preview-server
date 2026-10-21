@@ -1,11 +1,11 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.discovery.ComponentRecordFile
+import ee.schimke.composeai.uibuilder.export.CatalogSeedTemplates
 import ee.schimke.composeai.uibuilder.export.UiBuilderNewDesignSeed
 import ee.schimke.composeai.uibuilder.export.toDesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.*
 import ee.schimke.composeai.uibuilder.service.*
-import java.io.File
 import java.util.zip.GZIPInputStream
 import kotlin.test.*
 import kotlinx.serialization.json.Json
@@ -47,21 +47,36 @@ class A2uiJsonExportExecutorTest {
       .single()
   }
 
-  private val seed =
+  // a2ui-catalog's own published `a2ui-column` template, as its `/templates` route serves it.
+  private val seed by lazy {
+    val path = "ui-builder/designs/a2ui-column.json"
+    val templates =
+      when (
+        val read =
+          CatalogSeedTemplates.read(
+            CurrentM3UiBuilderCatalogExecutor.A2UI_CATALOG_SYSTEM_ID,
+            listOf(path),
+          ) {
+            publishedFile("a2ui-column.json.gz")
+          }
+      ) {
+        is CatalogSeedTemplates.Result.Read -> read.templates
+        is CatalogSeedTemplates.Result.Unusable -> fail(read.reason)
+      }
     UiBuilderNewDesignSeed.document(
         designId = "a2ui-seed",
-        catalogSystemId = CurrentM3UiBuilderCatalogExecutor.A2UI_CATALOG_SYSTEM_ID,
-        templateId = UiBuilderNewDesignSeed.A2UI_TEMPLATE,
-        catalogRevision = a2ui.benchmark.catalogRevision,
-        nativeRuntimeId = a2ui.benchmark.nativeRuntimeId,
-        fixture =
-          Json.parseToJsonElement(
-              File("../docs/design/fixtures/ui-builder/jetcaster-discover-operations-v1.json")
-                .readText()
-            )
-            .jsonObject,
+        templateId = "a2ui-column",
+        catalogPin =
+          CatalogReferenceV1(
+            CurrentM3UiBuilderCatalogExecutor.A2UI_CATALOG_SYSTEM_ID,
+            a2ui.benchmark.catalogRevision,
+            "candidate",
+            a2ui.benchmark.nativeRuntimeId,
+          ),
+        published = templates,
       )
       .toDesignDocumentV1()
+  }
 
   private val passedThrough =
     ExportArtifactV1(ExportFormatV1.JSON, "text/plain", ExportEncodingV1.UTF8, "delegate", "")
