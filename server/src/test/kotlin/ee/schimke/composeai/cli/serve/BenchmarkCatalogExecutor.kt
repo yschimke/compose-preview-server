@@ -1,6 +1,5 @@
 package ee.schimke.composeai.cli.serve
 
-import ee.schimke.composeai.uibuilder.export.CatalogOwnership
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
 import ee.schimke.composeai.uibuilder.service.CurrentM3UiBuilderCatalogExecutor
@@ -51,6 +50,5 @@ internal fun benchmarkCatalogExecutor(
                 .build()
           )
         else emptyMap()) + published
-      it.catalogOwnership = CatalogOwnership.ALL
     }
     .build()
