@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.147.0](https://github.com/yschimke/compose-preview-server/compare/v3.146.0...v3.147.0) (2026-10-21)
+
+
+### Bug Fixes
+
+* **deploy:** fail a rollout loudly when the compose project does not load ([#1770](https://github.com/yschimke/compose-preview-server/issues/1770)) ([37a5be4](https://github.com/yschimke/compose-preview-server/commit/37a5be4e26dfc125b1253915f4d9080781743b32))
+* **deps:** update androidx-compose to v1.0.0-alpha22 ([#1785](https://github.com/yschimke/compose-preview-server/issues/1785)) ([bd05919](https://github.com/yschimke/compose-preview-server/commit/bd059192034eca85515a003db350fa705d10172f))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.70.2 ([#1773](https://github.com/yschimke/compose-preview-server/issues/1773)) ([4ceba7f](https://github.com/yschimke/compose-preview-server/commit/4ceba7f95348ad4bf0c6767df3b3194c198d1c5a))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.70.5 ([#1778](https://github.com/yschimke/compose-preview-server/issues/1778)) ([c8fb292](https://github.com/yschimke/compose-preview-server/commit/c8fb292e7c58d27ec3809e8051cafac1745ff449))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.70.7 ([#1782](https://github.com/yschimke/compose-preview-server/issues/1782)) ([cf04857](https://github.com/yschimke/compose-preview-server/commit/cf04857fa5cc040573aa2882aff3174b8e65792f))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.21.0 ([#1769](https://github.com/yschimke/compose-preview-server/issues/1769)) ([64ce359](https://github.com/yschimke/compose-preview-server/commit/64ce359ecf551336386e5008ff70968d407c8c50))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.21.1 ([#1772](https://github.com/yschimke/compose-preview-server/issues/1772)) ([464d553](https://github.com/yschimke/compose-preview-server/commit/464d553d5535eaa50974780521c1f2d6531b9beb))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.21.3 ([#1777](https://github.com/yschimke/compose-preview-server/issues/1777)) ([62f9308](https://github.com/yschimke/compose-preview-server/commit/62f930825859dc369ff517d4410ccf0f6e47fe26))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.21.4 ([#1781](https://github.com/yschimke/compose-preview-server/issues/1781)) ([8bed9c8](https://github.com/yschimke/compose-preview-server/commit/8bed9c81d37fa64b50b365e927bfbe567470e974))
+* **deps:** update dependency ee.schimke.composeai:rc-players-bom to v2.17.1 ([#1786](https://github.com/yschimke/compose-preview-server/issues/1786)) ([bb85887](https://github.com/yschimke/compose-preview-server/commit/bb85887d86fbe792e4c88f8f15b9a6b55b5d0706))
+* **deps:** update rc-players to v2.17.0 ([#1774](https://github.com/yschimke/compose-preview-server/issues/1774)) ([fa63169](https://github.com/yschimke/compose-preview-server/commit/fa6316918f2f0d3f48c33d1bdd235779e280b6a9))
+
 ## [3.146.0](https://github.com/yschimke/compose-preview-server/compare/v3.145.0...v3.146.0) (2026-10-19)
 
 
