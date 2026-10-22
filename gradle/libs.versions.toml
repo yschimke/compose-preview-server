@@ -470,7 +470,7 @@ rc-players = "2.17.3"
 # `cmp-android`, and pins its JVM target staged as `lib-rc-player-desktop/` for the desktop player
 # daemon (`stageRcPlayerDesktopLibs`); compose-preview-daemon's desktop binding is compiled against
 # this release's `rc-player-compose`.
-rc-players-android = "2.17.3"
+rc-players-android = "2.17.4"
 compose-remote = "1.0.0-alpha22"
 # The TypeScript player's browser bundle (`remote-compose-player-js-dist`, a zip with the `dist`
 # classifier). Its own ref because rc-players publishes only the modules a release changed: the
