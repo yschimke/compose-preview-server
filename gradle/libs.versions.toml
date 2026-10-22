@@ -142,7 +142,7 @@ graphics-shapes = "1.1.0"
 # The 2.60.0 BOM did not reach Central because of bundle-producer's POM (compose-ai-tools#5981).
 # 2.69.2 widens the bundle daemon's carried app R jar with the daemon's own R fields
 # (`AndroidRClassUnion`, compose-ai-tools#6128), so a newer daemon Compose finds the ids it needs.
-composeai-tools = "2.70.7"
+composeai-tools = "2.71.0"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
 # in that repository's `docs/design/REPOSITORY_LAYERS.md`: between the contracts and
