@@ -103,11 +103,17 @@ jobs:
         env:
           HOOK_URL: ${{ vars.DEPLOY_HOOK_URL || 'https://preview.coo.ee/__hooks/rollout' }}
           HOOK_TOKEN: ${{ secrets.DEPLOY_HOOK_TOKEN }}
+          # Unset or `public`: this workflow rolls the box. See publish-preview-config.yml.
+          DEPLOY_WRITER: ${{ vars.DEPLOY_WRITER }}
           # Resolved exactly as `Publish deployment config` resolves it below: the render probe
           # reads the design systems out of this directory's `catalogs.json`, and the two steps
           # disagreeing about where that lives is a deploy that fails on a path, not on the box.
           DEPLOY_CONFIG_DIR: ${{ vars.DEPLOY_CONFIG_DIR || 'deploy/preview.coo.ee' }}
         run: |
+          if [[ -n "${DEPLOY_WRITER}" && "${DEPLOY_WRITER}" != public ]]; then
+            echo "::notice::DEPLOY_WRITER=${DEPLOY_WRITER}; another writer owns the box, skipping rollout notification"
+            exit 0
+          fi
           if [[ -z "${HOOK_TOKEN}" ]]; then
             echo "DEPLOY_HOOK_TOKEN is unset; skipping rollout notification"
             exit 0
@@ -330,6 +336,7 @@ jobs:
           BASE_URL: ${{ vars.DEPLOY_BASE_URL || 'https://preview.coo.ee' }}
           DEPLOY_CONFIG_DIR: ${{ vars.DEPLOY_CONFIG_DIR || 'deploy/preview.coo.ee' }}
           ADMIN_TOKEN: ${{ secrets.SERVE_ADMIN_TOKEN }}
+          DEPLOY_WRITER: ${{ vars.DEPLOY_WRITER }}
           # So a config this roll did not boot on (written after its replica started) still ends up
           # serving: same restart path as publish-preview-config.yml.
           DEPLOY_HOOK_TOKEN: ${{ secrets.DEPLOY_HOOK_TOKEN }}
@@ -337,6 +344,10 @@ jobs:
           # ${BASE_URL}/__hooks/restart, so a box picked by DEPLOY_BASE_URL is the box restarted.
           DEPLOY_HOOK_RESTART_URL: ${{ vars.DEPLOY_HOOK_RESTART_URL }}
         run: |
+          if [[ -n "${DEPLOY_WRITER}" && "${DEPLOY_WRITER}" != public ]]; then
+            echo "::notice::DEPLOY_WRITER=${DEPLOY_WRITER}; another writer owns the box, skipping deployment config publish"
+            exit 0
+          fi
           if [[ -z "${ADMIN_TOKEN}" ]]; then
             echo "SERVE_ADMIN_TOKEN is unset; skipping deployment config publish"
             exit 0
