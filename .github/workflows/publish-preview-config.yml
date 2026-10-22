@@ -30,6 +30,9 @@ jobs:
     # readiness-checks a fresh replica (up to the rollout's 300s health timeout) before the old one
     # drains, and the publish then reads the box until it serves the new config.
     timeout-minutes: 25
+    # DEPLOY_WRITER hands the box's config to another writer: unset or `public` publishes from here;
+    # anything else (`paused` during a handoff, `private` after it) leaves the box alone.
+    if: vars.DEPLOY_WRITER == '' || vars.DEPLOY_WRITER == 'public'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
