@@ -1508,6 +1508,35 @@ html.cp-js.cp-multi-section .cp-section-head { display: block; }
   html[data-cp-density="l"] .cp-imgwrap img { max-height: 460px; }
   html[data-cp-density="l"] .cp-crop { --cp-thumb-cap: 460px; }
 }
+/* "Wear panes" (`components/WearPanes.ts`, opt-in from the `⋯` panel or the viewer's View group):
+   the same PNG in a round and a square watch screen, in the Small (200 × 60 dp) and Large
+   (200 × 112 dp) Wear widget containers. An approximation drawn the way a widget host draws a
+   container — 26 dp corners, `rgb(39, 36, 48)`, 8 dp padding, on a black screen — with every dp a
+   fraction of a nominal 225 dp screen, so the four scale with whatever width they are given. The
+   screen is the size container; a length in `cqi` on anything inside it is a share of its width. */
+.cp-wear-panes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px;
+  padding: 10px 12px 2px; }
+.cp-wear-panes[hidden] { display: none; }
+.cp-wear-pane { margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.cp-wear-screen { container-type: inline-size; aspect-ratio: 1; background: #000;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+  border-radius: 8%; }
+.cp-wear-pane[data-shape="round"] .cp-wear-screen { border-radius: 50%; }
+.cp-wear-container { box-sizing: border-box; flex: none; display: flex;
+  width: calc(100cqi * 200 / 225); height: calc(100cqi * 112 / 225);
+  padding: calc(100cqi * 8 / 225); border-radius: calc(100cqi * 26 / 225);
+  background: rgb(39, 36, 48); }
+.cp-wear-pane[data-size="small"] .cp-wear-container { height: calc(100cqi * 60 / 225); }
+.cp-wear-panes .cp-wear-container > img { display: block; width: 100%; height: 100%;
+  max-width: none; max-height: none; min-width: 0; object-fit: contain; }
+.cp-wear-pane figcaption { text-align: center; color: var(--md-sys-color-on-surface-variant);
+  font-size: var(--md-sys-typescale-label-small-size, 11px); line-height: 1.3; }
+/* On the viewer the panes wrap onto their own row under the render, four across while each can be
+   at least 120px wide and two across below that (a phone); full screen is for the render alone. */
+.cp-stage:has(> .cp-wear-panes) { flex-wrap: wrap; }
+.cp-stage > .cp-wear-panes { flex: 1 1 100%; min-width: 0; max-width: 960px; padding: 16px 0 36px;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; }
+.cp-stage:fullscreen > .cp-wear-panes { display: none; }
 /* The Theme picker carries one chip per configured theme (the baked light/dark pair plus any
    app-declared @ThemeCatalog theme), so it wraps rather than overflowing a narrow viewport.
    That is exactly why it is NOT an M3 segmented button: a segmented track is specified for a

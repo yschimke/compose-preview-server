@@ -87,7 +87,12 @@ const limits = {
     // not a signal, it is a tripwire that the next unrelated edit to any shared viewer control
     // springs, in a page whose own bundle nobody touched. Raised by the usual 2 kB step so the
     // ceiling goes on meaning what it says.
-    "spatial viewer": 188_000,
+    //
+    // 188_000 until the opt-in Wear panes (`components/WearPanes.ts`), which the viewer carries in
+    // `viewer-components.js` so its stage can show them: measured at 188_554 gzip bytes, +1_021
+    // over the previous build (all of it that module) against 467 bytes of headroom. The panes are
+    // CSS around the existing PNG and add no dependency. Raised by the usual 2 kB step.
+    "spatial viewer": 190_000,
     "phone QR (lazy)": 4_000,
 };
 
