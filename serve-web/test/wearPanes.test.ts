@@ -233,6 +233,18 @@ describe("wear panes", () => {
         assert.equal(document.querySelectorAll(".cp-wear-panes-btn").length, 1);
     });
 
+    it("stays off a spatial preview's viewer, even when remembered on", () => {
+        localStorage.setItem(WEAR_PANES_KEY, "1");
+        document.body.innerHTML = `
+          <div class="cp-head-toggles"></div>
+          <div class="cp-viewer">
+            <div class="cp-stage"><img id="cp-img" alt="Room"><cp-spatial-view scene-url="/s.json"></cp-spatial-view></div>
+          </div>`;
+        assert.equal(installWearPanes(), null);
+        assert.equal(button(), null);
+        assert.equal(panes().length, 0);
+    });
+
     it("stays off pages that list no previews", () => {
         document.body.innerHTML = `<div class="cp-head-toggles"></div><div id="cp-grid" class="cp-grid cp-syslist"></div>`;
         assert.equal(installWearPanes(), null);

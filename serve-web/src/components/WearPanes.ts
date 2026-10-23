@@ -207,7 +207,12 @@ function follow(on: boolean): void {
 export function installWearPanes(): HTMLButtonElement | null {
     const grid = document.getElementById("cp-grid");
     const isCatalog = !!grid && !grid.classList.contains("cp-syslist");
-    if (!isCatalog && !document.querySelector(".cp-stage > img#cp-img"))
+    // A spatial preview's stage draws `<cp-spatial-view>`, not its `#cp-img`, and has no View group.
+    if (
+        !isCatalog &&
+        (!document.querySelector(".cp-stage > img#cp-img") ||
+            document.querySelector(".cp-stage > cp-spatial-view"))
+    )
         return null;
     const on = readWearPanes();
     applyWearPanes(on);
