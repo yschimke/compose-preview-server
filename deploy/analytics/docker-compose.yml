@@ -2,7 +2,7 @@ name: compose-preview-analytics
 
 services:
   umami:
-    image: ghcr.io/umami-software/umami:3.4.0
+    image: ghcr.io/umami-software/umami:3.4.1
     init: true
     restart: unless-stopped
     ports:
