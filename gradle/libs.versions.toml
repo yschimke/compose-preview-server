@@ -459,7 +459,7 @@ composeai-ui-builder = "3.123.0"
 # takes `?density=` (CSS px per dp), which the viewer sends so the lane draws at the preview's scale.
 # 2.11.0 sizes a CanvasContent's ComponentValue bindings from its own geometry (rc-players#644), so
 # the pressure gauges that bind their width/height there draw their ring and needle on the CMP lanes.
-rc-players = "2.17.3"
+rc-players = "2.17.4"
 # The Android Remote Compose players the server's own player-only Android daemon replays documents
 # with, staged as `lib-rc-players-android/` (`stageRcPlayersAndroidLibs`). The Android daemon
 # sidecar deliberately ships none of this family (a consumer brings it, compose-preview-daemon's
