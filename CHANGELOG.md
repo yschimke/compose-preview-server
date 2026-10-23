@@ -1,5 +1,26 @@
 # Changelog
 
+## [3.148.0](https://github.com/yschimke/compose-preview-server/compare/v3.147.0...v3.148.0) (2026-10-23)
+
+
+### Features
+
+* **serve-web:** opt-in Wear panes view for catalog previews ([#1803](https://github.com/yschimke/compose-preview-server/issues/1803)) ([689dda3](https://github.com/yschimke/compose-preview-server/commit/689dda3a024e388ac31a1e5e24c0355d56f2f43d))
+
+
+### Bug Fixes
+
+* **deps:** adopt compose-ui-builder 3.123.0 ([#1787](https://github.com/yschimke/compose-preview-server/issues/1787)) ([7883201](https://github.com/yschimke/compose-preview-server/commit/7883201f778ddb0fbe5de99dac4b4a03fae2234b))
+* **deps:** update dependency com.squareup.okhttp3:okhttp to v5.5.1 ([#1791](https://github.com/yschimke/compose-preview-server/issues/1791)) ([0627bee](https://github.com/yschimke/compose-preview-server/commit/0627bee18915cd0a07bdc5007a08656b608953a5))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.71.0 ([#1796](https://github.com/yschimke/compose-preview-server/issues/1796)) ([16a9f93](https://github.com/yschimke/compose-preview-server/commit/16a9f934da33dd00c146b427bfcbd359bcbbf0b2))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.72.0 ([#1802](https://github.com/yschimke/compose-preview-server/issues/1802)) ([11ccee9](https://github.com/yschimke/compose-preview-server/commit/11ccee9be564d8e3682f771543b2ffbe41f6a20a))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-contracts-bom to v3.38.0 ([#1794](https://github.com/yschimke/compose-preview-server/issues/1794)) ([9fff5d3](https://github.com/yschimke/compose-preview-server/commit/9fff5d3bd86a80fb6fb281e47ad162d4191fc4fe))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-contracts-bom to v3.39.0 ([#1799](https://github.com/yschimke/compose-preview-server/issues/1799)) ([3d57275](https://github.com/yschimke/compose-preview-server/commit/3d572756ed67ae0eb2b196e8818a76732cea600d))
+* **deps:** update dependency ee.schimke.composeai:rc-player-wasm-dist to v2.17.4 ([#1800](https://github.com/yschimke/compose-preview-server/issues/1800)) ([2231961](https://github.com/yschimke/compose-preview-server/commit/2231961768cae76a27f47dfc0354c9867e276b79))
+* **deps:** update dependency ee.schimke.composeai:rc-players-bom to v2.17.2 ([#1789](https://github.com/yschimke/compose-preview-server/issues/1789)) ([1a8f11a](https://github.com/yschimke/compose-preview-server/commit/1a8f11a0c6ac4bc61235c6eefa5098f24294b020))
+* **deps:** update dependency ee.schimke.composeai:rc-players-bom to v2.17.4 ([#1798](https://github.com/yschimke/compose-preview-server/issues/1798)) ([2e3c4fb](https://github.com/yschimke/compose-preview-server/commit/2e3c4fbaf9818fc003e12a1491e89730add799a0))
+* **deps:** update rc-players to v2.17.3 ([#1793](https://github.com/yschimke/compose-preview-server/issues/1793)) ([28be020](https://github.com/yschimke/compose-preview-server/commit/28be020cc61569486d77b44e26e20819b114e859))
+
 ## [3.147.0](https://github.com/yschimke/compose-preview-server/compare/v3.146.0...v3.147.0) (2026-10-21)
 
 
