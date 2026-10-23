@@ -14,7 +14,6 @@ import ee.schimke.composeai.uibuilder.export.RecordFreeExport
 import ee.schimke.composeai.uibuilder.export.ScreenDocumentProjection
 import ee.schimke.composeai.uibuilder.export.ScreenExportGate
 import ee.schimke.composeai.uibuilder.export.TypefaceTarget
-import ee.schimke.composeai.uibuilder.export.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.export.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.export.VariableFontExport
 import ee.schimke.composeai.uibuilder.export.VariableFontExportMode
@@ -354,9 +353,7 @@ internal class ScreenGeneratorComposeExportExecutor(
     }
     val platform = catalogPlatform(document.catalogPin.systemId)
     if (
-      UiBuilderBuildFeatures.remoteCompose &&
-        !RecordFreeExport.applies(document) &&
-        platform == UiBuilderCatalogPlatform.REMOTE_COMPOSE
+      !RecordFreeExport.applies(document) && platform == UiBuilderCatalogPlatform.REMOTE_COMPOSE
     ) {
       val packs =
         when (val resolved = packRecordsFor(document)) {

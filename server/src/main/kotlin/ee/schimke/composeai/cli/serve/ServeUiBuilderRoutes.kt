@@ -4,8 +4,10 @@ import ee.schimke.composeai.uibuilder.export.WearWidgetHostShape
 import ee.schimke.composeai.uibuilder.protocol.ApplyOperationRequestV1
 import ee.schimke.composeai.uibuilder.protocol.CreateDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
+import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
 import ee.schimke.composeai.uibuilder.protocol.ErrorResponseV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDesignRequestV1
+import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
 import ee.schimke.composeai.uibuilder.protocol.GetDeltaRequestV1
 import ee.schimke.composeai.uibuilder.protocol.GetDesignAccessRequestV1
 import ee.schimke.composeai.uibuilder.protocol.GetSnapshotRequestV1
@@ -444,6 +446,102 @@ internal fun Route.installUiBuilderRoutes(
   }
 
   if (nativePreview != null) {
+    // Local/unsaved authoring uses the same export admission as other supplied-document exports.
+    post("/api/ui-builder/v1/documents/native-capture") {
+      call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+      val decision = authorization.authorize(call, UiBuilderRouteCapability.EXPORT)
+      val actor = (decision as? UiBuilderAuthorizationDecision.Authorized)?.actor
+      if (actor == null) {
+        call.respondText(
+          "UI-builder export access required",
+          status =
+            if (decision == UiBuilderAuthorizationDecision.Missing) HttpStatusCode.Unauthorized
+            else HttpStatusCode.Forbidden,
+        )
+        return@post
+      }
+      val bytes =
+        withContext(Dispatchers.IO) {
+          call.receiveStream().use { it.readNBytes(MAX_UI_BUILDER_REQUEST_BYTES + 1) }
+        }
+      if (bytes.size > MAX_UI_BUILDER_REQUEST_BYTES) {
+        call.respondText("request body too large", status = HttpStatusCode.PayloadTooLarge)
+        return@post
+      }
+      val document =
+        try {
+          UI_BUILDER_JSON.decodeFromString(
+            DesignDocumentV1.serializer(),
+            bytes.toString(StandardCharsets.UTF_8),
+          )
+        } catch (_: SerializationException) {
+          call.respondText(
+            "expected a DesignDocumentV1 payload",
+            status = HttpStatusCode.BadRequest,
+          )
+          return@post
+        }
+      val admitted =
+        service.execute(
+          UiBuilderServiceCall(
+            actor,
+            UiBuilderServiceRequest.ExportDocument(document, ExportFormatV1.COMPOSE),
+          )
+        )
+      when (admitted) {
+        is UiBuilderServiceResponse.Error -> {
+          call.respondText(admitted.error.message, status = admitted.httpStatus())
+          return@post
+        }
+        is UiBuilderServiceResponse.Export ->
+          if (admitted.artifact.diagnostics.any { it.severity == DiagnosticSeverityV1.ERROR }) {
+            call.respondText(
+              "Source export refused this document",
+              status = HttpStatusCode.UnprocessableEntity,
+            )
+            return@post
+          }
+        else -> {
+          call.respondText(
+            "Source export did not return an artifact",
+            status = HttpStatusCode.InternalServerError,
+          )
+          return@post
+        }
+      }
+      when (val result = withContext(Dispatchers.IO) { nativePreview.capture(document) }) {
+        is UiBuilderNativePreviewOutcome.Refused ->
+          call.respondText(
+            UI_BUILDER_JSON.encodeToString(
+              NativePreviewRefusalV1.serializer(),
+              NativePreviewRefusalV1(code = result.code, reasons = result.reasons),
+            ),
+            ContentType.Application.Json,
+            HttpStatusCode.UnprocessableEntity,
+          )
+        is UiBuilderNativePreviewOutcome.Rendered -> {
+          val url = result.response.documentUrl
+          if (url.isNullOrBlank())
+            call.respondText(
+              "Native capture produced no document",
+              status = HttpStatusCode.UnprocessableEntity,
+            )
+          else
+            call.respondText(
+              UI_BUILDER_JSON.encodeToString(
+                NativeCaptureResultV1.serializer(),
+                NativeCaptureResultV1(
+                  designId = document.id,
+                  revision = document.revision,
+                  documentUrl = url,
+                ),
+              ),
+              ContentType.Application.Json,
+            )
+        }
+      }
+    }
+
     /**
      * One design compiled and rendered by real Compose on this host. A plain POST because
      * `UiBuilderRequestV1` has no native-render request. Gated on EXPORT, since it runs the
@@ -1067,3 +1165,10 @@ internal fun UiBuilderServiceResponse.withinCatalogs(
       copy(designs = designs.filter { it.catalogPin.systemId in catalogs })
     else -> this
   }
+
+@kotlinx.serialization.Serializable
+internal data class NativeCaptureResultV1(
+  val designId: String,
+  val revision: Long,
+  val documentUrl: String,
+)
