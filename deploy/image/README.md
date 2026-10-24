@@ -574,6 +574,33 @@ same treatment as one spelled out in `.env`.
 > it applies the committed entry live and rewrites the box's copy, so the two converge without the
 > overlay below. Adopt the overlay if you'd rather the committed file be authoritative outright.
 
+### Serving another app's hostname from the same edge
+
+To put a sibling app on this box behind the same Caddy (same certificates, logs and security
+headers), mount one Caddyfile fragment per hostname into `/etc/caddy/sites.d/` in a Compose
+override you keep beside your `.env`, and name those hostnames in `EXTRA_SITE_DOMAINS` so the
+main block does not claim them too:
+
+```yaml
+services:
+  caddy:
+    volumes:
+      - ./sites/other.caddy:/etc/caddy/sites.d/other.caddy:ro
+    environment:
+      EXTRA_SITE_DOMAINS: other.example.com
+```
+
+```caddyfile
+other.example.com {
+	import edge_common
+	reverse_proxy other-app:8080
+}
+```
+
+The entrypoint installs the mounted fragments on every start, so removing a mount and recreating
+`caddy` removes the site. Validate first with
+`docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile`.
+
 ### Config from version control (`docker-compose.deploy-config.yml`)
 
 `/config/catalogs.json` and `/config/producers.json` live on the `preview_config` **named volume**,

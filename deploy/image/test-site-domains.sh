@@ -110,9 +110,12 @@ entry_of() { # entry_of <json> [SITE_DOMAINS] -> the stub's report
     SITE_DOMAINS="${2:-}" \
     HA_DOMAIN="${HA_DOMAIN:-}" \
     HA_SITE_FILE="${here}/ha.caddy" \
+    EXTRA_SITES_DIR="${work}/extra" \
+    EXTRA_SITE_DOMAINS="${EXTRA_SITE_DOMAINS:-}" \
     OPTIONAL_SITES_DIR="${work}/sites" \
     sh "${entrypoint}" run --config /etc/caddy/Caddyfile --adapter caddyfile 2>/dev/null
 }
+mkdir -p "${work}/extra"
 
 check "derives the hostnames from the config" "SITE_DOMAINS=[m3.preview.coo.ee wear.preview.coo.ee]" \
   "$(entry_of '{"sites":[{"host":"m3.preview.coo.ee","system":"m3"},{"host":"wear.preview.coo.ee","system":"w"}]}' | head -1)"
@@ -155,6 +158,48 @@ check "HA_DOMAIN is taken out of SITE_DOMAINS" "SITE_DOMAINS=[m3.preview.coo.ee]
 
 check "unsetting HA_DOMAIN removes a previously installed ha.caddy" "" \
   "$(HA_DOMAIN=ha.coo.ee entry_of '{"catalogs":[]}' > /dev/null; entry_of '{"catalogs":[]}' > /dev/null; ls "${work}/sites")"
+
+# Extra sites are fragments a deployment mounts into EXTRA_SITES_DIR, one per hostname it serves
+# beside this server. The names they claim leave the main block, as HA_DOMAIN's did.
+check "no mounted fragments ⇒ no extra site installed" "" \
+  "$(entry_of '{"catalogs":[]}' > /dev/null; ls "${work}/sites")"
+
+printf 'other.example.com {\n\trespond "hi"\n}\n' > "${work}/extra/other.caddy"
+check "a mounted fragment is installed" "other.caddy" \
+  "$(entry_of '{"catalogs":[]}' > /dev/null; ls "${work}/sites")"
+
+check "EXTRA_SITE_DOMAINS leave the main block" "SITE_DOMAINS=[m3.example.com]" \
+  "$(EXTRA_SITE_DOMAINS=other.example.com,more.example.com \
+     entry_of '{"sites":[{"host":"m3.example.com","system":"m3"}]}' 'other.example.com more.example.com' | head -1)"
+
+check "EXTRA_SITE_DOMAINS turns off the deprecated HA_DOMAIN install" "other.caddy" \
+  "$(HA_DOMAIN=other.example.com EXTRA_SITE_DOMAINS=other.example.com entry_of '{"catalogs":[]}' > /dev/null; ls "${work}/sites")"
+
+rm "${work}/extra/other.caddy"
+check "unmounting a fragment removes its site" "" \
+  "$(entry_of '{"catalogs":[]}' > /dev/null; ls "${work}/sites")"
+
+# A fragment someone placed in the sites dir directly (on the box, a bind mount of the native demo's
+# route) is never removed or replaced: deleting a bind-mounted file fails, which under `set -e`
+# would stop Caddy and every hostname with it. A read-only file stands in for the mount.
+printf 'native.example.com {\n}\n' > "${work}/sites/native-demo.caddy"
+printf 'other.example.com {\n}\n' > "${work}/extra/native-demo.caddy"
+printf 'other.example.com {\n}\n' > "${work}/extra/other.caddy"
+check "a fragment placed in the sites dir by someone else survives every start" \
+  "native-demo.caddy other.caddy|native.example.com {" \
+  "$(entry_of '{"catalogs":[]}' > /dev/null; entry_of '{"catalogs":[]}' > /dev/null
+     echo "$(ls "${work}/sites" | tr '\n' ' ' | sed 's/ $//')|$(head -1 "${work}/sites/native-demo.caddy")")"
+rm "${work}/extra/native-demo.caddy" "${work}/extra/other.caddy" "${work}/sites/native-demo.caddy"
+
+mkdir -p "${work}/ro" && printf 'x {\n}\n' > "${work}/ro/pinned.caddy"
+check "the entrypoint still starts Caddy when the sites dir holds a file it cannot delete" \
+  "ARGS=[run --config /etc/caddy/Caddyfile --adapter caddyfile]" \
+  "$(printf 'pinned.caddy\n' > "${work}/ro/.installed"; chmod 555 "${work}/ro"
+     printf '%s' '{"catalogs":[]}' > "${work}/catalogs.json"
+     PATH="${work}/bin:${PATH}" CATALOGS_FILE="${work}/catalogs.json" SITE_DOMAINS="" HA_DOMAIN="" \
+       EXTRA_SITES_DIR="${work}/extra" OPTIONAL_SITES_DIR="${work}/ro" \
+       sh "${entrypoint}" run --config /etc/caddy/Caddyfile --adapter caddyfile 2>/dev/null | sed -n 2p
+     chmod 755 "${work}/ro")"
 
 # The image's CMD has to survive: the entrypoint replaces `caddy` as PID 1's program, so dropping
 # the arguments would start Caddy with no config at all.
