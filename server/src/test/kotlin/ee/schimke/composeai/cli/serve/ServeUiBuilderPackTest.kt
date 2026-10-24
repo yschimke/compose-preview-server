@@ -2,7 +2,6 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.export.UiBuilderNode
 import ee.schimke.composeai.uibuilder.export.toDesignDocumentV1
-import ee.schimke.composeai.uibuilder.export.wearScreenUiBuilderDocument
 import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
