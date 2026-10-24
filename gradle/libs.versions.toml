@@ -246,8 +246,10 @@ composeai-tools = "2.73.1"
 # through `daemon-core`'s `api` edge (compose-preview-daemon#388); the `composeai.daemon.bta.*`
 # property names are unchanged. 3.22.0 made the desktop `compose/figma-svg` export on demand
 # (compose-preview-daemon#360), so the UI builder's SVG export reaches it through a fetch-driven
-# re-render, which must run at the export's own overrides (compose-preview-daemon#391).
-composeai-preview-daemon = "3.25.0"
+# re-render, which ran at the preview's defaults until 3.25.1 (compose-preview-daemon#391): below
+# it the UI builder's SVG export is the packaged preview's empty document, so 3.22.0-3.25.0 are
+# not usable here (ui-builder-gate2's `data-material-icon` check is what catches it).
+composeai-preview-daemon = "3.25.1"
 # 2.9.0 is the first release carrying `DesignEnvironmentV1.exportDevices` and its Set/Reset
 # changes, which is the field a design names its export devices in. 2.14.0 adds the components a
 # design defines — `DesignDocumentV1.components`, `DesignNodeV1.component` and the `binding` value
