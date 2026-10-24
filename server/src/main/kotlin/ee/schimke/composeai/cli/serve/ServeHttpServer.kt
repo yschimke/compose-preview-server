@@ -13207,8 +13207,8 @@ class ServeHttpServer(
    *
    * A whole-query test, not an override test. `mode`, `svg`, `scroll` and `bg` are not overrides,
    * but `mode` and `svg` do change which frame or which format the viewer requests first, and a
-   * seeded URL that differs from the viewer's own costs an extra render rather than saving a
-   * trip — so the cheap, auditable rule is "nothing but the params that cannot possibly matter".
+   * seeded URL that differs from the viewer's own costs an extra render rather than saving a trip —
+   * so the cheap, auditable rule is "nothing but the params that cannot possibly matter".
    * [FRAME_NEUTRAL_PAGE_PARAMS] names those; everything else, known or not, withholds the seed, so
    * a new frame-moving param is safe by default rather than safe only once someone remembers it.
    */

@@ -14296,10 +14296,10 @@ ${scriptTag("known-differences.js")}
      */
     unseededOverrides: Set<String> = emptySet(),
     /**
-     * Whether this request named nothing that could move the first frame, so the stage image may
-     * be seeded server-side (see `stageFrameSrc`). Decided by the HTTP layer, which is the only
-     * place that sees the raw query; defaults to false, which keeps the old behaviour of leaving
-     * the stage empty until `viewer.js` asks for a frame.
+     * Whether this request named nothing that could move the first frame, so the stage image may be
+     * seeded server-side (see `stageFrameSrc`). Decided by the HTTP layer, which is the only place
+     * that sees the raw query; defaults to false, which keeps the old behaviour of leaving the
+     * stage empty until `viewer.js` asks for a frame.
      */
     bareFrameRequest: Boolean = false,
     /**
@@ -16277,8 +16277,7 @@ ${scriptTag("known-differences.js")}
     val stageFrameAttr =
       stageFrameSrc?.let { " data-stage-frame=\"${WebEscaping.htmlEscape(it)}\"" }.orEmpty()
     val stageFrameScript =
-      if (stageFrameSrc == null) ""
-      else "\n        <script>${stageFrameSeedScript()}</script>"
+      if (stageFrameSrc == null) "" else "\n        <script>${stageFrameSeedScript()}</script>"
     val body =
       """
       $sourceCodeStylesheet${if (browserBreadcrumb.isBlank()) "" else "$browserBreadcrumb\n      "}<div class="cp-preview-head">
