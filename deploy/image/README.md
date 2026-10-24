@@ -1,9 +1,10 @@
 # Prebuilt preview-host image (instant deploy)
 
-New deployments should start with the independent [Compose example](../example/README.md).
-This directory also retains the existing hosted site stack during the
-[staged extraction](../../docs/deployment/OWNERSHIP.md); its HA services, rollout and analytics
-routes are operator topology, rather than requirements of the server image.
+New deployments should start with the independent [Compose example](../example/README.md). This
+directory is the full-featured stack for the same image: zero-downtime rollouts, an auto-updating
+edge, the deploy webhook, the playground container and sizing for a large host. Everything
+host-specific (hostnames, catalogs, trust, accounts) belongs in your own deployment directory and
+`.env`; see [deploying your own](../../docs/deployment/OWNERSHIP.md).
 
 A **prebuilt** Docker image that runs the standalone `compose-preview-server` with **no build on
 the host**. It installs the released server distribution and serves published catalogs/live
@@ -30,13 +31,12 @@ bundles without a local Gradle project. Built once in CI and pushed to GHCR, so 
   `500 … ExceptionInInitializerError: null` for every document. Lighting the Android live lane needs the catalog's stickers to
   carry the `previewId` daemon mapping **and** the bundle to carry the app's resource table under
   `android/`; both shipped in **0.16.50** (previewId #2492, app-resource carriage #2498 + missing-
-  resource placeholder fallback #2499), so `wear-m3` renders live once the box rolls that image and
-  re-fetches the regenerated bundle. See the linked service design below. This is what
-  `preview.coo.ee` runs. The broader service design remains documented in
+  resource placeholder fallback #2499), so `wear-m3` renders live once the host rolls that image and
+  re-fetches the regenerated bundle. The broader service design remains documented in
   [compose-ai-tools](https://github.com/yschimke/compose-ai-tools/blob/main/docs/public-preview-server.md).
 - **Playground:** the baked `lib-bta/` carries the Kotlin Build Tools compiler, so a
   `SERVE_PLAYGROUND_BUNDLE` box compiles snippets server-side. See
-  [Playground on `preview.coo.ee`](#playground-on-previewcooee) — it is gated, not open.
+  [Playground](#playground) — it is gated, not open.
 - **Bundle uploads:** disabled. **Auth:** public browsing, optional GitHub sign-in gate for
   live/playground surfaces, shared token for private boxes. **TLS:** via Caddy.
 
@@ -88,41 +88,6 @@ DOMAIN=preview.example.com ./setup.sh
 Pin a version with `IMAGE_TAG=0.16.33` in `.env` (a bare tag; defaults to the
 `latest` tag when unset).
 
-### Moving an existing box off the compose-ai-tools checkout
-
-`preview.coo.ee` was set up before the split and runs `docker compose` from a
-**compose-ai-tools** checkout (`/root/compose-ai-tools/deploy/image`). That directory is
-being removed from that repository, so the box needs re-pointing here. Nothing about the
-*running* service depends on it — `rollout.sh` only does `docker compose pull`, which is
-the image, never `git pull` — so this is not urgent and causes no downtime. What breaks is
-the next manual `git pull` over there: `docker-compose.yml`, `rollout.sh`, `docker-rollout`
-and the `Caddyfile` disappear, and `docker compose` stops working on that host.
-
-The move is close to free because the files the box executes are byte-identical between the
-two repositories — only the `Dockerfile`, `entrypoint.sh` (baked into the image, not run
-from the checkout), this README and two CI test scripts ever differed:
-
-```bash
-cd /root
-git clone https://github.com/yschimke/compose-preview-server.git
-cp compose-ai-tools/deploy/image/.env compose-preview-server/deploy/image/.env
-cd compose-preview-server/deploy/image
-docker compose config >/dev/null && docker compose ps   # must list the RUNNING containers
-```
-
-That last check is the proof it worked. `docker-compose.yml` pins `name: compose-preview`
-rather than deriving the project name from the directory, so the new checkout addresses the
-**existing** stack: no container is recreated and the named volumes (`preview_cache` and
-friends) are retained. If `ps` comes back empty, stop — the project name is not resolving
-and continuing would start a second stack alongside the live one.
-
-`.env` is gitignored, so it is not in either clone and must be copied across; it carries the
-box's tokens. While editing it, `SERVE_IMAGE_UPLOAD_REPO` is worth checking: on
-`preview.coo.ee` it still reads `yschimke/compose-ai-tools`, which is where bug-report image
-uploads are gated, and that should now be `yschimke/compose-preview-server`.
-
-Once `ps` is right, operate from the new directory and delete the old checkout at leisure.
-
 The image also serves its release-matched Compose/Wasm preview browser per catalog at
 `/wasm/<system>/` (for example `/wasm/compose-m3/`). It is packaged inside the server distribution
 and enabled automatically: no `.env` entry or host directory is required. A catalog-published Wasm
@@ -162,18 +127,18 @@ volume, and `SERVE_UI_BUILDER_STATE_DIR=none` is the explicit static-only opt-ou
 ### Deployment settings: `settings.json` instead of `.env`
 
 Every **non-secret** setting — the guidelines model and who may run it, the catalog MCP, upload
-lanes, analytics, the public half of GitHub sign-in — lives in the deployment's
-[`settings.json`](../preview.coo.ee/settings.json), not in the box's `.env`. It is checked in,
-reviewed in a pull request, validated against [`settings.schema.json`](settings.schema.json) by
-`ServeSettingsTest` (a typo fails the PR, with the key it probably meant), and published by the
-`Publish preview deployment config` workflow over `PUT /admin/settings`. No SSH, no `sed`, no
-container recreate for the settings marked **live**. [`SETTINGS.md`](SETTINGS.md) lists every one,
+lanes, analytics, the public half of GitHub sign-in — lives in the deployment's `settings.json`
+([`deploy/example/settings.json`](../example/settings.json) is a starting point), not in the host's
+`.env`. Keep it in version control, validate it against
+[`settings.schema.json`](settings.schema.json) (the `$schema` line gives an editor completion and
+typo checks), and publish it over `PUT /admin/settings` or mount it read-only. No SSH, no `sed`, no
+container recreate for the settings marked **live** when published over the admin API. [`SETTINGS.md`](SETTINGS.md) lists every one,
 generated from `ServeSettings.kt`.
 
 ```json
 {
   "$schema": "../image/settings.schema.json",
-  "uiBuilder": { "guidelines": { "model": "deepseek/deepseek-v4.1-flash", "users": ["yschimke"] } }
+  "uiBuilder": { "guidelines": { "model": "deepseek/deepseek-v4.1-flash", "users": ["your-login"] } }
 }
 ```
 
@@ -183,15 +148,14 @@ generated from `ServeSettings.kt`.
   `environment`) and flag every `.env` line shadowing a reviewed value.
 - **Applying:** a **live** setting (the guidelines model, users, orgs, picture budget and triage)
   is re-read the moment it is published; the reply lists it under `applied`. A **restart** setting
-  is stored and applies at the box's next start; the reply lists it under `pending`, and so does
-  `GET /admin/settings` (`"pending": true`) until the box restarts. `publish-config-to-box.sh`
-  restarts it for you — see [Applying config without SSH](#applying-config-without-ssh).
+  is stored and applies at the host's next start; the reply lists it under `pending`, and so does
+  `GET /admin/settings` (`"pending": true`) until the host restarts. The deploy hook can do that
+  restart for you — see [Applying config without SSH](#applying-config-without-ssh).
 - **How it reaches the server:** the entrypoint reads `/config/settings.json` (written by the admin
   route, on the `preview_config` volume) and fills each `SERVE_*` variable compose left empty,
   *before* deriving anything from them — so a value there behaves exactly as the same line in
-  `.env` would. Nothing passes through `docker-compose.yml`, so a box whose checkout lags the image
-  still gets every setting; that drift is what kept the guidelines variables off preview.coo.ee
-  until a manual `git pull`. The playground container reads only the settings it must agree with
+  `.env` would. Nothing passes through `docker-compose.yml`, so a host whose checkout lags the image
+  still gets every setting. The playground container reads only the settings it must agree with
   `preview` on (sign-in, the upload repository, the registry, the start URL).
 - **What stays in `.env`:** secrets (`SERVE_TOKEN`, `SERVE_ADMIN_TOKEN`, `DEPLOY_HOOK_TOKEN`, the
   OAuth client and cookie secrets, the OpenRouter key and its GitHub token) — the file is public —
@@ -212,9 +176,9 @@ docker compose run --rm --no-deps -v "$PWD/.env:/tmp/box.env:ro" \
   --entrypoint /usr/local/bin/env-to-settings.sh preview /tmp/box.env
 ```
 
-Commit it as `deploy/<deployment>/settings.json`, merge, and let the workflow publish it. With the
-`.env` lines still in place nothing changes — they still win. `./env-redundant.sh` then lists them
-under **Duplicating settings.json** (same value: delete) or **Overriding settings.json** (different
+Commit it beside your deployment's other files and publish it. With the `.env` lines still in
+place nothing changes — they still win. `./env-redundant.sh` then lists them under
+**Duplicating settings.json** (same value: delete) or **Overriding settings.json** (different
 value: decide which is right, then delete). Each deletion applies at the next
 `docker compose up -d preview`.
 
@@ -222,11 +186,10 @@ value: decide which is right, then delete). Each deletion applies at the next
 
 Which catalogs the builder offers, and how each is defined, can be maintained in the deployment's
 `catalogs.json` under `uiBuilder`, and changed over `PUT /admin/ui-builder/config` (admin token),
-instead of in `.env`. `publish-config-to-box.sh` reconciles the block from the committed file the
-same way it reconciles the editor pin, and it applies at the box's next start
-(`GET /admin/ui-builder/config` reports `restartRequired`, and what the environment alone, the
-running process and the next start each serve). The publish then restarts the box itself, with no
-downtime and no SSH — see [Applying config without SSH](#applying-config-without-ssh). Switching a
+instead of in `.env`. A change applies at the host's next start (`GET /admin/ui-builder/config`
+reports `restartRequired`, and what the environment alone, the running process and the next start
+each serve); the deploy hook restarts the host with no downtime and no SSH — see
+[Applying config without SSH](#applying-config-without-ssh). Switching a
 catalog to `owned` is a one-line change to the committed `catalogs.json`.
 
 The block holds **overrides of the environment**, not a replacement, so nothing is disrupted by
@@ -257,9 +220,8 @@ Settings that no longer fit together (an owned catalog that is withdrawn) are re
 at startup instead of stopping the box. To move a box over: name a catalog here, publish, restart,
 then delete its `.env` value.
 
-The `shadow` flag, a startup report on what owning a catalog would change, is retired: every
-catalog preview.coo.ee serves has been owned since 2026-10-10. A box `catalogs.json` that still
-names it loads, and the flag is ignored; `PUT /admin/ui-builder/config` refuses it. Secrets and facts about the machine (`SERVE_UI_BUILDER_WEAR`,
+The `shadow` flag, a startup report on what owning a catalog would change, is retired. A
+`catalogs.json` that still names it loads, and the flag is ignored; `PUT /admin/ui-builder/config` refuses it. Secrets and facts about the machine (`SERVE_UI_BUILDER_WEAR`,
 `…_STATE_DIR`, `…_COMPONENTS`, `…_HOST`, the guidelines keys, the admin actors) stay in `.env`.
 `SERVE_UI_BUILDER_PACKS` (`<catalog>=<platform>[,…]`, e.g.
 `confetti-mobile=mobile,confetti-wear=wear`) offers served catalogs as **component packs** inside
@@ -435,8 +397,8 @@ unaffected: a registry catalog badges `unverified` until its producer is added w
 
 A box with a UI-builder lane and either `SERVE_ADMIN_TOKEN` or `SERVE_UI_BUILDER_ADMIN_ACTORS` set
 serves an operator's screen over every design it holds, whoever owns it. The image deployment
-defaults the actor setting to `github:yschimke`; set it explicitly to a comma-separated replacement,
-or to `none` to disable that default. Those people use `/admin/ui-builder` through their
+names no actor by default (`none`); set it explicitly to a comma-separated list such as
+`github:your-login`. Those people use `/admin/ui-builder` through their
 normal GitHub sign-in. Each row names the design, its catalog, its owner, how many editors have it
 open, and carries a **Delete** — the only way a design leaves a host. A delete is durable, closes any
 open editor on the design, and drops its reference overlay and comment threads with it; there is no
@@ -499,26 +461,26 @@ curl -X PUT -H "X-Compose-Preview-Admin-Token: $ADMIN_TOKEN" -H 'Content-Type: a
 curl -X DELETE -H "X-Compose-Preview-Admin-Token: $ADMIN_TOKEN" https://<box>/admin/editor   # roll back to bundled
 ```
 
-`publish-config-to-box.sh` PUTs a committed `editor` entry the same way, and with `--prune` it clears
-a pin the committed file no longer declares. The runtime, export and render-bundle jars stay part of
+A config publish can PUT a committed `editor` entry the same way, and DELETE a pin the committed file
+no longer declares. The runtime, export and render-bundle jars stay part of
 the server release. The editor↔server API version is what keeps a pinned editor compatible with
 them.
 
 ### Serving a catalog on its own hostname
 
 A published catalog can additionally be served on a hostname of its own, where it presents as the
-whole server — `m3.preview.coo.ee` shows what `preview.coo.ee/m3-catalog/` shows, with the catalog's
+whole server — `m3.preview.example.com` shows what `preview.example.com/m3-catalog/` shows, with the catalog's
 landing at `/` and no front door. What that changes about the pages is
 [the public-server design](https://github.com/yschimke/compose-ai-tools/blob/main/docs/public-preview-server.md#top-level-sites-one-catalog-on-a-hostname-of-its-own);
 what it takes to stand one up is a DNS record, an entry in `catalogs.json`, and a caddy restart.
 
-**1. DNS.** A `CNAME` to the box's existing hostname is the simplest form and is what
-`m3.preview.coo.ee` uses — it is a subdomain, so there is no apex-CNAME problem, the IP stays in one
+**1. DNS.** A `CNAME` to the host's existing hostname is the simplest form — for a subdomain such
+as `m3.preview.example.com` it is a subdomain, so there is no apex-CNAME problem, the IP stays in one
 place, and an `AAAA` added later is inherited for free:
 
 ```
-m3.preview.coo.ee.    CNAME  preview.coo.ee.
-wear.preview.coo.ee.  CNAME  preview.coo.ee.
+m3.preview.example.com.    CNAME  preview.example.com.
+wear.preview.example.com.  CNAME  preview.example.com.
 ```
 
 An `A` record straight to the host IP works identically; it is just a second copy of the IP to keep
@@ -529,8 +491,8 @@ which follows the alias without caring that it is one.
 
 ```json
 "sites": [
-  { "host": "m3.preview.coo.ee",   "system": "m3-catalog" },
-  { "host": "wear.preview.coo.ee", "system": "wear-m3-catalog" }
+  { "host": "m3.preview.example.com",   "system": "m3-catalog" },
+  { "host": "wear.preview.example.com", "system": "wear-m3-catalog" }
 ]
 ```
 
@@ -543,24 +505,24 @@ which is either a site nothing routes to or a hostname the app doesn't recognise
 visitor's `Host` through unchanged, so this works whether or not the app is told to read
 `X-Forwarded-Host` (it does only with `SERVE_TRUST_FORWARDED_FOR` set).
 
-It reaches a **running** box the same way a catalog does: `publish-config-to-box.sh` POSTs each
-entry to `/admin/sites` on every push to `main`, after the catalogs (a site may only name a catalog
-the box already serves). `SERVE_SITES` in `.env` still works — it adds any host the file doesn't
+It reaches a **running** host the same way a catalog does: POST each entry to `/admin/sites`, after
+the catalogs (a site may only name a catalog the host already serves), or mount the file read-only
+with the overlay below. `SERVE_SITES` in `.env` still works — it adds any host the file doesn't
 already claim — but it is no longer how a site is added: it predates the admin route, and an
-untracked file is exactly where a hostname goes to drift from `main`. Same for `SITE_DOMAINS`: set
+untracked file is exactly where a hostname goes to drift from version control. Same for `SITE_DOMAINS`: set
 it only for a name the app doesn't serve as a site.
 
-**3. Restart caddy.** The app needs no restart — the reconcile applies the site live. Caddy reads
+**3. Restart caddy.** The app needs no restart — `/admin/sites` applies the site live. Caddy reads
 its config once at start, so the *edge* half lands on the next recreate. `./rollout.sh` won't do it:
 it rolls `preview` only when the *image* changes, and `caddy` isn't rollable at all (fixed 80/443
 ports).
 
 ```bash
 docker compose up -d          # caddy re-reads catalogs.json and asks for any new certificate
-curl -sI https://m3.preview.coo.ee/ | head -1                            # 200 — catalog landing at /
-curl -sI https://m3.preview.coo.ee/m3-catalog/p/button-filled | head -1  # 308 → /p/button-filled
-curl -sI https://m3.preview.coo.ee/wear-m3/ | head -1                    # 404 — neighbours unreachable
-curl -sI https://wear.preview.coo.ee/ | head -1                          # 200 — the Wear catalog's landing
+curl -sI https://m3.preview.example.com/ | head -1                            # 200 — catalog landing at /
+curl -sI https://m3.preview.example.com/m3-catalog/p/button-filled | head -1  # 308 → /p/button-filled
+curl -sI https://m3.preview.example.com/wear-m3/ | head -1                    # 404 — neighbours unreachable
+curl -sI https://wear.preview.example.com/ | head -1                          # 200 — the Wear catalog's landing
 ```
 
 If this box uses GitHub sign-in, set `SERVE_GITHUB_AUTH_COOKIE_DOMAIN` as well — see *GitHub auth*
@@ -574,9 +536,9 @@ same treatment as one spelled out in `.env`.
 > it applies the committed entry live and rewrites the box's copy, so the two converge without the
 > overlay below. Adopt the overlay if you'd rather the committed file be authoritative outright.
 
-### Serving another app's hostname from the same edge
+### Extra sites on the same edge
 
-To put a sibling app on this box behind the same Caddy (same certificates, logs and security
+To put a sibling app on this host behind the same Caddy (same certificates, logs and security
 headers), mount one Caddyfile fragment per hostname into `/etc/caddy/sites.d/` in a Compose
 override you keep beside your `.env`, and name those hostnames in `EXTRA_SITE_DOMAINS` so the
 main block does not claim them too:
@@ -593,20 +555,27 @@ services:
 ```caddyfile
 other.example.com {
 	import edge_common
+	import crawler_block
 	reverse_proxy other-app:8080
 }
 ```
 
+`edge_common` (compression, the credential-filtered access log, security headers) and
+`crawler_block` are snippets defined in the baked [`Caddyfile`](Caddyfile), so every hostname on the
+edge gets the same treatment. The other app has to be reachable from the `caddy` container: put it
+on the same Compose network, or join `caddy` to the app's network in the same override.
+
 The entrypoint installs the mounted fragments on every start, so removing a mount and recreating
-`caddy` removes the site. Validate first with
+`caddy` removes the site. A fragment bind-mounted straight into `/run/caddy-sites/` instead is left
+alone: the entrypoint only removes or replaces files it installed itself. Validate first with
 `docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile`.
 
 ### Config from version control (`docker-compose.deploy-config.yml`)
 
 `/config/catalogs.json` and `/config/producers.json` live on the `preview_config` **named volume**,
 seeded on first boot and never overwritten (#2879 / #2897) so an image roll can't stomp a runtime
-edit. The cost is that config the box has never seen cannot arrive by `git pull` — only by a
-hand-edit or by the additive admin reconcile.
+edit. The cost is that config the host has never seen cannot arrive by `git pull` — only by a
+hand-edit or through the additive admin API.
 
 The opt-in overlay in this directory makes the committed deployment config authoritative instead:
 
@@ -615,20 +584,19 @@ docker compose -f docker-compose.yml -f docker-compose.deploy-config.yml up -d
 ```
 
 or set `COMPOSE_FILE=docker-compose.yml:docker-compose.deploy-config.yml` in `.env` so every later
-`docker compose` here picks it up. It bind-mounts the two files read-only from `DEPLOY_CONFIG_DIR`
-(default `../preview.coo.ee`, the same variable `publish-config-to-box.sh` uses), so deploying
-config becomes `git pull && docker compose up -d`.
+`docker compose` here picks it up. It bind-mounts `catalogs.json`, `producers.json` and `settings.json` read-only from `DEPLOY_CONFIG_DIR`
+(default `../example`; point it at your own deployment directory), so deploying config becomes
+`git pull && docker compose up -d`.
 
 Read-only does **not** break the admin API: `ServeCatalogAdmin.persist()` fails soft, so
 `POST /admin/catalogs` still registers and serves the catalog and only reports back
-`"warning": "not persisted: …"`. In steady state the reconcile never reaches that path — every entry
-it POSTs is already in the file the box booted from, so the admin API answers `409`, which the
-script counts as success. What you give up is a runtime edit outliving a restart, which is the
-point: that edit is drift from `main`.
+`"warning": "not persisted: …"`; an entry already in the file the host booted from answers `409`.
+What you give up is a runtime edit outliving a restart, which is the point: that edit is drift from
+version control.
 
-> **Diff before adopting this on a box that has been running.** The volume file is a superset
+> **Diff before adopting this on a host that has been running.** The volume file is a superset
 > whenever anyone added a catalog or a trusted producer directly on the host, and the overlay swaps
-> it wholesale — anything on the box and not in git stops being served at the next restart, with
+> it wholesale — anything on the host and not in git stops being served at the next restart, with
 > nothing logged. Compare first, and commit whatever is missing:
 > ```bash
 > curl -sH "X-Compose-Preview-Admin-Token: $SERVE_ADMIN_TOKEN" https://<host>/admin/catalogs
@@ -637,8 +605,8 @@ point: that edit is drift from `main`.
 
 ### Reading `/status.json` before you tune anything
 
-Four readings mislead if taken at face value. Each cost real debugging time on `preview.coo.ee`, so
-they are written down rather than rediscovered.
+Four readings mislead if taken at face value. Each cost real debugging time on a production host,
+so they are written down rather than rediscovered.
 
 **`pressure.reason` describes the HOLD, not the moment.** `host recovering` means a limb tripped at
 some point and the gate is now waiting out `optimizerResumeQuietMillis` (30s) of *continuous* calm
@@ -654,13 +622,13 @@ JVMs is normal. Multiply that by a per-daemon memory estimate and you will inven
 that does not exist. `docker compose exec preview ps -eo rss,comm --sort=-rss` is the honest answer.
 
 **`pressure.memoryAvailableFraction` is a spot sample, and it is spiky.** One low reading is not a
-trend — consecutive samples on this box have run 0.19, 0.34, 0.23, 0.48, 0.08, 0.81. Take two before
+trend — consecutive samples on one production host have run 0.19, 0.34, 0.23, 0.48, 0.08, 0.81. Take two before
 believing one, and cross-check against `docker stats`.
 
 **`pressure.loadPerCpu` is a queue depth, not a percentage.** One runnable task per core reads `1.0`;
 a box rendering flat out sits above that. The thresholds take the same units.
 
-### Sizing the box
+### Sizing the host
 
 | Knob | What it bounds | Default |
 | --- | --- | --- |
@@ -722,8 +690,9 @@ passes a variable through (`${VAR:-}`), the entrypoint's default is the one comp
 
 A line holding a setting the deployment's `settings.json` also sets is reported apart from the
 rest: **Duplicating settings.json** when the values match (delete it), **Overriding settings.json**
-when they differ — that `.env` line wins, so the reviewed value is not in force. It compares the
-checkout's `deploy/preview.coo.ee/settings.json` (`SETTINGS_FILE` to point elsewhere) and needs `jq`.
+when they differ — that `.env` line wins, so the reviewed value is not in force. It compares
+`SETTINGS_FILE` (default: `settings.json` in the deployment directory `DEPLOY_SETTINGS_DIR` beside
+this one, `example` unless set) and needs `jq`.
 
 ### Warming the theme cache aggressively
 
@@ -749,8 +718,8 @@ demanding half a minute of unbroken calm before coming back.
 **`optimizerResumeQuietMillis` is the knob people miss.** Rendering is bursty by nature, so a
 30-second recovery window is long enough for the optimizer's own next burst to re-trip whichever
 limb it just cleared. The gate then holds more or less permanently on a box whose every individual
-reading looks healthy — see *Reading `/status.json`* above for the signature. Measured on
-`preview.coo.ee`, gate-wait ran 5-35x the actual render time in that state, and roughly half of all
+reading looks healthy — see *Reading `/status.json`* above for the signature. Measured on a
+production host, gate-wait ran 5-35x the actual render time in that state, and roughly half of all
 turns had to be granted by the ten-minute forced-turn ceiling rather than by the gate opening.
 
 **Leave the memory thresholds alone.** CPU and load contention costs latency and recovers on its
@@ -819,13 +788,13 @@ too, and the queue can be paused or waiting on admission — the count cannot te
 does not claim to. A `· N failed` beside it is the one to act on: those are targets the pass has
 given up re-rendering, and they stay on the old pixels until something changes.
 
-### GitHub auth on `preview.coo.ee`
+### GitHub auth
 
 To keep catalog browsing public while requiring GitHub sign-in for live sessions and playground,
 create a GitHub OAuth app with callback:
 
 ```text
-https://preview.coo.ee/auth/github/callback
+https://preview.example.com/auth/github/callback
 ```
 
 Then add the OAuth values to the host `.env` and recreate the preview service:
@@ -841,18 +810,18 @@ The compose profile derives the callback base URL from `DOMAIN`; set
 
 ### Optional UI Builder hostname
 
-Set `SERVE_UI_BUILDER_HOST=ui.coo.ee` to serve the existing editor on an additional
-hostname. Point its DNS A/AAAA records at this deployment (a CNAME to `preview.coo.ee`
+Set `SERVE_UI_BUILDER_HOST=ui.example.com` to serve the existing editor on an additional
+hostname. Point its DNS A/AAAA records at this deployment (a CNAME to `preview.example.com`
 also works). Compose passes the name to both the server and Caddy, which provisions
 TLS using the existing proxy block. Recreate the preview and Caddy containers after
 changing `.env`.
 
-`https://ui.coo.ee/` redirects to `https://ui.coo.ee/ui-builder/`, preserving the query.
+`https://ui.example.com/` redirects to `https://ui.example.com/ui-builder/`, preserving the query.
 Editor assets, REST APIs, preview frames and WebSockets use that same origin and the
-same backend/design store. Existing `preview.coo.ee/ui-builder/` links continue to work.
+same backend/design store. Existing `preview.example.com/ui-builder/` links continue to work.
 
-To make the hostname the builder — `https://ui.coo.ee/` the editor's home and
-`https://ui.coo.ee/<design>` a design — also set `SERVE_UI_BUILDER_HOST_ROOT=true`
+To make the hostname the builder — `https://ui.example.com/` the editor's home and
+`https://ui.example.com/<design>` a design — also set `SERVE_UI_BUILDER_HOST_ROOT=true`
 (`uiBuilder.hostRoot` in settings.json). On that host:
 
 - every server route keeps its path: `/start`, `/api/…`, `/mcp`, `/agent-access/…`,
@@ -874,29 +843,29 @@ A design whose id is a reserved segment (a design named `api`) has no rooted URL
 For shared GitHub sign-in between these sibling hosts, explicitly set:
 
 ```dotenv
-SERVE_UI_BUILDER_HOST=ui.coo.ee
-SERVE_GITHUB_AUTH_COOKIE_DOMAIN=coo.ee
-SERVE_GITHUB_AUTH_CALLBACK_BASE_URL=https://preview.coo.ee
+SERVE_UI_BUILDER_HOST=ui.example.com
+SERVE_GITHUB_AUTH_COOKIE_DOMAIN=example.com
+SERVE_GITHUB_AUTH_CALLBACK_BASE_URL=https://preview.example.com
 SERVE_UI_BUILDER_START_URL=https://yschimke.github.io/compose-ui-builder/
 SERVE_CLI_START_URL=https://yschimke.github.io/compose-ai-tools/
 ```
 
-Keep the OAuth app's callback at `https://preview.coo.ee/auth/github/callback`.
+Keep the OAuth app's callback at `https://preview.example.com/auth/github/callback`.
 The configured builder hostname joins the existing callback return allowlist and
 browser-origin checks. The auth cookies retain `Secure`, `HttpOnly`, `SameSite=Lax`
-and `Path=/`. A cookie domain of `preview.coo.ee` cannot cover `ui.coo.ee`; the image
-never automatically widens it to `coo.ee`. Every subdomain of `coo.ee` receives the
+and `Path=/`. A cookie domain of `preview.example.com` cannot cover `ui.example.com`; the image
+never automatically widens it to `example.com`. Every subdomain of `example.com` receives the
 shared session, so this configuration assumes control of that whole domain.
 
-When widening an existing `Domain=preview.coo.ee` deployment to `coo.ee`, browsers keep
-the old `Domain=preview.coo.ee` cookies beside the new ones. The server expires the
+When widening an existing `Domain=preview.example.com` deployment to `example.com`, browsers keep
+the old `Domain=preview.example.com` cookies beside the new ones. The server expires the
 host-only variant and every variant scoped between the request's host and the configured
 domain whenever it sees them, and the callback accepts a state matching any `cp_gh_state`
 the browser sends, so existing visitors sign in again without clearing cookies by hand.
 
 The optional start URL makes `/start` on the builder hostname redirect to the guide.
 `SERVE_CLI_START_URL` (settings.json's `cli.startUrl`) does the same for `/start` on every other
-host — `preview.coo.ee/start` and each top-level site — sending it to the CLI and project-previews
+host — `preview.example.com/start` and each top-level site — sending it to the CLI and project-previews
 guide; unset, `/start` there stays the default catalog's landing.
 It does not relocate GitHub Pages. Serving the guide directly at `/start/` requires a
 separate static-site build with its asset base set to `/start/`, deployed alongside
@@ -905,7 +874,7 @@ change DNS or publish/move the guide automatically.
 
 **With top-level sites configured, the cookies need a domain.** `SERVE_GITHUB_AUTH_COOKIE_DOMAIN`
 scopes both auth cookies to a parent domain, so one sign-in covers this host and every site
-hostname under it — sign in on `preview.coo.ee` and `m3.preview.coo.ee` is signed in too. Without it
+hostname under it — sign in on `preview.example.com` and `m3.preview.example.com` is signed in too. Without it
 the cookies are host-only: a sign-in started on a site host writes its state cookie there while
 GitHub returns to the pinned callback origin, the callback sees no state, and the server withholds
 the sign-in affordance on every site (live and playground stay snapshot-only there). The entrypoint
@@ -913,7 +882,7 @@ derives it from `DOMAIN` when the box has any site configured — `SERVE_SITES`,
 `catalogs.json`; set it explicitly to narrow it, or to `none` to keep cookies host-only:
 
 ```bash
-SERVE_GITHUB_AUTH_COOKIE_DOMAIN=preview.coo.ee
+SERVE_GITHUB_AUTH_COOKIE_DOMAIN=preview.example.com
 ```
 
 Every host under that domain is inside the session's reach, so name the narrowest one covering your
@@ -923,7 +892,7 @@ startup rather than producing cookies the browser drops silently. Empty `SERVE_G
 signed-in GitHub user to use live previews; playground additionally requires **write** access to
 `SERVE_GITHUB_AUTH_REPO` (default `yschimke/compose-ai-tools`). Set `SERVE_GITHUB_AUTH_USERS` to a
 comma-separated login list only if you want to narrow sign-in for both surfaces. With a list set,
-`SERVE_GITHUB_AUTH_ORGS` (comma-separated GitHub organizations, e.g. `google`) admits every member
+`SERVE_GITHUB_AUTH_ORGS` (comma-separated GitHub organizations, e.g. `your-org`) admits every member
 of those orgs as though they were on the list, which is how a whole team gets edit access without
 anyone maintaining logins; it adds `read:org` to the requested scope, and a private membership only
 counts where the org allows this OAuth app (a public membership always does). With a list or orgs set,
@@ -944,7 +913,7 @@ with its link can open it read-only, signed in or not, and the link unfurls
 with the design's own picture. Only the owner and the people they share with can change it, and a
 public design is not listed on anybody else's designs page. Owners switch any one design between
 public and private from its share page. Unset (or `private`) keeps the old behaviour: a design is
-private to its owner and whoever it is shared with. preview.coo.ee runs `public`.
+private to its owner and whoever it is shared with.
 
 ### UI-builder guidelines check
 
@@ -958,8 +927,8 @@ unless both are set:
 
 ```
 SERVE_UI_BUILDER_GUIDELINES_OPENROUTER_KEY=sk-or-...   # read by the server, never put on argv
-SERVE_UI_BUILDER_GUIDELINES_USERS=yschimke             # GitHub logins who may spend it, and/or
-SERVE_UI_BUILDER_GUIDELINES_ORGS=google                # members of these GitHub orgs
+SERVE_UI_BUILDER_GUIDELINES_USERS=your-login           # GitHub logins who may spend it, and/or
+SERVE_UI_BUILDER_GUIDELINES_ORGS=your-org              # members of these GitHub orgs
 ```
 
 Only the key (and the GitHub token below) belongs in `.env`. Who may spend it, the model, the
@@ -1008,9 +977,9 @@ the rest are left out, named in its provenance, and attached the next time it is
 renderer drew at some other size than its frame is left out too, rather than shown as something it
 is not.
 
-### Playground on `preview.coo.ee`
+### Playground
 
-> **preview.coo.ee runs the engine without the playground.** `SERVE_COMPILE_ENGINE=1` starts the
+> **The engine can run without the playground.** `SERVE_COMPILE_ENGINE=1` starts the
 > compile engine described below for the UI builder's native preview and inline Remote Compose
 > capture, and leaves the public surface unmounted: `/playground` answers with the disabled page,
 > `/pg/` and `POST /api/{v}/compiler/run` are absent, and no viewer or catalog page offers the
@@ -1135,7 +1104,7 @@ catalog page offers "open in playground", and the editor's Run returns a frame.
 **Turn it off** by unsetting the three settings and running `docker compose up -d`. Caddy then
 sends the playground's paths back to `preview`, which shows its disabled page.
 
-### Image lane on `preview.coo.ee`
+### Image lane
 
 `POST /images` lets an agent that just rendered a preview hand the PNG to this box and get back an
 embeddable `/i/<id>.png` for a pull-request body — the mechanism
@@ -1148,7 +1117,7 @@ fetches an embedded image anonymously, so the unguessable 128-bit id is the whol
 Turning it on is naming that repository:
 
 ```bash
-SERVE_IMAGE_UPLOAD_REPO=yschimke/compose-ai-tools
+SERVE_IMAGE_UPLOAD_REPO=your-org/your-repo
 # optional: SERVE_IMAGE_TTL=604800 (7d default) · SERVE_IMAGE_RATE_LIMIT=60 (uploads/min/account)
 ```
 
@@ -1182,18 +1151,18 @@ reached the upload gets a `503` and nothing is cached.
 The derivation deliberately does **not** key on GitHub auth being configured, the way
 `SERVE_AGENT_GRANTS` does. The gating repository falls back to `SERVE_GITHUB_AUTH_REPO`, which this
 image defaults to `yschimke/compose-ai-tools` for the playground — so keying on auth would open an
-upload lane on every adopter's box gated by *our* collaborators rather than theirs. An operator who
+upload lane on every adopter's host gated by that repository's collaborators rather than theirs. An operator who
 wants that fallback still gets it by naming the repository explicitly.
 
 Verify after a roll — the row on `/status`, and the refusal an unauthenticated caller gets, which is
 the same route answering rather than a 404:
 
 ```bash
-curl -s https://preview.coo.ee/status.json | jq '.config | {acceptImages, imageUploadRepository}'
+curl -s https://preview.example.com/status.json | jq '.config | {acceptImages, imageUploadRepository}'
 curl -sS -o /dev/null -w '%{http_code}\n' -X POST --data-binary @render.png \
-  'https://preview.coo.ee/images?name=after.png'                       # 401 — lane is up, no credential
+  'https://preview.example.com/images?name=after.png'                  # 401 — lane is up, no credential
 curl -sS -H "Authorization: Bearer $GITHUB_TOKEN" --data-binary @render.png \
-  'https://preview.coo.ee/images?name=after.png'                       # 201 + the markdown to paste
+  'https://preview.example.com/images?name=after.png'                  # 201 + the markdown to paste
 ```
 
 ### Widening the background render lane (`SERVE_BACKGROUND_RENDERS`)
@@ -1207,8 +1176,8 @@ from `SERVE_LIVE_SEATS`:
 ```
 
 **The clamp is reached at 8 seats**, so on a bigger box the lane stops widening while everything
-else scales with the budget. Raising `SERVE_LIVE_SEATS` from 8 to 12 on `preview.coo.ee` — a
-container allowed 24 GB — left the lane at 3, unchanged.
+else scales with the budget. Raising `SERVE_LIVE_SEATS` from 8 to 12 on a container allowed 24 GB
+left the lane at 3, unchanged.
 
 Name it explicitly to go past that:
 
@@ -1235,7 +1204,7 @@ resulting failure points back at the change.
 
 Since 2.3.5 the entrypoint re-adds any `-Dcomposeai.cli.lib*Dir` a replaced string dropped, and
 logs that it did: losing those is what silently turns every live render lane into baked snapshots.
-It cost preview.coo.ee its desktop catalogs, under a degradation that blamed a daemon which "could
+It once cost a production host its desktop catalogs, under a degradation that blamed a daemon which "could
 not be started". A path you set yourself is left alone. Everything else the baked string carries —
 the heap ceiling, the render timeouts, the sandbox boot budgets — is still yours to lose, so use
 `SERVE_JAVA_OPTS`.
@@ -1284,7 +1253,7 @@ a hundred entries an hour against a warm render of well under a second. What tha
 
 - `turnsGranted` and `turnsYielded` within a handful of each other on every catalog: every turn the
   gate hands out is being taken straight back.
-- `gateWaitMillis` several times `renderMillis` — measured on `preview.coo.ee`, 1,789s against 427s.
+- `gateWaitMillis` several times `renderMillis` — measured on a production host, 1,789s against 427s.
 - `themeOptimizer.pressure.constrained` **false** and memory healthy, so nothing else is the cause.
 
 ```
@@ -1298,8 +1267,8 @@ waits at most the render already in flight either way.
 ### Warmed theme renders survive a deploy (`SERVE_THEME_CACHE_DIR`)
 
 The server pre-renders every catalog preview under every declared theme while the box is idle, so a
-visitor's theme selection is instant rather than a cold render. On `preview.coo.ee` that is 18,604
-renders, and it takes the better part of a day of quiet to fill.
+visitor's theme selection is instant rather than a cold render. On a host serving a large catalog
+set that is 18,604 renders, and it takes the better part of a day of quiet to fill.
 
 **That work is held on disk by default**, on the dedicated `preview_theme_cache` volume:
 
@@ -1360,7 +1329,7 @@ every writer first. Clearing the marker by hand is safe once the roll has settle
 renderer change needs none of this; the fingerprint and the sample verification are what that is
 for.
 
-Read `themeCache` on [`/status.json`](https://preview.coo.ee/status.json) to confirm it is on — it
+Read `themeCache` on `/status.json` to confirm it is on — it
 is `null` when there is no disk tier, and each catalog's `renderCache.persisted` is `null` beside
 it. `renderCache.persistenceOff` names the reason when a catalog fell back to memory-only for some
 *other* cause (an unreadable launch descriptor, a fingerprint it could not compute).
@@ -1554,12 +1523,13 @@ the *old* `:latest`.
 - Single-flight: overlapping calls fold into the in-progress roll instead of launching
   parallel rollouts.
 
-**Wiring it up.** `setup.sh` generates `DEPLOY_HOOK_TOKEN` into `.env` and prints it;
-add the **same value** as the repo's `DEPLOY_HOOK_TOKEN` Actions secret. If the box
-isn't `preview.coo.ee`, also set a `DEPLOY_HOOK_URL` repo *variable* to
-`https://<your-domain>/__hooks/rollout`. The CI step is **best-effort** — with no
-secret it's skipped, and any failure just falls back to the poll loop, which still
-rolls within one interval. To disable the webhook entirely, comment out the `hook`
+**Wiring it up.** `setup.sh` generates `DEPLOY_HOOK_TOKEN` into `.env` and prints it. Whatever
+publishes or watches your images calls the hook with that bearer token. If you build the image from
+a fork of this repository, `preview-host-image.yml` does it for you once the repository has a
+`DEPLOY_HOOK_URL` *variable* (`https://<your-domain>/__hooks/rollout`) and a `DEPLOY_HOOK_TOKEN`
+secret holding the same value; with no variable the step does not run. The notification is
+**best-effort** — any failure just falls back to the poll loop, which still rolls within one
+interval. To disable the webhook entirely, comment out the `hook`
 service **and** the Caddyfile `/__hooks/rollout` route; the poll loop keeps working.
 
 ### Applying config without SSH
@@ -1567,38 +1537,26 @@ service **and** the Caddyfile `/__hooks/rollout` route; the poll loop keeps work
 The UI-builder catalog settings (`catalogs.json` `uiBuilder`), the editor pin and the **restart**
 settings in `settings.json` are read once, when the server starts. Publishing one writes it through
 the admin API and the reply says `restartRequired` (or `pending`) — written, not yet serving. The
-hook's second route is what closes that:
+hook's second route is what closes that: after a PUT that owes a restart, POST
+`/__hooks/restart` with the same bearer token, and a fresh replica of the **same tag** boots on the
+new config, goes healthy and takes the traffic.
 
-> edit `deploy/preview.coo.ee/catalogs.json` (or `settings.json`) → merge → `publish-preview-config.yml`
-> → `publish-config-to-box.sh` PUTs it → a reply owes a restart → **the publish POSTs
-> `/__hooks/restart`** → `hook` runs `rollout.sh --force` → a fresh replica of the **same tag** boots
-> on the new config, goes healthy, takes the traffic → the publish reads the three admin routes
-> until none owes a restart (three clean reads in a row, since both replicas answer mid-swap)
+```bash
+curl -sX POST -H "Authorization: Bearer $DEPLOY_HOOK_TOKEN" https://<host>/__hooks/restart
+```
 
 - **Same zero-downtime swap** as an image update, minus the new digest: `rollout.sh --force`
   (`ROLLOUT_FORCE=1`) rolls even when the pulled image is the one running.
 - **Same safety argument** as `/__hooks/rollout`: same token, same single-flight lock, and the
   caller still cannot choose the image — a leaked token buys at most a restart of the pinned tag.
 - **A restart is never folded into a rollout already running**, which may have booted its replica
-  before the config was written: the hook answers `409` and the publish retries. A forced
-  `rollout.sh` that finds the cross-container lock held waits for it rather than skipping.
-- **Proven, not assumed.** If the box still owes a restart after `RESTART_WAIT_SECONDS` (900), the
-  publish step fails. A read only counts as clean when the route answers a 200 JSON document with
-  `restartRequired: false` (a 404 route is skipped); errors, 5xx and unparseable replies keep the
-  wait going, so an admin-API outage fails the step instead of passing it. `--no-restart` (or `NO_RESTART=1`) writes the config and leaves the restart to
-  you; with no `DEPLOY_HOOK_TOKEN` secret it warns and the config applies at the next image roll.
-- **`--prune` clears count too.** Deleting the editor pin, the `uiBuilder` block or the settings
-  because the committed file no longer declares them owes a restart exactly as writing them does.
-- **Wiring:** the same `DEPLOY_HOOK_TOKEN` secret as the image publish. The hook URL defaults to
-  `${DEPLOY_BASE_URL}/__hooks/restart`, so the box restarted is the box written; set a
-  `DEPLOY_HOOK_RESTART_URL` repo variable only when the hook lives somewhere else.
-
-**One-time step on an existing box.** The `hook` and `rollout` services run `deploy-hook.sh` and
-`rollout.sh` from the box's checkout of `deploy/image/` (bind-mounted at `/workspace`), which only a
-`git pull` there updates — the image roll does not. Until it is pulled once, the box's hook treats
-`/__hooks/restart` as a plain digest-gated rollout (a no-op without a new image), and the publish
-says so when its restart never takes effect. The Caddyfile route ships in the caddy image and
-arrives through Watchtower on its own. After that pull, config changes need no SSH.
+  before the config was written: the hook answers `409`, so retry. A forced `rollout.sh` that finds
+  the cross-container lock held waits for it rather than skipping.
+- **Check it took:** read `GET /admin/settings`, `/admin/ui-builder/config` and `/admin/editor`
+  until none owes a restart. Read more than once in a row — both replicas answer mid-swap.
+- The `hook` and `rollout` services run `deploy-hook.sh` and `rollout.sh` from this checkout
+  (bind-mounted at `/workspace`), so a change to them reaches the host with its next `git pull`,
+  not with the image roll.
 
 **How the swap stays seamless.** `preview` has a Docker `healthcheck` on the
 app's ungated `/readyz` **readiness** route — green only once the new replica has
@@ -1621,24 +1579,6 @@ plugins dir (no runtime download).
 > force a zero-downtime update by hand with `sudo docker rollout preview` (or
 > `./rollout.sh`, which pulls first and only rolls if the image changed).
 
-> **Adopting this on a box first started before the project name was pinned.**
-> `docker-compose.yml` now sets `name: compose-preview` so the `rollout`
-> container's Compose commands target the same project as the host. A box brought
-> up before that change ran under the **directory-derived** project name (`image`
-> when deployed the documented way, from `deploy/image/`). Because the new `name:`
-> takes precedence, a plain `docker compose down` here would target the *new,
-> empty* `compose-preview` project and leave the old stack running — colliding on
-> ports 80/443. So stop the **old** project by name first, then start the pinned
-> one:
->
-> ```bash
-> docker compose ls                # find the old project name (e.g. `image`)
-> docker compose -p image down     # stop the OLD stack explicitly
-> docker compose up -d             # start the pinned `compose-preview` project
-> ```
->
-> One brief restart; rolling from then on.
-
 **The reverse-proxy config auto-deploys too.** The `caddy` service runs
 `ghcr.io/…/compose-preview-caddy:latest` — a `caddy:2` image with
 `deploy/image/Caddyfile` **baked in** — rather than `caddy:2` + a bind-mounted
@@ -1653,14 +1593,10 @@ Certs survive a recreate (they live in the `caddy_data` volume, so no
 re-provision / rate-limit). `{$DOMAIN}` is still read from `.env` at runtime.
 Pin a specific config with `CADDY_IMAGE_TAG=sha-<commit>` in `.env`.
 
-> **Migrating an existing box** from the old `caddy:2` + `./Caddyfile` mount: pull
-> this compose and `docker compose up -d` once — it swaps in the baked image. After
-> that, Caddyfile edits ride Watchtower with no manual `caddy reload`.
-
 > **First publish is private — make it public once.** GHCR packages default to
 > private, so after `preview-caddy-image.yml`'s first run, set the new
 > `compose-preview-caddy` package **public** (Packages → settings), exactly like
-> `compose-preview-host` above. Otherwise a fresh or migrating box's unauthenticated
+> `compose-preview-host` above. Otherwise a fresh host's unauthenticated
 > `docker compose pull` fails on the caddy image *before Caddy can start* — no TLS,
 > no proxy. (Alternatively, give the box registry creds — see *Private GHCR
 > package* below; it now covers the caddy image too, not just the server.)
@@ -1785,66 +1721,35 @@ should never show two different typefaces.
 
 ## Optional interaction analytics
 
-[Umami deployment](../analytics/README.md) runs alongside this stack, with a private dashboard
-and collection routes through Caddy. Set `SERVE_UMAMI_ENABLED=1`, `SERVE_UMAMI_URL` and
-`SERVE_UMAMI_WEBSITE_ID` to enable the browser integration. The switch defaults to `0`;
-configured URL/ID values alone never enable analytics. The normal stack does not install Umami.
+The server can add an [Umami](https://umami.is) script to the pages it serves. Run Umami yourself;
+the baked Caddyfile already exposes its two collection paths (`/__analytics/script.js` and
+`/__analytics/api/send`) for a container named `umami` on the same Compose network, so add it in a
+Compose override and keep its dashboard off the public edge. Set `SERVE_UMAMI_ENABLED=1`,
+`SERVE_UMAMI_URL` and `SERVE_UMAMI_WEBSITE_ID` (or `analytics.umami` in `settings.json`) to enable
+the browser integration. The switch defaults to `0`; configured URL/ID values alone never enable
+analytics. The normal stack does not install Umami.
 
-### Public read-only Home Assistant demo (opt-in)
-
-The `/demo-ha/*` API for `https://ha.coo.ee/demo` is a separate, dedicated Home Assistant instance
-with only generic simulated data. Its provisioning, public protocol, private token handling and
-security verifier live in
-[`homeassistant-remotecompose/deploy/demo-ha`](https://github.com/yschimke/homeassistant-remotecompose/tree/main/deploy/demo-ha).
-The frontend `/demo` route is owned by that repository's Wasm frontend work.
-
-First provision that stack **on this host**, run its edge-network verifier, and only then add
-`docker-compose.demo-ha.yml` to this box's existing `COMPOSE_FILE`, keeping all existing overlays:
-
-```sh
-# Example; preserve whatever overlays this deployment already uses.
-COMPOSE_FILE=docker-compose.yml:docker-compose.deploy-config.yml:docker-compose.demo-ha.yml
-# Save the choice in the host's .env, then recreate only Caddy:
-docker compose config --quiet
-docker compose up -d --no-deps caddy
-```
-
-The overlay joins Caddy to the pre-existing `public-demo-ha_edge` network and mounts a route snippet
-into the optional import in `ha.caddy` (also mounted by the overlay, so staging this does not
-require publishing a Caddy image first). It strips `/demo-ha` and forwards only to
-`demo-ha-gateway:8080`. Caddy is **not** on HA's private network, and native HA's 8123 API, onboarding
-and admin interface are not routed. No administrative credential belongs in Caddy, this repository,
-the frontend or a URL. Without the overlay this route is absent; existing designs/auth/builder and
-frontend routes are unchanged. Backend changes can be staged without reloading preview services.
-
-After enabling the route, run the backend's `verify_public.py https://ha.coo.ee/demo-ha --stream`
-from an external client. It verifies reads, rejects REST/WebSocket mutations and observes an actual
-simulated state update. Record the result; the configuration by itself does not prove a deployment.
-Rollback: remove this overlay from `COMPOSE_FILE`, recreate only Caddy, and stop the dedicated demo
-stack while retaining its volume and private credential files.
-
-#### An overlay outside this directory must be mounted into `rollout` and `hook`
+## An overlay outside this directory must be mounted into `rollout` and `hook`
 
 `rollout` and `hook` run `docker compose` from inside their own containers, which mount only this
-directory, at `/workspace`. A `COMPOSE_FILE` entry given by an absolute host path elsewhere — the
-native demo's `/root/public-demo-ha/caddy.native.yaml`, say — loads on the host and fails in both
-of them, and with it every rollout. Mount that directory into both services at the same path, in the
-box's `docker-compose.override.yml`, then recreate only those two. An explicit `COMPOSE_FILE` turns
+directory, at `/workspace`. A `COMPOSE_FILE` entry given by an absolute host path elsewhere —
+`/srv/other-app/caddy.yaml`, say — loads on the host and fails in both of them, and with it every
+rollout. Mount that directory into both services at the same path, in the host's
+`docker-compose.override.yml`, then recreate only those two. An explicit `COMPOSE_FILE` turns
 off Compose's automatic override discovery, so the override must itself be one of its entries:
 
 ```sh
-COMPOSE_FILE=docker-compose.yml:docker-compose.override.yml:docker-compose.demo-ha.yml:/root/public-demo-ha/caddy.native.yaml
+COMPOSE_FILE=docker-compose.yml:docker-compose.override.yml:/srv/other-app/caddy.yaml
 ```
-
 
 ```yaml
 services:
   rollout:
     volumes:
-      - /root/public-demo-ha:/root/public-demo-ha:ro
+      - /srv/other-app:/srv/other-app:ro
   hook:
     volumes:
-      - /root/public-demo-ha:/root/public-demo-ha:ro
+      - /srv/other-app:/srv/other-app:ro
 ```
 
 ```sh
@@ -1852,6 +1757,5 @@ docker compose up -d --no-deps rollout hook
 docker compose exec -T rollout docker compose config --quiet   # must print nothing
 ```
 
-Left unmounted, the hook answers the publish CI's `POST /__hooks/rollout` with a 500 naming the
-missing file and the release fails at once. Before that check it answered 202, the poller skipped every
-cycle in silence, and the 3.145.0 release waited out its ten minutes against a box still on 3.144.0.
+Left unmounted, the hook answers `POST /__hooks/rollout` with a 500 naming the missing file, so a
+release notification fails at once instead of the poller skipping every cycle in silence.

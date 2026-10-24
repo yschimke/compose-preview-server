@@ -3,7 +3,7 @@
 #
 # Memory alone was the wrong input. A permit buys a render daemon and a render is CPU-bound, so a
 # RAM-rich, core-poor box derived a budget it could not work — and the old [2, 8] clamp meant a large
-# box stopped scaling at all. Measured on preview.coo.ee (48 GiB, 8 cores): memory afforded 40, the
+# box stopped scaling at all. Measured on a production host (48 GiB, 8 cores): memory afforded 40, the
 # clamp allowed 8, and the box ran a fifth of what its cores could drive.
 set -euo pipefail
 
@@ -73,7 +73,7 @@ check 0 8 2 "unknown memory falls back to the floor, not a negative"
 # ~93-96% utilisation by construction. The optimizer refuses to resume below 25% free
 # (`resumeMemoryAvailableFraction`), so any box where memory was the binding side sized itself into
 # permanent suspension: renders still succeeded, `status` still read ok, and background theme
-# optimisation simply never progressed. Measured on preview.coo.ee at ~11 GiB / 8 cores: 8 seats,
+# optimisation simply never progressed. Measured on a production host at ~11 GiB / 8 cores: 8 seats,
 # 15.5% available, 153 suspensions to 48 resumes.
 #
 # So assert the property rather than the numbers: projected utilisation stays within budget for

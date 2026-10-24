@@ -19,8 +19,8 @@
 # still needs its own DNS record. Empty (the default) leaves this block exactly as
 # it was.
 # Shared by every site this box serves: compression, the credential-filtered access log, and the
-# security headers. The {$DOMAIN} block below imports it, and so does an optional site imported at
-# the end of this file (ha.caddy for HA_DOMAIN), so every hostname gets the same log and headers.
+# security headers. The {$DOMAIN} block below imports it, and so should every extra site fragment
+# imported at the end of this file, so every hostname gets the same log and headers.
 (edge_common) {
 	encode zstd gzip
 
@@ -100,22 +100,21 @@
 	header @sameOriginFramesOnly ?X-Frame-Options SAMEORIGIN
 }
 
-# Shared by every site this box serves (ha.caddy imports it too), so no hostname is a way round it.
+# Shared by every site this host serves (extra site fragments import it too), so no hostname is a way
+# round it.
 (crawler_block) {
 	# meta-externalagent is blocked outright. It ignores robots.txt, and on this box it
 	# was not a tax on serving — it WAS the load.
 	#
-	# Measured over ~20k logged requests: 18,855 of them, 94% of ALL traffic, ~4.7 req/s
-	# sustained. Among them 4,126 /reference/, 2,356 /rc-compare/, 481 /compare, 342
-	# /api/ and 30 /playground — every one Disallowed by the robots.txt this server
-	# generates itself (ServeSiteIndex.robotsTxt), whose Crawl-delay: 10 it also ignores.
+	# Measured over ~20k logged requests on a public host: 18,855 of them, 94% of ALL
+	# traffic, ~4.7 req/s sustained. Among them 4,126 /reference/, 2,356 /rc-compare/, 481
+	# /compare, 342 /api/ and 30 /playground — every one Disallowed by the robots.txt this
+	# server generates itself (ServeSiteIndex.robotsTxt), whose Crawl-delay: 10 it also ignores.
 	#
-	# Why it took the box down rather than merely slowing it: each catalog URL it walked
-	# OPENED that catalog's render daemon (~1.1 GB resident, 3 Robolectric sandboxes).
-	# It walked m3-catalog, remote-m3, wear-m3-catalog, horologist, m3-samples,
-	# compose-m3, meshcore-mobile and homeassistant-remotecompose — exactly the resident
-	# set that filled the container and had the kernel OOM-kill the serve JVM every
-	# 20-60 min. Raising PREVIEW_MEM_LIMIT 16g -> 24g only bought it more room to fill,
+	# Why it took the host down rather than merely slowing it: each catalog URL it walked
+	# OPENED that catalog's render daemon (~1.1 GB resident, 3 Robolectric sandboxes), so
+	# it walked every published catalog into the resident set — which filled the container
+	# and had the kernel OOM-kill the serve JVM every 20-60 min. Raising PREVIEW_MEM_LIMIT 16g -> 24g only bought it more room to fill,
 	# because nothing sheds a resident daemon until #898 ships.
 	#
 	# THE COST, accepted deliberately: meta-externalagent is also Meta's link UNFURLER,
@@ -179,21 +178,20 @@
 		}
 	}
 
-	# Analytics: expose collection only; the dashboard stays on the host loopback port.
+	# Analytics (optional): expose collection only, for an Umami container named `umami` on the
+	# same network; the dashboard stays on the host loopback port. Without one these two paths 502.
 	@analytics path /__analytics/script.js /__analytics/api/send
 	handle @analytics {
 		uri strip_prefix /__analytics
 		reverse_proxy umami:3000
 	}
 
-	# A browser opening the UI builder on any host but SERVE_UI_BUILDER_HOST (ui.coo.ee on
-	# preview.coo.ee) is sent to that host, so the editor has one address and one cookie scope.
+	# A browser opening the UI builder on any host but SERVE_UI_BUILDER_HOST (e.g. ui.example.com
+	# beside preview.example.com) is sent to that host, so the editor has one address and one cookie scope.
 	# Navigations only — a GET/HEAD with an HTML Accept on /ui-builder — so its APIs, assets and MCP
 	# stay reachable on every host, and a form POST from a tab still open on the old host is not
 	# turned into a GET by the 302 (losing its body and its mutation). Inert when the variable is
-	# unset. This used to live only in preview.coo.ee's untracked Caddyfile.ui-domain, mounted over
-	# this file by a box-local compose override — which meant no change committed here (the
-	# /__hooks/restart route of #1512 included) reached that box.
+	# unset.
 	@builderNavigation {
 		expression `{env.SERVE_UI_BUILDER_HOST} != "" && {host} != {env.SERVE_UI_BUILDER_HOST}`
 		method GET HEAD

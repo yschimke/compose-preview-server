@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Guard: env-to-settings.sh drafts settings.json from a box's .env without ever emitting a secret.
 #
-# The fixture is preview.coo.ee's .env by NAME — every key the box sets, as of the move to
+# The fixture is a production host's .env by NAME — every key that host set, as of the move to
 # settings.json — with made-up values. The real values never left the box; the names are enough to
 # prove each one lands where it should: a managed setting in the draft, a catalogs.json setting
 # pointed at, and everything else (secrets, machine sizing) left alone.

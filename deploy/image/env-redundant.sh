@@ -24,8 +24,9 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 env_file="${ENV_FILE:-${here}/.env}"
 entrypoint="${ENTRYPOINT_FILE:-${here}/entrypoint.sh}"
 # The deployment's settings.json (SETTINGS.md): a managed setting it holds is one .env should no
-# longer carry. The checkout's copy is what the publish workflow sends the box.
-settings_file="${SETTINGS_FILE:-${here}/../${DEPLOY_SETTINGS_DIR:-preview.coo.ee}/settings.json}"
+# longer carry. SETTINGS_FILE names it directly; otherwise DEPLOY_SETTINGS_DIR names the deployment
+# directory beside this one (deploy/example by default).
+settings_file="${SETTINGS_FILE:-${here}/../${DEPLOY_SETTINGS_DIR:-example}/settings.json}"
 settings_schema="${SETTINGS_SCHEMA:-${here}/settings.schema.json}"
 
 [[ -f "${env_file}" ]] || {
@@ -65,7 +66,7 @@ compose_value() {
 
 # `COMPOSE_FILE` selects them, and this deployment documents an overlay
 # (`docker-compose.yml:docker-compose.deploy-config.yml`) that carries defaults of its own —
-# `${DEPLOY_CONFIG_DIR:-../preview.coo.ee}` among them. Reading only the base file tells an operator
+# `${DEPLOY_CONFIG_DIR:-../example}` among them. Reading only the base file tells an operator
 # who set exactly the overlay's default that their line genuinely differs from stock.
 #
 # Compose reads `COMPOSE_FILE` from the environment or from the .env itself, so both are honoured

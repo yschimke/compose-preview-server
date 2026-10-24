@@ -44,25 +44,25 @@ check "no sites key ⇒ nothing" "" \
 
 check "empty sites array ⇒ nothing" "" "$(scan_of '{"sites":[]}')"
 
-check "one site" "m3.preview.coo.ee" \
-  "$(scan_of '{"sites":[{"host":"m3.preview.coo.ee","system":"m3-catalog"}]}')"
+check "one site" "m3.preview.example.com" \
+  "$(scan_of '{"sites":[{"host":"m3.preview.example.com","system":"m3-catalog"}]}')"
 
-check "several sites, in file order" "m3.preview.coo.ee wear.preview.coo.ee" \
-  "$(scan_of '{"sites":[{"host":"m3.preview.coo.ee","system":"m3"},{"host":"wear.preview.coo.ee","system":"w"}]}')"
+check "several sites, in file order" "m3.preview.example.com wear.preview.example.com" \
+  "$(scan_of '{"sites":[{"host":"m3.preview.example.com","system":"m3"},{"host":"wear.preview.example.com","system":"w"}]}')"
 
 # Pretty-printed across lines is the form the file is actually committed in — a line-by-line scan
 # would find the key and lose the array.
-check "pretty-printed across lines" "m3.preview.coo.ee wear.preview.coo.ee" "$(scan_of '{
+check "pretty-printed across lines" "m3.preview.example.com wear.preview.example.com" "$(scan_of '{
   "catalogs": [
     { "system": "m3-catalog", "repo": "yschimke/m3-catalog" }
   ],
   "sites": [
     {
-      "host": "m3.preview.coo.ee",
+      "host": "m3.preview.example.com",
       "system": "m3-catalog"
     },
     {
-      "host": "wear.preview.coo.ee",
+      "host": "wear.preview.example.com",
       "system": "wear-m3-catalog"
     }
   ]
@@ -70,24 +70,24 @@ check "pretty-printed across lines" "m3.preview.coo.ee wear.preview.coo.ee" "$(s
 
 # Key order inside a site object is not guaranteed by anything — kotlinx.serialization writes
 # `host` first today, and a hand-edit needn't.
-check "system before host" "wear.preview.coo.ee" \
-  "$(scan_of '{"sites":[{"system":"wear-m3-catalog","host":"wear.preview.coo.ee"}]}')"
+check "system before host" "wear.preview.example.com" \
+  "$(scan_of '{"sites":[{"system":"wear-m3-catalog","host":"wear.preview.example.com"}]}')"
 
 # The real file carries a long `_sites_comment` next to the array. Its prose mentions sites, hosts
 # and hostnames throughout — none of which is config.
-check "a _sites_comment is not the sites array" "m3.preview.coo.ee" "$(scan_of '{
+check "a _sites_comment is not the sites array" "m3.preview.example.com" "$(scan_of '{
   "_sites_comment": "TOP-LEVEL SITES — a catalog served on a hostname of its own. DNS for the name must point at the box.",
-  "sites": [{ "host": "m3.preview.coo.ee", "system": "m3-catalog" }]
+  "sites": [{ "host": "m3.preview.example.com", "system": "m3-catalog" }]
 }')"
 
 # A `host` key elsewhere in the document is not a site: the scan is bounded by the array.
-check "a host key outside the array is ignored" "m3.preview.coo.ee" "$(scan_of '{
-  "sites": [{ "host": "m3.preview.coo.ee", "system": "m3-catalog" }],
+check "a host key outside the array is ignored" "m3.preview.example.com" "$(scan_of '{
+  "sites": [{ "host": "m3.preview.example.com", "system": "m3-catalog" }],
   "other": { "host": "not-a-site.example.com" }
 }')"
 
-check "hostnames are lowercased, as the Host header is compared" "wear.preview.coo.ee" \
-  "$(scan_of '{"sites":[{"host":"WEAR.Preview.Coo.EE","system":"w"}]}')"
+check "hostnames are lowercased, as the Host header is compared" "wear.preview.example.com" \
+  "$(scan_of '{"sites":[{"host":"WEAR.Preview.Example.COM","system":"w"}]}')"
 
 check "an absent file is not an error" "" "$(sh "${scan}" "${work}/nope.json"; echo -n)"
 
@@ -108,8 +108,6 @@ entry_of() { # entry_of <json> [SITE_DOMAINS] -> the stub's report
   PATH="${work}/bin:${PATH}" \
     CATALOGS_FILE="${work}/catalogs.json" \
     SITE_DOMAINS="${2:-}" \
-    HA_DOMAIN="${HA_DOMAIN:-}" \
-    HA_SITE_FILE="${here}/ha.caddy" \
     EXTRA_SITES_DIR="${work}/extra" \
     EXTRA_SITE_DOMAINS="${EXTRA_SITE_DOMAINS:-}" \
     OPTIONAL_SITES_DIR="${work}/sites" \
@@ -117,8 +115,8 @@ entry_of() { # entry_of <json> [SITE_DOMAINS] -> the stub's report
 }
 mkdir -p "${work}/extra"
 
-check "derives the hostnames from the config" "SITE_DOMAINS=[m3.preview.coo.ee wear.preview.coo.ee]" \
-  "$(entry_of '{"sites":[{"host":"m3.preview.coo.ee","system":"m3"},{"host":"wear.preview.coo.ee","system":"w"}]}' | head -1)"
+check "derives the hostnames from the config" "SITE_DOMAINS=[m3.preview.example.com wear.preview.example.com]" \
+  "$(entry_of '{"sites":[{"host":"m3.preview.example.com","system":"m3"},{"host":"wear.preview.example.com","system":"w"}]}' | head -1)"
 
 # Empty must stay EMPTY, not whitespace: `{$SITE_DOMAINS:}` expanding to a blank token puts a stray
 # address on the site line, and Caddy fails to parse its config — the box loses TLS entirely.
@@ -128,39 +126,25 @@ check "no sites ⇒ empty, not whitespace" "SITE_DOMAINS=[]" \
 check "an explicit SITE_DOMAINS still works on its own" "SITE_DOMAINS=[legacy.example.com]" \
   "$(entry_of '{"catalogs":[]}' 'legacy.example.com' | head -1)"
 
-check "explicit and derived are unioned" "SITE_DOMAINS=[legacy.example.com m3.preview.coo.ee]" \
-  "$(entry_of '{"sites":[{"host":"m3.preview.coo.ee","system":"m3"}]}' 'legacy.example.com' | head -1)"
+check "explicit and derived are unioned" "SITE_DOMAINS=[legacy.example.com m3.preview.example.com]" \
+  "$(entry_of '{"sites":[{"host":"m3.preview.example.com","system":"m3"}]}' 'legacy.example.com' | head -1)"
 
-check "a name in both is listed once" "SITE_DOMAINS=[m3.preview.coo.ee]" \
-  "$(entry_of '{"sites":[{"host":"m3.preview.coo.ee","system":"m3"}]}' 'm3.preview.coo.ee' | head -1)"
+check "a name in both is listed once" "SITE_DOMAINS=[m3.preview.example.com]" \
+  "$(entry_of '{"sites":[{"host":"m3.preview.example.com","system":"m3"}]}' 'm3.preview.example.com' | head -1)"
 
 check "comma-separated SITE_DOMAINS is accepted, as documented" \
   "SITE_DOMAINS=[a.example.com b.example.com]" \
   "$(entry_of '{"catalogs":[]}' 'a.example.com,b.example.com' | head -1)"
 
-check "builder hostname is included in TLS addresses" "SITE_DOMAINS=[ui.coo.ee]" \
-  "$(SERVE_UI_BUILDER_HOST=ui.coo.ee entry_of '{"catalogs":[]}' | head -1)"
+check "builder hostname is included in TLS addresses" "SITE_DOMAINS=[ui.example.com]" \
+  "$(SERVE_UI_BUILDER_HOST=ui.example.com entry_of '{"catalogs":[]}' | head -1)"
 
-check "builder hostname is deduplicated with explicit domains" "SITE_DOMAINS=[ui.coo.ee]" \
-  "$(SERVE_UI_BUILDER_HOST=ui.coo.ee entry_of '{"catalogs":[]}' 'ui.coo.ee' | head -1)"
-
-# ha.caddy is the box's one optional site: installed only when HA_DOMAIN names it, and its name
-# taken out of the main block's addresses, since Caddy refuses a hostname defined twice — which
-# would take every site on the box down with it.
-check "no HA_DOMAIN ⇒ no HA site installed" "" \
-  "$(entry_of '{"catalogs":[]}' > /dev/null; ls "${work}/sites")"
-
-check "HA_DOMAIN installs ha.caddy" "ha.caddy" \
-  "$(HA_DOMAIN=ha.coo.ee entry_of '{"catalogs":[]}' > /dev/null; ls "${work}/sites")"
-
-check "HA_DOMAIN is taken out of SITE_DOMAINS" "SITE_DOMAINS=[m3.preview.coo.ee]" \
-  "$(HA_DOMAIN=ha.coo.ee entry_of '{"sites":[{"host":"m3.preview.coo.ee","system":"m3"}]}' 'ha.coo.ee' | head -1)"
-
-check "unsetting HA_DOMAIN removes a previously installed ha.caddy" "" \
-  "$(HA_DOMAIN=ha.coo.ee entry_of '{"catalogs":[]}' > /dev/null; entry_of '{"catalogs":[]}' > /dev/null; ls "${work}/sites")"
+check "builder hostname is deduplicated with explicit domains" "SITE_DOMAINS=[ui.example.com]" \
+  "$(SERVE_UI_BUILDER_HOST=ui.example.com entry_of '{"catalogs":[]}' 'ui.example.com' | head -1)"
 
 # Extra sites are fragments a deployment mounts into EXTRA_SITES_DIR, one per hostname it serves
-# beside this server. The names they claim leave the main block, as HA_DOMAIN's did.
+# beside this server. The names they claim leave the main block, since Caddy refuses a hostname
+# defined twice — which would take every site on the host down with it.
 check "no mounted fragments ⇒ no extra site installed" "" \
   "$(entry_of '{"catalogs":[]}' > /dev/null; ls "${work}/sites")"
 
@@ -172,15 +156,11 @@ check "EXTRA_SITE_DOMAINS leave the main block" "SITE_DOMAINS=[m3.example.com]" 
   "$(EXTRA_SITE_DOMAINS=other.example.com,more.example.com \
      entry_of '{"sites":[{"host":"m3.example.com","system":"m3"}]}' 'other.example.com more.example.com' | head -1)"
 
-check "EXTRA_SITE_DOMAINS turns off the deprecated HA_DOMAIN install" "other.caddy" \
-  "$(HA_DOMAIN=other.example.com EXTRA_SITE_DOMAINS=other.example.com entry_of '{"catalogs":[]}' > /dev/null; ls "${work}/sites")"
-
 rm "${work}/extra/other.caddy"
 check "unmounting a fragment removes its site" "" \
   "$(entry_of '{"catalogs":[]}' > /dev/null; ls "${work}/sites")"
 
-# A fragment someone placed in the sites dir directly (on the box, a bind mount of the native demo's
-# route) is never removed or replaced: deleting a bind-mounted file fails, which under `set -e`
+# A fragment someone placed in the sites dir directly (on a host, a bind mount of a site's route) is never removed or replaced: deleting a bind-mounted file fails, which under `set -e`
 # would stop Caddy and every hostname with it. A read-only file stands in for the mount.
 printf 'native.example.com {\n}\n' > "${work}/sites/native-demo.caddy"
 printf 'other.example.com {\n}\n' > "${work}/extra/native-demo.caddy"
@@ -196,7 +176,7 @@ check "the entrypoint still starts Caddy when the sites dir holds a file it cann
   "ARGS=[run --config /etc/caddy/Caddyfile --adapter caddyfile]" \
   "$(printf 'pinned.caddy\n' > "${work}/ro/.installed"; chmod 555 "${work}/ro"
      printf '%s' '{"catalogs":[]}' > "${work}/catalogs.json"
-     PATH="${work}/bin:${PATH}" CATALOGS_FILE="${work}/catalogs.json" SITE_DOMAINS="" HA_DOMAIN="" \
+     PATH="${work}/bin:${PATH}" CATALOGS_FILE="${work}/catalogs.json" SITE_DOMAINS="" \
        EXTRA_SITES_DIR="${work}/extra" OPTIONAL_SITES_DIR="${work}/ro" \
        sh "${entrypoint}" run --config /etc/caddy/Caddyfile --adapter caddyfile 2>/dev/null | sed -n 2p
      chmod 755 "${work}/ro")"
@@ -214,7 +194,7 @@ check "no arguments still starts Caddy with the standard config" \
   "ARGS=[run --config /etc/caddy/Caddyfile --adapter caddyfile]" \
   "$(printf '%s' '{"catalogs":[]}' > "${work}/catalogs.json"
      PATH="${work}/bin:${PATH}" CATALOGS_FILE="${work}/catalogs.json" SITE_DOMAINS="" \
-       HA_DOMAIN="" OPTIONAL_SITES_DIR="${work}/sites" \
+       OPTIONAL_SITES_DIR="${work}/sites" \
        sh "${entrypoint}" 2>/dev/null | sed -n 2p)"
 
 # …and the image must not rely on that fallback: Docker RESETS an inherited CMD to empty when a
@@ -231,33 +211,17 @@ if grep -q '^ENTRYPOINT' "${dockerfile}"; then
   fi
 fi
 
-# --- the real deployment config ----------------------------------------------------------------
-# The committed file is the one input that must never surprise this. Its hostnames are what the box
-# routes, so a scan that disagrees with the file is a site that silently doesn't come up.
-deploy_config="${here}/../preview.coo.ee/catalogs.json"
-if [ -f "${deploy_config}" ] && command -v jq > /dev/null 2>&1; then
-  expected="$(jq -r '.sites // [] | .[] | .host | ascii_downcase' "${deploy_config}" | tr '\n' ' ' | sed 's/ *$//')"
-  check "the deployment's own catalogs.json scans exactly as jq reads it" \
-    "${expected}" "$(sh "${scan}" "${deploy_config}" | tr '\n' ' ' | sed 's/ *$//')"
+# --- the committed configs ---------------------------------------------------------------------
+# The configs this repo ships are inputs that must never surprise the scanner: their hostnames are
+# what a host routes, so a scan that disagrees with the file is a site that silently doesn't come up.
+if command -v jq > /dev/null 2>&1; then
+  for deploy_config in "${here}/catalogs.json" "${here}/../example/catalogs.json"; do
+    [ -f "${deploy_config}" ] || continue
+    expected="$(jq -r '.sites // [] | .[] | .host | ascii_downcase' "${deploy_config}" | tr '\n' ' ' | sed 's/ *$//')"
+    check "${deploy_config##*/deploy/} scans exactly as jq reads it" \
+      "${expected}" "$(sh "${scan}" "${deploy_config}" | tr '\n' ' ' | sed 's/ *$//')"
+  done
 fi
-
-# The WASM demo must reach ha-designs, including its scripts and WASM modules.
-route="$(sed -n '/@designs path /p' "${here}/ha.caddy")"
-case "${route}" in
-  *" /demo /demo/* "*) pass=$((pass + 1)) ;;
-  *) fail=$((fail + 1)); echo "FAIL: /demo and its assets must route to ha-designs" >&2 ;;
-esac
-
-case "${route}" in
-  *" /api/cards/resolve "*) pass=$((pass + 1)) ;;
-  *) fail=$((fail + 1)); echo "FAIL: design resolver must reach ha-designs" >&2 ;;
-esac
-
-# The HA repository's scheduled import reads the library's card design sources from ha-designs.
-case "${route}" in
-  *" /api/library/* /library/* "*) pass=$((pass + 1)) ;;
-  *) fail=$((fail + 1)); echo "FAIL: library sources and their edit links must reach ha-designs" >&2 ;;
-esac
 
 if [ "${fail}" -gt 0 ]; then
   echo "${fail} check(s) failed, ${pass} passed." >&2

@@ -2,7 +2,7 @@
 # Guard: the version-control-backed config overlay actually mounts the files it claims to.
 #
 # Why this needs a test. docker-compose.deploy-config.yml is opt-in, so nothing exercises it on the
-# way to a release — the first time anyone finds out it is wrong is on a box, after a restart, when
+# way to a release — the first time anyone finds out it is wrong is on a host, after a restart, when
 # the app boots from whatever /config it already had and serves a stale catalog set. Every failure
 # mode here is silent that way: a source path that doesn't exist makes Docker create an empty
 # DIRECTORY at the mount point (and the app then reads no catalogs), a target that isn't nested
@@ -68,15 +68,6 @@ for mount in "${mounts[@]}"; do
   [[ -f "${resolved}" ]] ||
     note "default DEPLOY_CONFIG_DIR source '${default_dir}/${rel_file}' does not exist (looked at ${resolved})."
 done
-
-# The overlay exists to carry `sites`, which publish-config-to-box.sh cannot. If the committed
-# catalogs.json it defaults to ever loses that key, the overlay still works but the gap it was
-# written for is back, unannounced.
-default_catalogs="${here}/../preview.coo.ee/catalogs.json"
-if [[ -f "${default_catalogs}" ]]; then
-  grep -q '"sites"' "${default_catalogs}" ||
-    note "${default_catalogs##*/} declares no \"sites\" — the overlay's reason for existing (delivering sites, which the admin reconcile cannot) is gone."
-fi
 
 if ((fail)); then
   exit 1

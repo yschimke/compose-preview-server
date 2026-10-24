@@ -7,7 +7,7 @@
 # admits the playground before it ever looks at the jail (`PlaygroundPublicGate.decide` returns
 # `Allow` for `repoAccessGated` ahead of every profile check), so a profile whose binary is missing
 # does not refuse the lane — it logs a preflight warning and serves anyway, uncontained. That is
-# exactly how preview.coo.ee ran: `bubblewrap` was absent from the image, the README said so and
+# exactly how a production host ran: `bubblewrap` was absent from the image, the README said so and
 # pointed at a `custom:` argv instead, and the resulting jail reported `active: true` with all three
 # containment checks false.
 #

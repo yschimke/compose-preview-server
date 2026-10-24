@@ -62,7 +62,7 @@ if [[ -f /opt/compose-preview-server/rc-player-wasm/index.html ]]; then
 fi
 
 # Auth posture (see deploy/cloudrun/entrypoint.sh): SERVE_PUBLIC=1 → the open
-# public preview server (preview.coo.ee); otherwise token-gated (SERVE_TOKEN
+# public preview server; otherwise token-gated (SERVE_TOKEN
 # required, fail closed).
 if [[ "${SERVE_PUBLIC:-}" == "1" || "${SERVE_PUBLIC:-}" == "true" ]]; then
   args+=(--public)
@@ -103,8 +103,8 @@ case "${SERVE_ROLE:-}" in
 esac
 
 # The deployment's settings.json: every NON-SECRET setting, reviewed in the repository and published
-# to /config by PUT /admin/settings (.github/scripts/publish-config-to-box.sh), instead of lines in
-# this box's private .env. See deploy/image/SETTINGS.md for the list.
+# to /config by PUT /admin/settings (or mounted read-only, as deploy/example does), instead of
+# lines in this host's private .env. See deploy/image/SETTINGS.md for the list.
 #
 # Applied HERE, as environment variables, and before anything below reads them: much of this file
 # derives one setting from another (the image lane from the upload repository, the grant
@@ -263,7 +263,7 @@ if [[ -n "${SERVE_UI_BUILDER_PROFILE_HOST:-}" ]]; then
   [[ -n "${SERVE_UI_BUILDER_PROFILE_HOME_URL:-}" ]] &&
     args+=(--ui-builder-profile-home-url "${SERVE_UI_BUILDER_PROFILE_HOME_URL}")
 fi
-# The builder at the ROOT of SERVE_UI_BUILDER_HOST (ui.coo.ee/<design>) instead of under /ui-builder/.
+# The builder at the ROOT of SERVE_UI_BUILDER_HOST (ui.example.com/<design>) instead of under /ui-builder/.
 # Opt in once the served editor bundle reads its `ui-builder-base-path` meta; ignored without a host.
 [[ -n "${SERVE_UI_BUILDER_HOST:-}" && ( "${SERVE_UI_BUILDER_HOST_ROOT:-}" == "1" || "${SERVE_UI_BUILDER_HOST_ROOT:-}" == "true" ) ]] &&
   args+=(--ui-builder-host-root)
@@ -279,7 +279,7 @@ fi
 [[ "${SERVE_UI_BUILDER_ADMIN_ACTORS}" != "none" ]] &&
   args+=(--ui-builder-admin-actors "${SERVE_UI_BUILDER_ADMIN_ACTORS}")
 # New UI-builder designs start `private` (the default) or `public` — readable by anyone with the
-# link, never writable. preview.coo.ee runs public; an owner makes any one design private.
+# link, never writable. An owner makes any one design private either way.
 [[ -n "${SERVE_UI_BUILDER_DEFAULT_VISIBILITY:-}" ]] &&
   args+=(--ui-builder-default-visibility "${SERVE_UI_BUILDER_DEFAULT_VISIBILITY}")
 # Aggregate view counts live beside catalog/trust config so container restarts and image updates do
@@ -336,7 +336,7 @@ if [[ -n "${SERVE_GITHUB_AUTH_CLIENT_ID:-}" ||
   [[ -n "${github_auth_cookie_domain}" && "${github_auth_cookie_domain}" != "none" ]] &&
     args+=(--github-auth-cookie-domain "${github_auth_cookie_domain}")
   [[ -n "${SERVE_GITHUB_AUTH_USERS:-}" ]] && args+=(--github-auth-users "${SERVE_GITHUB_AUTH_USERS}")
-  # Admit every member of these GitHub orgs as a member too (preview.coo.ee: `google`), so a team
+  # Admit every member of these GitHub orgs as a member too (e.g. `your-org`), so a team
   # gets edit access without anyone maintaining SERVE_GITHUB_AUTH_USERS.
   [[ -n "${SERVE_GITHUB_AUTH_ORGS:-}" ]] && args+=(--github-auth-orgs "${SERVE_GITHUB_AUTH_ORGS}")
   # With an allowlist set, admit every other GitHub account as a read-only UI-builder guest that can
@@ -421,7 +421,7 @@ if [[ -f /opt/compose-preview-server/ui-builder/index.html && "${SERVE_ROLE:-}" 
   # itself, and it needs nothing beyond this image. Wear (`wear-m3`), Remote Compose (`remote-m3`)
   # and A2UI (`a2ui-catalog`) are opt-ins a deployment names in SERVE_UI_BUILDER_CATALOGS — each
   # carries a cost the image should not impose on every adopter (a Wear/Android native lane needs
-  # Robolectric and an Android SDK). preview.coo.ee names its full set in its own `.env`.
+  # Robolectric and an Android SDK). A deployment that wants them names its full set in its own `.env`.
   #
   # An explicit value is an operator's choice and is kept as written. The one exception is
   # `m3-catalog,remote-m3,wear-m3-catalog`, a broken image default that named Wear's delivery
@@ -810,8 +810,8 @@ effective_cpus() {
 # to be `(eff_mb - 1024) / 1200`, so the implied budget (`1024 + seats*1200`) landed within one seat
 # of the entire limit: the derivation targeted ~93-96% utilisation by construction. The theme
 # optimizer refuses to resume below `resumeMemoryAvailableFraction` (0.25) of memory free, so on any
-# box where memory was the binding side those two could never both hold. Measured on preview.coo.ee
-# (~11 GiB, 8 cores, deriving 8 seats): 15.5% cgroup memory available against a 0.15 stop and a 0.25
+# box where memory was the binding side those two could never both hold. Measured on a production
+# host (~11 GiB, 8 cores, deriving 8 seats): 15.5% cgroup memory available against a 0.15 stop and a 0.25
 # resume — 153 host suspensions to 48 resumes and 2.57 h of cumulative admission wait, while the
 # HOST sat 55% free. Nothing failed; background theme optimisation simply stopped making progress.
 #
@@ -823,7 +823,7 @@ effective_cpus() {
 #
 # **Memory alone was the wrong input.** A permit buys a render daemon, and a render is CPU-bound —
 # so a box with plenty of RAM and few cores derived a budget it could not actually work, while the
-# [2, 8] clamp meant a large box stopped scaling entirely. Measured on preview.coo.ee (48 GiB
+# [2, 8] clamp meant a large box stopped scaling entirely. Measured on a production host (48 GiB
 # limit, 8 cores): memory afforded 40 permits, the clamp allowed 8, and the box ran a fifth of what
 # its cores could have driven.
 #
@@ -908,9 +908,8 @@ fi
 # it and getting a box where POST /images 404s is never what was meant, and the failure is silent
 # on both ends (no startup line, and an uploader's own 404 reads like a wrong --serve-url). The
 # derivation cannot be widened to "any box that could gate uploads somehow": the repository also
-# falls back to SERVE_GITHUB_AUTH_REPO, which this image defaults to yschimke/compose-ai-tools for
-# the playground, so keying on that would open an upload lane on every adopter's box gated by OUR
-# collaborators. An operator can still force either answer explicitly (`SERVE_ACCEPT_IMAGES=0` to
+# falls back to SERVE_GITHUB_AUTH_REPO, which a deployment sets for sign-in and the playground, so
+# keying on that would open an upload lane on every box that merely enabled GitHub sign-in. An operator can still force either answer explicitly (`SERVE_ACCEPT_IMAGES=0` to
 # name the repo and keep the lane shut, `=1` without a repository to get the server's own refusal,
 # which is the honest failure).
 if [[ -z "${SERVE_ACCEPT_IMAGES:-}" ]]; then
@@ -1056,7 +1055,7 @@ fi
 # restart: re-check each branch's head every SERVE_CATALOG_REFRESH seconds and re-fetch on change
 # (via `git ls-remote`, no API rate limit). Defaults to the CLI's 600s; set 0 to disable (serve the
 # boot snapshot until the container recycles). This is what lets a `design-artifacts.yml` regen
-# reach preview.coo.ee on its own — Watchtower only rolls the *image*, never the branch content.
+# reach a running host on its own — Watchtower only rolls the *image*, never the branch content.
 [[ -n "${SERVE_CATALOG_REFRESH:-}" ]] && args+=(--catalog-refresh-interval "${SERVE_CATALOG_REFRESH}")
 # RSS history is demand-activated: each feed request renews this inactivity lease. Once it expires,
 # its branch worker sleeps while retaining the generated XML + shallow Git cache under /config.
@@ -1124,7 +1123,7 @@ fi
 #
 # The failure that produces is silent and reads like a content problem: catalogs still serve, still
 # render, still look right — they just quietly stop offering live device/theme/knob controls, with
-# `livebundle-unavailable` naming a daemon that "could not be started". preview.coo.ee ran that way
+# `livebundle-unavailable` naming a daemon that "could not be started". A production host ran that way
 # with a stale JAVA_TOOL_OPTIONS carrying the Android flag alone: every Android catalog was live and
 # every desktop one was snapshots, which looks exactly like a desktop-lane bug and is not one.
 #

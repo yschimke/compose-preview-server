@@ -79,9 +79,10 @@ grep -Fq \
   exit 1
 }
 
-# The retained site example is an explicit deployment override, never a process default.
-grep -Fxq '# SERVE_UI_BUILDER_ADMIN_ACTORS=github:yschimke' "${example}" || {
-  echo "FAIL: the preview host example does not show github:yschimke as the UI-builder admin" >&2
+# The example shows an administrator only as a commented placeholder: an explicit deployment
+# override, never a process default, and never a particular operator's account.
+grep -Fxq '# SERVE_UI_BUILDER_ADMIN_ACTORS=github:your-login' "${example}" || {
+  echo "FAIL: the preview host example does not show a placeholder UI-builder admin" >&2
   exit 1
 }
 

@@ -9,7 +9,7 @@
 # catalog is published as baked PNGs with `livebundle-unavailable`. The site still works. Everything
 # renders. Only the device/theme/knob controls quietly stop re-rendering.
 #
-# That is exactly how preview.coo.ee ran: the Android pair (`/opt/lib-daemon-android` +
+# That is exactly how a production host ran: the Android pair (`/opt/lib-daemon-android` +
 # `-Dcomposeai.cli.libDaemonAndroidDir`) was baked and every `backend: "android"` catalog was live,
 # while the desktop pair was in neither the image nor JAVA_TOOL_OPTIONS and every
 # `backend: "desktop"` catalog — m3-catalog among them — served snapshots. The server distribution
@@ -47,7 +47,7 @@ sidecars=(
   # PLAYGROUND's Kotlin Build Tools jars are located by the same `locateBundleSidecarJars` call,
   # from the same CLI tarball, and were the one sidecar this image deliberately did not lift. The
   # consequence is louder than a degraded lane — `openPlaygroundService` returns null and the
-  # server serves no playground — but it is just as invisible to a build: preview.coo.ee logged
+  # server serves no playground — but it is just as invisible to a build: a production host logged
   # "playground admitted" and then "playground compiler unavailable" on the next line, for months.
   # The Skiko NATIVE, which is not code the CLI stages at all: `cli/build.gradle.kts` filters
   # every `skiko-awt-runtime-*` out of the sidecars ("SkikoNativeProvision downloads only the

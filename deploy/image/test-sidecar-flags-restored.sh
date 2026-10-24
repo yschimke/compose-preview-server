@@ -8,7 +8,7 @@
 # catalogs still serve and still render, they just stop offering live controls, and the degradation
 # blames a daemon that "could not be started".
 #
-# preview.coo.ee ran exactly that way — a stale JAVA_TOOL_OPTIONS carrying the Android flag alone,
+# A production host ran exactly that way — a stale JAVA_TOOL_OPTIONS carrying the Android flag alone,
 # so every Android catalog was live and every desktop one was snapshots. That reads like a
 # desktop-lane bug and is not one, which is what makes it worth a guard rather than a comment.
 set -euo pipefail
@@ -139,7 +139,7 @@ echo "PASS: the cmp-jvm player flag is restored, and only when the image carries
 #     the outside: every jar is present, the lane starts, and `Library`'s static initialiser dies
 #     with `Cannot find libskiko-<platform>.so.sha256` — reported to the caller as
 #     `ExceptionInInitializerError: null`, cause stripped. That is how `?rcPlayer=cmp-jvm` came to
-#     answer 500 for every document in every catalog on preview.coo.ee.
+#     answer 500 for every document in every catalog on a production host.
 result="$(run_stanza '-XX:MaxRAMPercentage=70')"
 [[ "${result}" == *"skikoDir=${fixtures}/lib-skiko"* ]] || {
   echo "FAIL: skikoDir was not restored: ${result}" >&2

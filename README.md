@@ -310,10 +310,9 @@ author from the editor's settings; see
 Releases attach that distribution to the GitHub release, then publish the reusable
 `ghcr.io/yschimke/compose-preview-host` image. Start your own instance with
 [`deploy/example`](deploy/example/), an independent Compose example with persistent state and
-optional HTTPS. See [deployment ownership and migration](docs/deployment/OWNERSHIP.md) for the
-image, operator configuration and integration boundaries. The existing site stack in `deploy/image`
-and `deploy/preview.coo.ee` remains operational during a staged move to the private
-`yschimke/preview-coo-ee` repository; it is not the recommended starting point for a new deployment.
+optional HTTPS, and grow into the full-featured stack in [`deploy/image`](deploy/image/README.md)
+when you need rollouts, auto-updates or a large host. [Deploying your own](docs/deployment/OWNERSHIP.md)
+covers what this repository ships and what belongs in your own deployment configuration.
 
 ## Releasing
 

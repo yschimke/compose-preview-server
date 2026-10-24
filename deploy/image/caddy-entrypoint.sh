@@ -37,7 +37,7 @@ resolved="$(
 resolved="$(printf '%s' "${resolved}" | sed 's/[[:space:]]*$//')"
 
 # Extra sites: a deployment that serves more hostnames than this server's own (a sibling app on the
-# same box, say) mounts one Caddyfile fragment per site into EXTRA_SITES_DIR, and the Caddyfile
+# same host, say) mounts one Caddyfile fragment per site into EXTRA_SITES_DIR, and the Caddyfile
 # imports whatever is installed in OPTIONAL_SITES_DIR. EXTRA_SITE_DOMAINS names the hostnames those
 # fragments claim, and they are taken out of SITE_DOMAINS, because Caddy refuses a hostname claimed
 # by two blocks. With nothing mounted the import's glob matches nothing and the config is exactly
@@ -73,16 +73,6 @@ done
 for claimed in $(printf '%s' "${EXTRA_SITE_DOMAINS:-}" | tr ',' ' '); do
   resolved="$(printf '%s' "${resolved}" | tr ' ' '\n' | awk -v d="${claimed}" 'NF && $0 != d' | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
 done
-
-# DEPRECATED, for the one deployment that predates EXTRA_SITES_DIR: HA_DOMAIN installs the image's
-# ha.caddy the same way. Skipped once EXTRA_SITE_DOMAINS is set, so a deployment can move its site
-# to a mounted fragment without both installing. Removed after that deployment has moved.
-HA_SITE_FILE="${HA_SITE_FILE:-/etc/caddy/ha.caddy}"
-if [ -n "${HA_DOMAIN:-}" ] && [ -z "${EXTRA_SITE_DOMAINS:-}" ]; then
-  install_site "${HA_SITE_FILE}" ha.caddy
-  resolved="$(printf '%s' "${resolved}" | tr ' ' '\n' | awk -v ha="${HA_DOMAIN}" 'NF && $0 != ha' | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
-  echo "caddy: ${HA_DOMAIN} served by ha.caddy (design server + preview server, split by path)" >&2
-fi
 
 export SITE_DOMAINS="${resolved}"
 if [ -n "${SITE_DOMAINS}" ]; then

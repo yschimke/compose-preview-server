@@ -85,7 +85,7 @@ refute "the default does not serve wear-m3" "wear-m3" "${default}"
 expect "the default publishes the one catalog it serves" \
   $'--ui-builder-published-catalogs\nm3-catalog\n' "${default}"$'\n'
 
-# The full set a deployment such as preview.coo.ee names itself: every catalog with a published
+# The full set a full-featured deployment names itself: every catalog with a published
 # file takes it.
 full="$(run_case "m3-catalog,remote-m3,wear-m3")"
 expect "a named full set publishes all three" \

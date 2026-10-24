@@ -45,8 +45,9 @@ boundaries.
 - Regenerate the committed goldens with `scripts/regenerate-goldens.sh`, and read the diff. On a
   Renovate branch the `Regenerate goldens` workflow does it for you when CI goes red; on any pull
   request `/regenerate-goldens` asks for the same thing.
-- A deployment's non-secret behaviour goes in its `settings.json` (`deploy/preview.coo.ee/`; the
-  list is `deploy/image/SETTINGS.md`, generated from `ServeSettings.kt`), never in `.env`. `.env`
+- A deployment's non-secret behaviour goes in its `settings.json` (`deploy/example/settings.json` is
+  the generic starting point; the list is `deploy/image/SETTINGS.md`, generated from
+  `ServeSettings.kt`), never in `.env`. `.env`
   holds only secrets and facts about the machine. A new `SERVE_*` setting that is neither is a line
   in `ServeSettings.ALL`, not a new `.env` key, and compose passes it through empty.
 - Immediately before every push, fetch `origin main` and confirm the branch or PR has not merged.
@@ -70,15 +71,15 @@ boundaries.
   201. Kept: `raw.githubusercontent.com`, `github.com/<owner>/<repo>/raw/<ref>/…`,
   `github.com/user-attachments/assets/…`, and the `user-images` / `private-user-images` / `avatars`
   / `objects` / `media` / `gist` `.githubusercontent.com` hosts. Stripped: everything else,
-  **`preview.coo.ee` included** — so a PR here that shows off a rendered page must point at the
+  **this server's own public instance included** — so a PR here that shows off a rendered page must point at the
   committed PNG under [`docs/evidence/`](docs/evidence/) or [`docs/images/`](docs/images/) through a
   commit-pinned `raw.githubusercontent.com` URL, never at the deployment. Measured variant-by-variant
   on [#456](https://github.com/yschimke/compose-preview-server/issues/456); upstream it is
   [anthropics/claude-code#89540](https://github.com/anthropics/claude-code/issues/89540) (open,
   `area:security`), an anti-exfiltration control rather than a bug to route around. The rewrite is a
   blind regex — it fires inside code spans and fenced blocks, and an `<img src=…>` is HTML-escaped
-  into a code span — so no spelling of a non-GitHub host renders. `preview.coo.ee` remains the right
-  thing to **link** to in prose; it is only image embeds that need the GitHub origin.
+  into a code span — so no spelling of a non-GitHub host renders. The public instance remains the
+  right thing to **link** to in prose; it is only image embeds that need the GitHub origin.
 - In a PR body write `![alt](url)` plainly, and **leave any backticks that appear around the URL
   alone**. They are injected between an agent and GitHub rather than authored, and the
   [`PR Body Syntax`](.github/workflows/pr-body-syntax.yml) workflow strips them in place within a
@@ -233,7 +234,7 @@ how those artefacts are regenerated, just run through `build-brief`.
 ## The hosted catalog MCP server
 
 [`.mcp.json`](.mcp.json) registers `compose-preview-catalog`, this repository's hosted catalog MCP
-endpoint (`ServeCatalogMcp`) at `https://preview.coo.ee/mcp`. It is how an agent reads the hosted catalogs and
+endpoint (`ServeCatalogMcp`) on the public instance, at the URL that file names. It is how an agent reads the hosted catalogs and
 drives a UI-builder design — `ui_builder_get_design`, `ui_builder_apply`, `ui_builder_export`,
 `ui_builder_render_native` — against the running server rather than a local one.
 

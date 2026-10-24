@@ -11,7 +11,7 @@
 # behaving as though they never touched it.
 #
 # That is how `SERVE_PLAYGROUND` — documented in README.md since the runtime catalog selector
-# shipped — spent its whole life unreachable on the prebuilt image, which is why preview.coo.ee ran
+# shipped — spent its whole life unreachable on the prebuilt image, which is why a production host ran
 # its playground pinned to a single catalog with the Android modes off, despite the image already
 # baking every Android bit they need.
 #

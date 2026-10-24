@@ -1,6 +1,6 @@
 # Build and publish the baked-Caddyfile reverse-proxy image to GHCR.
 #
-# Pairs with deploy/image/caddy.Dockerfile + docker-compose.yml: the public box
+# Pairs with deploy/image/caddy.Dockerfile + docker-compose.yml: a host running the stack
 # runs `ghcr.io/<owner>/compose-preview-caddy:latest` instead of `caddy:2` + a
 # bind-mounted Caddyfile, so a Caddyfile change auto-deploys through the SAME
 # Watchtower path as the preview server (Watchtower watches image digests, not the
@@ -9,12 +9,6 @@
 #
 # Triggers on a Caddyfile / caddy.Dockerfile change on main (so the published
 # image never lags the repo), plus manual dispatch.
-#
-# Ported from compose-ai-tools with the server. The image's inputs
-# (caddy.Dockerfile, Caddyfile, caddy-entrypoint.sh, site-domains.sh) already lived
-# here; only the workflow was left behind, which is what kept `deploy/image` from
-# leaving that repository — deleting it there would have left the running box with
-# no way to rebuild its reverse proxy.
 #
 # GHCR NOTE: `compose-preview-caddy` is a package created by compose-ai-tools, so its
 # Actions write access is scoped to that repository. This one needs Write on it
@@ -28,11 +22,10 @@ on:
     branches: [main]
     paths:
       - deploy/image/Caddyfile
-      - deploy/image/ha.caddy
       - deploy/image/caddy.Dockerfile
       # The entrypoint that resolves SITE_DOMAINS from the deployment's catalogs.json, and the
       # scanner it calls. Baked into the image like the Caddyfile, so a change to either has to
-      # publish a new one or the box keeps running the old edge config.
+      # publish a new one or a host keeps running the old edge config.
       - deploy/image/caddy-entrypoint.sh
       - deploy/image/site-domains.sh
       - .github/workflows/preview-caddy-image.yml
