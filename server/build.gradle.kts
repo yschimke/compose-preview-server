@@ -673,6 +673,14 @@ dependencies {
   // The saved-document projection and the generator behind it. Multiplatform, so the
   // browser editor reaches the same code rather than keeping an emitter of its own.
   implementation(libs.composeai.ui.builder.export)
+  // What the runtime and export read off the classpath but no longer carry or depend on: the
+  // packaged preview `PackagedUiBuilderRenderBundle` renders a design through, and the variable
+  // fonts `FlexpressVariableFontSources.fromClasspath()` generates text outlines from. Both are
+  // compose-ui-builder release assets (the `uiBuilderWebRelease` ivy repository), not Central
+  // coordinates, so they are named here at the UI-builder version; `runtimeOnly` puts them in the
+  // distribution's `lib/` and on the test classpath.
+  runtimeOnly(libs.composeai.ui.builder.render.bundle)
+  runtimeOnly(libs.composeai.ui.builder.export.fonts)
 
   api(libs.composeai.common.web.escaping)
   // Published wire-format DTOs and the bundle format, `api` because they appear in signatures
@@ -966,11 +974,16 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
     }
   )
 
-  // The UI-builder runtime, export and render bundle. Named as projects for `-PcomposeUiBuilderDir`
-  // (included-build substitution); the default build matches them in `allowedComposeAiModules`.
-  // `:ui-builder-render-bundle` arrives via the runtime's `api` edge and carries only a PNG.
+  // The UI-builder runtime, export, render bundle and export fonts. Named as projects for
+  // `-PcomposeUiBuilderDir` (included-build substitution); the default build matches them in
+  // `allowedComposeAiModules`. The last two are resources only: a PNG and two font files.
   allowedProjects.set(
-    listOf(":ui-builder-runtime", ":ui-builder-export", ":ui-builder-render-bundle")
+    listOf(
+      ":ui-builder-runtime",
+      ":ui-builder-export",
+      ":ui-builder-render-bundle",
+      ":ui-builder-export-fonts",
+    )
   )
 
   // The same implementations named twice, because they can arrive by two different routes and the
@@ -1035,13 +1048,14 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
       "ee.schimke.composeai:preview-discovery",
       "ee.schimke.composeai:render-session-api",
       "ee.schimke.composeai:render-session-subprocess",
-      // The UI-builder seams as published coordinates (projects under `-PcomposeUiBuilderDir`).
-      // `-render-bundle` arrives via the runtime's `api` edge, so only this list names it;
+      // The UI-builder seams as resolved coordinates (projects under `-PcomposeUiBuilderDir`).
+      // `-render-bundle` and `-export-fonts` are release assets this build names directly;
       // `-export-jvm` is the export module's KMP variant.
       "ee.schimke.composeai:compose-preview-ui-builder-runtime",
       "ee.schimke.composeai:compose-preview-ui-builder-export",
       "ee.schimke.composeai:compose-preview-ui-builder-export-jvm",
       "ee.schimke.composeai:compose-preview-ui-builder-render-bundle",
+      "ee.schimke.composeai:compose-preview-ui-builder-export-fonts",
       // The offline screen model and generator, reached through `:ui-builder-export`.
       "ee.schimke.composeai:screen-document",
       "ee.schimke.composeai:screen-document-jvm",
