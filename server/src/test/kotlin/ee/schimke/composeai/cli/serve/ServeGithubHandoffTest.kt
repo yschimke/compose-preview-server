@@ -107,7 +107,8 @@ class ServeGithubHandoffTest {
         trustForwardedFor = true,
         sites = siteRegistry,
         uiBuilderHost = UI,
-        uiBuilderProfile = ServeUiBuilderProfile(DESIGNER, "Example designer", listOf("m3-catalog")),
+        uiBuilderProfile =
+          ServeUiBuilderProfile(DESIGNER, "Example designer", listOf("m3-catalog")),
       )
       .also {
         it.start()

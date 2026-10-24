@@ -497,20 +497,21 @@ class ServeGithubAuth(
    * [verifySession] regardless. With a cookie domain, the host-only variant is cleared too, since
    * two session values read as signed out.
    *
-   * The sign-in is also recorded as signed out ([isSignedOut]): every session sharing its login and
-   * `authenticatedAt` is refused from now on. That is the one GitHub sign-in on every host it was
-   * handed to ([handleHandoff]), and nothing else: another browser or device signed in separately
-   * has its own `authenticatedAt` and stays signed in. The record is held in this process's memory
-   * until the absolute cap would have expired those sessions anyway, so a restart forgets it, and a
-   * separate process accepting the same cookie (the playground service) never learns it; complete
-   * server-side revocation is a different design
-   * ([#280](https://github.com/yschimke/compose-preview-server/issues/280)).
+   * Without a cookie domain ([handsOff]) the sign-in is also recorded as signed out
+   * ([isSignedOut]): every session sharing its login and `authenticatedAt` is refused from now on.
+   * That is the one GitHub sign-in on every host it was handed to ([handleHandoff]), and nothing
+   * else: another browser or device signed in separately has its own `authenticatedAt` and stays
+   * signed in. The record is held in this process's memory until the absolute cap would have
+   * expired those sessions anyway, so a restart forgets it, and a separate process accepting the
+   * same cookie (the playground service) never learns it; complete server-side revocation is a
+   * different design ([#280](https://github.com/yschimke/compose-preview-server/issues/280)).
    */
   suspend fun RoutingContext.handleLogout() {
     val returnTo = safeReturnTo(call.request.queryParameters["return"] ?: "/")
     val secure = isSecure(call, config.callbackBaseUrl, config.trustForwardedHeaders)
     call.request
       .soleCookieValue(authCookieName)
+      ?.takeIf { handsOff }
       ?.let { verifySession(it) }
       ?.let { session ->
         val now = clock.millis()
@@ -980,7 +981,9 @@ class ServeGithubAuth(
     if (legacy.isEmpty()) return
     val host = requestHost(call, config.trustForwardedHeaders) ?: return
     val parents =
-      generateSequence(host) { it.substringAfter('.', "") }.filter { it.contains('.') }.toList()
+      generateSequence(host) { it.substringAfter('.', "").takeIf(String::isNotEmpty) }
+        .filter { it.contains('.') }
+        .toList()
     for (name in legacy) {
       call.response.cookies.append(sessionCookie(name, "", 0, secure, domain = null))
       for (parent in parents) {
