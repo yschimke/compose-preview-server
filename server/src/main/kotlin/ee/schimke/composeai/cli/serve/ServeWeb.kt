@@ -5183,6 +5183,49 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
+   * Applies the server's seeded stage frame (`data-stage-frame`, [viewerPage]'s `stageFrameSrc`),
+   * unless this tab remembers a Theme choice that will change which frame `viewer.js` asks for.
+   *
+   * The seed only pays off if it is the SAME URL the viewer's first `refreshSnapshot()` builds, and
+   * the server decides that from the request alone. One input it cannot see is
+   * [viewerThemeStickyScript]'s `sessionStorage` memory, which is applied to `#cp-theme` before
+   * `viewer.js` reads it, so on a bare URL the first render can still carry `uiMode` /
+   * `themeProvider` (and then omit `gen`, since naming a theme is an override). Seeding the baked
+   * frame there would paint the wrong theme and then refetch, so the last word belongs here.
+   *
+   * The test mirrors `pinsTheme` in [viewerThemeStickyScript]: a memory equal to the preview's
+   * baked theme asks for nothing and is not a pin, and a memory naming an option this preview does
+   * not offer (or a disabled control) is ignored downstream. Anything unreadable withholds the
+   * seed, which costs only the optimisation.
+   *
+   * Deliberately a separate script from [viewerThemeStickyScript], which returns early on a page
+   * with no `#cp-theme` — exactly the pages where seeding is safest.
+   */
+  private fun stageFrameSeedScript(): String =
+    """
+    (function () {
+      var img = document.getElementById("cp-img");
+      var url = img && img.getAttribute("data-stage-frame");
+      if (!url) return;
+      var el = document.getElementById("cp-theme");
+      var key = document.documentElement.getAttribute("data-cp-theme-key");
+      if (el && !el.disabled && key) {
+        var stored = null;
+        try { stored = sessionStorage.getItem(key); } catch (e) {}
+        if (stored && stored !== (el.getAttribute("data-default-theme") || "")) {
+          var option = null;
+          Array.prototype.forEach.call(el.options, function (o) {
+            if (o.value === stored) option = o;
+          });
+          if (option && !option.disabled) return;
+        }
+      }
+      img.src = url;
+    })();
+    """
+      .trimIndent()
+
+  /**
    * Viewer half of the catalog-scoped sticky Theme control; values match the landing (`light`,
    * `dark`, `theme:<provider FQN>`).
    *
@@ -14253,6 +14296,13 @@ ${scriptTag("known-differences.js")}
      */
     unseededOverrides: Set<String> = emptySet(),
     /**
+     * Whether this request named nothing that could move the first frame, so the stage image may be
+     * seeded server-side (see `stageFrameSrc`). Decided by the HTTP layer, which is the only place
+     * that sees the raw query; defaults to false, which keeps the old behaviour of leaving the
+     * stage empty until `viewer.js` asks for a frame.
+     */
+    bareFrameRequest: Boolean = false,
+    /**
      * Whether the session can export a `compose/figma-svg`, adding an SVG download URL to the
      * copyable-links panel. Defaults to false.
      */
@@ -16195,6 +16245,39 @@ ${scriptTag("known-differences.js")}
           parallelLabel = specSources.firstOrNull { it.id == "parallel" }?.label,
           defaultSource = primarySpecSource?.id ?: "kit",
         )
+    // The frame `viewer.js` will ask for first, offered to the stage `<img>` so the browser starts
+    // fetching it while still parsing the body, instead of after that bundle has downloaded, parsed
+    // and run `refreshSnapshot()`. Applied by [stageFrameSeedScript], which has the last word: this
+    // decides it from the request, and one input — the tab's remembered Theme — is not in it.
+    //
+    // It must be the SAME URL, byte for byte, and one a cache may answer: the viewer always fetches
+    // its own first frame (even behind a bookmarked `?mode=`, which it enters only once that frame
+    // lands), so a URL that differs — or one answered `no-store` — buys a second render rather
+    // than saving a round trip. That is why this is withheld rather than approximated:
+    // - `bareFrameRequest`: the request named no override, format or pin, so `query()` pushes none
+    //   either. The viewer's own order (token, session, `at`, overrides, `gen`) then collapses to a
+    //   single parameter, which is the only case worth reproducing exactly.
+    // - `q.isEmpty()`: no `token=` / `session=` for the viewer to re-emit ahead of it.
+    // - `isPublic`: a gated box answers every frame `no-store` (`DYNAMIC_RESOURCE_CACHE_CONTROL`),
+    //   so the `<img>` and the viewer's `fetch` would each pay for a render.
+    // - no spatial scene: those pages load `spatial-view.js`, which never paints `#cp-img`.
+    val stageFrameSrc =
+      if (!bareFrameRequest || !isPublic || q.isNotEmpty() || spatialSceneUrl != null) null
+      else if (ServeRcPlayerIds.requiresRenderParam(defaultRcBackend, bakedRcPlayer)) {
+        // The default lane is not the one a bare URL produces, so the viewer names the player —
+        // and then `generationEmitted` withholds `gen=`, because naming a player is an override.
+        // Cacheable all the same: a bare `?rcPlayer=` takes the baked lane's lifetime
+        // (`STATIC_RESOURCE_CACHE_CONTROL`), it just never takes `immutable`.
+        "$basePath/render/$idSeg.png?rcPlayer=${WebEscaping.urlEncodeSegment(defaultRcBackend)}"
+      } else {
+        // The published frame: no overrides, so it carries this page's generation and is served
+        // `immutable`.
+        "$basePath/render/$idSeg.png${assetQuery("", revisions)}"
+      }
+    val stageFrameAttr =
+      stageFrameSrc?.let { " data-stage-frame=\"${WebEscaping.htmlEscape(it)}\"" }.orEmpty()
+    val stageFrameScript =
+      if (stageFrameSrc == null) "" else "\n        <script>${stageFrameSeedScript()}</script>"
     val body =
       """
       $sourceCodeStylesheet${if (browserBreadcrumb.isBlank()) "" else "$browserBreadcrumb\n      "}<div class="cp-preview-head">
@@ -16213,7 +16296,7 @@ ${scriptTag("known-differences.js")}
       $historyInlineHtml
       <div class="cp-viewer"$bgThemeAttr$alwaysDarkAttr$irReplayAttr$replayThemesAttr data-preview-id="$idText" data-mode="snapshot" data-modes="$modes" data-static-snapshot="$staticSnapshot" data-can-render-overrides="$canRenderOverrides" data-snapshot-backend="$backendLabel" data-live-backend="$liveLabel"$liveInputAttr data-render-density="${renderDensityAttr(renderDensity)}" data-fold-scope="${foldStorageScope(sessionId, basePath)}"$sourceLaneAttr$unseededAttr$wasmAttr$rcAttr$rcDensityData$historyAttrs$pinnedAttr$generationAttr>
         $navDrawer
-        <div class="cp-stage"><cp-backend-badge class="cp-backend" id="cp-backend" role="status" aria-live="polite"></cp-backend-badge><img id="cp-img" alt="$label"><canvas id="cp-canvas" hidden></canvas>${spatialSceneUrl?.let { "<cp-spatial-view scene-url=\"${WebEscaping.htmlEscape(it)}\" label=\"$label\"></cp-spatial-view>" }.orEmpty()}$rcCanvas$wasmFrame$rcWasmFrame$specImg$motionImg$motionPlayer$sourcePanelHtml$specCompare$inspectLayerHtml$stageLiveHint<div class="cp-error" id="cp-error" role="alert" hidden></div></div>
+        <div class="cp-stage"><cp-backend-badge class="cp-backend" id="cp-backend" role="status" aria-live="polite"></cp-backend-badge><img id="cp-img" alt="$label"$stageFrameAttr><canvas id="cp-canvas" hidden></canvas>${spatialSceneUrl?.let { "<cp-spatial-view scene-url=\"${WebEscaping.htmlEscape(it)}\" label=\"$label\"></cp-spatial-view>" }.orEmpty()}$rcCanvas$wasmFrame$rcWasmFrame$specImg$motionImg$motionPlayer$sourcePanelHtml$specCompare$inspectLayerHtml$stageLiveHint<div class="cp-error" id="cp-error" role="alert" hidden></div></div>$stageFrameScript
         $inspectLegendHtml
         <div class="cp-controls" id="cp-controls">
           <!-- No "Appearance" group. Its only ever-visible control was a Background select

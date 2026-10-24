@@ -11051,6 +11051,9 @@ class ServeHttpServer(
           // …and the axes it declined, so `hydrateFromUrl` defers on them instead of putting them
           // straight back a frame after load.
           unseededOverrides = overrideSeeds.withheld,
+          // Whether the page may seed its own stage frame, which it may only do when this request
+          // named nothing that moves it.
+          bareFrameRequest = bareFrameRequest(),
           // Per-preview: a catalog advertises SVG once it has `figma/`, but a preview without
           // `figma/<slug>.svg` still 404s.
           hasSvgExport = renderHost.hasSvgExportFor(preview.id),
@@ -13197,6 +13200,20 @@ class ServeHttpServer(
    */
   private fun RoutingContext.requestCarriesOverrides(): Boolean =
     renderParams().entries().any { (key, _) -> ServeOverrides.isOverrideParam(key) }
+
+  /**
+   * Whether this page request names nothing that could move the frame the viewer asks for first,
+   * which is what lets [ServeWeb.viewerPage] seed the stage image and preload it.
+   *
+   * A whole-query test, not an override test. `mode`, `svg`, `scroll` and `bg` are not overrides,
+   * but `mode` and `svg` do change which frame or which format the viewer requests first, and a
+   * seeded URL that differs from the viewer's own costs an extra render rather than saving a trip —
+   * so the cheap, auditable rule is "nothing but the params that cannot possibly matter".
+   * [FRAME_NEUTRAL_PAGE_PARAMS] names those; everything else, known or not, withholds the seed, so
+   * a new frame-moving param is safe by default rather than safe only once someone remembers it.
+   */
+  private fun RoutingContext.bareFrameRequest(): Boolean =
+    call.request.queryParameters.names().none { it !in FRAME_NEUTRAL_PAGE_PARAMS }
 
   /**
    * `/render/{name}` suffixes that are never a baked replay: figma-svg, the slot / accessibility /
@@ -17758,6 +17775,13 @@ class ServeHttpServer(
     const val CHROME_PARAM: String = "chrome"
 
     private const val DEFAULT_PORT_RANGE = 32
+
+    /**
+     * Page params that cannot change which frame the viewer requests first: the link credentials it
+     * re-emits itself (and which already withhold the seed by making the page query non-empty), and
+     * `chrome`, which picks presentation. See [bareFrameRequest].
+     */
+    private val FRAME_NEUTRAL_PAGE_PARAMS: Set<String> = setOf("token", "session", CHROME_PARAM)
 
     /** Short edge/browser caching for HTML assembled entirely from published catalog metadata. */
     private const val STATIC_PAGE_CACHE_CONTROL = "public, max-age=60, stale-while-revalidate=300"
