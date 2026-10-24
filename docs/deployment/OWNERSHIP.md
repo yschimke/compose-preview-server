@@ -1,111 +1,60 @@
-# Deployment ownership and staged extraction
+# Deploying your own preview server
 
-New operators should start with [deploy/example](../../deploy/example/README.md). It runs a
-published image with their own configuration and optional HTTPS, without the hosted site's sibling
-services, accounts, cookies, auto-rollout or catalog inventory. Non-secret behavior belongs in
-`settings.json`; credentials belong in a local secret store or untracked environment file.
+This repository publishes two images on every release, and everything you need to run them
+yourself:
 
-| Component | Owner and reason |
+- `ghcr.io/yschimke/compose-preview-host` — the server, with the released distribution and its
+  live-render sidecars baked in. No Gradle build runs on the host.
+- `ghcr.io/yschimke/compose-preview-caddy` — an optional `caddy:2` edge with the stack's Caddyfile
+  baked in (TLS, the credential-filtered access log, security headers, rollout-aware upstreams).
+
+No hostname, account, catalog set or trust relationship of any particular deployment is part of
+either image or of the files below. Those are yours to choose.
+
+## Start from `deploy/example`
+
+[`deploy/example`](../../deploy/example/README.md) is the adoption path: one Compose file, the
+server on loopback, an optional plain Caddy for HTTPS, and three read-only configuration files —
+`settings.json`, `catalogs.json` and `producers.json`. Copy the directory into your own repository
+(private if you like), edit those files, pin `IMAGE_TAG` and run it. Every configuration change is
+then a reviewed commit and a container recreate.
+
+## Grow into `deploy/image`
+
+[`deploy/image`](../../deploy/image/README.md) is the full-featured stack for the same image:
+zero-downtime rollouts (`rollout`), an instant-roll webhook (`hook`), an auto-updating edge image
+(`watchtower` + `compose-preview-caddy`), the sandboxed playground container, and sizing knobs for a
+large host. `.env.example` there lists every variable with an `example.com` placeholder;
+`docker-compose.deploy-config.yml` mounts your deployment directory's `catalogs.json` and
+`producers.json` read-only (`DEPLOY_CONFIG_DIR`, default `../example`). Run it from a checkout of
+this repository, or copy the directory and track upstream changes yourself.
+
+## What goes where
+
+| What | Where |
 | --- | --- |
-| HTTP/auth, admin APIs, catalog delivery and retained runtimes | Server: reusable behavior and transport |
-| Image build, entrypoint, schema and settings reference | Server: interface of the released image |
-| Editor, catalog interpretation, browser offline design creation | compose-ui-builder releases; consumed through existing seams |
-| Published catalog definitions, templates, capability pins | Catalog producers; no deployment-owned seed factories or chooser tables |
-| Hostnames, catalog inventory/trust, OAuth registration, cookie parent, administrators, analytics IDs | Private deployment repository: operator policy |
-| Caddy site routing, rollout scheduling/hooks, HA sidecar and demo-network joins | Private deployment repository: this machine's topology |
-| HA API, demo facade/read-only enforcement, entities, custom card and dashboard semantics | homeassistant-remotecompose: integration behavior |
-| Builder profile and HTTPS seed import allowlist APIs | Server: generic host/catalog restrictions and trust checks; HA is one consumer |
-| Analytics service image and tooling | May be reusable, but this site's DB, IDs and installation belong to deployment; do not move server event delivery into HA |
+| Server behaviour, admin APIs, catalog delivery, the settings schema | This repository, in the released image |
+| Non-secret settings (`settings.json`, keys in [`SETTINGS.md`](../../deploy/image/SETTINGS.md)) | Your deployment directory |
+| Catalog inventory and trusted producers (`catalogs.json`, `producers.json`) | Your deployment directory |
+| Hostnames, OAuth app, cookie domain, administrators, analytics ids | Your `settings.json` and `.env` |
+| Secrets (`SERVE_ADMIN_TOKEN`, OAuth and cookie secrets, `DEPLOY_HOOK_TOKEN`) | An untracked `.env` or your secret store, never a repository |
+| Other apps on the same machine | Caddyfile fragments mounted into `/etc/caddy/sites.d`, named in `EXTRA_SITE_DOMAINS` |
 
-The entrypoint no longer grants an operator's GitHub account administrator access by default or
-implicitly gates OAuth against the operator's repository. Configure `uiBuilder.adminActors` and
-`SERVE_GITHUB_AUTH_REPO` explicitly when required. Existing site settings already name its
-administrator. GitHub sign-in currently requires a repository as well as the three OAuth
-credentials, even for open builder access. The legacy site Compose file retains its repository
-policy until cutover; removing it before migrating that value would prevent the server starting.
-The private stack preserves its previous Compose defaults during staging.
+The image grants no administrator and gates GitHub sign-in on no repository by default: set
+`uiBuilder.adminActors` and `SERVE_GITHUB_AUTH_REPO` explicitly when you enable sign-in.
 
-## Migration gates
+## Extra sites on the same edge
 
-This is a preparation change. It deliberately retains the old workflows, images, file locations and
-HA routes until the private replacement has passed live parity. Copying files is not switchover.
-The private repository contains a commit-pinned hash inventory of the copied tracked inputs,
-verification tooling, and the host runbook. No credentials or host `.env` files are copied.
+The `compose-preview-caddy` image imports one Caddyfile fragment per extra hostname from
+`/etc/caddy/sites.d`. Mount yours there from a Compose override, list the hostnames in
+`EXTRA_SITE_DOMAINS` so the server's own block does not claim them too, and `import edge_common`
+and `import crawler_block` inside each fragment to share the log, headers and crawler policy. See
+"Extra sites on the same edge" in the [image README](../../deploy/image/README.md).
 
-1. Review both PRs. Confirm the private repository remains private. Reconcile changes landing in
-   either source while review is open; specifically check the catalog and Lovelace workers.
-2. Inspect the real host's Compose project, resolved files, image digests, override files, volumes,
-   networks and environment *names*. Back up configuration and durable design state privately.
-   Compare admin inventories with the private config before considering any pruning.
-3. Test the pinned server image on a disposable deployment with this example. Verify catalog
-   loading, builder entry, actual renders and browser-local creation with the network disabled.
-   Separately stage the private stack without claiming production ports or sharing writable state.
-4. Copy required Actions credentials through approved secret tooling; GitHub secret values cannot
-   be read back from the public repository. Enable only one config/deployment writer at a time.
-   Keep image production in the server release lane and site rollout/verification in the private lane.
-5. After parity, switch the host's deployment checkout/config source while retaining its existing
-   Compose project/volume identities and all live overrides. Verify every hostname and integration,
-   authenticated flows, catalog revisions, actual render lanes and browser offline creation.
-6. Only after that succeeds, remove superseded site config, HA services/routes and site-specific
-   workflow stages from the public repository in a follow-up PR. Keep generic image behavior/tests.
+## Rolling out a release
 
-Merging these PRs is a separate user decision. Deployment is authorized after verification, but a
-merge-dependent step must wait for an explicit merge request. No old setup is removed by this PR.
-Rollback before cleanup means restoring the previous checkout, Compose file list and pinned image
-references, rolling the existing project back, and repeating verification. Do not delete volumes or
-recreate the stack under a new project name. State-schema changes require the matching backup;
-never blindly run an older binary against newly migrated state.
-
-## Known overlap and unresolved dependencies
-
-On 2026-10-17, server #1721 (builder 3.120.0) and #1698 (release 3.142.0) are merged. Public `/version`
-and `/status.json` report 3.142.0. That release predates the #1721 adoption: a merged dependency bump
-is not evidence the running image contains it. #1726 (published-template caching) and #1728 (HA
-profile allowing Lovelace) remain open. The interrupted catalog worker also has builder-side work;
-this migration does not duplicate it or remove its compatibility paths.
-
-The existing catalog failures are tracked in [SCH-8](https://linear.app/yschimke/issue/SCH-8).
-The first public probe reports 44 loaded catalogs, zero failed/pending, and three builder problems:
-HA and Meshcore template pins, and an unavailable Lovelace publication. Preserve that baseline and
-resolve those separately; do not interpret a successful HTTP page or 44/44 loading as working
-catalog templates or offline design creation. Their revisions, retained runtimes and browser caches
-must survive the deployment-source move.
-
-Still unknown until host access: active local overrides, whether HA demo networking has been
-provisioned, exact running editor/runtime pin, secret delivery and backup/restore mechanism.
-The deployment runbook must be updated with observed facts before cutover.
-
-## Catalog ownership compatibility retirement
-
-The 2026-10-18 production check observed server 3.144.0 and editor 3.121.0. Published Material 3
-templates loaded and browser-local creation from the published `hello` document preserved its
-catalog pin and five node IDs. The release workflow's admin config reconcile reported the builder
-catalog settings already serving. Evidence is in
-[`published-catalog-rollout/result.json`](../evidence/published-catalog-rollout/result.json).
-
-The fresh-tab offline gate failed on the deployed root editor host: `ui.coo.ee` emits
-`ui-builder-base-path=/`, and the editor explicitly skips service-worker registration in that mode.
-With networking disabled, a new tab cannot load its shell, despite the templates reaching IndexedDB.
-This is tracked in [SCH-11](https://linear.app/yschimke/issue/SCH-11). The earlier standalone/prefixed
-editor smoke test does not establish parity for this host. HA and Meshcore template-pin failures
-remain tracked in SCH-8.
-
-Remove the ignored `owned` fields from configuration writers first. The public deployment config
-cleanup retains the compatible server decoder; the matching staged private deployment cleanup
-removes the same fields and updates its source manifest without changing effective settings.
-Both cleanups must land before the private copy can become authoritative.
-
-The prepared root-host fix shares `/push-sw.js` with the editor's offline handler, preserving the
-notification registration. It requires an editor archive advertising `rootOffline: 1`; older
-archives and other hosts retain their existing behavior. Local Chromium verification passes:
-after warming the published document cache, closing the tab and disabling networking, a fresh
-tab loads and creates a design from the cached publication with its pin intact. This local
-HTTP-contract harness is not production verification. Release the compatible builder, consume its
-released archive, then verify this behavior on the deployed root host before retiring seed factories
-or chooser tables. The host fix alone does not enable offline loading with editor 3.121.0.
-
-After the production offline gate passes, publish the clean
-configuration through the active writer, verify the admin round trip and persisted configuration,
-and reconcile the private copy before cutover. Only then remove the `owned` decoder and its rolling
-upgrade tests in a subsequent server release. Removing that decoder alongside only one writer
-would make the other writer's strict admin requests fail.
+The stack's `rollout` service polls GHCR and rolls `preview` with no downtime. To roll as soon as an
+image is published instead, call your host's `POST /__hooks/rollout` with `DEPLOY_HOOK_TOKEN` from
+whatever watches your images. A fork that builds its own image gets this from
+`preview-host-image.yml` by setting the `DEPLOY_HOOK_URL` repository variable and the
+`DEPLOY_HOOK_TOKEN` secret; without the variable that step does not run.
