@@ -1,5 +1,15 @@
 # Changelog
 
+## [3.149.0](https://github.com/yschimke/compose-preview-server/compare/v3.148.0...v3.149.0) (2026-10-24)
+
+
+### Bug Fixes
+
+* **deploy:** route the HA design server's library sources through Caddy ([#1809](https://github.com/yschimke/compose-preview-server/issues/1809)) ([563941c](https://github.com/yschimke/compose-preview-server/commit/563941c4e1cb0bb2816636e2965bb95e652e4705))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.73.0 ([#1808](https://github.com/yschimke/compose-preview-server/issues/1808)) ([bc4a223](https://github.com/yschimke/compose-preview-server/commit/bc4a223252a0677280337e7b593e9258000ea6e3))
+* **deps:** update dependency ee.schimke.composeai:rc-players-bom to v2.17.5 ([#1805](https://github.com/yschimke/compose-preview-server/issues/1805)) ([30173fb](https://github.com/yschimke/compose-preview-server/commit/30173fbe2e0846e60717e4705de443bcc1a246c5))
+* **deps:** update rc-players to v2.17.5 ([#1807](https://github.com/yschimke/compose-preview-server/issues/1807)) ([0ca7728](https://github.com/yschimke/compose-preview-server/commit/0ca7728d4eb5b799a57d392ff2b51e38803ba0d5))
+
 ## [3.148.0](https://github.com/yschimke/compose-preview-server/compare/v3.147.0...v3.148.0) (2026-10-23)
 
 
