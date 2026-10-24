@@ -145,8 +145,10 @@
 	# proxy below. The hook is fail-closed (idle without DEPLOY_HOOK_TOKEN), and only
 	# reachable here — it publishes no host port of its own.
 	# /__hooks/restart is the same hook forcing the roll (no new image) so a config change published
-	# through the admin API takes effect without SSH; see deploy-hook.sh.
-	@deploy_hooks path /__hooks/rollout /__hooks/restart
+	# through the admin API takes effect without SSH; see deploy-hook.sh. The whole /__hooks/ prefix
+	# goes to the hook, so a deployment's own hook script can add routes without an edge change; the
+	# stock hook answers 404 for any path it does not serve.
+	@deploy_hooks path /__hooks/*
 	handle @deploy_hooks {
 		reverse_proxy hook:9000
 	}
