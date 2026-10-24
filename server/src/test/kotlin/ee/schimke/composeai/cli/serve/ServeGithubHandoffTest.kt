@@ -284,8 +284,8 @@ class ServeGithubHandoffTest {
       assertTrue(session.contains("Secure", ignoreCase = true), session)
       assertTrue(session.contains("HttpOnly", ignoreCase = true), session)
       assertEquals("octo", auth.sessionLogin(assertNotNull(it.cookieValue(AUTH_COOKIE))))
-      // The nonce is spent with the code.
-      assertTrue(it.setCookies(HANDOFF_COOKIE).single().startsWith("$HANDOFF_COOKIE=;"))
+      // The nonce stays for another tab's handoff; it expires on its own.
+      assertTrue(it.setCookies(HANDOFF_COOKIE).isEmpty())
     }
   }
 
@@ -401,11 +401,19 @@ class ServeGithubHandoffTest {
   }
 
   @Test
-  fun `a second tab's sign-in keeps the first tab's nonce`() {
+  fun `two tabs signing in at once both complete`() {
     val server = server()
     val first = startOnSite(server)
     val second = startOnSite(server, cookie = "$HANDOFF_COOKIE=${first.nonce}")
     assertEquals(first.nonce, second.nonce)
+    val firstHandoff = throughGitHub(server, first) { it.location() }
+    val secondHandoff = throughGitHub(server, second) { it.location() }
+    // Redeeming one tab's code must not cost the other tab its nonce.
+    redeem(server, firstHandoff, M3, first.nonce).use { assertEquals(302, it.code) }
+    redeem(server, secondHandoff, M3, second.nonce).use {
+      assertEquals(302, it.code)
+      assertNotNull(it.cookieValue(AUTH_COOKIE))
+    }
   }
 
   @Test

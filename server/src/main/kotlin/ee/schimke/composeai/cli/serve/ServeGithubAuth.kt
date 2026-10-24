@@ -320,6 +320,10 @@ class ServeGithubAuth(
    * useless in another browser, and an attacker can't sign a victim in as themselves by sending
    * them their own code (login CSRF). The new session keeps the original sign-in's
    * `authenticatedAt`, so the absolute cap and [handleLogout]'s revocation cover both copies.
+   *
+   * The nonce is left to expire with its own `Max-Age` rather than cleared here: tabs signing in on
+   * this host at the same time share it, and each holds its own code. It authorises nothing by
+   * itself, since every code bound to it is spent on first use.
    */
   suspend fun RoutingContext.handleHandoff() {
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
@@ -330,7 +334,6 @@ class ServeGithubAuth(
         ?.takeIf { it.isNotEmpty() }
         ?.let { handoffGrants.remove(it) }
     val nonce = call.request.soleCookieValue(handoffCookieName)
-    call.response.cookies.append(handoffCookie("", 0, secure))
     val now = clock.millis()
     val expiresAt = grant?.let { cappedExpiry(it.session.authenticatedAt, now) } ?: 0L
     if (
