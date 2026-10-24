@@ -94,6 +94,18 @@ dependencyResolutionManagement {
       content { includeModule("ee.schimke.composeai", "compose-preview-ui-builder-web") }
       metadataSources { artifact() }
     }
+
+    // The CMP/Wasm Remote Compose player's browser bundle, `rc-player-wasm.zip` on every
+    // yschimke/rc-players release. Same shape as the editor archive above, except that the asset
+    // name carries no version. It used to come from Central as `rc-player-wasm-dist`; that copy was
+    // ~11 MB per release against the org's monthly Central size limit, for a bundle nothing
+    // compiles against. Fenced to this one module.
+    ivy("https://github.com/yschimke/rc-players/releases/download") {
+      name = "rcPlayerWasmRelease"
+      patternLayout { artifact("v[revision]/[module].[ext]") }
+      content { includeModule("ee.schimke.composeai", "rc-player-wasm") }
+      metadataSources { artifact() }
+    }
   }
 }
 

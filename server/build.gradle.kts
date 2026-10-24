@@ -208,8 +208,9 @@ val writeDistributionJavaMin =
 // compose-ai-tools' `RcJvmServerRenderer` also looks there by default.
 
 // The CMP/Wasm Remote Compose player, shipped as `<APP_HOME>/rc-player-wasm/` (the image entrypoint
-// passes it as `--rc-player-wasm-dir` when it holds `index.html`). Resolved from Central
-// (`rc-player-wasm-dist`) and unpacked as static files.
+// passes it as `--rc-player-wasm-dir` when it holds `index.html`). Resolved from the rc-players
+// release asset `rc-player-wasm.zip` (the `rcPlayerWasmRelease` ivy repository) and unpacked as
+// static files.
 val rcPlayerWasmDist =
   configurations.create("rcPlayerWasmDist") {
     description = "The CMP/Wasm Remote Compose player's static browser bundle."
@@ -219,15 +220,11 @@ val rcPlayerWasmDist =
   }
 
 dependencies {
-  rcPlayerWasmDist(
-    variantOf(libs.rc.player.wasm.dist) {
-      classifier("dist")
-      artifactType("zip")
-    }
-  )
+  // A bare release asset with no module metadata, so requested artifact-only (`@zip`).
+  rcPlayerWasmDist("${libs.rc.player.wasm.get()}@zip")
 }
 
-/** Unpack the rc-player-wasm-dist zip, refusing one without the `index.html` the host serves. */
+/** Unpack the rc-player-wasm zip, refusing one without the `index.html` the host serves. */
 abstract class UnpackRcPlayerWasm : DefaultTask() {
   @get:InputFile abstract val archiveFile: RegularFileProperty
 
@@ -244,7 +241,7 @@ abstract class UnpackRcPlayerWasm : DefaultTask() {
       into(outputDirectory)
     }
     check(outputDirectory.file("index.html").get().asFile.isFile) {
-      "rc-player-wasm-dist unpacked without an index.html; the entrypoint would skip it"
+      "rc-player-wasm.zip unpacked without an index.html; the entrypoint would skip it"
     }
   }
 }
