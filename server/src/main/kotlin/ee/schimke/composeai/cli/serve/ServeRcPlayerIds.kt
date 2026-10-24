@@ -136,6 +136,24 @@ internal object ServeRcPlayerIds {
   }
 
   /**
+   * Whether a server-side player must name itself as `?rcPlayer=` on a `/render` URL: every player
+   * except the one a bare URL already produces, [bakedPlayer] ([ServeHost.bakedRcPlayer]). Naming
+   * that one would split the cache and read as a choice the visitor never made.
+   *
+   * The server-side mirror of the viewer's `backendRequiresRenderParam`
+   * (`serve-web/src/viewer/laneState.ts`), kept in step with it: both decide whether the viewer's
+   * very first snapshot request carries a player, and [ServeWeb.viewerPage] seeds the stage frame
+   * from this answer. A browser lane paints from the `.rc` bytes and never calls `/render`, so it
+   * names nothing whatever baked. An absent or unknown [bakedPlayer] names everything.
+   */
+  fun requiresRenderParam(backend: String, bakedPlayer: String?): Boolean {
+    val id = normalizeRequest(backend)
+    if (UNIVERSE.none { it.id == id && it.serverSide }) return false
+    val baked = fromCaptureRecord(bakedPlayer) ?: return true
+    return id != baked
+  }
+
+  /**
    * Canonical id of a configured default player, or null for none: blank, or unknown (reported via
    * [onInvalid] rather than failing the server).
    */
