@@ -208,6 +208,12 @@ case "${route}" in
   *) fail=$((fail + 1)); echo "FAIL: design resolver must reach ha-designs" >&2 ;;
 esac
 
+# The HA repository's scheduled import reads the library's card design sources from ha-designs.
+case "${route}" in
+  *" /api/library/* /library/* "*) pass=$((pass + 1)) ;;
+  *) fail=$((fail + 1)); echo "FAIL: library sources and their edit links must reach ha-designs" >&2 ;;
+esac
+
 if [ "${fail}" -gt 0 ]; then
   echo "${fail} check(s) failed, ${pass} passed." >&2
   exit 1

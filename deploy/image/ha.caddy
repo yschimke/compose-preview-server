@@ -2,8 +2,9 @@
 # by path between two services:
 #
 #   * the HA design server (`ha-designs`, ghcr.io/yschimke/ha-card-design-server): the app's front
-#     page, the template browser, the card library the app reads (/designs/v1), the card embed and
-#     Card Studio's handoffs from the app;
+#     page, the template browser, the card library the app reads (/designs/v1), the card embed,
+#     Card Studio's handoffs from the app, and the library's card design sources (/api/library, which
+#     the HA repository's scheduled import reads, and /library/<cardType>/edit);
 #   * the preview server: everything else, which on this host is the white-labelled Home Assistant
 #     card designer (/ui-builder, its APIs, /auth, /mcp) and the catalog
 #     (/homeassistant-remotecompose and the rooted routes its pages draw from).
@@ -23,7 +24,7 @@
 	# docker-compose.demo-ha.yml mounts its route and joins the isolated edge network.
 	import /run/caddy-ha-routes/*.caddy
 
-	@designs path / /demo /demo/* /designs /designs/* /site/* /schema /embed/* /studio/* /api/designs /api/designs/* /api/schema /api/cards/resolve /api/studio/* /edit /healthz
+	@designs path / /demo /demo/* /designs /designs/* /site/* /schema /embed/* /studio/* /api/designs /api/designs/* /api/schema /api/cards/resolve /api/studio/* /api/library/* /library/* /edit /healthz
 	handle @designs {
 		reverse_proxy {$HA_DESIGNS_UPSTREAM:ha-designs:8080} {
 			transport http {
