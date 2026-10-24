@@ -1,5 +1,26 @@
 # Changelog
 
+## [3.150.0](https://github.com/yschimke/compose-preview-server/compare/v3.149.0...v3.150.0) (2026-10-24)
+
+
+### Features
+
+* **auth:** host-only GitHub sign-in with a one-time cross-host handoff ([#1817](https://github.com/yschimke/compose-preview-server/issues/1817)) ([7cbb1b0](https://github.com/yschimke/compose-preview-server/commit/7cbb1b065476fe9523cba6b6002d8a757a42233a))
+* **deploy:** route the whole /__hooks/ prefix to the deploy hook ([#1814](https://github.com/yschimke/compose-preview-server/issues/1814)) ([1134613](https://github.com/yschimke/compose-preview-server/commit/1134613208d2b862f6ed3338917d3c1ee7882f84))
+* **deploy:** serve extra sites from mounted Caddyfile fragments ([#1810](https://github.com/yschimke/compose-preview-server/issues/1810)) ([acb8af9](https://github.com/yschimke/compose-preview-server/commit/acb8af941c72e38fc4d52c9b5b03f2285ea6b73e))
+
+
+### Bug Fixes
+
+* **deps:** move to compose-preview-daemon 3.25.1 and daemon-compile ([#1819](https://github.com/yschimke/compose-preview-server/issues/1819)) ([00acb2b](https://github.com/yschimke/compose-preview-server/commit/00acb2b54c160ecc16a6733f1aebbcc6956e872a))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.73.1 ([#1813](https://github.com/yschimke/compose-preview-server/issues/1813)) ([1e937d0](https://github.com/yschimke/compose-preview-server/commit/1e937d018641f0c7ba2ae0b2255b4b0726c3c947))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.73.2 ([#1818](https://github.com/yschimke/compose-preview-server/issues/1818)) ([28f0901](https://github.com/yschimke/compose-preview-server/commit/28f09010f358208f7e7277bf7bfac0c850b88889))
+
+
+### Performance Improvements
+
+* **serve:** seed and preload the viewer's first stage frame ([#1815](https://github.com/yschimke/compose-preview-server/issues/1815)) ([10b0e7e](https://github.com/yschimke/compose-preview-server/commit/10b0e7e472424f756a3ccf4bda1c85b10188ca4b))
+
 ## [3.149.0](https://github.com/yschimke/compose-preview-server/compare/v3.148.0...v3.149.0) (2026-10-24)
 
 
