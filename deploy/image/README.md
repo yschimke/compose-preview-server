@@ -525,11 +525,12 @@ curl -sI https://m3.preview.example.com/wear-m3/ | head -1                    # 
 curl -sI https://wear.preview.example.com/ | head -1                          # 200 — the Wear catalog's landing
 ```
 
-If this box uses GitHub sign-in, set `SERVE_GITHUB_AUTH_COOKIE_DOMAIN` as well — see *GitHub auth*
-below; without it sign-in is withheld on a site host and its live and playground surfaces stay
-snapshot-only. The entrypoint derives it from `DOMAIN` whenever the box has a site configured at
-all — `SERVE_SITES` or a `sites` entry in the catalogs file — so a site delivered by config gets the
-same treatment as one spelled out in `.env`.
+If this box uses GitHub sign-in, a site host signs in one of two ways — see *GitHub auth* below:
+through a cookie domain shared with the callback host, or, with `auth.github.cookieDomain` set to
+`none`, through a one-time handoff from the callback host that leaves every cookie host-only. The
+entrypoint derives a cookie domain from `DOMAIN` whenever the box has a site configured at all —
+`SERVE_SITES` or a `sites` entry in the catalogs file — so a site delivered by config gets the same
+treatment as one spelled out in `.env`.
 
 > On this image `/config/catalogs.json` is a volume the box seeds once and never overwrites, so the
 > file the *app* reads is the box's copy, not the one in git. `/admin/sites` is what bridges them —
@@ -840,7 +841,9 @@ To make the hostname the builder — `https://ui.example.com/` the editor's home
 A design whose id is a reserved segment (a design named `api`) has no rooted URL; its
 `/ui-builder/<id>` link keeps working.
 
-For shared GitHub sign-in between these sibling hosts, explicitly set:
+For shared GitHub sign-in between these sibling hosts, either keep the cookies host-only and let the
+callback host hand each one its session (`auth.github.cookieDomain` `none`; see *Host-only sign-in
+by handoff* below), or explicitly set a shared parent:
 
 ```dotenv
 SERVE_UI_BUILDER_HOST=ui.example.com
@@ -872,23 +875,55 @@ separate static-site build with its asset base set to `/start/`, deployed alongs
 this proxy; leave the redirect unset when using that arrangement. No settings here
 change DNS or publish/move the guide automatically.
 
-**With top-level sites configured, the cookies need a domain.** `SERVE_GITHUB_AUTH_COOKIE_DOMAIN`
-scopes both auth cookies to a parent domain, so one sign-in covers this host and every site
-hostname under it — sign in on `preview.example.com` and `m3.preview.example.com` is signed in too. Without it
-the cookies are host-only: a sign-in started on a site host writes its state cookie there while
-GitHub returns to the pinned callback origin, the callback sees no state, and the server withholds
-the sign-in affordance on every site (live and playground stay snapshot-only there). The entrypoint
-derives it from `DOMAIN` when the box has any site configured — `SERVE_SITES`, or a `sites` entry in
-`catalogs.json`; set it explicitly to narrow it, or to `none` to keep cookies host-only:
+**With top-level sites configured, sign-in crosses hosts one of two ways.** A cookie domain
+(`SERVE_GITHUB_AUTH_COOKIE_DOMAIN`) scopes both auth cookies to a parent domain, so one sign-in
+covers this host and every site hostname under it — sign in on `preview.example.com` and
+`m3.preview.example.com` is signed in too. The entrypoint derives it from `DOMAIN` when the box has
+any site configured — `SERVE_SITES`, or a `sites` entry in `catalogs.json`; set it explicitly to
+narrow it, or to `none` to keep cookies host-only:
 
 ```bash
 SERVE_GITHUB_AUTH_COOKIE_DOMAIN=preview.example.com
 ```
 
-Every host under that domain is inside the session's reach, so name the narrowest one covering your
-sites — on a box whose `DOMAIN` is an apex, set this explicitly rather than letting one session span
-the whole zone. A public suffix, or a domain that doesn't cover the callback host, is refused at
-startup rather than producing cookies the browser drops silently. Empty `SERVE_GITHUB_AUTH_USERS` allows any
+Every host under that domain is inside the session's reach — the browser sends the session cookie
+to any server answering there, yours or not — so name the narrowest one covering your sites, and
+don't use one at all if anything else is hosted under it. A public suffix, or a domain that doesn't
+cover the callback host, is refused at startup rather than producing cookies the browser drops
+silently.
+
+**Host-only sign-in by handoff.** With the cookie domain `none` (settings.json
+`"auth": {"github": {"cookieDomain": "none"}}`) and a pinned callback, no cookie names a `Domain`,
+and each configured site host — `SERVE_SITES`, the catalogs file's `sites`, `SERVE_UI_BUILDER_HOST`
+and the white-labelled builder host — gets its own session from the callback host:
+
+1. `/auth/github/start` on a site host sets a host-only nonce cookie (`__Host-cp_gh_handoff`) and
+   redirects to the callback host's `/auth/github/start`, carrying the site host, the page and the
+   nonce's SHA-256. The state cookie is set there, on the host GitHub returns to, so the CSRF check
+   is the one it always was.
+2. The callback signs the callback host in, mints a code — single-use, valid for 60 seconds, for
+   that one site host and that nonce — and redirects to `https://<site>/auth/github/handoff?code=…`
+   with `Referrer-Policy: no-referrer`. The site host must be configured: anything else returns to
+   a path on the callback host, never an open redirect.
+3. `/auth/github/handoff` spends the code on first use, checks it was minted for this host and
+   that the browser holds the matching nonce, sets this host's own session, and returns to the
+   page. A code read out of a URL, sent to another browser or to another host, signs no one in.
+4. Already signed in on the callback host, a site host's sign-in skips GitHub and goes straight to
+   step 2.
+
+Over HTTPS the cookies are named with the `__Host-` prefix (`__Host-cp_gh_auth`,
+`__Host-cp_gh_state`), which a browser refuses to set with a `Domain`, so a sibling host can't plant
+a session of its choosing either. Sessions written for a shared domain before the switch aren't
+read, and are expired for every parent domain the first time the browser is seen; visitors sign in
+once more (GitHub asks for no consent the second time). That includes a box with a pinned callback,
+no cookie domain and no sites, which is in this mode already. The `preview` and `playground` services
+read the same settings, so they switch together; they must agree on the cookie domain.
+
+**Signing out** ends that GitHub sign-in on every host it was handed to, not only the host it was
+pressed on: each copy carries the sign-in's time, and the server refuses all of them from then on.
+Another browser or device, signed in separately, stays signed in. The record lives in the `preview`
+process's memory until the sessions would have expired anyway, so a restart forgets it, and the
+`playground` service only sees the sign-out of the cookie cleared on its own host. Empty `SERVE_GITHUB_AUTH_USERS` allows any
 signed-in GitHub user to use live previews; playground additionally requires **write** access to
 `SERVE_GITHUB_AUTH_REPO` (default `yschimke/compose-ai-tools`). Set `SERVE_GITHUB_AUTH_USERS` to a
 comma-separated login list only if you want to narrow sign-in for both surfaces. With a list set,

@@ -36,6 +36,6 @@ Non-secret settings live in a deployment's `settings.json` (see [`deploy/example
 | `analytics.umami.websiteId` | `SERVE_UMAMI_WEBSITE_ID` | restart | preview | The Umami website id. |
 | `auth.github.clientId` | `SERVE_GITHUB_AUTH_CLIENT_ID` | restart | preview, playground | The GitHub OAuth app's client id. Public by design; its client secret and the cookie secret stay in `.env`. |
 | `auth.github.callbackBaseUrl` | `SERVE_GITHUB_AUTH_CALLBACK_BASE_URL` | restart | preview, playground | The origin GitHub redirects back to after sign-in. |
-| `auth.github.cookieDomain` | `SERVE_GITHUB_AUTH_COOKIE_DOMAIN` | restart | preview, playground | The parent domain the sign-in cookies cover, so one sign-in covers every site host. `none` keeps them host-only. |
+| `auth.github.cookieDomain` | `SERVE_GITHUB_AUTH_COOKIE_DOMAIN` | restart | preview, playground | The parent domain the sign-in cookies cover, so one sign-in covers every site host. `none` keeps them host-only: each site host then gets its own session from the callback host by a one-time handoff. |
 | `auth.github.openUiBuilder` | `SERVE_GITHUB_AUTH_OPEN_UI_BUILDER` | restart | preview | Let every signed-in GitHub account create, edit and export UI-builder designs. |
 | `auth.github.scope` | `SERVE_GITHUB_AUTH_SCOPE` | restart | preview | The OAuth scope asked for. Only read-only identity scopes are accepted. |

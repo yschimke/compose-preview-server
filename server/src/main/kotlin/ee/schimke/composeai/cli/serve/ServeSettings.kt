@@ -480,7 +480,8 @@ object ServeSettings {
         Type.Text(pattern = HOSTNAME, patternHint = "a domain name, or none"),
         Apply.RESTART,
         "The parent domain the sign-in cookies cover, so one sign-in covers every site host. " +
-          "`none` keeps them host-only.",
+          "`none` keeps them host-only: each site host then gets its own session from the " +
+          "callback host by a one-time handoff.",
         BOTH,
       ),
       Setting(

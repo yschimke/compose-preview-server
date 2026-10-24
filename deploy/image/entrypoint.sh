@@ -308,9 +308,9 @@ if [[ -n "${SERVE_GITHUB_AUTH_CLIENT_ID:-}" ||
   args+=(--github-auth-cookie-secret "${SERVE_GITHUB_AUTH_COOKIE_SECRET:-}")
   [[ -n "${SERVE_GITHUB_AUTH_REPO:-}" ]] && args+=(--github-auth-repo "${SERVE_GITHUB_AUTH_REPO}")
   # Scope the auth cookies to the parent domain so ONE sign-in covers this host and every
-  # SERVE_SITES hostname under it. Without it the cookies are host-only, the state cookie written on
-  # a site host never reaches the pinned callback origin, and the server withholds the sign-in
-  # affordance on every site (live + playground stay snapshot-only there).
+  # SERVE_SITES hostname under it. With `none` the cookies stay host-only and each site host is
+  # handed its own session by the pinned callback host instead (README: "Host-only sign-in by
+  # handoff") — the choice for a domain that also hosts servers that aren't this one.
   #
   # Derived from DOMAIN, but only when sites are actually configured — a single-hostname box has
   # nothing to widen for, and a cookie domain is the blast radius of a session. Set it explicitly to
