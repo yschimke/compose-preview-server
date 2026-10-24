@@ -1,6 +1,6 @@
 # OPT-IN overlay: serve a DEPLOYMENT's config from version control instead of the volume.
 #
-# The base docker-compose.yml keeps catalogs.json + producers.json on the `preview_config` named
+# The base docker-compose.yml keeps catalogs.json, producers.json and settings.json on the `preview_config` named
 # volume, seeded on first boot and never overwritten after, so an image roll can't stomp a runtime
 # edit. The cost of that is that config the host has never seen cannot arrive by `git pull`, only
 # through the admin API, which is additive: anything it cannot express (a deletion, a changed
@@ -29,7 +29,7 @@
 #   curl -sH "X-Compose-Preview-Admin-Token: $SERVE_ADMIN_TOKEN" https://<host>/admin/catalogs
 #   docker compose exec preview cat /config/catalogs.json
 #
-# DEPLOY_CONFIG_DIR names the deployment directory holding those two files, relative to this file
+# DEPLOY_CONFIG_DIR names the deployment directory holding those three files, relative to this file
 # or absolute. It defaults to deploy/example, the generic starting point; point it at your own
 # directory (a copy of deploy/example, or a checkout of your private deployment repository).
 services:
@@ -41,3 +41,6 @@ services:
       # inside it.
       - ${DEPLOY_CONFIG_DIR:-../example}/catalogs.json:/config/catalogs.json:ro
       - ${DEPLOY_CONFIG_DIR:-../example}/producers.json:/config/producers.json:ro
+      # The entrypoint reads its non-secret settings from /config/settings.json (SERVE_SETTINGS_FILE),
+      # so the deployment's settings.json rides along: OAuth client/callback, UI-builder policy.
+      - ${DEPLOY_CONFIG_DIR:-../example}/settings.json:/config/settings.json:ro

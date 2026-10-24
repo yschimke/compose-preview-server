@@ -584,7 +584,7 @@ docker compose -f docker-compose.yml -f docker-compose.deploy-config.yml up -d
 ```
 
 or set `COMPOSE_FILE=docker-compose.yml:docker-compose.deploy-config.yml` in `.env` so every later
-`docker compose` here picks it up. It bind-mounts the two files read-only from `DEPLOY_CONFIG_DIR`
+`docker compose` here picks it up. It bind-mounts `catalogs.json`, `producers.json` and `settings.json` read-only from `DEPLOY_CONFIG_DIR`
 (default `../example`; point it at your own deployment directory), so deploying config becomes
 `git pull && docker compose up -d`.
 
