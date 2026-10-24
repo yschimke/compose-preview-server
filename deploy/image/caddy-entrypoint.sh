@@ -42,13 +42,32 @@ resolved="$(printf '%s' "${resolved}" | sed 's/[[:space:]]*$//')"
 # fragments claim, and they are taken out of SITE_DOMAINS, because Caddy refuses a hostname claimed
 # by two blocks. With nothing mounted the import's glob matches nothing and the config is exactly
 # the main block. Installed afresh on every start, so removing a mount removes the site.
+#
+# Only files this script installed (listed in .installed) are ever removed. A deployment may also
+# bind-mount a fragment straight into OPTIONAL_SITES_DIR; deleting a bind-mounted file fails, and
+# under `set -e` that would stop Caddy and take every hostname on the box down. Such a file is left
+# alone, and a fragment of the same name is not copied over it.
 OPTIONAL_SITES_DIR="${OPTIONAL_SITES_DIR:-/run/caddy-sites}"
 EXTRA_SITES_DIR="${EXTRA_SITES_DIR:-/etc/caddy/sites.d}"
+installed="${OPTIONAL_SITES_DIR}/.installed"
 mkdir -p "${OPTIONAL_SITES_DIR}"
-rm -f "${OPTIONAL_SITES_DIR}"/*.caddy
+if [ -f "${installed}" ]; then
+  while IFS= read -r name; do
+    [ -n "${name}" ] && { rm -f "${OPTIONAL_SITES_DIR}/${name}" 2>/dev/null || true; }
+  done < "${installed}"
+fi
+: > "${installed}"
+install_site() { # install_site <source> <name>
+  if [ -e "${OPTIONAL_SITES_DIR}/$2" ]; then
+    echo "caddy: ${OPTIONAL_SITES_DIR}/$2 is already there (mounted?), not replacing it" >&2
+    return 0
+  fi
+  cp "$1" "${OPTIONAL_SITES_DIR}/$2"
+  echo "$2" >> "${installed}"
+}
 for site in "${EXTRA_SITES_DIR}"/*.caddy; do
   [ -f "${site}" ] || continue
-  cp "${site}" "${OPTIONAL_SITES_DIR}/"
+  install_site "${site}" "$(basename "${site}")"
   echo "caddy: extra site $(basename "${site}") from ${EXTRA_SITES_DIR}" >&2
 done
 for claimed in $(printf '%s' "${EXTRA_SITE_DOMAINS:-}" | tr ',' ' '); do
@@ -60,7 +79,7 @@ done
 # to a mounted fragment without both installing. Removed after that deployment has moved.
 HA_SITE_FILE="${HA_SITE_FILE:-/etc/caddy/ha.caddy}"
 if [ -n "${HA_DOMAIN:-}" ] && [ -z "${EXTRA_SITE_DOMAINS:-}" ]; then
-  cp "${HA_SITE_FILE}" "${OPTIONAL_SITES_DIR}/ha.caddy"
+  install_site "${HA_SITE_FILE}" ha.caddy
   resolved="$(printf '%s' "${resolved}" | tr ' ' '\n' | awk -v ha="${HA_DOMAIN}" 'NF && $0 != ha' | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
   echo "caddy: ${HA_DOMAIN} served by ha.caddy (design server + preview server, split by path)" >&2
 fi

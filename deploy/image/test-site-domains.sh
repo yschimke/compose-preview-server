@@ -179,6 +179,28 @@ rm "${work}/extra/other.caddy"
 check "unmounting a fragment removes its site" "" \
   "$(entry_of '{"catalogs":[]}' > /dev/null; ls "${work}/sites")"
 
+# A fragment someone placed in the sites dir directly (on the box, a bind mount of the native demo's
+# route) is never removed or replaced: deleting a bind-mounted file fails, which under `set -e`
+# would stop Caddy and every hostname with it. A read-only file stands in for the mount.
+printf 'native.example.com {\n}\n' > "${work}/sites/native-demo.caddy"
+printf 'other.example.com {\n}\n' > "${work}/extra/native-demo.caddy"
+printf 'other.example.com {\n}\n' > "${work}/extra/other.caddy"
+check "a fragment placed in the sites dir by someone else survives every start" \
+  "native-demo.caddy other.caddy|native.example.com {" \
+  "$(entry_of '{"catalogs":[]}' > /dev/null; entry_of '{"catalogs":[]}' > /dev/null
+     echo "$(ls "${work}/sites" | tr '\n' ' ' | sed 's/ $//')|$(head -1 "${work}/sites/native-demo.caddy")")"
+rm "${work}/extra/native-demo.caddy" "${work}/extra/other.caddy" "${work}/sites/native-demo.caddy"
+
+mkdir -p "${work}/ro" && printf 'x {\n}\n' > "${work}/ro/pinned.caddy"
+check "the entrypoint still starts Caddy when the sites dir holds a file it cannot delete" \
+  "ARGS=[run --config /etc/caddy/Caddyfile --adapter caddyfile]" \
+  "$(printf 'pinned.caddy\n' > "${work}/ro/.installed"; chmod 555 "${work}/ro"
+     printf '%s' '{"catalogs":[]}' > "${work}/catalogs.json"
+     PATH="${work}/bin:${PATH}" CATALOGS_FILE="${work}/catalogs.json" SITE_DOMAINS="" HA_DOMAIN="" \
+       EXTRA_SITES_DIR="${work}/extra" OPTIONAL_SITES_DIR="${work}/ro" \
+       sh "${entrypoint}" run --config /etc/caddy/Caddyfile --adapter caddyfile 2>/dev/null | sed -n 2p
+     chmod 755 "${work}/ro")"
+
 # The image's CMD has to survive: the entrypoint replaces `caddy` as PID 1's program, so dropping
 # the arguments would start Caddy with no config at all.
 check "the caddy command line is passed through" \
