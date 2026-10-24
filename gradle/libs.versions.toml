@@ -449,17 +449,6 @@ composeai-contracts = "3.39.0"
 # deprecated `catalogOwnership` properties (compose-ui-builder#980) and the per-catalog-id seed path
 # (compose-ui-builder#991). This server already seeds only through the published overload.
 composeai-ui-builder = "3.123.0"
-# The CMP/Wasm Remote Compose player (yschimke/rc-players' `rc-player-wasm-dist`, a zip of its
-# static browser bundle). Shipped in the server tarball as `rc-player-wasm/`, which the image's
-# entrypoint already passes as `--rc-player-wasm-dir`: that serves `/rc-player-wasm/`, enables the
-# viewer's `cmp-wasm` lane, and offers the CMP player beside the TypeScript one on a `/d/<id>` page.
-# 2.4.0 brings 2.3.0's postMessage driver (the player embeds cross-origin), `rcPlayerLoadBytes`,
-# vendored variable fonts, draw-list sounds and per-frame redraw of clock-driven canvases, then
-# 2.4.0's StateLayout enter/exit and shared elements matched by their AnimationSpec id. 2.9.0
-# takes `?density=` (CSS px per dp), which the viewer sends so the lane draws at the preview's scale.
-# 2.11.0 sizes a CanvasContent's ComponentValue bindings from its own geometry (rc-players#644), so
-# the pressure gauges that bind their width/height there draw their ring and needle on the CMP lanes.
-rc-players = "2.17.5"
 # The Android Remote Compose players the server's own player-only Android daemon replays documents
 # with, staged as `lib-rc-players-android/` (`stageRcPlayersAndroidLibs`). The Android daemon
 # sidecar deliberately ships none of this family (a consumer brings it, compose-preview-daemon's
@@ -469,7 +458,8 @@ rc-players = "2.17.5"
 # together. The same BOM picks the CMP player (`rc-player-compose`) staged beside them for
 # `cmp-android`, and pins its JVM target staged as `lib-rc-player-desktop/` for the desktop player
 # daemon (`stageRcPlayerDesktopLibs`); compose-preview-daemon's desktop binding is compiled against
-# this release's `rc-player-compose`.
+# this release's `rc-player-compose`. The CMP/Wasm player's browser bundle (`rc-player-wasm` below)
+# comes from the same release, so it moves with this ref too.
 rc-players-android = "2.17.5"
 compose-remote = "1.0.0-alpha22"
 # The TypeScript player's browser bundle (`remote-compose-player-js-dist`, a zip with the `dist`
@@ -575,14 +565,21 @@ composeai-data-render-core = { module = "ee.schimke.composeai:data-render-core" 
 composeai-ui-builder-protocol = { module = "ee.schimke.composeai:ui-builder-protocol" }
 composeai-ui-builder-runtime = { module = "ee.schimke.composeai:compose-preview-ui-builder-runtime" }
 composeai-ui-builder-export = { module = "ee.schimke.composeai:compose-preview-ui-builder-export" }
-# The editor archive, and the only coordinate here resolved from a GitHub release rather than from
-# Central. `@zip` at the use site, because an artifact-only dependency is the one shape an ivy
-# repository with no metadata can serve.
+# The editor archive, one of the two coordinates here resolved from a GitHub release rather than
+# from Central (`rc-player-wasm` below is the other). `@zip` at the use site, because an
+# artifact-only dependency is the one shape an ivy repository with no metadata can serve.
 composeai-ui-builder-web = { module = "ee.schimke.composeai:compose-preview-ui-builder-web", version.ref = "composeai-ui-builder" }
 composeai-ui-builder-render-bundle = { module = "ee.schimke.composeai:compose-preview-ui-builder-render-bundle" }
+# The CMP/Wasm Remote Compose player: the `rc-player-wasm.zip` asset on the yschimke/rc-players
+# release, through the `rcPlayerWasmRelease` ivy repository (settings.gradle.kts), not Central.
+# Shipped in the server tarball as `rc-player-wasm/`, which the image's entrypoint passes as
+# `--rc-player-wasm-dir`: that serves `/rc-player-wasm/`, enables the viewer's `cmp-wasm` lane, and
+# offers the CMP player beside the TypeScript one on a `/d/<id>` page. `@zip` at the use site, like
+# the editor archive. Versioned by the rc-players BOM's ref so Renovate still moves it: a Central
+# lookup of this coordinate finds nothing, and a ref of its own would never be bumped.
+rc-player-wasm = { module = "ee.schimke.composeai:rc-player-wasm", version.ref = "rc-players-android" }
 # Artifact-only at the use site (`dist` classifier, `zip`): the coordinate is a static bundle, not a
 # library, and only its zip is wanted.
-rc-player-wasm-dist = { module = "ee.schimke.composeai:rc-player-wasm-dist", version.ref = "rc-players" }
 remote-compose-player-js-dist = { module = "ee.schimke.composeai:remote-compose-player-js-dist", version.ref = "remote-compose-player-js" }
 
 # Artifact-only at the use site and non-transitive: `lib-rc-players-android/` is exactly the family the
