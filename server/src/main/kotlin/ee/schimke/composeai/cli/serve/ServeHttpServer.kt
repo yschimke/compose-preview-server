@@ -1515,6 +1515,9 @@ class ServeHttpServer(
             with(auth) { handleStart(browserHosts, setOfNotNull(uiBuilderProfile?.host)) }
           }
           get(ServeGithubAuth.CALLBACK_PATH) { with(auth) { handleCallback(browserHosts) } }
+          // A site host redeeming the one-time code the callback host minted for it, when the
+          // cookies are host-only ([ServeGithubAuth.handleHandoff]).
+          get(ServeGithubAuth.HANDOFF_PATH) { with(auth) { handleHandoff() } }
           // POST only ([ServeGithubAuth.handleLogout]): a prefetcher or unfurler following the URL
           // gets 405 rather than signing the visitor out.
           post(ServeGithubAuth.LOGOUT_PATH) {
@@ -2639,7 +2642,9 @@ class ServeHttpServer(
    * With [ServeGithubAuthConfig.cookieDomain] the state and session cookies are written for the
    * parent domain, so the pinned callback host and every site host under it share them; the state
    * carries the originating host for the return redirect. False for hosts outside that domain,
-   * where a sign-in would land the visitor back signed out.
+   * where a sign-in would land the visitor back signed out. Without a domain the cookies stay
+   * host-only and a configured site host gets its own session from the pinned callback host by a
+   * one-time handoff ([ServeGithubAuth.handleHandoff]), so every one of them round-trips.
    */
   private fun RoutingContext.oauthCanRoundTrip(): Boolean =
     githubAuth?.canRoundTrip(requestHost(call, trustForwardedFor), browserHosts) ?: true

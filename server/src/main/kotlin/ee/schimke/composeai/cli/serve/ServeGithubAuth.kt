@@ -16,6 +16,7 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.time.Clock
 import java.util.Base64
+import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.Dispatchers
@@ -71,12 +72,12 @@ data class ServeGithubAuthConfig(
   val callbackBaseUrl: String? = null,
   /**
    * Domain the auth cookies are scoped to, so one sign-in covers a parent host and every site host
-   * under it. Needed for a pinned callback to work from a site host: host-only `cp_gh_state`
-   * wouldn't reach the callback origin, failing CSRF.
+   * under it, the callback host's `cp_gh_state` included.
    *
    * Null keeps cookies host-only, the only safe default: it must be the operator's explicit choice,
    * never derived from `Host`. Every host under this domain is inside the session's blast radius;
-   * public suffixes are refused.
+   * public suffixes are refused. With a pinned [callbackBaseUrl] and no domain, a site host signs
+   * in through a one-time handoff from the callback host instead ([ServeGithubAuth.handleHandoff]).
    */
   val cookieDomain: String? = null,
   /**
@@ -186,6 +187,8 @@ class ServeGithubAuth(
    * of [siteHosts] and inside the cookie domain — so a sign-in begun anywhere can land there. That
    * URL is split into the host, carried like any site host's, and a path; any other absolute URL is
    * the plain `/` it always was, never an open redirect.
+   *
+   * Without a cookie domain ([handsOff]) the cross-host legs differ, see [handleHandoff].
    */
   suspend fun RoutingContext.handleStart(
     siteHosts: Set<String> = emptySet(),
@@ -194,6 +197,10 @@ class ServeGithubAuth(
     val requested = call.request.queryParameters["return"] ?: "/"
     val absolute = absoluteReturn(requested, siteHosts intersect absoluteReturnHosts)
     val returnTo = absolute?.second ?: safeReturnTo(requested)
+    if (handsOff) {
+      startHandoffSignIn(siteHosts, absolute?.first, returnTo)
+      return
+    }
     // Null on the ordinary same-host sign-in, which is then byte-for-byte what it always was.
     val originHost = absolute?.first ?: originHostFor(call, siteHosts)
     val state = signedState(nonce(), returnTo, originHost)
@@ -206,6 +213,159 @@ class ServeGithubAuth(
   }
 
   /**
+   * [handleStart] without a cookie domain. Three cases, by the host the request arrived on:
+   * - **A site host** (not the callback host): set a host-only [handoffCookieName] nonce here and
+   *   send the browser to the callback host's start, carrying this host, the path and the nonce's
+   *   digest. The nonce never leaves this host; only its digest travels.
+   * - **The callback host, asked for a handoff** (a valid site host and digest in the query): with
+   *   a live session here, skip GitHub and hand that session straight back (silent sign-in);
+   *   otherwise sign in with GitHub, carrying the handoff in the signed state.
+   * - **Anywhere else**: the ordinary same-host sign-in.
+   *
+   * An absolute return on another host starts over on that host, so the nonce is set where the code
+   * is later redeemed.
+   */
+  private suspend fun RoutingContext.startHandoffSignIn(
+    siteHosts: Set<String>,
+    absoluteHost: String?,
+    returnTo: String,
+  ) {
+    val secure = isSecure(call, config.callbackBaseUrl, config.trustForwardedHeaders)
+    val host = requestHost(call, config.trustForwardedHeaders)
+    val callbackHost = pinnedCallbackHost()
+    if (absoluteHost != null && absoluteHost != host) {
+      call.respondRedirect("https://$absoluteHost$START_PATH?return=${urlEncode(returnTo)}")
+      return
+    }
+    if (host != null && host != callbackHost && host in siteHosts) {
+      // A sign-in already in flight from another tab keeps its nonce, so neither tab's handoff is
+      // refused for the other's. The value is still secret and still bound to this browser.
+      val nonce =
+        call.request.soleCookieValue(handoffCookieName)?.takeIf { it.matches(TOKEN_SHAPE) }
+          ?: token()
+      call.response.cookies.append(handoffCookie(nonce, STATE_TTL_SECONDS, secure))
+      val params =
+        listOf("return" to returnTo, HANDOFF_HOST_PARAM to host, HANDOFF_PARAM to digest(nonce))
+          .joinToString("&") { (k, v) -> "$k=${urlEncode(v)}" }
+      call.respondRedirect("${config.callbackBaseUrl!!.trimEnd('/')}$START_PATH?$params")
+      return
+    }
+    val handoff = if (host == callbackHost) handoffTarget(call, siteHosts) else null
+    if (handoff != null) {
+      val session = call.request.soleCookieValue(authCookieName)?.let { verifySession(it) }
+      if (session != null) {
+        respondWithHandoff(handoff, returnTo, session)
+        return
+      }
+    }
+    val state = signedState(nonce(), returnTo, handoff?.host, handoff?.nonceDigest)
+    call.response.cookies.append(stateCookie(state, maxAge = STATE_TTL_SECONDS, secure = secure))
+    call.respondRedirect(authorizeUrl(call, state))
+  }
+
+  /**
+   * The site host and nonce digest a callback-host start was asked to hand back to, or null when
+   * either is missing, malformed, not a configured site host, or the callback host itself.
+   */
+  private fun handoffTarget(call: ApplicationCall, siteHosts: Set<String>): HandoffTarget? {
+    val params = call.request.queryParameters
+    val host = params[HANDOFF_HOST_PARAM]?.let { ServeSites.normalizeHost(it) } ?: return null
+    val digest = params[HANDOFF_PARAM]?.takeIf { it.matches(TOKEN_SHAPE) } ?: return null
+    if (host !in siteHosts || host == pinnedCallbackHost()) return null
+    return HandoffTarget(host, digest)
+  }
+
+  /**
+   * Mint a single-use [HANDOFF_TTL_SECONDS] code carrying [session] for [target], and send the
+   * browser to redeem it on that host. `no-referrer`, so the code in the next URL isn't sent on as
+   * a `Referer`; `no-store`, so no cache keeps the redirect.
+   */
+  private suspend fun RoutingContext.respondWithHandoff(
+    target: HandoffTarget,
+    returnTo: String,
+    session: SessionPayload,
+  ) {
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    call.response.headers.append(REFERRER_POLICY, "no-referrer")
+    val now = clock.millis()
+    // Spent and expired codes leave the map on redemption or here; a bounded map means a flood of
+    // silent sign-ins can't grow it without limit.
+    handoffGrants.values.removeIf { it.expiresAt <= now }
+    if (handoffGrants.size >= MAX_HANDOFF_GRANTS) {
+      call.respondText(
+        "GitHub sign-in is busy; try again shortly.",
+        status = HttpStatusCode.ServiceUnavailable,
+      )
+      return
+    }
+    val code = token()
+    handoffGrants[code] =
+      HandoffGrant(
+        host = target.host,
+        nonceDigest = target.nonceDigest,
+        returnTo = returnTo,
+        session = session,
+        expiresAt = now + HANDOFF_TTL_SECONDS * 1000,
+      )
+    call.respondRedirect("https://${target.host}$HANDOFF_PATH?code=${urlEncode(code)}")
+  }
+
+  /**
+   * `GET /auth/github/handoff` on a site host: redeem a code minted by [respondWithHandoff] for a
+   * host-only session here.
+   *
+   * The code is removed before anything is checked, so it is spent by its first use whatever the
+   * outcome. It must be unexpired, minted for this host, and presented alongside the
+   * [handoffCookieName] nonce whose digest it was minted against: a code copied out of a URL is
+   * useless in another browser, and an attacker can't sign a victim in as themselves by sending
+   * them their own code (login CSRF). The new session keeps the original sign-in's
+   * `authenticatedAt`, so the absolute cap and [handleLogout]'s revocation cover both copies.
+   */
+  suspend fun RoutingContext.handleHandoff() {
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    call.response.headers.append(REFERRER_POLICY, "no-referrer")
+    val secure = isSecure(call, config.callbackBaseUrl, config.trustForwardedHeaders)
+    val grant =
+      call.request.queryParameters["code"]
+        ?.takeIf { it.isNotEmpty() }
+        ?.let { handoffGrants.remove(it) }
+    val nonce = call.request.soleCookieValue(handoffCookieName)
+    call.response.cookies.append(handoffCookie("", 0, secure))
+    val now = clock.millis()
+    val expiresAt = grant?.let { cappedExpiry(it.session.authenticatedAt, now) } ?: 0L
+    if (
+      !handsOff ||
+        grant == null ||
+        grant.expiresAt <= now ||
+        requestHost(call, config.trustForwardedHeaders) != grant.host ||
+        nonce == null ||
+        !tokensMatch(grant.nonceDigest, digest(nonce)) ||
+        expiresAt <= now ||
+        isSignedOut(grant.session.login, grant.session.authenticatedAt)
+    ) {
+      call.respondText("GitHub sign-in failed.", status = HttpStatusCode.Unauthorized)
+      return
+    }
+    val session = grant.session
+    call.response.cookies.append(
+      authCookie(
+        signedSession(
+          session.login,
+          session.repositoryAccess,
+          session.imageRepositoryAccess,
+          session.authenticatedAt,
+          expiresAt,
+          guest = session.guest,
+        ),
+        maxAge = (expiresAt - now) / 1000,
+        secure = secure,
+      )
+    )
+    clearLegacyDomainCookies(call, secure)
+    call.respondRedirect(grant.returnTo)
+  }
+
+  /**
    * `GET /auth/github/callback`, which with a pinned callback always lands on the pinned origin. A
    * same-host sign-in returns to a relative path; a cross-host one (started on a site) returns to
    * an absolute URL on that site.
@@ -213,13 +373,17 @@ class ServeGithubAuth(
    * The CSRF check is unchanged: with [ServeGithubAuthConfig.cookieDomain] set, `cp_gh_state` is
    * sent to the callback host too. The cross-host leg adds only a redirect target, not a
    * credential, and the session cookie already covers every site host.
+   *
+   * Without a cookie domain ([handsOff]) the state cookie was written on this host by its own
+   * start, so the check is the same; a state carrying a handoff then ends at [respondWithHandoff]
+   * rather than at a redirect.
    */
   suspend fun RoutingContext.handleCallback(siteHosts: Set<String> = emptySet()) {
     val state = call.request.queryParameters["state"].orEmpty()
     // Every value, not a sole one: a stale state cookie from a narrower domain can't be cleared
     // from a sibling host. The query's state must still match one this browser holds, which a
     // cross-site request can't arrange.
-    val held = call.request.cookieValues(STATE_COOKIE)
+    val held = call.request.cookieValues(stateCookieName)
     val code = call.request.queryParameters["code"].orEmpty()
     val statePayload = verifyState(state)
     if (
@@ -236,8 +400,15 @@ class ServeGithubAuth(
     }
     // The origin host is re-validated against the live site list: the signature proves we minted
     // the state, not that the host is still ours, and an unchecked value would be an open redirect.
-    // Unrecognised hosts fall back to a same-origin relative return.
-    val returnHost = statePayload.originHost?.takeIf { it in siteHosts && withinCookieDomain(it) }
+    // Unrecognised hosts fall back to a same-origin relative return. A handoff is honoured only in
+    // the mode that mints one, and a domain return only inside the domain.
+    val handoffDigest = statePayload.handoffDigest
+    val returnHost =
+      statePayload.originHost?.takeIf { host ->
+        host in siteHosts &&
+          if (handoffDigest != null) handsOff && host != pinnedCallbackHost()
+          else withinCookieDomain(host)
+      }
     val secure = isSecure(call, config.callbackBaseUrl, config.trustForwardedHeaders)
     val user =
       withContext(Dispatchers.IO) { verifier.verify(code, callbackUrl(call), config) }
@@ -267,6 +438,22 @@ class ServeGithubAuth(
     // or a narrower one), so this removes only leftovers and never the cookie just minted.
     clearStaleVariants(call, AUTH_COOKIE, secure)
     clearStaleVariants(call, STATE_COOKIE, secure)
+    clearLegacyDomainCookies(call, secure)
+    if (returnHost != null && handoffDigest != null) {
+      respondWithHandoff(
+        HandoffTarget(returnHost, handoffDigest),
+        statePayload.returnTo,
+        SessionPayload(
+          login = user.login.lowercase(),
+          repositoryAccess = user.repositoryAccess && !user.guest,
+          imageRepositoryAccess = user.imageRepositoryAccess && !user.guest,
+          expiresAt = authenticatedAt + SESSION_TTL_SECONDS * 1000,
+          authenticatedAt = authenticatedAt,
+          guest = user.guest,
+        ),
+      )
+      return
+    }
     call.respondRedirect(
       if (returnHost == null) statePayload.returnTo
       else "https://$returnHost${statePayload.returnTo}"
@@ -310,28 +497,52 @@ class ServeGithubAuth(
    * [verifySession] regardless. With a cookie domain, the host-only variant is cleared too, since
    * two session values read as signed out.
    *
-   * This can't revoke a stateless cookie copied off the wire; server-side revocation is a different
-   * design ([#280](https://github.com/yschimke/compose-preview-server/issues/280)).
+   * The sign-in is also recorded as signed out ([isSignedOut]): every session sharing its login and
+   * `authenticatedAt` is refused from now on. That is the one GitHub sign-in on every host it was
+   * handed to ([handleHandoff]), and nothing else: another browser or device signed in separately
+   * has its own `authenticatedAt` and stays signed in. The record is held in this process's memory
+   * until the absolute cap would have expired those sessions anyway, so a restart forgets it, and a
+   * separate process accepting the same cookie (the playground service) never learns it; complete
+   * server-side revocation is a different design
+   * ([#280](https://github.com/yschimke/compose-preview-server/issues/280)).
    */
   suspend fun RoutingContext.handleLogout() {
     val returnTo = safeReturnTo(call.request.queryParameters["return"] ?: "/")
     val secure = isSecure(call, config.callbackBaseUrl, config.trustForwardedHeaders)
+    call.request
+      .soleCookieValue(authCookieName)
+      ?.let { verifySession(it) }
+      ?.let { session ->
+        val now = clock.millis()
+        signedOut.values.removeIf { it <= now }
+        signedOut[signedOutKey(session.login, session.authenticatedAt)] =
+          session.authenticatedAt + SESSION_ABSOLUTE_TTL_SECONDS * 1000
+      }
     call.response.cookies.append(authCookie("", maxAge = 0, secure = secure))
     clearStaleVariants(call, AUTH_COOKIE, secure)
+    clearLegacyDomainCookies(call, secure)
     call.respondRedirect(returnTo)
   }
 
+  /** Whether [handleLogout] signed this sign-in out. */
+  private fun isSignedOut(login: String, authenticatedAt: Long): Boolean =
+    signedOut.containsKey(signedOutKey(login, authenticatedAt))
+
+  private fun signedOutKey(login: String, authenticatedAt: Long): String =
+    "${login.lowercase()}|$authenticatedAt"
+
   /**
    * Whether a sign-in started on [rawHost] can come back to it: true when the callback isn't
-   * pinned, on the pinned host, or for a configured site host inside the cookie domain. False
-   * otherwise, since the visitor would land back signed out; [ServeHttpServer] uses it to decide
-   * whether to offer sign-in.
+   * pinned, on the pinned host, or for a configured site host inside the cookie domain (or any
+   * configured site host, without a domain, through [handleHandoff]). False otherwise, since the
+   * visitor would land back signed out; [ServeHttpServer] uses it to decide whether to offer
+   * sign-in.
    */
   fun canRoundTrip(rawHost: String?, siteHosts: Set<String>): Boolean {
     if (!hasPinnedCallback) return true
     val host = rawHost?.let { ServeSites.normalizeHost(it) } ?: return false
     if (host == pinnedCallbackHost()) return true
-    return host in siteHosts && withinCookieDomain(host)
+    return host in siteHosts && (handsOff || withinCookieDomain(host))
   }
 
   fun isAuthenticated(call: ApplicationCall): Boolean {
@@ -358,13 +569,14 @@ class ServeGithubAuth(
     // Before the public-cache check: a request with two session values reads as signed out and gets
     // the public cache policy, so returning early would leave the stale copy forever. The clearing
     // cookie carries no session.
-    if (call.request.cookieValues(AUTH_COOKIE).size > 1) {
+    if (call.request.cookieValues(authCookieName).size > 1) {
       clearStaleVariants(call, AUTH_COOKIE, secure)
       return
     }
     val cacheControl = call.response.headers.values(HttpHeaders.CacheControl) + contentCacheControl
     if (cacheControl.any { directive -> isPublicCacheControl(directive) }) return
-    val session = call.request.soleCookieValue(AUTH_COOKIE)?.let { verifySession(it) } ?: return
+    clearLegacyDomainCookies(call, secure)
+    val session = call.request.soleCookieValue(authCookieName)?.let { verifySession(it) } ?: return
     val now = clock.millis()
     if (session.expiresAt - now > SESSION_REFRESH_AFTER_SECONDS * 1000) return
     val authenticatedAt = session.authenticatedAt
@@ -394,7 +606,7 @@ class ServeGithubAuth(
    * which keeps every member gate closed to one.
    */
   fun currentLogin(call: ApplicationCall): String? {
-    val cookie = call.request.soleCookieValue(AUTH_COOKIE) ?: return null
+    val cookie = call.request.soleCookieValue(authCookieName) ?: return null
     return verifySession(cookie)?.takeIf { !it.guest }?.login
   }
 
@@ -403,7 +615,7 @@ class ServeGithubAuth(
    * UI builder's read-only access and page chrome.
    */
   fun currentSignedInLogin(call: ApplicationCall): String? {
-    val cookie = call.request.soleCookieValue(AUTH_COOKIE) ?: return null
+    val cookie = call.request.soleCookieValue(authCookieName) ?: return null
     return verifySession(cookie)?.login
   }
 
@@ -412,12 +624,12 @@ class ServeGithubAuth(
 
   /** True when the session belongs to a guest rather than a member. */
   fun isGuest(call: ApplicationCall): Boolean {
-    val cookie = call.request.soleCookieValue(AUTH_COOKIE) ?: return false
+    val cookie = call.request.soleCookieValue(authCookieName) ?: return false
     return verifySession(cookie)?.guest == true
   }
 
   fun hasRepositoryAccess(call: ApplicationCall): Boolean {
-    val cookie = call.request.soleCookieValue(AUTH_COOKIE) ?: return false
+    val cookie = call.request.soleCookieValue(authCookieName) ?: return false
     return verifySession(cookie)?.let { it.repositoryAccess && !it.guest } == true
   }
 
@@ -426,7 +638,7 @@ class ServeGithubAuth(
    * approver may grant `images` to an agent.
    */
   fun hasImageRepositoryAccess(call: ApplicationCall): Boolean {
-    val cookie = call.request.soleCookieValue(AUTH_COOKIE) ?: return false
+    val cookie = call.request.soleCookieValue(authCookieName) ?: return false
     return hasImageRepositoryAccess(cookie)
   }
 
@@ -529,8 +741,8 @@ class ServeGithubAuth(
 
   /**
    * `(host, path)` when [raw] is an absolute HTTPS URL on one of [hosts] that a sign-in can return
-   * to (a pinned callback, and inside the cookie domain); null for anything else, including every
-   * relative path, which [safeReturnTo] handles as it always has.
+   * to (a pinned callback, and inside the cookie domain or [handsOff]); null for anything else,
+   * including every relative path, which [safeReturnTo] handles as it always has.
    */
   internal fun absoluteReturn(raw: String, hosts: Set<String>): Pair<String, String>? {
     if (hosts.isEmpty() || !hasPinnedCallback || !raw.startsWith("https://")) return null
@@ -538,7 +750,7 @@ class ServeGithubAuth(
     val uri = runCatching { java.net.URI(raw) }.getOrNull() ?: return null
     if (uri.userInfo != null || (uri.port != -1 && uri.port != 443)) return null
     val host = uri.host?.let { ServeSites.normalizeHost(it) } ?: return null
-    if (host !in hosts || !withinCookieDomain(host)) return null
+    if (host !in hosts || !(handsOff || withinCookieDomain(host))) return null
     val path = uri.rawPath.orEmpty().ifEmpty { "/" } + (uri.rawQuery?.let { "?$it" } ?: "")
     val safe = safeReturnTo(path)
     return if (safe == path) host to path else null
@@ -553,6 +765,43 @@ class ServeGithubAuth(
     val domain = cookieDomain ?: return false
     return host == domain || host.endsWith(".$domain")
   }
+
+  /**
+   * Cross-host sign-in by handoff ([handleHandoff]) rather than a shared cookie: the callback is
+   * pinned and the cookies are host-only. Only then do site hosts other than the callback host
+   * reach a sign-in at all.
+   */
+  private val handsOff: Boolean
+    get() = hasPinnedCallback && cookieDomain == null
+
+  /**
+   * Whether the auth cookies take the `__Host-` prefix: [handsOff] over HTTPS. A browser refuses a
+   * `__Host-` cookie that has a `Domain`, so a sibling host under the same parent domain (which may
+   * be someone else's server) can't plant one here — no session, state or nonce of its choosing,
+   * which is what keeps login CSRF closed once the cookies are no longer this server's alone to
+   * set. The new names also leave every older domain-wide `cp_gh_*` cookie unread.
+   */
+  private val hostPrefixed: Boolean by lazy {
+    handsOff && config.callbackBaseUrl.orEmpty().trim().startsWith("https://", ignoreCase = true)
+  }
+
+  private val authCookieName: String by lazy { cookieName(AUTH_COOKIE) }
+  private val stateCookieName: String by lazy { cookieName(STATE_COOKIE) }
+  private val handoffCookieName: String by lazy { cookieName(HANDOFF_COOKIE) }
+
+  private fun cookieName(base: String): String = if (hostPrefixed) "$HOST_PREFIX$base" else base
+
+  /**
+   * Codes minted by [respondWithHandoff], awaiting [handleHandoff]. In memory, which is enough: one
+   * process serves every host a code may be redeemed on, and a code lives [HANDOFF_TTL_SECONDS].
+   */
+  private val handoffGrants = ConcurrentHashMap<String, HandoffGrant>()
+
+  /**
+   * `login|authenticatedAt` of every sign-in [handleLogout] ended, to when the absolute cap would
+   * have ended it anyway.
+   */
+  private val signedOut = ConcurrentHashMap<String, Long>()
 
   /** The configured cookie domain, normalised; null when cookies stay host-only. */
   private val cookieDomain: String? by lazy {
@@ -574,10 +823,18 @@ class ServeGithubAuth(
   /**
    * `nonce|issuedAt|originHost|returnTo`. None of the first three can contain `|`, so `returnTo`
    * (which may contain anything) keeps the rest of the string. The issue time lets [verifyState]
-   * enforce [STATE_TTL_SECONDS] itself.
+   * enforce [STATE_TTL_SECONDS] itself. A handoff's nonce digest rides on the host as
+   * `originHost#digest`; neither a hostname nor base64url contains `#`.
    */
-  private fun signedState(nonce: String, returnTo: String, originHost: String?): String =
-    sign(STATE_PURPOSE, "$nonce|${clock.millis()}|${originHost.orEmpty()}|$returnTo")
+  private fun signedState(
+    nonce: String,
+    returnTo: String,
+    originHost: String?,
+    handoffDigest: String? = null,
+  ): String {
+    val origin = originHost.orEmpty() + (handoffDigest?.let { "#$it" } ?: "")
+    return sign(STATE_PURPOSE, "$nonce|${clock.millis()}|$origin|$returnTo")
+  }
 
   /**
    * Null unless this is a state we minted within [STATE_TTL_SECONDS]. Older-shape states are
@@ -588,14 +845,19 @@ class ServeGithubAuth(
     if (parts.size != 4 || parts[0].isEmpty()) return null
     val issuedAt = parts[1].toLongOrNull() ?: return null
     if (clock.millis() - issuedAt !in 0..STATE_TTL_SECONDS * 1000) return null
-    val originHost =
-      if (parts[2].isEmpty()) null else ServeSites.normalizeHost(parts[2]) ?: return null
-    return StatePayload(parts[0], safeReturnTo(parts[3]), originHost)
+    val origin = parts[2].substringBefore('#')
+    val handoffDigest =
+      parts[2]
+        .substringAfter('#', "")
+        .takeIf { it.isNotEmpty() }
+        ?.takeIf { it.matches(TOKEN_SHAPE) }
+    val originHost = if (origin.isEmpty()) null else ServeSites.normalizeHost(origin) ?: return null
+    return StatePayload(parts[0], safeReturnTo(parts[3]), originHost, handoffDigest)
   }
 
   /**
-   * `login|repo|expiresAt|authenticatedAt|image|role|configFingerprint`. Fields are only ever
-   * appended so older ones keep their positions.
+   * `login|repo|expiresAt|authenticatedAt|image|role|configFingerprint`, and `|host-only` when
+   * [handsOff]. Fields are only ever appended so older ones keep their positions.
    */
   private fun signedSession(
     login: String,
@@ -610,7 +872,8 @@ class ServeGithubAuth(
     val role = if (guest) GUEST_FLAG else MEMBER_FLAG
     return sign(
       SESSION_PURPOSE,
-      "${login.lowercase()}|$repoFlag|$expiresAt|$authenticatedAt|$imageFlag|$role|$configFingerprint",
+      "${login.lowercase()}|$repoFlag|$expiresAt|$authenticatedAt|$imageFlag|$role|$configFingerprint" +
+        if (handsOff) "|$HOST_ONLY_FLAG" else "",
     )
   }
 
@@ -619,10 +882,15 @@ class ServeGithubAuth(
    * ([configFingerprint]). The fingerprint makes config changes (e.g. a new allowlist) apply to
    * existing sessions, which simply sign in again silently. Cookies without a fingerprint, or older
    * shapes signed without the purpose tag, are refused.
+   *
+   * When [handsOff], so is every session minted without the host-only mark: such a cookie may have
+   * been written for a whole parent domain before this mode was adopted, and so been sent to hosts
+   * that aren't this server's. A sign-in [handleLogout] ended is refused too.
    */
   private fun verifySession(value: String): SessionPayload? {
     val parts = verifySigned(SESSION_PURPOSE, value)?.split("|") ?: return null
-    if (parts.size != 7) return null
+    if (parts.size != 7 && !(parts.size == 8 && parts[7] == HOST_ONLY_FLAG)) return null
+    if (handsOff && parts.size != 8) return null
     if (!tokensMatch(configFingerprint, parts[6])) return null
     val login = parts[0]
     val expiresAt = parts[2].toLongOrNull() ?: return null
@@ -637,6 +905,7 @@ class ServeGithubAuth(
     // Covered by the fingerprint already (it includes the guest setting), and kept as its own rule:
     // a guest cookie is never read while guests are turned off.
     if (guest && !config.allowGuests) return null
+    if (isSignedOut(login, authenticatedAt)) return null
     return SessionPayload(
       login = login,
       repositoryAccess = parts[1] == "repo" && !guest,
@@ -696,6 +965,47 @@ class ServeGithubAuth(
       }
   }
 
+  /**
+   * With [handsOff], expire any `cp_gh_auth` / `cp_gh_state` this request still carries from a
+   * domain-wide deployment, for every parent domain of this host it may have been written for. The
+   * old cookies are no longer read (other names, and [verifySession] refuses their shape), but the
+   * browser keeps sending them to every host under that domain until told otherwise. Derived from
+   * `Host` like [clearStaleVariants], which is safe for the same reason: these only expire things;
+   * a browser ignores the ones naming a public suffix.
+   */
+  private fun clearLegacyDomainCookies(call: ApplicationCall, secure: Boolean) {
+    if (!hostPrefixed) return
+    val legacy =
+      listOf(AUTH_COOKIE, STATE_COOKIE).filter { call.request.cookieValues(it).isNotEmpty() }
+    if (legacy.isEmpty()) return
+    val host = requestHost(call, config.trustForwardedHeaders) ?: return
+    val parents =
+      generateSequence(host) { it.substringAfter('.', "") }.filter { it.contains('.') }.toList()
+    for (name in legacy) {
+      call.response.cookies.append(sessionCookie(name, "", 0, secure, domain = null))
+      for (parent in parents) {
+        call.response.cookies.append(sessionCookie(name, "", 0, secure, domain = parent))
+      }
+    }
+  }
+
+  /** The latest a session first minted at [authenticatedAt] may expire, re-minted at [now]. */
+  private fun cappedExpiry(authenticatedAt: Long, now: Long): Long =
+    minOf(now + SESSION_TTL_SECONDS * 1000, authenticatedAt + SESSION_ABSOLUTE_TTL_SECONDS * 1000)
+
+  /** 256 random bits, base64url: a handoff code or nonce. */
+  private fun token(): String {
+    val bytes = ByteArray(32)
+    SECURE_RANDOM.nextBytes(bytes)
+    return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+  }
+
+  /** SHA-256 of [value], base64url; how a handoff nonce travels without being disclosed. */
+  private fun digest(value: String): String =
+    Base64.getUrlEncoder()
+      .withoutPadding()
+      .encodeToString(MessageDigest.getInstance("SHA-256").digest(value.toByteArray()))
+
   private fun nonce(): String {
     val bytes = ByteArray(18)
     SECURE_RANDOM.nextBytes(bytes)
@@ -703,13 +1013,16 @@ class ServeGithubAuth(
   }
 
   private fun stateCookie(value: String, maxAge: Long, secure: Boolean): Cookie =
-    sessionCookie(STATE_COOKIE, value, maxAge, secure)
+    sessionCookie(stateCookieName, value, maxAge, secure)
+
+  private fun handoffCookie(value: String, maxAge: Long, secure: Boolean): Cookie =
+    sessionCookie(handoffCookieName, value, maxAge, secure)
 
   private fun regrantCookie(value: String, maxAge: Long, secure: Boolean): Cookie =
     sessionCookie(REGRANT_COOKIE, value, maxAge, secure)
 
   private fun authCookie(value: String, maxAge: Long, secure: Boolean): Cookie =
-    sessionCookie(AUTH_COOKIE, value, maxAge, secure)
+    sessionCookie(authCookieName, value, maxAge, secure)
 
   /**
    * [secure] is derived per request ([isSecure]): TLS-terminated deployments must not send the
@@ -740,6 +1053,20 @@ class ServeGithubAuth(
     val returnTo: String,
     /** The site host to hand the finished sign-in back to; null on the same-host flow. */
     val originHost: String?,
+    /** With [originHost], the digest of that host's handoff nonce: hand back by [handleHandoff]. */
+    val handoffDigest: String? = null,
+  )
+
+  /** Where [respondWithHandoff] sends a session: a site host and the digest of its nonce. */
+  private data class HandoffTarget(val host: String, val nonceDigest: String)
+
+  /** A minted, unredeemed handoff code's contents; see [handleHandoff]. */
+  private data class HandoffGrant(
+    val host: String,
+    val nonceDigest: String,
+    val returnTo: String,
+    val session: SessionPayload,
+    val expiresAt: Long,
   )
 
   private data class SessionPayload(
@@ -759,6 +1086,33 @@ class ServeGithubAuth(
   companion object {
     const val START_PATH = "/auth/github/start"
     const val CALLBACK_PATH = "/auth/github/callback"
+
+    /** Where a site host redeems a handoff code ([handleHandoff]). */
+    const val HANDOFF_PATH = "/auth/github/handoff"
+
+    /** On a callback-host start: the site host to hand back to, and its nonce's digest. */
+    private const val HANDOFF_HOST_PARAM = "handoff_host"
+    private const val HANDOFF_PARAM = "handoff"
+
+    /** A site host's handoff nonce, host-only, for as long as a sign-in may take. */
+    private const val HANDOFF_COOKIE = "cp_gh_handoff"
+
+    /** Browsers refuse a cookie so named unless it is `Secure`, `Path=/` and has no `Domain`. */
+    private const val HOST_PREFIX = "__Host-"
+
+    /** The eighth session field: minted host-only, so never sent beyond the host it was set on. */
+    private const val HOST_ONLY_FLAG = "host-only"
+
+    /** A handoff code is redeemed by the redirect that carries it, so it needs only seconds. */
+    internal const val HANDOFF_TTL_SECONDS = 60L
+
+    /** Unredeemed codes held at once; beyond it a handoff is refused with `503`. */
+    internal const val MAX_HANDOFF_GRANTS = 10_000
+
+    private const val REFERRER_POLICY = "Referrer-Policy"
+
+    /** [token]'s and [digest]'s shape: 32 bytes, base64url, unpadded. */
+    private val TOKEN_SHAPE = Regex("[A-Za-z0-9_-]{43}")
 
     /**
      * POST-only, and under [AUTH_PATH_PREFIX] so [refreshSession] doesn't mint a fresh session

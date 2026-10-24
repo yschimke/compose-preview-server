@@ -467,7 +467,8 @@ class ServeGithubSiteAuthTest {
       )
     }
 
-    // And with host-only cookies against a pinned callback, no site host can round-trip at all.
+    // And with host-only cookies against a pinned callback, a site host round-trips by handoff
+    // ([ServeGithubHandoffTest]).
     val hostOnly =
       ServeHttpServer(
           host = "127.0.0.1",
@@ -493,9 +494,9 @@ class ServeGithubSiteAuthTest {
           .execute()
       }
       req("m3.preview.coo.ee").use {
-        assertFalse(
+        assertTrue(
           it.body.string().contains("cp-gh-auth"),
-          "the site cannot come back to itself",
+          "the site comes back to itself through the callback host's handoff",
         )
       }
       // The pinned callback host itself is unaffected — this is where sign-in always worked.
@@ -508,13 +509,14 @@ class ServeGithubSiteAuthTest {
   }
 
   @Test
-  fun `without a cookie domain a site host is told sign-in cannot round-trip`() {
+  fun `without a cookie domain a configured site host round-trips by handoff`() {
     val hostOnly = auth(cookieDomain = null)
-    assertFalse(
+    assertTrue(
       hostOnly.canRoundTrip("m3.preview.coo.ee", sites.hosts),
-      "host-only cookies cannot reach a pinned callback, so the affordance must stay withheld",
+      "the callback host hands a host-only session back, so the affordance is offered",
     )
     assertTrue(hostOnly.canRoundTrip("preview.coo.ee", sites.hosts))
+    assertFalse(hostOnly.canRoundTrip("other.preview.coo.ee", sites.hosts))
   }
 
   @Test

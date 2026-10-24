@@ -409,7 +409,7 @@
               ]
             },
             "cookieDomain": {
-              "description": "The parent domain the sign-in cookies cover, so one sign-in covers every site host. `none` keeps them host-only.",
+              "description": "The parent domain the sign-in cookies cover, so one sign-in covers every site host. `none` keeps them host-only: each site host then gets its own session from the callback host by a one-time handoff.",
               "type": "string",
               "minLength": 1,
               "pattern": "^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?)$",

@@ -27,6 +27,9 @@ internal object ServeSameOriginRequests {
   /** The browser's GitHub session cookie, as [ServeGithubAuth] writes it. */
   const val SESSION_COOKIE: String = "cp_gh_auth"
 
+  /** The same cookie when it is host-only over HTTPS ([ServeGithubAuth.handleHandoff]). */
+  const val HOST_SESSION_COOKIE: String = "__Host-cp_gh_auth"
+
   /**
    * Whether this request was sent by a page on this server.
    *
@@ -81,6 +84,7 @@ internal object ServeSameOriginRequests {
     val cookies = request.cookies.rawCookies
     if (
       cookies[SESSION_COOKIE] == null &&
+        cookies[HOST_SESSION_COOKIE] == null &&
         cookies[ServeBrowseCookie.NAME] == null &&
         cookies[ServeAgentGrantCookie.NAME] == null
     ) {
