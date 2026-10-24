@@ -908,9 +908,8 @@ fi
 # it and getting a box where POST /images 404s is never what was meant, and the failure is silent
 # on both ends (no startup line, and an uploader's own 404 reads like a wrong --serve-url). The
 # derivation cannot be widened to "any box that could gate uploads somehow": the repository also
-# falls back to SERVE_GITHUB_AUTH_REPO, which this image defaults to yschimke/compose-ai-tools for
-# the playground, so keying on that would open an upload lane on every adopter's box gated by OUR
-# collaborators. An operator can still force either answer explicitly (`SERVE_ACCEPT_IMAGES=0` to
+# falls back to SERVE_GITHUB_AUTH_REPO, which a deployment sets for sign-in and the playground, so
+# keying on that would open an upload lane on every box that merely enabled GitHub sign-in. An operator can still force either answer explicitly (`SERVE_ACCEPT_IMAGES=0` to
 # name the repo and keep the lane shut, `=1` without a repository to get the server's own refusal,
 # which is the honest failure).
 if [[ -z "${SERVE_ACCEPT_IMAGES:-}" ]]; then

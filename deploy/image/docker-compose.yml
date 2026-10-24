@@ -125,11 +125,12 @@ services:
       SERVE_ENGAGEMENT_FILE: "${SERVE_ENGAGEMENT_FILE:-}"
       # Optional GitHub OAuth auth for code-running surfaces. Empty values keep public catalog
       # browsing unchanged. Empty SERVE_GITHUB_AUTH_USERS lets any signed-in GitHub user use live
-      # preview; playground also requires access to SERVE_GITHUB_AUTH_REPO.
+      # preview; playground also requires access to SERVE_GITHUB_AUTH_REPO, your own owner/repo
+      # (required once GitHub sign-in is configured).
       SERVE_GITHUB_AUTH_CLIENT_ID: "${SERVE_GITHUB_AUTH_CLIENT_ID:-}"
       SERVE_GITHUB_AUTH_CLIENT_SECRET: "${SERVE_GITHUB_AUTH_CLIENT_SECRET:-}"
       SERVE_GITHUB_AUTH_COOKIE_SECRET: "${SERVE_GITHUB_AUTH_COOKIE_SECRET:-}"
-      SERVE_GITHUB_AUTH_REPO: "${SERVE_GITHUB_AUTH_REPO:-yschimke/compose-ai-tools}"
+      SERVE_GITHUB_AUTH_REPO: "${SERVE_GITHUB_AUTH_REPO:-}"
       SERVE_GITHUB_AUTH_CALLBACK_BASE_URL: "${SERVE_GITHUB_AUTH_CALLBACK_BASE_URL:-}"
       # Scopes the auth cookies to a parent domain so ONE sign-in covers this host and every
       # SERVE_SITES hostname under it. Empty derives it from DOMAIN when sites are configured (see
@@ -355,8 +356,8 @@ services:
       # repository uploads are gated on, off otherwise. Setting that variable is what asks for the
       # lane — naming it and still getting a 404 from POST /images is nobody's intent, and the
       # miss is silent at both ends. The derivation deliberately does NOT key on
-      # SERVE_GITHUB_AUTH_*: that repo defaults to yschimke/compose-ai-tools for the playground, so
-      # it would gate an adopter's upload lane on someone else's collaborators. `0` opts out
+      # SERVE_GITHUB_AUTH_*: that repo is set for sign-in and the playground, so keying on it would
+      # open an upload lane on every box that merely enabled GitHub sign-in. `0` opts out
       # explicitly with the repository still named.
       SERVE_ACCEPT_IMAGES: "${SERVE_ACCEPT_IMAGES:-}"
       # Empty means "let the entrypoint decide": on when SERVE_GITHUB_AUTH_* gives it a human to
@@ -552,7 +553,7 @@ services:
       SERVE_GITHUB_AUTH_CLIENT_ID: "${SERVE_GITHUB_AUTH_CLIENT_ID:-}"
       SERVE_GITHUB_AUTH_CLIENT_SECRET: "${SERVE_GITHUB_AUTH_CLIENT_SECRET:-}"
       SERVE_GITHUB_AUTH_COOKIE_SECRET: "${SERVE_GITHUB_AUTH_COOKIE_SECRET:-}"
-      SERVE_GITHUB_AUTH_REPO: "${SERVE_GITHUB_AUTH_REPO:-yschimke/compose-ai-tools}"
+      SERVE_GITHUB_AUTH_REPO: "${SERVE_GITHUB_AUTH_REPO:-}"
       SERVE_GITHUB_AUTH_USERS: "${SERVE_GITHUB_AUTH_USERS:-}"
       SERVE_GITHUB_AUTH_ORGS: "${SERVE_GITHUB_AUTH_ORGS:-}"
       SERVE_GITHUB_AUTH_GUESTS: "${SERVE_GITHUB_AUTH_GUESTS:-}"
