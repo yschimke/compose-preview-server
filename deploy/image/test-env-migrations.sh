@@ -44,43 +44,43 @@ run_case() {
 }
 
 run_case "removes the exact legacy pin" removed \
-  "DOMAIN=preview.coo.ee
+  "DOMAIN=preview.example.com
 SERVE_TOKEN=abc123" \
-  "DOMAIN=preview.coo.ee
+  "DOMAIN=preview.example.com
 SERVE_CATALOGS=${LEGACY}
 SERVE_TOKEN=abc123
 "
 
 run_case "removes a quoted legacy pin" removed \
-  "DOMAIN=preview.coo.ee" \
-  "DOMAIN=preview.coo.ee
+  "DOMAIN=preview.example.com" \
+  "DOMAIN=preview.example.com
 SERVE_CATALOGS=\"${LEGACY}\"
 "
 
 run_case "removes an exported legacy pin with trailing whitespace" removed \
-  "DOMAIN=preview.coo.ee" \
-  "DOMAIN=preview.coo.ee
+  "DOMAIN=preview.example.com" \
+  "DOMAIN=preview.example.com
 export SERVE_CATALOGS=${LEGACY}
 "
 
 run_case "removes a CRLF legacy pin" removed \
-  "DOMAIN=preview.coo.ee" \
-  "$(printf 'DOMAIN=preview.coo.ee\nSERVE_CATALOGS=%s\r\n' "${LEGACY}")"
+  "DOMAIN=preview.example.com" \
+  "$(printf 'DOMAIN=preview.example.com\nSERVE_CATALOGS=%s\r\n' "${LEGACY}")"
 
 # The point of the migration: an operator's own list is config, not legacy cruft.
 run_case "keeps an operator's custom list" kept \
-  "DOMAIN=preview.coo.ee
+  "DOMAIN=preview.example.com
 SERVE_CATALOGS=${CUSTOM}" \
-  "DOMAIN=preview.coo.ee
+  "DOMAIN=preview.example.com
 SERVE_CATALOGS=${CUSTOM}
 "
 
 # Docker Compose takes the LAST assignment, so a custom line after the legacy one
 # is the value actually in force — removing it would silently reset the box.
 run_case "keeps a custom list that follows the legacy pin" removed \
-  "DOMAIN=preview.coo.ee
+  "DOMAIN=preview.example.com
 SERVE_CATALOGS=${CUSTOM}" \
-  "DOMAIN=preview.coo.ee
+  "DOMAIN=preview.example.com
 SERVE_CATALOGS=${LEGACY}
 SERVE_CATALOGS=${CUSTOM}
 "
@@ -96,9 +96,9 @@ run_case "keeps an unrelated key whose value is the legacy list" kept \
 "
 
 run_case "leaves a file without SERVE_CATALOGS alone" kept \
-  "DOMAIN=preview.coo.ee
+  "DOMAIN=preview.example.com
 SERVE_TOKEN=abc123" \
-  "DOMAIN=preview.coo.ee
+  "DOMAIN=preview.example.com
 SERVE_TOKEN=abc123
 "
 
@@ -154,10 +154,10 @@ run_registry_case() {
 }
 
 run_registry_case "re-points the staging repository" changed \
-  "DOMAIN=preview.coo.ee
+  "DOMAIN=preview.example.com
 SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports-out
 SERVE_TOKEN=abc123" \
-  "DOMAIN=preview.coo.ee
+  "DOMAIN=preview.example.com
 SERVE_CATALOG_REGISTRY=yschimke/compose-preview-imports
 SERVE_TOKEN=abc123
 "
@@ -218,8 +218,8 @@ run_registry_case "keeps a commented-out example" kept \
 "
 
 run_registry_case "leaves a file without SERVE_CATALOG_REGISTRY alone" kept \
-  "DOMAIN=preview.coo.ee" \
-  "DOMAIN=preview.coo.ee
+  "DOMAIN=preview.example.com" \
+  "DOMAIN=preview.example.com
 "
 
 mode_file="${TMP}/registry-mode-env"

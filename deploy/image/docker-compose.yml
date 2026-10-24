@@ -80,8 +80,8 @@ services:
       SERVE_UI_BUILDER_PROFILE_ACCENT: "${SERVE_UI_BUILDER_PROFILE_ACCENT:-}"
       SERVE_UI_BUILDER_PROFILE_HOME_URL: "${SERVE_UI_BUILDER_PROFILE_HOME_URL:-}"
       SERVE_UI_BUILDER_HOST_ROOT: "${SERVE_UI_BUILDER_HOST_ROOT:-}"
-      # Public preview server by default (preview.coo.ee): open, serving our
-      # published design systems. The in-browser CMP Wasm tier rides --catalogs —
+      # Public preview server by default: open, serving the published design
+      # systems in catalogs.json. The in-browser CMP Wasm tier rides --catalogs —
       # `serve` fetches each system's web/wasm/ from the trusted branch (the
       # prebuilt image has no catalog modules to build a local app from), so this
       # needs a CLI release that carries the branch-fetch + an up-to-date
@@ -98,7 +98,7 @@ services:
       # /config/settings.json, which PUT /admin/settings writes; `none` ignores it.
       SERVE_SETTINGS_FILE: "${SERVE_SETTINGS_FILE:-}"
       # Top-level sites: <host>=<system>[,…] — serve one of those catalogs on a hostname of its
-      # own, where it looks like the whole server (e.g. m3.preview.coo.ee=m3-catalog). Same
+      # own, where it looks like the whole server (e.g. m3.preview.example.com=m3-catalog). Same
       # sessions, same pixels, no extra load; the proxy in front must route + terminate TLS for
       # the hostname. catalogs.json's "sites" is the durable form of the same setting.
       SERVE_SITES: "${SERVE_SITES:-}"
@@ -191,7 +191,7 @@ services:
       # from the trusted branch and launches a render daemon straight from it — no checkout, no
       # Gradle build. So a bare image pull "just works" with live CMP; the entrypoint defaults
       # SERVE_ALLOW_RENDER_TRUSTED=1 and auto-sizes SERVE_LIVE_SEATS from the box's RAM (unbounded
-      # mem_limit below ⇒ physical RAM; e.g. an 8 GB host — what preview.coo.ee runs — derives 5
+      # mem_limit below ⇒ physical RAM; e.g. an 8 GB host derives 5
       # permits). Fail-closed: only Trusted catalogs execute. wear-m3 publishes an Android liveBundle
       # and this image bakes the Robolectric Android daemon + SDK, so it CAN render live (2 seat
       # permits). remote-m3 publishes an IR-backed Android liveBundle: the daemon replays its
@@ -298,7 +298,7 @@ services:
       #
       # **This defaulted to `none` — OFF — and that made theme optimization unable to finish.**
       # Without a disk tier the warmed renders live only in the serve process's heap, so every
-      # deploy starts the whole pass again from zero. Measured on preview.coo.ee: 1,502 of 18,604
+      # deploy starts the whole pass again from zero. Measured on a public host: 1,502 of 18,604
       # entries after a 40-hour uptime on 1.35.0, then 0 again an hour later on 1.36.0, and 0 again
       # on 1.37.0 — three releases in one morning, three resets. A pass that needs a day of quiet to
       # complete cannot survive a deploy cadence measured in hours, and the memory tier is by design
@@ -376,7 +376,7 @@ services:
       # requires the authenticated agent-grant lane above.
       SERVE_CATALOG_MCP: "${SERVE_CATALOG_MCP:-}"
       # Durable browser/MCP design state. The preview_config volume is shared across rolling image
-      # replacements, so a design does not disappear when preview.coo.ee updates.
+      # replacements, so a design does not disappear when the image updates.
       SERVE_UI_BUILDER_STATE_DIR: "${SERVE_UI_BUILDER_STATE_DIR:-/config/ui-builder-state}"
       # Explicit authoring allowlist; publishing another preview catalog does not expose a builder.
       # Material 3 only by default; name `remote-m3`, `wear-m3` or `a2ui-catalog` to add them.
@@ -646,9 +646,9 @@ services:
   # the compose network, never a host port; reachable solely via Caddy's route.
   # POST /__hooks/restart is the same, forced (rollout.sh --force): it restarts `preview` on
   # the tag it already runs, so config published through the admin API (catalogs.json
-  # `uiBuilder`, the editor pin, restart settings) serves without SSH — publish-config-to-box.sh
-  # calls it when a PUT answers restartRequired. These scripts are read from this checkout, so
-  # a change to them reaches the box with its next `git pull`, not the image roll.
+  # `uiBuilder`, the editor pin, restart settings) serves without SSH — call it when a PUT to
+  # /admin/settings answers restartRequired. These scripts are read from this checkout, so a
+  # change to them reaches the host with its next `git pull`, not the image roll.
   # Comment this service out (and the Caddyfile /__hooks/* route) to disable the
   # webhook and rely on the poll loop alone.
   hook:
@@ -692,44 +692,13 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     command: --label-enable --cleanup --interval 1200
 
-  # The Home Assistant card design server (yschimke/homeassistant-remotecompose's design-server):
-  # ha.coo.ee's front page, its card template browser, and the card library the app reads. Only
-  # runs with COMPOSE_PROFILES=ha, and only reached through HA_DOMAIN's block (ha.caddy), which
-  # sends it an explicit list of paths and everything else to `preview`. It runs without a bundled
-  # UI Builder and without its own GitHub sign-in, because on that host the builder and /auth are
-  # the preview server's. HA_DESIGNS_UI_BUILDER_URL + HA_DESIGNS_UI_BUILDER_TOKEN (an operator
-  # token for this box's builder) let Card Studio hand a card from the app to the builder; leave
-  # both empty and the server still serves everything else.
-  ha-designs:
-    logging: *default-logging
-    profiles: [ha]
-    image: "ghcr.io/yschimke/ha-card-design-server:${HA_DESIGNS_IMAGE_TAG:-latest}"
-    restart: always
-    environment:
-      PORT: "8080"
-      UI_BUILDER_BINARY: ""
-      UI_BUILDER_URL: "${HA_DESIGNS_UI_BUILDER_URL:-}"
-      UI_BUILDER_TOKEN: "${HA_DESIGNS_UI_BUILDER_TOKEN:-}"
-      # Where browsers reach the builder: this same host, whose /ui-builder is the preview server.
-      UI_BUILDER_BROWSER_URL: "https://${HA_DOMAIN:-ha.coo.ee}"
-      PUBLIC_URL: "https://${HA_DOMAIN:-ha.coo.ee}"
-      DESIGNER_URL: "${HA_DESIGNS_DESIGNER_URL:-}"
-      CATALOG_URL: "${HA_DESIGNS_CATALOG_URL:-}"
-      STORE_URL: "${HA_DESIGNS_STORE_URL:-}"
-    volumes:
-      - ha_designs_data:/data
-    labels:
-      com.centurylinklabs.watchtower.enable: "true"
-
   caddy:
     logging: *default-logging
     # The Caddyfile is BAKED into this image (preview-caddy-image.yml) instead of
     # bind-mounted, so a config change auto-deploys via Watchtower like the server
     # (Watchtower watches image digests, not files). DOMAIN is still substituted
     # from .env at runtime. Pin a config with CADDY_IMAGE_TAG=<sha> in .env; leave
-    # it unset for the auto-updating :latest. (Migrating an existing box: the first
-    # `docker compose up -d` after adopting this compose swaps caddy:2 + the mount
-    # for this image — a one-time step; edits then ride Watchtower.)
+    # it unset for the auto-updating :latest.
     image: "ghcr.io/yschimke/compose-preview-caddy:${CADDY_IMAGE_TAG:-latest}"
     pull_policy: always
     restart: always
@@ -749,14 +718,10 @@ services:
       # Which service serves the public playground's paths: `preview` (the default, which answers
       # with its disabled page) or `playground` once that profile is running.
       PLAYGROUND_UPSTREAM: "${PLAYGROUND_UPSTREAM:-preview}"
-      # The Home Assistant project's hostname (ha.coo.ee), split by path between `ha-designs` and
-      # `preview` (ha.caddy). Empty, the default, leaves the edge exactly as it was. Set it together
-      # with COMPOSE_PROFILES=ha so the `ha-designs` service it routes to is running.
-      HA_DOMAIN: "${HA_DOMAIN:-}"
       # Hostnames served by Caddyfile fragments mounted into /etc/caddy/sites.d (a sibling app on
-      # this box): taken out of the main block, which would otherwise claim them too.
+      # this host): taken out of the main block, which would otherwise claim them too. See
+      # README.md → "Extra sites on the same edge".
       EXTRA_SITE_DOMAINS: "${EXTRA_SITE_DOMAINS:-}"
-      HA_DESIGNS_UPSTREAM: "${HA_DESIGNS_UPSTREAM:-ha-designs:8080}"
     volumes:
       - caddy_data:/data
       - caddy_config:/config
@@ -765,7 +730,10 @@ services:
       # back) is picked up by the next caddy start with nothing to keep in step by hand. Mounted at
       # /srv/preview-config, not /config — that path is caddy's own state volume above.
       - preview_config:/srv/preview-config:ro
-    # Opt in to Watchtower so a new baked-Caddyfile image rolls onto this box.
+      # Extra sites: mount a directory of Caddyfile fragments (one `<name>.caddy` per site), from
+      # a compose override so this file stays the same on every host:
+      #   - ./sites.d:/etc/caddy/sites.d:ro
+    # Opt in to Watchtower so a new baked-Caddyfile image rolls onto this host.
     labels:
       com.centurylinklabs.watchtower.enable: "true"
 
@@ -783,5 +751,3 @@ volumes:
   preview_config:
   caddy_data:
   caddy_config:
-  # The HA design server's state (its UI Builder state dir, unused without a bundled builder).
-  ha_designs_data:

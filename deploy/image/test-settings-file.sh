@@ -78,30 +78,30 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 # but the ones the server requires with the host.
 (
   cat > "${work}/profile.json" <<'JSON'
-{"uiBuilder": {"profile": {"host": "ha.coo.ee", "name": "Home Assistant card designer",
-  "catalogs": ["remote-m3"], "accent": "#03a9f4", "homeUrl": "https://ha.coo.ee/"}}}
+{"uiBuilder": {"profile": {"host": "designer.example.com", "name": "Card designer",
+  "catalogs": ["remote-m3"], "accent": "#03a9f4", "homeUrl": "https://designer.example.com/"}}}
 JSON
   unset SERVE_UI_BUILDER_PROFILE_HOST SERVE_UI_BUILDER_PROFILE_NAME \
     SERVE_UI_BUILDER_PROFILE_CATALOGS SERVE_UI_BUILDER_PROFILE_ACCENT \
     SERVE_UI_BUILDER_PROFILE_HOME_URL SERVE_SETTINGS_SOURCES
   apply_settings_file "${work}/profile.json" "${schema}" preview 2> /dev/null
-  [[ "${SERVE_UI_BUILDER_PROFILE_HOST}" == "ha.coo.ee" ]] || fail "profile host"
-  [[ "${SERVE_UI_BUILDER_PROFILE_NAME}" == "Home Assistant card designer" ]] ||
+  [[ "${SERVE_UI_BUILDER_PROFILE_HOST}" == "designer.example.com" ]] || fail "profile host"
+  [[ "${SERVE_UI_BUILDER_PROFILE_NAME}" == "Card designer" ]] ||
     fail "profile name with spaces: '${SERVE_UI_BUILDER_PROFILE_NAME}'"
   [[ "${SERVE_UI_BUILDER_PROFILE_CATALOGS}" == "remote-m3" ]] || fail "profile catalogs"
   [[ "${SERVE_UI_BUILDER_PROFILE_ACCENT}" == "#03a9f4" ]] || fail "profile accent"
-  [[ "${SERVE_UI_BUILDER_PROFILE_HOME_URL}" == "https://ha.coo.ee/" ]] || fail "profile home"
+  [[ "${SERVE_UI_BUILDER_PROFILE_HOME_URL}" == "https://designer.example.com/" ]] || fail "profile home"
   echo "PASS: the UI-builder profile reaches its variables"
 )
 
-# Exercise the deployed HA profile, not a synthetic catalog list: both the card studio and
-# dashboard host use this allowlist when asking the preview server for catalogs.
+# The settings.json this repository ships as the adoption path (deploy/example) must apply cleanly
+# against the schema: it is the first one every adopter copies.
 (
-  unset SERVE_UI_BUILDER_PROFILE_CATALOGS SERVE_SETTINGS_SOURCES
-  apply_settings_file "${here}/../preview.coo.ee/settings.json" "${schema}" preview 2> /dev/null
-  [[ "${SERVE_UI_BUILDER_PROFILE_CATALOGS}" == "ha-cards,lovelace" ]] ||
-    fail "HA profile must offer the card and dashboard catalogs"
-  echo "PASS: the deployed HA profile offers card and dashboard editing"
+  unset SERVE_SETTINGS_SOURCES
+  out="$(apply_settings_file "${here}/../example/settings.json" "${schema}" preview 2>&1)" ||
+    fail "deploy/example/settings.json stopped the entrypoint"
+  [[ "${out}" != *"not applied"* ]] || fail "deploy/example/settings.json was not applied: ${out}"
+  echo "PASS: deploy/example/settings.json applies"
 )
 
 # A broken file is reported and skipped; the box still comes up.

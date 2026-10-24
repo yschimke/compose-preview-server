@@ -19,9 +19,13 @@ python3 - "$here/../example" <<'PY'
 import json, sys
 from pathlib import Path
 root = Path(sys.argv[1])
+# The adoption path names no particular deployment: not a real public host's domain, not a sibling
+# project of one. Spelled in pieces so this guard does not itself trip a repository-wide search.
+forbidden = ['coo' + '.ee', 'home' + 'assistant', 'home ' + 'assistant']
 for path in root.iterdir():
     text = path.read_text()
-    assert 'coo.ee' not in text and 'homeassistant' not in text.lower(), path
+    for word in forbidden:
+        assert word not in text.lower(), (path, word)
     if path.suffix == '.json':
         json.loads(text)
 entrypoint = (root.parent / 'image/entrypoint.sh').read_text()

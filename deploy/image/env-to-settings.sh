@@ -4,8 +4,8 @@
 #   deploy/image/env-to-settings.sh [path/to/.env] > settings.json.draft
 #
 # settings.json (deploy/image/SETTINGS.md) is where a deployment's non-secret settings live now:
-# checked in, reviewed, published to the box by the publish-preview-config workflow. This is the
-# one-off move: it reads the .env the box already runs on and prints the settings.json that says
+# checked in, reviewed, and published to the host (PUT /admin/settings, or the read-only mount of
+# deploy/example). This is the one-off move: it reads the .env the host already runs on and prints the settings.json that says
 # the same thing, so the operator can diff it into deploy/<deployment>/settings.json, open a pull
 # request, and — once the publish has landed and GET /admin/settings shows each value coming from
 # settings.json — delete the .env lines env-redundant.sh then reports as duplicates.

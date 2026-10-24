@@ -9,7 +9,7 @@
 # The failure is invisible in exactly the way a status endpoint is supposed to prevent. Nothing
 # errors, no request fails, and the leak is in GRANDCHILDREN nobody writes code for: the catalog
 # feed's promisor partial clone spawns background lazy fetches and a detached `gc --auto`, which
-# outlive the `git` the server waits on. Measured on preview.coo.ee: 108 `git <defunct>` in 11.5 h,
+# outlive the `git` the server waits on. Measured on a production host: 108 `git <defunct>` in 11.5 h,
 # against an earlier 2099 `[java] <defunct>` in the daemon lane (see ServeProcessCensus). Both are
 # the same missing `wait()` above the JVM, and both are fixed by this one line — which is also why
 # it is so easy to drop in a refactor and never notice until a box runs out of PIDs.

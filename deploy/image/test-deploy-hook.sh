@@ -45,7 +45,7 @@ export DEPLOY_HOOK_ROLLOUT_SCRIPT="${work}/rollout-stub.sh"
 
 # The handler checks the compose project loads before it accepts a rollout. $COMPOSE_BROKEN stands
 # in for a project that does not: an overlay listed by an absolute host path the container does not
-# mount, which is what kept preview.coo.ee on 3.144.0 through the 3.145.0 release.
+# mount, which is what kept a production host on 3.144.0 through the 3.145.0 release.
 mkdir -p "${work}/hookbin"
 cat > "${work}/hookbin/docker" <<'STUB'
 #!/usr/bin/env bash

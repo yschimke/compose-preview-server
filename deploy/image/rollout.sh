@@ -19,7 +19,8 @@
 # answers `restartRequired: true` has written config nothing is serving yet. A forced rollout is the
 # same zero-downtime swap as an image update — a fresh replica boots on the pinned tag, reads
 # /config, passes /readyz, and only then replaces the old one — just without a new digest to wait
-# for. `deploy-hook.sh` runs it for `POST /__hooks/restart`, which `publish-config-to-box.sh` calls.
+# for. `deploy-hook.sh` runs it for `POST /__hooks/restart`, which a config publish calls after a
+# PUT to the admin API answers `restartRequired: true`.
 #
 # Only `preview` is rolled this way — `caddy` publishes fixed 80/443 ports so it
 # can't be scaled, and stays on Watchtower's recreate (a ~1s proxy blip, and only

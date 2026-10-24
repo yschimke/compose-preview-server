@@ -79,7 +79,7 @@ ENV_FILE="${tmp}/absent" "${here}/env-redundant.sh" >/dev/null 2>&1 || {
 echo "PASS: a missing .env exits cleanly"
 
 # 7. A trailing backslash is fatal and must be reported as such — this is the failure that took
-#    preview.coo.ee down: .env is not a shell script, so the backslash lands in the value, reaches
+#    a production host down: .env is not a shell script, so the backslash lands in the value, reaches
 #    JAVA_TOOL_OPTIONS, and the JVM refuses to start behind a 502 with nothing naming the cause.
 cat > "${tmp}/.env-cont" <<'ENV'
 SERVE_JAVA_OPTS=-Dcomposeai.serve.themeOptimizationIdleMillis=10000 \
@@ -195,16 +195,16 @@ cat > "${tmp}/overlay.yml" <<'YML'
 services:
   preview:
     environment:
-      DEPLOY_CONFIG_DIR: ${DEPLOY_CONFIG_DIR:-../preview.coo.ee}
+      DEPLOY_CONFIG_DIR: ${DEPLOY_CONFIG_DIR:-../example}
 YML
-printf 'DEPLOY_CONFIG_DIR=../preview.coo.ee\n' > "${tmp}/.env-overlay"
+printf 'DEPLOY_CONFIG_DIR=../example\n' > "${tmp}/.env-overlay"
 ovl_out="$(
   ENV_FILE="${tmp}/.env-overlay" \
   COMPOSE_FILE_UNDER_TEST="${tmp}/base.yml:${tmp}/overlay.yml" \
   ENTRYPOINT_FILE="${tmp}/entrypoint-defaults.sh" \
   "${here}/env-redundant.sh"
 )"
-grep -q "DEPLOY_CONFIG_DIR=../preview.coo.ee" <<<"${ovl_out}" || {
+grep -q "DEPLOY_CONFIG_DIR=../example" <<<"${ovl_out}" || {
   echo "FAIL: an overlay's default was not read" >&2
   echo "${ovl_out}" >&2
   exit 1

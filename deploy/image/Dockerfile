@@ -150,7 +150,7 @@ RUN set -eu; \
 # Stage 1c: the DESKTOP (Compose Multiplatform / Skiko) live daemon sidecar.
 #
 # The counterpart of stage 1b for `backend: "desktop"` bundles, and the reason
-# preview.coo.ee served every desktop catalog as baked PNGs. `ServeBundleDaemon`'s
+# a production host served every desktop catalog as baked PNGs. `ServeBundleDaemon`'s
 # desktop launch (`desktopBundleDaemonLaunch`) needs two directories the Android path
 # has an explicit ARG for and this one had nothing at all: `lib-daemon-desktop/` (the
 # CMP daemon) and `lib-renderer/` (the Skiko render backend it links against). They are
@@ -182,7 +182,7 @@ RUN set -eu; \
 # which is what `PlaygroundBtaCompiler.fromInstall` loads to compile a playground snippet:
 # the serve host has no Gradle plugin to supply them the way the editor daemon does. Absent
 # it, `openPlaygroundService` logged "playground compiler unavailable — no lib-bta/ in the
-# CLI install" and returned null, so preview.coo.ee admitted the lane on every other count
+# CLI install" and returned null, so a production host admitted the lane on every other count
 # (public host, repo-access-gated, sandbox preflighted) and then served no playground at
 # all. Same lookup as its neighbours: `-Dcomposeai.cli.libBtaDir`, else `$APP_HOME/lib-bta`.
 # It is the largest of the sidecars, and it buys the lane that compiles a stranger's Kotlin;
@@ -362,7 +362,7 @@ COPY --from=server "/opt/compose-preview-server-${SERVER_VERSION}/lib-renderer/w
 # (`RcJvmServerRenderer`), whose subprocess classpath is `lib-rcjvm/*` + `lib-daemon-desktop/*`.
 # Only half of that pair was here, so every `?rcPlayer=cmp-jvm` on the deployed site answered 503
 # with "needs lib-rcjvm and lib-daemon-desktop on the CLI install" — measured against
-# preview.coo.ee/remote-m3 — and the compare wall could never show that player.
+# a production host's /remote-m3 — and the compare wall could never show that player.
 COPY --from=desktop-daemon /opt/lib-rcjvm /opt/lib-rcjvm
 # …and the Skiko native both of those link against. Neither sidecar ships one — see the
 # desktop-daemon stage — so without this directory every Skiko-backed lane on this box dies in a
@@ -396,7 +396,7 @@ RUN set -eu; \
     check-skiko-pairing.sh /opt "$platform"
 # …and the Kotlin Build Tools API jars the PLAYGROUND compiles snippets with. Unlike the
 # sidecars above it backs no render lane: without it `--playground` is admitted and then
-# disabled at the last step, which is how preview.coo.ee ran with a playground nobody could
+# disabled at the last step, which is how a production host ran with a playground nobody could
 # open. See the desktop-daemon stage for why it is lifted here.
 COPY --from=desktop-daemon /opt/lib-bta /opt/lib-bta
 # JAVA_TOOL_OPTIONS (inherited by the spawned daemon JVM too) points the CLI at the

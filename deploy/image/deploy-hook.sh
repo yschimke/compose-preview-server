@@ -29,10 +29,10 @@
 #   POST /__hooks/rollout   roll if the pinned tag's digest changed (the image-publish CI)
 #   POST /__hooks/restart   roll even if it did not (`rollout.sh --force`)
 #
-# /__hooks/restart is how a CONFIG change takes effect without SSH. `publish-config-to-box.sh` PUTs
+# /__hooks/restart is how a CONFIG change takes effect without SSH. An operator's publish step PUTs
 # catalogs.json's `uiBuilder` block, the editor pin and settings.json through the admin API; the
 # server reads those at START, so when a PUT answers `restartRequired: true` the publish calls this
-# route and the box swaps to a fresh replica of the SAME tag, which boots on the new config. The
+# route and the host swaps to a fresh replica of the SAME tag, which boots on the new config. The
 # safety argument above holds unchanged: the caller still cannot choose what image runs, so a leaked
 # token buys at most a zero-downtime restart of the pinned tag. A restart that finds a rollout
 # already running answers 409 rather than folding into it — that rollout may have booted its
