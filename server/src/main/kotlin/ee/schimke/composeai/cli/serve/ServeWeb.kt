@@ -5183,6 +5183,49 @@ ${captureControlsHtml().prependIndent("          ")}
   }
 
   /**
+   * Applies the server's seeded stage frame (`data-stage-frame`, [viewerPage]'s `stageFrameSrc`),
+   * unless this tab remembers a Theme choice that will change which frame `viewer.js` asks for.
+   *
+   * The seed only pays off if it is the SAME URL the viewer's first `refreshSnapshot()` builds, and
+   * the server decides that from the request alone. One input it cannot see is
+   * [viewerThemeStickyScript]'s `sessionStorage` memory, which is applied to `#cp-theme` before
+   * `viewer.js` reads it, so on a bare URL the first render can still carry `uiMode` /
+   * `themeProvider` (and then omit `gen`, since naming a theme is an override). Seeding the baked
+   * frame there would paint the wrong theme and then refetch, so the last word belongs here.
+   *
+   * The test mirrors `pinsTheme` in [viewerThemeStickyScript]: a memory equal to the preview's
+   * baked theme asks for nothing and is not a pin, and a memory naming an option this preview does
+   * not offer (or a disabled control) is ignored downstream. Anything unreadable withholds the
+   * seed, which costs only the optimisation.
+   *
+   * Deliberately a separate script from [viewerThemeStickyScript], which returns early on a page
+   * with no `#cp-theme` — exactly the pages where seeding is safest.
+   */
+  private fun stageFrameSeedScript(): String =
+    """
+    (function () {
+      var img = document.getElementById("cp-img");
+      var url = img && img.getAttribute("data-stage-frame");
+      if (!url) return;
+      var el = document.getElementById("cp-theme");
+      var key = document.documentElement.getAttribute("data-cp-theme-key");
+      if (el && !el.disabled && key) {
+        var stored = null;
+        try { stored = sessionStorage.getItem(key); } catch (e) {}
+        if (stored && stored !== (el.getAttribute("data-default-theme") || "")) {
+          var option = null;
+          Array.prototype.forEach.call(el.options, function (o) {
+            if (o.value === stored) option = o;
+          });
+          if (option && !option.disabled) return;
+        }
+      }
+      img.src = url;
+    })();
+    """
+      .trimIndent()
+
+  /**
    * Viewer half of the catalog-scoped sticky Theme control; values match the landing (`light`,
    * `dark`, `theme:<provider FQN>`).
    *
@@ -16202,9 +16245,10 @@ ${scriptTag("known-differences.js")}
           parallelLabel = specSources.firstOrNull { it.id == "parallel" }?.label,
           defaultSource = primarySpecSource?.id ?: "kit",
         )
-    // The frame `viewer.js` will ask for first, seeded onto the stage `<img>` and preloaded in
-    // `<head>` so the browser starts fetching it while parsing the HTML instead of after the
-    // bundle has downloaded, parsed and run `refreshSnapshot()`.
+    // The frame `viewer.js` will ask for first, offered to the stage `<img>` so the browser starts
+    // fetching it while still parsing the body, instead of after that bundle has downloaded, parsed
+    // and run `refreshSnapshot()`. Applied by [stageFrameSeedScript], which has the last word: this
+    // decides it from the request, and one input — the tab's remembered Theme — is not in it.
     //
     // It must be the SAME URL, byte for byte, and one a cache may answer: the viewer always fetches
     // its own first frame (even behind a bookmarked `?mode=`, which it enters only once that frame
@@ -16231,9 +16275,10 @@ ${scriptTag("known-differences.js")}
         "$basePath/render/$idSeg.png${assetQuery("", revisions)}"
       }
     val stageFrameAttr =
-      stageFrameSrc
-        ?.let { " src=\"${WebEscaping.htmlEscape(it)}\" fetchpriority=\"high\"" }
-        .orEmpty()
+      stageFrameSrc?.let { " data-stage-frame=\"${WebEscaping.htmlEscape(it)}\"" }.orEmpty()
+    val stageFrameScript =
+      if (stageFrameSrc == null) ""
+      else "\n        <script>${stageFrameSeedScript()}</script>"
     val body =
       """
       $sourceCodeStylesheet${if (browserBreadcrumb.isBlank()) "" else "$browserBreadcrumb\n      "}<div class="cp-preview-head">
@@ -16252,7 +16297,7 @@ ${scriptTag("known-differences.js")}
       $historyInlineHtml
       <div class="cp-viewer"$bgThemeAttr$alwaysDarkAttr$irReplayAttr$replayThemesAttr data-preview-id="$idText" data-mode="snapshot" data-modes="$modes" data-static-snapshot="$staticSnapshot" data-can-render-overrides="$canRenderOverrides" data-snapshot-backend="$backendLabel" data-live-backend="$liveLabel"$liveInputAttr data-render-density="${renderDensityAttr(renderDensity)}" data-fold-scope="${foldStorageScope(sessionId, basePath)}"$sourceLaneAttr$unseededAttr$wasmAttr$rcAttr$rcDensityData$historyAttrs$pinnedAttr$generationAttr>
         $navDrawer
-        <div class="cp-stage"><cp-backend-badge class="cp-backend" id="cp-backend" role="status" aria-live="polite"></cp-backend-badge><img id="cp-img" alt="$label"$stageFrameAttr><canvas id="cp-canvas" hidden></canvas>${spatialSceneUrl?.let { "<cp-spatial-view scene-url=\"${WebEscaping.htmlEscape(it)}\" label=\"$label\"></cp-spatial-view>" }.orEmpty()}$rcCanvas$wasmFrame$rcWasmFrame$specImg$motionImg$motionPlayer$sourcePanelHtml$specCompare$inspectLayerHtml$stageLiveHint<div class="cp-error" id="cp-error" role="alert" hidden></div></div>
+        <div class="cp-stage"><cp-backend-badge class="cp-backend" id="cp-backend" role="status" aria-live="polite"></cp-backend-badge><img id="cp-img" alt="$label"$stageFrameAttr><canvas id="cp-canvas" hidden></canvas>${spatialSceneUrl?.let { "<cp-spatial-view scene-url=\"${WebEscaping.htmlEscape(it)}\" label=\"$label\"></cp-spatial-view>" }.orEmpty()}$rcCanvas$wasmFrame$rcWasmFrame$specImg$motionImg$motionPlayer$sourcePanelHtml$specCompare$inspectLayerHtml$stageLiveHint<div class="cp-error" id="cp-error" role="alert" hidden></div></div>$stageFrameScript
         $inspectLegendHtml
         <div class="cp-controls" id="cp-controls">
           <!-- No "Appearance" group. Its only ever-visible control was a Background select
@@ -16358,7 +16403,6 @@ ${scriptTag("known-differences.js")}
       rcFonts = hasRemoteComposeDoc,
       componentBrowser = componentBrowser,
       interfaceModeControl = true,
-      preloadImage = stageFrameSrc,
     )
   }
 
@@ -16800,12 +16844,6 @@ ${scriptTag("known-differences.js")}
      * font. Off elsewhere; page chrome is system-font.
      */
     rcFonts: Boolean = false,
-    /**
-     * A frame this page is certain to fetch, declared as `<link rel=preload as=image>` so it is in
-     * flight before the scripts that ask for it. Only ever a URL the page itself also carries, so
-     * the preload cannot become a request nothing consumes. Null on pages with no such frame.
-     */
-    preloadImage: String? = null,
     /** Streamlined component-browser chrome; full mode remains the default. */
     componentBrowser: Boolean = false,
     /** Show and persist the Catalog / Dev switch on pages that support both presentations. */
@@ -16862,15 +16900,6 @@ ${scriptTag("known-differences.js")}
     // Before `themeCss`, so a catalog palette still wins at equal specificity; the font block
     // declares faces only and collides with nothing in the chrome.
     val rcFontsBlock = if (rcFonts) "\n" + ServeRcFonts.linkTag().prependIndent("        ") else ""
-    // `high`, because it is the page's subject: without it the preload competes with the chrome's
-    // own stylesheet and scripts for the first connections.
-    val preloadBlock =
-      preloadImage
-        ?.let {
-          "\n        <link rel=\"preload\" as=\"image\" fetchpriority=\"high\"" +
-            " href=\"${WebEscaping.htmlEscape(it)}\">"
-        }
-        .orEmpty()
     val themeBlock =
       (themeCss + brand?.accentCss().orEmpty())
         .takeIf { it.isNotBlank() }
@@ -16912,7 +16941,7 @@ ${scriptTag("known-differences.js")}
         <title>${WebEscaping.htmlEscape(title)}</title>
 ${(if (brand == null) ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compose Preview" }) else ServeSiteIcon.linkTags(themeCss, brand.name, brand.manifestPath)).prependIndent("        ")}
         $SPECULATION_RULES
-        <link rel="stylesheet" href="${assetHref("serve.css")}">$feedLink$preloadBlock$rcFontsBlock$themeBlock$interfaceModeBoot
+        <link rel="stylesheet" href="${assetHref("serve.css")}">$feedLink$rcFontsBlock$themeBlock$interfaceModeBoot
         <!-- Apply the Transparent choice before first paint (no checkerboard flash).
              A `?bg=` on the URL is an explicit, shareable choice and outranks the sticky one. -->
         <script>try{var b=new URLSearchParams(location.search).get("bg");if(b?b==="off":localStorage.getItem("cp-bg")==="off")document.documentElement.classList.add("cp-bg-transparent");}catch(e){}</script>
