@@ -1004,8 +1004,9 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
       // contracts only.
       "ee.schimke.composeai:component-catalog-protocol",
       "ee.schimke.composeai:component-catalog-protocol-jvm",
-      "ee.schimke.composeai:daemon-bta",
       "ee.schimke.composeai:daemon-client",
+      // The in-process compile `PlaygroundBtaCompiler` drives, `api` from `daemon-core`.
+      "ee.schimke.composeai:daemon-compile",
       // The connector SPI `daemon-core` exposes as `api`; no renderer behind it.
       "ee.schimke.composeai:daemon-connector-api",
       "ee.schimke.composeai:daemon-core",
