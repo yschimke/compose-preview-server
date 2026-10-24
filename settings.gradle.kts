@@ -87,11 +87,22 @@ dependencyResolutionManagement {
     // GitHub release asset rather than on Maven Central; an ivy repository keeps it a normal
     // versioned dependency. `metadataSources { artifact() }` because the asset has no POM/module
     // metadata, so `:server` requests it by extension. The pattern spells the tag's `v` prefix
-    // separately from the file name's. Fenced to this one module.
+    // separately from the file name's. Fenced to these modules.
+    //
+    // The render bundle (`-render-bundle`, ~13 MB) and the export's variable fonts
+    // (`-export-fonts`, ~6 MB) are jars on the same release for the same reason: re-uploaded to
+    // Central on nearly every release, they were most of the org's monthly Central upload quota.
+    // Both are read off the classpath, so `:server` only has to put them there. Releases before
+    // compose-ui-builder#1027 have no such assets, but those versions of the render bundle are
+    // still on Central, which is why this repository filters rather than claiming the modules.
     ivy("https://github.com/yschimke/compose-ui-builder/releases/download") {
       name = "uiBuilderWebRelease"
       patternLayout { artifact("v[revision]/[module]-[revision].[ext]") }
-      content { includeModule("ee.schimke.composeai", "compose-preview-ui-builder-web") }
+      content {
+        includeModule("ee.schimke.composeai", "compose-preview-ui-builder-web")
+        includeModule("ee.schimke.composeai", "compose-preview-ui-builder-render-bundle")
+        includeModule("ee.schimke.composeai", "compose-preview-ui-builder-export-fonts")
+      }
       metadataSources { artifact() }
     }
 
@@ -218,6 +229,8 @@ providers.gradleProperty("composeUiBuilderDir").orNull?.let { path ->
         .using(project(":ui-builder-web"))
       substitute(module("ee.schimke.composeai:compose-preview-ui-builder-render-bundle"))
         .using(project(":ui-builder-render-bundle"))
+      substitute(module("ee.schimke.composeai:compose-preview-ui-builder-export-fonts"))
+        .using(project(":ui-builder-export-fonts"))
     }
   }
 }

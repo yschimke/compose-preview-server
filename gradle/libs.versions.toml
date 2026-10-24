@@ -512,8 +512,9 @@ composeai-remotecompose-json = { module = "ee.schimke.composeai:remotecompose-js
 # yschimke/compose-preview-server#9 asked for.
 composeai-build-host-protocol = { module = "ee.schimke.composeai:build-host-protocol" }
 # The upstream BOMs. THE only `ee.schimke.composeai` entries in this file that carry a
-# version: every coordinate below deliberately carries none of its own. (`compose-preview-ui-builder-web`
-# is the one non-BOM entry with a version, and the UI-builder ref above says why.)
+# version: every coordinate below deliberately carries none of its own. (The three UI-builder release
+# assets, `-web`, `-render-bundle` and `-export-fonts`, are the non-BOM entries with a version: no BOM
+# names what is not on Central.)
 #
 # The rule the daemon line arrived at now holds for every line. Each of those repositories publishes
 # only the modules a release changes -- compose-preview-daemon#123, and since then
@@ -573,11 +574,14 @@ composeai-data-render-core = { module = "ee.schimke.composeai:data-render-core" 
 composeai-ui-builder-protocol = { module = "ee.schimke.composeai:ui-builder-protocol" }
 composeai-ui-builder-runtime = { module = "ee.schimke.composeai:compose-preview-ui-builder-runtime" }
 composeai-ui-builder-export = { module = "ee.schimke.composeai:compose-preview-ui-builder-export" }
-# The editor archive, one of the two coordinates here resolved from a GitHub release rather than
-# from Central (`rc-player-wasm` below is the other). `@zip` at the use site, because an
-# artifact-only dependency is the one shape an ivy repository with no metadata can serve.
+# The editor archive, the render bundle and the export's variable fonts: three of the four
+# coordinates here resolved from a GitHub release rather than from Central (`rc-player-wasm` below
+# is the other). They carry the UI-builder version themselves because the BOM, which only names what
+# is on Central, no longer does. `@zip` for the archive at the use site; the two jars are the
+# ivy repository's default extension.
 composeai-ui-builder-web = { module = "ee.schimke.composeai:compose-preview-ui-builder-web", version.ref = "composeai-ui-builder" }
-composeai-ui-builder-render-bundle = { module = "ee.schimke.composeai:compose-preview-ui-builder-render-bundle" }
+composeai-ui-builder-render-bundle = { module = "ee.schimke.composeai:compose-preview-ui-builder-render-bundle", version.ref = "composeai-ui-builder" }
+composeai-ui-builder-export-fonts = { module = "ee.schimke.composeai:compose-preview-ui-builder-export-fonts", version.ref = "composeai-ui-builder" }
 # The CMP/Wasm Remote Compose player: the `rc-player-wasm.zip` asset on the yschimke/rc-players
 # release, through the `rcPlayerWasmRelease` ivy repository (settings.gradle.kts), not Central.
 # Shipped in the server tarball as `rc-player-wasm/`, which the image's entrypoint passes as
