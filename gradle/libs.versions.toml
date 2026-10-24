@@ -456,7 +456,9 @@ composeai-contracts = "3.39.0"
 # 3.123.0 seeds every new design from the catalog's published templates: it removes the executor's
 # deprecated `catalogOwnership` properties (compose-ui-builder#980) and the per-catalog-id seed path
 # (compose-ui-builder#991). This server already seeds only through the published overload.
-composeai-ui-builder = "3.123.0"
+# 3.124.0 ships the render bundle and the export's variable fonts as release assets instead of on
+# Central (compose-ui-builder#1027); `-render-bundle` and `-export-fonts` below come from its release.
+composeai-ui-builder = "3.124.0"
 # The Android Remote Compose players the server's own player-only Android daemon replays documents
 # with, staged as `lib-rc-players-android/` (`stageRcPlayersAndroidLibs`). The Android daemon
 # sidecar deliberately ships none of this family (a consumer brings it, compose-preview-daemon's
