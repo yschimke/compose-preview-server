@@ -36,16 +36,30 @@ resolved="$(
 # to whitespace is the difference between "one domain on this block" and a Caddyfile parse error.
 resolved="$(printf '%s' "${resolved}" | sed 's/[[:space:]]*$//')"
 
-# The Home Assistant project's hostname (HA_DOMAIN) is served by its own block, ha.caddy, which the
-# Caddyfile imports from OPTIONAL_SITES_DIR. Install it only when the name is set — the import's glob
-# then matches nothing and the config is exactly the main block — and take the name out of
-# SITE_DOMAINS, because Caddy refuses a hostname claimed by two blocks. The .env that served
-# ha.coo.ee as a plain site before HA_DOMAIN existed keeps working unchanged after it is set.
+# Extra sites: a deployment that serves more hostnames than this server's own (a sibling app on the
+# same box, say) mounts one Caddyfile fragment per site into EXTRA_SITES_DIR, and the Caddyfile
+# imports whatever is installed in OPTIONAL_SITES_DIR. EXTRA_SITE_DOMAINS names the hostnames those
+# fragments claim, and they are taken out of SITE_DOMAINS, because Caddy refuses a hostname claimed
+# by two blocks. With nothing mounted the import's glob matches nothing and the config is exactly
+# the main block. Installed afresh on every start, so removing a mount removes the site.
 OPTIONAL_SITES_DIR="${OPTIONAL_SITES_DIR:-/run/caddy-sites}"
-HA_SITE_FILE="${HA_SITE_FILE:-/etc/caddy/ha.caddy}"
+EXTRA_SITES_DIR="${EXTRA_SITES_DIR:-/etc/caddy/sites.d}"
 mkdir -p "${OPTIONAL_SITES_DIR}"
-rm -f "${OPTIONAL_SITES_DIR}/ha.caddy"
-if [ -n "${HA_DOMAIN:-}" ]; then
+rm -f "${OPTIONAL_SITES_DIR}"/*.caddy
+for site in "${EXTRA_SITES_DIR}"/*.caddy; do
+  [ -f "${site}" ] || continue
+  cp "${site}" "${OPTIONAL_SITES_DIR}/"
+  echo "caddy: extra site $(basename "${site}") from ${EXTRA_SITES_DIR}" >&2
+done
+for claimed in $(printf '%s' "${EXTRA_SITE_DOMAINS:-}" | tr ',' ' '); do
+  resolved="$(printf '%s' "${resolved}" | tr ' ' '\n' | awk -v d="${claimed}" 'NF && $0 != d' | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+done
+
+# DEPRECATED, for the one deployment that predates EXTRA_SITES_DIR: HA_DOMAIN installs the image's
+# ha.caddy the same way. Skipped once EXTRA_SITE_DOMAINS is set, so a deployment can move its site
+# to a mounted fragment without both installing. Removed after that deployment has moved.
+HA_SITE_FILE="${HA_SITE_FILE:-/etc/caddy/ha.caddy}"
+if [ -n "${HA_DOMAIN:-}" ] && [ -z "${EXTRA_SITE_DOMAINS:-}" ]; then
   cp "${HA_SITE_FILE}" "${OPTIONAL_SITES_DIR}/ha.caddy"
   resolved="$(printf '%s' "${resolved}" | tr ' ' '\n' | awk -v ha="${HA_DOMAIN}" 'NF && $0 != ha' | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
   echo "caddy: ${HA_DOMAIN} served by ha.caddy (design server + preview server, split by path)" >&2

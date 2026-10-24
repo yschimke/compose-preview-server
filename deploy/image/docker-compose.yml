@@ -753,6 +753,9 @@ services:
       # `preview` (ha.caddy). Empty, the default, leaves the edge exactly as it was. Set it together
       # with COMPOSE_PROFILES=ha so the `ha-designs` service it routes to is running.
       HA_DOMAIN: "${HA_DOMAIN:-}"
+      # Hostnames served by Caddyfile fragments mounted into /etc/caddy/sites.d (a sibling app on
+      # this box): taken out of the main block, which would otherwise claim them too.
+      EXTRA_SITE_DOMAINS: "${EXTRA_SITE_DOMAINS:-}"
       HA_DESIGNS_UPSTREAM: "${HA_DESIGNS_UPSTREAM:-ha-designs:8080}"
     volumes:
       - caddy_data:/data

@@ -252,6 +252,7 @@
 	}
 }
 
-# Optional sites, installed by caddy-entrypoint.sh: ha.caddy when HA_DOMAIN is set. The glob matching
-# nothing is only a warning, so with none installed this file is exactly the block above.
+# Optional sites, installed by caddy-entrypoint.sh from the fragments a deployment mounts into
+# /etc/caddy/sites.d (EXTRA_SITES_DIR). The glob matching nothing is only a warning, so with none
+# installed this file is exactly the block above.
 import /run/caddy-sites/*.caddy
