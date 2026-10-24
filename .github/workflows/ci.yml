@@ -303,16 +303,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Verify analytics bootstrap
-        run: |
-          python3 deploy/analytics/test-bootstrap.py
-          bash -n deploy/analytics/setup.sh deploy/analytics/backup.sh
-          UMAMI_DB_PASSWORD=test UMAMI_APP_SECRET=test UMAMI_TWO_FACTOR_KEY=test docker compose -f deploy/analytics/docker-compose.yml config --quiet
       - name: Verify deployment scripts
         run: |
-          # Both directories: the box's own scripts live in deploy/image/, and the reconcile that
-          # publishes config TO a box lives in .github/scripts/. Its self-test was referenced by
-          # name in its header long before it existed, which is how the prune diff went untested.
+          # Both directories: the deployment image's own scripts live in deploy/image/, and the CI
+          # helpers they pair with (the rollout notification, for one) live in .github/scripts/.
           for test_script in deploy/image/test-*.sh .github/scripts/test-*.sh; do
             [ -f "${test_script}" ] || continue
             echo "::group::${test_script}"

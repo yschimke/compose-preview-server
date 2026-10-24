@@ -1,7 +1,7 @@
 name: UI-builder export A/B
 
 # The typed-export pilots against the production catalogs they would replace: the same designs
-# exported through both published catalogs, as preview.coo.ee serves them, and a report of where the
+# exported through both published catalogs, as a deployed server serves them, and a report of where the
 # Kotlin differs. `:server:uiBuilderExportComparison` (UiBuilderExportComparison.kt) composes each
 # delivery branch with PublishedUiBuilderCatalog and exports through the host's own
 # ScreenGeneratorComposeExportExecutor, so a difference here is a difference a user would see.

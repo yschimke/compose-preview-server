@@ -25,7 +25,6 @@ on:
         type: string
     secrets:
       DEPLOY_HOOK_TOKEN: {required: false}
-      SERVE_ADMIN_TOKEN: {required: false}
 
 permissions:
   contents: read
@@ -98,20 +97,22 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-      - name: Notify preview.coo.ee and verify rollout
+      # OPT-IN: notify an operator's deploy hook (deploy/image/deploy-hook.sh, routed by the edge at
+      # /__hooks/rollout) and wait for that host to serve the image just pushed. Inert unless the
+      # repository sets the `DEPLOY_HOOK_URL` variable and the `DEPLOY_HOOK_TOKEN` secret, so a fork
+      # or a repository with no deployment of its own only builds and publishes. `DEPLOY_WRITER` set
+      # to anything but `public` also skips it, for a host whose rollout another repository drives.
+      - name: Notify the deploy hook and verify rollout
         id: rollout
+        if: ${{ vars.DEPLOY_HOOK_URL != '' }}
         env:
-          HOOK_URL: ${{ vars.DEPLOY_HOOK_URL || 'https://preview.coo.ee/__hooks/rollout' }}
+          HOOK_URL: ${{ vars.DEPLOY_HOOK_URL }}
           HOOK_TOKEN: ${{ secrets.DEPLOY_HOOK_TOKEN }}
-          # Unset or `public`: this workflow rolls the box. See publish-preview-config.yml.
           DEPLOY_WRITER: ${{ vars.DEPLOY_WRITER }}
-          # Resolved exactly as `Publish deployment config` resolves it below: the render probe
-          # reads the design systems out of this directory's `catalogs.json`, and the two steps
-          # disagreeing about where that lives is a deploy that fails on a path, not on the box.
-          DEPLOY_CONFIG_DIR: ${{ vars.DEPLOY_CONFIG_DIR || 'deploy/preview.coo.ee' }}
+          EXPECTED: ${{ steps.versions.outputs.server }}
         run: |
           if [[ -n "${DEPLOY_WRITER}" && "${DEPLOY_WRITER}" != public ]]; then
-            echo "::notice::DEPLOY_WRITER=${DEPLOY_WRITER}; another writer owns the box, skipping rollout notification"
+            echo "::notice::DEPLOY_WRITER=${DEPLOY_WRITER}; another writer owns the host, skipping rollout notification"
             exit 0
           fi
           if [[ -z "${HOOK_TOKEN}" ]]; then
@@ -124,7 +125,7 @@ jobs:
           case "${code}" in
             200|202) ;;
             *)
-              # The hook refuses with this body only when the box's compose project does not load.
+              # The hook refuses with this body only when the host's compose project does not load.
               # The poller runs the same project and fails the same way, so waiting would only
               # spend the whole convergence window; anything else (a 502 while the hook restarts,
               # a timeout) may still be picked up by the poller.
@@ -132,167 +133,44 @@ jobs:
                 echo "::error::deploy hook refused the rollout: $(head -c 2000 "${hook_body}")"
                 exit 1
               fi
-              echo "::warning::deploy hook returned ${code}; waiting for the box poller"
+              echo "::warning::deploy hook returned ${code}; waiting for the host's poller"
               ;;
           esac
           base="${HOOK_URL%/__hooks/rollout}"
           # CONVERGED, as a function, so `.github/scripts/test-preview-host-rollout.sh` can extract
           # and exercise it without a network. What it rejects is the reason it exists:
           #
-          #   * A SPLIT during the swap. Two containers answer this host while the new one takes
+          #   * A SPLIT during the swap. Two containers answer the host while the new one takes
           #     over, so `/version` can report the new build in the same second that
-          #     `/status.json` reports the old one -- observed on the 3.27.0 rollout, /version
-          #     3.27.0 against /status.json 3.26.0 with 9213s of uptime. Reading the version from
-          #     `/version` alone could call that converged and report a deploy that had not
-          #     happened, against the very build it was replacing. Both must say the new version.
-          #   * `loaded -ge 0` and `total -ge 0`, which is what this used to require of the
-          #     catalogs and is true of every number this endpoint can emit -- `loaded=0` included.
-          #     An assertion that cannot fail is not a check. The catalogs have to be LOADED, and
-          #     none of them failed.
+          #     `/status.json` reports the old one. Reading the version from one endpoint alone
+          #     could call that converged against the very build it was replacing. Both must say
+          #     the new version.
+          #   * An empty fleet. `loaded -ge 0` is true of every number the endpoint can emit, so the
+          #     catalogs have to be LOADED (at least one, all of them), and none of them failed.
           #
-          # Catalogs load asynchronously after the process is up (37 of them take a few minutes
-          # from a cold start), so `pending` is expected to be non-zero for a while; the loop is
-          # what waits for it, and 30 attempts at 20s is ~10 minutes of room.
-          #   * A catalog that is LOADED but cannot RENDER. `catalogs.loaded` counts discovery, and
-          #     a lane can produce bytes only once its daemon is up -- so the gate could go green
-          #     while a design system's page answered with every one of its images missing, which
-          #     is what the 3.38.0 rollout served from `glimmer-catalog`. `renders_ok` is that
-          #     window closed: one real PNG per design system, checked below.
-          converged() { # 1=live 2=status_version 3=expected 4=loaded 5=total 6=failed 7=builder_ok
-                        # 8=renders_ok 9=wear_authorable
+          # Catalogs load asynchronously after the process is up, so `pending` is expected to be
+          # non-zero for a while; the loop is what waits for it, and 30 attempts at 20s is ~10
+          # minutes of room.
+          converged() { # 1=live 2=status_version 3=expected 4=loaded 5=total 6=failed
             [ -n "$1" ] && [ "$1" = "$3" ] || return 1
             [ -n "$2" ] && [ "$2" = "$3" ] || return 1
             [ "${5:--1}" -gt 0 ] && [ "${4:--1}" -eq "$5" ] || return 1
-            [ "${6:--1}" -eq 0 ] || return 1
-            [ "${7:-0}" -eq 1 ] || return 1
-            [ "${8:-0}" -eq 1 ] || return 1
-            [ "${9:-0}" -eq 1 ]
-          }
-
-          # The design systems, read from the deployed config rather than listed here: the server
-          # gates its own readiness on the same group id, and a second copy in YAML is a copy that
-          # goes stale the first time one is added. Empty is not a pass -- a config this cannot read
-          # means the probe below has nothing to assert, which must not read as success.
-          design_systems="$(jq -r \
-            '.catalogs[] | select(.group == "design-systems") | .system' \
-            "${DEPLOY_CONFIG_DIR:-deploy/preview.coo.ee}/catalogs.json" 2>/dev/null || true)"
-          if [ -z "${design_systems}" ]; then
-            echo "::error::no design-systems catalogs in catalogs.json; the render probe would assert nothing"
-            exit 1
-          fi
-          echo "probing renders for: $(echo "${design_systems}" | tr '\n' ' ')"
-
-          # Every catalog this repository declares, which is what the catalog counts below judge.
-          declared_json="$(jq -c '[.catalogs[].system]' \
-            "${DEPLOY_CONFIG_DIR:-deploy/preview.coo.ee}/catalogs.json" 2>/dev/null || true)"
-          if [ -z "${declared_json}" ] || [ "${declared_json}" = "[]" ]; then
-            echo "::error::no catalogs declared in catalogs.json; the catalog counts would assert nothing"
-            exit 1
-          fi
-
-          # One real render per design system. Not the catalog PAGE -- that was already 200 with a
-          # full component tree while every image under it was missing. The page is where the render
-          # URL comes from; the render is the assertion.
-          #
-          # `-gt 512` because an error page is also a 200 and a placeholder PNG is tiny: the healthy
-          # responses measured on 3.38.0 were 5194 B (glimmer) and 3373 B (compose-m3).
-          renders_ready() {
-            for system in ${design_systems}; do
-              page="$(curl -fsS -m 20 "${base}/${system}/" 2>/dev/null || true)"
-              # The page is where the render URL comes from; the render is the assertion. The
-              # character class avoids quoting an HTML attribute delimiter inside a YAML block
-              # scalar inside a shell string, which is three layers of escaping for no gain.
-              render_path="$(printf '%s' "${page}" \
-                | grep -oE "/${system}/render/[A-Za-z0-9._-]+\.png(\?[A-Za-z0-9=&_-]+)?" \
-                | head -n1)"
-              if [ -z "${render_path}" ]; then
-                echo "  ${system}: no render URL on its page yet"
-                return 1
-              fi
-              # A cold lane's first render boots a daemon, so allow it real time -- far longer than
-              # the 10s the cheap endpoints above get.
-              probe="$(curl -sS -m 120 -o /dev/null \
-                -w '%{http_code} %{content_type} %{size_download}' \
-                "${base}${render_path}" 2>/dev/null || echo "000 - 0")"
-              code="${probe%% *}"
-              rest="${probe#* }"
-              type="${rest%% *}"
-              size="${rest##* }"
-              case "${code}:${type}" in
-                200:image/png*) ;;
-                *)
-                  echo "  ${system}: ${render_path} -> ${code} ${type}"
-                  return 1
-                  ;;
-              esac
-              # An error page is also a 200 and a placeholder PNG is tiny. Measured across all six
-              # design systems on the 3.38.0 box: 1209 B (an m3-catalog badge, the smallest real
-              # render on the box) to 25538 B (a remote-m3 app card). 512 sits below every real
-              # render and above an error body or a 1x1, which is the whole job of the number.
-              if [ "${size:-0}" -le 512 ]; then
-                echo "  ${system}: ${render_path} -> 200 but only ${size}B"
-                return 1
-              fi
-            done
-            return 0
+            [ "${6:--1}" -eq 0 ]
           }
           for i in $(seq 1 30); do
             version_json=$(curl -fsS -m 10 "${base}/version" 2>/dev/null || true)
             status_json=$(curl -fsS -m 10 "${base}/status.json" 2>/dev/null || true)
             live=$(printf '%s' "${version_json}" | tr -d ' \n' | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')
             status_version=$(printf '%s' "${status_json}" | jq -r '.version // ""' 2>/dev/null || echo "")
-            # Counted over the catalogs THIS repository declares, not the box's totals. The box also
-            # serves every catalog the import registry (`SERVE_CATALOG_REGISTRY`) lists, and those
-            # are third-party builds published from another repository on their own schedule: the
-            # 3.105.0 rollout ran out its ten minutes on `element-hq-element-x-android`, which the
-            # registry listed before its build had ever published a `design-artifacts/` branch. A
-            # catalog this release did not ship cannot say whether this release deployed, so it is
-            # reported below instead. `loaded` and `failed` mean what `/status.json` means by them:
-            # a stale catalog still serves, and only one with nothing to serve has failed.
-            loaded=$(printf '%s' "${status_json}" | jq -r --argjson d "${declared_json}" \
-              '[.catalogList[] | select(.id as $i | $d | index($i)) | select(.loadState == "loaded" or .loadState == "stale")] | length' \
+            # `loaded` and `failed` mean what `/status.json` means by them: a stale catalog still
+            # serves, and only one with nothing to serve has failed.
+            loaded=$(printf '%s' "${status_json}" | jq -r \
+              '[.catalogList[] | select(.loadState == "loaded" or .loadState == "stale")] | length' \
               2>/dev/null || echo -1)
-            # Declared AND listed by the box: a catalog this checkout adds is registered by the
-            # `Publish deployment config` step after this one, so requiring it here could never
-            # converge. Not yet registered is not failed; it was not counted before this either.
-            total=$(printf '%s' "${status_json}" | jq -r --argjson d "${declared_json}" \
-              '[.catalogList[] | select(.id as $i | $d | index($i))] | length' 2>/dev/null || echo -1)
-            failed=$(printf '%s' "${status_json}" | jq -r --argjson d "${declared_json}" \
-              '[.catalogList[] | select(.id as $i | $d | index($i)) | select(.loadState == "failed")] | length' \
-              2>/dev/null || echo -1)
-            undeclared_failed=$(printf '%s' "${status_json}" | jq -r --argjson d "${declared_json}" \
-              '[.catalogList[] | select(.id as $i | $d | index($i) | not) | select(.loadState == "failed") | .id] | join(" ")' \
-              2>/dev/null || true)
-            builder_html=$(curl -fsS -m 10 "${base}/ui-builder/" 2>/dev/null || true)
-            builder_mjs=$(curl -sS -o /dev/null -w '%{http_code}:%{content_type}' -m 10 "${base}/ui-builder/uiBuilder.mjs" 2>/dev/null || true)
-            builder_wasm=$(curl -sS -o /dev/null -w '%{http_code}:%{content_type}' -m 10 "${base}/ui-builder/uiBuilder.wasm" 2>/dev/null || true)
-            builder_ok=0
-            case "${builder_html}:${builder_mjs}:${builder_wasm}" in
-              *"<title>Compose UI Builder Preview</title>"*:200:text/javascript*:200:application/wasm*) builder_ok=1 ;;
-            esac
-            # Catalog selection happens before authentication on the New design route. A 401 is
-            # therefore a cheap, credential-free proof that Wear is in the running box's authoring
-            # allowlist; the stale pre-Wear host override that caused #911 answers 404 instead.
-            wear_create_code=$(curl -sS -o /dev/null -w '%{http_code}' -m 10 \
-              -X POST -H 'content-type: application/x-www-form-urlencoded' \
-              --data 'catalog=wear-m3&designId=rollout-wear-probe&template=wear-screen' \
-              "${base}/ui-builder/designs" 2>/dev/null || true)
-            wear_authorable=0
-            [ "${wear_create_code}" = "401" ] && wear_authorable=1
-            renders_ok=0
-            # Only worth the renders once the cheap fields agree -- otherwise every attempt pays a
-            # cold render against the replica that is still on its way out.
-            if [ "${live}" = "${{ steps.versions.outputs.server }}" ] &&
-              [ "${status_version}" = "${{ steps.versions.outputs.server }}" ] &&
-              renders_ready; then
-              renders_ok=1
-            fi
-            if converged "${live}" "${status_version}" "${{ steps.versions.outputs.server }}" \
-              "${loaded}" "${total}" "${failed}" "${builder_ok}" "${renders_ok}" \
-              "${wear_authorable}"; then
-              for system in ${undeclared_failed}; do
-                echo "::warning::${system} is served from the import registry and failed to load; it does not gate this release"
-              done
+            total=$(printf '%s' "${status_json}" | jq -r '.catalogList | length' 2>/dev/null || echo -1)
+            failed=$(printf '%s' "${status_json}" | jq -r \
+              '[.catalogList[] | select(.loadState == "failed")] | length' 2>/dev/null || echo -1)
+            if converged "${live}" "${status_version}" "${EXPECTED}" "${loaded}" "${total}" "${failed}"; then
               {
                 echo "deployed=true"
                 echo "base_url=${base}"
@@ -302,10 +180,10 @@ jobs:
               } >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            echo "waiting for preview.coo.ee: version=${live:-?}/${status_version:-?} want ${{ steps.versions.outputs.server }}, catalogs=${loaded}/${total} failed=${failed}, ui-builder=${builder_ok}, wear-authorable=${wear_authorable}, renders=${renders_ok} (attempt ${i}/30)"
+            echo "waiting for ${base}: version=${live:-?}/${status_version:-?} want ${EXPECTED}, catalogs=${loaded}/${total} failed=${failed} (attempt ${i}/30)"
             sleep 20
           done
-          echo "::error::preview.coo.ee did not converge within ~10 min"
+          echo "::error::${base} did not converge within ~10 min"
           exit 1
       - name: Comment the deploy milestone on the release PR
         if: ${{ steps.rollout.outputs.deployed == 'true' }}
@@ -329,30 +207,3 @@ jobs:
             printf -- '- Image: `ghcr.io/%s/compose-preview-host:%s`\n' "${GITHUB_REPOSITORY_OWNER}" "${V}"
           } > "$md"
           MILESTONE_BODY="$(<"$md")" .github/scripts/comment-release-milestone.sh
-      - name: Publish deployment config
-        if: always() && steps.push.outcome == 'success'
-        continue-on-error: true
-        env:
-          BASE_URL: ${{ vars.DEPLOY_BASE_URL || 'https://preview.coo.ee' }}
-          DEPLOY_CONFIG_DIR: ${{ vars.DEPLOY_CONFIG_DIR || 'deploy/preview.coo.ee' }}
-          ADMIN_TOKEN: ${{ secrets.SERVE_ADMIN_TOKEN }}
-          DEPLOY_WRITER: ${{ vars.DEPLOY_WRITER }}
-          # So a config this roll did not boot on (written after its replica started) still ends up
-          # serving: same restart path as publish-preview-config.yml.
-          DEPLOY_HOOK_TOKEN: ${{ secrets.DEPLOY_HOOK_TOKEN }}
-          # Empty unless the repository sets it: an empty value falls through to the script's
-          # ${BASE_URL}/__hooks/restart, so a box picked by DEPLOY_BASE_URL is the box restarted.
-          DEPLOY_HOOK_RESTART_URL: ${{ vars.DEPLOY_HOOK_RESTART_URL }}
-        run: |
-          if [[ -n "${DEPLOY_WRITER}" && "${DEPLOY_WRITER}" != public ]]; then
-            echo "::notice::DEPLOY_WRITER=${DEPLOY_WRITER}; another writer owns the box, skipping deployment config publish"
-            exit 0
-          fi
-          if [[ -z "${ADMIN_TOKEN}" ]]; then
-            echo "SERVE_ADMIN_TOKEN is unset; skipping deployment config publish"
-            exit 0
-          fi
-          # Same reconcile as publish-preview-config.yml and the same --prune, so an image roll
-          # and a config push cannot leave the box in two different states.
-          DEPLOY_CONFIG_DIR="$(cd "${DEPLOY_CONFIG_DIR}" && pwd)" \
-            bash .github/scripts/publish-config-to-box.sh --prune

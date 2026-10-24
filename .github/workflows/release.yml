@@ -270,7 +270,6 @@ jobs:
       daemon_version: ${{ needs.resolve-preview-host-tools.outputs.daemon_version }}
     secrets:
       DEPLOY_HOOK_TOKEN: ${{ secrets.DEPLOY_HOOK_TOKEN }}
-      SERVE_ADMIN_TOKEN: ${{ secrets.SERVE_ADMIN_TOKEN }}
 
   # The PR half, split out so it never runs against a half-published release. Runs on an ordinary
   # push (the normal case) or straight after a SUCCESSFUL release, so the next release PR opens
