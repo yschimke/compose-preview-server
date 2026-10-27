@@ -10,6 +10,7 @@
 
 ### Bug Fixes
 
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.74.1 ([#1825](https://github.com/yschimke/compose-preview-server/issues/1825)) ([144f112](https://github.com/yschimke/compose-preview-server/commit/144f1128bb4c3c47d06f5591467f40520aa636fb))
 * **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.26.0 ([#1795](https://github.com/yschimke/compose-preview-server/issues/1795)) ([111fb23](https://github.com/yschimke/compose-preview-server/commit/111fb23e3d00bc41b3e008a797ffc639148e43e2))
 * **deps:** update rc-players to v2.19.0 ([#1826](https://github.com/yschimke/compose-preview-server/issues/1826)) ([960746e](https://github.com/yschimke/compose-preview-server/commit/960746ed77a9dde9dab5ab2c6815ca1adadd78f6))
 
