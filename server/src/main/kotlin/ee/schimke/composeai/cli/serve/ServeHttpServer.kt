@@ -1518,6 +1518,8 @@ class ServeHttpServer(
           // A site host redeeming the one-time code the callback host minted for it, when the
           // cookies are host-only ([ServeGithubAuth.handleHandoff]).
           get(ServeGithubAuth.HANDOFF_PATH) { with(auth) { handleHandoff() } }
+          // Who the session is, for a service sharing the host ([ServeGithubAuth.handleWhoami]).
+          get(ServeGithubAuth.WHOAMI_PATH) { with(auth) { handleWhoami() } }
           // POST only ([ServeGithubAuth.handleLogout]): a prefetcher or unfurler following the URL
           // gets 405 rather than signing the visitor out.
           post(ServeGithubAuth.LOGOUT_PATH) {

@@ -911,6 +911,13 @@ and the white-labelled builder host — gets its own session from the callback h
 4. Already signed in on the callback host, a site host's sign-in skips GitHub and goes straight to
    step 2.
 
+**Reusing the sign-in from another service on the same host.** `GET /auth/github/whoami` answers
+`{"login": "…", "guest": false}` for the browser's session, or `401` without one, with `no-store`
+and no CORS headers. A service that shares a site host and is routed beside the server can send it
+the visitor's `Cookie` header over the internal network instead of running its own OAuth app; on
+ha.coo.ee the HA card design server does this for `/my`, and starts sign-in at
+`/auth/github/start?return=/my`.
+
 Over HTTPS the cookies are named with the `__Host-` prefix (`__Host-cp_gh_auth`,
 `__Host-cp_gh_state`), which a browser refuses to set with a `Domain`, so a sibling host can't plant
 a session of its choosing either. Sessions written for a shared domain before the switch aren't

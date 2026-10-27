@@ -48,6 +48,7 @@ class ServeSitesReservedRoutesTest {
       "ServeGithubAuth.LOGOUT_PATH" to ServeGithubAuth.LOGOUT_PATH,
       "ServeGithubAuth.CALLBACK_PATH" to ServeGithubAuth.CALLBACK_PATH,
       "ServeGithubAuth.HANDOFF_PATH" to ServeGithubAuth.HANDOFF_PATH,
+      "ServeGithubAuth.WHOAMI_PATH" to ServeGithubAuth.WHOAMI_PATH,
       "ServeSiteIcon.SVG_PATH" to ServeSiteIcon.SVG_PATH,
       "ServeSiteIcon.ICO_PATH" to ServeSiteIcon.ICO_PATH,
       "ServeSiteIcon.APPLE_TOUCH_PATH" to ServeSiteIcon.APPLE_TOUCH_PATH,
