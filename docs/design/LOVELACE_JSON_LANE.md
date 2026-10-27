@@ -6,7 +6,8 @@ and content digest evidence. Other catalogs/formats continue through the existin
 The shared builder validates lossless config projection; server tests assert delegation, refusal
 propagation and the host artifact invariants rather than restating Lovelace output.
 
-`deploy/preview.coo.ee/catalogs.json` serves harc's declaration-only Lovelace catalog from
+preview.coo.ee's `catalogs.json` (in its private deployment repository, `yschimke/preview-coo-ee`)
+serves harc's declaration-only Lovelace catalog from
 `yschimke/homeassistant-remotecompose-out`, branch `design-artifacts/lovelace`. It is a UI Builder
 catalog, not a renderable component inventory. Harc remains the owner/publisher. Its actual card
 preview entry lives in the separate `homeassistant-remotecompose` catalog and is rendered through
