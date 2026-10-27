@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.151.0](https://github.com/yschimke/compose-preview-server/compare/v3.150.0...v3.151.0) (2026-10-27)
+
+
+### Features
+
+* **auth:** GET /auth/github/whoami, so a service on the same host can reuse the sign-in ([#1822](https://github.com/yschimke/compose-preview-server/issues/1822)) ([12217c2](https://github.com/yschimke/compose-preview-server/commit/12217c24b6757955db3cd89ab8e5ecfa83d9f043))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.26.0 ([#1795](https://github.com/yschimke/compose-preview-server/issues/1795)) ([111fb23](https://github.com/yschimke/compose-preview-server/commit/111fb23e3d00bc41b3e008a797ffc639148e43e2))
+* **deps:** update rc-players to v2.19.0 ([#1826](https://github.com/yschimke/compose-preview-server/issues/1826)) ([960746e](https://github.com/yschimke/compose-preview-server/commit/960746ed77a9dde9dab5ab2c6815ca1adadd78f6))
+
 ## [3.150.0](https://github.com/yschimke/compose-preview-server/compare/v3.149.0...v3.150.0) (2026-10-24)
 
 
