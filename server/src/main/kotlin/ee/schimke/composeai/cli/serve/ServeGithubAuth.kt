@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import io.ktor.http.ContentType
 import io.ktor.http.Cookie
 import io.ktor.http.CookieEncoding
 import io.ktor.http.HttpHeaders
@@ -367,6 +368,31 @@ class ServeGithubAuth(
     clearLegacyDomainCookies(call, secure)
     call.respondRedirect(grant.returnTo)
   }
+
+  /**
+   * `GET /auth/github/whoami`: who this browser's session speaks for, member or guest, so a service
+   * sharing the host can reuse this sign-in instead of running its own OAuth app. The HA card
+   * design server on ha.coo.ee forwards a visitor's cookies here over the internal network. 200
+   * with the login and whether it is a guest; 401 without a live session.
+   *
+   * No CORS headers, so another origin's page can't read it, and `no-store`. Under
+   * [AUTH_PATH_PREFIX], so [refreshSession] leaves the cookie as it is.
+   */
+  suspend fun RoutingContext.handleWhoami() {
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    val session = call.request.soleCookieValue(authCookieName)?.let(::verifySession)
+    if (session == null) {
+      call.respondText("Not signed in.", status = HttpStatusCode.Unauthorized)
+      return
+    }
+    call.respondText(
+      Json.encodeToString(Whoami.serializer(), Whoami(session.login, session.guest)),
+      ContentType.Application.Json,
+    )
+  }
+
+  /** [handleWhoami]'s reply. */
+  @Serializable data class Whoami(val login: String, val guest: Boolean)
 
   /**
    * `GET /auth/github/callback`, which with a pinned callback always lands on the pinned origin. A
@@ -1095,6 +1121,9 @@ class ServeGithubAuth(
 
     /** Where a site host redeems a handoff code ([handleHandoff]). */
     const val HANDOFF_PATH = "/auth/github/handoff"
+
+    /** Who the session speaks for, for a service sharing the host ([handleWhoami]). */
+    const val WHOAMI_PATH = "/auth/github/whoami"
 
     /** On a callback-host start: the site host to hand back to, and its nonce's digest. */
     private const val HANDOFF_HOST_PARAM = "handoff_host"

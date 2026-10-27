@@ -607,6 +607,29 @@ class ServeGithubHandoffTest {
 
   private fun enc(v: String): String = URLEncoder.encode(v, "UTF-8")
 
+  @Test
+  fun `whoami names a site host's session for a service sharing that host, until sign-out`() {
+    val server = server()
+    val start = startOnSite(server)
+    val handoff = throughGitHub(server, start) { it.location() }
+    val session =
+      redeem(server, handoff, M3, start.nonce).use { assertNotNull(it.cookieValue(AUTH_COOKIE)) }
+
+    get(server, WHOAMI, M3, "$AUTH_COOKIE=$session").use {
+      assertEquals(200, it.code)
+      assertEquals("no-store", it.header("Cache-Control"))
+      assertNull(it.header("Access-Control-Allow-Origin"))
+      assertEquals("""{"login":"octo","guest":false}""", it.body.string())
+      // Reading who is signed in leaves the session as it was.
+      assertTrue(it.setCookies(AUTH_COOKIE).isEmpty())
+    }
+    get(server, WHOAMI, M3).use { assertEquals(401, it.code) }
+    get(server, WHOAMI, M3, "$AUTH_COOKIE=$session.tampered").use { assertEquals(401, it.code) }
+
+    post(server, "${ServeGithubAuth.LOGOUT_PATH}?return=%2F", M3, "$AUTH_COOKIE=$session").close()
+    get(server, WHOAMI, M3, "$AUTH_COOKIE=$session").use { assertEquals(401, it.code) }
+  }
+
   private companion object {
     const val SECRET = "handoff-test-cookie-secret-0123456789"
     const val MAIN = "preview.example.com"
@@ -617,6 +640,7 @@ class ServeGithubHandoffTest {
     const val START = ServeGithubAuth.START_PATH
     const val CALLBACK = ServeGithubAuth.CALLBACK_PATH
     const val HANDOFF = ServeGithubAuth.HANDOFF_PATH
+    const val WHOAMI = ServeGithubAuth.WHOAMI_PATH
     const val AUTH_COOKIE = "__Host-cp_gh_auth"
     const val STATE_COOKIE = "__Host-cp_gh_state"
     const val HANDOFF_COOKIE = "__Host-cp_gh_handoff"
