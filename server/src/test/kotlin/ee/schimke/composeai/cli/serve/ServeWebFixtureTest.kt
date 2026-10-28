@@ -4457,12 +4457,13 @@ class ServeWebFixtureTest {
       rcLanesComparison.contains("cp-rc-absent"),
       "a wall showing every known player carries no absent-players note",
     )
-    // ...and one whose run covered only three names the other three, so the missing columns read
+    // ...and one whose run covered only three names the other four, so the missing columns read
     // as "this run didn't include them" rather than as a page that lost its players.
     assertEquals(
       listOf(
         "AndroidX Embedded · vendored Android",
         "AndroidX Embedded · androidx.dev",
+        "CMP Android",
         "CMP JVM",
       ),
       Regex("<span class=\"cp-rc-absent-lane\">([^<]+)</span>")
@@ -4506,7 +4507,12 @@ class ServeWebFixtureTest {
       "androidx-embedded is never filled live: an Android daemon answers it with the baked bytes",
     )
     assertEquals(
-      listOf("AndroidX Embedded · vendored Android", "AndroidX Embedded · androidx.dev"),
+      // CMP Android too: this host offers no `cmp-android` player, so nothing can draw it here.
+      listOf(
+        "AndroidX Embedded · vendored Android",
+        "AndroidX Embedded · androidx.dev",
+        "CMP Android",
+      ),
       Regex("<span class=\"cp-rc-absent-lane\">([^<]+)</span>")
         .findAll(rcLanesLiveComparison)
         .map { it.groupValues[1] }
