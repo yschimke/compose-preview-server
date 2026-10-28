@@ -179,6 +179,9 @@ services:
       SERVE_TRUST_STORE: "${SERVE_TRUST_STORE:-}"
       # Unused in public mode; required only when SERVE_PUBLIC=0.
       SERVE_TOKEN: "${SERVE_TOKEN:-}"
+      # Public mode only: a stable operator token for a co-hosted service that creates UI-builder
+      # designs on people's behalf. Empty (the default) leaves a public box with no operator.
+      SERVE_OPERATOR_TOKEN: "${SERVE_OPERATOR_TOKEN:-}"
       SERVE_IDLE_EXIT: "0"
       # Per-render/build budget handed to `serve --timeout`. Empty ⇒ the image's baked 1800s,
       # generous enough that a cold first render on a slow box doesn't trip the CLI's 300s default.

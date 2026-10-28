@@ -157,7 +157,7 @@ generated from `ServeSettings.kt`.
   `.env` would. Nothing passes through `docker-compose.yml`, so a host whose checkout lags the image
   still gets every setting. The playground container reads only the settings it must agree with
   `preview` on (sign-in, the upload repository, the registry, the start URL).
-- **What stays in `.env`:** secrets (`SERVE_TOKEN`, `SERVE_ADMIN_TOKEN`, `DEPLOY_HOOK_TOKEN`, the
+- **What stays in `.env`:** secrets (`SERVE_TOKEN`, `SERVE_OPERATOR_TOKEN`, `SERVE_ADMIN_TOKEN`, `DEPLOY_HOOK_TOKEN`, the
   OAuth client and cookie secrets, the OpenRouter key and its GitHub token) — the file is public —
   and facts about the machine: `PREVIEW_MEM_LIMIT`, `SERVE_JAVA_OPTS`, `COMPOSE_PROFILES`, the
   rollout cadence, `DOMAIN` / `SITE_DOMAINS` / `SERVE_UI_BUILDER_HOST` / `PLAYGROUND_UPSTREAM`
