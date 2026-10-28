@@ -314,6 +314,7 @@ class ServeWebFixtureTest {
         RcCompareLane("js", "Camaelon JS", "camaelon-js"),
         RcCompareLane("embedded", "AndroidX Embedded · vendored Android", "vendored"),
         RcCompareLane("androidx-embedded", "AndroidX Embedded · androidx.dev", "androidx.dev"),
+        RcCompareLane("cmp-android", "CMP Android", "android"),
         RcCompareLane("cmp-jvm", "CMP JVM", "jvm"),
         RcCompareLane("cmp-wasm", "CMP Wasm", "cmp-wasm"),
       )
@@ -346,6 +347,7 @@ class ServeWebFixtureTest {
                   "embedded" to cell("embedded", slot, 0.03 + slot * 0.01, 24L + slot),
                   "androidx-embedded" to
                     cell("androidx-embedded", slot, 0.4 + slot * 0.1, 640L + slot * 10),
+                  "cmp-android" to cell("cmp-android", slot, 0.7 + slot * 0.1, 1120L + slot * 20),
                   "cmp-jvm" to cell("cmp-jvm", slot, 1.09 + slot * 0.2, 5151L + slot * 40),
                   "cmp-wasm" to
                     if (wasmRefuses)
@@ -4400,6 +4402,7 @@ class ServeWebFixtureTest {
         "Camaelon JS",
         "AndroidX Embedded · vendored Android",
         "AndroidX Embedded · androidx.dev",
+        "CMP Android",
         "CMP JVM",
         "CMP Wasm",
       ),
@@ -4411,7 +4414,16 @@ class ServeWebFixtureTest {
       "every player the run covered is its own column, in the published order",
     )
     assertEquals(
-      listOf("none", "baked", "js", "embedded", "androidx-embedded", "cmp-jvm", "cmp-wasm"),
+      listOf(
+        "none",
+        "baked",
+        "js",
+        "embedded",
+        "androidx-embedded",
+        "cmp-android",
+        "cmp-jvm",
+        "cmp-wasm",
+      ),
       Regex("data-rc-ref=\"([^\"]+)\"")
         .findAll(rcLanesComparison)
         .map { it.groupValues[1] }
