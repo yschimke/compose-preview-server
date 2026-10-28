@@ -66,6 +66,12 @@ fi
 # required, fail closed).
 if [[ "${SERVE_PUBLIC:-}" == "1" || "${SERVE_PUBLIC:-}" == "true" ]]; then
   args+=(--public)
+  # A public box has no operator: without `--token` the server makes up a random one at each start,
+  # so nothing can act as `operator` on the UI-builder API. SERVE_OPERATOR_TOKEN gives it a stable
+  # one, for a service co-hosted on this box that creates and shares designs on people's behalf
+  # (the Home Assistant card design server's Card Studio). Reads stay as open as before; only the
+  # holder of this token gains the operator's authority. Unset, the box is exactly as it was.
+  [[ -n "${SERVE_OPERATOR_TOKEN:-}" ]] && args+=(--token "${SERVE_OPERATOR_TOKEN}")
 else
   if [[ -z "${SERVE_TOKEN:-}" ]]; then
     echo "entrypoint: SERVE_TOKEN unset and SERVE_PUBLIC off — refusing to start an" >&2
