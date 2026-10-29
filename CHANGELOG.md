@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.152.0](https://github.com/yschimke/compose-preview-server/compare/v3.151.0...v3.152.0) (2026-10-29)
+
+
+### Features
+
+* **image:** optional stable operator token on a public box ([#1829](https://github.com/yschimke/compose-preview-server/issues/1829)) ([71d06ef](https://github.com/yschimke/compose-preview-server/commit/71d06ef983045c9f3db41b7357ea9218bbbb594d))
+
 ## [3.151.0](https://github.com/yschimke/compose-preview-server/compare/v3.150.0...v3.151.0) (2026-10-27)
 
 
