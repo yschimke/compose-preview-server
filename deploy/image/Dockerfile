@@ -37,7 +37,7 @@ ARG DAEMON_VERSION
 #
 # `jq` is for the entrypoint's settings.json merge (see the settings.schema.json COPY below).
 # ---------------------------------------------------------------------------
-FROM eclipse-temurin:21.0.12_8-jdk AS base
+FROM eclipse-temurin:21.0.13_9-jdk AS base
 COPY scripts/install-linux-font-fallbacks.sh /usr/local/bin/install-linux-font-fallbacks
 RUN COMPOSEAI_CLEAN_APT=1 /usr/local/bin/install-linux-font-fallbacks \
       libfreetype6 libfontconfig1 libgl1 libglx-mesa0 libgl1-mesa-dri \
