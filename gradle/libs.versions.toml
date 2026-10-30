@@ -249,7 +249,7 @@ composeai-tools = "2.74.1"
 # re-render, which ran at the preview's defaults until 3.25.1 (compose-preview-daemon#391): below
 # it the UI builder's SVG export is the packaged preview's empty document, so 3.22.0-3.25.0 are
 # not usable here (ui-builder-gate2's `data-material-icon` check is what catches it).
-composeai-preview-daemon = "3.26.0"
+composeai-preview-daemon = "3.27.0"
 # 2.9.0 is the first release carrying `DesignEnvironmentV1.exportDevices` and its Set/Reset
 # changes, which is the field a design names its export devices in. 2.14.0 adds the components a
 # design defines — `DesignDocumentV1.components`, `DesignNodeV1.component` and the `binding` value
@@ -470,19 +470,19 @@ composeai-ui-builder = "3.124.0"
 # daemon (`stageRcPlayerDesktopLibs`); compose-preview-daemon's desktop binding is compiled against
 # this release's `rc-player-compose`. The CMP/Wasm player's browser bundle (`rc-player-wasm` below)
 # comes from the same release, so it moves with this ref too.
-rc-players-android = "2.19.0"
+rc-players-android = "2.21.0"
 compose-remote = "1.0.0-alpha22"
 # The TypeScript player's browser bundle (`remote-compose-player-js-dist`, a zip with the `dist`
 # classifier). Its own ref because rc-players publishes only the modules a release changed: the
 # bundle last changed in 2.1.2, and 2.1.3–2.4.0 never published this coordinate.
-remote-compose-player-js = "2.19.0"
+remote-compose-player-js = "2.21.0"
 kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.12.0"
 ktor = "3.6.0"
 # The Model Context Protocol Kotlin SDK, behind `:mcp`. Same version compose-ai-tools' `:mcp` was
 # on when the module moved here (compose-ai-tools#5176) — a move is not the moment to also change
 # the protocol implementation.
-mcp-kotlin-sdk = "0.15.0"
+mcp-kotlin-sdk = "0.16.0"
 # JUnit 4 + Truth, used only by `:mcp`'s tests, which came with the module. Converting ~1.5k lines
 # of assertions to `kotlin.test` is a separate change from moving them.
 junit = "4.13.2"
