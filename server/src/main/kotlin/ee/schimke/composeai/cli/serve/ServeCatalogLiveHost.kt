@@ -374,9 +374,11 @@ class ServeCatalogLiveHost(
     val deadline = clock() + FOREGROUND_WARM_AWAIT_MILLIS
     while (clock() < deadline) {
       if (warmDaemonIds.contains(daemonId)) return true
-      // The warm finished without succeeding (a genuinely failing preview): stop waiting and let
-      // the caller take its normal path rather than burning the whole budget on a lost cause.
-      if (!warmingInFlight.contains(daemonId)) return false
+      // The warm finished: stop waiting rather than burning the whole budget. Re-read the warm set
+      // instead of returning false, since the warm task marks the id warm *then* leaves
+      // [warmingInFlight]. A warm that completes between the check above and this one succeeded,
+      // and reporting it as failed turns a cold knob edit into a spurious Busy.
+      if (!warmingInFlight.contains(daemonId)) return warmDaemonIds.contains(daemonId)
       try {
         Thread.sleep(WARM_POLL_MILLIS)
       } catch (_: InterruptedException) {
