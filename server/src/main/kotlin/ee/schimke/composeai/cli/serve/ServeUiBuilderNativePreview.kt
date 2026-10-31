@@ -92,6 +92,15 @@ internal class ServeUiBuilderNativePreview(
   override fun render(
     document: DesignDocumentV1,
     widgetHostShape: WearWidgetHostShape,
+  ): UiBuilderNativePreviewOutcome = render(document, widgetHostShape, captureDocument = false)
+
+  override fun capture(document: DesignDocumentV1): UiBuilderNativePreviewOutcome =
+    render(document, WearWidgetHostShape.Default, captureDocument = true)
+
+  private fun render(
+    document: DesignDocumentV1,
+    widgetHostShape: WearWidgetHostShape,
+    captureDocument: Boolean,
   ): UiBuilderNativePreviewOutcome {
     // Checked before generation: two packs have no bundle regardless of the Kotlin, and that
     // design-level sentence shouldn't be pre-empted by a missing record.
@@ -144,6 +153,14 @@ internal class ServeUiBuilderNativePreview(
           ),
         )
     val environment = document.environment
+    if (captureDocument && (!generated.remoteContent || generated.widgetFrame != null)) {
+      return UiBuilderNativePreviewOutcome.Refused(
+        "NO_REMOTE_DOCUMENT",
+        listOf(
+          "This design has no standalone Remote Compose body; widget capture needs its own profile contract"
+        ),
+      )
+    }
     if (generated.remoteContent && target.confType != UiBuilderGeneratedCompose.COMPOSE_ANDROID) {
       return UiBuilderNativePreviewOutcome.Refused(
         NO_NATIVE_CATALOG,
@@ -175,7 +192,9 @@ internal class ServeUiBuilderNativePreview(
             environment.theme.name.lowercase().takeIf {
               document.catalogPin.systemId == "m3-catalog" && it in setOf("light", "dark")
             },
-          confType = target.confType,
+          confType =
+            if (captureDocument) ServeUiBuilderInlineCapture.REMOTE_COMPOSE_CONF_TYPE
+            else target.confType,
           wearWidget = widget != null,
           remoteCapture = generated.remoteContent,
           widgetPlayer = player,
@@ -204,7 +223,9 @@ internal class ServeUiBuilderNativePreview(
         else -> document.nodes.keys.sorted()
       },
       bounds,
-      failure = if (response.image == null) response.noFrameReason() else null,
+      failure =
+        if (response.image == null && response.documentUrl == null) response.noFrameReason()
+        else null,
       warnings = generated.systemFontFamilies.map(SystemFontLookups::note),
     )
   }
@@ -284,6 +305,15 @@ fun interface UiBuilderNativePreviewLane {
     document: DesignDocumentV1,
     widgetHostShape: WearWidgetHostShape,
   ): UiBuilderNativePreviewOutcome
+
+  /**
+   * Capture a standalone document through the native catalog compiler, when the host supports it.
+   */
+  fun capture(document: DesignDocumentV1): UiBuilderNativePreviewOutcome =
+    UiBuilderNativePreviewOutcome.Refused(
+      "NO_REMOTE_DOCUMENT_CAPTURE",
+      listOf("This host has no native document capture lane"),
+    )
 }
 
 /**
