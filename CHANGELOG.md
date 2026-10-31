@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.153.0](https://github.com/yschimke/compose-preview-server/compare/v3.152.0...v3.153.0) (2026-10-30)
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.75.0 ([#1845](https://github.com/yschimke/compose-preview-server/issues/1845)) ([be418c5](https://github.com/yschimke/compose-preview-server/commit/be418c53c1b17267c2fe4d5734171c5d65eb5a8d))
+* **deps:** update ktor to v3.6.1 ([#1841](https://github.com/yschimke/compose-preview-server/issues/1841)) ([37cf6a4](https://github.com/yschimke/compose-preview-server/commit/37cf6a40cdd0c98a72dfbd9532678fe47ccd05f9))
+* **deps:** update rc-players to 2.21.0, mcp kotlin-sdk 0.16.0, node 26, daemon 3.27.0 ([#1837](https://github.com/yschimke/compose-preview-server/issues/1837)) ([4ef3a78](https://github.com/yschimke/compose-preview-server/commit/4ef3a787f953a1904ed773cf8c0859387d04c9c4))
+
 ## [3.152.0](https://github.com/yschimke/compose-preview-server/compare/v3.151.0...v3.152.0) (2026-10-29)
 
 
