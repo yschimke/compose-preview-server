@@ -13,6 +13,9 @@ type AnalyticsWindow = Window & {
 
 export function surface(path: string): string {
     if (path.startsWith("/ui-builder")) return "builder";
+    // The docs sites: served at `/start/` on the preview and builder hosts (the caddy edge proxies
+    // them in place), and still under `/compose-ai-tools` on the GitHub Pages copy.
+    if (path === "/start" || path.startsWith("/start/")) return "docs";
     if (path.startsWith("/compose-ai-tools")) return "docs";
     if (path.startsWith("/wasm/")) return "wasm";
     return "preview";
