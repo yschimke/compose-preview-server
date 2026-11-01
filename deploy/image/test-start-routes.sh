@@ -65,5 +65,14 @@ check "http:// refused" "NONE" "$(routes START_SITE_URL=http://example.github.io
 check "Caddyfile syntax in the URL refused" "NONE" \
   "$(routes 'START_SITE_URL=https://example.github.io/docs}{')"
 
+# A routes directory that can't be created must not stop Caddy: under `set -e` that would take every
+# hostname on the box down. /proc refuses a mkdir even for root.
+printf '#!/bin/sh\necho started > "%s/started"\n' "${work}" > "${work}/bin/caddy"
+rm -f "${work}/started"
+env -i PATH="${work}/bin:${PATH}" CATALOGS_FILE=/nonexistent OPTIONAL_SITES_DIR="${work}/sites" \
+  ROUTES_DIR=/proc/compose-preview-no-such-dir START_SITE_URL=https://example.github.io/docs \
+  sh "${entrypoint}" run 2>/dev/null || true
+check "an uncreatable routes dir still starts Caddy" "started" "$(cat "${work}/started" 2>/dev/null)"
+
 echo "test-start-routes: ${pass} passed, ${fail} failed"
 [ "${fail}" -eq 0 ]
