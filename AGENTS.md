@@ -43,8 +43,8 @@ boundaries.
   there is a release, then a catalog ref bump here. `:server` stays off the gate on purpose; its
   build file says why.
 - Regenerate the committed goldens with `scripts/regenerate-goldens.sh`, and read the diff. On a
-  Renovate branch the `Regenerate goldens` workflow does it for you when CI goes red; on any pull
-  request `/regenerate-goldens` asks for the same thing.
+  Renovate branch the `Regenerate goldens` workflow does it, rebuilding the serve-web bundles first,
+  when CI goes red; on any pull request `/regenerate-goldens` asks for the same thing.
 - A deployment's non-secret behaviour goes in its `settings.json` (`deploy/example/settings.json` is
   the generic starting point; the list is `deploy/image/SETTINGS.md`, generated from
   `ServeSettings.kt`), never in `.env`. `.env`

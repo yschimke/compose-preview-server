@@ -4,7 +4,11 @@ name: Regenerate goldens
 # request's branch.
 #
 # The goldens — `preview-harness/fixtures/pages/` and `renders/exploded-view/` — are a *derived*
-# artifact with a deterministic generator. When `ServeWebFixtureTest` fails there is nothing to
+# artifact with a deterministic generator. So are the committed serve-web bundles under
+# `server/src/main/resources/.../serve/assets/` (`npm --prefix serve-web run build`), which go stale
+# the same way on a serve-web dependency bump (`three`, `vue`, `esbuild`) and fail `serve-web`'s
+# `check-committed-bundle.mjs`; this workflow rebuilds them first, so the goldens are taken from
+# the bundles that ship. When `ServeWebFixtureTest` fails there is nothing to
 # decide: the fix is to run `scripts/regenerate-goldens.sh` and commit what it writes. The only
 # reason a red pull request ever waited on a person was that nobody had wired the generator to the
 # failure.
@@ -187,6 +191,19 @@ jobs:
           ref: ${{ steps.ui-builder-pin.outputs.ref }}
           path: .compose-ui-builder
           persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          # CI's `serve-web` job's Node, so the rebuild is byte-for-byte what its check rebuilds.
+          node-version: 26.13.0
+          cache: npm
+          cache-dependency-path: serve-web/package-lock.json
+      # Before the goldens: the page fixtures are rendered by a server that serves these bundles.
+      # `build`, not `verify`: a bundle over its gzip budget is still the bundle the bump produces,
+      # and the budget is a person's call (`scripts/check-bundle-budgets.mjs`), not this job's.
+      - name: Rebuild the serve-web bundles
+        run: |
+          npm --prefix serve-web ci
+          npm --prefix serve-web run build
       - name: Regenerate
         env:
           COMPOSE_UI_BUILDER_CHECKOUT: .compose-ui-builder
@@ -201,7 +218,8 @@ jobs:
           # but this line does not stage is a golden the workflow reports as "already matching"
           # while pushing nothing — the failure is silent and looks like success.
           git add -- preview-harness/fixtures/pages 'renders/exploded-view/*.svg' \
-            'docs/design/fixtures/ui-builder/*-capabilities-v1.json'
+            'docs/design/fixtures/ui-builder/*-capabilities-v1.json' \
+            server/src/main/resources/ee/schimke/composeai/cli/serve/assets
           if git diff --cached --quiet; then
             echo "the goldens already match what the code renders"
             echo "pushed=false" >> "$GITHUB_OUTPUT"
@@ -213,7 +231,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m "test(fixtures): regenerate the goldens" \
-            -m "Written by scripts/regenerate-goldens.sh from the current ServeWeb and ExplodedSvg: ${files} file(s)."
+            -m "Written by npm --prefix serve-web run build and scripts/regenerate-goldens.sh from the current serve-web, ServeWeb and ExplodedSvg: ${files} file(s)."
           # The branch can have moved since checkout — Renovate rebases, a reviewer pushes.
           # --force-with-lease refuses instead of clobbering, and the next failure regenerates.
           git push --force-with-lease origin "HEAD:${BRANCH}"
@@ -239,7 +257,7 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo "Regenerated ${FILES} golden file(s) from the current \`ServeWeb\`/\`ExplodedSvg\`"
+            echo "Regenerated ${FILES} golden/bundle file(s) from the current \`serve-web\`/\`ServeWeb\`/\`ExplodedSvg\`"
             echo "and pushed them to this branch; CI is re-dispatched for the new head."
             echo
             echo "The visual harness diffs the refreshed pages, so **look at the screenshots** —"
