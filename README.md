@@ -142,7 +142,7 @@ already running finishes first. The loading page retries automatically until the
 
 ## Agent plugins
 
-Start at <https://yschimke.github.io/compose-ai-tools/> (or <https://ui.coo.ee/start> to design a
+Start at <https://preview.coo.ee/start/> (or <https://ui.coo.ee/start> to design a
 new screen). A coding agent installs one plugin, `compose-preview` from
 [yschimke/compose-agent-plugins](https://github.com/yschimke/compose-agent-plugins); it carries the
 `compose-preview` and `compose-ui-builder` skills, the local MCP server and this server's hosted
