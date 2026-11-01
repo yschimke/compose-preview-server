@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.154.0](https://github.com/yschimke/compose-preview-server/compare/v3.153.0...v3.154.0) (2026-11-01)
+
+
+### Bug Fixes
+
+* **deps:** update classgraph to 5.0.1 ([#1852](https://github.com/yschimke/compose-preview-server/issues/1852)) ([f98731e](https://github.com/yschimke/compose-preview-server/commit/f98731e639ba54cdc3080952a9f9c3aa61996ba8))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.79.0 ([#1848](https://github.com/yschimke/compose-preview-server/issues/1848)) ([1de2ddd](https://github.com/yschimke/compose-preview-server/commit/1de2dddd15631f08d89f0cb7ad9d44ecdfc972c5))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-contracts-bom to v3.39.1 ([#1851](https://github.com/yschimke/compose-preview-server/issues/1851)) ([a9032bd](https://github.com/yschimke/compose-preview-server/commit/a9032bdaa99bbb25d6f0808c00e6fa5b7b891ef4))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-ui-builder-bom to v3.125.0 ([#1849](https://github.com/yschimke/compose-preview-server/issues/1849)) ([596a5e8](https://github.com/yschimke/compose-preview-server/commit/596a5e802a258ae44d72e5e62ad78d54b04411d3))
+* **deps:** update dependency org.jmdns:jmdns to v3.6.5 ([#1847](https://github.com/yschimke/compose-preview-server/issues/1847)) ([ef00b10](https://github.com/yschimke/compose-preview-server/commit/ef00b106e6f028d210400b3f0bcc7c52de9fb63e))
+* **deps:** update rc-players to v2.22.0 ([#1854](https://github.com/yschimke/compose-preview-server/issues/1854)) ([93393b9](https://github.com/yschimke/compose-preview-server/commit/93393b9560b493ce73ada6833945938f983ec581))
+
 ## [3.153.0](https://github.com/yschimke/compose-preview-server/compare/v3.152.0...v3.153.0) (2026-10-30)
 
 
