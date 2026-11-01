@@ -74,6 +74,72 @@ for claimed in $(printf '%s' "${EXTRA_SITE_DOMAINS:-}" | tr ',' ' '); do
   resolved="$(printf '%s' "${resolved}" | tr ' ' '\n' | awk -v d="${claimed}" 'NF && $0 != d' | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
 done
 
+# Start pages: serve each product's guide AT `/start/` on this box's own hostnames instead of the app
+# redirecting there (SERVE_CLI_START_URL / SERVE_UI_BUILDER_START_URL). The guide stays a static site
+# hosted elsewhere (GitHub Pages); Caddy proxies `/start/<path>` to `<site>/<path>`, so the address
+# bar keeps the short URL. The site must be built with `/start` as its base path, or its absolute
+# asset links point back at the host it was built for.
+#   START_SITE_URL             the guide for every host but the builder's (e.g. preview.example.com)
+#   UI_BUILDER_START_SITE_URL  the guide for SERVE_UI_BUILDER_HOST (e.g. ui.example.com)
+# Both unset (the default): no route is written, and `/start` reaches the app exactly as before.
+# Written afresh on every start into ROUTES_DIR, which the main site block imports.
+ROUTES_DIR="${ROUTES_DIR:-/run/caddy-routes}"
+mkdir -p "${ROUTES_DIR}"
+start_routes="${ROUTES_DIR}/start.caddy"
+rm -f "${start_routes}"
+regex_quote() { printf '%s' "$1" | sed 's/[.[\*^$()+?{|]/\\&/g'; }
+start_route() { # start_route <name> <url> <host matcher line>
+  case "$2" in
+    https://*) ;;
+    *)
+      echo "caddy: $1 start site '$2' is not an https:// URL, not serving /start from it" >&2
+      return 0
+      ;;
+  esac
+  rest="${2#https://}"
+  upstream_host="${rest%%/*}"
+  case "${rest}" in */*) upstream_path="/${rest#*/}" ;; *) upstream_path="/" ;; esac
+  upstream_path="${upstream_path%/}"
+  # Hostnames and paths only: anything else would be interpreted by the Caddyfile parser.
+  if ! printf '%s' "${upstream_host}" | grep -Eq '^[A-Za-z0-9.-]+$' ||
+    { [ -n "${upstream_path}" ] && ! printf '%s' "${upstream_path}" | grep -Eq '^[A-Za-z0-9._~/-]+$'; }; then
+    echo "caddy: $1 start site '$2' has characters this edge won't put in its config, ignoring" >&2
+    return 0
+  fi
+  cat >> "${start_routes}" <<EOF
+@start_$1 {
+	path /start /start/*
+	$3
+}
+handle @start_$1 {
+	route {
+		redir /start /start/ 308
+		uri strip_prefix /start
+		rewrite * ${upstream_path}{uri}
+		reverse_proxy https://${upstream_host} {
+			header_up Host ${upstream_host}
+			header_down Location "^https?://$(regex_quote "${upstream_host}")$(regex_quote "${upstream_path}")(/.*)?\$" "/start\$1"
+		}
+	}
+}
+EOF
+  echo "caddy: /start ($1) served from $2" >&2
+}
+if [ -n "${UI_BUILDER_START_SITE_URL:-}" ]; then
+  if [ -n "${SERVE_UI_BUILDER_HOST:-}" ]; then
+    start_route builder "${UI_BUILDER_START_SITE_URL}" "host ${SERVE_UI_BUILDER_HOST}"
+  else
+    echo "caddy: UI_BUILDER_START_SITE_URL is set but SERVE_UI_BUILDER_HOST is not, ignoring it" >&2
+  fi
+fi
+if [ -n "${START_SITE_URL:-}" ]; then
+  if [ -n "${SERVE_UI_BUILDER_HOST:-}" ] && [ -n "${UI_BUILDER_START_SITE_URL:-}" ]; then
+    start_route default "${START_SITE_URL}" "not host ${SERVE_UI_BUILDER_HOST}"
+  else
+    start_route default "${START_SITE_URL}" ""
+  fi
+fi
+
 export SITE_DOMAINS="${resolved}"
 if [ -n "${SITE_DOMAINS}" ]; then
   echo "caddy: top-level site hostnames: ${SITE_DOMAINS}" >&2
