@@ -83,10 +83,18 @@ done
 #   UI_BUILDER_START_SITE_URL  the guide for SERVE_UI_BUILDER_HOST (e.g. ui.example.com)
 # Both unset (the default): no route is written, and `/start` reaches the app exactly as before.
 # Written afresh on every start into ROUTES_DIR, which the main site block imports.
+#
+# Never fatal: under `set -e` a directory that can't be created (a read-only /run, a non-root run)
+# would stop Caddy and take every hostname on the box down. A route that can't be written is
+# skipped with a warning, and `/start` falls through to the app.
 ROUTES_DIR="${ROUTES_DIR:-/run/caddy-routes}"
-mkdir -p "${ROUTES_DIR}"
 start_routes="${ROUTES_DIR}/start.caddy"
-rm -f "${start_routes}"
+rm -f "${start_routes}" 2>/dev/null || true
+if [ -n "${START_SITE_URL:-}${UI_BUILDER_START_SITE_URL:-}" ] && ! mkdir -p "${ROUTES_DIR}" 2>/dev/null; then
+  echo "caddy: cannot create ${ROUTES_DIR}, not serving /start from a start site" >&2
+  START_SITE_URL=
+  UI_BUILDER_START_SITE_URL=
+fi
 regex_quote() { printf '%s' "$1" | sed 's/[.[\*^$()+?{|]/\\&/g'; }
 start_route() { # start_route <name> <url> <host matcher line>
   case "$2" in
@@ -106,7 +114,7 @@ start_route() { # start_route <name> <url> <host matcher line>
     echo "caddy: $1 start site '$2' has characters this edge won't put in its config, ignoring" >&2
     return 0
   fi
-  cat >> "${start_routes}" <<EOF
+  { cat >> "${start_routes}" || { echo "caddy: cannot write ${start_routes}, not serving /start ($1)" >&2; return 0; }; } <<EOF
 @start_$1 {
 	path /start /start/*
 	$3
