@@ -719,6 +719,11 @@ services:
       # for a name the app doesn't serve as a site (a vanity alias, a migration).
       SITE_DOMAINS: "${SITE_DOMAINS:-}"
       SERVE_UI_BUILDER_HOST: "${SERVE_UI_BUILDER_HOST:-}"
+      # Serve each product's static guide AT /start/ (proxied, the address bar keeps the short URL)
+      # instead of the app redirecting there. Unset: /start reaches the app as before. See README.md
+      # → "Start pages served in place".
+      START_SITE_URL: "${START_SITE_URL:-}"
+      UI_BUILDER_START_SITE_URL: "${UI_BUILDER_START_SITE_URL:-}"
       # Which service serves the public playground's paths: `preview` (the default, which answers
       # with its disabled page) or `playground` once that profile is running.
       PLAYGROUND_UPSTREAM: "${PLAYGROUND_UPSTREAM:-preview}"
