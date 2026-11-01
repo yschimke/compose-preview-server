@@ -188,11 +188,6 @@
 		reverse_proxy umami:3000
 	}
 
-	# Start pages: `/start/` proxied to each product's static guide when START_SITE_URL /
-	# UI_BUILDER_START_SITE_URL are set. caddy-entrypoint.sh writes the routes; with neither set the
-	# glob matches nothing and `/start` falls through to the app below, exactly as before.
-	import /run/caddy-routes/*.caddy
-
 	# A browser opening the UI builder on any host but SERVE_UI_BUILDER_HOST (e.g. ui.example.com
 	# beside preview.example.com) is sent to that host, so the editor has one address and one cookie scope.
 	# Navigations only — a GET/HEAD with an HTML Accept on /ui-builder — so its APIs, assets and MCP

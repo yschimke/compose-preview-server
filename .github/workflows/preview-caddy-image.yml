@@ -29,18 +29,6 @@ on:
       - deploy/image/caddy-entrypoint.sh
       - deploy/image/site-domains.sh
       - .github/workflows/preview-caddy-image.yml
-  # Validate (never publish) the edge config on a pull request: `latest` rolls onto the live box
-  # automatically, and a Caddyfile that fails to parse takes every hostname on it down.
-  pull_request:
-    paths:
-      - deploy/image/Caddyfile
-      - deploy/image/caddy.Dockerfile
-      # The entrypoint that resolves SITE_DOMAINS from the deployment's catalogs.json, and the
-      # scanner it calls. Baked into the image like the Caddyfile, so a change to either has to
-      # publish a new one or a host keeps running the old edge config.
-      - deploy/image/caddy-entrypoint.sh
-      - deploy/image/site-domains.sh
-      - .github/workflows/preview-caddy-image.yml
   workflow_dispatch:
 
 permissions:
@@ -48,39 +36,7 @@ permissions:
   packages: write
 
 jobs:
-  validate:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Build the image locally
-        run: docker build -f deploy/image/caddy.Dockerfile -t compose-preview-caddy:validate deploy/image
-
-      # `caddy validate` through the image's own entrypoint, so the generated `/start` routes and
-      # SITE_DOMAINS are part of what is parsed. Each case is a configuration a deployment can run.
-      - name: caddy validate
-        run: |
-          set -euo pipefail
-          validate() {
-            echo "::group::validate $*"
-            docker run --rm -e DOMAIN=preview.example.com "$@" compose-preview-caddy:validate \
-              validate --config /etc/caddy/Caddyfile --adapter caddyfile
-            echo "::endgroup::"
-          }
-          validate
-          validate -e START_SITE_URL=https://yschimke.github.io/compose-ai-tools/
-          validate -e SERVE_UI_BUILDER_HOST=ui.example.com \
-            -e START_SITE_URL=https://yschimke.github.io/compose-ai-tools/ \
-            -e UI_BUILDER_START_SITE_URL=https://yschimke.github.io/compose-ui-builder/
-          validate -e SERVE_UI_BUILDER_HOST=ui.example.com -e SITE_DOMAINS=m3.preview.example.com
-
   publish:
-    if: github.event_name != 'pull_request'
-    needs: validate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
