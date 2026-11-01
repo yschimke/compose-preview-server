@@ -27,24 +27,16 @@ class PlaygroundPreviewDiscoverer(
 
   override fun discover(classesDir: Path, classpath: List<Path>): List<String> =
     try {
-      ClassGraph()
-        .enableMethodInfo()
-        .enableAnnotationInfo()
-        .ignoreMethodVisibility()
-        .overrideClasspath(classesDir.toNioPath().toAbsolutePath().toString())
-        .ignoreParentClassLoaders()
-        .scan()
-        .use { scan ->
-          val ids = LinkedHashSet<String>()
-          for (classInfo in scan.allClasses) {
-            for (method in classInfo.methodInfo) {
-              val isPreview =
-                method.annotationInfo?.any { it.name in previewAnnotationFqns } == true
-              if (isPreview) ids.add(previewId(classInfo.name, method.name))
-            }
+      scopedScan(classesDir).scan().use { scan ->
+        val ids = LinkedHashSet<String>()
+        for (classInfo in scan.allClasses) {
+          for (method in classInfo.methodInfo) {
+            val isPreview = method.allAnnotationInfo.any { it.name in previewAnnotationFqns }
+            if (isPreview) ids.add(previewId(classInfo.name, method.name))
           }
-          ids.toList()
         }
+        ids.toList()
+      }
     } catch (t: Throwable) {
       System.err.println(
         "playground: preview discovery failed (${t.javaClass.simpleName}: ${t.message}); none found"
@@ -63,26 +55,19 @@ class PlaygroundPreviewDiscoverer(
    */
   override fun unrecognisedPreviewAnnotations(classesDir: Path): List<String> =
     try {
-      ClassGraph()
-        .enableMethodInfo()
-        .enableAnnotationInfo()
-        .ignoreMethodVisibility()
-        .overrideClasspath(classesDir.toNioPath().toAbsolutePath().toString())
-        .ignoreParentClassLoaders()
-        .scan()
-        .use { scan ->
-          val fqns = sortedSetOf<String>()
-          for (classInfo in scan.allClasses) {
-            for (method in classInfo.methodInfo) {
-              val annotations = method.annotationInfo ?: continue
-              for (annotation in annotations) {
-                if (annotation.name in previewAnnotationFqns) continue
-                if (looksLikePreview(annotation.name)) fqns.add(annotation.name)
-              }
+      scopedScan(classesDir).scan().use { scan ->
+        val fqns = sortedSetOf<String>()
+        for (classInfo in scan.allClasses) {
+          for (method in classInfo.methodInfo) {
+            val annotations = method.allAnnotationInfo
+            for (annotation in annotations) {
+              if (annotation.name in previewAnnotationFqns) continue
+              if (looksLikePreview(annotation.name)) fqns.add(annotation.name)
             }
           }
-          fqns.toList()
         }
+        fqns.toList()
+      }
     } catch (t: Throwable) {
       System.err.println(
         "playground: unrecognised-annotation scan failed " +
@@ -92,6 +77,19 @@ class PlaygroundPreviewDiscoverer(
     }
 
   companion object {
+    /**
+     * A ClassGraph scan of [classesDir] alone. ClassGraph 5 needs `enableClassInfo()` spelled out
+     * (it no longer follows from method/annotation info), and explicit classpath entries never
+     * consult class loaders, so there is no `ignoreParentClassLoaders()` to add (5.x rejects it).
+     */
+    private fun scopedScan(classesDir: Path): ClassGraph =
+      ClassGraph()
+        .enableClassInfo()
+        .enableMethodInfo()
+        .enableAnnotationInfo()
+        .ignoreMethodVisibility()
+        .enableClasspathEntries(classesDir.toNioPath().toAbsolutePath().toString())
+
     /**
      * The `@Preview` annotation FQNs a playground snippet can use: Android Compose, Compose Desktop
      * (`androidx.compose.desktop.*` — what a `compose-cmp` snippet's classpath offers and what an
