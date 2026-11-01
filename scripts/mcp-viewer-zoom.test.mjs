@@ -1,8 +1,7 @@
 // NODE_PATH=<Playwright installation>/node_modules node --test scripts/mcp-viewer-zoom.test.mjs
 //
-// Fit / Actual size on a static card (Antigravity) held to a short frame: Actual size shows the
-// whole render at its own pixels, so the page grows to it, rather than a fitted-height slice that
-// scrolls inside the canvas; Fit goes back.
+// Actual size should not move the conversation: the full-size render scrolls inside the same
+// bounded viewport, and Fit restores the original image without resizing the surrounding page.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -42,7 +41,7 @@ function tallPng(width, height) {
 }
 
 test('Actual size shows the whole render and Fit goes back', async () => {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ executablePath: process.env.HARNESS_CHROMIUM || undefined });
   try {
     const page = await browser.newPage({ viewport: { width: 640, height: 520 } });
     const uri = 'compose-preview://app/_app/TallPreview';
@@ -69,9 +68,12 @@ test('Actual size shows the whole render and Fit goes back', async () => {
     await zoom.click();
     assert.equal(await zoom.textContent(), 'Fit');
     const actual = await measure();
+    if (process.env.MCP_AUDIT_EVIDENCE) await page.screenshot({ path: `${process.env.MCP_AUDIT_EVIDENCE}/actual-size.png` });
     assert.equal(actual.height, 1200);
-    // Nothing of the render is hidden inside the canvas: the canvas is as tall as what it holds.
-    assert.ok(actual.canvas >= actual.scroll, `canvas ${actual.canvas} clips ${actual.scroll}`);
+    assert.ok(actual.scroll > actual.canvas, 'full-size image can be scrolled inside the canvas');
+    assert.ok(Math.abs(actual.canvas - fitted.canvas) <= 8, `canvas height stays stable: ${fitted.canvas} → ${actual.canvas}`);
+    await page.locator('#canvas').evaluate(el => { el.scrollTop = el.scrollHeight; });
+    assert.ok(await page.locator('#canvas').evaluate(el => el.scrollTop) > 0);
 
     await zoom.click();
     assert.equal(await zoom.textContent(), 'Actual size');
