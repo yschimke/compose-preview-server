@@ -870,10 +870,31 @@ The optional start URL makes `/start` on the builder hostname redirect to the gu
 `SERVE_CLI_START_URL` (settings.json's `cli.startUrl`) does the same for `/start` on every other
 host — `preview.example.com/start` and each top-level site — sending it to the CLI and project-previews
 guide; unset, `/start` there stays the default catalog's landing.
-It does not relocate GitHub Pages. Serving the guide directly at `/start/` requires a
-separate static-site build with its asset base set to `/start/`, deployed alongside
-this proxy; leave the redirect unset when using that arrangement. No settings here
-change DNS or publish/move the guide automatically.
+To keep the guide at the short address instead of redirecting, see *Start pages served in place*
+below; the edge then answers `/start` before the app does.
+
+#### Start pages served in place
+
+The caddy edge can serve each guide **at** `/start/`, proxying it from wherever it is hosted, so
+`preview.example.com/start/install/` stays in the address bar:
+
+```dotenv
+START_SITE_URL=https://yschimke.github.io/compose-ai-tools/
+UI_BUILDER_START_SITE_URL=https://yschimke.github.io/compose-ui-builder/
+```
+
+`START_SITE_URL` serves every hostname but the builder's (the catalog host and each top-level
+site); `UI_BUILDER_START_SITE_URL` serves `SERVE_UI_BUILDER_HOST` and is ignored without it. Each
+must be `https://`. `/start` redirects to `/start/`, a request for `/start/<path>` is fetched from
+`<site>/<path>` with the site's own `Host`, and a redirect the site answers with (GitHub Pages adds
+trailing slashes) is rewritten back under `/start/`. The site must be built with `/start` as its
+base path, or its absolute asset and navigation links point at the host it was built for.
+
+Both unset (the default), no route is generated and `/start` reaches the app exactly as before.
+They are read by `caddy-entrypoint.sh` at container start, so a change needs
+`docker compose up -d caddy`, not a new image. Once a guide is served in place, the app's own
+`SERVE_UI_BUILDER_START_URL` / `SERVE_CLI_START_URL` redirect is never reached on that host and can
+be left unset.
 
 **With top-level sites configured, sign-in crosses hosts one of two ways.** A cookie domain
 (`SERVE_GITHUB_AUTH_COOKIE_DOMAIN`) scopes both auth cookies to a parent domain, so one sign-in
