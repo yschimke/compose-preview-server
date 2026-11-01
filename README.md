@@ -142,10 +142,22 @@ already running finishes first. The loading page retries automatically until the
 
 ## Agent plugins
 
-Install the `compose-preview` local MCP plugin or the `compose-catalogs` hosted catalog and
-UI Builder plugin from [yschimke/compose-agent-plugins](https://github.com/yschimke/compose-agent-plugins#quick-start).
-That guide covers each supported agent host, the canonical skill bundles from `yschimke/skills`,
-and [migration from the old marketplace](https://github.com/yschimke/compose-agent-plugins#moving-from-compose-ag-plugin).
+Start at <https://yschimke.github.io/compose-ai-tools/> (or <https://ui.coo.ee/start> to design a
+new screen). A coding agent installs one plugin, `compose-preview` from
+[yschimke/compose-agent-plugins](https://github.com/yschimke/compose-agent-plugins); it carries the
+`compose-preview` and `compose-ui-builder` skills, the local MCP server and this server's hosted
+catalog endpoint. In Claude Code:
+
+```text
+/plugin marketplace add yschimke/compose-agent-plugins
+/plugin install compose-preview@compose-agent-plugins
+```
+
+A host with no shell or Java (Claude chat, Cowork, ChatGPT) uses the `compose-catalogs` plugin or
+the hosted MCP URL `https://preview.coo.ee/mcp` instead, never both. Other hosts are in the
+[host setup notes](https://github.com/yschimke/compose-agent-plugins/blob/main/docs/host-setup.md);
+moving from the old marketplace is
+[migration from `compose-ag-plugin`](https://github.com/yschimke/compose-agent-plugins#moving-from-compose-ag-plugin).
 
 ## Remote catalog MCP
 
