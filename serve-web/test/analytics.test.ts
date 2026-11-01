@@ -1,8 +1,24 @@
 import { trackInteraction } from "../src/analyticsClient.js";
 import { strict as assert } from "node:assert";
-import { safeEvent, safePath, installAnalytics } from "../src/analytics.js";
+import {
+    safeEvent,
+    safePath,
+    installAnalytics,
+    surface,
+} from "../src/analytics.js";
 
 describe("analytics", () => {
+    it("counts the docs at /start and on the GitHub Pages copy as docs", () => {
+        assert.equal(surface("/start"), "docs");
+        assert.equal(surface("/start/"), "docs");
+        assert.equal(surface("/start/install/"), "docs");
+        assert.equal(surface("/compose-ai-tools/install/"), "docs");
+        assert.equal(surface("/starter-kit/"), "preview");
+        assert.equal(surface("/ui-builder/"), "builder");
+        assert.equal(surface("/wasm/m3/"), "wasm");
+        assert.equal(surface("/m3/"), "preview");
+    });
+
     it("removes credentials, searches and private design names", () => {
         assert.equal(
             safePath(
