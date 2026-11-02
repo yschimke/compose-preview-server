@@ -207,5 +207,6 @@ test('a host that honours sizing enlarges a short initial preview frame', async 
     await page.waitForFunction(() => document.querySelector('#app').getBoundingClientRect().height > 200);
     const image = await page.frameLocator('#app').locator('#canvas img').boundingBox();
     assert.ok(image.height > 120, 'render grows beyond the initial tiny frame');
+    if (process.env.MCP_AUDIT_EVIDENCE) await page.screenshot({ path: `${process.env.MCP_AUDIT_EVIDENCE}/short-frame.png` });
   } finally { await browser.close(); }
 });
