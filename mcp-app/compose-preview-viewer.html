@@ -2179,10 +2179,10 @@
     // `target` is the most the first screen may take: the host's limit, else the default. The
     // image is drawn to fit the smaller of that and the current frame (for hosts that ignore
     // size-changed), and size-changed asks for up to `target` so the frame can grow to it.
+    // Drawing at `target` while the iframe is still the host's short initial height overflows
+    // that frame and clips the preview and the toolbar.
     const target = limit ?? DEFAULT_FRAME_HEIGHT;
-    // With no host-imposed cap, fit to the height we ask the host for. Fitting to a short initial
-    // iframe feeds its tiny image back into the next size request and strands the viewer there.
-    const frame = limit === undefined ? target : Math.min(window.innerHeight || Infinity, target);
+    const frame = Math.min(window.innerHeight || Infinity, target);
     // The compact review controls share the first screen with the image. Expanded copy prompts,
     // saved findings, render details and comments may sit below the fold.
     let auditChrome = auditSection.hidden ? 0 : auditSection.getBoundingClientRect().height + 10;
@@ -2206,7 +2206,8 @@
     const scaled = !!image?.dataset.renderWidth;
     // Offer Actual size only while the fit drew the image smaller than its own pixels.
     zoom.hidden = !image || (!zoomed && !(size.width > image.getBoundingClientRect().width + 1));
-    // Zoomed, the image takes its own height and the frame is asked for all of the content.
+    // Zoomed, the image keeps its own pixels inside the canvas viewport captured at click
+    // time (--zoom-height), and the frame is asked for that viewport.
     if (image && zoomed) {
       if (scaled) image.style.width = `${size.width}px`;
     } else if (image) {
