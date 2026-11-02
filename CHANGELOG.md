@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.155.0](https://github.com/yschimke/compose-preview-server/compare/v3.154.0...v3.155.0) (2026-11-02)
+
+
+### Features
+
+* **deploy:** serve the start guides in place at /start/ ([#1860](https://github.com/yschimke/compose-preview-server/issues/1860)) ([c1376e9](https://github.com/yschimke/compose-preview-server/commit/c1376e933d04a16b0df8753077c646e01010ab8b))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.81.0 ([#1858](https://github.com/yschimke/compose-preview-server/issues/1858)) ([b77451f](https://github.com/yschimke/compose-preview-server/commit/b77451f091d56570ad4a9ad1d7adfed8c6e639f9))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.27.2 ([#1853](https://github.com/yschimke/compose-preview-server/issues/1853)) ([e5b2ff5](https://github.com/yschimke/compose-preview-server/commit/e5b2ff5d6ae14a3f81b6ef27a5ba88df923766e5))
+* keep preview zoom within a stable viewport ([#1857](https://github.com/yschimke/compose-preview-server/issues/1857)) ([c55c159](https://github.com/yschimke/compose-preview-server/commit/c55c159b8e13c2610f35c0c80c8fd9a5ce3f4e39))
+* **serve-web:** count the docs at /start as docs in analytics ([#1861](https://github.com/yschimke/compose-preview-server/issues/1861)) ([4725847](https://github.com/yschimke/compose-preview-server/commit/4725847f5be85068bd8bb8780f6cb8308fea9b79))
+
 ## [3.154.0](https://github.com/yschimke/compose-preview-server/compare/v3.153.0...v3.154.0) (2026-11-01)
 
 
