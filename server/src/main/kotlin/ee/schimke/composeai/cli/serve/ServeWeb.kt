@@ -14793,6 +14793,19 @@ ${scriptTag("known-differences.js")}
     // The density both browser RC lanes (camaelon-js, cmp-wasm) apply to a document whose header
     // declares none, so they agree with the server lanes ([ServeBundleHost.rcLaneDensityFor]).
     val rcDensityData = if (hasRemoteComposeDoc || hasRcWasm) rcDensityAttr(rcDensity) else ""
+    // `allow-same-origin` is load-bearing here, so Chromium's "can escape its sandboxing" console
+    // warning for this frame is expected (#1592). Three things break in an opaque origin:
+    // * the player fetches the document from the gated `/render/<id>.rc` lane, which carries the
+    //   session's token or sign-in cookie and is not CORS-open (only the player's own static assets
+    //   are), so an opaque-origin fetch gets no credentials and no readable response;
+    // * the viewer accepts `cp-rc-wasm-ready` / `-error:` / host-action messages only when
+    //   `e.origin === location.origin`; an opaque frame posts from origin `"null"`, so the lane
+    //   would sit on its 20 s boot timeout;
+    // * the Kotlin/Wasm + Compose runtime's storage/history/Cache APIs throw `SecurityError` there
+    //   (the same reason [wasmSameOrigin] exists for a trusted catalog's app).
+    // That is acceptable because this frame only ever loads `/rc-player-wasm/`, the rc-players
+    // release this server ships, never catalog code; a catalog's own Wasm (`cp-wasm` above) stays
+    // opaque unless trusted. The `sandbox` still withholds forms, popups and top navigation.
     val rcWasmFrame =
       if (hasRcWasm)
         "<iframe id=\"cp-rc-wasm\" hidden sandbox=\"allow-scripts allow-same-origin\" " +
