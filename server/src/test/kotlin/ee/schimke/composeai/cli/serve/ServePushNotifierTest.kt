@@ -227,7 +227,8 @@ class ServePushNotifierTest {
         baseUrl = { "https://preview.example" },
         endpointAllowed = { true },
         onLog = { logs += it },
-        debounceMillis = 50,
+        debounceMillis =
+          2_000, // wide enough that both burst replies land in one window on a slow runner
         retryBaseMillis = 10,
       )
     closeables += notifier

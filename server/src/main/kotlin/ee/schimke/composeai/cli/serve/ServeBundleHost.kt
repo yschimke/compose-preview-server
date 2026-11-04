@@ -881,6 +881,14 @@ class ServeBundleHost(
   }
 
   /**
+   * Whether the catalog's served tree carried a `history.json` when it loaded. Without one the
+   * delivery branch has no manifest for the viewer to fetch, so a manifest URL built from the
+   * provenance alone would be a guaranteed 404 on every viewer load (#1592).
+   */
+  val publishesHistoryManifest: Boolean
+    get() = indexedPreviewHistory != null
+
+  /**
    * The publisher's timeline for [previewId], or null without generated history. Already pinned to
    * the served tree; exposed so remote consumers needn't fetch the whole (~1 MB) manifest for one
    * preview.

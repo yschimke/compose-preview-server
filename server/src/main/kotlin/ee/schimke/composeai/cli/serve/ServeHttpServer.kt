@@ -11212,12 +11212,16 @@ class ServeHttpServer(
           // warm-daemon actions.
           presenceUrl = "$basePath/api/presence${requestQuerySuffix()}",
           // Delivery-branch provenance names the repo/branch carrying history.json; without it
-          // (uploaded bundle) the strip is omitted.
+          // (uploaded bundle) the strip is omitted. So is it when the branch publishes no
+          // history.json: the load already looked, and advertising the URL anyway made every
+          // viewer load fetch a 404 (#1592).
           historyManifestUrl =
-            catalogBundleHost(renderHost)?.provenance?.let {
-              ServeUrls.historyManifestUrl(it.repo, it.branch)
-            },
-          historyRepo = catalogBundleHost(renderHost)?.provenance?.repo,
+            catalogBundleHost(renderHost)
+              ?.takeIf { it.publishesHistoryManifest }
+              ?.provenance
+              ?.let { ServeUrls.historyManifestUrl(it.repo, it.branch) },
+          historyRepo =
+            catalogBundleHost(renderHost)?.takeIf { it.publishesHistoryManifest }?.provenance?.repo,
           // …and its project-mode twin, inlined and linking to `/history/render/`; mutually
           // exclusive with the pair above.
           historyInlineJson = localHistoryJson,
