@@ -523,6 +523,49 @@ class ServeUiBuilderAgentErgonomicsTest {
     assertTrue(provenance.any { "The tablet picture (1280×800dp) is left out" in it })
   }
 
+  /**
+   * The native lane refusing every frame (#1867: an `android`-declared catalog against a desktop
+   * bundle) used to leave the prompt with no pictures and no reason. Each refused frame now says
+   * which it is and the refusal's code and reason, through the frame cache and without it.
+   */
+  @Test
+  fun `a frame the native lane refuses is left out with the refusal's code and reason`() {
+    val refusing = UiBuilderNativePreviewLane { _, _ ->
+      UiBuilderNativePreviewOutcome.Refused(
+        ServeUiBuilderNativePreview.NO_NATIVE_CATALOG,
+        listOf("catalog `m3-catalog` declares the `android` native backend, but … `desktop`"),
+      )
+    }
+    for (cached in listOf(true, false)) {
+      val directory = stateDirectory.resolve("refused-cached-$cached")
+      val thumbnails =
+        if (cached) ServeUiBuilderThumbnails(directory.resolve("thumbs"), "test-generation")
+        else null
+      val server = start(directory = directory, thumbnails = thumbnails, nativePreview = refusing)
+      create(server, cleanDocument())
+
+      val result =
+        call(server, ServeUiBuilderMcp.GUIDELINES_PROMPT, """{"designId":"agent-screen"}""")
+      val prompt = result["structuredContent"]!!.jsonObject
+      assertEquals(emptyList(), prompt.pictureKinds())
+      val provenance = prompt["provenance"]!!.jsonArray.map { it.jsonPrimitive.content }
+      for (frame in listOf("phone picture (412×915dp)", "tablet picture (1280×800dp)")) {
+        assertTrue(
+          provenance.any {
+            "The $frame is left out: the native render was refused (NO_NATIVE_CATALOG): " +
+              "catalog `m3-catalog` declares the `android` native backend" in it
+          },
+          "cached=$cached: $provenance",
+        )
+      }
+      // Repeated beside the request, as a slow frame's line is.
+      val blocks = result["content"]!!.jsonArray.map { it.jsonObject }
+      assertTrue("NO_NATIVE_CATALOG" in blocks[1].text("text"), blocks.toString())
+      thumbnails?.close()
+      server.close()
+    }
+  }
+
   @Test
   fun `an agent records its own verdicts, which read back with who ran them and when stale`() {
     val server = start()

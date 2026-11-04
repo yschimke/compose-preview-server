@@ -170,6 +170,26 @@ class ServeUiBuilderNativePreviewTest {
     assertEquals(emptyList(), artifact.diagnostics)
   }
 
+  /**
+   * A dark design's export previews name `android.content.res.Configuration`, which a desktop
+   * bundle cannot resolve (#1867: m3-catalog on its CMP bundle). The lane renders through its own
+   * synthesized preview, so the export's device previews are left out of the native source.
+   */
+  @Test
+  fun `the rendered source leaves out the export's device previews`() {
+    val dark =
+      document().let {
+        it.copy(
+          environment =
+            it.environment.copy(theme = ThemeV1.DARK, exportDevices = listOf("id:pixel_9"))
+        )
+      }
+    lane.render(dark)
+    val source = submitted.single().source
+    assertTrue("android.content.res" !in source, source)
+    assertTrue("@Preview" !in source, source)
+  }
+
   @Test
   fun `a design the generator refuses never reaches the compiler`() {
     // `matchParentSize` is declared on `BoxScope`, and the projection refuses it outside one. The

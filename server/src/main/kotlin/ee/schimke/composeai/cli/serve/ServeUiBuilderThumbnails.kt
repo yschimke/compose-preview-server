@@ -124,15 +124,7 @@ internal constructor(
     set(lane) {
       field = lane
       guidelineFrames?.render = lane?.let { native ->
-        { document, shape ->
-          (native.render(document, shape) as? UiBuilderNativePreviewOutcome.Rendered)
-            ?.takeIf { it.failure == null }
-            ?.response
-            ?.image
-            ?.let {
-              runCatching { Base64.getDecoder().decode(it.removePrefix(PNG_DATA_URI)) }.getOrNull()
-            }
-        }
+        { document, shape -> guidelineDrawing(native.render(document, shape)) }
       }
     }
 
@@ -690,3 +682,35 @@ private const val THUMBNAIL_RETRY_DELAY_MS = 750L
 
 /** How long a card waits for its first picture before answering without one. */
 private const val COLD_RENDER_TIMEOUT_MS = 60_000L
+
+/**
+ * A native render as a guideline frame: its PNG, or the sentence saying why there is none. A
+ * refusal keeps its code (e.g. `NO_NATIVE_CATALOG`) and reasons, so a prompt that attaches fewer
+ * pictures says which host setting to change (#1867).
+ */
+internal fun guidelineDrawing(
+  outcome: UiBuilderNativePreviewOutcome
+): ServeUiBuilderGuidelineFrames.Drawing =
+  when (outcome) {
+    is UiBuilderNativePreviewOutcome.Refused ->
+      ServeUiBuilderGuidelineFrames.Drawing(
+        null,
+        "the native render was refused (${outcome.code}): " + outcome.reasons.joinToString("; "),
+      )
+    is UiBuilderNativePreviewOutcome.Rendered -> {
+      val png =
+        outcome.response.image
+          ?.takeIf { outcome.failure == null }
+          ?.let {
+            runCatching { Base64.getDecoder().decode(it.removePrefix("data:image/png;base64,")) }
+              .getOrNull()
+          }
+      ServeUiBuilderGuidelineFrames.Drawing(
+        png,
+        if (png != null) null
+        else
+          "the native render drew nothing: " +
+            (outcome.failure ?: "its frame was not a readable PNG"),
+      )
+    }
+  }

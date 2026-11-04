@@ -72,6 +72,12 @@ internal class ServeUiBuilderNativePreview(
     UiBuilderNativeTarget(catalog = it, confType = UiBuilderGeneratedCompose.COMPOSE_CMP)
   },
   /**
+   * Why [nativeTarget] has no target for a catalog, when the host knows more than "no bundle": a
+   * bundle is served but built for another daemon ([UiBuilderNativeTargets.backendMismatch]). Null
+   * keeps the generic [NO_NATIVE_CATALOG] sentence.
+   */
+  private val nativeTargetRefusal: (String) -> String? = { null },
+  /**
    * Component packs this host admits (same set as the export executor). A design using a pack
    * compiles against the pack's bundle, which carries both the pack and Material 3; two packs have
    * no common bundle and are refused with [MIXED_PACKS].
@@ -125,6 +131,9 @@ internal class ServeUiBuilderNativePreview(
             typefaces = typefaces,
             // The bundle this compiles against carries Compose, not flexpress.
             variableFontMode = VariableFontExportMode.STANDALONE,
+            // Rendered through the adapter's own `@Preview`; the export's device previews would
+            // only be extra (and, dark on a desktop bundle, uncompilable) declarations.
+            exportPreviews = false,
           )
       ) {
         is ScreenGeneratorComposeExportExecutor.Generated.Emitted -> outcome
@@ -138,9 +147,10 @@ internal class ServeUiBuilderNativePreview(
         ?: return UiBuilderNativePreviewOutcome.Refused(
           NO_NATIVE_CATALOG,
           listOf(
-            "this host compiles no bundle for catalog `$catalogSystemId`, so there is nothing to " +
-              "render this design against; serve that catalog's bundle and map it with " +
-              "`--ui-builder-native-catalog $catalogSystemId=<served catalog>`"
+            nativeTargetRefusal(catalogSystemId)
+              ?: ("this host compiles no bundle for catalog `$catalogSystemId`, so there is " +
+                "nothing to render this design against; serve that catalog's bundle and map it " +
+                "with `--ui-builder-native-catalog $catalogSystemId=<served catalog>`")
           ),
         )
     val environment = document.environment
@@ -211,8 +221,9 @@ internal class ServeUiBuilderNativePreview(
 
   internal companion object {
     /**
-     * The design is fine but this host can't build it: no served bundle is mapped to its catalog.
-     * Distinct from generator codes, which point at the design; this points at host configuration.
+     * The design is fine but this host can't build it: no served bundle is mapped to its catalog,
+     * or the one mapped is built for a daemon the catalog's components cannot compile on. Distinct
+     * from generator codes, which point at the design; this points at host configuration.
      */
     const val NO_NATIVE_CATALOG = "NO_NATIVE_CATALOG"
 

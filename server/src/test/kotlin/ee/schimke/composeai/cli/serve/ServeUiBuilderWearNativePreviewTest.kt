@@ -48,6 +48,7 @@ class ServeUiBuilderWearNativePreviewTest {
     nativeTarget: (String) -> UiBuilderNativeTarget? = {
       UiBuilderNativeTarget("wear-m3-catalog", UiBuilderGeneratedCompose.COMPOSE_ANDROID)
     },
+    nativeTargetRefusal: (String) -> String? = { null },
     widgetPlayer: UiBuilderWidgetPlayer = UiBuilderWidgetPlayer.DEFAULT,
     carriesCmpWidgetPlayer: (String) -> Boolean = { true },
     captureNodeBounds: (PlaygroundRunResponse) -> Map<String, AnnotationBounds> = { emptyMap() },
@@ -60,6 +61,7 @@ class ServeUiBuilderWearNativePreviewTest {
       },
       captureNodeBounds = captureNodeBounds,
       nativeTarget = nativeTarget,
+      nativeTargetRefusal = nativeTargetRefusal,
       widgetPlayer = widgetPlayer,
       carriesCmpWidgetPlayer = carriesCmpWidgetPlayer,
     )
@@ -148,6 +150,40 @@ class ServeUiBuilderWearNativePreviewTest {
     assertEquals(ServeUiBuilderNativePreview.NO_NATIVE_CATALOG, refused.code)
     assertTrue("--ui-builder-native-catalog" in refused.reasons.single(), refused.reasons.single())
     assertTrue("wear-m3" in refused.reasons.single(), refused.reasons.single())
+    assertTrue(submitted.isEmpty())
+  }
+
+  /**
+   * A Wear catalog mapped to a desktop bundle is refused, never compiled on Skiko, and the refusal
+   * names both backends rather than claiming no bundle is served (#1867).
+   */
+  @Test
+  fun `a wear screen mapped to a desktop bundle is refused naming both backends`() {
+    val resolve = { catalog: String ->
+      UiBuilderNativeTargets.resolve(
+        builderCatalog = catalog,
+        served = "wear-m3-catalog",
+        declaredBackend = "android",
+        servedBackend = "desktop",
+        platform = ee.schimke.composeai.uibuilder.export.UiBuilderCatalogPlatform.WEAR,
+      )
+    }
+    val refused =
+      assertIs<UiBuilderNativePreviewOutcome.Refused>(
+        lane(
+            nativeTarget = { (resolve(it) as? UiBuilderNativeTargets.Resolution.Target)?.target },
+            nativeTargetRefusal = {
+              (resolve(it) as? UiBuilderNativeTargets.Resolution.Refused)?.reason
+            },
+          )
+          .render(wearScreen())
+      )
+
+    assertEquals(ServeUiBuilderNativePreview.NO_NATIVE_CATALOG, refused.code)
+    val reason = refused.reasons.single()
+    assertTrue("`android`" in reason && "`desktop`" in reason, reason)
+    assertTrue("`wear-m3-catalog`" in reason, reason)
+    assertTrue("compiles no bundle" !in reason, reason)
     assertTrue(submitted.isEmpty())
   }
 

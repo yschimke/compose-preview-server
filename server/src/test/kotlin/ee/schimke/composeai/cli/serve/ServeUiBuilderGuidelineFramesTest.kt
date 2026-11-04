@@ -47,7 +47,9 @@ class ServeUiBuilderGuidelineFramesTest {
     val frames = frames(quietPeriodMillis = 150)
     frames.render = { document, _ ->
       drawn += document.revision to document.environment.widthDp
-      png(document.environment.widthDp, document.environment.heightDp)
+      ServeUiBuilderGuidelineFrames.Drawing(
+        png(document.environment.widthDp, document.environment.heightDp)
+      )
     }
     frames.planner = { _, _ ->
       planned.incrementAndGet()
@@ -83,7 +85,9 @@ class ServeUiBuilderGuidelineFramesTest {
     val frames = frames()
     frames.render = { document, _ ->
       drawn += document.environment.widthDp
-      png(document.environment.widthDp, document.environment.heightDp)
+      ServeUiBuilderGuidelineFrames.Drawing(
+        png(document.environment.widthDp, document.environment.heightDp)
+      )
     }
     val thumbnail = png(216, 124)
     val result = runBlocking {
@@ -123,6 +127,59 @@ class ServeUiBuilderGuidelineFramesTest {
   }
 
   @Test
+  fun `a refused frame is named with its reason rather than dropped in silence`() {
+    val frames = frames()
+    val reason =
+      "the native render was refused (NO_NATIVE_CATALOG): catalog `m3-catalog` declares the " +
+        "`android` native backend"
+    frames.render = { document, _ ->
+      if (document.environment.widthDp == 412) ServeUiBuilderGuidelineFrames.Drawing(null, reason)
+      else
+        ServeUiBuilderGuidelineFrames.Drawing(
+          png(document.environment.widthDp, document.environment.heightDp)
+        )
+    }
+    val result = runBlocking {
+      frames.pictures("design", document(revision = 6), listOf(PHONE, TABLET), 5_000)
+    }
+    assertEquals(listOf("tablet"), result.pictures.map { it.first.kind })
+    assertEquals(listOf(PHONE to reason), result.refused)
+    assertTrue(result.pending.isEmpty())
+    assertNull(frames.cached(frames.keyOf("design", document(revision = 6), PHONE)))
+  }
+
+  @Test
+  fun `a frame drawn without a picture or a reason still says it is missing`() {
+    val frames = frames()
+    frames.render = { _, _ -> ServeUiBuilderGuidelineFrames.Drawing(null) }
+    val result = runBlocking {
+      frames.pictures("design", document(revision = 1), listOf(PHONE), 5_000)
+    }
+    assertEquals(listOf(PHONE to ServeUiBuilderGuidelineFrames.NO_REASON), result.refused)
+  }
+
+  @Test
+  fun `a native refusal becomes a drawing carrying its code and reasons`() {
+    val refused =
+      guidelineDrawing(
+        UiBuilderNativePreviewOutcome.Refused(
+          ServeUiBuilderNativePreview.NO_NATIVE_CATALOG,
+          listOf("first reason", "second reason"),
+        )
+      )
+    assertNull(refused.png)
+    assertEquals(
+      "the native render was refused (NO_NATIVE_CATALOG): first reason; second reason",
+      refused.refusal,
+    )
+    assertEquals(
+      "The phone picture (412×915dp) is left out: the native render was refused " +
+        "(NO_NATIVE_CATALOG): first reason; second reason.",
+      ServeUiBuilderMcp.refusedFrameNote("phone picture (412×915dp)", refused.refusal!!),
+    )
+  }
+
+  @Test
   fun `a new revision replaces the old one's frames on disk`() {
     val frames = frames()
     val old = frames.keyOf("design", document(revision = 1), PHONE)
@@ -140,7 +197,9 @@ class ServeUiBuilderGuidelineFramesTest {
     frames.render = { document, _ ->
       drawing.countDown()
       release.await()
-      png(document.environment.widthDp, document.environment.heightDp)
+      ServeUiBuilderGuidelineFrames.Drawing(
+        png(document.environment.widthDp, document.environment.heightDp)
+      )
     }
     val key = frames.keyOf("design", document(revision = 3), PHONE)
     val inFlight = frames.submit(key, document(revision = 3), PHONE, background = false)
