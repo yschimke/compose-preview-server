@@ -2,8 +2,12 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
+import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
+import ee.schimke.composeai.uibuilder.protocol.DesignAccessRoleV1
+import ee.schimke.composeai.uibuilder.protocol.DesignActorAccessV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignHomeV1
+import ee.schimke.composeai.uibuilder.protocol.DesignListItemV1
 import ee.schimke.composeai.uibuilder.protocol.DesignStateV1
 import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
 import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
@@ -28,6 +32,7 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 import okhttp3.FormBody
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -122,6 +127,45 @@ class ServeUiBuilderCreateRoutesTest {
               documents[request.document.id] = request.document
               UiBuilderServiceResponse.Catalogs(emptyList())
             }
+          is UiBuilderServiceRequest.RenameDesign -> {
+            val document = documents[request.designId]
+            when {
+              document == null ->
+                UiBuilderServiceResponse.Error(
+                  UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "missing")
+                )
+              call.actor.actorId == "reader" ->
+                UiBuilderServiceResponse.Error(
+                  UiBuilderServiceError(ServiceErrorCodeV1.FORBIDDEN, "actor may not write")
+                )
+              request.title.isBlank() ->
+                UiBuilderServiceResponse.Error(
+                  UiBuilderServiceError(ServiceErrorCodeV1.BAD_REQUEST, "design title is blank")
+                )
+              else -> {
+                val renamed = document.copy(title = request.title.trim())
+                documents[request.designId] = renamed
+                UiBuilderServiceResponse.DesignRenamed(
+                  DesignListItemV1(
+                    designId = renamed.id,
+                    title = renamed.title,
+                    revision = renamed.revision,
+                    accessRevision = 1,
+                    catalogPin = renamed.catalogPin,
+                    createdAtEpochMillis = 1_000,
+                    updatedAtEpochMillis = 2_000,
+                    ownerActorId = call.actor.actorId,
+                    requesterAccess =
+                      DesignActorAccessV1(
+                        actorId = call.actor.actorId,
+                        role = DesignAccessRoleV1.OWNER,
+                        allowedActions = DesignAccessActionV1.entries,
+                      ),
+                  )
+                )
+              }
+            }
+          }
           else -> UiBuilderServiceResponse.Catalogs(emptyList())
         }
 
@@ -246,6 +290,109 @@ class ServeUiBuilderCreateRoutesTest {
         assertEquals("/ui-builder/mywidget3", response.header("Location"))
       }
     assertEquals(listOf("mywidget3"), created)
+  }
+
+  @Test
+  fun `the New design form carries the author's title, and a blank one keeps the template's`() {
+    fun create(id: String, title: String?) {
+      val form =
+        FormBody.Builder().add("designId", id).add("catalog", "m3-catalog").add("template", "blank")
+      title?.let { form.add("title", it) }
+      client
+        .newCall(
+          Request.Builder()
+            .url(url("/ui-builder/designs"))
+            .header("X-Test-Actor", "operator")
+            .post(form.build())
+            .build()
+        )
+        .execute()
+        .use { assertEquals(303, it.code) }
+    }
+    create("titled", "  Checkout screen  ")
+    create("untitled", "   ")
+    create("older-form", null)
+
+    val titled = createdDocuments.getValue("titled")
+    assertEquals("Checkout screen", titled.title)
+    assertEquals("titled", titled.id, "the title never becomes the id")
+    val templateTitle = createdDocuments.getValue("older-form").title
+    assertTrue(templateTitle.isNotBlank())
+    assertEquals(templateTitle, createdDocuments.getValue("untitled").title)
+  }
+
+  @Test
+  fun `PUT title renames a design without touching its id or revision`() {
+    create("renamed")
+    val before = documents.getValue("renamed")
+    fun putTitle(
+      id: String,
+      body: String,
+      actor: String? = "operator",
+      contentType: String = "application/json",
+    ): Pair<Int, String> {
+      val builder =
+        Request.Builder()
+          .url(url("/api/ui-builder/v1/designs/$id/title"))
+          .put(body.toRequestBody(contentType.toMediaType()))
+      if (actor != null) builder.header("X-Test-Actor", actor)
+      return client.newCall(builder.build()).execute().use { it.code to it.body.string() }
+    }
+
+    val (code, body) = putTitle("renamed", """{"title":"Order summary"}""")
+    assertEquals(200, code, body)
+    assertTrue("\"title\":\"Order summary\"" in body, body)
+    assertTrue("\"designId\":\"renamed\"" in body, body)
+    val after = documents.getValue("renamed")
+    assertEquals("Order summary", after.title)
+    assertEquals(before.id, after.id)
+    assertEquals(before.revision, after.revision)
+
+    assertEquals(400, putTitle("renamed", """{"title":"  "}""").first)
+    assertEquals(400, putTitle("renamed", """{"name":"x"}""").first)
+    assertEquals(415, putTitle("renamed", "title=x", contentType = "text/plain").first)
+    assertEquals(404, putTitle("missing", """{"title":"x"}""").first)
+    assertEquals(403, putTitle("renamed", """{"title":"x"}""", actor = "reader").first)
+    assertEquals(403, putTitle("renamed", """{"title":"x"}""", actor = "forbidden").first)
+    assertEquals(401, putTitle("renamed", """{"title":"x"}""", actor = null).first)
+    assertEquals("Order summary", documents.getValue("renamed").title)
+  }
+
+  @Test
+  fun `the designs page renames by form and redirects back to the index`() {
+    create("paged")
+    fun post(title: String, origin: String? = null): Int {
+      val builder =
+        Request.Builder()
+          .url(url("/ui-builder/paged/rename"))
+          .header("X-Test-Actor", "operator")
+          .post(FormBody.Builder().add("title", title).build())
+      if (origin != null) builder.header("Origin", origin)
+      return client.newCall(builder.build()).execute().use { it.code }
+    }
+    assertEquals(403, post("Cross-site", origin = "https://evil.example"))
+    assertEquals(400, post(" "))
+    assertEquals(303, post("Paged title"))
+    assertEquals("Paged title", documents.getValue("paged").title)
+  }
+
+  private fun create(id: String) {
+    client
+      .newCall(
+        Request.Builder()
+          .url(url("/ui-builder/designs"))
+          .header("X-Test-Actor", "operator")
+          .post(
+            FormBody.Builder()
+              .add("designId", id)
+              .add("catalog", "m3-catalog")
+              .add("template", "blank")
+              .build()
+          )
+          .build()
+      )
+      .execute()
+      .use { assertEquals(303, it.code) }
   }
 
   @Test

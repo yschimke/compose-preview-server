@@ -52,6 +52,12 @@ internal class ServeUiBuilderCreate(
     designId: String,
     templateId: String,
     state: List<NewDesignState>,
+    /**
+     * The author's display title, or null/blank for the template's own. Separate from [designId]:
+     * the id is the path-safe, permanent part of the URL; the title is what people read and can
+     * change later (`RenameDesign`).
+     */
+    title: String? = null,
   ): Outcome {
     when (val existing = service.executeMapped(OpenDesignRequestV1(designId), actor)) {
       is UiBuilderServiceResponse.Error ->
@@ -86,6 +92,9 @@ internal class ServeUiBuilderCreate(
             state = state,
           )
           .toDesignDocumentV1()
+          .let { seeded ->
+            title?.trim()?.takeIf { it.isNotEmpty() }?.let { seeded.copy(title = it) } ?: seeded
+          }
           .withServerHome(serverOrigin)
       } catch (e: IllegalArgumentException) {
         // The template builders refuse a design they know cannot work — a state variable that

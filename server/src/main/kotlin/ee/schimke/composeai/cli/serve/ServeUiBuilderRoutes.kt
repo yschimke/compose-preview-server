@@ -4,6 +4,7 @@ import ee.schimke.composeai.uibuilder.export.WearWidgetHostShape
 import ee.schimke.composeai.uibuilder.protocol.ApplyOperationRequestV1
 import ee.schimke.composeai.uibuilder.protocol.CreateDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
+import ee.schimke.composeai.uibuilder.protocol.DesignListItemV1
 import ee.schimke.composeai.uibuilder.protocol.ErrorResponseV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.GetDeltaRequestV1
@@ -440,6 +441,96 @@ internal fun Route.installUiBuilderRoutes(
         call.response.headers.append(HttpHeaders.Location, "/ui-builder/$designId")
         call.respondText("created $designId", status = HttpStatusCode.Created)
       }
+    }
+  }
+
+  /**
+   * `PUT` a design's title: the HTTP face of [UiBuilderServiceRequest.RenameDesign], which has no
+   * protocol request shape (like `ui_builder_rename_design`, which wraps the same request). The id
+   * — and with it the URL, links, history and access — never changes; only the display title does,
+   * outside the operation log, so the revision does not move. Whoever may write the design may
+   * rename it. A JSON body (`{"title": "…"}`) keeps the route out of a plain cross-site form's
+   * reach, as the other JSON write routes are. The answer is the design's list entry as renamed.
+   */
+  put(UI_BUILDER_TITLE_PATH) {
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    val actor =
+      when (val decision = authorization.authorize(call, UiBuilderRouteCapability.WRITE)) {
+        is UiBuilderAuthorizationDecision.Authorized -> decision.actor
+        UiBuilderAuthorizationDecision.Missing -> {
+          call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
+          call.respondText("authentication is required", status = HttpStatusCode.Unauthorized)
+          return@put
+        }
+        UiBuilderAuthorizationDecision.Forbidden -> {
+          call.respondText("UI-builder write access required", status = HttpStatusCode.Forbidden)
+          return@put
+        }
+      }
+    val designId = call.parameters["designId"].orEmpty()
+    if (designId.isBlank()) {
+      call.respondText("a design id is required", status = HttpStatusCode.BadRequest)
+      return@put
+    }
+    if (call.request.headers[HttpHeaders.ContentType]?.startsWith("application/json") != true) {
+      call.respondText(
+        "send the title as JSON: {\"title\": \"…\"}",
+        status = HttpStatusCode.UnsupportedMediaType,
+      )
+      return@put
+    }
+    val bytes =
+      withContext(Dispatchers.IO) {
+        call.receiveStream().use { input -> input.readNBytes(MAX_UI_BUILDER_TITLE_BYTES + 1) }
+      }
+    if (bytes.size > MAX_UI_BUILDER_TITLE_BYTES) {
+      call.respondText("request body too large", status = HttpStatusCode.PayloadTooLarge)
+      return@put
+    }
+    val title =
+      try {
+        UI_BUILDER_JSON.decodeFromString(
+            UiBuilderTitleRequest.serializer(),
+            bytes.toString(StandardCharsets.UTF_8),
+          )
+          .title
+      } catch (_: SerializationException) {
+        call.respondText("body is not {\"title\": \"…\"}", status = HttpStatusCode.BadRequest)
+        return@put
+      } catch (_: IllegalArgumentException) {
+        call.respondText("body is not {\"title\": \"…\"}", status = HttpStatusCode.BadRequest)
+        return@put
+      }
+    val response =
+      try {
+        service.execute(
+          UiBuilderServiceCall(actor, UiBuilderServiceRequest.RenameDesign(designId, title))
+        )
+      } catch (cancelled: CancellationException) {
+        throw cancelled
+      } catch (failure: Exception) {
+        logUiBuilderServiceFailure(failure)
+        UiBuilderServiceResponse.Error(
+          ee.schimke.composeai.uibuilder.service.UiBuilderServiceError(
+            ServiceErrorCodeV1.INTERNAL,
+            "UI-builder service failed",
+            retryable = true,
+          )
+        )
+      }
+    when (response) {
+      is UiBuilderServiceResponse.DesignRenamed ->
+        call.respondText(
+          UI_BUILDER_JSON.encodeToString(DesignListItemV1.serializer(), response.design),
+          ContentType.Application.Json,
+        )
+      is UiBuilderServiceResponse.Error ->
+        call.respondText(response.error.message, status = response.httpStatus())
+      else ->
+        call.respondText(
+          "the design service answered a rename with something else",
+          status = HttpStatusCode.InternalServerError,
+        )
     }
   }
 
@@ -901,6 +992,10 @@ internal val UI_BUILDER_JSON = Json {
 internal const val UI_BUILDER_REQUEST_PATH = "/api/ui-builder/v1/requests"
 internal const val UI_BUILDER_DESIGN_PATH = "/api/ui-builder/v1/designs/{designId}"
 internal const val UI_BUILDER_UPDATES_PATH = "/api/ui-builder/v1/designs/{designId}/updates"
+internal const val UI_BUILDER_TITLE_PATH = "/api/ui-builder/v1/designs/{designId}/title"
+
+/** A title is a short line; anything near this is not one. */
+private const val MAX_UI_BUILDER_TITLE_BYTES = 16 * 1024
 internal const val UI_BUILDER_DEVICE_PRESETS_PATH = "/api/ui-builder/v1/device-presets"
 internal const val UI_BUILDER_IDENTITY_PATH = "/api/ui-builder/v1/identity"
 internal const val UI_BUILDER_NATIVE_PREVIEW_PATH =
@@ -1032,6 +1127,9 @@ internal data class NativePreviewRefusalV1(
   val code: String,
   val reasons: List<String>,
 )
+
+/** The body of `PUT /api/ui-builder/v1/designs/{designId}/title`. */
+@kotlinx.serialization.Serializable internal data class UiBuilderTitleRequest(val title: String)
 
 @kotlinx.serialization.Serializable
 internal data class UiBuilderVisibilityPayload(

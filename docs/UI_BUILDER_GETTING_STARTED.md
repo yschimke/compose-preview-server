@@ -210,6 +210,12 @@ Everything a design can have done to it from outside the editor is on its card:
 - **Duplicate** it — a copy at revision zero with its own history, comments and access list; the
   design it was copied from is untouched. This is the same `POST /ui-builder/designs/copy` the home
   screen's **Start from this** uses.
+- **Rename** it. The title is what the home screen, the editor's toolbar and exports show; the id —
+  and with it the URL, links, history and access — never changes. Anyone who may write the design
+  may rename it. `POST /ui-builder/<designId>/rename` with `title`, same-origin; the editor and
+  scripts use `PUT /api/ui-builder/v1/designs/<designId>/title` with a JSON `{"title": "…"}` body,
+  and agents `ui_builder_rename_design`. All three are the one `RenameDesign` request, which takes
+  no revision.
 - **Share** it, which is the design's own access page.
 - **Delete** it, behind a disclosure that says what will happen. Owner-only, and it is the service
   that says so — a grantee cannot delete somebody else's work however wide its grant. The design
@@ -219,7 +225,9 @@ Everything a design can have done to it from outside the editor is on its card:
   /ui-builder/<designId>/restore` with `confirm=restore`, both same-origin.
 
 The page is also where a design is created: **Start a new design** picks one starting point (a
-catalog and a template, as one control) and **Start from an existing design** copies one.
+catalog and a template, as one control) and **Start from an existing design** copies one. Both take
+an optional **Title**; left empty, a new design keeps its template's name and a copy is called
+"<original> copy".
 
 The builder's home page — `/ui-builder/` with no design named — offers the same two beginnings
 beside the designs you already have, and **My designs** in the editor's overflow menu leads back

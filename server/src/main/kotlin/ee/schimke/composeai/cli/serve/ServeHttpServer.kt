@@ -6432,6 +6432,9 @@ class ServeHttpServer(
     // Shared file-manager metadata. A move changes no design revision, but it is visible to
     // every collaborator, so the design's WRITE action gates the form.
     post("${base}/{designId}/folder") { handleUiBuilderFolderMove() }
+    // Retitle a design from the designs page. The id, URL and history stay; the service's
+    // `RenameDesign` decides who may (anyone who may write it).
+    post("${base}/{designId}/rename") { handleUiBuilderRename() }
     // Compatibility for bookmarks emitted before the catalog became document-only state.
     get("${base}/{catalog}/{designId}/access") { handleUiBuilderAccess() }
     post("${base}/{catalog}/{designId}/access") { handleUiBuilderAccessUpdate() }
@@ -14661,9 +14664,10 @@ class ServeHttpServer(
    * `POST /ui-builder/designs`: create one design, then `303` to its permalink.
    *
    * Form-urlencoded so a browser can submit it without script (POST/Redirect/GET). The server seeds
-   * the document ([UiBuilderNewDesignSeed]) from intent (id, template, optional state variables)
-   * rather than accepting a payload; whole documents go through `PUT
-   * /api/ui-builder/v1/designs/{id}`. Never overwrites: an existing id gets the same `303`.
+   * the document ([UiBuilderNewDesignSeed]) from intent (id, template, optional title and state
+   * variables) rather than accepting a payload; a blank title keeps the template's own; whole
+   * documents go through `PUT /api/ui-builder/v1/designs/{id}`. Never overwrites: an existing id
+   * gets the same `303`.
    */
   private suspend fun RoutingContext.handleUiBuilderCreate() {
     val dir = uiBuilderDir
@@ -14761,6 +14765,7 @@ class ServeHttpServer(
               designId = designId,
               templateId = template,
               state = state,
+              title = form["title"],
             )
         }
       }
@@ -15270,6 +15275,45 @@ class ServeHttpServer(
   }
 
   /**
+   * `POST /ui-builder/{designId}/rename`: change one design's display title, then `303` back to the
+   * index. The page route to [UiBuilderServiceRequest.RenameDesign]; the editor uses the JSON `PUT
+   * /api/ui-builder/v1/designs/{designId}/title` for the same request.
+   */
+  private suspend fun RoutingContext.handleUiBuilderRename() {
+    if (!isSameOriginFormSubmission()) {
+      call.respondText("cross-site renames are refused", status = HttpStatusCode.Forbidden)
+      return
+    }
+    val (actor, designId) = uiBuilderAccessTarget(UiBuilderRouteCapability.WRITE) ?: return
+    val service = designService ?: return
+    val title = call.receiveParameters()["title"].orEmpty()
+    val response =
+      service.execute(
+        UiBuilderServiceCall(actor, UiBuilderServiceRequest.RenameDesign(designId, title))
+      )
+    when (response) {
+      is UiBuilderServiceResponse.DesignRenamed -> {
+        call.response.headers.append(
+          HttpHeaders.Location,
+          "/ui-builder/designs${agentGrantTokenQuery()}",
+        )
+        call.respond(HttpStatusCode.SeeOther)
+      }
+      is UiBuilderServiceResponse.Error ->
+        respondUiBuilderDenied(
+          HttpStatusCode.fromValue(response.httpStatusValue()),
+          response.error.message,
+          response.error.message,
+        )
+      else ->
+        call.respondText(
+          "the design service answered a rename with something else",
+          status = HttpStatusCode.InternalServerError,
+        )
+    }
+  }
+
+  /**
    * `POST /ui-builder/{designId}/restore`: bring a design back out of the trash, then `303` to it.
    * The trash section of the designs page posts here; the service admits whoever could have deleted
    * it, until its retention passes. `confirm=restore` stops a stray re-POST.
@@ -15547,6 +15591,10 @@ class ServeHttpServer(
               item.requesterAccess.allowedActions.contains(DesignAccessActionV1.WRITE)
           )
             "/ui-builder/${WebEscaping.urlEncodeSegment(item.designId)}/folder$tokenQuery"
+          else "",
+        renameAction =
+          if (item.requesterAccess.allowedActions.contains(DesignAccessActionV1.WRITE))
+            "/ui-builder/${WebEscaping.urlEncodeSegment(item.designId)}/rename$tokenQuery"
           else "",
         // The same way in as the page's own link, naming this design, so what the owner is asked
         // to approve is edit access to this design rather than to everything they can edit.
