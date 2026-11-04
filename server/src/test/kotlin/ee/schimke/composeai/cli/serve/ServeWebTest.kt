@@ -1422,10 +1422,11 @@ class ServeWebTest {
     assertFalse(option.contains(" disabled"), "cmp-wasm is offered: '$option'")
     assertTrue(html.contains("id=\"cp-rc-wasm\""), "dedicated CMP/Wasm iframe is present")
     assertTrue(html.contains("value=\"rc-wasm\""), "dedicated CMP/Wasm mode is present")
-    assertTrue(
-      html.contains("sandbox=\"allow-scripts allow-same-origin\""),
-      "repository-owned player can fetch the tokened document from its own origin",
-    )
+    // The repository-owned player keeps its real origin to fetch the tokened document, and has no
+    // `sandbox` attribute: with `allow-same-origin` it would isolate nothing and only warn (#1592).
+    val rcWasmTag = Regex("<iframe id=\"cp-rc-wasm\"[^>]*>").find(html)?.value ?: ""
+    assertTrue(rcWasmTag.isNotEmpty(), "CMP/Wasm iframe tag found")
+    assertFalse(rcWasmTag.contains("sandbox"), "CMP/Wasm player frame is unsandboxed: '$rcWasmTag'")
     val knob = Regex("<input[^>]*data-rc-name=\"label\"[^>]*>").find(html)?.value ?: ""
     assertFalse(knob.contains(" disabled"), "CMP/Wasm can apply named values: '$knob'")
     val viewerJs = viewerSource()
