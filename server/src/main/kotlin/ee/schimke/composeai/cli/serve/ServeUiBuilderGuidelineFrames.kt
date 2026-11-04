@@ -65,8 +65,25 @@ internal constructor(
     val environment: String = "",
   )
 
-  /** Draws [document] in [shape]; null when the host could not. Set once the host has a lane. */
-  @Volatile internal var render: ((DesignDocumentV1, WearWidgetHostShape) -> ByteArray?)? = null
+  /**
+   * Draws [document] in [shape]: its picture, or why the host drew none. Set once the host has a
+   * lane.
+   */
+  @Volatile internal var render: ((DesignDocumentV1, WearWidgetHostShape) -> Drawing)? = null
+
+  /**
+   * What one frame's drawing came to: [png], or [refusal], the sentence saying why there is none
+   * (the native lane's refusal code and reason, or the render's failure). Both null only when the
+   * host gave no reason at all.
+   */
+  internal class Drawing(val png: ByteArray?, val refusal: String? = null)
+
+  /**
+   * Why each frame drawn without a picture has none, by key, so a prompt can say so instead of
+   * silently attaching fewer pictures (#1867). Not kept on disk: a refusal is host configuration,
+   * and the next ask draws again.
+   */
+  private val refusals = ConcurrentHashMap<Key, String>()
 
   /**
    * What the warm of a design draws: its latest document and the frames planned for it, read as
@@ -148,12 +165,24 @@ internal constructor(
             val png =
               try {
                 cached(job.key)
-                  ?: draw(job.document, job.frame)?.also {
-                    // Evicted while drawing: drop the picture rather than recreate the entry.
-                    if (job.epoch == epochOf(job.key.designId)) store(job.key, it)
+                  ?: draw(job.document, job.frame).let { drawing ->
+                    // Evicted while drawing: drop the picture (or refusal) rather than recreate
+                    // the entry.
+                    if (job.epoch == epochOf(job.key.designId)) {
+                      val png = drawing.png
+                      val refusal = drawing.refusal
+                      if (png != null) store(job.key, png)
+                      else if (refusal != null) refusals[job.key] = refusal
+                    }
+                    drawing.png
                   }
               } catch (failure: Exception) {
                 onLog("serve: UI-builder guideline frame ${job.key} not drawn: ${failure.message}")
+                if (job.epoch == epochOf(job.key.designId)) {
+                  refusals[job.key] =
+                    "the native render failed on this host: " +
+                      (failure.message ?: failure.javaClass.name)
+                }
                 null
               }
             pending.remove(job.key, job)
@@ -192,6 +221,8 @@ internal constructor(
   internal fun store(key: Key, png: ByteArray) {
     memory[key] = png
     memory.keys.removeIf { it.designId == key.designId && it.revision != key.revision }
+    refusals.remove(key)
+    refusals.keys.removeIf { it.designId == key.designId && it.revision != key.revision }
     runCatching {
       val dir = directory.resolve(designBase(key.designId))
       ServeOwnerOnlyFiles.createDirectories(dir)
@@ -234,6 +265,8 @@ internal constructor(
     }
     val job = Job(key, document, frame, background, epoch = epochOf(key.designId))
     val existing = pending.putIfAbsent(key, job)
+    // A new drawing is asked for; the last one's refusal no longer answers for it.
+    if (existing == null) refusals.remove(key)
     if (existing != null) {
       if (!background && existing.background && warms.remove(existing)) {
         val promoted =
@@ -261,7 +294,8 @@ internal constructor(
    * [frames] of [designId]'s [document]: each from the cache, from [seeds] (pictures the caller
    * already holds, such as the a11y check's device render), or drawn — one at a time, within
    * [budgetMillis] in all. A frame not drawn in time is left out of the answer and keeps drawing
-   * into the cache, so the next ask includes it; [Drawn.pending] names those.
+   * into the cache, so the next ask includes it; [Drawn.pending] names those. A frame the host
+   * finished without a picture is named in [Drawn.refused] with the reason, never dropped silently.
    */
   internal suspend fun pictures(
     designId: String,
@@ -285,6 +319,7 @@ internal constructor(
     }
     val drawn = mutableListOf<Pair<DesignGuidelineFrame, ByteArray>>()
     val late = mutableListOf<DesignGuidelineFrame>()
+    val refused = mutableListOf<Pair<DesignGuidelineFrame, String>>()
     for (frame in frames) {
       val future = futures.getValue(frame)
       val left = (deadline - System.nanoTime()) / 1_000_000
@@ -297,15 +332,18 @@ internal constructor(
       when {
         png != null -> drawn += frame to png
         !future.isDone -> late += frame
+        else -> refused += frame to (refusals[keys.getValue(frame)] ?: NO_REASON)
       }
     }
-    return Drawn(drawn, late)
+    return Drawn(drawn, late, refused)
   }
 
-  /** What [pictures] could attach now, and what is still drawing. */
+  /** What [pictures] could attach now, what is still drawing, and what was drawn without one. */
   internal data class Drawn(
     val pictures: List<Pair<DesignGuidelineFrame, ByteArray>>,
     val pending: List<DesignGuidelineFrame>,
+    /** Frames the host finished without a picture, each with why ([Drawing.refusal]). */
+    val refused: List<Pair<DesignGuidelineFrame, String>> = emptyList(),
   )
 
   /** [designId] may be warmed after edits, as [actor]; see the class comment. */
@@ -362,6 +400,7 @@ internal constructor(
       (key.designId == designId).also { if (it) job.result.complete(null) }
     }
     memory.keys.removeIf { it.designId == designId }
+    refusals.keys.removeIf { it.designId == designId }
     warmable.remove(designId)
     scheduled.remove(designId)?.cancel(false)
     runCatching {
@@ -376,8 +415,8 @@ internal constructor(
       }
   }
 
-  private fun draw(document: DesignDocumentV1, frame: DesignGuidelineFrame): ByteArray? {
-    val lane = render ?: return null
+  private fun draw(document: DesignDocumentV1, frame: DesignGuidelineFrame): Drawing {
+    val lane = render ?: return Drawing(null, "this host has no native render lane")
     val shape =
       frame.environment[WearWidgetHostShape.ENVIRONMENT_KEY]?.content?.let {
         WearWidgetHostShape.fromId(it)
@@ -411,6 +450,9 @@ internal constructor(
 
   internal companion object {
     const val QUEUE = 256
+
+    /** Said of a frame finished without a picture when the host gave no reason. */
+    const val NO_REASON = "the host's native renderer returned no picture for it"
 
     private const val GENERATION_TAG = 12
 

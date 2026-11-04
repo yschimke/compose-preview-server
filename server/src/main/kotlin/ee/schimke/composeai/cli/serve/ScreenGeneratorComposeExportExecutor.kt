@@ -308,6 +308,12 @@ internal class ScreenGeneratorComposeExportExecutor(
      * [STANDALONE][VariableFontExportMode.STANDALONE].
      */
     variableFontMode: VariableFontExportMode = VariableFontExportMode.LIBRARY,
+    /**
+     * Whether the screen carries the design's export-device `@Preview`s. The native lane passes
+     * false: it renders through its own synthesized preview, and a dark design's `uiMode =
+     * android.content.res.Configuration.UI_MODE_NIGHT_YES` does not compile on a desktop bundle.
+     */
+    exportPreviews: Boolean = true,
   ): Generated {
     // Record-free designs answer first here too, but this lane compiles, so the two emitters
     // diverge. A Wear screen is ordinary Wear Compose and compiles against a bundle carrying
@@ -480,7 +486,7 @@ internal class ScreenGeneratorComposeExportExecutor(
           projection.resolvable(merged),
           packageName,
           EXPRESSION_PACKAGES,
-          previewFor(document.environment),
+          if (exportPreviews) previewFor(document.environment) else null,
         )
     ) {
       is ScreenGenerator.Result.Refused ->

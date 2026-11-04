@@ -81,6 +81,15 @@ plan extends rather than invents:
 | designs | the design library | `ui-builder/designs/index.json` on the delivery branch |
 | device presets | the frame menu | `DeviceDimensions`, the render lane's own catalog |
 
+`previewSurfaces.native.backend` and the served bundle's own backend can disagree. The native lane
+resolves that in [`UiBuilderNativeTargets`](../../server/src/main/kotlin/ee/schimke/composeai/cli/serve/UiBuilderNativeTargets.kt),
+from the two declared rows above rather than any catalog id: a catalog declaring `android` compiles
+on a `desktop` bundle only when its `platform` is `mobile` (Material 3 on Compose, which is
+multiplatform), and a Wear or Remote Compose catalog is refused with `NO_NATIVE_CATALOG` naming both
+backends. That refusal, like any frame the lane cannot draw, reaches a guidelines prompt as a
+provenance line rather than a silently missing picture
+([#1867](https://github.com/yschimke/compose-preview-server/issues/1867)).
+
 Every row of the second table is a fact the catalog states once and two surfaces read. Every row of
 the first is a fact restated in Kotlin here, for one catalog, by hand. The plan is to move rows from
 the first table to the second until the first is empty.

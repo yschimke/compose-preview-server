@@ -2757,7 +2757,7 @@ class ServeUiBuilderMcp(
     val drawn =
       if (frames.isNotEmpty()) {
         guidelinePictures(document, frames, devicePng, storedDesignId, actor)
-      } else GuidelinePictures(emptyList(), emptyList(), emptyList())
+      } else GuidelinePictures(emptyList(), emptyList(), emptyList(), emptyList())
     val request =
       build(drawn.pictures, source).let { built ->
         accessibility?.let { built.copy(userText = built.userText + "\n\n" + it) } ?: built
@@ -2770,6 +2770,7 @@ class ServeUiBuilderMcp(
           "The ${frameName(frame)} is left out: the renderer drew the design at a size other " +
             "than ${frame.widthDp}×${frame.heightDp}dp, so it would not show what it claims to."
         } +
+        drawn.refused.map { (frame, reason) -> refusedFrameNote(frameName(frame), reason) } +
         triageNotes
     return if (notes.isEmpty()) request else request.copy(provenance = request.provenance + notes)
   }
@@ -2810,6 +2811,8 @@ class ServeUiBuilderMcp(
     val pending: List<DesignGuidelineFrame>,
     /** Drawn at a size other than the frame's, so left out; see [ServeUiBuilderGuidelineFrames]. */
     val mismatched: List<DesignGuidelineFrame>,
+    /** Finished without a picture, with why (the native lane's refusal, or its failure). */
+    val refused: List<Pair<DesignGuidelineFrame, String>>,
   )
 
   /**
@@ -2830,6 +2833,7 @@ class ServeUiBuilderMcp(
     val cache = guidelineFrames
     val drawn: List<Pair<DesignGuidelineFrame, ByteArray>>
     val pending: List<DesignGuidelineFrame>
+    val refused: List<Pair<DesignGuidelineFrame, String>>
     if (cache != null && storedDesignId != null && nativePreview != null) {
       cache.rememberWarmable(storedDesignId, actor)
       val seeds = buildMap {
@@ -2844,7 +2848,9 @@ class ServeUiBuilderMcp(
         cache.pictures(storedDesignId, document, frames, guidelinePictureBudgetMillis(), seeds)
       drawn = result.pictures
       pending = result.pending
+      refused = result.refused
     } else {
+      val reasons = mutableListOf<Pair<DesignGuidelineFrame, String>>()
       drawn = frames.mapNotNull { frame ->
         val png =
           if (
@@ -2858,11 +2864,18 @@ class ServeUiBuilderMcp(
               frame.environment[WearWidgetHostShape.ENVIRONMENT_KEY]?.content?.let {
                 WearWidgetHostShape.fromId(it)
               } ?: WearWidgetHostShape.Default
-            nativeRender(ServeUiBuilderGuidelineFrames.framed(document, frame), shape)?.png
+            val attempt =
+              nativeRenderAttempt(ServeUiBuilderGuidelineFrames.framed(document, frame), shape)
+            attempt.render?.png.also {
+              if (it == null) {
+                reasons += frame to (attempt.unavailable ?: ServeUiBuilderGuidelineFrames.NO_REASON)
+              }
+            }
           }
         png?.let { frame to it }
       }
       pending = emptyList()
+      refused = reasons
     }
     // A widget is drawn at its container's frame whatever the environment says, which is the
     // frame planned for it; every other picture must be drawn at its frame's size.
@@ -2878,6 +2891,7 @@ class ServeUiBuilderMcp(
       },
       pending,
       mismatched.map { it.first },
+      refused,
     )
   }
 
@@ -3968,6 +3982,14 @@ class ServeUiBuilderMcp(
   }
 
   companion object {
+    /**
+     * The provenance line for a frame the host finished without a picture: which, and why, so a
+     * prompt never attaches fewer pictures in silence (#1867). Worded like the aspect guard's line
+     * (`… is left out: …`), which the MCP prompt tool repeats beside the request.
+     */
+    internal fun refusedFrameNote(frameName: String, reason: String): String =
+      "The $frameName is left out: ${reason.trimEnd('.')}."
+
     /**
      * How many allowed values a summary row lists before reporting a count. Past every
      * hand-authored enumeration (the longest is 15) but far short of generated ones like the 11,431

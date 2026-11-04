@@ -2391,6 +2391,11 @@ public class ServeRunner(
      */
     val nativeBackends: Map<String, String>,
     /**
+     * Which platform each catalog authors for, from the same declaration; decides whether a catalog
+     * declaring the Android daemon may compile against a desktop bundle ([UiBuilderNativeTargets]).
+     */
+    val nativePlatforms: Map<String, UiBuilderCatalogPlatform> = emptyMap(),
+    /**
      * `ui_builder_validate`: a scratch service over [service]'s catalogs and exporter, answering
      * with the real refusal and writing nothing.
      */
@@ -3030,6 +3035,7 @@ public class ServeRunner(
           .getOrNull(),
       compose = compose,
       nativeBackends = nativeBackends,
+      nativePlatforms = catalogPlatforms,
       validator = ScratchUiBuilderDraftValidator(catalogs, annotatedExporter),
       stateDirectory = directory,
     )
@@ -3660,32 +3666,38 @@ public class ServeRunner(
           uiBuilderLane?.let { lane ->
             playgroundLane?.let { playground ->
               val adapter = UiBuilderGeneratedPreviewAdapter(playground.compile)
+              val resolveNativeTarget = { builderCatalog: String ->
+                val served = uiBuilderNativeCatalogs[builderCatalog] ?: builderCatalog
+                // Only reported where the host knows it (not on pinned hosts).
+                val servedBackend = playground.catalogBackend(served)
+                UiBuilderNativeTargets.resolve(
+                  builderCatalog = builderCatalog,
+                  served = served,
+                  // A pack declares no backend; it takes its served bundle's.
+                  declaredBackend =
+                    lane.nativeBackends[builderCatalog]
+                      ?: servedBackend?.takeIf { builderCatalog in uiBuilderPacks },
+                  servedBackend = servedBackend,
+                  platform = lane.nativePlatforms[builderCatalog],
+                )
+              }
               ServeUiBuilderNativePreview(
                 executor = lane.compose,
                 // A builder catalog id is not a served catalog id, and the daemon follows the
                 // bundle (e.g. `wear-m3` is a Robolectric bundle served from another repository).
                 // Unmapped catalogs compile against a served catalog of the same name on desktop.
+                // A catalog declaring the Android daemon but mapped to a desktop bundle compiles on
+                // Skiko only when it authors mobile (Compose Multiplatform) screens; a Wear or
+                // Remote Compose catalog is refused with both backends named, since every
+                // `androidx.wear.compose` import would fail there. See [UiBuilderNativeTargets].
                 nativeTarget = { builderCatalog ->
-                  val served = uiBuilderNativeCatalogs[builderCatalog] ?: builderCatalog
-                  // A pack declares no backend; it takes its served bundle's.
-                  val backend =
-                    lane.nativeBackends[builderCatalog]
-                      ?: playground.catalogBackend(served)?.takeIf {
-                        builderCatalog in uiBuilderPacks
-                      }
-                  // A catalog declaring the Android daemon but mapped to a desktop bundle is
-                  // refused rather than compiled on Skiko, where every `androidx.wear.compose`
-                  // import would fail. Only checked where the host reports a backend (not on pinned
-                  // hosts).
-                  val servedBackend = playground.catalogBackend(served)
-                  when {
-                    backend == UiBuilderPreviewSurfaces.BACKEND_ANDROID &&
-                      servedBackend != null &&
-                      servedBackend != UiBuilderPreviewSurfaces.BACKEND_ANDROID -> null
-                    backend == UiBuilderPreviewSurfaces.BACKEND_ANDROID ->
-                      UiBuilderNativeTarget(served, UiBuilderGeneratedCompose.COMPOSE_ANDROID)
-                    else -> UiBuilderNativeTarget(served, UiBuilderGeneratedCompose.COMPOSE_CMP)
-                  }
+                  (resolveNativeTarget(builderCatalog) as? UiBuilderNativeTargets.Resolution.Target)
+                    ?.target
+                },
+                nativeTargetRefusal = { builderCatalog ->
+                  (resolveNativeTarget(builderCatalog)
+                      as? UiBuilderNativeTargets.Resolution.Refused)
+                    ?.reason
                 },
                 packs = uiBuilderPacks.keys,
                 widgetPlayer = options.uiBuilderWidgetPlayer,
