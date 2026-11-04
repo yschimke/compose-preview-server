@@ -92,6 +92,19 @@
       "minimumReleaseAge": null
     },
     {
+      "description": "These four `ee.schimke.composeai` coordinates are GitHub release assets, not Maven artifacts: settings.gradle.kts resolves them through the `uiBuilderWebRelease` (yschimke/compose-ui-builder) and `rcPlayerWasmRelease` (yschimke/rc-players) ivy repositories. Renovate looks every catalog entry up on Maven Central, where `-export-fonts` and `rc-player-wasm` were never published (the Dependency Dashboard's `no-result` lookup failures, #18) and `-web` / `-render-bundle` stop at the releases before compose-ui-builder#1027, so no lookup can ever offer a real update for them. They lose nothing by being skipped: each shares its version ref with the BOM of the release that ships it (`composeai-ui-builder` with `compose-preview-ui-builder-bom`, `rc-players-android` with `rc-players-bom`), so the BOM's update moves them in the same edit.",
+      "matchManagers": [
+        "gradle"
+      ],
+      "matchPackageNames": [
+        "ee.schimke.composeai:compose-preview-ui-builder-web",
+        "ee.schimke.composeai:compose-preview-ui-builder-render-bundle",
+        "ee.schimke.composeai:compose-preview-ui-builder-export-fonts",
+        "ee.schimke.composeai:rc-player-wasm"
+      ],
+      "enabled": false
+    },
+    {
       "description": "ClassGraph 6 requires Java 25 (class file 69): PR #1741 fails checkServerJvmFloor (Java 17). Keep updates below 6 while the server distribution supports Java 17. ClassGraph 5 (Java 17) is the current line; it already removed the 4.x API (overrideClasspath, getAnnotationInfo), so the server, compose-ai-tools and compose-preview-daemon must move between ClassGraph lines together, since they share one classpath. Remove this ceiling only after intentionally raising the server JVM floor to Java 25 and porting/verifying preview discovery. See https://github.com/yschimke/compose-preview-server/pull/1741 and https://github.com/classgraph/classgraph#classgraph-6-is-released.",
       "matchManagers": [
         "gradle"
