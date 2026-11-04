@@ -193,26 +193,7 @@ internal class DesignLocalCompileLane(
     )
 
   override fun generate(document: DesignDocumentV1): DesignLocalLane.Source =
-    // Written for this lane's bundle, as the render below compiles it: a desktop bundle gets
-    // `SystemFont` lookups for its typefaces, because it has no Android `GoogleFont` to resolve.
-    when (
-      val generated =
-        executor.generate(
-          document,
-          typefaces = TypefaceTarget.forNativeBackend(backend),
-          // The bundle this compiles against carries Compose, not flexpress.
-          variableFontMode = VariableFontExportMode.STANDALONE,
-        )
-    ) {
-      is ScreenGeneratorComposeExportExecutor.Generated.Emitted ->
-        DesignLocalLane.Source.Emitted(
-          generated.source,
-          generated.screenName,
-          warnings = generated.systemFontFamilies.map(SystemFontLookups::note),
-        )
-      is ScreenGeneratorComposeExportExecutor.Generated.Refused ->
-        DesignLocalLane.Source.Refused(generated.code, generated.reasons)
-    }
+    generateFor(executor, document, backend)
 
   override fun render(document: DesignDocumentV1): DesignLocalLane.Frame {
     val preview =
@@ -258,6 +239,39 @@ internal class DesignLocalCompileLane(
      * id names a server catalog, and there is none here.
      */
     const val CATALOG: String = "local"
+
+    /**
+     * [document]'s Kotlin, written for a bundle of [backend], as this lane's render compiles it: a
+     * desktop bundle gets `SystemFont` lookups for its typefaces, since it has no Android
+     * `GoogleFont` to resolve, and no export-device `@Preview`s, since a dark design's `uiMode =
+     * android.content.res.Configuration.UI_MODE_NIGHT_YES` does not compile there (as the native
+     * lane already leaves them out). An Android bundle keeps them: they compile there, and they are
+     * what `design export` from a server writes.
+     */
+    fun generateFor(
+      executor: ScreenGeneratorComposeExportExecutor,
+      document: DesignDocumentV1,
+      backend: String?,
+    ): DesignLocalLane.Source =
+      when (
+        val generated =
+          executor.generate(
+            document,
+            typefaces = TypefaceTarget.forNativeBackend(backend),
+            // The bundle this compiles against carries Compose, not flexpress.
+            variableFontMode = VariableFontExportMode.STANDALONE,
+            exportPreviews = backend == ANDROID_BACKEND,
+          )
+      ) {
+        is ScreenGeneratorComposeExportExecutor.Generated.Emitted ->
+          DesignLocalLane.Source.Emitted(
+            generated.source,
+            generated.screenName,
+            warnings = generated.systemFontFamilies.map(SystemFontLookups::note),
+          )
+        is ScreenGeneratorComposeExportExecutor.Generated.Refused ->
+          DesignLocalLane.Source.Refused(generated.code, generated.reasons)
+      }
 
     /** The asset store a `--assets <dir>` names, or null when the directory cannot be read. */
     fun assetStore(directory: File?, log: (String) -> Unit): UiBuilderAssetStore? {
