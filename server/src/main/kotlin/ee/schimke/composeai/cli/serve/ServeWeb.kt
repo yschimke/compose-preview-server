@@ -6689,6 +6689,11 @@ ${captureControlsHtml().prependIndent("          ")}
     /** POST target that changes [folder]. Empty when this viewer may not move the design. */
     val folderAction: String = "",
     /**
+     * POST target that changes [title] (never the id). Empty when this viewer may not write the
+     * design.
+     */
+    val renameAction: String = "",
+    /**
      * `/ui-builder/request-access?design=…` for this design where asking for edit access is
      * offered; empty otherwise.
      */
@@ -6843,6 +6848,22 @@ ${captureControlsHtml().prependIndent("          ")}
             """
             .trimIndent()
         }
+      val rename =
+        if (row.renameAction.isBlank()) ""
+        else
+          """
+            <details class="cp-design-more">
+              <summary>Rename</summary>
+              <form class="cp-design-form" method="post" action="${esc(row.renameAction)}">
+                <label class="cp-grant-ttl"><span>Title</span><input type="text" name="title"
+                  value="${esc(row.title)}" maxlength="200" required></label>
+                <p class="cp-grant-fineprint">The id <code>${esc(row.designId)}</code>, and every
+                link to it, stays the same.</p>
+                <button class="cp-grant-approve" type="submit">Rename</button>
+              </form>
+            </details>
+            """
+            .trimIndent()
       val grants =
         row.grants?.let { all ->
           val isPublic = all.any { ServeUiBuilderVisibility.isReservedActor(it.actorId) }
@@ -6902,7 +6923,7 @@ ${captureControlsHtml().prependIndent("          ")}
           .joinToString(" ")
           .lowercase()
       val cardActions =
-        listOf(share, folder, grants, delete)
+        listOf(share, rename, folder, grants, delete)
           .filter(String::isNotBlank)
           .joinToString("\n            ")
       """
@@ -7039,6 +7060,8 @@ ${captureControlsHtml().prependIndent("          ")}
             ${startOptions.prependIndent("            ").trimStart()}
             </select>
           </label>
+          <label class="cp-grant-ttl"><span>Title</span><input type="text" name="title"
+            maxlength="200" placeholder="Leave empty for the starting point's name"></label>
           <label class="cp-grant-ttl"><span>Design id</span><input type="text" name="designId"
             value="${esc(suggestedDesignId)}" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required></label>
           ${uiBuilderCreationVisibility()}
@@ -7066,6 +7089,8 @@ ${captureControlsHtml().prependIndent("          ")}
             ${copyOptions.prependIndent("            ").trimStart()}
             </select>
           </label>
+          <label class="cp-grant-ttl"><span>Title</span><input type="text" name="title"
+            maxlength="200" placeholder="Leave empty for the original's title + copy"></label>
           <label class="cp-grant-ttl"><span>New design id</span><input type="text" name="designId"
             value="${esc(suggestedDesignId)}" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required></label>
           ${uiBuilderCreationVisibility()}
