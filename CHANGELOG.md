@@ -1,5 +1,25 @@
 # Changelog
 
+## [3.156.0](https://github.com/yschimke/compose-preview-server/compare/v3.155.0...v3.156.0) (2026-11-05)
+
+
+### Features
+
+* **ui-builder:** title on create and rename routes over RenameDesign ([#1866](https://github.com/yschimke/compose-preview-server/issues/1866)) ([00a8e25](https://github.com/yschimke/compose-preview-server/commit/00a8e2551509f8ee58d058eb4c82c529e97522f1))
+
+
+### Bug Fixes
+
+* **deps:** update androidx-compose to v1.0.0-alpha23 ([#1871](https://github.com/yschimke/compose-preview-server/issues/1871)) ([c547dbc](https://github.com/yschimke/compose-preview-server/commit/c547dbcad3aab50ff26fc2d53a86939f40c80f33))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.83.0 ([#1864](https://github.com/yschimke/compose-preview-server/issues/1864)) ([c142718](https://github.com/yschimke/compose-preview-server/commit/c142718168aaab34b1e4f4c701d40342ec9ba6db))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.85.0 ([#1874](https://github.com/yschimke/compose-preview-server/issues/1874)) ([d8ea458](https://github.com/yschimke/compose-preview-server/commit/d8ea4581ba130886ae6489250d7e4da048a3d56f))
+* **deps:** update dependency ee.schimke.composeai:rc-players-bom to v2.23.0 ([#1873](https://github.com/yschimke/compose-preview-server/issues/1873)) ([a64d3ef](https://github.com/yschimke/compose-preview-server/commit/a64d3ef235df39df8dc8b9008e1c247caefa744e))
+* **deps:** update dependency ee.schimke.composeai:remote-compose-player-js-dist to v2.23.0 ([#1875](https://github.com/yschimke/compose-preview-server/issues/1875)) ([dc530bd](https://github.com/yschimke/compose-preview-server/commit/dc530bda7b228425536afd92cc67b03c8298211a))
+* **serve:** drop the sandbox attribute from the CMP/Wasm player frame ([#1865](https://github.com/yschimke/compose-preview-server/issues/1865)) ([8bcd231](https://github.com/yschimke/compose-preview-server/commit/8bcd2313a5b3c46a9d0d48e01cd72a775bae9e82))
+* **serve:** only advertise history.json when published; quiet Renovate release-asset lookups ([#1862](https://github.com/yschimke/compose-preview-server/issues/1862)) ([cd1d7e6](https://github.com/yschimke/compose-preview-server/commit/cd1d7e64325d9cf6bd678666e626b0b89b9df53e))
+* **ui-builder:** leave export device previews out of design export --local on a desktop bundle ([#1869](https://github.com/yschimke/compose-preview-server/issues/1869)) ([e294982](https://github.com/yschimke/compose-preview-server/commit/e294982d888ead6cbd9d7c90e7cc547e295d64b9))
+* **ui-builder:** render m3-catalog guideline frames on its CMP bundle, and say why a frame is missing ([#1868](https://github.com/yschimke/compose-preview-server/issues/1868)) ([0bc21fa](https://github.com/yschimke/compose-preview-server/commit/0bc21fa35d21bc3a0ffef0b2cdc32ce8701ced86))
+
 ## [3.155.0](https://github.com/yschimke/compose-preview-server/compare/v3.154.0...v3.155.0) (2026-11-02)
 
 
