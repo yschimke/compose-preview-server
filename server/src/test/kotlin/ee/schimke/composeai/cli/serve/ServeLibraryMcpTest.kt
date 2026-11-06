@@ -46,7 +46,7 @@ class ServeLibraryMcpTest {
       open = {
         opened.incrementAndGet()
         null
-      }
+      },
     )
 
   init {
@@ -89,7 +89,7 @@ class ServeLibraryMcpTest {
         runBlocking {
           mcp.handle(body) { ServeMachineAuthorization.Decision.Authorized("agent:test") }
         }
-          .body
+          .body,
       )["result"]!!
       .jsonObject
   }
@@ -119,7 +119,7 @@ class ServeLibraryMcpTest {
       assertEquals("image/svg+xml", icon["mimeType"]!!.jsonPrimitive.content)
       val svg =
         String(
-          Base64.getDecoder().decode(icon["src"]!!.jsonPrimitive.content.substringAfter("base64,"))
+          Base64.getDecoder().decode(icon["src"]!!.jsonPrimitive.content.substringAfter("base64,")),
         )
       assertTrue("currentColor" in svg && "viewBox=\"0 0 20 20\"" in svg)
       // An entrypoint tool must accept {}.
@@ -153,7 +153,7 @@ class ServeLibraryMcpTest {
     assertTrue("openai/deepLink" in read["text"]!!.jsonPrimitive.content)
     val readRequest =
       Json.parseToJsonElement(
-          """{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"${ServeLibraryMcp.RESOURCE_URI}"}}"""
+          """{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"${ServeLibraryMcp.RESOURCE_URI}"}}""",
         )
         .jsonObject
     assertFalse(ServeCatalogMcp.requiresGrant(readRequest))

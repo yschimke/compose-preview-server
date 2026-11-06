@@ -32,14 +32,14 @@ internal object ServeUiBuilderNativeCheck {
     val message = buildString {
       append(
         "the exported Kotlin does not compile on this host's native render lane, so the " +
-          "rendered checks did not run and a project with the same dependencies cannot build it"
+          "rendered checks did not run and a project with the same dependencies cannot build it",
       )
       if (icon != null) {
         append(
           ". `${icon.field}` = \"${icon.key}\" on `${icon.nodeId}` exports `Icons.*.${icon.member}`, " +
             "which is not on this bundle's classpath; it ships in " +
             "`$MATERIAL_ICONS_EXTENDED`, not `material-icons-core`. Pick an icon key the bundle " +
-            "carries, or add that dependency to the project the code is for"
+            "carries, or add that dependency to the project the code is for",
         )
       }
       append(": ")

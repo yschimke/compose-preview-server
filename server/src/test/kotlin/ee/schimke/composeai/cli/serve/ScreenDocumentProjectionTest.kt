@@ -80,8 +80,8 @@ class ScreenDocumentProjectionTest {
             id = "text",
             componentId = "m3/text",
             properties = mapOf("text" to StateValueV1("query")),
-          )
-        )
+          ),
+        ),
       ),
     )
   }
@@ -91,7 +91,7 @@ class ScreenDocumentProjectionTest {
     assertEquals(
       listOf("node `text`.`eventBindings.click` writes undeclared state variable `expanded`"),
       refusal(
-        document(text().copy(eventBindings = mapOf("click" to listOf(ToggleActionV1("expanded")))))
+        document(text().copy(eventBindings = mapOf("click" to listOf(ToggleActionV1("expanded"))))),
       ),
     )
   }
@@ -108,7 +108,7 @@ class ScreenDocumentProjectionTest {
   fun `an asset binding is refused by slot name`() {
     assertEquals(
       listOf(
-        "node `text` binds the asset(s) artwork, which need a caller-supplied artwork adapter"
+        "node `text` binds the asset(s) artwork, which need a caller-supplied artwork adapter",
       ),
       refusal(document(text().copy(assetBindings = mapOf("artwork" to "podcast-1")))),
     )
@@ -119,7 +119,7 @@ class ScreenDocumentProjectionTest {
     assertEquals(
       listOf(
         "node `text` sets accessibility, which is a `semantics {}` modifier the component record " +
-          "cannot type-check"
+          "cannot type-check",
       ),
       refusal(document(text().copy(accessibility = AccessibilityV1(label = "Schedule")))),
     )
@@ -129,7 +129,7 @@ class ScreenDocumentProjectionTest {
   fun `a pixel dimension is refused because it needs the composition's density`() {
     assertEquals(
       listOf(
-        "node `text`.`color` is in pixels, which needs the composition's density to become a `Dp`"
+        "node `text`.`color` is in pixels, which needs the composition's density to become a `Dp`",
       ),
       refusal(document(text("color" to DimensionValueV1(JsonPrimitive(12), DimensionUnitV1.PX)))),
     )
@@ -140,7 +140,7 @@ class ScreenDocumentProjectionTest {
     assertEquals(
       listOf(
         "node `text`.`color` is the colour token `brandTeal`, which is not one this catalog's " +
-          "theme defines"
+          "theme defines",
       ),
       refusal(document(text("color" to ColorTokenValueV1("brandTeal")))),
     )
@@ -171,7 +171,7 @@ class ScreenDocumentProjectionTest {
     assertEquals(
       listOf(
         "node `text`.`color` is a colour, which is written as a `#RRGGBB` literal or as a theme " +
-          "role and not as StringValueV1"
+          "role and not as StringValueV1",
       ),
       refusal(document(text("color" to StringValueV1("#5F6368")))),
     )
@@ -181,7 +181,7 @@ class ScreenDocumentProjectionTest {
   fun `a colour that is not hex is refused with the value quoted`() {
     assertEquals(
       listOf(
-        "node `text`.`color` is the colour `rebeccapurple`, which is not #RRGGBB or #AARRGGBB"
+        "node `text`.`color` is the colour `rebeccapurple`, which is not #RRGGBB or #AARRGGBB",
       ),
       refusal(document(text("color" to ColorValueV1("rebeccapurple")))),
     )
@@ -225,9 +225,9 @@ class ScreenDocumentProjectionTest {
               id = "carousel",
               componentId = "layout/horizontal-carousel",
               properties = mapOf("kind" to EnumValueV1("uncontained")),
-            )
-          )
-        )
+            ),
+          ),
+        ),
     )
   }
 
@@ -247,13 +247,13 @@ class ScreenDocumentProjectionTest {
           ),
           text("weight" to DecimalValueV1(1.0)),
           roots = listOf("button"),
-        )
+        ),
       )
     assertEquals(emptyList(), weightInside("text"))
     assertEquals(
       listOf(
         "node `text`.`weight` is a layout weight, which `Modifier.weight` supplies from a row's " +
-          "or column's scope; this node sits at the root, which has no receiver"
+          "or column's scope; this node sits at the root, which has no receiver",
       ),
       weightInside("fab"),
     )
@@ -270,7 +270,7 @@ class ScreenDocumentProjectionTest {
           ),
           text(),
           roots = listOf("button"),
-        )
+        ),
       )
       .root
 
@@ -281,7 +281,7 @@ class ScreenDocumentProjectionTest {
     fun factoryFor(style: String): String {
       val colors =
         assertIs<ScreenValue.Construct>(
-          styledButton(style, "containerColor" to ColorValueV1("#FF0000")).arguments["colors"]
+          styledButton(style, "containerColor" to ColorValueV1("#FF0000")).arguments["colors"],
         )
       assertEquals("androidx.compose.material3.ButtonColors", colors.typeFqn)
       assertEquals(setOf("containerColor"), colors.named.keys)
@@ -317,7 +317,7 @@ class ScreenDocumentProjectionTest {
     assertEquals(
       listOf(
         "node `text`.`textAlign` is the enum value `middle`, which is not one of " +
-          "center, end, justify, start"
+          "center, end, justify, start",
       ),
       refusal(document(text("textAlign" to EnumValueV1("middle")))),
     )
@@ -344,8 +344,8 @@ class ScreenDocumentProjectionTest {
               id = "icon",
               componentId = "m3/icon",
               properties = mapOf("iconKey" to EnumValueV1("star")),
-            )
-          )
+            ),
+          ),
         )
         .root
         .arguments
@@ -371,7 +371,7 @@ class ScreenDocumentProjectionTest {
           ),
           text("weight" to DecimalValueV1(1.0)),
           roots = listOf("column"),
-        )
+        ),
       )
     val child = column.root.slots.getValue("content").single()
     assertFalse("weight" in child.arguments)
@@ -381,7 +381,7 @@ class ScreenDocumentProjectionTest {
           "androidx.compose.foundation.layout.ColumnScope.weight",
           positional = listOf(ScreenValue.Fractional32(1f)),
           receiverScopeFqn = "androidx.compose.foundation.layout.ColumnScope",
-        )
+        ),
       ),
       (child.arguments.getValue("modifier") as ScreenValue.Chain).links,
     )
@@ -394,7 +394,7 @@ class ScreenDocumentProjectionTest {
     assertEquals(
       listOf(
         "node `text`.`weight` is a layout weight, which `Modifier.weight` supplies from a row's " +
-          "or column's scope; this node sits at the root, which has no receiver"
+          "or column's scope; this node sits at the root, which has no receiver",
       ),
       refusal(document(text("weight" to DecimalValueV1(1.0)))),
     )
@@ -412,7 +412,7 @@ class ScreenDocumentProjectionTest {
           ),
           text().copy(modifiers = listOf(MatchParentSizeModifierV1)),
           roots = listOf("box"),
-        )
+        ),
       )
     val child = box.root.slots.getValue("content").single()
     assertEquals(
@@ -420,14 +420,14 @@ class ScreenDocumentProjectionTest {
         ChainLink(
           "androidx.compose.foundation.layout.BoxScope.matchParentSize",
           receiverScopeFqn = "androidx.compose.foundation.layout.BoxScope",
-        )
+        ),
       ),
       (child.arguments.getValue("modifier") as ScreenValue.Chain).links,
     )
     assertEquals(
       listOf(
         "node `text` uses `matchParentSize`, which is declared on `BoxScope` and is in scope only " +
-          "inside a `layout/box` slot; this node sits at the root, which has no receiver"
+          "inside a `layout/box` slot; this node sits at the root, which has no receiver",
       ),
       refusal(document(text().copy(modifiers = listOf(MatchParentSizeModifierV1)))),
     )
@@ -442,8 +442,8 @@ class ScreenDocumentProjectionTest {
             id = "icon",
             componentId = "m3/icon",
             properties = mapOf("iconKey" to EnumValueV1("star"), "sizeDp" to DecimalValueV1(24.0)),
-          )
-        )
+          ),
+        ),
       )
     assertFalse("sizeDp" in icon.root.arguments)
     assertEquals(
@@ -458,7 +458,7 @@ class ScreenDocumentProjectionTest {
     // `.size(width = 120.dp)` compiles as neither.
     val width =
       projected(
-          document(text().copy(modifiers = listOf(SizeModifierV1(JsonPrimitive(120), JsonNull))))
+          document(text().copy(modifiers = listOf(SizeModifierV1(JsonPrimitive(120), JsonNull)))),
         )
         .root
         .arguments
@@ -469,7 +469,7 @@ class ScreenDocumentProjectionTest {
     )
     val height =
       projected(
-          document(text().copy(modifiers = listOf(SizeModifierV1(JsonNull, JsonPrimitive(40)))))
+          document(text().copy(modifiers = listOf(SizeModifierV1(JsonNull, JsonPrimitive(40))))),
         )
         .root
         .arguments
@@ -481,8 +481,8 @@ class ScreenDocumentProjectionTest {
     val both =
       projected(
           document(
-            text().copy(modifiers = listOf(SizeModifierV1(JsonPrimitive(10), JsonPrimitive(20))))
-          )
+            text().copy(modifiers = listOf(SizeModifierV1(JsonPrimitive(10), JsonPrimitive(20)))),
+          ),
         )
         .root
         .arguments
@@ -492,7 +492,7 @@ class ScreenDocumentProjectionTest {
         ChainLink(
           "androidx.compose.foundation.layout.size",
           named = mapOf("width" to dp(10), "height" to dp(20)),
-        )
+        ),
       ),
       both.links,
     )
@@ -515,9 +515,9 @@ class ScreenDocumentProjectionTest {
                 "androidx.compose.material3.MaterialTheme",
                 listOf("shapes", "medium"),
                 typeFqn = "androidx.compose.ui.graphics.Shape",
-              )
+              ),
             ),
-        )
+        ),
       ),
       chain.links,
     )
@@ -537,7 +537,7 @@ class ScreenDocumentProjectionTest {
     assertTrue(
       refusal(document(text().copy(modifiers = listOf(ClipModifierV1(shape = "squircle")))))
         .single()
-        .startsWith("node `text` clips to shape `squircle`, which is neither a theme shape")
+        .startsWith("node `text` clips to shape `squircle`, which is neither a theme shape"),
     )
   }
 
@@ -574,9 +574,9 @@ class ScreenDocumentProjectionTest {
                   MatchParentSizeModifierV1,
                   SizeModifierV1(JsonNull, JsonNull),
                   ClipModifierV1(shape = "squircle"),
-                )
-            )
-        )
+                ),
+            ),
+        ),
       )
     assertEquals(3, reasons.size, reasons.toString())
     assertTrue(reasons.any { it.contains("matchParentSize") }, reasons.toString())
@@ -592,8 +592,9 @@ class ScreenDocumentProjectionTest {
       listOf("node `text` pads with no axis that is a number"),
       refusal(
         document(
-          text().copy(modifiers = listOf(PaddingModifierV1(JsonNull, JsonNull, JsonNull, JsonNull)))
-        )
+          text()
+            .copy(modifiers = listOf(PaddingModifierV1(JsonNull, JsonNull, JsonNull, JsonNull))),
+        ),
       ),
     )
     assertEquals(
@@ -607,7 +608,7 @@ class ScreenDocumentProjectionTest {
     assertEquals(
       listOf(
         "the document has 2 roots; a generated screen body needs exactly one, so wrap them in a " +
-          "layout component in the builder"
+          "layout component in the builder",
       ),
       refusal(
         document(
@@ -618,7 +619,7 @@ class ScreenDocumentProjectionTest {
             properties = mapOf("text" to StringValueV1("two")),
           ),
           roots = listOf("text", "other"),
-        )
+        ),
       ),
     )
   }
@@ -641,8 +642,8 @@ class ScreenDocumentProjectionTest {
             id = "card",
             componentId = "m3/card",
             slots = mapOf("content" to listOf("card")),
-          )
-        )
+          ),
+        ),
       ),
     )
   }
@@ -672,8 +673,8 @@ class ScreenDocumentProjectionTest {
             properties =
               mapOf("text" to StateValueV1("query"), "color" to ColorTokenValueV1("brandTeal")),
             predicate = StateTruthyPredicateV1("visible"),
-          )
-        )
+          ),
+        ),
       )
     assertEquals(3, reasons.size, reasons.toString())
     assertTrue(reasons.any { it.contains("state variable `query`") }, reasons.toString())
@@ -717,14 +718,14 @@ class ScreenDocumentProjectionTest {
                   .copy(
                     modifiers =
                       listOf(
-                        SizeModifierV1(widthDp = JsonPrimitive(2147483648L), heightDp = JsonNull)
-                      )
+                        SizeModifierV1(widthDp = JsonPrimitive(2147483648L), heightDp = JsonNull),
+                      ),
                   )),
         )
       }
     val projected =
       assertIs<ScreenDocumentProjection.Outcome.Projected>(
-        ScreenDocumentProjection.project(document)
+        ScreenDocumentProjection.project(document),
       )
     val rendered = projected.document.toString()
     assertTrue(rendered.contains("Fractional"), rendered)
@@ -747,7 +748,7 @@ class ScreenDocumentProjectionTest {
                   .copy(
                     properties =
                       base.nodes.getValue("heading").properties +
-                        ("size" to DimensionValueV1(JsonPrimitive(1e100), DimensionUnitV1.DP))
+                        ("size" to DimensionValueV1(JsonPrimitive(1e100), DimensionUnitV1.DP)),
                   )),
         )
       }
@@ -804,7 +805,7 @@ class ScreenDocumentProjectionTest {
           ),
           text(),
           roots = listOf("list"),
-        )
+        ),
       )
 
     val root = projected.root
@@ -833,7 +834,7 @@ class ScreenDocumentProjectionTest {
             ),
             text(),
             roots = listOf("list"),
-          )
+          ),
         )
         .root
 
@@ -856,7 +857,7 @@ class ScreenDocumentProjectionTest {
             lazyList("layout/lazy-column", "scrollStateKey" to StringValueV1("detail-scroll")),
             text(),
             roots = listOf("list"),
-          )
+          ),
         )
         .root
 
@@ -871,14 +872,14 @@ class ScreenDocumentProjectionTest {
       listOf(
         "node `list`.`span` is the span this node takes in its parent grid, which is " +
           "`item(span = { GridItemSpan(…) })` on the wrapper around it — an argument to another " +
-          "node, computed from the grid's own scope, and this vocabulary has neither"
+          "node, computed from the grid's own scope, and this vocabulary has neither",
       ),
       refusal(
         document(
           lazyList("layout/lazy-row", "span" to EnumValueV1("full")),
           text(),
           roots = listOf("list"),
-        )
+        ),
       ),
     )
   }
@@ -893,9 +894,9 @@ class ScreenDocumentProjectionTest {
             lazyList("layout/lazy-column"),
             text("weight" to DecimalValueV1(1.0)),
             roots = listOf("list"),
-          )
+          ),
         )
-        .any { "which `Modifier.weight` supplies from a row's or column's scope" in it }
+        .any { "which `Modifier.weight` supplies from a row's or column's scope" in it },
     )
   }
 
@@ -915,7 +916,7 @@ class ScreenDocumentProjectionTest {
         projected(document(indicator("progress" to DecimalValueV1(0.4)), roots = listOf("bar")))
           .root
           .arguments
-          .getValue("progress")
+          .getValue("progress"),
       )
 
     assertEquals(ScreenValue.Fractional32(0.4f), progress.result)
@@ -941,7 +942,7 @@ class ScreenDocumentProjectionTest {
         argumentsFor(
           "indeterminate" to BooleanValueV1(false),
           "progress" to DecimalValueV1(0.4),
-        )
+        ),
     )
   }
 
@@ -950,7 +951,7 @@ class ScreenDocumentProjectionTest {
     assertEquals(
       listOf(
         "node `bar` is not indeterminate and sets no `progress`; the determinate indicator is " +
-          "chosen by passing one, and there is nothing here to pass"
+          "chosen by passing one, and there is nothing here to pass",
       ),
       refusal(document(indicator("indeterminate" to BooleanValueV1(false)), roots = listOf("bar"))),
     )

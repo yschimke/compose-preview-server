@@ -73,7 +73,7 @@ class ServeSettingsTest {
   fun `validation names the typo and the setting it meant`() {
     val problems =
       ServeSettings.validate(
-        doc("""{"uiBuilder": {"guidelines": {"modle": "x", "users": "yschimke"}}}""")
+        doc("""{"uiBuilder": {"guidelines": {"modle": "x", "users": "yschimke"}}}"""),
       )
     assertTrue(
       problems.any { "uiBuilder.guidelines.modle" in it && "uiBuilder.guidelines.model" in it },
@@ -89,15 +89,16 @@ class ServeSettingsTest {
     )
     assertTrue(
       ServeSettings.validate(doc("""{"agents": {"grantCapabilities": ["telepathy"]}}"""))
-        .isNotEmpty()
+        .isNotEmpty(),
     )
     assertTrue(
-      ServeSettings.validate(doc("""{"uploads": {"imageRepository": "not a repo"}}""")).isNotEmpty()
+      ServeSettings.validate(doc("""{"uploads": {"imageRepository": "not a repo"}}"""))
+        .isNotEmpty(),
     )
     assertTrue(ServeSettings.validate(doc("""{"uiBuilder": "x"}""")).isNotEmpty())
     // A scope the server would refuse at startup is refused here instead.
     assertTrue(
-      ServeSettings.validate(doc("""{"auth": {"github": {"scope": "repo"}}}""")).isNotEmpty()
+      ServeSettings.validate(doc("""{"auth": {"github": {"scope": "repo"}}}""")).isNotEmpty(),
     )
     assertEquals(
       emptyList(),
@@ -117,8 +118,8 @@ class ServeSettingsTest {
             """
             {"uiBuilder": {"adminActors": [], "guidelines": {"users": ["a", "b"], "pictureBudgetSeconds": 30}},
              "catalogs": {"mcp": true}, "uploads": {"acceptImages": false}}
-            """
-          )
+            """,
+          ),
         )
         .mapKeys { it.key.env }
     assertEquals(
@@ -138,7 +139,7 @@ class ServeSettingsTest {
     val sources =
       ServeSettings.parseSources(
         "SERVE_UI_BUILDER_GUIDELINES_MODEL=settings.json,SERVE_CATALOG_MCP=environment," +
-          "SERVE_TOKEN=environment,garbage"
+          "SERVE_TOKEN=environment,garbage",
       )
     assertEquals(
       mapOf(
@@ -209,8 +210,8 @@ class ServeSettingsTest {
     val result =
       admin.set(
         doc(
-          """{"uiBuilder": {"guidelines": {"model": "deepseek/deepseek-v4.1-flash", "users": ["yschimke"]}}}"""
-        )
+          """{"uiBuilder": {"guidelines": {"model": "deepseek/deepseek-v4.1-flash", "users": ["yschimke"]}}}""",
+        ),
       ) as ServeSettingsAdmin.Result.Ok
     assertEquals(listOf("uiBuilder.guidelines.model"), result.applied)
     assertEquals(
@@ -218,7 +219,7 @@ class ServeSettingsTest {
         mapOf(
           "SERVE_UI_BUILDER_GUIDELINES_MODEL" to "deepseek/deepseek-v4.1-flash",
           "SERVE_UI_BUILDER_GUIDELINES_USERS" to "yschimke",
-        )
+        ),
       ),
       recorder.applied,
     )
@@ -235,8 +236,8 @@ class ServeSettingsTest {
     val result =
       admin.set(
         doc(
-          """{"uploads": {"acceptDocs": true}, "uiBuilder": {"guidelines": {"model": "typesafe/jev-router", "users": ["yschimke"]}}}"""
-        )
+          """{"uploads": {"acceptDocs": true}, "uiBuilder": {"guidelines": {"model": "typesafe/jev-router", "users": ["yschimke"]}}}""",
+        ),
       ) as ServeSettingsAdmin.Result.Ok
     val docs = result.entries.single { it.key == "uploads.acceptDocs" }
     assertTrue(docs.pending)
@@ -255,7 +256,7 @@ class ServeSettingsTest {
     val admin = admin(environment, listOf(recorder))
     val result =
       admin.set(
-        doc("""{"uiBuilder": {"guidelines": {"model": "other/model", "users": ["yschimke"]}}}""")
+        doc("""{"uiBuilder": {"guidelines": {"model": "other/model", "users": ["yschimke"]}}}"""),
       ) as ServeSettingsAdmin.Result.Ok
     assertEquals(emptyList(), recorder.applied)
     val model = result.entries.single { it.key == "uiBuilder.guidelines.model" }
@@ -263,7 +264,7 @@ class ServeSettingsTest {
     assertFalse(model.pending)
     assertEquals("typesafe/jev-router", model.serving)
     assertTrue(
-      admin.describe().any { "SERVE_UI_BUILDER_GUIDELINES_MODEL" in it && "overrides" in it }
+      admin.describe().any { "SERVE_UI_BUILDER_GUIDELINES_MODEL" in it && "overrides" in it },
     )
   }
 
@@ -305,7 +306,7 @@ class ServeSettingsTest {
         "SERVE_UI_BUILDER_GUIDELINES_MODEL" to "deepseek/deepseek-v4.1-flash",
         "SERVE_UI_BUILDER_GUIDELINES_USERS" to "someone",
         "SERVE_UI_BUILDER_GUIDELINES_ORGS" to null,
-      )
+      ),
     )
     assertEquals("deepseek/deepseek-v4.1-flash", guidelines.model)
     assertEquals("users someone", guidelines.describeAccess())
@@ -314,7 +315,7 @@ class ServeSettingsTest {
       mapOf(
         "SERVE_UI_BUILDER_GUIDELINES_USERS" to "someone",
         "SERVE_UI_BUILDER_GUIDELINES_TRIAGE" to "off",
-      )
+      ),
     )
     assertFalse(guidelines.triageEnabled)
     // Back to the default model when the setting is removed.

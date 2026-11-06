@@ -150,12 +150,12 @@ internal class ServePushSubscriptionStore(
       val mine = others.count { it.actor == actor }
       if (mine >= maximumPerActor) {
         return@exclusive PushSubscribeResult.Refused(
-          "you already have $maximumPerActor devices subscribed; turn notifications off on one first"
+          "you already have $maximumPerActor devices subscribed; turn notifications off on one first",
         )
       }
       if (others.size >= maximumTotal) {
         return@exclusive PushSubscribeResult.Refused(
-          "this server holds the most push subscriptions it allows"
+          "this server holds the most push subscriptions it allows",
         )
       }
       val wire = (kinds ?: kindsOf(current, actor)).map { it.wire }.toSortedSet()
@@ -479,7 +479,7 @@ internal object ServePushEndpoints {
 internal class ServeVapidKeys(val keyPair: KeyPair, val subject: String) {
   val publicKey: String =
     ServeWebPush.base64Url(
-      ServeWebPush.rawPublicKey(keyPair.public as java.security.interfaces.ECPublicKey)
+      ServeWebPush.rawPublicKey(keyPair.public as java.security.interfaces.ECPublicKey),
     )
 
   companion object {
@@ -526,8 +526,8 @@ internal class ServeVapidKeys(val keyPair: KeyPair, val subject: String) {
             privateKey =
               ServeWebPush.base64Url(
                 ServeWebPush.rawPrivateKey(
-                  generated.private as java.security.interfaces.ECPrivateKey
-                )
+                  generated.private as java.security.interfaces.ECPrivateKey,
+                ),
               ),
           ),
         ),

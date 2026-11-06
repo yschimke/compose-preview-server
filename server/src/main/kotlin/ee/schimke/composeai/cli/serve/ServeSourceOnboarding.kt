@@ -89,7 +89,7 @@ class ServeSourceOnboarding(
       }
     onLog(
       "serve: scanned $repo@${checkout.ref} — ${scanned.buildable.size}/${scanned.modules.size} " +
-        "module(s) hold previewable modules"
+        "module(s) hold previewable modules",
     )
     return ScanResult.Ok(
       repo = repo,

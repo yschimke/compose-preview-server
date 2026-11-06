@@ -50,7 +50,7 @@ internal fun Route.installUiBuilderFolderRoutes(
             .let { stored ->
               if (administrators.contains(actor)) stored
               else stored.filterKeys { service.canRead(actor, it) }
-            }
+            },
         )
       is FolderWriteResult.Refused ->
         call.respondFolderError(HttpStatusCode.UnprocessableEntity, result.reason)
@@ -70,7 +70,7 @@ internal fun Route.installUiBuilderFolderRoutes(
             .let { stored ->
               if (administrators.contains(actor)) stored
               else stored.filterKeys { service.canRead(actor, it) }
-            }
+            },
         )
       is FolderWriteResult.Refused ->
         call.respondFolderError(HttpStatusCode.UnprocessableEntity, result.reason)

@@ -71,7 +71,7 @@ class ServeUiBuilderGuidelineStore(private val root: Path) {
     if (record.revision < 0) return GuidelineWriteResult.Refused("`revision` must not be negative")
     if (currentRevision != null && record.revision > currentRevision) {
       return GuidelineWriteResult.Refused(
-        "revision ${record.revision} does not exist yet; the design is at revision $currentRevision"
+        "revision ${record.revision} does not exist yet; the design is at revision $currentRevision",
       )
     }
     val model = record.model.trim()
@@ -86,21 +86,21 @@ class ServeUiBuilderGuidelineStore(private val root: Path) {
     val unknown = record.asked.filterNot { it in known }
     if (unknown.isNotEmpty()) {
       return GuidelineWriteResult.Refused(
-        "`asked` names rules this host does not know: ${unknown.joinToString(", ")}"
+        "`asked` names rules this host does not know: ${unknown.joinToString(", ")}",
       )
     }
     val asked = record.asked.toSet()
     val stray = record.verdicts.map { it.ruleId }.filterNot { it in asked }
     if (stray.isNotEmpty()) {
       return GuidelineWriteResult.Refused(
-        "verdicts answer rules that were not asked: ${stray.distinct().joinToString(", ")}"
+        "verdicts answer rules that were not asked: ${stray.distinct().joinToString(", ")}",
       )
     }
     val badVerdict = record.verdicts.firstOrNull { it.verdict !in VERDICTS }
     if (badVerdict != null) {
       return GuidelineWriteResult.Refused(
         "verdict `${badVerdict.verdict}` on ${badVerdict.ruleId} is not one of " +
-          VERDICTS.joinToString(", ")
+          VERDICTS.joinToString(", "),
       )
     }
     val stored =
@@ -155,7 +155,7 @@ class ServeUiBuilderGuidelineStore(private val root: Path) {
     root.resolve(
       MessageDigest.getInstance("SHA-256")
         .digest(designId.toByteArray(StandardCharsets.UTF_8))
-        .joinToString("") { "%02x".format(it) } + ".json"
+        .joinToString("") { "%02x".format(it) } + ".json",
     )
 
   sealed interface GuidelineWriteResult {

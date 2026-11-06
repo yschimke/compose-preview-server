@@ -117,7 +117,7 @@ class ServeUiBuilderComponentLibraryRoutingTest {
     File(components, "index.json")
       .writeText(
         """{"schema":"${ServeUiBuilderComponentLibrary.INDEX_SCHEMA}",
-           "components":[{"id":"broken","title":"Broken"}]}"""
+           "components":[{"id":"broken","title":"Broken"}]}""",
       )
     assertEquals(404, send("/admin/ui-builder/component-library/local/broken").first)
   }
@@ -137,7 +137,7 @@ class ServeUiBuilderComponentLibraryRoutingTest {
     File(secondComponents, "index.json")
       .writeText(
         """{"schema":"${ServeUiBuilderComponentLibrary.INDEX_SCHEMA}",
-           "components":[{"id":"branch-only","title":"Branch only"}]}"""
+           "components":[{"id":"branch-only","title":"Branch only"}]}""",
       )
     File(secondComponents, "branch-only.json").writeText(symbolFile("branch-only", "Branch only"))
     publish()
@@ -163,7 +163,7 @@ class ServeUiBuilderComponentLibraryRoutingTest {
     File(components, "index.json")
       .writeText(
         """{"schema":"${ServeUiBuilderComponentLibrary.INDEX_SCHEMA}",
-           "components":[{"id":"contribution-cell","title":"Contribution cell"}]}"""
+           "components":[{"id":"contribution-cell","title":"Contribution cell"}]}""",
       )
     File(components, "contribution-cell.json")
       .writeText(symbolFile("contribution-cell", "Contribution cell"))

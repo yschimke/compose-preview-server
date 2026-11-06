@@ -165,14 +165,14 @@ internal const val MAX_PROJECT_FILE_BYTES = 2 * 1024 * 1024L
 
 internal fun validateProjectPath(path: String) {
   require(
-    path.isNotEmpty() && path.length <= 512 && !path.startsWith('/') && !path.contains('\\')
+    path.isNotEmpty() && path.length <= 512 && !path.startsWith('/') && !path.contains('\\'),
   ) {
     "a project path must be relative"
   }
   require(
     path.split('/').all {
       it.isNotBlank() && it != "." && it != ".." && !it.any(Char::isISOControl)
-    }
+    },
   ) {
     "invalid project path"
   }

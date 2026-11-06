@@ -47,7 +47,7 @@ class ServeUiBuilderCatalogRecoveryRoutesTest {
                 sourceDocumentHash = "source-hash",
                 status = CatalogUpgradePreviewStatusV1.BLOCKED,
                 previewDigest = "preview-digest",
-              )
+              ),
             )
           // The service's quarantine gate answers every request naming a stranded design this way,
           // the shell's `GetDesignActions` as much as a snapshot.
@@ -57,7 +57,7 @@ class ServeUiBuilderCatalogRecoveryRoutesTest {
               UiBuilderServiceError(
                 ServiceErrorCodeV1.CATALOG_UNAVAILABLE,
                 "the stored pin is unavailable",
-              )
+              ),
             )
           else -> error("unexpected request $request")
         }

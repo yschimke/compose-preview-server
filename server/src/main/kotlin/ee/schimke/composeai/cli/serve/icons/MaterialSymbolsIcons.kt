@@ -68,7 +68,7 @@ internal class MaterialSymbolsIcons(private val source: MaterialSymbolsSource) {
       source.names(style)
         ?: return IconResult.Refused(IconRequestFailure.UnknownStyle(style, source.styleIds))
     return IconResult.Answered(
-      IconNamesResponse(style, source.pin(style).orEmpty(), names.sorted())
+      IconNamesResponse(style, source.pin(style).orEmpty(), names.sorted()),
     )
   }
 

@@ -111,7 +111,7 @@ internal class ServeUiBuilderBranchTools(private val branches: UiBuilderBranchPo
         else ->
           UiBuilderBranchStatus.entries.firstOrNull { it.name.lowercase() == status }
             ?: throw McpRequestException(
-              "`status` must be one of ${STATUS_VALUES.joinToString()}; got `$status`"
+              "`status` must be one of ${STATUS_VALUES.joinToString()}; got `$status`",
             )
       }
     val listed =
@@ -218,7 +218,7 @@ internal class ServeUiBuilderBranchTools(private val branches: UiBuilderBranchPo
             (error.currentRevision?.let { " (current revision $it)" } ?: "") +
             ". ${ServeUiBuilderHistoryTools.LIST_REVISIONS} lists what is still reachable."
         else -> "${error.code.name}: ${error.message}"
-      } + (if (tail.isEmpty()) "" else " $tail")
+      } + (if (tail.isEmpty()) "" else " $tail"),
     )
 
   private fun JsonObject.text(name: String): String? =
@@ -525,7 +525,7 @@ internal fun UiBuilderBranchMergeReport.wire(): DesignBranchMergeV1 {
             "$parentDesignId@r$parentRevisionBefore, landing at r$parentRevisionAfter"
         else
           "Merged $branchId: $applied command(s) replayed onto $parentDesignId, " +
-            "r$parentRevisionBefore → r$parentRevisionAfter"
+            "r$parentRevisionBefore → r$parentRevisionAfter",
       )
       if (overwrites > 0) append("; $overwrites last-writer-wins overwrite(s), listed per command")
       if (archivedSiblingIds.isNotEmpty()) {
@@ -538,7 +538,7 @@ internal fun UiBuilderBranchMergeReport.wire(): DesignBranchMergeV1 {
       if (refused != null) {
         append(
           "command ${refused.operationId} (by ${refused.actorId}) was refused " +
-            "${refused.code ?: ""}${refused.message?.let { ": $it" } ?: ""}"
+            "${refused.code ?: ""}${refused.message?.let { ": $it" } ?: ""}",
         )
         append(" after $applied command(s) replayed cleanly; $remaining never tried. ")
         append("Nothing was written. Fix it on the branch, or pass ")

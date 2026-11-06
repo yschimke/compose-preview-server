@@ -39,7 +39,7 @@ class ServeFigmaSpecTest {
         reference(
           uri = "https://www.figma.com/file/gYzowY4cQ7rNr2gYoco1M6/MeshCore",
           attributes = mapOf("nodeId" to "10:2"),
-        )
+        ),
       )
     assertEquals("https://www.figma.com/design/gYzowY4cQ7rNr2gYoco1M6?node-id=10-2", spec?.url)
   }
@@ -48,7 +48,7 @@ class ServeFigmaSpecTest {
   fun `a node-id already in the URL is honoured`() {
     val spec =
       ServeFigmaSpec.of(
-        reference(uri = "https://figma.com/design/abc123/MeshCore?node-id=42-7&t=xyz")
+        reference(uri = "https://figma.com/design/abc123/MeshCore?node-id=42-7&t=xyz"),
       )
     assertEquals("https://www.figma.com/design/abc123?node-id=42-7", spec?.url)
   }
@@ -80,7 +80,7 @@ class ServeFigmaSpecTest {
     assertNull(ServeFigmaSpec.of(reference(uri = "https://figma.com.evil.example/design/k/1:1")))
     assertNull(
       ServeFigmaSpec.of(
-        reference(uri = "figma:abc/1:1", attributes = mapOf("nodeId" to "1:1\"><script>"))
+        reference(uri = "figma:abc/1:1", attributes = mapOf("nodeId" to "1:1\"><script>")),
       ),
       "the attribute is validated exactly like the handle's own node segment",
     )

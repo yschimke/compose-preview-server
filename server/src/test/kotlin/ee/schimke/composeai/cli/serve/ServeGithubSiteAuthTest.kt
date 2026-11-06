@@ -81,7 +81,7 @@ class ServeGithubSiteAuthTest {
 
   private val sites =
     ServeSiteRegistry.of(
-      listOf("m3.preview.coo.ee" to "m3-catalog", "wear.preview.coo.ee" to "wear-m3")
+      listOf("m3.preview.coo.ee" to "m3-catalog", "wear.preview.coo.ee" to "wear-m3"),
     )
 
   private val registry = ServeSessionRegistry(open = { null })
@@ -196,7 +196,7 @@ class ServeGithubSiteAuthTest {
     get("/auth/github/start?return=%2Fui-builder%2Fmy-design", "ui.coo.ee").use { started ->
       val location = started.header("Location").orEmpty()
       assertTrue(
-        location.contains("redirect_uri=https%3A%2F%2Fpreview.coo.ee%2Fauth%2Fgithub%2Fcallback")
+        location.contains("redirect_uri=https%3A%2F%2Fpreview.coo.ee%2Fauth%2Fgithub%2Fcallback"),
       )
       val state =
         java.net.URLDecoder.decode(location.substringAfter("state=").substringBefore("&"), "UTF-8")
@@ -367,7 +367,7 @@ class ServeGithubSiteAuthTest {
             .url("http://127.0.0.1:${evil.port}/auth/github/callback?code=ok&state=${enc(state)}")
             .header("X-Forwarded-Host", "preview.coo.ee")
             .header("Cookie", stateCookie)
-            .build()
+            .build(),
         )
         .execute()
         .use {
@@ -489,7 +489,7 @@ class ServeGithubSiteAuthTest {
             Request.Builder()
               .url("http://127.0.0.1:${hostOnly.port}/status")
               .header("X-Forwarded-Host", host)
-              .build()
+              .build(),
           )
           .execute()
       }

@@ -54,7 +54,7 @@ class ServePageThemeTest {
         listOf(
           wearTheme("Light", "com.example.LightWearTheme"),
           wearTheme("Coral", "com.example.CoralWearTheme"),
-        )
+        ),
       )
 
     assertTrue(themes.first { it.name == "Light" }.mode == "light")
@@ -162,7 +162,7 @@ class ServePageThemeTest {
     // The URL outranks the remembered choice, exactly as the theme itself does.
     assertTrue(
       script.contains(
-        "p.get(\"theme\")||(p.get(\"themeProvider\")?\"theme:\"+p.get(\"themeProvider\"):\"\")||p.get(\"uiMode\")"
+        "p.get(\"theme\")||(p.get(\"themeProvider\")?\"theme:\"+p.get(\"themeProvider\"):\"\")||p.get(\"uiMode\")",
       ),
       script,
     )
@@ -195,7 +195,7 @@ class ServePageThemeTest {
     )
     assertTrue(
       script.contains(
-        "r=function(t){t=t;return t===\"light\"||t===\"dark\"?t:((decodeURIComponent"
+        "r=function(t){t=t;return t===\"light\"||t===\"dark\"?t:((decodeURIComponent",
       ),
       "…and one that names no mode gives way to the theme the id bakes: $script",
     )
@@ -286,7 +286,7 @@ class ServePageThemeTest {
       )
       assertTrue(
         html.contains(
-          """<script src="${ServeWebAssets.href("keyboard-navigation.js")}"></script>"""
+          """<script src="${ServeWebAssets.href("keyboard-navigation.js")}"></script>""",
         ),
         "$name never loads keyboard-navigation.js",
       )
@@ -299,7 +299,7 @@ class ServePageThemeTest {
     assertTrue(viewer().contains("data-cp-theme-key=\"cp-theme:wear-m3\""))
     // The front door has no theme control, so there is nothing to follow and no key to read.
     assertFalse(
-      ServeWeb.homeIndexPage(emptyList(), token = "t", version = "0").contains("data-cp-theme-key")
+      ServeWeb.homeIndexPage(emptyList(), token = "t", version = "0").contains("data-cp-theme-key"),
     )
   }
 
@@ -372,7 +372,7 @@ class ServePageThemeTest {
 
     assertTrue(
       html.contains(
-        "data-theme-choice=\"theme:${darkTheme.providerFqn}\" data-theme-mode=\"dark\""
+        "data-theme-choice=\"theme:${darkTheme.providerFqn}\" data-theme-mode=\"dark\"",
       ),
       "the declared-theme chip must carry its resolved mode",
     )

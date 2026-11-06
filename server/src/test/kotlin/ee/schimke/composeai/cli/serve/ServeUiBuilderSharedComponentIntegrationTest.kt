@@ -95,7 +95,7 @@ class ServeUiBuilderSharedComponentIntegrationTest {
 
     val artifact =
       assertIs<ExportResponseV1>(
-          response(server, ExportDesignRequestV1(DESIGN_ID, revision = 0, ExportFormatV1.COMPOSE))
+          response(server, ExportDesignRequestV1(DESIGN_ID, revision = 0, ExportFormatV1.COMPOSE)),
         )
         .artifact
 
@@ -205,8 +205,8 @@ class ServeUiBuilderSharedComponentIntegrationTest {
                   system = CATALOG_SYSTEM_ID,
                   componentId = COMPONENT_ID,
                   digest = symbol.digest,
-                )
-            )
+                ),
+            ),
         ),
     )
 
@@ -214,7 +214,7 @@ class ServeUiBuilderSharedComponentIntegrationTest {
     File(components, "index.json")
       .writeText(
         """{"schema":"${ServeUiBuilderComponentLibrary.INDEX_SCHEMA}",
-           "components":[{"id":"$COMPONENT_ID","title":"Contribution cell"}]}"""
+           "components":[{"id":"$COMPONENT_ID","title":"Contribution cell"}]}""",
       )
     File(components, "$COMPONENT_ID.json")
       .writeText(
@@ -248,7 +248,7 @@ class ServeUiBuilderSharedComponentIntegrationTest {
           }
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
   }
 
@@ -256,7 +256,7 @@ class ServeUiBuilderSharedComponentIntegrationTest {
     val registry = ServeSessionRegistry(open = { null })
     val source =
       ComponentRecordSource(
-        mapOf(CATALOG_SYSTEM_ID to ScreenGeneratorScreenFixture.componentsFile())
+        mapOf(CATALOG_SYSTEM_ID to ScreenGeneratorScreenFixture.componentsFile()),
       )
     val service =
       PersistentUiBuilderService(
@@ -307,9 +307,9 @@ class ServeUiBuilderSharedComponentIntegrationTest {
             .post(
               json
                 .encodeToString(HttpRequestEnvelopeV1.serializer(), envelope)
-                .toRequestBody(JSON_MEDIA_TYPE)
+                .toRequestBody(JSON_MEDIA_TYPE),
             )
-            .build()
+            .build(),
         )
         .execute()
     return http.use {

@@ -28,7 +28,7 @@ class ServeRcFontsTest {
         ServeRcFonts::class.java.getResourceAsStream(resource)?.use { it.readBytes() }
           ?: error(
             "${face.file} is declared by ServeRcFonts but not on the classpath — add it to " +
-              "stageRcFontResources in cli/build.gradle.kts"
+              "stageRcFontResources in cli/build.gradle.kts",
           )
       assertTrue(bytes.size > 1024, "${face.file} looks truncated (${bytes.size} bytes)")
       // TrueType's sfnt version, so a staged-but-wrong file (an OFL text file, an LFS
@@ -48,7 +48,7 @@ class ServeRcFontsTest {
       assertTrue(
         css.contains(
           "@font-face{font-family:\"${face.family}\";font-weight:${face.weightRange};" +
-            "font-style:normal;src:url(\"/rc-fonts/${face.file}\") format(\"truetype\");}"
+            "font-style:normal;src:url(\"/rc-fonts/${face.file}\") format(\"truetype\");}",
         ),
         "missing rule for ${face.file}:\n$css",
       )
@@ -89,7 +89,7 @@ class ServeRcFontsTest {
     // elements, so what this pins is that the page carrying a document carries the loader at all.
     assertTrue(
       withDoc.contains(
-        """<script src="${ServeWebAssets.href("viewer-components.js")}"></script>"""
+        """<script src="${ServeWebAssets.href("viewer-components.js")}"></script>""",
       ),
       withDoc,
     )

@@ -100,7 +100,7 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
       "m3/snackbar-host" to
         "not a discovery gap. There is no SnackbarHost preview, deliberately: m3-catalog's " +
           "Snackbar.kt says the host is a dispatcher and the catalog composes snackbars " +
-          "directly, so the record cannot carry a callable no sticker draws"
+          "directly, so the record cannot carry a callable no sticker draws",
     )
 
   private fun frozenOwned() = frozen.components.filter { it.componentId.startsWith("m3/") }
@@ -326,7 +326,7 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
           "iconGrade",
           "iconOpticalSize",
           "iconAutoMirror",
-        )
+        ),
     )
 
   /**
@@ -645,9 +645,9 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
               subject.copy(
                 properties =
                   subject.properties +
-                    mapOf("hour" to IntegerValueV1(25), "minute" to IntegerValueV1(-1))
-              )
-          )
+                    mapOf("hour" to IntegerValueV1(25), "minute" to IntegerValueV1(-1)),
+              ),
+          ),
       )
     val clamped = executor.generate(outOfRange)
     assertIs<ScreenGeneratorComposeExportExecutor.Generated.Emitted>(clamped)
@@ -665,9 +665,9 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
           linkedMapOf(
             "subject" to
               subject.copy(
-                properties = subject.properties + mapOf("is24Hour" to BooleanValueV1(false))
-              )
-          )
+                properties = subject.properties + mapOf("is24Hour" to BooleanValueV1(false)),
+              ),
+          ),
       )
     val authored = executor.generate(twelveHour)
     assertIs<ScreenGeneratorComposeExportExecutor.Generated.Emitted>(authored)
@@ -812,7 +812,7 @@ class PublishedGeneratedM3CatalogEquivalenceTest {
                     property.name to
                       (choose[property.name]?.let { EnumValueV1(it) } ?: authored(property))
                   },
-            )
+            ),
         ),
     )
 

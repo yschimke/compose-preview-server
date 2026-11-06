@@ -75,7 +75,7 @@ class ServeUiBuilderCommentsIntegrationTest {
           server,
           ServeUiBuilderMcp.AWAIT_COMMENTS,
           """{"designId":"$DESIGN_ID","afterSequence":0,"waitSeconds":30}""",
-        )
+        ),
       )
     }
       .also { it.isDaemon = true }
@@ -317,7 +317,7 @@ class ServeUiBuilderCommentsIntegrationTest {
                   actorId,
                   DesignAccessRoleV1.VIEWER,
                   listOf(DesignAccessActionV1.READ, DesignAccessActionV1.EXPORT),
-                )
+                ),
               ),
           ),
       )
@@ -328,7 +328,7 @@ class ServeUiBuilderCommentsIntegrationTest {
             .url("http://127.0.0.1:${server.server.port}/api/ui-builder/v1/requests")
             .header(ServeHttpServer.TOKEN_HEADER, OPERATOR_TOKEN)
             .post(json.encodeToString(envelope).toRequestBody(JSON_MEDIA_TYPE))
-            .build()
+            .build(),
         )
         .execute()
     response.use { assertEquals(200, it.code, it.body.string()) }
@@ -343,9 +343,9 @@ class ServeUiBuilderCommentsIntegrationTest {
         .newCall(
           Request.Builder()
             .url(
-              "http://127.0.0.1:${server.server.port}/api/ui-builder/v1/designs/$DESIGN_ID/comments"
+              "http://127.0.0.1:${server.server.port}/api/ui-builder/v1/designs/$DESIGN_ID/comments",
             )
-            .build()
+            .build(),
         )
         .execute()
     response.use { assertEquals(401, it.code) }
@@ -531,7 +531,7 @@ class ServeUiBuilderCommentsIntegrationTest {
     client.newWebSocket(
       Request.Builder()
         .url(
-          "ws://127.0.0.1:${server.server.port}/api/ui-builder/v1/designs/$DESIGN_ID/comments/updates"
+          "ws://127.0.0.1:${server.server.port}/api/ui-builder/v1/designs/$DESIGN_ID/comments/updates",
         )
         .header(ServeHttpServer.TOKEN_HEADER, OPERATOR_TOKEN)
         .build(),
@@ -596,7 +596,7 @@ class ServeUiBuilderCommentsIntegrationTest {
             .url("http://127.0.0.1:${server.server.port}/api/ui-builder/v1/requests")
             .header(ServeHttpServer.TOKEN_HEADER, OPERATOR_TOKEN)
             .post(json.encodeToString(envelope).toRequestBody(JSON_MEDIA_TYPE))
-            .build()
+            .build(),
         )
         .execute()
     response.use { assertEquals(200, it.code, it.body.string()) }
@@ -625,8 +625,8 @@ class ServeUiBuilderCommentsIntegrationTest {
         exporter =
           ScreenGeneratorComposeExportExecutor(
             ComponentRecordSource(
-              mapOf(CATALOG_SYSTEM_ID to ScreenGeneratorScreenFixture.componentsFile())
-            )::record
+              mapOf(CATALOG_SYSTEM_ID to ScreenGeneratorScreenFixture.componentsFile()),
+            )::record,
           ),
       )
     val server =
@@ -673,7 +673,7 @@ class ServeUiBuilderCommentsIntegrationTest {
           .url("http://127.0.0.1:${server.server.port}/mcp")
           .header(ServeHttpServer.TOKEN_HEADER, OPERATOR_TOKEN)
           .post(body.toRequestBody(JSON_MEDIA_TYPE))
-          .build()
+          .build(),
       )
       .execute()
       .use {

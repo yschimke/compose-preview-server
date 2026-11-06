@@ -160,7 +160,7 @@ class PlaygroundNodeBoundsServiceTest {
                   node("3", "32,48,80,96", label = "Play"),
                   node("4", "80,48,128,96", label = NativeNodeTags.tag("x"), testTag = "real"),
                 ),
-            )
+            ),
           ),
       )
     val fake =

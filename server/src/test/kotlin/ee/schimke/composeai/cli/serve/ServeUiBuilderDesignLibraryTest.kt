@@ -58,7 +58,7 @@ class ServeUiBuilderDesignLibraryTest {
     assertEquals("checkout.json", entries.single().file, "the file defaults to <id>.json")
     assertEquals(
       listOf(
-        "https://raw.githubusercontent.com/yschimke/m3-catalog/design-artifacts/m3-catalog/ui-builder/designs/index.json"
+        "https://raw.githubusercontent.com/yschimke/m3-catalog/design-artifacts/m3-catalog/ui-builder/designs/index.json",
       ),
       asked,
     )

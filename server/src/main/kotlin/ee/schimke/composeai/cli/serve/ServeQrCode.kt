@@ -42,7 +42,7 @@ internal class ServeQrCode private constructor(val version: Int, val modules: Ar
               top -> '▀'
               bottom -> '▄'
               else -> ' '
-            }
+            },
           )
         }
         append(ANSI_RESET)
@@ -58,7 +58,7 @@ internal class ServeQrCode private constructor(val version: Int, val modules: Ar
       for (y in 0 until size) for (x in 0 until size) {
         if (modules[y][x])
           append(
-            "M${(x + quiet) * moduleSize},${(y + quiet) * moduleSize}h${moduleSize}v${moduleSize}h-${moduleSize}z"
+            "M${(x + quiet) * moduleSize},${(y + quiet) * moduleSize}h${moduleSize}v${moduleSize}h-${moduleSize}z",
           )
       }
     }

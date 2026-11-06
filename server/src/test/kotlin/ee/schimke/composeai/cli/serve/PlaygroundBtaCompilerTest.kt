@@ -76,7 +76,7 @@ class PlaygroundBtaCompilerTest {
   fun `a single-line diagnostic is unchanged`() {
     val diag =
       PlaygroundBtaCompiler.diagnosticsFrom(
-          listOf("file:///tmp/pg/abc/src/Snippet.kt:3:5 unresolved reference: Bttn")
+          listOf("file:///tmp/pg/abc/src/Snippet.kt:3:5 unresolved reference: Bttn"),
         )
         .single()
 
@@ -140,7 +140,7 @@ class PlaygroundBtaCompilerTest {
   fun `positions never go negative`() {
     val diags =
       PlaygroundBtaCompiler.mapDiagnostics(
-        listOf(CompileErrorDetail(file = "X.kt", line = 0, column = 0, message = "m"))
+        listOf(CompileErrorDetail(file = "X.kt", line = 0, column = 0, message = "m")),
       )
     assertEquals(0, diags.single().line)
     assertEquals(0, diags.single().ch)

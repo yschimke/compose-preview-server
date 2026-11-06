@@ -26,7 +26,7 @@ internal object ServeUidReference {
     val doc = Json.parseToJsonElement(bytes.decodeToString()).jsonObject
     require(
       doc["schema"]?.jsonPrimitive?.content in
-        setOf("compose-ui-builder-document/v1", "compose-ui-builder-document/v1-candidate")
+        setOf("compose-ui-builder-document/v1", "compose-ui-builder-document/v1-candidate"),
     )
     require(doc["id"]?.jsonPrimitive?.content == reference.source.attributes["designId"])
     val system = doc.getValue("catalogPin").jsonObject.getValue("systemId").jsonPrimitive.content
@@ -58,8 +58,8 @@ internal object ServeUidReference {
       reference.source.uri.orEmpty().takeIf {
         it.matches(
           Regex(
-            "https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/blob/[a-f0-9]{40}/[^?#]+\\.uid"
-          )
+            "https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/blob/[a-f0-9]{40}/[^?#]+\\.uid",
+          ),
         )
       }
     val sourceLink =

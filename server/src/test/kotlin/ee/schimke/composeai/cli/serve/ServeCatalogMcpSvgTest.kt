@@ -72,7 +72,7 @@ class ServeCatalogMcpSvgTest {
           """
           {"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_render_preview",
            "arguments":{"catalog":"m3","previewId":"card","observe":"$observe"}}}
-          """
+          """,
         )
         .jsonObject
     val reply = runBlocking {

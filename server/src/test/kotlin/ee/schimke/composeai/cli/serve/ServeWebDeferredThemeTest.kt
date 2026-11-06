@@ -50,7 +50,7 @@ class ServeWebDeferredThemeTest {
     assertTrue(
       html.contains(
         "themeVisible = current === \"all\" || " +
-          "themeSection.getAttribute(\"data-section\") === current"
+          "themeSection.getAttribute(\"data-section\") === current",
       ),
       "All shows every section, so only the viewport decides",
     )
@@ -91,7 +91,7 @@ class ServeWebDeferredThemeTest {
       html.contains("function releaseAllThemeLeases(beacon)") &&
         html.contains("releaseAllThemeLeases(false);") &&
         html.contains(
-          "window.addEventListener(\"pagehide\", function () { releaseAllThemeLeases(true); });"
+          "window.addEventListener(\"pagehide\", function () { releaseAllThemeLeases(true); });",
         ),
       "a theme change and a page exit both hand back every claim",
     )
@@ -177,7 +177,9 @@ class ServeWebDeferredThemeTest {
     // Otherwise those cards would sit on the wrong theme forever.
     assertTrue(
       page()
-        .contains("if (!window.IntersectionObserver) { runDeferredThemeBatch(jobs, gen); return; }")
+        .contains(
+          "if (!window.IntersectionObserver) { runDeferredThemeBatch(jobs, gen); return; }",
+        ),
     )
   }
 

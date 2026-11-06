@@ -148,7 +148,7 @@ internal object UiBuilderDesignMatrix {
         else ->
           listOf(
             WearWidgetScaffoldSize.entries.firstOrNull { it.componentId == root.componentId }
-              ?: return null
+              ?: return null,
           )
       }
     return sizes.flatMap { size -> WIDGET_SHAPES.map { widgetPresetId(size, it) } }

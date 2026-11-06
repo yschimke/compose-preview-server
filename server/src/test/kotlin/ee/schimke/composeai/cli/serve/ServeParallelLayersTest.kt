@@ -39,7 +39,7 @@ class ServeParallelLayersTest {
               "Continue",
               detail =
                 mapOf("fontFamily" to "Inter", "fontSize" to "16.0sp", "token" to "bodyLarge"),
-            )
+            ),
           ),
         there =
           listOf(
@@ -47,7 +47,7 @@ class ServeParallelLayersTest {
               "Continue",
               detail =
                 mapOf("fontFamily" to "Roboto", "fontSize" to "16.0sp", "token" to "bodyLarge"),
-            )
+            ),
           ),
       )
     val rows = layer(diff, AnnotationKind.TYPOGRAPHY).rows
@@ -185,11 +185,11 @@ class ServeParallelLayersTest {
       ServeParallelLayers.diff(
         here =
           listOf(
-            typography(null, detail = mapOf("token" to "titleMedium", "fontSize" to "16.0sp"))
+            typography(null, detail = mapOf("token" to "titleMedium", "fontSize" to "16.0sp")),
           ),
         there =
           listOf(
-            typography(null, detail = mapOf("token" to "titleMedium", "fontSize" to "18.0sp"))
+            typography(null, detail = mapOf("token" to "titleMedium", "fontSize" to "18.0sp")),
           ),
       )
     val row = layer(diff, AnnotationKind.TYPOGRAPHY).rows.single()

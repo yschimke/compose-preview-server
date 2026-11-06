@@ -55,7 +55,7 @@ class ServeDiscoverySelectionTest {
         selectRequestedModule(
           discovery("catalog-desktop", "remote-catalog", "wear-m3-catalog"),
           ":remote-catalog",
-        )
+        ),
       )
     assertEquals(listOf("remote-catalog"), selected.manifests.map { it.first.gradlePath })
     assertEquals(true, selected.buildOk, "the build result is carried through, not re-decided")
@@ -65,7 +65,7 @@ class ServeDiscoverySelectionTest {
   fun `a nested gradle path matches colon-separated`() {
     val selected =
       assertNotNull(
-        selectRequestedModule(discovery("auth:composables", "auth:ui"), "auth:composables")
+        selectRequestedModule(discovery("auth:composables", "auth:ui"), "auth:composables"),
       )
     assertEquals(listOf("auth:composables"), selected.manifests.map { it.first.gradlePath })
   }

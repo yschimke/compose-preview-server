@@ -145,8 +145,8 @@ class OrdinaryScreenExportTest {
             "layout/row",
             "horizontalArrangement" to EnumValueV1("end"),
             "horizontalSpacingDp" to IntegerValueV1(8),
-          )
-        )
+          ),
+        ),
     )
     assertTrue(
       "verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically)" in
@@ -155,8 +155,8 @@ class OrdinaryScreenExportTest {
             "layout/column",
             "verticalArrangement" to EnumValueV1("center"),
             "verticalSpacingDp" to IntegerValueV1(12),
-          )
-        )
+          ),
+        ),
     )
     // A `space*` arrangement distributes free space itself and Compose cannot also add a gap, so
     // the arrangement wins, as on the canvas.
@@ -166,7 +166,7 @@ class OrdinaryScreenExportTest {
           "layout/column",
           "verticalArrangement" to EnumValueV1("spaceBetween"),
           "verticalSpacingDp" to IntegerValueV1(8),
-        )
+        ),
       )
     assertTrue("verticalArrangement = Arrangement.SpaceBetween" in spaced, spaced)
     assertTrue("spacedBy" !in spaced, spaced)
@@ -179,13 +179,13 @@ class OrdinaryScreenExportTest {
             "layout/column",
             "verticalArrangement" to EnumValueV1("top"),
             "verticalSpacingDp" to IntegerValueV1(0),
-          )
-        )
+          ),
+        ),
     )
     // And a gap alone still exports as it always has.
     assertTrue(
       "horizontalArrangement = Arrangement.spacedBy(8.dp)" in
-        source(layout("layout/row", "horizontalSpacingDp" to IntegerValueV1(8)))
+        source(layout("layout/row", "horizontalSpacingDp" to IntegerValueV1(8))),
     )
   }
 
@@ -195,7 +195,7 @@ class OrdinaryScreenExportTest {
     assertEquals(
       listOf(
         "node `layout`.`horizontalArrangement` is the enum value `middle`, which is not one of " +
-          "center, end, spaceAround, spaceBetween, spaceEvenly, start"
+          "center, end, spaceAround, spaceBetween, spaceEvenly, start",
       ),
       alone,
     )
@@ -207,7 +207,7 @@ class OrdinaryScreenExportTest {
           "layout/row",
           "horizontalArrangement" to EnumValueV1("middle"),
           "horizontalSpacingDp" to IntegerValueV1(8),
-        )
+        ),
       ),
     )
   }
@@ -222,9 +222,9 @@ class OrdinaryScreenExportTest {
           nodes =
             linkedMapOf(
               "caption" to
-                label("caption", "Posted yesterday", "fontStyle" to EnumValueV1("italic"))
+                label("caption", "Posted yesterday", "fontStyle" to EnumValueV1("italic")),
             ),
-        )
+        ),
       )
     assertTrue("fontStyle = FontStyle.Italic" in source, source)
     assertTrue("import androidx.compose.ui.text.font.FontStyle" in source, source)
@@ -321,7 +321,7 @@ class OrdinaryScreenExportTest {
                 ),
               "title" to label("title", "Inbox"),
             ),
-        )
+        ),
       )
     assertTrue("CenterAlignedTopAppBar(" in source, source)
     // Two roles, one bundle: read one at a time the second would have overwritten the first.
@@ -351,7 +351,7 @@ class OrdinaryScreenExportTest {
                 componentId = "m3/slider",
                 properties = mapOf(*properties),
                 modifiers = listOf(FillMaxWidthModifierV1),
-              )
+              ),
           ),
       )
     val source =
@@ -363,7 +363,7 @@ class OrdinaryScreenExportTest {
           // The default bounds, spelled out: omitting them leaves `valueRange` at exactly this.
           "valueFrom" to IntegerValueV1(0),
           "valueTo" to DecimalValueV1(1.0),
-        )
+        ),
       )
     assertTrue("value = 0.4f" in source, source)
     // Required, and not a handler the document can bind; the placeholder the record licenses.
@@ -391,7 +391,7 @@ class OrdinaryScreenExportTest {
                 id = "dot",
                 componentId = "shape/colour-dot",
                 properties = mapOf(*properties),
-              )
+              ),
           ),
       )
     // The canvas draws `size(d).clip(CircleShape).background(colour)` on a `Box`; the export writes
@@ -404,7 +404,7 @@ class OrdinaryScreenExportTest {
     assertTrue("import androidx.compose.foundation.shape.CircleShape" in source, source)
     assertTrue(
       "Modifier.size(12.dp).clip(CircleShape)" in
-        source(dot("color" to StringValueV1("#00FF00"), "diameterDp" to IntegerValueV1(12)))
+        source(dot("color" to StringValueV1("#00FF00"), "diameterDp" to IntegerValueV1(12))),
     )
     assertEquals(
       listOf("node `dot` sets no `color`, and a colour dot is nothing but its colour"),
@@ -558,7 +558,7 @@ class OrdinaryScreenExportTest {
             document = document,
             catalog = catalog,
             format = ExportFormatV1.COMPOSE,
-          )
+          ),
         )
 
     assertEquals(emptyList(), artifact.diagnostics, artifact.content)

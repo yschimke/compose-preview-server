@@ -190,7 +190,7 @@ class ServeCatalogRegistrySyncTest {
         ServeCatalogsConfig.Entry(
           system = "joreilly-peopleinspace",
           importedFrom = "joreilly/PeopleInSpace",
-        )
+        ),
       )
     box.tracked += "joreilly-peopleinspace"
     val sync = syncOf(box) { doc }
@@ -258,7 +258,7 @@ class ServeCatalogRegistrySyncTest {
         ServeCatalogsConfig.Entry(
           system = "joreilly-peopleinspace",
           importedFrom = "joreilly/PeopleInSpace",
-        )
+        ),
       )
     sync.syncOnce()
 
@@ -294,7 +294,7 @@ class ServeCatalogRegistrySyncTest {
     val sync =
       syncOf(box) {
         contributionOfEntry(
-          ServeCatalogsConfig.Entry(system = "operator-named", importedFrom = "someone/Else")
+          ServeCatalogsConfig.Entry(system = "operator-named", importedFrom = "someone/Else"),
         )
       }
 

@@ -101,7 +101,7 @@ class PlaygroundAndroidRenderService(
   private fun reportNoFrame(snippet: PlaygroundTokenStore.PlaygroundSnippet, reason: String?) {
     System.err.println(
       "serve: no first frame for ${snippet.previewId} (${snippet.mode.name}) — " +
-        (reason ?: "no reason reported")
+        (reason ?: "no reason reported"),
     )
   }
 
@@ -134,7 +134,7 @@ class PlaygroundAndroidRenderService(
           try {
             failure.set(
               renderFailureDetail(params)?.let { "daemon reported renderFailed: $it" }
-                ?: "daemon reported renderFailed"
+                ?: "daemon reported renderFailed",
             )
           } finally {
             latch.countDown()

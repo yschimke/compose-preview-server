@@ -79,7 +79,8 @@ class ServeKnownDifferencesTest {
       "x".repeat(ServeKnownDifferences.MAX_DOCUMENT_BYTES),
     )
     assertTrue(
-      ServeKnownDifferences.document(root, FileSystem.SYSTEM) is ServeKnownDifferences.Document.Text
+      ServeKnownDifferences.document(root, FileSystem.SYSTEM)
+        is ServeKnownDifferences.Document.Text,
     )
   }
 
@@ -103,7 +104,7 @@ class ServeKnownDifferencesTest {
     write(root, artifactPath("glyph", "nested/mask.png"), "bytes")
     assertTrue(
       ServeKnownDifferences.artifact(root, "glyph/nested/mask.png", FileSystem.SYSTEM)
-        is ServeKnownDifferences.Artifact.Bytes
+        is ServeKnownDifferences.Artifact.Bytes,
     )
   }
 

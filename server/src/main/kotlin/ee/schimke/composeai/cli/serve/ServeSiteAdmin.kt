@@ -77,7 +77,7 @@ class ServeSiteAdmin(
       return Result.Invalid(
         problems.firstOrNull { it.contains("'$host'") }
           ?: problems.firstOrNull()
-          ?: "site '$host' was rejected"
+          ?: "site '$host' was rejected",
       )
     }
     return commit(next, host, "published")
@@ -128,5 +128,5 @@ class ServeSiteAdmin(
 
 /** This config with its `sites` list replaced by [sites] — the whole list, in map order. */
 internal fun ServeCatalogsConfig.withSites(
-  sites: List<ServeCatalogsConfig.Site>
+  sites: List<ServeCatalogsConfig.Site>,
 ): ServeCatalogsConfig = copy(sites = sites)

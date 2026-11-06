@@ -61,7 +61,7 @@ class ServeDesignPageParallelTest {
       File(dir, "${ServeDesignPageStore.DIRECTORY}/shape.svg")
         .writeText(
           """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">""" +
-            """<g data-node-id="1:1"><rect width="10" height="10"/></g></svg>"""
+            """<g data-node-id="1:1"><rect width="10" height="10"/></g></svg>""",
         )
       File(dir, "${ServeDesignPageStore.DIRECTORY}/${ServeDesignPageStore.INDEX_FILE}")
         .writeText(
@@ -73,7 +73,7 @@ class ServeDesignPageParallelTest {
              "nodes":[{"nodeId":"1:1","name":"Shape=Circle","depth":3,"link":"manifest",
                        "confidence":"high","code":"ui/Shapes.kt#Circle","previewId":"$previewId"}]}]}
           """
-            .trimIndent()
+            .trimIndent(),
         )
     }
     return ServeBundleHost(

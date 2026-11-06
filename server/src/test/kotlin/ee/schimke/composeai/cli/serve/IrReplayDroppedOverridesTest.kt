@@ -99,7 +99,7 @@ class IrReplayDroppedOverridesTest {
       CatalogLiveRouting.irReplayDroppedOverrideNames(
         lightId,
         PreviewOverrides(
-          namedOverrides = mapOf("label" to PreviewOverrideValue.StringValue("Tap me"))
+          namedOverrides = mapOf("label" to PreviewOverrideValue.StringValue("Tap me")),
         ),
       ),
     )
@@ -130,7 +130,7 @@ class IrReplayDroppedOverridesTest {
                   "iconSize" to RemoteNamedValue.DpValue(64f),
                 )
             }
-            .build()
+            .build(),
       )
     assertEquals(
       listOf("rc.label"),
@@ -149,7 +149,7 @@ class IrReplayDroppedOverridesTest {
           remoteCompose =
             RemoteComposeOverride.Builder()
               .also { it.player = RemoteComposePlayerKind.EMBEDDED }
-              .build()
+              .build(),
         ),
       ),
     )

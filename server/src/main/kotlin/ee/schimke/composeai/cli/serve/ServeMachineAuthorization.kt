@@ -75,7 +75,7 @@ class ServeMachineAuthorization(
       } else {
         Decision.Forbidden(
           "This agent grant covers ${grant.scopes.joinToString(", ") { it.wire }}; " +
-            "'${required.wire}' was not approved."
+            "'${required.wire}' was not approved.",
         )
       }
     }

@@ -125,7 +125,7 @@ class ServeMotionIndexTest {
     // served as a `.gif` renders one frame and stops (see [ServeMotion.extension]).
     assertTrue(
       html.contains(
-        "data-motion-src=\"/compose-m3/motion/card__filled__interaction.apng?token=t\""
+        "data-motion-src=\"/compose-m3/motion/card__filled__interaction.apng?token=t\"",
       ),
       "the interaction capture keeps its .apng",
     )
@@ -148,13 +148,13 @@ class ServeMotionIndexTest {
     // the raw — an unescaped `&` in an href is the classic way a query param goes missing.
     assertTrue(
       html.contains(
-        "/compose-m3/p/card__filled?token=t&amp;mode=motion&amp;motion=card__filled__anim"
+        "/compose-m3/p/card__filled?token=t&amp;mode=motion&amp;motion=card__filled__anim",
       ),
       "the second capture's card opens the viewer on the second capture",
     )
     assertTrue(
       html.contains(
-        "/compose-m3/p/card__filled?token=t&amp;mode=motion&amp;motion=card__filled__interaction"
+        "/compose-m3/p/card__filled?token=t&amp;mode=motion&amp;motion=card__filled__interaction",
       ),
       "and the first on the first",
     )
@@ -289,7 +289,7 @@ class ServeMotionIndexTest {
     )
     assertTrue(
       html.contains(
-        "data-motion-src-dark=\"/compose-m3/motion/fab__ideal__default__dark.apng?token=t\""
+        "data-motion-src-dark=\"/compose-m3/motion/fab__ideal__default__dark.apng?token=t\"",
       ),
       "…and carries the other take for the control to swap to",
     )
@@ -297,14 +297,14 @@ class ServeMotionIndexTest {
     // light thumbnail over a dark recording and a link back to the light render's viewer page.
     assertTrue(
       html.contains(
-        "data-motion-poster-dark=\"/compose-m3/render/fab__ideal__default__dark.png?token=t\""
+        "data-motion-poster-dark=\"/compose-m3/render/fab__ideal__default__dark.png?token=t\"",
       ),
       "the still the card returns to is the dark render's",
     )
     assertTrue(
       html.contains(
         "data-motion-href-dark=\"/compose-m3/p/fab__ideal__default__dark?token=t" +
-          "&amp;mode=motion&amp;motion=fab__ideal__default__dark\""
+          "&amp;mode=motion&amp;motion=fab__ideal__default__dark\"",
       ),
       "and the deep link is the dark take's",
     )
@@ -364,7 +364,7 @@ class ServeMotionIndexTest {
     assertTrue(
       Regex(
           "data-motion-src=\"[^\"]*fab__ideal__default__light\\.apng[^>]*" +
-            "data-motion-poster=\"[^\"]*fab__ideal__default__light\\.png"
+            "data-motion-poster=\"[^\"]*fab__ideal__default__light\\.png",
         )
         .containsMatchIn(html),
       "the light take sits on the light default render's still",
@@ -372,7 +372,7 @@ class ServeMotionIndexTest {
     assertTrue(
       html.contains(
         "/compose-m3/p/fab__ideal__default__light?token=t&amp;mode=motion" +
-          "&amp;motion=fab__ideal__default__light"
+          "&amp;motion=fab__ideal__default__light",
       ),
       "…and deep-links to that render, on that take",
     )

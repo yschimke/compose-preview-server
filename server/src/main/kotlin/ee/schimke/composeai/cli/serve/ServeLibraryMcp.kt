@@ -215,7 +215,7 @@ internal object ServeLibraryMcp {
                 putJsonArray("entrypoints") { addJsonObject { put("type", "global") } }
               }
             },
-        )
+        ),
     )
 
   private fun resourceMeta(): JsonObject = buildJsonObject {

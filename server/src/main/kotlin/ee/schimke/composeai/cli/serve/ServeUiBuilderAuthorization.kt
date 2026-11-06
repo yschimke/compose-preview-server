@@ -69,7 +69,7 @@ fun interface ServeUiBuilderAuthorization {
       fromMachineAuthorization(ServeMachineAuthorization(serverToken, githubAuth, agentGrants))
 
     fun fromMachineAuthorization(
-      authorization: ServeMachineAuthorization
+      authorization: ServeMachineAuthorization,
     ): ServeUiBuilderAuthorization = ServeUiBuilderAuthorization { call, capability, presented ->
       when (
         val decision =

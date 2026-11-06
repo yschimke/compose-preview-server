@@ -59,7 +59,7 @@ class ServeUiBuilderGrantScopeTest {
             UiBuilderServiceResponse.DesignActions(designId!!, DesignAccessActionV1.entries)
           else
             UiBuilderServiceResponse.Error(
-              UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "no such design")
+              UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "no such design"),
             )
         }
       }
@@ -80,7 +80,7 @@ class ServeUiBuilderGrantScopeTest {
   private val grants =
     ServeAgentGrantStore(
       maxCapabilities =
-        setOf(AgentGrantCapability.UI_BUILDER_READ, AgentGrantCapability.UI_BUILDER_WRITE)
+        setOf(AgentGrantCapability.UI_BUILDER_READ, AgentGrantCapability.UI_BUILDER_WRITE),
     )
 
   private val port =
@@ -100,7 +100,7 @@ class ServeUiBuilderGrantScopeTest {
             setOf(AgentGrantCapability.UI_BUILDER_READ, AgentGrantCapability.UI_BUILDER_WRITE),
           requesterActorId = REQUESTER,
           designIds = designIds,
-        )
+        ),
       )
     return checkNotNull(
       grants.approve(
@@ -111,13 +111,13 @@ class ServeUiBuilderGrantScopeTest {
         capabilities = request.requestedCapabilities,
         approvedByActorId = OWNER,
         limitToRequestedDesigns = limit,
-      )
+      ),
     )
   }
 
   private fun reads(designId: String): Boolean = runBlocking {
     port.execute(
-      UiBuilderServiceCall(holder, UiBuilderServiceRequest.GetSnapshot(designId, revision = null))
+      UiBuilderServiceCall(holder, UiBuilderServiceRequest.GetSnapshot(designId, revision = null)),
     ) is UiBuilderServiceResponse.DesignActions
   }
 
@@ -126,9 +126,9 @@ class ServeUiBuilderGrantScopeTest {
       UiBuilderServiceCall(
         holder,
         UiBuilderServiceRequest.ApplyOperation(
-          UiBuilderSubmission.Batch(designId, "op", "client", baseRevision = 1, emptyList())
+          UiBuilderSubmission.Batch(designId, "op", "client", baseRevision = 1, emptyList()),
         ),
-      )
+      ),
     ) is UiBuilderServiceResponse.DesignActions
   }
 
@@ -170,7 +170,7 @@ class ServeUiBuilderGrantScopeTest {
     // `CreateDesign` names no existing design, so it resolves exactly like this: the new design
     // belongs to the holder rather than to the approver who lent one design.
     assertNull(
-      ServeUiBuilderGrantScope.actorFor(holder, designId = null, grantsLookup()).onBehalfOfActorId
+      ServeUiBuilderGrantScope.actorFor(holder, designId = null, grantsLookup()).onBehalfOfActorId,
     )
     runBlocking { port.execute(UiBuilderServiceCall(holder, UiBuilderServiceRequest.ListCatalogs)) }
     assertNull(service.calls.last().actor.onBehalfOfActorId)
@@ -293,7 +293,7 @@ class ServeUiBuilderGrantScopeTest {
         requestedScope = AgentGrantScope.PREVIEW,
         requestedTtlSeconds = 60,
         designIds = setOf("cheeky-raccoon.v2"),
-      )
+      ),
     )
   }
 
@@ -318,7 +318,7 @@ class ServeUiBuilderGrantScopeTest {
               grants = null,
               unopenableReason = null,
               requestAccessHref = href,
-            )
+            ),
           ),
         viewerActorId = REQUESTER,
         requestAccessHref = "/ui-builder/request-access",

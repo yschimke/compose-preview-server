@@ -218,7 +218,7 @@ class PlaygroundRoutingTest {
         Request.Builder()
           .url("http://127.0.0.1:$port/api/1/compiler/run")
           .post(body.toRequestBody("application/json".toMediaType()))
-          .build()
+          .build(),
       )
       .execute()
 
@@ -320,7 +320,7 @@ class PlaygroundRoutingTest {
   private fun get(path: String, port: Int, cookie: String) =
     client
       .newCall(
-        Request.Builder().url("http://127.0.0.1:$port$path").header("Cookie", cookie).build()
+        Request.Builder().url("http://127.0.0.1:$port$path").header("Cookie", cookie).build(),
       )
       .execute()
 
@@ -594,7 +594,7 @@ class PlaygroundRoutingTest {
           Request.Builder()
             .url("http://127.0.0.1:${gatedServer.port}/api/1/compiler/run?token=sekret")
             .post(body.toRequestBody("application/json".toMediaType()))
-            .build()
+            .build(),
         )
         .execute()
         .use { resp ->
@@ -612,7 +612,7 @@ class PlaygroundRoutingTest {
       .newCall(
         Request.Builder()
           .url("http://127.0.0.1:${gatedServer.port}$previewUrl?token=sekret")
-          .build()
+          .build(),
       )
       .execute()
       .use { resp ->
@@ -636,7 +636,7 @@ class PlaygroundRoutingTest {
           Request.Builder()
             .url("http://127.0.0.1:${gatedServer.port}/api/1/compiler/run?token=sekret")
             .post(body.toRequestBody("application/json".toMediaType()))
-            .build()
+            .build(),
         )
         .execute()
         .use { resp ->
@@ -652,7 +652,7 @@ class PlaygroundRoutingTest {
       .newCall(
         Request.Builder()
           .url("http://127.0.0.1:${engineOnlyServer.port}$previewUrl?token=sekret")
-          .build()
+          .build(),
       )
       .execute()
       .use { resp -> assertEquals(404, resp.code, "`/pg/` is not mounted without the surface") }
@@ -661,7 +661,7 @@ class PlaygroundRoutingTest {
         Request.Builder()
           .url("http://127.0.0.1:${engineOnlyServer.port}/api/1/compiler/run?token=sekret")
           .post(body.toRequestBody("application/json".toMediaType()))
-          .build()
+          .build(),
       )
       .execute()
       .use { resp -> assertEquals(404, resp.code, "the run route is not mounted either") }
@@ -721,7 +721,7 @@ class PlaygroundRoutingTest {
         .newCall(
           Request.Builder()
             .url("http://127.0.0.1:$port/auth/github/start?return=/playground")
-            .build()
+            .build(),
         )
         .execute()
         .use { resp ->
@@ -746,7 +746,7 @@ class PlaygroundRoutingTest {
         Request.Builder()
           .url("http://127.0.0.1:$port/auth/github/callback?code=ok&state=$state")
           .header("Cookie", start.second)
-          .build()
+          .build(),
       )
       .execute()
       .use { resp ->

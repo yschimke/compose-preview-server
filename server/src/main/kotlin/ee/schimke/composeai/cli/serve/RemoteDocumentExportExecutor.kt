@@ -25,7 +25,7 @@ internal class RemoteDocumentExportExecutor(
   override fun export(request: RevisionPinnedUiBuilderExport): ExportArtifactV1 {
     if (request.format !in RemoteDocumentExportSupport.formats) return delegate.export(request)
     require(
-      request.document.id == request.designId && request.document.revision == request.revision
+      request.document.id == request.designId && request.document.revision == request.revision,
     )
     val binary = request.format == RemoteDocumentExportSupport.documentFormat
     val diagnostics = mutableListOf<ExportDiagnosticV1>()
@@ -87,7 +87,7 @@ internal class RemoteDocumentExportExecutor(
     val compilerAvailable: Boolean by lazy {
       runCatching {
         RemoteComposeJson.compile(
-          """{"compilerProfile":"${RemoteDocumentJsonExporter.INTEGER_PROFILE}","root":{"box":{"children":[{"integerExpression":{"name":"probe","value":"1+1"}}]}}}"""
+          """{"compilerProfile":"${RemoteDocumentJsonExporter.INTEGER_PROFILE}","root":{"box":{"children":[{"integerExpression":{"name":"probe","value":"1+1"}}]}}}""",
         )
       }
         .isSuccess

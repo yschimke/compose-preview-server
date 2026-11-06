@@ -241,7 +241,7 @@ class ScratchUiBuilderDraftValidator(
               clientId = SCRATCH_CLIENT_ID,
               baseRevision = revision,
               operations = operations,
-            )
+            ),
           ),
         )
       when (val result = (outcome as? UiBuilderServiceResponse.OperationOutcome)?.outcome) {
@@ -269,7 +269,7 @@ class ScratchUiBuilderDraftValidator(
                 nodeId = result.nodeId,
                 field = result.field,
                 operationIndex = result.operationIndex,
-              )
+              ),
             ),
             null,
             catalog,
@@ -291,7 +291,7 @@ class ScratchUiBuilderDraftValidator(
             code = "composeExportUnavailable",
             message =
               "the pinned catalog does not export Compose, so there is no export gate to check",
-          )
+          ),
         ),
         checked,
         catalog,
@@ -347,7 +347,7 @@ class ScratchUiBuilderDraftValidator(
             UiBuilderServiceError(
               ServiceErrorCodeV1.INTERNAL,
               "validation failed: ${failure.message ?: failure::class.simpleName}",
-            )
+            ),
           )
         }
       is ProtocolRequestMapping.Rejected -> UiBuilderServiceResponse.Error(mapping.error)
@@ -456,7 +456,7 @@ internal object UiBuilderExportDiagnosticLocation {
       .singleOrNull()
       ?.let { node ->
         return listOf(
-          node to named.firstOrNull { it in (document.nodes[node]?.properties ?: emptyMap()) }
+          node to named.firstOrNull { it in (document.nodes[node]?.properties ?: emptyMap()) },
         )
       }
     NO_COMPONENT.find(message)?.let { match ->

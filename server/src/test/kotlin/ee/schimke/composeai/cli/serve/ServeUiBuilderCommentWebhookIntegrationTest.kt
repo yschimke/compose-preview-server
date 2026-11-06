@@ -441,8 +441,8 @@ class ServeUiBuilderCommentWebhookIntegrationTest {
         exporter =
           ScreenGeneratorComposeExportExecutor(
             ComponentRecordSource(
-              mapOf(CATALOG_SYSTEM_ID to ScreenGeneratorScreenFixture.componentsFile())
-            )::record
+              mapOf(CATALOG_SYSTEM_ID to ScreenGeneratorScreenFixture.componentsFile()),
+            )::record,
           ),
       )
     val server =
@@ -492,7 +492,7 @@ class ServeUiBuilderCommentWebhookIntegrationTest {
           .url("http://127.0.0.1:${server.port}$path")
           .header(ServeHttpServer.TOKEN_HEADER, OPERATOR_TOKEN)
           .post(body.toRequestBody(JSON_MEDIA_TYPE))
-          .build()
+          .build(),
       )
       .execute()
       .use { it.code to it.body.string() }
@@ -521,7 +521,7 @@ class ServeUiBuilderCommentWebhookIntegrationTest {
           .url("http://127.0.0.1:${server.port}/api/ui-builder/v1/requests")
           .header(ServeHttpServer.TOKEN_HEADER, OPERATOR_TOKEN)
           .post(json.encodeToString(envelope).toRequestBody(JSON_MEDIA_TYPE))
-          .build()
+          .build(),
       )
       .execute()
       .use { assertEquals(200, it.code, it.body.string()) }

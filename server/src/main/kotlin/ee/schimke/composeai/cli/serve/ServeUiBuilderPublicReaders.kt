@@ -81,7 +81,7 @@ internal class PublicReaderView(
                 )
               },
           )
-        }
+        },
     )
 
   fun snapshot(snapshot: ServiceSnapshotV1): ServiceSnapshotV1 =
@@ -117,7 +117,7 @@ internal class PublicReaderView(
       is UiBuilderServiceResponse.Delta -> UiBuilderServiceResponse.Delta(delta(response.delta))
       is UiBuilderServiceResponse.Revisions ->
         response.copy(
-          revisions = response.revisions.map { it.copy(actorId = it.actorId?.let(::actor)) }
+          revisions = response.revisions.map { it.copy(actorId = it.actorId?.let(::actor)) },
         )
       else -> response
     }

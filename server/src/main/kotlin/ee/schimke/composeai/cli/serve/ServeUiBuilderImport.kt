@@ -102,7 +102,7 @@ object ServeUiBuilderImport {
       } catch (e: Exception) {
         val cause = (e as? ExecutionException)?.cause ?: e
         return Fetched.Refused(
-          "the seed document could not be fetched: ${cause.javaClass.simpleName}"
+          "the seed document could not be fetched: ${cause.javaClass.simpleName}",
         )
       }
     if (response.statusCode() != 200) {

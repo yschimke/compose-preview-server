@@ -483,7 +483,7 @@ class ServeSessionRegistryTest {
             override fun discard(sessionId: String) {
               captured -= sessionId
             }
-          }
+          },
         )
         reg.register("compose-m3", stateFor("compose-m3"))
         assertNotNull(reg.acquire("compose-m3"), "resident before the idle window")
@@ -517,7 +517,7 @@ class ServeSessionRegistryTest {
             override fun discard(sessionId: String) {
               held -= sessionId
             }
-          }
+          },
         )
         reg.register("compose-m3", stateFor("compose-m3"))
         reg.acquire("compose-m3")
@@ -709,7 +709,7 @@ class ServeSessionRegistryTest {
               variant = "desktop",
               renderConfig = "density=2",
             ),
-          )
+          ),
       )
     val clock = AtomicLong(0)
     val work = ServeBackgroundWork(clock = clock::get)
@@ -1105,7 +1105,7 @@ class ServeSessionRegistryTest {
             override fun discard(sessionId: String) {
               held -= sessionId
             }
-          }
+          },
         )
         assertNotNull(reg.acquire("rev1"))
         clock.set(200)

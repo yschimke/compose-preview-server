@@ -92,7 +92,7 @@ class ServeCatalogMcp(
   private val viewImages =
     object : LinkedHashMap<String, Pair<ByteArray, Long>>(16, 0.75f, true) {
       override fun removeEldestEntry(
-        eldest: MutableMap.MutableEntry<String, Pair<ByteArray, Long>>
+        eldest: MutableMap.MutableEntry<String, Pair<ByteArray, Long>>,
       ) = size > MAX_VIEW_IMAGES
     }
 
@@ -276,7 +276,7 @@ class ServeCatalogMcp(
                       put("code", "export_overloaded")
                       put("retryable", true)
                       put("retryAfterSeconds", EXPORT_RETRY_AFTER_SECONDS)
-                    })
+                    }),
               )
             } catch (e: McpRequestException) {
               toolError(e.message ?: "Tool call failed")
@@ -410,7 +410,7 @@ class ServeCatalogMcp(
     val urlMode = (declared["elicitation"] as? JsonObject)?.get("url") is JsonObject
     val arguments = params["arguments"] as? JsonObject ?: JsonObject(emptyMap())
     return JsonObject(
-      params + ("arguments" to JsonObject(arguments + ("urlMode" to JsonPrimitive(urlMode))))
+      params + ("arguments" to JsonObject(arguments + ("urlMode" to JsonPrimitive(urlMode)))),
     )
   }
 
@@ -436,7 +436,7 @@ class ServeCatalogMcp(
                       "A bare design id is accepted too.",
                   )
                   put("required", true)
-                }
+                },
               )
               add(
                 buildJsonObject {
@@ -446,10 +446,10 @@ class ServeCatalogMcp(
                     "The design id on this server; kept for older clients, use designUrl.",
                   )
                   put("required", false)
-                }
+                },
               )
             }
-          }
+          },
         )
         add(
           buildJsonObject {
@@ -464,10 +464,10 @@ class ServeCatalogMcp(
                   put("name", "designId")
                   put("description", "The design id on this server.")
                   put("required", true)
-                }
+                },
               )
             }
-          }
+          },
         )
       }
     }
@@ -500,7 +500,7 @@ class ServeCatalogMcp(
                 put("text", text)
               },
             )
-          }
+          },
         )
       }
     }
@@ -510,7 +510,7 @@ class ServeCatalogMcp(
     val designId = requiredString("designId")
     if (!designId.matches(PROMPT_DESIGN_ID)) {
       throw McpRequestException(
-        "designId must be 1-64 URL-safe letters, digits, dots, underscores, or hyphens"
+        "designId must be 1-64 URL-safe letters, digits, dots, underscores, or hyphens",
       )
     }
     return designId
@@ -545,7 +545,7 @@ class ServeCatalogMcp(
       if (own != null && theirs != own) {
         throw McpRequestException(
           "designUrl names another server ($theirs); review it through that server's /mcp, " +
-            "since design ids are per server"
+            "since design ids are per server",
         )
       }
     }
@@ -556,7 +556,7 @@ class ServeCatalogMcp(
       rest.takeIf { it.size in 1..2 }?.last()?.takeIf { it.matches(PROMPT_DESIGN_ID) }
         ?: throw McpRequestException(
           "designUrl must look like …/ui-builder/<designId> (optionally ?node=<nodeId>), where " +
-            "designId is 1-64 URL-safe letters, digits, dots, underscores, or hyphens"
+            "designId is 1-64 URL-safe letters, digits, dots, underscores, or hyphens",
         )
     val nodeId =
       parsed.rawQuery
@@ -568,7 +568,7 @@ class ServeCatalogMcp(
           if (!it.matches(PROMPT_NODE_ID)) {
             throw McpRequestException(
               "designUrl's node must be 1-128 URL-safe letters, digits, dots, underscores, colons, " +
-                "or hyphens"
+                "or hyphens",
             )
           }
         }
@@ -628,7 +628,7 @@ class ServeCatalogMcp(
             "this when a call answered 'authorization_required', or when your token stopped " +
             "working (a server restart drops every grant).",
           """{"type":"object","properties":{"label":{"type":"string"},"scope":{"type":"string","enum":["preview","live","playground"]},"ttlSeconds":{"type":"integer"},"capabilities":{"type":"array","items":{"type":"string"}}}}""",
-        )
+        ),
       )
       add(
         tool(
@@ -647,7 +647,7 @@ class ServeCatalogMcp(
             "reaching this flow mid-session needs, since its headers were fixed when it " +
             "connected.",
           """{"type":"object","properties":{"requestId":{"type":"string"},"deviceSecret":{"type":"string"},"waitSeconds":{"type":"integer","minimum":0,"maximum":30},"urlMode":{"type":"boolean","description":"Use the protocol-standard URL elicitation UI while this request is pending."}},"required":["requestId","deviceSecret"]}""",
-        )
+        ),
       )
     }
     add(
@@ -657,7 +657,7 @@ class ServeCatalogMcp(
           "canonical origin designs here are homed at, and `originAliases`, other hostnames " +
           "that reach this same server.",
         EMPTY_SCHEMA,
-      )
+      ),
     )
     add(
       tool(
@@ -665,7 +665,7 @@ class ServeCatalogMcp(
         "List every remote catalog with its stable id and preview count. Call this first: " +
           "catalog_list_previews and catalog_list_data_products take one of these ids as 'catalog'.",
         EMPTY_SCHEMA,
-      )
+      ),
     )
     // Sidebar apps (#1241): OpenAI global entrypoints opening the library MCP App.
     add(ServeLibraryMcp.libraryTool(::tool))
@@ -680,7 +680,7 @@ class ServeCatalogMcp(
           "only: previews of the project you are editing come from the local " +
           "compose-preview-mcp server, not from here.",
         LIST_PREVIEWS_SCHEMA,
-      )
+      ),
     )
     add(
       tool(
@@ -692,7 +692,7 @@ class ServeCatalogMcp(
           "other observations and fresh renders require live grant scope; without it, a call " +
           "with no overrides returns the published snapshot (as resources/read does).",
         """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"observe":{"type":"string","enum":["png","svg","scroll-png","scroll-svg","semantics","hash"]},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}},"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
-      )
+      ),
     )
     add(
       tool(
@@ -703,7 +703,7 @@ class ServeCatalogMcp(
           "and are reported together, so comparing axes costs one round trip instead of N. " +
           "Capped at $MAX_MATRIX_CELLS cells. Requires live grant scope.",
         """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"observe":{"type":"string","enum":["png","hash"]},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}},"axes":{"type":"object","additionalProperties":{"type":"array","items":{"type":["string","number","boolean"]},"minItems":1}}},"required":["axes"],"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
-      )
+      ),
     )
     add(
       tool(
@@ -713,7 +713,7 @@ class ServeCatalogMcp(
           "unrecognised name renders the default frame rather than failing, so check here " +
           "instead of guessing.",
         EMPTY_SCHEMA,
-      )
+      ),
     )
     add(
       tool(
@@ -723,7 +723,7 @@ class ServeCatalogMcp(
           "positional ref, so a tag that stops resolving is reported rather than silently " +
           "retargeted at different pixels. Requires live grant scope.",
         """{"type":"object","properties":{"catalog":{"type":"string"},"previewId":{"type":"string"},"uri":{"type":"string"},"other":{"type":"object","properties":{"catalog":{"type":"string"},"previewId":{"type":"string"},"uri":{"type":"string"}}},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}},"otherOverrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}},"required":["other"],"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
-      )
+      ),
     )
     add(
       tool(
@@ -734,7 +734,7 @@ class ServeCatalogMcp(
           "returned inline; where the catalog is published from a delivery branch the manifest " +
           "lives on that branch and this reports where to fetch it.",
         """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"}},"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
-      )
+      ),
     )
     add(
       tool(
@@ -745,7 +745,7 @@ class ServeCatalogMcp(
           "either image. Reports `unstable` so a difference on a nondeterministic preview is not " +
           "mistaken for a real change.",
         """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"from":{"type":"string"},"to":{"type":"string"}},"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
-      )
+      ),
     )
     add(
       tool(
@@ -754,7 +754,7 @@ class ServeCatalogMcp(
           "prefix is enough). Use when an agent cannot reach the delivery branch itself, or wants " +
           "the bytes rather than the timeline.",
         """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"commit":{"type":"string"},"blob":{"type":"string"}},"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
-      )
+      ),
     )
     uiBuilder?.let {
       addAll(
@@ -769,7 +769,7 @@ class ServeCatalogMcp(
           it.supportsBranches,
           it.supportsReferences,
           it.supportsGuidelineRecords,
-        )
+        ),
       )
     }
     add(
@@ -778,7 +778,7 @@ class ServeCatalogMcp(
         "List the structured data-product kinds of one catalog, optionally one preview. Name " +
           "the catalog with 'catalog' (ids from catalog_list_projects) or a preview 'uri'.",
         """{"type":"object","properties":{"catalog":{"type":"string"},"previewId":{"type":"string"},"uri":{"type":"string"}},"anyOf":[{"required":["catalog"]},{"required":["uri"]}]}""",
-      )
+      ),
     )
     add(
       tool(
@@ -786,28 +786,28 @@ class ServeCatalogMcp(
         "Fetch the merged accessibility or annotation product for a preview. This lane " +
           "requires live grant scope.",
         """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"kind":{"type":"string"},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}},"required":["kind"],"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
-      )
+      ),
     )
     add(
       tool(
         "list-all-documentation",
         "Storybook-MCP-compatible alias that lists every preview as a story.",
         EMPTY_SCHEMA,
-      )
+      ),
     )
     add(
       tool(
         "get-documentation-for-story",
         "Storybook-MCP-compatible preview metadata lookup.",
         """{"type":"object","properties":{"storyId":{"type":"string"},"id":{"type":"string"}},"anyOf":[{"required":["storyId"]},{"required":["id"]}]}""",
-      )
+      ),
     )
     add(
       tool(
         "preview-stories",
         "Storybook-MCP-compatible rendering of one or more story ids. Requires live scope.",
         """{"type":"object","properties":{"storyIds":{"type":"array","items":{"type":"string"}},"storyId":{"type":"string"},"ids":{"type":"array","items":{"type":"string"}},"id":{"type":"string"},"observe":{"type":"string","enum":["png","svg","scroll-png","scroll-svg","semantics","hash"]},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}},"anyOf":[{"required":["storyIds"]},{"required":["storyId"]},{"required":["ids"]},{"required":["id"]}]}""",
-      )
+      ),
     )
   }
 
@@ -894,7 +894,7 @@ class ServeCatalogMcp(
         else ServeLibraryMcp.uiBuilderOpenResult()
       "list_previews" ->
         textResult(
-          previewsJson(requireCatalog("list_previews", args), PreviewPage.of(args)).toString()
+          previewsJson(requireCatalog("list_previews", args), PreviewPage.of(args)).toString(),
         )
       "list_data_products" -> textResult(dataProductsJson(args).toString())
       "list-all-documentation" -> textResult(storiesJson().toString())
@@ -956,7 +956,7 @@ class ServeCatalogMcp(
             ?: listOf(args.firstString("storyId", "id"))
         if (ids.size > MAX_STORIES_PER_CALL) {
           throw McpRequestException(
-            "preview-stories accepts at most $MAX_STORIES_PER_CALL ids per call"
+            "preview-stories accepts at most $MAX_STORIES_PER_CALL ids per call",
           )
         }
         requireLive(liveAuthorization)
@@ -1009,7 +1009,7 @@ class ServeCatalogMcp(
           )
           put("mimeType", MCP_APP_MIME_TYPE)
           put("_meta", viewerResourceMeta())
-        }
+        },
       )
       add(ServeLibraryMcp.resourceDescriptor())
       // UI-builder schemas, static and public, so an agent has them before its first call rather
@@ -1022,7 +1022,7 @@ class ServeCatalogMcp(
               put("name", schema.title)
               put("description", schema.description)
               put("mimeType", UiBuilderJsonSchemas.MEDIA_TYPE)
-            }
+            },
           )
         }
       }
@@ -1035,7 +1035,7 @@ class ServeCatalogMcp(
               put("name", "${view.label}: ${preview.label}")
               put("description", "$catalog: ${preview.id}")
               put("mimeType", "image/png")
-            }
+            },
           )
         }
       }
@@ -1059,7 +1059,7 @@ class ServeCatalogMcp(
                 put("uri", uri)
                 put("mimeType", UiBuilderJsonSchemas.MEDIA_TYPE)
                 put("text", schema.text)
-              }
+              },
             )
           }
         }
@@ -1076,7 +1076,7 @@ class ServeCatalogMcp(
                 put("mimeType", MCP_APP_MIME_TYPE)
                 put("text", viewerHtml())
                 put("_meta", viewerResourceMeta())
-              }
+              },
             )
           },
         )
@@ -1108,7 +1108,7 @@ class ServeCatalogMcp(
                 put("uri", uri)
                 put("mimeType", "image/png")
                 put("blob", Base64.getEncoder().encodeToString(png))
-              }
+              },
             )
           },
         )
@@ -1153,7 +1153,7 @@ class ServeCatalogMcp(
     if (cells > MAX_MATRIX_CELLS) {
       throw McpRequestException(
         "catalog_render_matrix would produce $cells cells; the cap is $MAX_MATRIX_CELLS. " +
-          "Narrow an axis or split the call."
+          "Narrow an axis or split the call.",
       )
     }
 
@@ -1179,7 +1179,7 @@ class ServeCatalogMcp(
         val unknown = params.keys.filterNot(ServeOverrides::isOverrideParam).sorted()
         if (unknown.isNotEmpty()) {
           throw McpRequestException(
-            "unknown override ${unknown.joinToString()} in catalog_render_matrix"
+            "unknown override ${unknown.joinToString()} in catalog_render_matrix",
           )
         }
         val overrides =
@@ -1212,7 +1212,7 @@ class ServeCatalogMcp(
             } else if (observe == "png") {
               put("png", Base64.getEncoder().encodeToString(cell.png))
             }
-          }
+          },
         )
       }
     }
@@ -1330,7 +1330,7 @@ class ServeCatalogMcp(
               put("flapCount", timeline.flapCount)
               put("versions", versionsJson(timeline, provenance.repo))
             }
-          }
+          },
       )
     }
 
@@ -1345,7 +1345,7 @@ class ServeCatalogMcp(
                 "this catalog has no delivery-branch provenance and this server has no checkout to " +
                   "derive a timeline from; an uploaded bundle carries no history",
               )
-            }
+            },
         )
 
     // Off the request dispatcher: the first call per refresh window shells out to `git log`.
@@ -1361,7 +1361,7 @@ class ServeCatalogMcp(
                 "the local delivery-branch timeline names fewer than two distinct renders for this " +
                   "preview, so there is no change to show",
               )
-            }
+            },
         )
 
     val parsed = runCatching { JSON.parseToJsonElement(timeline).jsonObject }.getOrNull()
@@ -1387,13 +1387,13 @@ class ServeCatalogMcp(
                         v["blob"]?.jsonPrimitive?.contentOrNull?.let {
                           put("renderUrl", "/history/render/$it.png")
                         }
-                      }
-                  )
+                      },
+                  ),
                 )
               }
             },
           )
-        }
+        },
     )
   }
 
@@ -1418,7 +1418,7 @@ class ServeCatalogMcp(
             "renderUrl",
             "https://raw.githubusercontent.com/$repo/${version.commit}/${timeline.path}",
           )
-        }
+        },
       )
     }
   }
@@ -1498,11 +1498,11 @@ class ServeCatalogMcp(
       val view =
         historyView(host, preview.id)
           ?: throw McpRequestException(
-            "no timeline for '${preview.id}'; call catalog_history_list to see why this catalog has none"
+            "no timeline for '${preview.id}'; call catalog_history_list to see why this catalog has none",
           )
       if (view.versions.size < 2) {
         throw McpRequestException(
-          "'${preview.id}' has ${view.versions.size} recorded render(s); a diff needs two"
+          "'${preview.id}' has ${view.versions.size} recorded render(s); a diff needs two",
         )
       }
       val requestedTo = args.optionalString("to")
@@ -1539,7 +1539,7 @@ class ServeCatalogMcp(
             )
           }
         }
-          .toString()
+          .toString(),
       )
     }
   }
@@ -1572,13 +1572,13 @@ class ServeCatalogMcp(
       val view =
         historyView(host, preview.id)
           ?: throw McpRequestException(
-            "no timeline for '${preview.id}'; call catalog_history_list to see why this catalog has none"
+            "no timeline for '${preview.id}'; call catalog_history_list to see why this catalog has none",
           )
       val version =
         view.versions.firstOrNull { it.commit.startsWith(wanted) || it.blob.startsWith(wanted) }
           ?: throw McpRequestException(
             "'$wanted' names no recorded render of '${preview.id}'; catalog_history_list lists the ones " +
-              "this catalog can serve"
+              "this catalog can serve",
           )
       val bytes =
         if (view.mode == "published") {
@@ -1590,13 +1590,13 @@ class ServeCatalogMcp(
               throw McpRequestException("branch fetch queue saturated; retry shortly")
             ServeBundleHost.PinnedOutcome.Missing ->
               throw McpRequestException(
-                "the delivery branch has no render for '${preview.id}' at ${version.commit}"
+                "the delivery branch has no render for '${preview.id}' at ${version.commit}",
               )
           }
         } else {
           withContext(Dispatchers.IO) { projectHistory?.renderBytes(version.blob) }
             ?: throw McpRequestException(
-              "the local repository has no object ${version.blob} for '${preview.id}'"
+              "the local repository has no object ${version.blob} for '${preview.id}'",
             )
         }
       buildJsonObject {
@@ -1634,7 +1634,7 @@ class ServeCatalogMcp(
               put("widthDp", spec.widthDp)
               put("heightDp", spec.heightDp)
               put("density", spec.density.toDouble())
-            }
+            },
           )
         }
       },
@@ -1653,7 +1653,7 @@ class ServeCatalogMcp(
     val other =
       args["other"] as? JsonObject
         ?: throw McpRequestException(
-          "catalog_diff_semantics requires an 'other' preview to compare with"
+          "catalog_diff_semantics requires an 'other' preview to compare with",
         )
     return left to other.previewTarget()
   }
@@ -1702,7 +1702,7 @@ class ServeCatalogMcp(
                 },
               )
             }
-          }
+          },
         )
       }
     }
@@ -1752,7 +1752,7 @@ class ServeCatalogMcp(
           )
         }
       }
-        .toString()
+        .toString(),
     )
   }
 
@@ -1773,7 +1773,7 @@ class ServeCatalogMcp(
           }
         }
           ?: throw McpRequestException(
-            "compose/semantics is not available for '${target.previewId}', so it cannot be diffed"
+            "compose/semantics is not available for '${target.previewId}', so it cannot be diffed",
           )
       val tags =
         runCatching { JSON.parseToJsonElement(payload.decodeToString()) }
@@ -1929,7 +1929,7 @@ class ServeCatalogMcp(
         "overridesIgnoredReason",
         JsonPrimitive(
           "answered from the published bundle, which carries no renderer; these overrides are " +
-            "not reflected in the returned bytes"
+            "not reflected in the returned bytes",
         ),
       )
     } else {
@@ -1950,7 +1950,7 @@ class ServeCatalogMcp(
       val baked =
         host.bakedRender(previewId, overrides)
           ?: throw McpRequestException(
-            "published preview '$previewId' is unavailable; use catalog_render_preview with live scope"
+            "published preview '$previewId' is unavailable; use catalog_render_preview with live scope",
           )
       return Rendered(baked.png, RenderOutcome.Generation.BAKED)
     }
@@ -1978,7 +1978,7 @@ class ServeCatalogMcp(
     // NotFound below cannot: both arrive as the same outcome.
     if (!host.hasSvgExportFor(previewId)) {
       throw McpRequestException(
-        "preview '$previewId' has no compose/figma-svg export; this catalog serves raster only"
+        "preview '$previewId' has no compose/figma-svg export; this catalog serves raster only",
       )
     }
     return withRenderPermit {
@@ -1999,7 +1999,7 @@ class ServeCatalogMcp(
     if (!host.hasScrollExportFor(previewId)) {
       throw McpRequestException(
         "preview '$previewId' has no full-page scroll export; the tall re-render needs a daemon, " +
-          "and this catalog is serving published bytes"
+          "and this catalog is serving published bytes",
       )
     }
   }
@@ -2058,7 +2058,7 @@ class ServeCatalogMcp(
       throw McpRequestException(
         "unknown override ${if (unknown.size == 1) "key" else "keys"} ${unknown.joinToString()}; " +
           "supported: ${ServeOverrides.SUPPORTED_KEYS.sorted().joinToString()}, " +
-          "plus ${ServeOverrides.KNOB_PREFIX}<knob> and ${ServeOverrides.RC_NAMED_PREFIX}<name>"
+          "plus ${ServeOverrides.KNOB_PREFIX}<knob> and ${ServeOverrides.RC_NAMED_PREFIX}<name>",
       )
     }
     val knobKinds = ServeOverrides.declaredKnobKinds(preview)
@@ -2092,7 +2092,7 @@ class ServeCatalogMcp(
             } else {
               "'${preview.id}' declares no knob '$name'; its knobs are " +
                 knobKinds.keys.sorted().joinToString { ServeOverrides.KNOB_PREFIX + it }
-            }
+            },
           )
       if (value != null && !knobValueFits(kind, value)) {
         throw McpRequestException("'$key' is a $kind knob, and '$value' is not a $kind")
@@ -2182,7 +2182,7 @@ class ServeCatalogMcp(
                   put("previewId", preview.id)
                   put("uri", resourceUri(catalog, preview.id))
                   put("kinds", JsonArray(kinds.sorted().map(::JsonPrimitive)))
-                }
+                },
               )
             }
         }
@@ -2302,7 +2302,7 @@ class ServeCatalogMcp(
                         "a 'query' (such as a component name) to narrow the list.",
                     )
                   }
-                }
+                },
               )
             }
           }
@@ -2346,9 +2346,9 @@ class ServeCatalogMcp(
           "note" to
             JsonPrimitive(
               "Render with preview-stories. Native catalog_render_preview and catalog_get_preview_data also " +
-                "accept this story's URI."
+                "accept this story's URI.",
             ),
-        )
+        ),
     )
 
   private fun hostTitle(preview: ServePreview): String =
@@ -2381,7 +2381,7 @@ class ServeCatalogMcp(
               buildJsonObject {
                 put("key", knob.seedKey)
                 put("type", knob.type)
-              }
+              },
             )
           }
         },
@@ -2406,7 +2406,7 @@ class ServeCatalogMcp(
         )
       throw McpRequestException(
         "needs 'uri', or 'catalog' and 'previewId' (missing: ${missing.joinToString()}). " +
-          "Ids come from catalog_list_projects and catalog_list_previews."
+          "Ids come from catalog_list_projects and catalog_list_previews.",
       )
     }
     return PreviewTarget(catalog, previewId)
@@ -2416,7 +2416,7 @@ class ServeCatalogMcp(
     if (value.startsWith(RESOURCE_URI_PREFIX)) {
       if (resourceOverrides(value) != null) {
         throw McpRequestException(
-          "story id '$value' carries render overrides; pass them as the 'overrides' argument"
+          "story id '$value' carries render overrides; pass them as the 'overrides' argument",
         )
       }
       return targetFromUri(value)
@@ -2424,7 +2424,7 @@ class ServeCatalogMcp(
     val separator = value.indexOf(STORY_ID_SEPARATOR)
     if (separator <= 0 || separator + STORY_ID_SEPARATOR.length >= value.length) {
       throw McpRequestException(
-        "story id '$value' is not catalog-qualified; use an id from list-all-documentation"
+        "story id '$value' is not catalog-qualified; use an id from list-all-documentation",
       )
     }
     return PreviewTarget(
@@ -2474,7 +2474,7 @@ class ServeCatalogMcp(
     if (explicit != null && explicit !is JsonNull && explicit != otherOverrides) {
       throw McpRequestException(
         "catalog_diff_semantics: 'other.uri' carries render overrides that differ from " +
-          "'otherOverrides'; pass one or the other"
+          "'otherOverrides'; pass one or the other",
       )
     }
     return JsonObject(
@@ -2482,7 +2482,7 @@ class ServeCatalogMcp(
         mapOf(
           "other" to JsonObject(other + ("uri" to JsonPrimitive(otherUri.substringBefore('?')))),
           "otherOverrides" to otherOverrides,
-        )
+        ),
     )
   }
 
@@ -2493,18 +2493,18 @@ class ServeCatalogMcp(
     if (name !in URI_OVERRIDE_TOOLS) {
       throw McpRequestException(
         "$name: 'uri' carries render overrides (?overrides=) that this tool does not apply; " +
-          "pass the preview URI without the overrides query"
+          "pass the preview URI without the overrides query",
       )
     }
     val explicit = args[overridesKey]
     if (explicit != null && explicit !is JsonNull && explicit != uriOverrides) {
       throw McpRequestException(
         "$name: 'uri' carries render overrides that differ from the '$overridesKey' argument; " +
-          "pass one or the other"
+          "pass one or the other",
       )
     }
     return JsonObject(
-      args + mapOf("uri" to JsonPrimitive(uri.substringBefore('?')), overridesKey to uriOverrides)
+      args + mapOf("uri" to JsonPrimitive(uri.substringBefore('?')), overridesKey to uriOverrides),
     )
   }
 
@@ -2526,7 +2526,7 @@ class ServeCatalogMcp(
           val uri = obj["uri"]?.jsonPrimitive?.contentOrNull ?: return@map block
           if (resourceOverrides(uri) == null) return@map block
           JsonObject(obj + ("uri" to JsonPrimitive(signResourceUri(uri))))
-        }
+        },
       )
     return JsonObject(result + ("content" to signed))
   }
@@ -2662,7 +2662,7 @@ class ServeCatalogMcp(
     return if (catalog in pending) {
       McpRequestException(
         "catalog '$catalog' is still loading on this server (${pending.size} catalog(s) " +
-          "pending after a restart); retry in a minute"
+          "pending after a restart); retry in a minute",
       )
     } else {
       McpRequestException("no such catalog '$catalog'")
@@ -2701,7 +2701,7 @@ class ServeCatalogMcp(
       "$tool needs a 'catalog' argument; this hosted server does not list every catalog at " +
         "once. Available catalogs: ${if (shown.isEmpty()) "(none)" else shown.joinToString()}" +
         "$more. Call catalog_list_projects for their labels and preview counts. Previews of the project " +
-        "you are working on are not hosted here: use the local compose-preview-mcp server."
+        "you are working on are not hosted here: use the local compose-preview-mcp server.",
     )
   }
 
@@ -2768,8 +2768,8 @@ class ServeCatalogMcp(
                 put("published", true)
                 put("note", PUBLISHED_SNAPSHOT_NOTE)
               }
-                .toString()
-            )
+                .toString(),
+            ),
           )
         }
       }
@@ -2783,7 +2783,7 @@ class ServeCatalogMcp(
           "live grant scope is required for a made-to-order render. To look at a published " +
             "render, read its resource instead (resources/read on the uri from " +
             "catalog_list_previews), which needs only preview scope. For a live render, call " +
-            "request_access with scope \"live\"."
+            "request_access with scope \"live\".",
         )
       is ServeMachineAuthorization.Decision.Forbidden -> throw McpRequestException(decision.message)
     }
@@ -2811,7 +2811,7 @@ class ServeCatalogMcp(
             "this tool needs a UI-builder ${capability.name.lowercase()} grant; none was " +
               "presented. Call request_access with capability " +
               "'${capability.agentGrantCapability().wire}', have a human approve it, then pass the " +
-              "token poll_access returns as this tool's '$TOKEN_ARGUMENT' argument."
+              "token poll_access returns as this tool's '$TOKEN_ARGUMENT' argument.",
           )
         UiBuilderAuthorizationDecision.Forbidden ->
           return toolError(
@@ -2819,7 +2819,7 @@ class ServeCatalogMcp(
               "A grant only carries what this server's --agent-grant-capabilities allows and what " +
               "the approver ticked, so either the ask was narrowed at approval or the box's " +
               "ceiling excludes it — request again, and if the approval page says the box does " +
-              "not offer it, the operator has to add the capability and restart."
+              "not offer it, the operator has to add the capability and restart.",
           )
       }
     builder.additionalCapabilityFor(name, args)?.let { additional ->
@@ -2828,7 +2828,7 @@ class ServeCatalogMcp(
           "this call also needs a UI-builder ${additional.name.lowercase()} grant. Call " +
             "request_access with capability '${additional.agentGrantCapability().wire}', have a " +
             "human approve it, then pass the token poll_access returns as this tool's " +
-            "'$TOKEN_ARGUMENT' argument."
+            "'$TOKEN_ARGUMENT' argument.",
         )
       }
     }
@@ -2893,8 +2893,8 @@ class ServeCatalogMcp(
                     "url" to JsonPrimitive(it.first),
                     "expiresAtEpochSeconds" to JsonPrimitive(it.second),
                   )
-                } ?: emptyMap())
-            ))
+                } ?: emptyMap()),
+            )),
       )
     return buildJsonObject {
       put(
@@ -2913,7 +2913,7 @@ class ServeCatalogMcp(
                   "Short-lived signed https URL of this exact view; it grants nothing beyond " +
                     "that image.",
                 )
-              }
+              },
             )
             add(chatImageText(it.first, it.second))
           }
@@ -2958,7 +2958,7 @@ class ServeCatalogMcp(
                 put("type", "image")
                 put("data", png)
                 put("mimeType", "image/png")
-              }
+              },
             )
           }
         },
@@ -3003,7 +3003,7 @@ class ServeCatalogMcp(
               put("type", "image")
               put("data", png)
               put("mimeType", "image/png")
-            }
+            },
           )
           // A chat surface shows the person text and links, never the block above.
           runCatching { Base64.getDecoder().decode(png) }
@@ -3027,7 +3027,7 @@ class ServeCatalogMcp(
             JsonObject(
                 reply +
                   ("response" to
-                    JsonObject(response + ("artifact" to JsonObject(artifact - "content"))))
+                    JsonObject(response + ("artifact" to JsonObject(artifact - "content")))),
               )
               .toString()
           }
@@ -3230,8 +3230,8 @@ class ServeCatalogMcp(
                 buildJsonObject {
                   put("type", "string")
                   put("description", TOKEN_ARGUMENT_DESCRIPTION)
-                })
-          ))
+                }),
+          )),
     )
   }
 
@@ -3243,7 +3243,7 @@ class ServeCatalogMcp(
           buildJsonObject {
             put("type", "text")
             put("text", text)
-          }
+          },
         )
       },
     )
@@ -3257,7 +3257,7 @@ class ServeCatalogMcp(
           buildJsonObject {
             put("type", "text")
             put("text", message)
-          }
+          },
         )
       },
     )
@@ -3295,7 +3295,7 @@ class ServeCatalogMcp(
     textContent(
       "Image: $url\n" +
         "(signed https PNG, valid until ${Instant.ofEpochSecond(expiresAtEpochSeconds)}; " +
-        "attach or link it in chat rather than describing it)"
+        "attach or link it in chat rather than describing it)",
     )
 
   /** A plain `https` link a host can put in an `<img>`: no scheme it has to know, no bridge. */
@@ -3333,7 +3333,7 @@ class ServeCatalogMcp(
               put("elicitationId", required.elicitationId)
               put("url", required.url)
               put("message", required.message)
-            }
+            },
           )
         }
       }

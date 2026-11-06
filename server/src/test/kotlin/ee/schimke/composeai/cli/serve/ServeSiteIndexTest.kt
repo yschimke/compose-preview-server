@@ -117,7 +117,7 @@ class ServeSiteIndexTest {
             "compose-m3",
             listOf("Button", "Card"),
             "2026-07-17T12:34:56Z",
-          )
+          ),
         ),
       )
     assertTrue(xml.contains("<loc>https://preview.example/compose-m3/</loc>"), xml)

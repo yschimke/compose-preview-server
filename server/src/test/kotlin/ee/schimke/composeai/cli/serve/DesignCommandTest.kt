@@ -258,7 +258,7 @@ class DesignCommandTest {
     assertEquals("actual", compare.fit)
     assertTrue(
       ee.schimke.composeai.agentgrants.AgentGrantCapability.UI_BUILDER_EXPORT in
-        compare.capabilities
+        compare.capabilities,
     )
     val differencesOnly = run("compare", "home", "--renderer", "export")
     assertEquals(

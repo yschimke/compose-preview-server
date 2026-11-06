@@ -137,7 +137,7 @@ public class ServeCatalogRefresher(
     if (head == lastHead[e.system]) return CatalogRefreshResult.CURRENT
     val prev = lastHead[e.system]
     onLog(
-      "serve: catalog ${e.system} (${e.branch}) moved ${prev?.take(7) ?: "?"}→${head.take(7)} — re-fetching"
+      "serve: catalog ${e.system} (${e.branch}) moved ${prev?.take(7) ?: "?"}→${head.take(7)} — re-fetching",
     )
     // Taken before the reload, so an invalidation during it makes the head write conditional.
     val mark = invalidationMark(e.system)
@@ -156,7 +156,7 @@ public class ServeCatalogRefresher(
       forgetHeads(listOf(e.system))
       onLog(
         "serve: catalog ${e.system} refreshed to ${head.take(7)}, but some assets could not be " +
-          "fetched — will re-read next tick"
+          "fetched — will re-read next tick",
       )
       return CatalogRefreshResult.UPDATED
     }
@@ -167,7 +167,7 @@ public class ServeCatalogRefresher(
       if (lastHead[e.system] == head) "serve: catalog ${e.system} refreshed to ${head.take(7)}"
       else
         "serve: catalog ${e.system} refreshed to ${head.take(7)}, but some assets could not be " +
-          "fetched — will re-read next tick"
+          "fetched — will re-read next tick",
     )
     return CatalogRefreshResult.UPDATED
   }

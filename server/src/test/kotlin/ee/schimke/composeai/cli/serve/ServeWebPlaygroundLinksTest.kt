@@ -88,7 +88,7 @@ class ServeWebPlaygroundLinksTest {
   fun `both links are attribute-escaped`() {
     assertFalse(viewer("/playground?from=a\"><script>x</script>").contains("<script>x</script>"))
     assertFalse(
-      landing("/playground?catalog=a\"><script>y</script>").contains("<script>y</script>")
+      landing("/playground?catalog=a\"><script>y</script>").contains("<script>y</script>"),
     )
   }
 }

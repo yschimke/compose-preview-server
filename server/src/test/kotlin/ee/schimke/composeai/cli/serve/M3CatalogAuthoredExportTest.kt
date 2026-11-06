@@ -165,7 +165,7 @@ class M3CatalogAuthoredExportTest {
         val declared = component.jsonObject
         declared.getValue("componentId").jsonPrimitive.content to
           (declared["properties"]?.jsonArray ?: return@associate "" to emptySet()).mapTo(
-            mutableSetOf()
+            mutableSetOf(),
           ) {
             it.jsonObject.getValue("name").jsonPrimitive.content
           }
@@ -197,7 +197,7 @@ class M3CatalogAuthoredExportTest {
           document = document,
           catalog = catalog,
           format = ExportFormatV1.COMPOSE,
-        )
+        ),
       )
 
   @Test
@@ -228,7 +228,7 @@ class M3CatalogAuthoredExportTest {
     )
     assertTrue(
       source.contains(
-        "colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)"
+        "colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)",
       ),
       source,
     )
@@ -286,7 +286,7 @@ class M3CatalogAuthoredExportTest {
                   listOf(
                     BackgroundModifierV1(ColorTokenValueV1("surfaceVariant"), shape = "medium"),
                     BorderModifierV1(JsonPrimitive(1), ColorValueV1("#6750A4")),
-                  )
+                  ),
               )
             "card" ->
               node.copy(
@@ -294,7 +294,7 @@ class M3CatalogAuthoredExportTest {
                   listOf(
                     ShadowModifierV1(JsonPrimitive(4), shape = "medium"),
                     WidthInModifierV1(null, JsonPrimitive(320)),
-                  )
+                  ),
               )
             // In the `Row`, so the vertical align is the one that resolves — and it lands on the
             // same chain as the `weight` this node already carried as a property.
@@ -304,7 +304,7 @@ class M3CatalogAuthoredExportTest {
                   listOf(
                     AlignVerticalModifierV1(VerticalAlignmentV1.BOTTOM),
                     AlphaModifierV1(JsonPrimitive(0.6)),
-                  )
+                  ),
               )
             else -> node
           }
@@ -321,14 +321,14 @@ class M3CatalogAuthoredExportTest {
     assertTrue(
       source.contains(
         "Modifier.background(color = MaterialTheme.colorScheme.surfaceVariant, " +
-          "shape = MaterialTheme.shapes.medium).border(width = 1.dp, color = Color(0xFF6750A4))"
+          "shape = MaterialTheme.shapes.medium).border(width = 1.dp, color = Color(0xFF6750A4))",
       ),
       source,
     )
     // One bound of two: an omitted `min` is unconstrained, which is what the document said.
     assertTrue(
       source.contains(
-        "Modifier.shadow(elevation = 4.dp, shape = MaterialTheme.shapes.medium).widthIn(max = 320.dp)"
+        "Modifier.shadow(elevation = 4.dp, shape = MaterialTheme.shapes.medium).widthIn(max = 320.dp)",
       ),
       source,
     )

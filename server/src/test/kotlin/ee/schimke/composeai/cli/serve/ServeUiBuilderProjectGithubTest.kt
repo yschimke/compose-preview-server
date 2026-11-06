@@ -51,7 +51,7 @@ class ServeUiBuilderProjectGithubTest {
           if (method == "POST") 201 else 200,
           PROJECT_JSON.parseToJsonElement(response),
         )
-      }
+      },
     )
 
   @Test

@@ -148,7 +148,7 @@ class ServeGithubGrantRevocationTest {
         .newCall(
           Request.Builder()
             .url("http://127.0.0.1:${server.port}/auth/github/start?return=%2Fplayground")
-            .build()
+            .build(),
         )
         .execute()
         .use { it.header("Location").orEmpty() to it.header("Set-Cookie")!!.substringBefore(";") }
@@ -159,7 +159,7 @@ class ServeGithubGrantRevocationTest {
         Request.Builder()
           .url("http://127.0.0.1:${server.port}/auth/github/callback?code=ok&state=$state")
           .header("Cookie", cookies)
-          .build()
+          .build(),
       )
       .execute()
       .use { Triple(it.code, it.header("Location").orEmpty(), it.headers("Set-Cookie")) }
@@ -189,7 +189,7 @@ class ServeGithubGrantRevocationTest {
     assertEquals("/playground", location)
     assertTrue(cookies.any { it.startsWith("cp_gh_auth=") }, cookies.toString())
     assertTrue(
-      cookies.any { it.startsWith("cp_gh_regrant=;") || it.startsWith("cp_gh_regrant=\"\"") }
+      cookies.any { it.startsWith("cp_gh_regrant=;") || it.startsWith("cp_gh_regrant=\"\"") },
     )
   }
 }

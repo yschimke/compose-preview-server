@@ -110,7 +110,7 @@ class ServeUnofferedRcPlayerTest {
       .newCall(
         Request.Builder()
           .url("http://127.0.0.1:${server!!.port}$path${if ('?' in path) "&" else "?"}token=$TOKEN")
-          .build()
+          .build(),
       )
       .execute()
       .use { it.code to it.body.string() }

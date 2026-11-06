@@ -34,7 +34,7 @@ class ServeCatalogMcpListingBoundsTest {
         opened.incrementAndGet()
         Thread.sleep(RESUME_MILLIS)
         null
-      }
+      },
     )
 
   private val mcp =
@@ -57,7 +57,7 @@ class ServeCatalogMcpListingBoundsTest {
     val reply = runBlocking {
       mcp.handle(
         Json.parseToJsonElement("""{"jsonrpc":"2.0","id":1,"method":"$method","params":$params}""")
-          .jsonObject
+          .jsonObject,
       ) {
         ServeMachineAuthorization.Decision.Authorized("agent:test")
       }

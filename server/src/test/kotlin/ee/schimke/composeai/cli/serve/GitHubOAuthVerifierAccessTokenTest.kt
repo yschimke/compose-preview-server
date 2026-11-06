@@ -62,7 +62,7 @@ class GitHubOAuthVerifierAccessTokenTest {
               .message("x")
               .body(body.toResponseBody("application/json".toMediaType()))
               .build()
-          }
+          },
         )
         .build()
     return GitHubOAuthVerifier(client)

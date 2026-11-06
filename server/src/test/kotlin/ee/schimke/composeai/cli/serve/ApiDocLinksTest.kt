@@ -40,7 +40,7 @@ class ApiDocLinksTest {
           )
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
     assertEquals(ref("androidx/wear/compose/material3/Button.composable"), links["Button"])
     assertEquals(ref("androidx/wear/compose/material3/Text.composable"), links["Text"])
@@ -67,7 +67,7 @@ class ApiDocLinksTest {
             Button(onClick = {}) { Text("Hi", style = MaterialTheme.typography.bodyLarge) }
           }
           """
-            .trimIndent()
+            .trimIndent(),
         )
         .map { it.name }
     assertEquals(listOf("Button", "Text", "Composable", "MaterialTheme"), names)
@@ -86,7 +86,7 @@ class ApiDocLinksTest {
           Text("Hi", color = Color(0xFF00FF00), modifier = pad(PaddingValues(4.dp)))
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
     // `androidx.compose.ui.graphics` publishes values only, so the page shape is known outright.
     assertEquals(ref("androidx/compose/ui/graphics/Color"), links["Color"])
@@ -112,7 +112,7 @@ class ApiDocLinksTest {
           )
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
     assertEquals(ref("androidx/compose/ui/graphics/SolidColor"), links["SolidColor"])
     assertEquals(ref("androidx/wear/compose/material3/Button.composable"), links["Button"])
@@ -128,7 +128,7 @@ class ApiDocLinksTest {
 
         @Composable private fun kitGlyph() = Icon(Icons.Filled.Add, contentDescription = "Add")
         """
-          .trimIndent()
+          .trimIndent(),
       )
     assertEquals(ref("androidx/wear/compose/material3/Icon.composable"), links["Icon"])
   }
@@ -145,7 +145,7 @@ class ApiDocLinksTest {
           val interactions: MutableInteractionSource = remember { MutableInteractionSource() }
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
     // The `remember { … }` call site would otherwise read exactly like a composable one. The type
     // annotation is what places it — and without one it would be dropped, not mislabelled.
@@ -170,7 +170,7 @@ class ApiDocLinksTest {
           Icon(Icons.Filled.Add, contentDescription = "Add")
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
     // `Slider.kt` in a comment used to read as a qualifier and demote the composable.
     assertEquals(ref("androidx/wear/compose/material3/Slider.composable"), links["Slider"])
@@ -196,7 +196,7 @@ class ApiDocLinksTest {
           box(Modifier.fillMaxSize(), shape = CircleShape, easing = LinearEasing)
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
     // Kept: a qualifier that really is a class.
     assertEquals(ref("androidx/compose/ui/Modifier"), links["Modifier"])
@@ -218,7 +218,7 @@ class ApiDocLinksTest {
           WearText("Hi")
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
     assertEquals(ref("androidx/wear/compose/material3/Text.composable"), links["WearText"])
   }
@@ -238,7 +238,7 @@ class ApiDocLinksTest {
           Button(onClick = {}, enabled = enabled)
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
     assertEquals(ref("androidx/wear/compose/material3/Button.composable"), links["Button"])
   }
@@ -257,7 +257,7 @@ class ApiDocLinksTest {
           Button(onClick = { Intent(context, Target::class.java) })
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
     assertEquals(ref("android/content/Intent"), links["Intent"])
     assertEquals(ref("androidx/wear/compose/material3/Button.composable"), links["Button"])
@@ -274,7 +274,7 @@ class ApiDocLinksTest {
           val box: Box = build()
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
     // `…/LayoutElementBuilders/Box` asks for a directory; the site spells the nested type dotted.
     assertEquals(ref("androidx/wear/protolayout/LayoutElementBuilders.Box"), links["Box"])
@@ -295,7 +295,7 @@ class ApiDocLinksTest {
             colorScheme = androidx.compose.material3.lightColorScheme()
           ) {}
         """
-          .trimIndent()
+          .trimIndent(),
       )
     // Called, so the composable page — the same reading a plain `MaterialTheme { }` would get.
     assertEquals(ref("androidx/compose/material3/MaterialTheme.composable"), links["MaterialTheme"])
@@ -311,7 +311,7 @@ class ApiDocLinksTest {
           request(android.permission.BLUETOOTH_CONNECT)
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
     // `Color.Transparent` is a member read off `Color`, not a nested type.
     assertEquals(ref("androidx/compose/ui/graphics/Color"), links["Color"])
@@ -334,7 +334,7 @@ class ApiDocLinksTest {
           Button(onClick = {})
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
     assertEquals(ref("androidx/compose/material3/Button.composable"), links["Button"])
   }

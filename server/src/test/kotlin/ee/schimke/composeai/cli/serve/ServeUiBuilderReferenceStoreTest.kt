@@ -44,7 +44,7 @@ class ServeUiBuilderReferenceStoreTest {
             image = pngImage(),
             settings = StoredReferenceSettings(mode = "difference", opacityPercent = 30),
           ),
-        )
+        ),
       )
     val reopened = requireNotNull(store.read("design-1"))
     assertEquals(written.image?.id, reopened.image?.id)
@@ -59,9 +59,9 @@ class ServeUiBuilderReferenceStoreTest {
         store.replace(
           "design-1",
           ReferenceUploadRequest(
-            image = pngImage(width = 7, height = 5).copy(id = "whatever-i-said", widthPx = 999)
+            image = pngImage(width = 7, height = 5).copy(id = "whatever-i-said", widthPx = 999),
           ),
-        )
+        ),
       )
     assertNotEquals("whatever-i-said", written.image?.id)
     assertEquals(7, written.image?.widthPx)
@@ -85,7 +85,7 @@ class ServeUiBuilderReferenceStoreTest {
             StoredReferenceImage(
               mediaType = "image/png",
               base64 = Base64.getEncoder().encodeToString("not a picture".toByteArray()),
-            )
+            ),
         ),
       )
     assertIs<ReferenceWriteResult.Refused>(refusal)
@@ -104,9 +104,9 @@ class ServeUiBuilderReferenceStoreTest {
               base64 =
                 Base64.getEncoder()
                   .encodeToString(
-                    "<svg viewBox=\"0 0 1 1\"><script>alert(1)</script></svg>".toByteArray()
+                    "<svg viewBox=\"0 0 1 1\"><script>alert(1)</script></svg>".toByteArray(),
                   ),
-            )
+            ),
         ),
       )
     assertIs<ReferenceWriteResult.Refused>(refusal)
@@ -126,11 +126,11 @@ class ServeUiBuilderReferenceStoreTest {
                   Base64.getEncoder()
                     .encodeToString(
                       "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4 4\"/>"
-                        .toByteArray()
+                        .toByteArray(),
                     ),
-              )
+              ),
           ),
-        )
+        ),
       )
     assertEquals("image/svg+xml", written.image?.mediaType)
   }
@@ -144,8 +144,8 @@ class ServeUiBuilderReferenceStoreTest {
           store.replaceSettings(
             "design-1",
             ReferenceSettingsRequest(StoredReferenceSettings(scalePercent = 150)),
-          )
-        )
+          ),
+        ),
       )
     assertEquals(150, reaimed.settings.scalePercent)
     // The bytes are still there: re-aiming must never be a way to lose the picture.
@@ -155,7 +155,7 @@ class ServeUiBuilderReferenceStoreTest {
   @Test
   fun `re-aiming a design with nothing attached is a miss rather than an empty record`() {
     assertNull(
-      store.replaceSettings("design-1", ReferenceSettingsRequest(StoredReferenceSettings()))
+      store.replaceSettings("design-1", ReferenceSettingsRequest(StoredReferenceSettings())),
     )
   }
 
@@ -173,10 +173,10 @@ class ServeUiBuilderReferenceStoreTest {
                 opacityPercent = 4000,
                 scalePercent = -5,
                 offsetXDp = Float.NaN,
-              )
+              ),
             ),
-          )
-        )
+          ),
+        ),
       )
     assertEquals("overlay", clamped.settings.mode)
     assertEquals(100, clamped.settings.opacityPercent)
@@ -202,7 +202,7 @@ class ServeUiBuilderReferenceStoreTest {
                   right = 0.5f,
                   bottom = 0.4f,
                   componentId = "m3/button",
-                )
+                ),
               ),
             marks =
               listOf(
@@ -211,7 +211,7 @@ class ServeUiBuilderReferenceStoreTest {
                 StoredReferenceMark("m3", "not-a-kind", listOf(0f, 0f, 1f, 1f), 0xFFFF5252),
               ),
           ),
-        )
+        ),
       )
     assertEquals(listOf("m1"), written.marks.map { it.id })
     assertEquals("m3/button", written.pieces.single().componentId)
@@ -237,11 +237,11 @@ class ServeUiBuilderReferenceStoreTest {
                     top = 0f,
                     right = 1f,
                     bottom = 1f,
-                  )
+                  ),
                 ),
             ),
-          )
-        )
+          ),
+        ),
       )
     assertTrue(reaimed.pieces.isEmpty())
   }
@@ -262,10 +262,10 @@ class ServeUiBuilderReferenceStoreTest {
                   listOf(0f, 0f, 1f, 1f),
                   0xFFFF5252,
                   text = "x".repeat(MAX_MARK_TEXT * 3),
-                )
+                ),
               ),
           ),
-        )
+        ),
       )
     assertEquals(MAX_MARK_TEXT, written.marks.single().text?.length)
   }

@@ -114,7 +114,7 @@ class ServeAgentGrantPublicApproverTest {
         Request.Builder()
           .url("$base/auth/github/callback?code=$login&state=$state")
           .header("Cookie", stateCookie.substringBefore(";"))
-          .build()
+          .build(),
       )
       .execute()
       .use { response ->
@@ -148,7 +148,7 @@ class ServeAgentGrantPublicApproverTest {
           Request.Builder()
             .url("$base${ServeAgentGrants.REQUEST_PATH}")
             .post("""{"label":"$label","scope":"preview"}""".toRequestBody())
-            .build()
+            .build(),
         )
         .execute()
         .use { it.body.string() }
@@ -221,7 +221,7 @@ class ServeAgentGrantPublicApproverTest {
           client = "test",
           requestedScope = AgentGrantScope.PREVIEW,
           requestedTtlSeconds = 600,
-        )
+        ),
       )
     val grant =
       requireNotNull(
@@ -230,7 +230,7 @@ class ServeAgentGrantPublicApproverTest {
           approvedBy = "operator",
           scope = AgentGrantScope.PREVIEW,
           ttlSeconds = 600,
-        )
+        ),
       )
     val credential = requireNotNull(grants.browserCredentialFor(grant))
     val alice = signIn("alice")
@@ -242,7 +242,7 @@ class ServeAgentGrantPublicApproverTest {
           .url("$base/status?token=${grant.token}")
           .header("Cookie", alice)
           .header("Accept", "text/html")
-          .build()
+          .build(),
       )
       .execute()
       .use {
@@ -251,7 +251,7 @@ class ServeAgentGrantPublicApproverTest {
         assertTrue(
           it.headers("Set-Cookie").any { value ->
             value.startsWith("${ServeAgentGrantCookie.NAME}=") && value.contains("Max-Age=0")
-          }
+          },
         )
       }
 
@@ -262,7 +262,7 @@ class ServeAgentGrantPublicApproverTest {
           .header("Cookie", cookies)
           .header("Origin", base)
           .post("{}".toRequestBody())
-          .build()
+          .build(),
       )
       .execute()
       .use {
@@ -270,7 +270,7 @@ class ServeAgentGrantPublicApproverTest {
         assertTrue(
           it.headers("Set-Cookie").any { value ->
             value.startsWith("${ServeAgentGrantCookie.NAME}=") && value.contains("Max-Age=0")
-          }
+          },
         )
       }
   }

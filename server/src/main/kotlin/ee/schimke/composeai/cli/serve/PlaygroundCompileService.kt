@@ -264,7 +264,7 @@ class PlaygroundCompileService(
       catalogClasspath(mode, catalog)
         ?: return failure(
           if (catalog == null) "mode ${mode.name} is not available on this host"
-          else "catalog '$catalog' cannot serve mode ${mode.name} on this host"
+          else "catalog '$catalog' cannot serve mode ${mode.name} on this host",
         )
 
     var workDir: Path? = null
@@ -464,7 +464,7 @@ class PlaygroundCompileService(
       }
       if (request.revision <= lease.lastRevision) {
         return@synchronized failure(
-          "Revision ${request.revision} is stale; the lease is already at ${lease.lastRevision}."
+          "Revision ${request.revision} is stale; the lease is already at ${lease.lastRevision}.",
         )
       }
       val files = request.files.filter { it.text.isNotBlank() }
@@ -476,7 +476,7 @@ class PlaygroundCompileService(
         catalogClasspath(mode, catalog)
           ?: return@synchronized failure(
             if (catalog == null) "mode ${mode.name} is not available on this host"
-            else "catalog '$catalog' cannot serve mode ${mode.name} on this host"
+            else "catalog '$catalog' cannot serve mode ${mode.name} on this host",
           )
 
       renewEditLeaseLocked(lease)

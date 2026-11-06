@@ -49,17 +49,17 @@ internal class DesignWorkspaceStatus(
     fun summary(): String = buildList {
       if (unacknowledgedComments > 0) {
         add(
-          "$unacknowledgedComments unacknowledged design ${plural(unacknowledgedComments, "comment")}"
+          "$unacknowledgedComments unacknowledged design ${plural(unacknowledgedComments, "comment")}",
         )
       }
       if (unsavedTemporaryCopies > 0) {
         add(
-          "$unsavedTemporaryCopies unsaved temporary ${plural(unsavedTemporaryCopies, "copy", "copies")}"
+          "$unsavedTemporaryCopies unsaved temporary ${plural(unsavedTemporaryCopies, "copy", "copies")}",
         )
       }
       if (unavailable > 0) {
         add(
-          "design inventory unavailable for $unavailable workspace-linked ${plural(unavailable, "design")}"
+          "design inventory unavailable for $unavailable workspace-linked ${plural(unavailable, "design")}",
         )
       }
     }
@@ -90,7 +90,7 @@ internal class DesignWorkspaceStatus(
                 put("state", design.state)
                 design.unacknowledgedComments?.let { put("unacknowledgedComments", it) }
                 design.code?.let { put("code", it) }
-              }
+              },
             )
           }
         },
@@ -124,7 +124,7 @@ internal class DesignWorkspaceStatus(
         0,
         1,
         listOf(
-          Design("index", "ui-builder/designs/index.json", "unavailable", code = indexed.failure)
+          Design("index", "ui-builder/designs/index.json", "unavailable", code = indexed.failure),
         ),
       )
     }

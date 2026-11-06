@@ -70,7 +70,7 @@ class BehaviorScreenExportTest {
                         SetValueActionV1("label", JsonPrimitive("Updated")),
                         ToggleActionV1("enabled"),
                         SetValueActionV1("progress", JsonPrimitive(1)),
-                      )
+                      ),
                   ),
               ),
             "label" to
@@ -120,7 +120,7 @@ class BehaviorScreenExportTest {
         .copy(eventBindings = mapOf("click" to listOf(ToggleActionV1("missing"))))
     val result =
       assertIs<ScreenExportGate.Outcome.Refused>(
-        ScreenExportGate.export(doc.copy(nodes = doc.nodes + ("button" to button)), record)
+        ScreenExportGate.export(doc.copy(nodes = doc.nodes + ("button" to button)), record),
       )
     assertTrue(
       result.reasons.any { "eventBindings.click" in it && "missing" in it },
@@ -137,7 +137,7 @@ class BehaviorScreenExportTest {
         .copy(eventBindings = mapOf("click" to listOf(ToggleActionV1("label"))))
     val result =
       assertIs<ScreenExportGate.Outcome.Refused>(
-        ScreenExportGate.export(doc.copy(nodes = doc.nodes + ("button" to button)), record)
+        ScreenExportGate.export(doc.copy(nodes = doc.nodes + ("button" to button)), record),
       )
     assertTrue(
       result.reasons.any { "label" in it && "kotlin.Boolean" in it },
@@ -163,7 +163,7 @@ class BehaviorScreenExportTest {
                   "label",
                   "m3/text",
                   properties = mapOf("text" to StringValueV1("Label")),
-                )
+                ),
             ),
         )
     val result = assertIs<ScreenExportGate.Outcome.Refused>(ScreenExportGate.export(doc, record))

@@ -94,7 +94,7 @@ internal class DesignLocalRunner(
     if (code == ScreenGeneratorComposeExportExecutor.NO_COMPONENT_RECORD) {
       emit(
         "design $verb --local: that advice names `serve`'s flag; here it is " +
-          "`--components <catalog>=<components.json>`."
+          "`--components <catalog>=<components.json>`.",
       )
     }
     emit("design $verb --local: nothing was written.")

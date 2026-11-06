@@ -55,7 +55,7 @@ class GitHubOAuthVerifierTest {
               .message(if (body == null) "Not Found" else "OK")
               .body((body ?: "{}").toResponseBody("application/json".toMediaType()))
               .build()
-          }
+          },
         )
         .build()
     return GitHubOAuthVerifier(client)

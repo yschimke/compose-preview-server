@@ -13,8 +13,8 @@ class RemotePngExportExecutorTest {
   private val document =
     Json.decodeFromString<DesignDocumentV1>(
       Files.readString(
-        Path.of("../docs/design/evidence/ui-builder-remote-native-preview/document.json")
-      )
+        Path.of("../docs/design/evidence/ui-builder-remote-native-preview/document.json"),
+      ),
     )
   private val remote = PublishedCutoverCatalogs.remote
 
@@ -40,7 +40,7 @@ class RemotePngExportExecutorTest {
             density = 1.5,
             locale = "fr-FR",
             fontScale = 1.2,
-          )
+          ),
       )
     val result = RemotePngExportExecutor.renderRequest(request(doc), byteArrayOf(1, 2, 3))
     assertEquals(539, result.widthPx)
@@ -68,7 +68,7 @@ class RemotePngExportExecutorTest {
           DiagnosticSeverityV1.ERROR,
           "REMOTE_EXPORT_UNSUPPORTED",
           "nodes.choice.properties: unsupported value",
-        )
+        ),
       )
     val delegate = UiBuilderExportExecutor {
       assertEquals(format, it.format)
@@ -105,7 +105,7 @@ class RemotePngExportExecutorTest {
     assertSame(
       sentinel,
       executor.export(
-        request(document.copy(roots = listOf("imported"), nodes = mapOf("imported" to embedded)))
+        request(document.copy(roots = listOf("imported"), nodes = mapOf("imported" to embedded))),
       ),
     )
   }

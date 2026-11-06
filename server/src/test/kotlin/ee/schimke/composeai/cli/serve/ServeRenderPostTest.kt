@@ -44,7 +44,7 @@ class ServeRenderPostTest {
         PreviewOverrideValue.StringValue(
           "{\"createSurface\":{\"surfaceId\":\"main\"}}\n" +
             "{\"updateComponents\":{\"surfaceId\":\"main\",\"components\":[" +
-            "{\"id\":\"root\",\"component\":\"Text\",\"text\":\"<Hi & bye>\"}]}}"
+            "{\"id\":\"root\",\"component\":\"Text\",\"text\":\"<Hi & bye>\"}]}}",
         ),
     )
 
@@ -251,7 +251,7 @@ class ServeRenderPostTest {
     val viewer = call("/a2ui-catalog/p/$previewId").text
     assertTrue(viewer.contains("<textarea class=\"cp-knob\" data-knob-key=\"document\""), viewer)
     assertFalse(
-      viewer.contains("<input type=\"text\" class=\"cp-knob\" data-knob-key=\"document\"")
+      viewer.contains("<input type=\"text\" class=\"cp-knob\" data-knob-key=\"document\""),
     )
   }
 

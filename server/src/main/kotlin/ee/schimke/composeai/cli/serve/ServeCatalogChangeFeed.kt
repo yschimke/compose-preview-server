@@ -886,7 +886,7 @@ public object CatalogFeedXml {
             CatalogPreviewChangeKind.CHANGED,
             CatalogPreviewChangeKind.VISUAL_AND_METADATA -> {
               append(
-                "<br><img alt=\"After\" src=\"${html(newUrl)}\"> <img alt=\"Before\" src=\"${html(oldUrl)}\">"
+                "<br><img alt=\"After\" src=\"${html(newUrl)}\"> <img alt=\"Before\" src=\"${html(oldUrl)}\">",
               )
               true
             }
@@ -977,7 +977,7 @@ public object CatalogFeedXml {
    * footnote, except the newest, so a quiet catalog can still announce its renderer version.
    */
   private fun displayedBatches(
-    batches: List<CatalogFeedBatch>
+    batches: List<CatalogFeedBatch>,
   ): List<Pair<CatalogFeedBatch, List<CatalogVersionChange>>> {
     val displayed = mutableListOf<Pair<CatalogFeedBatch, List<CatalogVersionChange>>>()
     val pendingVersions = mutableListOf<CatalogVersionChange>()

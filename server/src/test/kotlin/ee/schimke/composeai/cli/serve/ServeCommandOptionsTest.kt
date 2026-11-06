@@ -19,7 +19,7 @@ class ServeCommandOptionsTest {
           "UI.Coo.EE",
           "--ui-builder-start-url",
           "https://yschimke.github.io/compose-ui-builder/",
-        )
+        ),
       )
     assertEquals("ui.coo.ee", configured.uiBuilderHost)
     assertEquals("https://yschimke.github.io/compose-ui-builder/", configured.uiBuilderStartUrl)
@@ -53,7 +53,7 @@ class ServeCommandOptionsTest {
     assertFalse(options(emptyList()).uiBuilderHostRoot)
     assertFalse(options(listOf("--ui-builder-host", "ui.coo.ee")).uiBuilderHostRoot)
     assertTrue(
-      options(listOf("--ui-builder-host", "ui.coo.ee", "--ui-builder-host-root")).uiBuilderHostRoot
+      options(listOf("--ui-builder-host", "ui.coo.ee", "--ui-builder-host-root")).uiBuilderHostRoot,
     )
     assertFailsWith<IllegalArgumentException> { options(listOf("--ui-builder-host-root")) }
   }
@@ -90,7 +90,7 @@ class ServeCommandOptionsTest {
           "/srv/ui-builder-state",
           "--ui-builder-migrate-state",
           "--catalog-mcp",
-        )
+        ),
       )
 
     assertTrue(options.lan)
@@ -220,7 +220,7 @@ class ServeCommandOptionsTest {
   fun `component record arguments are catalog-keyed, and malformed ones are rejected`() {
     val options =
       options(
-        listOf("--ui-builder-components", "m3-catalog=/srv/m3.json,remote-m3=/srv/remote.json")
+        listOf("--ui-builder-components", "m3-catalog=/srv/m3.json,remote-m3=/srv/remote.json"),
       )
     assertEquals(
       mapOf(
@@ -283,13 +283,13 @@ class ServeCommandOptionsTest {
     // Absent is `all`, which is what the loader shipped with — a bump that changed this silently
     // would flip every catalog that publishes without anybody choosing to.
     assertNull(
-      options(listOf("--ui-builder-catalogs", "m3-catalog,remote-m3")).uiBuilderPublishedCatalogs
+      options(listOf("--ui-builder-catalogs", "m3-catalog,remote-m3")).uiBuilderPublishedCatalogs,
     )
     assertNull(
       options(
-          listOf("--ui-builder-catalogs", "m3-catalog", "--ui-builder-published-catalogs", "all")
+          listOf("--ui-builder-catalogs", "m3-catalog", "--ui-builder-published-catalogs", "all"),
         )
-        .uiBuilderPublishedCatalogs
+        .uiBuilderPublishedCatalogs,
     )
 
     // `none` is an empty SET, not null: "no catalog may" and "every catalog may" are opposites and
@@ -297,7 +297,7 @@ class ServeCommandOptionsTest {
     assertEquals(
       emptySet(),
       options(
-          listOf("--ui-builder-catalogs", "m3-catalog", "--ui-builder-published-catalogs", "none")
+          listOf("--ui-builder-catalogs", "m3-catalog", "--ui-builder-published-catalogs", "none"),
         )
         .uiBuilderPublishedCatalogs,
     )
@@ -310,7 +310,7 @@ class ServeCommandOptionsTest {
             "m3-catalog,remote-m3",
             "--ui-builder-published-catalogs",
             "m3-catalog",
-          )
+          ),
         )
         .uiBuilderPublishedCatalogs,
     )
@@ -328,7 +328,7 @@ class ServeCommandOptionsTest {
             "m3-catalog",
             "--ui-builder-published-catalogs",
             "wear-m3",
-          )
+          ),
         )
       }
     assertTrue("wear-m3" in unknown.message.orEmpty(), unknown.message.orEmpty())
@@ -340,7 +340,7 @@ class ServeCommandOptionsTest {
           "m3-catalog",
           "--ui-builder-published-catalogs",
           "m3-catalog,m3-catalog",
-        )
+        ),
       )
     }
     assertFailsWith<IllegalArgumentException> {
@@ -358,7 +358,7 @@ class ServeCommandOptionsTest {
     assertEquals(
       setOf("wear-m3-typed-pilot", "m3-catalog-typed-pilot"),
       options(
-          listOf("--ui-builder-unlisted-catalogs", "wear-m3-typed-pilot, m3-catalog-typed-pilot")
+          listOf("--ui-builder-unlisted-catalogs", "wear-m3-typed-pilot, m3-catalog-typed-pilot"),
         )
         .uiBuilderUnlistedCatalogs,
     )
@@ -393,11 +393,11 @@ class ServeCommandOptionsTest {
     val pair = ServeWebPush.generateKeyPair()
     val public =
       ServeWebPush.base64Url(
-        ServeWebPush.rawPublicKey(pair.public as java.security.interfaces.ECPublicKey)
+        ServeWebPush.rawPublicKey(pair.public as java.security.interfaces.ECPublicKey),
       )
     val private =
       ServeWebPush.base64Url(
-        ServeWebPush.rawPrivateKey(pair.private as java.security.interfaces.ECPrivateKey)
+        ServeWebPush.rawPrivateKey(pair.private as java.security.interfaces.ECPrivateKey),
       )
     val pinned = options(listOf("--vapid-public-key", public, "--vapid-private-key", private))
     assertEquals(public, pinned.vapidPublicKey)
@@ -444,7 +444,7 @@ class ServeCommandOptionsTest {
           "Google",
           "--ui-builder-guidelines-model",
           " openai/gpt-5 ",
-        )
+        ),
       )
     assertEquals(setOf("alice", "bob"), parsed.uiBuilderGuidelinesUsers)
     assertEquals(setOf("google"), parsed.uiBuilderGuidelinesOrgs)

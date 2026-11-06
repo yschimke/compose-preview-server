@@ -201,7 +201,7 @@ internal class DesignLocalCompileLane(
         ?: return DesignLocalLane.Frame.NoFrame(
           "this install cannot compile the design at all: " +
             (if (classpath == null) "the bundle resolved no classpath"
-            else "no Kotlin compiler (lib-bta/) is installed")
+            else "no Kotlin compiler (lib-bta/) is installed"),
         )
     return when (val outcome = preview.render(document)) {
       is UiBuilderNativePreviewOutcome.Refused ->
@@ -213,7 +213,7 @@ internal class DesignLocalCompileLane(
           failure != null -> DesignLocalLane.Frame.NoFrame(failure)
           image == null ->
             DesignLocalLane.Frame.NoFrame(
-              "the render lane answered with neither a frame nor a reason"
+              "the render lane answered with neither a frame nor a reason",
             )
           else ->
             runCatching { Base64.getDecoder().decode(renderedFrameBase64(image)) }
@@ -221,7 +221,7 @@ internal class DesignLocalCompileLane(
                 onSuccess = { DesignLocalLane.Frame.Rendered(it) },
                 onFailure = {
                   DesignLocalLane.Frame.NoFrame(
-                    "the render lane's frame is not valid base64 (${image.take(32)}…)"
+                    "the render lane's frame is not valid base64 (${image.take(32)}…)",
                   )
                 },
               )
@@ -280,7 +280,7 @@ internal class DesignLocalCompileLane(
         .onFailure {
           log(
             "--assets ${directory.path} is not usable (${it.message}); a design that inlines an " +
-              "uploaded picture will refuse by name"
+              "uploaded picture will refuse by name",
           )
         }
         .getOrNull()

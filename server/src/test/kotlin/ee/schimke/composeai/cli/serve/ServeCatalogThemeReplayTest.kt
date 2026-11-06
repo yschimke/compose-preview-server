@@ -31,7 +31,7 @@ class ServeCatalogThemeReplayTest {
           },
           "spacing": { "small": { "${'$'}type": "dimension", "${'$'}value": "4px" } }
         }
-        """
+        """,
       )
 
     assertEquals(
@@ -88,7 +88,7 @@ class ServeCatalogThemeReplayTest {
       .writeBytes(
         ByteArrayOutputStream()
           .also { ImageIO.write(BufferedImage(4, 4, BufferedImage.TYPE_INT_ARGB), "png", it) }
-          .toByteArray()
+          .toByteArray(),
       )
     File(dir, "ir").mkdirs()
     File(dir, "ir/Card.rc").writeBytes(byteArrayOf(1, 2, 3))
@@ -120,9 +120,9 @@ class ServeCatalogThemeReplayTest {
           Request.Builder()
             .url(
               "http://127.0.0.1:${server.port}/ha-cards/render/Card.png" +
-                "?themeProvider=${theme.providerFqn}"
+                "?themeProvider=${theme.providerFqn}",
             )
-            .build()
+            .build(),
         )
         .execute()
         .use { it.code }

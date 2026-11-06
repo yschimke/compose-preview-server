@@ -269,7 +269,7 @@ class ServeRelatedCatalogsTest {
           registered = setOf("samples"),
           isLive = { true },
         )
-        .isEmpty()
+        .isEmpty(),
     )
   }
 }

@@ -102,7 +102,7 @@ class ServeUiBuilderWearNativePreviewTest {
   fun `the untagged generation carries no test tag`() {
     val generated =
       assertIs<ScreenGeneratorComposeExportExecutor.Generated.Emitted>(
-        executor.generate(wearScreen(), tagNodes = false)
+        executor.generate(wearScreen(), tagNodes = false),
       )
 
     assertTrue("testTag" !in generated.source, generated.source)
@@ -128,7 +128,7 @@ class ServeUiBuilderWearNativePreviewTest {
 
     val refused =
       assertIs<ScreenGeneratorComposeExportExecutor.Generated.Refused>(
-        wearExecutor.generate(bareRoot, tagNodes = true)
+        wearExecutor.generate(bareRoot, tagNodes = true),
       )
 
     assertEquals("UNEXPRESSIBLE_DOCUMENT", refused.code)
@@ -144,7 +144,7 @@ class ServeUiBuilderWearNativePreviewTest {
   fun `a host with no wear bundle refuses by naming the flag, not the design`() {
     val refused =
       assertIs<UiBuilderNativePreviewOutcome.Refused>(
-        lane(nativeTarget = { null }).render(wearScreen())
+        lane(nativeTarget = { null }).render(wearScreen()),
       )
 
     assertEquals(ServeUiBuilderNativePreview.NO_NATIVE_CATALOG, refused.code)
@@ -176,7 +176,7 @@ class ServeUiBuilderWearNativePreviewTest {
               (resolve(it) as? UiBuilderNativeTargets.Resolution.Refused)?.reason
             },
           )
-          .render(wearScreen())
+          .render(wearScreen()),
       )
 
     assertEquals(ServeUiBuilderNativePreview.NO_NATIVE_CATALOG, refused.code)
@@ -229,9 +229,9 @@ class ServeUiBuilderWearNativePreviewTest {
             captureNodeBounds = {
               captured += it
               mapOf("art" to box)
-            }
+            },
           )
-          .render(wearWidget(assetKey = "picture"))
+          .render(wearWidget(assetKey = "picture")),
       )
 
     assertEquals(1, captured.size)
@@ -253,7 +253,7 @@ class ServeUiBuilderWearNativePreviewTest {
               mapOf("art" to AnnotationBounds(x = 0, y = 0, width = 1, height = 1))
             },
           )
-          .render(wearWidget(assetKey = "picture"))
+          .render(wearWidget(assetKey = "picture")),
       )
 
     assertEquals(false, asked)
@@ -311,7 +311,7 @@ class ServeUiBuilderWearNativePreviewTest {
         carriesCmpWidgetPlayer = {
           asked += it
           false
-        }
+        },
       )
       .render(wearWidget())
     lane(carriesCmpWidgetPlayer = { false }, widgetPlayer = UiBuilderWidgetPlayer.ANDROIDX)
@@ -441,7 +441,7 @@ class ServeUiBuilderWearNativePreviewTest {
                 mediaType = "image/png",
                 contentDigest = "sha256:unused",
                 source = EmbeddedAssetSourceV1(ONE_PIXEL_PNG_BASE64),
-              )
+              ),
           ),
     )
 

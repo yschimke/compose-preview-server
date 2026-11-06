@@ -35,7 +35,7 @@ class ServeLiveSessionTest {
     val session = FakeRenderSession(newRenderRoot()) // streaming = false
     host(session).use { h ->
       assertNull(
-        ServeLiveSession.tryStart(h, previewId, emptyMap(), send = {}, system = "compose-m3")
+        ServeLiveSession.tryStart(h, previewId, emptyMap(), send = {}, system = "compose-m3"),
       )
     }
   }
@@ -53,7 +53,7 @@ class ServeLiveSessionTest {
           send = {},
           system = "compose-m3",
           onUnavailable = { reason = it },
-        )
+        ),
       )
       // The daemon's own exception message is carried through, not swallowed into a log.
       assertEquals("streaming not supported", reason)
@@ -73,7 +73,7 @@ class ServeLiveSessionTest {
           send = {},
           system = "compose-m3",
           onUnavailable = { reason = it },
-        )
+        ),
       )
       assertTrue(
         reason?.contains("could not hold an interactive session") == true,
@@ -103,7 +103,7 @@ class ServeLiveSessionTest {
           send = {},
           system = "compose-m3",
           onUnavailable = { reason = it },
-        )
+        ),
       )
       assertEquals("UnsupportedOperationException: interactive session already held", reason)
     }
@@ -133,7 +133,7 @@ class ServeLiveSessionTest {
           send = {},
           system = "compose-m3",
           onUnavailable = { reason = it },
-        )
+        ),
       )
       assertNotNull(reason)
       assertTrue(
@@ -173,7 +173,13 @@ class ServeLiveSessionTest {
     host(session).use { h ->
       val sent = CopyOnWriteArrayList<String>()
       assertNotNull(
-        ServeLiveSession.tryStart(h, previewId, emptyMap(), send = sent::add, system = "compose-m3")
+        ServeLiveSession.tryStart(
+          h,
+          previewId,
+          emptyMap(),
+          send = sent::add,
+          system = "compose-m3",
+        ),
       )
       val fsid = assertNotNull(session.lastFrameStreamId)
       val payload = Base64.getEncoder().encodeToString("xy".toByteArray())
@@ -208,7 +214,7 @@ class ServeLiveSessionTest {
             emptyMap(),
             send = sent::add,
             system = "compose-m3",
-          )
+          ),
         )
       val payload = Base64.getEncoder().encodeToString("xy".toByteArray())
       session.emitStreamFrame(assertNotNull(session.lastFrameStreamId), 7, payloadBase64 = payload)
@@ -242,7 +248,7 @@ class ServeLiveSessionTest {
           null,
           sent::add,
           system = "compose-m3",
-        )
+        ),
       )
       assertEquals(StreamCodec.WEBP, session.lastCodec)
       session.emitStreamFrame(
@@ -262,7 +268,13 @@ class ServeLiveSessionTest {
     host(session).use { h ->
       val sent = CopyOnWriteArrayList<String>()
       assertNotNull(
-        ServeLiveSession.tryStart(h, previewId, emptyMap(), send = sent::add, system = "compose-m3")
+        ServeLiveSession.tryStart(
+          h,
+          previewId,
+          emptyMap(),
+          send = sent::add,
+          system = "compose-m3",
+        ),
       )
       session.emitStreamFrame(
         assertNotNull(session.lastFrameStreamId),
@@ -289,7 +301,7 @@ class ServeLiveSessionTest {
             send = {},
             system = "compose-m3",
             frameStats = stats,
-          )
+          ),
         )
       val fsid = assertNotNull(session.lastFrameStreamId)
       val payload = Base64.getEncoder().encodeToString(ByteArray(64))
@@ -324,7 +336,7 @@ class ServeLiveSessionTest {
           send = {},
           system = "compose-m3",
           frameStats = stats,
-        )
+        ),
       )
       assertEquals(0, assertNotNull(stats.snapshot("compose-m3")).openSockets)
     }
@@ -336,7 +348,7 @@ class ServeLiveSessionTest {
     host(session).use { h ->
       val live =
         assertNotNull(
-          ServeLiveSession.tryStart(h, previewId, emptyMap(), send = {}, system = "compose-m3")
+          ServeLiveSession.tryStart(h, previewId, emptyMap(), send = {}, system = "compose-m3"),
         )
       live.onClientMessage("""{"type":"input","kind":"click","pixelX":10,"pixelY":20}""")
       assertEquals(1, session.interactiveInputs.size)
@@ -353,16 +365,16 @@ class ServeLiveSessionTest {
     host(session).use { h ->
       val live =
         assertNotNull(
-          ServeLiveSession.tryStart(h, previewId, emptyMap(), send = {}, system = "compose-m3")
+          ServeLiveSession.tryStart(h, previewId, emptyMap(), send = {}, system = "compose-m3"),
         )
       live.onClientMessage(
-        """{"type":"input","kind":"pointerDown","pixelX":3,"pixelY":4,"pointerId":1}"""
+        """{"type":"input","kind":"pointerDown","pixelX":3,"pixelY":4,"pointerId":1}""",
       )
       live.onClientMessage(
-        """{"type":"input","kind":"pointerMove","pixelX":7,"pixelY":9,"pointerId":1}"""
+        """{"type":"input","kind":"pointerMove","pixelX":7,"pixelY":9,"pointerId":1}""",
       )
       live.onClientMessage(
-        """{"type":"input","kind":"pointerUp","pixelX":7,"pixelY":9,"pointerId":1}"""
+        """{"type":"input","kind":"pointerUp","pixelX":7,"pixelY":9,"pointerId":1}""",
       )
       live.onClientMessage("""{"type":"input","kind":"rotaryScroll","scrollDeltaY":-12.5}""")
       live.onClientMessage("""{"type":"input","kind":"keyDown","keyCode":"66"}""")
@@ -397,7 +409,7 @@ class ServeLiveSessionTest {
             emptyMap(),
             send = sent::add,
             system = "compose-m3",
-          )
+          ),
         )
       live.onClientMessage("""{"type":"input","kind":"telepathy"}""")
       assertEquals("error", typeOf(sent.last()))
@@ -411,7 +423,7 @@ class ServeLiveSessionTest {
     host(session).use { h ->
       val live =
         assertNotNull(
-          ServeLiveSession.tryStart(h, previewId, emptyMap(), send = {}, system = "compose-m3")
+          ServeLiveSession.tryStart(h, previewId, emptyMap(), send = {}, system = "compose-m3"),
         )
       val first = assertNotNull(session.lastFrameStreamId)
       assertEquals(1, session.streamStarts.get())
@@ -450,7 +462,7 @@ class ServeLiveSessionTest {
               label = "secondary",
               default =
                 ee.schimke.composeai.daemon.protocol.PreviewOverrideValue.BooleanValue(false),
-            )
+            ),
           ),
       )
     ServeRenderHost(session, listOf(preview), renderTimeoutSeconds = 30).use { h ->
@@ -462,12 +474,12 @@ class ServeLiveSessionTest {
             mapOf("knob.secondary" to "true"),
             send = {},
             system = "compose-m3",
-          )
+          ),
         )
       assertEquals(
         mapOf(
           "secondary" to
-            ee.schimke.composeai.daemon.protocol.PreviewOverrideValue.BooleanValue(true)
+            ee.schimke.composeai.daemon.protocol.PreviewOverrideValue.BooleanValue(true),
         ),
         session.lastStreamOverrides?.namedOverrides,
         "the connect query's knob should reach stream/start typed",
@@ -478,7 +490,7 @@ class ServeLiveSessionTest {
       assertEquals(
         mapOf(
           "secondary" to
-            ee.schimke.composeai.daemon.protocol.PreviewOverrideValue.BooleanValue(true)
+            ee.schimke.composeai.daemon.protocol.PreviewOverrideValue.BooleanValue(true),
         ),
         session.lastStreamOverrides?.namedOverrides,
         "setOverrides' knob should reach the restarted stream typed",
@@ -501,12 +513,12 @@ class ServeLiveSessionTest {
             emptyMap(),
             send = sent::add,
             system = "confetti-wear",
-          )
+          ),
         )
 
       live.onClientMessage("""{"type":"setOverrides","overrides":{"uiMode":"chartreuse"}}""")
       live.onClientMessage(
-        """{"type":"switch","previewId":"$previewId","overrides":{"uiMode":"chartreuse"}}"""
+        """{"type":"switch","previewId":"$previewId","overrides":{"uiMode":"chartreuse"}}""",
       )
 
       assertEquals(2, session.streamStarts.get())
@@ -527,7 +539,7 @@ class ServeLiveSessionTest {
             emptyMap(),
             send = sent::add,
             system = "compose-m3",
-          )
+          ),
         )
 
       // Same message, non-Wear catalog: the override reaches the parser, which rejects the bogus
@@ -546,10 +558,10 @@ class ServeLiveSessionTest {
       val a = CopyOnWriteArrayList<String>()
       val b = CopyOnWriteArrayList<String>()
       assertNotNull(
-        ServeLiveSession.tryStart(h, previewId, emptyMap(), send = a::add, system = "compose-m3")
+        ServeLiveSession.tryStart(h, previewId, emptyMap(), send = a::add, system = "compose-m3"),
       )
       assertNotNull(
-        ServeLiveSession.tryStart(h, previewId, emptyMap(), send = b::add, system = "compose-m3")
+        ServeLiveSession.tryStart(h, previewId, emptyMap(), send = b::add, system = "compose-m3"),
       )
 
       assertEquals(1, session.streamStarts.get(), "two clients should ride one daemon stream/start")
@@ -578,7 +590,7 @@ class ServeLiveSessionTest {
       .use { h ->
         val live =
           assertNotNull(
-            ServeLiveSession.tryStart(h, previewId, emptyMap(), send = {}, system = "compose-m3")
+            ServeLiveSession.tryStart(h, previewId, emptyMap(), send = {}, system = "compose-m3"),
           )
         val firstFsid = assertNotNull(session.lastFrameStreamId)
         assertEquals(1, session.streamStarts.get())
@@ -607,7 +619,7 @@ class ServeLiveSessionTest {
             emptyMap(),
             send = sent::add,
             system = "compose-m3",
-          )
+          ),
         )
       val fsid = assertNotNull(session.lastFrameStreamId)
 
@@ -627,7 +639,7 @@ class ServeLiveSessionTest {
     host(session).use { h ->
       val live =
         assertNotNull(
-          ServeLiveSession.tryStart(h, previewId, emptyMap(), send = {}, system = "compose-m3")
+          ServeLiveSession.tryStart(h, previewId, emptyMap(), send = {}, system = "compose-m3"),
         )
       val fsid = assertNotNull(session.lastFrameStreamId)
 
@@ -647,7 +659,7 @@ class ServeLiveSessionTest {
     host(session).use { h ->
       val live =
         assertNotNull(
-          ServeLiveSession.tryStart(h, previewId, emptyMap(), send = {}, system = "compose-m3")
+          ServeLiveSession.tryStart(h, previewId, emptyMap(), send = {}, system = "compose-m3"),
         )
       live.onClientMessage("""{"type":"visibility","visible":false,"fps":2}""")
 
@@ -671,7 +683,7 @@ class ServeLiveSessionTest {
     host(session).use { h ->
       val live =
         assertNotNull(
-          ServeLiveSession.tryStart(h, previewId, emptyMap(), send = {}, system = "compose-m3")
+          ServeLiveSession.tryStart(h, previewId, emptyMap(), send = {}, system = "compose-m3"),
         )
       val fsid = assertNotNull(session.lastFrameStreamId)
       live.close()

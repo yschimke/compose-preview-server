@@ -34,7 +34,7 @@ internal object PlaygroundDaemonOpeners {
       log(
         "Android rendering needs the Android daemon sidecar (lib-daemon-android/), which ships " +
           "separately as compose-preview-android-daemon-<version>.zip; unpack it and set " +
-          "-Dcomposeai.cli.libDaemonAndroidDir=<dir>/lib-daemon-android."
+          "-Dcomposeai.cli.libDaemonAndroidDir=<dir>/lib-daemon-android.",
       )
       return null
     }
@@ -74,7 +74,7 @@ internal object PlaygroundDaemonOpeners {
     if (daemonJars.isEmpty() || rendererJars.isEmpty()) {
       log(
         "desktop rendering needs the desktop daemon sidecar (lib-daemon-desktop/ + lib-renderer/) " +
-          "from an installed distribution."
+          "from an installed distribution.",
       )
       return null
     }
@@ -140,7 +140,7 @@ internal object PlaygroundDaemonOpeners {
                 classesDir +
                 previewsJson,
             javaHome = File(System.getProperty("java.home")),
-          )
+          ),
         ),
       hardTtlSeconds = sandbox.ttlSeconds.takeIf { sandbox.isActive },
     )

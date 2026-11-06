@@ -261,7 +261,7 @@ class BuildHostDiscoveryTest {
         listOf("--build-host", "none"),
         env = { null },
         pathLookup = { java.io.File("/usr/bin/compose-preview") },
-      )
+      ),
     )
   }
 
@@ -272,7 +272,7 @@ class BuildHostDiscoveryTest {
         emptyList(),
         env = { "none" },
         pathLookup = { java.io.File("/usr/bin/compose-preview") },
-      )
+      ),
     )
   }
 

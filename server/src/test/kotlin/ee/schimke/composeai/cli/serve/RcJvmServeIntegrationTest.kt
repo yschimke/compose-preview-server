@@ -63,7 +63,7 @@ class RcJvmServeIntegrationTest {
           {"module":":m","variant":"debug","previews":[
             {"id":"Foo","functionName":"Foo","className":"FooKt","params":{$params}}]}
           """
-            .trimIndent()
+            .trimIndent(),
         )
     }
     return dir
@@ -210,7 +210,7 @@ class RcJvmServeIntegrationTest {
           "rc.tint" to "color:#FF00FF00",
           "rc.bad" to "float:notanumber", // malformed → skipped
           "knob.x" to "1", // not an rc. seed → ignored
-        )
+        ),
       )
     assertEquals(RemoteNamedValue.StringValue("Hello"), seeds["label"])
     assertEquals(RemoteNamedValue.FloatValue(0.5f), seeds["progress"])

@@ -137,12 +137,12 @@ internal constructor(
     val platform =
       request.platform
         ?: return UiBuilderGuidelineOutcome.Skipped(
-          "no guidelines are written for this catalog yet"
+          "no guidelines are written for this catalog yet",
         )
     val asked = request.rules.asked
     if (asked.isEmpty()) {
       return UiBuilderGuidelineOutcome.Skipped(
-        "no $platform guideline can be judged without a render"
+        "no $platform guideline can be judged without a render",
       )
     }
     val response =
@@ -158,13 +158,13 @@ internal constructor(
       }
     if (response.status !in 200..299) {
       return UiBuilderGuidelineOutcome.Failed(
-        "OpenRouter answered ${response.status}: ${DesignGuidelinePrompt.errorMessage(response.body)}"
+        "OpenRouter answered ${response.status}: ${DesignGuidelinePrompt.errorMessage(response.body)}",
       )
     }
     val verdicts =
       DesignGuidelinePrompt.parseCompletion(response.body).getOrElse {
         return UiBuilderGuidelineOutcome.Failed(
-          "the model's answer was not the verdict list asked for: ${it.message}"
+          "the model's answer was not the verdict list asked for: ${it.message}",
         )
       }
     // One verdict per rule asked. A rule the model skipped is unanswered, never counted as a pass.
@@ -173,7 +173,7 @@ internal constructor(
     val served = DesignGuidelinePrompt.parseServed(response.body)
     if (answered.isEmpty()) {
       return UiBuilderGuidelineOutcome.Failed(
-        "${config.model} returned no verdict for any of the ${asked.size} rules asked"
+        "${config.model} returned no verdict for any of the ${asked.size} rules asked",
       )
     }
     return UiBuilderGuidelineOutcome.Checked(
@@ -267,7 +267,7 @@ internal constructor(
                   served
                     ?.takeIf { it.model != null }
                     ?.describe(model)
-                    ?.replaceFirstChar { it.uppercase() } ?: "Model $model"
+                    ?.replaceFirstChar { it.uppercase() } ?: "Model $model",
                 )
                 append(", confidence ")
                   .append(String.format(java.util.Locale.ROOT, "%.2f", finding.confidence))
@@ -509,7 +509,7 @@ internal class ServeGuidelinesLiveSettings(private val guidelines: ServeUiBuilde
     )
     System.err.println(
       "serve: ui-builder guidelines check now on ${guidelines.model} for " +
-        guidelines.describeAccess()
+        guidelines.describeAccess(),
     )
   }
 

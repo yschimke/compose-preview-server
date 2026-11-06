@@ -149,7 +149,7 @@ class ServeUiBuilderLinksIntegrationTest {
         .newCall(
           Request.Builder()
             .url("http://127.0.0.1:${server.server.port}${designPath(DESIGN_ID)}")
-            .build()
+            .build(),
         )
         .execute()
     response.use { assertEquals(401, it.code) }
@@ -309,7 +309,7 @@ class ServeUiBuilderLinksIntegrationTest {
                   actorId,
                   DesignAccessRoleV1.VIEWER,
                   listOf(DesignAccessActionV1.READ, DesignAccessActionV1.EXPORT),
-                )
+                ),
               ),
           ),
       )
@@ -320,7 +320,7 @@ class ServeUiBuilderLinksIntegrationTest {
             .url("http://127.0.0.1:${server.server.port}/api/ui-builder/v1/requests")
             .header(ServeHttpServer.TOKEN_HEADER, token)
             .post(json.encodeToString(envelope).toRequestBody(JSON_MEDIA_TYPE))
-            .build()
+            .build(),
         )
         .execute()
     response.use { assertEquals(200, it.code, it.body.string()) }
@@ -441,7 +441,7 @@ class ServeUiBuilderLinksIntegrationTest {
             .url("http://127.0.0.1:${server.server.port}/api/ui-builder/v1/requests")
             .header(ServeHttpServer.TOKEN_HEADER, token)
             .post(json.encodeToString(envelope).toRequestBody(JSON_MEDIA_TYPE))
-            .build()
+            .build(),
         )
         .execute()
     response.use { assertEquals(200, it.code, it.body.string()) }
@@ -469,8 +469,8 @@ class ServeUiBuilderLinksIntegrationTest {
         exporter =
           ScreenGeneratorComposeExportExecutor(
             ComponentRecordSource(
-              mapOf(CATALOG_SYSTEM_ID to ScreenGeneratorScreenFixture.componentsFile())
-            )::record
+              mapOf(CATALOG_SYSTEM_ID to ScreenGeneratorScreenFixture.componentsFile()),
+            )::record,
           ),
       )
     val server =
@@ -545,7 +545,7 @@ class ServeUiBuilderLinksIntegrationTest {
           .url("http://127.0.0.1:${server.server.port}/mcp")
           .header(ServeHttpServer.TOKEN_HEADER, token)
           .post(body.toRequestBody(JSON_MEDIA_TYPE))
-          .build()
+          .build(),
       )
       .execute()
       .use {

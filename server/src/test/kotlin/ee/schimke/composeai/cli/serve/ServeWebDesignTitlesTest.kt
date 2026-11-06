@@ -23,7 +23,7 @@ class ServeWebDesignTitlesTest {
               "m3-catalog",
               "Mobile app",
               listOf(ServeWeb.UiBuilderNewDesignTemplate("blank", "Blank screen")),
-            )
+            ),
           ),
         suggestedDesignId = "brave-heron",
       )

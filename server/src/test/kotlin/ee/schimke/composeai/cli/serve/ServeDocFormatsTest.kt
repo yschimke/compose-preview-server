@@ -67,17 +67,17 @@ class ServeDocFormatsTest {
     // The other properties still read alongside it.
     assertEquals(ServeDocSize(300, 200), ServeDocFormats.REMOTE_COMPOSE.size(declared))
     assertNull(
-      ServeDocFormats.remoteComposeDensityAtGeneration(ServeDocFixtures.remoteComposeDoc())
+      ServeDocFormats.remoteComposeDensityAtGeneration(ServeDocFixtures.remoteComposeDoc()),
     )
     assertNull(
       ServeDocFormats.remoteComposeDensityAtGeneration(
-        ServeDocFixtures.androidxUntaggedRemoteComposePrefix()
-      )
+        ServeDocFixtures.androidxUntaggedRemoteComposePrefix(),
+      ),
     )
     assertNull(
       ServeDocFormats.remoteComposeDensityAtGeneration(
-        ServeDocFixtures.remoteComposeDoc(densityAtGeneration = Float.NaN)
-      )
+        ServeDocFixtures.remoteComposeDoc(densityAtGeneration = Float.NaN),
+      ),
     )
     assertNull(ServeDocFormats.remoteComposeDensityAtGeneration(byteArrayOf(0x52, 0x43, 0x01)))
   }
@@ -104,7 +104,7 @@ class ServeDocFormatsTest {
     assertEquals(ServeDocFormats.REMOTE_COMPOSE, ServeDocFormats.detect(truncated))
     assertNull(ServeDocFormats.REMOTE_COMPOSE.size(truncated))
     assertTrue(
-      ServeDocFormats.REMOTE_COMPOSE.describe(truncated).any { it.key == "Format version" }
+      ServeDocFormats.REMOTE_COMPOSE.describe(truncated).any { it.key == "Format version" },
     )
   }
 

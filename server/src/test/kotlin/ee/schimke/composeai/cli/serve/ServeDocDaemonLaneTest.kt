@@ -115,7 +115,7 @@ class ServeDocDaemonLaneTest {
         Request.Builder()
           .url(url("/docs?name=button.rc"))
           .post(bytes.toRequestBody("application/octet-stream".toMediaType()))
-          .build()
+          .build(),
       )
       .execute()
       .use { response ->

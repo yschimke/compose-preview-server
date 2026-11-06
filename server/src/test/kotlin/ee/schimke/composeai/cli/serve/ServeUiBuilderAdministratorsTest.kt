@@ -22,14 +22,14 @@ class ServeUiBuilderAdministratorsTest {
         AuthenticatedUiBuilderActor(
           actorId = "agent-grant:temporary",
           onBehalfOfActorId = "github:yschimke",
-        )
+        ),
       ),
       "a grant approved by an administrator does not administer the host",
     )
     assertFalse(
       administrators.contains(
-        AuthenticatedUiBuilderActor("github:guest", onBehalfOfActorId = "github:yschimke")
-      )
+        AuthenticatedUiBuilderActor("github:guest", onBehalfOfActorId = "github:yschimke"),
+      ),
     )
     assertFalse(administrators.contains(AuthenticatedUiBuilderActor("github:someone-else")))
   }

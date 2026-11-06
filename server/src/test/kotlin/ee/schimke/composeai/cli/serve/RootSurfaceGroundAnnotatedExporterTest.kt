@@ -85,7 +85,7 @@ class RootSurfaceGroundAnnotatedExporterTest {
             root.copy(
               properties = root.properties + ("containerColor" to ColorValueV1("#313338")),
               modifiers = emptyList(),
-            ))
+            )),
     )
   }
 

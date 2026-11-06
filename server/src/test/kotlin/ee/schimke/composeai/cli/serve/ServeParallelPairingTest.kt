@@ -181,7 +181,7 @@ class ServeParallelPairingTest {
     assertEquals(
       "state=disabled, size=192dp, content=icon",
       ServeParallelPairing.cellLabel(
-        preview("x", state = "disabled", size = "192dp", props = mapOf("content" to "icon"))
+        preview("x", state = "disabled", size = "192dp", props = mapOf("content" to "icon")),
       ),
     )
     assertEquals("", ServeParallelPairing.cellLabel(preview("x", state = "default")))
@@ -202,7 +202,7 @@ class ServeParallelPairingTest {
             raster = DesignReferenceRaster(path = "references/b.png"),
             source = DesignReferenceSource(provider = "file", uri = "references/b.png"),
           ),
-        )
+        ),
       ),
     )
   }

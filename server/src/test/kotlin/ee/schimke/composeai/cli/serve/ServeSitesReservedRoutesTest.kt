@@ -136,7 +136,7 @@ class ServeSitesReservedRoutesTest {
     }
     fail(
       "a route is registered from an expression this test cannot read: '$argument'. Resolve it in " +
-        "constantPaths (and make sure its first segment is in ServeSites.RESERVED_SYSTEMS)."
+        "constantPaths (and make sure its first segment is in ServeSites.RESERVED_SYSTEMS).",
     )
   }
 

@@ -119,12 +119,12 @@ class ServeUiBuilderComponentStore(private val root: Path) {
     if (!SYSTEM.matches(system)) return PublishResult.Refused("`$system` is not a catalog system")
     if (!COMPONENT_ID.matches(componentId)) {
       return PublishResult.Refused(
-        "`$componentId` is not a component id: letters, digits, `.`, `_` and `-`, at most 64"
+        "`$componentId` is not a component id: letters, digits, `.`, `_` and `-`, at most 64",
       )
     }
     if (document.catalogPin.systemId != system) {
       return PublishResult.Refused(
-        "the component is drawn with ${document.catalogPin.systemId}, not $system"
+        "the component is drawn with ${document.catalogPin.systemId}, not $system",
       )
     }
     val cleanTitle = title.trim().ifEmpty { componentId }
@@ -158,7 +158,7 @@ class ServeUiBuilderComponentStore(private val root: Path) {
     val symbol =
       checker.symbolOf(entry, published)
         ?: return PublishResult.Refused(
-          reasons.lastOrNull()?.removePrefix("serve: ") ?: "the component is not a usable symbol"
+          reasons.lastOrNull()?.removePrefix("serve: ") ?: "the component is not a usable symbol",
         )
 
     val coordinate = coordinate(system)
@@ -213,11 +213,11 @@ class ServeUiBuilderComponentStore(private val root: Path) {
                     put("title", JsonPrimitive(entry.title))
                     entry.description?.let { put("description", JsonPrimitive(it)) }
                     put("file", JsonPrimitive(entry.file))
-                  }
+                  },
                 )
-              }
+              },
             ),
-        )
+        ),
       ),
     )
 

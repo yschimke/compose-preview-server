@@ -91,7 +91,7 @@ class ServeCarriedRcInteractiveTest {
             final = false,
             payloadBase64 =
               Base64.getEncoder().encodeToString(ServeCarriedRcStreamTest.png(marker)),
-          )
+          ),
         )
       frame(HELD_FIRST_FRAME)
       return object : StreamHandle {
@@ -200,7 +200,7 @@ class ServeCarriedRcInteractiveTest {
       .newCall(
         Request.Builder()
           .url("http://127.0.0.1:${server!!.port}/examples/p/$EXAMPLE_ID?token=$TOKEN")
-          .build()
+          .build(),
       )
       .execute()
       .use { it.body.string() }
@@ -277,7 +277,7 @@ class ServeCarriedRcInteractiveTest {
     val frames = CopyOnWriteArrayList<StreamFrameParams>()
     val live =
       assertIs<ServeRcPlayerDaemon.LiveOutcome.Streaming>(
-        daemon.openLive(overrides, StreamCodec.WEBP, 12) { frames += it }
+        daemon.openLive(overrides, StreamCodec.WEBP, 12) { frames += it },
       )
     assertEquals(overrides, heldStarts.single(), "the held session carries the document as given")
     assertEquals(1, frames.size)
@@ -295,7 +295,7 @@ class ServeCarriedRcInteractiveTest {
     assertEquals(false, daemon.knownToPlayCarriedDocumentsLive)
     val outcome =
       assertIs<ServeRcPlayerDaemon.LiveOutcome.Unsupported>(
-        daemon.openLive(carried(), null, null) {}
+        daemon.openLive(carried(), null, null) {},
       )
     assertTrue(ServeRcPlayerDaemon.CARRIED_LIVE_CAPABILITY in outcome.reason, outcome.reason)
     assertTrue(heldStarts.isEmpty())

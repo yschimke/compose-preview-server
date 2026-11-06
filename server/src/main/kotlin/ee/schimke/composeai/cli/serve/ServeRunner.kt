@@ -101,7 +101,7 @@ public class ServeRunner(
       System.err.println(
         "serve: catalog blob cache at $preferred (cap ${maxBytes / (1024 * 1024)} MB) — " +
           "it survives only if that path outlives the process; in a container that means a " +
-          "mounted volume, since the writable layer goes with the container"
+          "mounted volume, since the writable layer goes with the container",
       )
       CatalogBlobPool(preferred, maxBytes = maxBytes, persistenceConfigured = true)
     } else {
@@ -114,7 +114,7 @@ public class ServeRunner(
         }
       System.err.println(
         "serve: catalog blob cache is a temp dir — it will not survive a restart. " +
-          "Set --catalog-cache-dir (SERVE_CATALOG_CACHE_DIR) to a mounted volume to keep it."
+          "Set --catalog-cache-dir (SERVE_CATALOG_CACHE_DIR) to a mounted volume to keep it.",
       )
       // Flagged as not configured so `/status.json` can tell a temp pool from a working durable
       // cache.
@@ -163,7 +163,7 @@ public class ServeRunner(
         // credential lives.
         AgentGrantProtocol.parseDurationSeconds(it)
           ?: throw IllegalArgumentException(
-            "--agent-grant-max-ttl '$it' is not a duration — try 90m, 2h, or a number of seconds"
+            "--agent-grant-max-ttl '$it' is not a duration — try 90m, 2h, or a number of seconds",
           )
       }
       ?.coerceIn(60L, ServeDefaults.AGENT_GRANT_HARD_MAX_TTL_SECONDS)
@@ -175,7 +175,7 @@ public class ServeRunner(
       // operator meant to narrow them.
       AgentGrantScope.parseHighest(it)
         ?: throw IllegalArgumentException(
-          "--agent-grant-scopes '$it' is not a scope list — use preview, live, or playground"
+          "--agent-grant-scopes '$it' is not a scope list — use preview, live, or playground",
         )
     } ?: AgentGrantScope.DEFAULT_MAX
 
@@ -287,7 +287,7 @@ public class ServeRunner(
             pids = playgroundSandboxPids,
             ttlSeconds = playgroundSandboxTtlSeconds,
             extraReadOnlyPaths = playgroundSandboxReadOnlyPaths,
-          )
+          ),
         )
         .getOrThrow()
     }
@@ -516,7 +516,7 @@ public class ServeRunner(
     if (force || snapshot.evicted > 0) {
       System.err.println(
         "serve: catalog blob cache — ${snapshot.blobs} blob(s), ${snapshot.bytes / (1024 * 1024)} MB, " +
-          "${snapshot.hits} hit(s), ${snapshot.misses} miss(es), ${snapshot.evicted} reclaimed"
+          "${snapshot.hits} hit(s), ${snapshot.misses} miss(es), ${snapshot.evicted} reclaimed",
       )
     }
   }
@@ -543,13 +543,13 @@ public class ServeRunner(
     if (result.deletedGenerations > 0) {
       System.err.println(
         "serve: theme cache swept ${result.deletedGenerations} stale generation(s), " +
-          "${result.reclaimedBytes / (1024 * 1024)} MB reclaimed"
+          "${result.reclaimedBytes / (1024 * 1024)} MB reclaimed",
       )
     }
     if (result.overCap) {
       System.err.println(
         "serve: theme cache is ${result.bytes / (1024 * 1024)} MB, over its cap — every generation " +
-          "still in use, so nothing was evicted. Raise --theme-cache-max-bytes or serve fewer catalogs."
+          "still in use, so nothing was evicted. Raise --theme-cache-max-bytes or serve fewer catalogs.",
       )
     }
   }
@@ -613,9 +613,10 @@ public class ServeRunner(
             routing = routing,
           )
             ?: return CatalogThemeCache(
-              persistenceOffReason = "fingerprint unavailable (a classpath entry could not be read)"
+              persistenceOffReason =
+                "fingerprint unavailable (a classpath entry could not be read)",
             )
-        }
+        },
       ) ?: return CatalogThemeCache(persistenceOffReason = "fingerprint unavailable")
     val inputs =
       GenerationInputs(
@@ -628,7 +629,7 @@ public class ServeRunner(
     val generation =
       store.open(system, fingerprint, inputs)
         ?: return CatalogThemeCache(
-          persistenceOffReason = "generation directory could not be opened"
+          persistenceOffReason = "generation directory could not be opened",
         )
     // The sweep is not run here: the replacement host is still being staged and may fail, leaving
     // the previous generation in use. Retirement waits for a successful publication
@@ -636,7 +637,7 @@ public class ServeRunner(
     liveThemeGenerations[system] = fingerprint
     if (generation.loadedEntries > 0) {
       System.err.println(
-        "serve: catalog $system → ${generation.loadedEntries} theme renders adopted from disk"
+        "serve: catalog $system → ${generation.loadedEntries} theme renders adopted from disk",
       )
     }
     return CatalogThemeCache(persistence = generation)
@@ -734,7 +735,7 @@ public class ServeRunner(
           ?.also { contribution ->
             System.err.println(
               "serve: catalog registry ${nomination}: ${contribution.entries.size} catalog(s) — " +
-                contribution.entries.joinToString(", ") { it.system }
+                contribution.entries.joinToString(", ") { it.system },
             )
           }
       RegistryBoot(nomination, contribution, problem)
@@ -756,7 +757,7 @@ public class ServeRunner(
    * then the sync's latest. See [catalogRegistryStatus].
    */
   private fun catalogRegistryStatuses(
-    sync: ServeCatalogRegistrySync?
+    sync: ServeCatalogRegistrySync?,
   ): List<CatalogRegistryStatus> = catalogRegistryBoot.map { boot ->
     catalogRegistryStatus(
       nomination = boot.nomination,
@@ -788,7 +789,7 @@ public class ServeRunner(
     }
 
   private fun uiBuilderDesignCatalogCoordinates(
-    catalogLoads: CatalogLoadTracker?
+    catalogLoads: CatalogLoadTracker?,
   ): List<ServeUiBuilderDesignLibrary.Coordinate> =
     catalogLoads?.snapshot().orEmpty().map { state ->
       ServeUiBuilderDesignLibrary.Coordinate(
@@ -870,10 +871,10 @@ public class ServeRunner(
         System.err.println(
           "serve: ${selectors.joinToString(" / ")} select previews from a discovered module, but " +
             "this server is bundle-backed — it hosts what --bundle / --bundles / --catalogs and " +
-            "uploads provide, and no manifest to select against exists."
+            "uploads provide, and no manifest to select against exists.",
         )
         System.err.println(
-          "  Drop the selector, or pass --module <path> / --discover to serve from a module."
+          "  Drop the selector, or pass --module <path> / --discover to serve from a module.",
         )
         exitProcess(64)
       }
@@ -895,7 +896,7 @@ public class ServeRunner(
                 else
                   ": " +
                     discovered.manifests.joinToString(", ") { (module, _) -> module.gradlePath } +
-                    "."
+                    ".",
             )
             exitProcess(3)
           }
@@ -924,7 +925,7 @@ public class ServeRunner(
     if (servable.size > 1) {
       System.err.println(
         "serve: ${servable.size} modules discovered; a server hosts one module. " +
-          "Narrow with --module <path>:"
+          "Narrow with --module <path>:",
       )
       servable.forEach { (m, _) -> System.err.println("  ${m.gradlePath}") }
       exitProcess(1)
@@ -1098,14 +1099,14 @@ public class ServeRunner(
     servable.forEach { (module, previews) ->
       if (!runDaemonStart(module)) {
         System.err.println(
-          "browse: ${module.gradlePath} could not start its preview daemon — skipping it."
+          "browse: ${module.gradlePath} could not start its preview daemon — skipping it.",
         )
         return@forEach
       }
       val descriptor = File(module.projectDir, "build/compose-previews/daemon-launch.json")
       if (!descriptor.isFile) {
         System.err.println(
-          "browse: ${module.gradlePath} produced no daemon-launch.json — skipping it."
+          "browse: ${module.gradlePath} produced no daemon-launch.json — skipping it.",
         )
         return@forEach
       }
@@ -1126,7 +1127,7 @@ public class ServeRunner(
           )
         } catch (e: RenderSessionException) {
           System.err.println(
-            "browse: ${module.gradlePath} failed to open its render session (${e.message}) — skipping it."
+            "browse: ${module.gradlePath} failed to open its render session (${e.message}) — skipping it.",
           )
           return@forEach
         }
@@ -1192,7 +1193,7 @@ public class ServeRunner(
     if (roots.values.all { it.isEmpty() }) return null
     return ServeSourceWatcher(roots, rebuild = rebuild::rebuild).also {
       System.err.println(
-        "watch: rebuilding on edits under ${it.watchedDirectories} director(ies); --no-watch to stop"
+        "watch: rebuilding on edits under ${it.watchedDirectories} director(ies); --no-watch to stop",
       )
     }
   }
@@ -1272,14 +1273,14 @@ public class ServeRunner(
       System.err.println(
         "serve: nothing to serve — no --bundle / --bundles / --catalogs registered a session, and " +
           "none of --accept-bundles / --accept-docs / --accept-images / --ui-builder-dir / " +
-          "--admin-token is set."
+          "--admin-token is set.",
       )
       // Guide the common "ran serve in my project expecting a build" case: Gradle discovery is now
       // opt-in, so point at --discover / --module rather than leaving them staring at a bare error.
       if (gradleProjectRoot() != null) {
         System.err.println(
           "  This looks like a Gradle project. Local preview discovery/build is opt-in: pass " +
-            "--discover to build all modules, or --module <path> to scope to one."
+            "--discover to build all modules, or --module <path> to scope to one.",
         )
       }
       exitProcess(3)
@@ -1388,8 +1389,8 @@ public class ServeRunner(
         .also { it.prewarm() }
     else daemon
   }
-    // Record the failure for `/status`; the host still degrades to null.
-    .onFailure { daemonLog.record(state.label, it.message ?: it.toString()) }
+  // Record the failure for `/status`; the host still degrades to null.
+  .onFailure { daemonLog.record(state.label, it.message ?: it.toString()) }
     .getOrNull()
 
   /**
@@ -1400,12 +1401,12 @@ public class ServeRunner(
     if (acceptDocsFrom.isEmpty()) {
       System.err.println(
         "serve: --accept-docs accepts uploads only; no ?url= host is allowed (SSRF fail closed). " +
-          "Pass --accept-docs-from <host>[,<host>…] to permit URL fetches."
+          "Pass --accept-docs-from <host>[,<host>…] to permit URL fetches.",
       )
     }
     System.err.println(
       "serve: document uploads enabled (/docs) — ${ServeDocFormats.knownSummary()}; " +
-        "links expire after ${docTtlSeconds}s"
+        "links expire after ${docTtlSeconds}s",
     )
     return ServeDocStore(
       ttlSeconds = docTtlSeconds,
@@ -1437,12 +1438,12 @@ public class ServeRunner(
     System.err.println(
       "serve: image uploads enabled (POST /images) — ${ServeImageFormats.knownSummary()}; " +
         "links expire after ${imageTtlSeconds}s; uploaders must have access to $repository; " +
-        "tokens accepted: ${tokens.describe(appConfigured = oauthApp != null)}"
+        "tokens accepted: ${tokens.describe(appConfigured = oauthApp != null)}",
     )
     if (imageRateLimit <= 0) {
       System.err.println(
         "serve: WARNING image uploads are UNMETERED (--image-rate-limit 0). The store's size caps " +
-          "still bound memory, but one account can churn every held image out of it."
+          "still bound memory, but one account can churn every held image out of it.",
       )
     }
     return ImageLane(
@@ -1515,7 +1516,7 @@ public class ServeRunner(
       System.err.println(
         "serve: --playground / --compile-engine select a catalog at runtime but no --catalogs " +
           "are configured, and no --playground-bundle is pinned; there is nothing to compile " +
-          "against. Playground disabled."
+          "against. Playground disabled.",
       )
       return null
     }
@@ -1572,7 +1573,7 @@ public class ServeRunner(
           "host (${probe.detail}), and its CPU/memory/pid caps are enforced BY that command — " +
           "dropping it would leave the snippet effectively uncapped, so the playground is " +
           "disabled instead. Fix the jail (a container has no systemd to build a transient scope " +
-          "against), or pick a profile whose caps are JVM-level (bwrap, unshare)."
+          "against), or pick a profile whose caps are JVM-level (bwrap, unshare).",
       )
       workRoot.deleteRecursively()
       return null
@@ -1585,7 +1586,7 @@ public class ServeRunner(
             "capped but UNCONTAINED; the lane is admitted by ${if (public) "repo-access gating" else "the access token"}, not by containment." +
             (if (configuredSandbox.profile == PlaygroundSandbox.Profile.CUSTOM)
               " Any caps that custom argv supplied are gone with it — only the JVM-level ones remain."
-            else "")
+            else ""),
         )
         configuredSandbox.droppingJail()
       } else configuredSandbox
@@ -1596,7 +1597,7 @@ public class ServeRunner(
         "serve: WARNING playground sandbox '${sandbox.profile.id}' is configured but did not " +
           "contain the preflight (" +
           (if (!probe.ran) probe.detail else probe.failedChecks().joinToString("; ")) +
-          "). The lane serves because it is repo-access-gated, not because it is contained."
+          "). The lane serves because it is repo-access-gated, not because it is contained.",
       )
     }
 
@@ -1633,7 +1634,7 @@ public class ServeRunner(
     if (compiler == null) {
       System.err.println(
         "serve: playground compiler unavailable — no lib-bta/ in the CLI install (run from an " +
-          "installed distribution). Playground disabled."
+          "installed distribution). Playground disabled.",
       )
       return null
     }
@@ -1722,7 +1723,7 @@ public class ServeRunner(
             rcCapture?.let { "remote-compose✓" },
             catalogTargets?.let { "catalog-selector✓(≤$playgroundCatalogLimit)" },
           )
-          .joinToString(" ")
+          .joinToString(" "),
     )
 
     val snippetCounter = java.util.concurrent.atomic.AtomicLong()
@@ -1805,12 +1806,12 @@ public class ServeRunner(
     if (playgroundEditing && !repoAccessGated) {
       System.err.println(
         "serve: --playground-editing requested without GitHub auth; the authenticated editing " +
-          "lease is disabled."
+          "lease is disabled.",
       )
     } else if (service.editLeasesEnabled) {
       System.err.println(
         "serve: playground live editing trial enabled — one authenticated lease, " +
-          "${playgroundEditLeaseTtlSeconds}s idle TTL"
+          "${playgroundEditLeaseTtlSeconds}s idle TTL",
       )
     }
     // No mode is wired (e.g. Android-only with no sidecar): disable the lane rather than offer an
@@ -1827,7 +1828,7 @@ public class ServeRunner(
     if (wiredModes.isEmpty() && catalogTargets == null) {
       System.err.println(
         "serve: playground resolved no runnable mode (a bundle source is configured but its " +
-          "render backend is unavailable); playground disabled."
+          "render backend is unavailable); playground disabled.",
       )
       return null
     }
@@ -1928,14 +1929,14 @@ public class ServeRunner(
     if (playgroundRateLimit <= 0) {
       System.err.println(
         "serve: WARNING playground compile lane is UNMETERED (--playground-rate-limit 0). Its " +
-          "remaining bounds are all whole-host ones, so one caller can hold every compile slot."
+          "remaining bounds are all whole-host ones, so one caller can hold every compile slot.",
       )
       return null
     }
     System.err.println(
       "serve: playground compile budget — $playgroundRateLimit/min per caller, " +
         "$playgroundCallerConcurrency concurrent" +
-        (if (trustForwardedFor) ", keyed by the last X-Forwarded-For entry when anonymous" else "")
+        (if (trustForwardedFor) ", keyed by the last X-Forwarded-For entry when anonymous" else ""),
     )
     return ServeRateLimiter(
       permitsPerWindow = playgroundRateLimit,
@@ -1956,14 +1957,14 @@ public class ServeRunner(
         "serve: --agent-grants refused — a --public server with no GitHub auth has no way to tell " +
           "an operator from a visitor, so nobody could be said to have approved a grant. Add " +
           "--github-auth-* (any signed-in user then approves), or drop --public (the --token " +
-          "holder then approves)."
+          "holder then approves).",
       )
       throw IllegalArgumentException("--agent-grants needs an approver identity")
     }
     if (agentGrantMaxScope == AgentGrantScope.PLAYGROUND) {
       System.err.println(
         "serve: WARNING --agent-grant-scopes allows 'playground' — an approved agent can compile " +
-          "and run Kotlin on this host."
+          "and run Kotlin on this host.",
       )
     }
     // An `images` capability without a configured image lane ([imageLaneConfigured], not just the
@@ -1973,7 +1974,7 @@ public class ServeRunner(
         "serve: --agent-grant-capabilities images refused — this server does not run the image " +
           "lane, so a granted upload would have nowhere to go. Add --accept-images AND a " +
           "repository to gate it on (--image-upload-repo, or --github-auth-repo), or drop the " +
-          "capability."
+          "capability.",
       )
       throw IllegalArgumentException("--agent-grant-capabilities images needs the image lane")
     }
@@ -1985,7 +1986,7 @@ public class ServeRunner(
       System.err.println(
         "serve: agent grants may carry " +
           AgentGrantCapability.wireNames(agentGrantCapabilities).joinToString(", ") +
-          " when a human ticks it — an approved agent can then upload without a GitHub credential."
+          " when a human ticks it — an approved agent can then upload without a GitHub credential.",
       )
     }
     return ServeAgentGrantStore(
@@ -2006,7 +2007,7 @@ public class ServeRunner(
     if (agentGrantRateLimit <= 0) {
       System.err.println(
         "serve: WARNING agent-grant routes are UNMETERED (--agent-grant-rate-limit 0). " +
-          "/agent-access/request is reachable without any credential."
+          "/agent-access/request is reachable without any credential.",
       )
       return null
     }
@@ -2066,7 +2067,7 @@ public class ServeRunner(
             "catalog this server is configured to serve" +
             (if (configured.isEmpty()) " (no --catalogs configured)"
             else " (configured: ${configured.sorted().joinToString(", ")})") +
-            ". That mode is disabled — pass a .bundle path, or a served system id."
+            ". That mode is disabled — pass a .bundle path, or a served system id.",
         )
         return null
       }
@@ -2100,11 +2101,11 @@ public class ServeRunner(
         if (it == null) {
           System.err.println(
             "serve: playground could not resolve a $label classpath from " +
-              "${bundleFile.absolutePath}; that target is unavailable."
+              "${bundleFile.absolutePath}; that target is unavailable.",
           )
         } else {
           System.err.println(
-            "serve: playground $label classpath resolved from ${bundleFile.absolutePath}"
+            "serve: playground $label classpath resolved from ${bundleFile.absolutePath}",
           )
         }
       }
@@ -2114,7 +2115,7 @@ public class ServeRunner(
    * when the sidecar or `android.jar` is missing.
    */
   private fun buildPlaygroundAndroidDaemonOpener(
-    sandbox: PlaygroundSandbox
+    sandbox: PlaygroundSandbox,
   ): PlaygroundAndroidSessionOpener? =
     PlaygroundDaemonOpeners.android(sandbox) {
       System.err.println("serve: playground Android modes disabled — $it")
@@ -2125,7 +2126,7 @@ public class ServeRunner(
    * (logged) when its jars are absent.
    */
   private fun buildPlaygroundDesktopDaemonOpener(
-    sandbox: PlaygroundSandbox
+    sandbox: PlaygroundSandbox,
   ): PlaygroundAndroidSessionOpener? =
     PlaygroundDaemonOpeners.desktop(sandbox) {
       System.err.println("serve: playground CMP first-frame unavailable — $it")
@@ -2173,7 +2174,7 @@ public class ServeRunner(
     if (docStore == null) {
       System.err.println(
         "serve: playground remote-compose mode needs the /d/ document store — enable it with " +
-          "--accept-docs. Remote-compose mode disabled."
+          "--accept-docs. Remote-compose mode disabled.",
       )
       return null
     }
@@ -2219,7 +2220,7 @@ public class ServeRunner(
       ?.also {
         System.err.println(
           "serve: Android Remote Compose players on demand — " +
-            it.players.joinToString(" ") { player -> "${ServeRcPlayerIds.of(player)}✓" }
+            it.players.joinToString(" ") { player -> "${ServeRcPlayerIds.of(player)}✓" },
         )
       }
   }
@@ -2231,7 +2232,7 @@ public class ServeRunner(
     if (acceptBundlesFrom.isEmpty()) {
       System.err.println(
         "serve: --accept-bundles accepts uploads only; no ?url= host is allowed (SSRF fail " +
-          "closed). Pass --accept-bundles-from <host>[,<host>…] to permit URL fetches."
+          "closed). Pass --accept-bundles-from <host>[,<host>…] to permit URL fetches.",
       )
     }
     return ServeBundleStore(
@@ -2265,7 +2266,7 @@ public class ServeRunner(
     if (!ok) {
       System.err.println(
         "serve: --wasm-dir $system=${dir.path} has no index.html — skipping (build it with " +
-          ":samples:cmp-wasm-catalog:wasmCatalogDist)."
+          ":samples:cmp-wasm-catalog:wasmCatalogDist).",
       )
     }
     ok
@@ -2316,7 +2317,7 @@ public class ServeRunner(
       is ServeUiBuilderEditorStore.Result.Ready -> {
         System.err.println(
           "serve: UI-builder editor ${pin.version} (pinned in catalogs.json)" +
-            (bundledVersion?.let { "; bundled is $it" } ?: "")
+            (bundledVersion?.let { "; bundled is $it" } ?: ""),
         )
         uiBuilderEditorState = ServeUiBuilderEditorState(bundledVersion, pin, pin.version)
         runCatching { store.prune(keep = resolved.dir) }
@@ -2326,7 +2327,7 @@ public class ServeRunner(
         System.err.println(
           "serve: pinned UI-builder editor ${pin.version} unavailable (${resolved.reason}) — " +
             "serving the bundled editor" +
-            (bundledVersion?.let { " $it" } ?: "")
+            (bundledVersion?.let { " $it" } ?: ""),
         )
         bundled
       }
@@ -2431,7 +2432,7 @@ public class ServeRunner(
   ): UiBuilderLane? {
     if (uiBuilderMigrateState && (appDirectory == null || uiBuilderStateDirFlag == "none")) {
       throw IllegalStateException(
-        "--ui-builder-migrate-state requires an enabled UI-builder app and durable state"
+        "--ui-builder-migrate-state requires an enabled UI-builder app and durable state",
       )
     }
     if (appDirectory == null || uiBuilderStateDirFlag == "none") return null
@@ -2496,7 +2497,7 @@ public class ServeRunner(
               "and ${catalogsWithoutRecords.sorted().joinToString(", ")} " +
                 (if (catalogsWithoutRecords.size == 1) "has" else "have") +
                 " no component record, so this host offers no export at all " +
-                "(pass --ui-builder-components <catalog>=<components.json>)"
+                "(pass --ui-builder-components <catalog>=<components.json>)",
         )
       }
       .getOrNull()
@@ -2547,7 +2548,7 @@ public class ServeRunner(
             System.err.println(
               "serve: UI-builder pack $packId is not offered — no component record: the served " +
                 "catalog publishes none (or is not served here), and none was passed as " +
-                "`--ui-builder-components $packId=<components.json>`"
+                "`--ui-builder-components $packId=<components.json>`",
             )
             return@mapNotNull null
           }
@@ -2555,12 +2556,12 @@ public class ServeRunner(
             if (records.isConfigured(packId)) {
               throw IllegalArgumentException(
                 "--ui-builder-packs admits `$packId`, and its component record could not be " +
-                  "loaded: ${lookup.reason}"
+                  "loaded: ${lookup.reason}",
               )
             } else {
               System.err.println(
                 "serve: UI-builder pack $packId is not offered — the served catalog's component " +
-                  "record could not be loaded: ${lookup.reason}"
+                  "record could not be loaded: ${lookup.reason}",
               )
               return@mapNotNull null
             }
@@ -2578,7 +2579,7 @@ public class ServeRunner(
         "serve: UI-builder pack $packId offers ${derived.source.components.size} " +
           "components to $platform designs" +
           if (derived.skipped.isEmpty()) ""
-          else " (${derived.skipped.size} left out: ${derived.skipped.joinToString("; ")})"
+          else " (${derived.skipped.size} left out: ${derived.skipped.joinToString("; ")})",
       )
       derived.source
     }
@@ -2591,7 +2592,7 @@ public class ServeRunner(
       .onFailure {
         System.err.println(
           "serve: UI-builder asset store unavailable (${it.message}); " +
-            "the builder works, and a design cannot hold an uploaded image"
+            "the builder works, and a design cannot hold an uploaded image",
         )
       }
       .getOrNull()
@@ -2625,8 +2626,8 @@ public class ServeRunner(
     val exporter =
       LovelaceJsonExportExecutor(
         A2uiJsonExportExecutor(
-          documentExporter?.let { RemotePngExportExecutor(it, renderer, fonts) } ?: pictureExporter
-        )
+          documentExporter?.let { RemotePngExportExecutor(it, renderer, fonts) } ?: pictureExporter,
+        ),
       )
     val pictureExports =
       ((pictureExporter as? ProductionUiBuilderExportExecutor)?.capabilities
@@ -2672,7 +2673,7 @@ public class ServeRunner(
             "(--ui-builder-published-catalogs none); every catalog is withheld"
         else
           "serve: only ${publishedAllowed.sorted().joinToString()} may read a published " +
-            "ui-builder.json; ${withheld.joinToString()} are withheld"
+            "ui-builder.json; ${withheld.joinToString()} are withheld",
       )
     }
     // Compose one catalog's published definition into the maps below; a function because the
@@ -2872,7 +2873,7 @@ public class ServeRunner(
             " refreshed from " +
             sourceSystem +
             "; runtime " +
-            changed.joinToString { publishedRuntimeIds[it] ?: "built-in" }
+            changed.joinToString { publishedRuntimeIds[it] ?: "built-in" },
         )
         // Designs pinned to the runtime just replaced no longer open; move the ones that can move.
         recovery?.let {
@@ -2910,13 +2911,13 @@ public class ServeRunner(
             "download it, edit it to satisfy the rule, put it back, or retire it"
         }
       System.err.println(
-        "serve: WARNING UI-builder design $designId cannot be served: $reason — $remedy"
+        "serve: WARNING UI-builder design $designId cannot be served: $reason — $remedy",
       )
     }
     service.adminDegradedDesigns().forEach { (designId, reason) ->
       System.err.println(
         "serve: WARNING UI-builder design $designId is degraded: $reason — open its Issues " +
-          "panel to drop each property or map it to a catalog replacement"
+          "panel to drop each property or map it to a catalog replacement",
       )
     }
     // Warn about a state file near its size ceiling in the deploy output. Never allowed to fail
@@ -2931,7 +2932,7 @@ public class ServeRunner(
       System.err.println(
         "serve: UI-builder persistence ${migration.fromFormat} -> ${migration.toFormat} " +
           if (migration.migrated) "completed (${migration.persistedBytes} bytes)"
-          else "already current"
+          else "already current",
       )
     }
     return UiBuilderLane(
@@ -2948,7 +2949,7 @@ public class ServeRunner(
           .onFailure {
             System.err.println(
               "serve: UI-builder reference overlays unavailable (${it.message}); " +
-                "the builder works, and a reference cannot be attached"
+                "the builder works, and a reference cannot be attached",
             )
           }
           .getOrNull(),
@@ -2957,7 +2958,7 @@ public class ServeRunner(
           .onFailure {
             System.err.println(
               "serve: UI-builder comments unavailable (${it.message}); " +
-                "the builder works, and a design cannot be discussed on it"
+                "the builder works, and a design cannot be discussed on it",
             )
           }
           .getOrNull(),
@@ -2966,7 +2967,7 @@ public class ServeRunner(
           .onFailure {
             System.err.println(
               "serve: UI-builder links unavailable (${it.message}); " +
-                "the builder works, and a design cannot say what it is for"
+                "the builder works, and a design cannot say what it is for",
             )
           }
           .getOrNull(),
@@ -2975,7 +2976,7 @@ public class ServeRunner(
           .onFailure {
             System.err.println(
               "serve: UI-builder reviews unavailable (${it.message}); " +
-                "the builder works, and a design cannot be approved on it"
+                "the builder works, and a design cannot be approved on it",
             )
           }
           .getOrNull(),
@@ -2985,7 +2986,7 @@ public class ServeRunner(
           .onFailure {
             System.err.println(
               "serve: UI-builder guidelines results unavailable (${it.message}); " +
-                "the builder works, and a guidelines check is not kept"
+                "the builder works, and a guidelines check is not kept",
             )
           }
           .getOrNull(),
@@ -3002,7 +3003,7 @@ public class ServeRunner(
           .onFailure {
             System.err.println(
               "serve: UI-builder thumbnails unavailable (${it.message}); " +
-                "the design list draws each card from the live export"
+                "the design list draws each card from the live export",
             )
           }
           .getOrNull(),
@@ -3011,7 +3012,7 @@ public class ServeRunner(
           .onFailure {
             System.err.println(
               "serve: UI-builder folders unavailable (${it.message}); " +
-                "the builder works, and designs remain unfiled"
+                "the builder works, and designs remain unfiled",
             )
           }
           .getOrNull(),
@@ -3023,13 +3024,13 @@ public class ServeRunner(
           .getOrNull(),
       components = runCatching {
           ServeUiBuilderComponentStore(
-            directory.resolve(ServeUiBuilderComponentStore.DIRECTORY).toPath()
+            directory.resolve(ServeUiBuilderComponentStore.DIRECTORY).toPath(),
           )
         }
           .onFailure {
             System.err.println(
               "serve: UI-builder component publishing unavailable (${it.message}); " +
-                "the project library is still read, and nothing can be published to it"
+                "the project library is still read, and nothing can be published to it",
             )
           }
           .getOrNull(),
@@ -3064,12 +3065,12 @@ public class ServeRunner(
         matches
           .sortedWith(
             compareByDescending<AutomaticWasmProject> { it.distribution() != null }
-              .thenBy { it.gradlePath }
+              .thenBy { it.gradlePath },
           )
           .firstOrNull() ?: return@mapNotNull null
       if (matches.size > 1) {
         System.err.println(
-          "browse: several Wasm apps depend on ${module.gradlePath}; using ${selected.gradlePath}."
+          "browse: several Wasm apps depend on ${module.gradlePath}; using ${selected.gradlePath}.",
         )
       }
       module.gradlePath to selected
@@ -3088,7 +3089,7 @@ public class ServeRunner(
           )
         if (!ok) {
           System.err.println(
-            "browse: ${project.gradlePath} has no usable Wasm browser distribution; using snapshots."
+            "browse: ${project.gradlePath} has no usable Wasm browser distribution; using snapshots.",
           )
         }
       }
@@ -3148,7 +3149,7 @@ public class ServeRunner(
             },
           knownSystems = (configuredCatalogs + configuredApps).toSet(),
           onProblem = { System.err.println("serve: $it") },
-        )
+        ),
       )
     // Runtime catalog administration needs both an admin token and a catalog store; a plain `serve`
     // has no admin surface.
@@ -3248,7 +3249,7 @@ public class ServeRunner(
     if (catalogMcp && agentGrantStore == null) {
       System.err.println(
         "serve: --catalog-mcp refused — remote MCP requires --agent-grants so its bearer can be " +
-          "short-lived, scoped, approved, and revoked."
+          "short-lived, scoped, approved, and revoked.",
       )
       throw IllegalArgumentException("--catalog-mcp requires --agent-grants")
     }
@@ -3268,7 +3269,7 @@ public class ServeRunner(
           "serve: --playground-external ignored — this host mounts the playground itself."
         else
           "serve: --playground-external has no compile engine to decide which catalogs compile " +
-            "(add --compile-engine); no playground links are offered."
+            "(add --compile-engine); no playground links are offered.",
       )
     }
     val catalogFeed =
@@ -3297,7 +3298,7 @@ public class ServeRunner(
           File(
             root,
             "build/compose-previews/${ee.schimke.composeai.uibuilder.guidelines.CatalogGuidelines.FILE_NAME}",
-          )
+          ),
         )
     }
     uiBuilderLaneOpen = uiBuilderLane != null
@@ -3335,7 +3336,7 @@ public class ServeRunner(
         System.err.println(
           "serve: agent grants cannot carry ${missing.joinToString(", ") { it.wire }} — the " +
             "UI-builder tools will refuse every agent call. Add them to --agent-grant-capabilities " +
-            "if approved agents should author designs on this box."
+            "if approved agents should author designs on this box.",
         )
       }
     }
@@ -3352,7 +3353,7 @@ public class ServeRunner(
     ) {
       System.err.println(
         "serve: the UI builder is the only surface on this server and its service could not be " +
-          "opened, so there is nothing left to serve."
+          "opened, so there is nothing left to serve.",
       )
       exitProcess(1)
     }
@@ -3409,7 +3410,7 @@ public class ServeRunner(
         System.err.println(
           "serve: --ui-builder-comment-webhook is set and there is no comment store to watch " +
             "(the UI builder is off, or its state directory could not be opened); nothing " +
-            "will be posted"
+            "will be posted",
         )
         return@let null
       }
@@ -3445,7 +3446,7 @@ public class ServeRunner(
           events.activity.map { it.wire }
       System.err.println(
         "serve: UI-builder activity posts to a ${format.wire} webhook " +
-          "(${webhook.fingerprint}): ${posted.joinToString(", ").ifEmpty { "nothing selected" }}"
+          "(${webhook.fingerprint}): ${posted.joinToString(", ").ifEmpty { "nothing selected" }}",
       )
       // On a token-gated host without sign-in, permalinks in notifications can't be opened by
       // recipients. Warned, not fixed: putting the server token into a chat channel would hand out
@@ -3455,7 +3456,7 @@ public class ServeRunner(
         System.err.println(
           "serve: note - this host is gated by a browse token and has no GitHub sign-in, so a " +
             "recipient without that token cannot open the designs these notifications link to; " +
-            "configure --github-auth-client-id, or authenticate in front of this server"
+            "configure --github-auth-client-id, or authenticate in front of this server",
         )
       }
       // Each source is attached only when asked for and present; a selected kind with nothing to
@@ -3464,7 +3465,7 @@ public class ServeRunner(
       if (events.comments) handles += webhook.attach(comments)
       val reviewKinds =
         events.activity.intersect(
-          setOf(DesignActivityKind.DECISION, DesignActivityKind.IMPLEMENTATION)
+          setOf(DesignActivityKind.DECISION, DesignActivityKind.IMPLEMENTATION),
         )
       if (reviewKinds.isNotEmpty()) {
         val reviews = uiBuilderLane?.reviews
@@ -3472,7 +3473,7 @@ public class ServeRunner(
         else
           System.err.println(
             "serve: --ui-builder-webhook-events names review events and this host keeps no " +
-              "review records; none will be posted"
+              "review records; none will be posted",
           )
       }
       if (DesignActivityKind.FORK in events.activity) {
@@ -3481,7 +3482,7 @@ public class ServeRunner(
         else
           System.err.println(
             "serve: --ui-builder-webhook-events names fork and this host keeps no design " +
-              "ancestry; none will be posted"
+              "ancestry; none will be posted",
           )
       }
       webhook to java.io.Closeable { handles.forEach { runCatching { it.close() } } }
@@ -3752,14 +3753,14 @@ public class ServeRunner(
       System.err.println(
         "serve: trust admin API enabled at /admin/trust" +
           (trustStoreFile?.let { " (persisting to ${it.displayPath})" }
-            ?: " (runtime only — pass --trust-store to persist)")
+            ?: " (runtime only — pass --trust-store to persist)"),
       )
     }
     if (catalogAdmin != null) {
       System.err.println(
         "serve: catalog admin API enabled at /admin/catalogs" +
           (catalogsFile?.let { " (persisting to ${it.displayPath})" }
-            ?: " (runtime only — pass --catalogs-file to persist)")
+            ?: " (runtime only — pass --catalogs-file to persist)"),
       )
     }
     if (uiBuilderAdmin != null) {
@@ -3772,7 +3773,7 @@ public class ServeRunner(
       System.err.println(
         "serve: site admin API enabled at /admin/sites" +
           (catalogsFile?.let { " (persisting to ${it.displayPath})" }
-            ?: " (runtime only — pass --catalogs-file to persist)")
+            ?: " (runtime only — pass --catalogs-file to persist)"),
       )
     }
     if (githubAuth != null) {
@@ -3781,13 +3782,13 @@ public class ServeRunner(
           (githubAuthUsers.takeIf { it.isNotEmpty() }?.let { " (${it.size} allowed user(s))" }
             ?: "") +
           (githubAuthOrgs.takeIf { it.isNotEmpty() }?.let { " (members of ${it.joinToString()})" }
-            ?: "")
+            ?: ""),
       )
     }
     if (uiBuilderGuidelines != null) {
       System.err.println(
         "serve: ui-builder guidelines check enabled on ${uiBuilderGuidelines.model} for " +
-          uiBuilderGuidelines.describeAccess()
+          uiBuilderGuidelines.describeAccess(),
       )
     }
     if (agentGrantStore != null) {
@@ -3795,13 +3796,13 @@ public class ServeRunner(
         "serve: agent access grants enabled at /agent-access — up to " +
           "${AgentGrantProtocol.formatDuration(agentGrantStore.maxGrantTtlSeconds)}, " +
           "max scope ${agentGrantStore.maxScope.wire}, approved by " +
-          (if (githubAuth != null) "a signed-in GitHub user" else "the holder of --token")
+          (if (githubAuth != null) "a signed-in GitHub user" else "the holder of --token"),
       )
     }
     if (catalogMcp) {
       System.err.println(
         "serve: aggregate catalog MCP enabled at /mcp (Streamable HTTP; preview scope reads, " +
-          "live scope renders)"
+          "live scope renders)",
       )
     }
 
@@ -3838,7 +3839,7 @@ public class ServeRunner(
           runCatching { uiBuilderLane?.close() }
           closeables.forEach { c -> runCatching { c?.close() } }
           done.countDown()
-        }
+        },
       )
 
     startedServer = server
@@ -3907,7 +3908,7 @@ public class ServeRunner(
       }
       System.err.println(
         "serve: Web Push enabled (VAPID subject ${keys.subject}; " +
-          "${store.all().size} subscription(s))"
+          "${store.all().size} subscription(s))",
       )
       WebPush(
         ServePushLane(
@@ -3977,7 +3978,7 @@ public class ServeRunner(
         val idle = registry.connectionIdleMillis()
         if (idle != null && idle >= timeoutMillis) {
           System.err.println(
-            "serve: idle ${idle / 1000}s (--exit-when-idle=${idleExitSeconds}s) — shutting down."
+            "serve: idle ${idle / 1000}s (--exit-when-idle=${idleExitSeconds}s) — shutting down.",
           )
           done.countDown()
         }
@@ -4002,7 +4003,7 @@ public class ServeRunner(
     if (revisionAllowRefs.isEmpty()) {
       System.err.println(
         "serve: --revisions has no --revisions-allow refs; no revision will build (fail closed). " +
-          "Pass --revisions-allow <ref>[,<ref>…] (e.g. main,release/*) to enable trusted revs."
+          "Pass --revisions-allow <ref>[,<ref>…] (e.g. main,release/*) to enable trusted revs.",
       )
     }
     return GitWorktrees(
@@ -4075,7 +4076,7 @@ public class ServeRunner(
       System.err.println("serve: --bundles ${root.path} held no bundles (previews/*.png).")
     } else {
       System.err.println(
-        "serve: serving ${result.size} bundle session(s): ${result.keys.joinToString(", ")}"
+        "serve: serving ${result.size} bundle session(s): ${result.keys.joinToString(", ")}",
       )
     }
     return result
@@ -4133,7 +4134,7 @@ public class ServeRunner(
           registry.register(spec.name, state, host = host)
           System.err.println(
             "serve: bundle ${spec.name} → LIVE from bundle (no build), " +
-              "trust=${BundleVerifier.summary(verdict)} (/${spec.name}/)"
+              "trust=${BundleVerifier.summary(verdict)} (/${spec.name}/)",
           )
           registered += spec.name
           continue
@@ -4141,7 +4142,7 @@ public class ServeRunner(
       } else if (allowRenderTrusted) {
         System.err.println(
           "serve: bundle ${spec.name} is ${BundleVerifier.summary(verdict)} — not live-rendering; " +
-            "serving baked PNGs"
+            "serving baked PNGs",
         )
       }
       // Read-only fallback: serve the bundle's baked previews/<id>.png (executes no code).
@@ -4150,7 +4151,7 @@ public class ServeRunner(
           registered += r.name
           System.err.println(
             "serve: bundle ${r.name} → ${r.previewCount} baked preview(s), trust=${r.trust} " +
-              "(/${r.name}/)"
+              "(/${r.name}/)",
           )
         }
         is ServeBundleStore.Result.Failed ->
@@ -4248,7 +4249,7 @@ public class ServeRunner(
                 if (!r.incomplete) loaded += r.system
                 System.err.println(
                   "serve: catalog ${r.system} → ${r.previewCount} preview(s), trust=${r.trust} " +
-                    "(/${r.system}/${if (config.listed) "" else ", unlisted"})"
+                    "(/${r.system}/${if (config.listed) "" else ", unlisted"})",
                 )
               }
               is ServeCatalogStore.Result.Failed ->
@@ -4297,7 +4298,7 @@ public class ServeRunner(
             loadPriority = ref.loadPriority,
             designSystem = ref.designSystem,
           )
-        }
+        },
       )
     // The sweeper needs configured-but-unloaded systems, which only the tracker knows.
     themeCacheConfiguredSystems = loads::configuredSystems
@@ -4324,14 +4325,14 @@ public class ServeRunner(
               // run old code and then 404.
               if (wasm.remove(system) != null) {
                 System.err.println(
-                  "serve: catalog $system no longer carries an in-browser Wasm app"
+                  "serve: catalog $system no longer carries an in-browser Wasm app",
                 )
               }
             } else {
               val fresh = wasm.put(system, wasmDir) == null
               if (fresh) {
                 System.err.println(
-                  "serve: catalog $system carries an in-browser Wasm app (/wasm/$system/)"
+                  "serve: catalog $system carries an in-browser Wasm app (/wasm/$system/)",
                 )
               }
             }
@@ -4487,7 +4488,7 @@ public class ServeRunner(
           if (host != null) {
             System.err.println(
               "serve: catalog $system is no longer listed by its registry but is published as " +
-                "the top-level site '$host' — keeping it"
+                "the top-level site '$host' — keeping it",
             )
           } else {
             loads.remove(system)
@@ -4917,7 +4918,7 @@ public class ServeRunner(
       commitCmpAndroidPlayer(system, state.descriptor)
       liveLaneLaunchLog.clear(system)
       System.err.println(
-        "serve: catalog $system → LIVE from ${opened.size} module bundles (no build) (?session=$system)"
+        "serve: catalog $system → LIVE from ${opened.size} module bundles (no build) (?session=$system)",
       )
       publishedSuccessfully = true
       return true
@@ -4949,7 +4950,7 @@ public class ServeRunner(
     if (!allowRenderTrusted || worktrees == null) return false
     if (source.repo.isNotBlank() && source.repo != catalogRepo) {
       System.err.println(
-        "serve: catalog $system source repo '${source.repo}' != '$catalogRepo' — not live-rendering"
+        "serve: catalog $system source repo '${source.repo}' != '$catalogRepo' — not live-rendering",
       )
       return false
     }
@@ -4961,7 +4962,7 @@ public class ServeRunner(
       worktrees.prepare(source.ref)
         ?: run {
           System.err.println(
-            "serve: catalog $system ref '${source.ref}' not allowed/resolvable — serving baked PNGs"
+            "serve: catalog $system ref '${source.ref}' not allowed/resolvable — serving baked PNGs",
           )
           return false
         }
@@ -4980,7 +4981,7 @@ public class ServeRunner(
       builder.build(worktree, ServeModuleRef(gradlePath, relativePath), isSecurityChecked = true)
         ?: run {
           System.err.println(
-            "serve: catalog $system build of ${source.module}@${source.ref} failed — serving baked PNGs"
+            "serve: catalog $system build of ${source.module}@${source.ref} failed — serving baked PNGs",
           )
           return false
         }
@@ -5009,7 +5010,7 @@ public class ServeRunner(
     sweepCatalogBlobs()
     System.err.println(
       "serve: catalog $system → LIVE server-render from ${source.module}@${source.ref} " +
-        "(?session=$system)"
+        "(?session=$system)",
     )
     return true
   }
@@ -5036,7 +5037,7 @@ public class ServeRunner(
     for (state in affected) {
       System.err.println(
         "serve: re-verifying ${state.config.system} — ${state.config.repo}@${state.config.branch}" +
-          " is now trusted"
+          " is now trusted",
       )
     }
     // Same lever the revocation path pulls, for the same reason: without clearing the remembered
@@ -5068,7 +5069,7 @@ public class ServeRunner(
         loads.recordFailure(state.config.system, "producer trust revoked; awaiting re-verification")
         retired += state.config.system
         System.err.println(
-          "serve: retired ${state.config.system} — $repo@$branch is no longer trusted"
+          "serve: retired ${state.config.system} — $repo@$branch is no longer trusted",
         )
       }
     }
@@ -5114,7 +5115,7 @@ public class ServeRunner(
    * [ServeParameterRows] resolves that.
    */
   private fun modulesWithMatchingPreviews(
-    manifests: List<Pair<PreviewModule, PreviewManifest>>
+    manifests: List<Pair<PreviewModule, PreviewManifest>>,
   ): List<Pair<PreviewModule, List<ServePreview>>> =
     manifests
       .map { (module, manifest) -> module to servablePreviewsOf(module, manifest) }
@@ -5201,7 +5202,7 @@ public class ServeRunner(
     if (provided != 4) {
       error(
         "GitHub auth needs --github-auth-client-id, --github-auth-client-secret, " +
-          "--github-auth-cookie-secret, and --github-auth-repo"
+          "--github-auth-cookie-secret, and --github-auth-repo",
       )
     }
     return ServeGithubAuth(
@@ -5221,7 +5222,7 @@ public class ServeRunner(
         cookieDomain = githubAuthCookieDomain,
         oauthScope = githubAuthScope,
         trustForwardedHeaders = trustForwardedFor,
-      )
+      ),
     )
   }
 
@@ -5230,7 +5231,7 @@ public class ServeRunner(
    * at startup.
    */
   private fun buildUiBuilderGuidelines(
-    env: Map<String, String> = System.getenv()
+    env: Map<String, String> = System.getenv(),
   ): ServeUiBuilderGuidelines? {
     // Either the variable or `<name>_FILE` (a Docker secret), which keeps the key out of this
     // process's environment block and so out of every child's ([ServeSecretEnv]).
@@ -5241,7 +5242,7 @@ public class ServeRunner(
         System.err.println(
           "serve: --ui-builder-guidelines-users/-orgs set but " +
             "${ServeUiBuilderGuidelinesConfig.API_KEY_ENV} (or its ${ServeSecretEnv.FILE_SUFFIX}) " +
-            "is not; the guidelines check is off"
+            "is not; the guidelines check is off",
         )
       }
       return null
@@ -5282,10 +5283,10 @@ public class ServeRunner(
 
           override fun apply(values: Map<String, String?>) {
             pictureBudget.set(
-              values.values.single()?.toLong() ?: DEFAULT_GUIDELINES_PICTURE_BUDGET_SECONDS
+              values.values.single()?.toLong() ?: DEFAULT_GUIDELINES_PICTURE_BUDGET_SECONDS,
             )
           }
-        }
+        },
       )
     }
     return ServeSettingsAdmin(settingsFilePath?.toPath(), live = live)
@@ -5353,7 +5354,7 @@ public class ServeRunner(
       "serve: wrote bundle to ${target.path} " +
         "(${built.renderedCount}/${built.previewCount} previews" +
         (if (built.failed.isEmpty()) "" else ", ${built.failed.size} failed") +
-        ")"
+        ")",
     )
   }
 }

@@ -431,7 +431,7 @@ internal constructor(
       onLog(
         "serve: UI-builder widget thumbnail for $designId fell back to the export: " +
           ((outcome as? UiBuilderNativePreviewOutcome.Refused)?.reasons?.joinToString("; ")
-            ?: rendered?.failure)
+            ?: rendered?.failure),
       )
       return null
     }
@@ -689,7 +689,7 @@ private const val COLD_RENDER_TIMEOUT_MS = 60_000L
  * pictures says which host setting to change (#1867).
  */
 internal fun guidelineDrawing(
-  outcome: UiBuilderNativePreviewOutcome
+  outcome: UiBuilderNativePreviewOutcome,
 ): ServeUiBuilderGuidelineFrames.Drawing =
   when (outcome) {
     is UiBuilderNativePreviewOutcome.Refused ->

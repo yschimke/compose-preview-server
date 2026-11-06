@@ -90,7 +90,10 @@ class ServeUiBuilderDesignManagementRoutesTest {
             val stored = documents[request.designId]
             if (stored == null)
               UiBuilderServiceResponse.Error(
-                UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "no design ${request.designId}")
+                UiBuilderServiceError(
+                  ServiceErrorCodeV1.NOT_FOUND,
+                  "no design ${request.designId}",
+                ),
               )
             else
               UiBuilderServiceResponse.Snapshot(
@@ -101,7 +104,7 @@ class ServeUiBuilderDesignManagementRoutesTest {
                   retainedFromSequence = 0,
                   presence = emptyList(),
                   access = access(stored.id),
-                )
+                ),
               )
           }
           is UiBuilderServiceRequest.ListDesigns ->
@@ -113,7 +116,7 @@ class ServeUiBuilderDesignManagementRoutesTest {
             UiBuilderServiceResponse.Trash(
               trashed.values.map {
                 UiBuilderTrashedDesign(it.id, it.title, OWNER, 1_000, OWNER, 86_401_000)
-              }
+              },
             )
           is UiBuilderServiceRequest.RestoreDesign ->
             trashed.remove(request.designId)?.let {
@@ -121,7 +124,10 @@ class ServeUiBuilderDesignManagementRoutesTest {
               UiBuilderServiceResponse.DesignRestored(listItem(it))
             }
               ?: UiBuilderServiceResponse.Error(
-                UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "no design ${request.designId}")
+                UiBuilderServiceError(
+                  ServiceErrorCodeV1.NOT_FOUND,
+                  "no design ${request.designId}",
+                ),
               )
           is UiBuilderServiceRequest.GetDesignAccess ->
             UiBuilderServiceResponse.DesignAccess(request.designId, access(request.designId))
@@ -134,7 +140,10 @@ class ServeUiBuilderDesignManagementRoutesTest {
           is UiBuilderServiceRequest.DeleteDesign ->
             if (documents[request.designId]?.also { trashed[it.id] = it } == null)
               UiBuilderServiceResponse.Error(
-                UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "no design ${request.designId}")
+                UiBuilderServiceError(
+                  ServiceErrorCodeV1.NOT_FOUND,
+                  "no design ${request.designId}",
+                ),
               )
             else {
               documents.remove(request.designId)
@@ -172,7 +181,7 @@ class ServeUiBuilderDesignManagementRoutesTest {
             .takeIf { it.isFile }
             ?.readText()
             ?: File("docs/design/fixtures/ui-builder/jetcaster-discover-operations-v1.json")
-              .readText()
+              .readText(),
         )
     }
 

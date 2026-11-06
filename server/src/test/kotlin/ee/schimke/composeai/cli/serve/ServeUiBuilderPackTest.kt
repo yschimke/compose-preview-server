@@ -37,7 +37,7 @@ class ServeUiBuilderPackTest {
 
   private fun executor(
     packRecord: ComponentRecordSource.Lookup =
-      ComponentRecordSource.Lookup.Found(ComponentRecordPacksTest.record())
+      ComponentRecordSource.Lookup.Found(ComponentRecordPacksTest.record()),
   ) =
     ScreenGeneratorComposeExportExecutor(
       components = { catalog ->
@@ -79,7 +79,7 @@ class ServeUiBuilderPackTest {
   fun `a pack component exports through the pack's record, beside the catalog's own`() {
     val generated =
       assertIs<ScreenGeneratorComposeExportExecutor.Generated.Emitted>(
-        executor().generate(withPackNode())
+        executor().generate(withPackNode()),
       )
 
     assertTrue("import dev.confetti.ui.SessionCard" in generated.source, generated.source)
@@ -94,7 +94,7 @@ class ServeUiBuilderPackTest {
     val generated =
       assertIs<ScreenGeneratorComposeExportExecutor.Generated.Emitted>(
         executor(packRecord = ComponentRecordSource.Lookup.Unconfigured)
-          .generate(ScreenGeneratorScreenFixture.document())
+          .generate(ScreenGeneratorScreenFixture.document()),
       )
     assertTrue("SessionCard" !in generated.source)
   }
@@ -103,7 +103,7 @@ class ServeUiBuilderPackTest {
   fun `a pack whose record is missing refuses by naming the pack and the flag`() {
     val refused =
       assertIs<ScreenGeneratorComposeExportExecutor.Generated.Refused>(
-        executor(packRecord = ComponentRecordSource.Lookup.Unconfigured).generate(withPackNode())
+        executor(packRecord = ComponentRecordSource.Lookup.Unconfigured).generate(withPackNode()),
       )
 
     assertEquals(ScreenGeneratorComposeExportExecutor.NO_COMPONENT_RECORD, refused.code)
@@ -138,7 +138,7 @@ class ServeUiBuilderPackTest {
               ("column" to
                 base.nodes
                   .getValue("column")
-                  .copy(slots = mapOf("content" to listOf("heading", "card", "session", "story"))))
+                  .copy(slots = mapOf("content" to listOf("heading", "card", "session", "story")))),
         )
       }
 
@@ -159,7 +159,7 @@ class ServeUiBuilderPackTest {
   fun `a wear screen holding a wear pack component exports its call from the pack's record alone`() {
     val generated =
       assertIs<ScreenGeneratorComposeExportExecutor.Generated.Emitted>(
-        executor().generate(wearScreenWithPackNode())
+        executor().generate(wearScreenWithPackNode()),
       )
 
     assertTrue(
@@ -209,7 +209,7 @@ class ServeUiBuilderPackTest {
 
     val generated =
       assertIs<ScreenGeneratorComposeExportExecutor.Generated.Emitted>(
-        executor().generate(document)
+        executor().generate(document),
       )
 
     assertTrue("session = null," in generated.source, generated.source)
@@ -228,7 +228,7 @@ class ServeUiBuilderPackTest {
 
     val refused =
       assertIs<ScreenGeneratorComposeExportExecutor.Generated.Refused>(
-        executor().generate(document)
+        executor().generate(document),
       )
 
     // `session-speaker-chip` is not in the pack — its record proved no call site for
@@ -248,7 +248,7 @@ class ServeUiBuilderPackTest {
         nodes +
           (id to DesignNodeV1(id = id, componentId = componentId)) +
           ("wear-list" to
-            nodes.getValue("wear-list").copy(slots = mapOf("items" to listOf("day", id))))
+            nodes.getValue("wear-list").copy(slots = mapOf("items" to listOf("day", id)))),
     )
 
   /** The Wear screen template with a Confetti `SectionHeader` as its only list item. */
@@ -272,11 +272,11 @@ class ServeUiBuilderPackTest {
                           mapOf(
                             "type" to JsonPrimitive("string"),
                             "value" to JsonPrimitive("Thursday"),
-                          )
-                        )
-                    )
+                          ),
+                        ),
+                    ),
                   ),
-              ))
+              )),
       )
       .toDesignDocumentV1()
   }
@@ -289,7 +289,7 @@ class ServeUiBuilderPackTest {
           catalogRevision = "candidate",
           capabilityDigest = "candidate",
           nativeRuntimeId = "candidate",
-        )
+        ),
       )
       .let { it as JsonObject }
 
@@ -307,7 +307,7 @@ class ServeUiBuilderPackTest {
           windowPosture = WindowPostureV1.FLAT,
           animations = AnimationStateV1.SETTLED,
           networkAccess = false,
-        )
+        ),
       )
       .let { it as JsonObject }
 
@@ -326,7 +326,7 @@ class ServeUiBuilderPackTest {
           ("column" to
             base.nodes
               .getValue("column")
-              .copy(slots = mapOf("content" to listOf("heading", "card", "session"))))
+              .copy(slots = mapOf("content" to listOf("heading", "card", "session")))),
     )
   }
 

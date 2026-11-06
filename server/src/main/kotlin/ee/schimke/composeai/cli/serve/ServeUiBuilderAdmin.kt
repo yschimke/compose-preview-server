@@ -116,7 +116,7 @@ class ServeUiBuilderAdmin(
       is UiBuilderAdminRepair.Repaired -> {
         onLog(
           "serve: admin repaired UI-builder design $designId at revision ${outcome.revision} " +
-            "(was unusable: ${outcome.previousReason})"
+            "(was unusable: ${outcome.previousReason})",
         )
         Result.Repaired(designId, outcome.revision)
       }
@@ -171,7 +171,7 @@ class ServeUiBuilderAdmin(
     onLog(
       "serve: admin removed UI-builder actor $actorId: grants revoked on ${revoked.size} " +
         "design(s), ${boards} comment board(s) rewritten, ${owned.size} owned design(s) left " +
-        "for the operator; revision history keeps the id"
+        "for the operator; revision history keeps the id",
     )
     return ActorErasure(actorId, revoked, owned, boards)
   }
@@ -190,7 +190,7 @@ class ServeUiBuilderAdmin(
     repeat(2) {
       val access =
         (port.execute(
-            UiBuilderServiceCall(owner, UiBuilderServiceRequest.GetDesignAccess(design.designId))
+            UiBuilderServiceCall(owner, UiBuilderServiceRequest.GetDesignAccess(design.designId)),
           ) as? UiBuilderServiceResponse.DesignAccess)
           ?.access ?: return false
       val grants = access.actorGrants.filter { it.actorId.equals(actorId, ignoreCase = true) }
@@ -204,7 +204,7 @@ class ServeUiBuilderAdmin(
               access.accessRevision,
               grants.map { RevokeActorAccessMutationV1(it.actorId) },
             ),
-          )
+          ),
         )
       if (updated is UiBuilderServiceResponse.DesignAccess) return true
     }

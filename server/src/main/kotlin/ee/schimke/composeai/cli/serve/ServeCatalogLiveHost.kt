@@ -156,7 +156,7 @@ class ServeCatalogLiveHost(
     ServeWeb.a2uiDocumentPreview(
         live.previews.filter { preview ->
           preview.id !in alias.values && baked.previews.none { it.id == preview.id }
-        }
+        },
       )
       ?.takeIf { ServeWeb.a2uiDocumentPreview(baked.previews) == null }
       ?.let(::listOf)
@@ -217,7 +217,7 @@ class ServeCatalogLiveHost(
   // A design-guidelines result is published catalog data, like the parity issues: the baked
   // bundle carries it, and a live lane has nothing different to say about it.
   override fun guidelineResultFor(
-    previewId: String
+    previewId: String,
   ): ee.schimke.composeai.guidelines.protocol.GuidelineRecordV1? =
     // The published id first, then the bundle id it aliases: the report is keyed by the ids the
     // bundle was built with, which a catalog's published ids need not be.
@@ -613,7 +613,7 @@ class ServeCatalogLiveHost(
       persistenceVerified.set(true)
       System.err.println(
         "serve: catalog $label — persisted theme renders no longer match this renderer; " +
-          "dropped the generation and re-warming from scratch"
+          "dropped the generation and re-warming from scratch",
       )
     }
     // Not latched: the generation couldn't be discarded, so the next pass must retry rather than
@@ -621,7 +621,7 @@ class ServeCatalogLiveHost(
     if (outcome == CatalogThemeCache.VerifyOutcome.MISMATCH_UNDISCARDED) {
       System.err.println(
         "serve: catalog $label — persisted theme renders no longer match this renderer, and the " +
-          "generation could not be discarded (write lock held); withholding them and retrying"
+          "generation could not be discarded (write lock held); withholding them and retrying",
       )
     }
   }
@@ -772,7 +772,7 @@ class ServeCatalogLiveHost(
         catalogThemeCache.recordProduced(
           outcomes.count {
             it is RenderOutcome.Ok && it.generation == RenderOutcome.Generation.DAEMON
-          }
+          },
         )
         for ((job, outcome) in batch.zip(outcomes)) {
           // A success needs no bookkeeping (`put` cleared failure and busy counts). Checked first

@@ -78,7 +78,7 @@ class ServeImageStoreTest {
     assertTrue(store.put(bytes = ByteArray(0)) is ServeImageStore.Result.Failed)
     assertTrue(
       store.put(bytes = ServeImageFixtures.png(width = 64, height = 64))
-        is ServeImageStore.Result.Failed
+        is ServeImageStore.Result.Failed,
     )
   }
 

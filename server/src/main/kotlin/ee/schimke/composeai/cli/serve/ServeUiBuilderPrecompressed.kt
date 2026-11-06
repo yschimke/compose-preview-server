@@ -49,7 +49,7 @@ import java.util.zip.GZIPOutputStream
  *   served as it is.
  */
 internal class UiBuilderPrecompressedAssets(
-  private val cacheDir: () -> File = { defaultCacheDir }
+  private val cacheDir: () -> File = { defaultCacheDir },
 ) {
   private val copies = ConcurrentHashMap<String, Future<File?>>()
 

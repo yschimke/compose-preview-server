@@ -60,7 +60,7 @@ class ServeParityIssuesStoreTest {
             // Same repository, number AND component: a genuine duplicate, and still one row.
             issue().copy(component = "Card/Elevated"),
           ),
-      )
+      ),
     )
     val rows = assertNotNull(load()).issues
     assertEquals(
@@ -76,7 +76,7 @@ class ServeParityIssuesStoreTest {
       ParityIssues(
         generatedAt = "2026-08-15T10:00:00Z",
         issues = listOf(issue(), issue(41, "closed")),
-      )
+      ),
     )
     val rows = assertNotNull(load()).issues
     assertEquals(listOf("open", "closed"), rows.map { it.state })
@@ -91,8 +91,8 @@ class ServeParityIssuesStoreTest {
           listOf(
             issue(40).copy(scope = "variant"),
             issue(41).copy(scope = "unknown"),
-          )
-      )
+          ),
+      ),
     )
     assertEquals(listOf("variant"), assertNotNull(load()).issues.map { it.scope })
   }
@@ -129,9 +129,9 @@ class ServeParityIssuesStoreTest {
                 issue(url = "javascript:alert(1)"),
                 issue(41, url = "https://github.com/other/repo/issues/41"),
                 issue(42, url = "https://WWW.GITHUB.COM/YSCHIMKE/M3-CATALOG/issues/42/"),
-              )
-          )
-        )
+              ),
+          ),
+        ),
       )
     assertEquals(listOf(42), sanitized.issues.map { it.number })
     assertEquals("https://github.com/yschimke/m3-catalog/issues/42", sanitized.issues.single().url)
@@ -142,8 +142,8 @@ class ServeParityIssuesStoreTest {
     val row =
       assertNotNull(
           ServeParityIssuesStore.sanitize(
-            ParityIssues(issues = listOf(issue().copy(area = "admin", parity = "magic")))
-          )
+            ParityIssues(issues = listOf(issue().copy(area = "admin", parity = "magic"))),
+          ),
         )
         .issues
         .single()

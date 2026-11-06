@@ -132,7 +132,7 @@ class ServeUiBuilderDesignLibrary(
             // published something and it is not being offered, which is exactly the case an
             // operator cannot otherwise tell apart from publishing nothing.
             onLog(
-              "serve: ${catalog.system} publishes a design index that is not readable (${it.message})"
+              "serve: ${catalog.system} publishes a design index that is not readable (${it.message})",
             )
             emptyList()
           }
@@ -178,7 +178,7 @@ class ServeUiBuilderDesignLibrary(
         } else root
       require(
         document.text("schema") in
-          setOf("compose-ui-builder-document/v1", "compose-ui-builder-document/v1-candidate")
+          setOf("compose-ui-builder-document/v1", "compose-ui-builder-document/v1-candidate"),
       ) {
         "unsupported design schema"
       }
@@ -188,7 +188,7 @@ class ServeUiBuilderDesignLibrary(
     }
       .onFailure {
         onLog(
-          "serve: ${catalog.system}'s design $designId is not a DesignDocumentV1 (${it.message})"
+          "serve: ${catalog.system}'s design $designId is not a DesignDocumentV1 (${it.message})",
         )
       }
       .getOrNull()

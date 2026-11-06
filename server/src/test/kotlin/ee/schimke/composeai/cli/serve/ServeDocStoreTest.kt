@@ -74,7 +74,7 @@ class ServeDocStoreTest {
     val store = store(maxBytes = 64)
 
     assertTrue(
-      failure(store.add("big.json", ByteArray(65) { 'a'.code.toByte() }, true)).contains("exceeds")
+      failure(store.add("big.json", ByteArray(65) { 'a'.code.toByte() }, true)).contains("exceeds"),
     )
     assertEquals("empty document", failure(store.add("nothing", ByteArray(0), true)))
   }
@@ -127,7 +127,7 @@ class ServeDocStoreTest {
     val body = ServeDocFixtures.lottieDoc()
     val closed = store(fetch = { body })
     assertTrue(
-      failure(closed.addFromUrl(null, "https://example.com/a.json", true)).contains("allowlist")
+      failure(closed.addFromUrl(null, "https://example.com/a.json", true)).contains("allowlist"),
     )
     assertTrue(closed.snapshot().isEmpty())
 
@@ -139,7 +139,7 @@ class ServeDocStoreTest {
     // Only the allowlisted host — a redirect target or an internal address is still refused.
     assertTrue(
       failure(open.addFromUrl(null, "http://169.254.169.254/latest/meta-data", true))
-        .contains("allowlist")
+        .contains("allowlist"),
     )
     assertTrue(failure(open.addFromUrl(null, "file:///etc/passwd", true)).contains("allowlist"))
   }

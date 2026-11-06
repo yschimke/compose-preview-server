@@ -72,7 +72,7 @@ class ServeParityDashboardTest {
                       at = "2026-08-03T10:00:00Z",
                       components = listOf("Navigation/Rail"),
                       previewIds = listOf("nav-rail__ideal__default__light"),
-                    )
+                    ),
                   ),
               ),
             figma =
@@ -80,7 +80,7 @@ class ServeParityDashboardTest {
                 fileKey = "abc123",
                 versions =
                   listOf(
-                    FigmaVersionEvent(id = "v1", at = "2026-08-05T10:00:00Z", label = "Rail pass")
+                    FigmaVersionEvent(id = "v1", at = "2026-08-05T10:00:00Z", label = "Rail pass"),
                   ),
                 comments =
                   listOf(
@@ -91,7 +91,7 @@ class ServeParityDashboardTest {
                       nodeId = "51592:4768",
                       components = listOf("Navigation/Rail"),
                       previewIds = listOf("nav-rail__ideal__default__light"),
-                    )
+                    ),
                   ),
               ),
           ),
@@ -134,9 +134,9 @@ class ServeParityDashboardTest {
                       subject = "chore: rename a preview",
                       at = "2026-08-03T10:00:00Z",
                       previewIds = listOf("renamed-away__ideal__default__light"),
-                    )
+                    ),
                   ),
-              )
+              ),
           ),
       )
 
@@ -183,7 +183,7 @@ class ServeParityDashboardTest {
                       at = "2026-08-04T10:00:00Z",
                       message = "tweak",
                       components = listOf("Button/Filled"),
-                    )
+                    ),
                   ),
               ),
           ),
@@ -220,9 +220,9 @@ class ServeParityDashboardTest {
                       message = "track is short",
                       components = listOf("Switch/On"),
                       previewIds = listOf("nav-rail__ideal__default__light"),
-                    )
+                    ),
                   ),
-              )
+              ),
           ),
       )
 
@@ -249,9 +249,9 @@ class ServeParityDashboardTest {
                       at = "2026-08-04T10:00:00Z",
                       message = "new spec",
                       components = listOf("Button/Filled"),
-                    )
+                    ),
                   ),
-              )
+              ),
           ),
       )
 
@@ -279,9 +279,9 @@ class ServeParityDashboardTest {
                       at = "2026-08-04T10:00:00Z",
                       message = "done",
                       resolved = true,
-                    )
+                    ),
                   ),
-              )
+              ),
           ),
       )
 
@@ -306,9 +306,9 @@ class ServeParityDashboardTest {
                       sha = sha,
                       subject = "chore: bump gradle",
                       at = "2026-08-05T10:00:00Z",
-                    )
+                    ),
                   ),
-              )
+              ),
           ),
       )
 

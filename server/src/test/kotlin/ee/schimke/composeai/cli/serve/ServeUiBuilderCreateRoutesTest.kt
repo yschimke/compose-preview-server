@@ -88,11 +88,11 @@ class ServeUiBuilderCreateRoutesTest {
                   state = DesignStateV1(lastSequence = 0, document = document),
                   catalog = catalog,
                   retainedFromSequence = 0,
-                )
+                ),
               )
             }
               ?: UiBuilderServiceResponse.Error(
-                UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "missing")
+                UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "missing"),
               )
           is UiBuilderServiceRequest.GetSnapshot ->
             documents[request.designId]
@@ -104,11 +104,11 @@ class ServeUiBuilderCreateRoutesTest {
                     state = DesignStateV1(lastSequence = 0, document = document),
                     catalog = catalog,
                     retainedFromSequence = 0,
-                  )
+                  ),
                 )
               }
               ?: UiBuilderServiceResponse.Error(
-                UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "missing")
+                UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "missing"),
               )
           is UiBuilderServiceRequest.ListCatalogs ->
             UiBuilderServiceResponse.Catalogs(listOf(catalog))
@@ -117,7 +117,7 @@ class ServeUiBuilderCreateRoutesTest {
               // The service says "bad request" for every refusal, a design limit as much as a
               // duplicate id.
               UiBuilderServiceResponse.Error(
-                UiBuilderServiceError(ServiceErrorCodeV1.BAD_REQUEST, "design limit reached")
+                UiBuilderServiceError(ServiceErrorCodeV1.BAD_REQUEST, "design limit reached"),
               )
             } else {
               visibility[request.document.id] =
@@ -132,15 +132,15 @@ class ServeUiBuilderCreateRoutesTest {
             when {
               document == null ->
                 UiBuilderServiceResponse.Error(
-                  UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "missing")
+                  UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "missing"),
                 )
               call.actor.actorId == "reader" ->
                 UiBuilderServiceResponse.Error(
-                  UiBuilderServiceError(ServiceErrorCodeV1.FORBIDDEN, "actor may not write")
+                  UiBuilderServiceError(ServiceErrorCodeV1.FORBIDDEN, "actor may not write"),
                 )
               request.title.isBlank() ->
                 UiBuilderServiceResponse.Error(
-                  UiBuilderServiceError(ServiceErrorCodeV1.BAD_REQUEST, "design title is blank")
+                  UiBuilderServiceError(ServiceErrorCodeV1.BAD_REQUEST, "design title is blank"),
                 )
               else -> {
                 val renamed = document.copy(title = request.title.trim())
@@ -161,7 +161,7 @@ class ServeUiBuilderCreateRoutesTest {
                         role = DesignAccessRoleV1.OWNER,
                         allowedActions = DesignAccessActionV1.entries,
                       ),
-                  )
+                  ),
                 )
               }
             }
@@ -235,7 +235,7 @@ class ServeUiBuilderCreateRoutesTest {
             .url(url("/ui-builder/designs"))
             .header("X-Test-Actor", "operator")
             .post(form.build())
-            .build()
+            .build(),
         )
         .execute()
         .use { assertEquals(if (choice == "invalid") 400 else 303, it.code) }
@@ -282,7 +282,7 @@ class ServeUiBuilderCreateRoutesTest {
           .url(url("/ui-builder/m3-catalog"))
           .header("X-Test-Actor", "operator")
           .post(FormBody.Builder().add("designId", "mywidget3").add("template", "blank").build())
-          .build()
+          .build(),
       )
       .execute()
       .use { response ->
@@ -304,7 +304,7 @@ class ServeUiBuilderCreateRoutesTest {
             .url(url("/ui-builder/designs"))
             .header("X-Test-Actor", "operator")
             .post(form.build())
-            .build()
+            .build(),
         )
         .execute()
         .use { assertEquals(303, it.code) }
@@ -387,9 +387,9 @@ class ServeUiBuilderCreateRoutesTest {
               .add("designId", id)
               .add("catalog", "m3-catalog")
               .add("template", "blank")
-              .build()
+              .build(),
           )
-          .build()
+          .build(),
       )
       .execute()
       .use { assertEquals(303, it.code) }
@@ -406,7 +406,7 @@ class ServeUiBuilderCreateRoutesTest {
             .add("designId", "refused-design")
             .add("catalog", "m3-catalog")
             .add("template", "blank")
-            .build()
+            .build(),
         )
         .build()
     client.newCall(request).execute().use { response ->
@@ -548,7 +548,7 @@ class ServeUiBuilderCreateRoutesTest {
             .header("X-Test-Actor", "operator")
             .header("If-None-Match", "*")
             .put(canonical.toRequestBody())
-            .build()
+            .build(),
         )
         .execute()
     refused.use { response ->
@@ -585,7 +585,7 @@ class ServeUiBuilderCreateRoutesTest {
           .header("X-Test-Actor", "operator")
           .header("If-None-Match", "*")
           .put(document.toRequestBody())
-          .build()
+          .build(),
       )
       .execute()
       .use { assertEquals(201, it.code) }
@@ -627,12 +627,12 @@ class ServeUiBuilderCreateRoutesTest {
     val equivalent =
       document.copy(home = DesignHomeV1.Server("HTTPS://Designs.Example:443/", "published"))
     assertIs<ServeUiBuilderCreate.Outcome.AlreadyExists>(
-      creator.installPublished(actor, equivalent)
+      creator.installPublished(actor, equivalent),
     )
     assertEquals(1, created.count { it == "published" })
     // Reopening is idempotent whatever home the entry carries.
     assertIs<ServeUiBuilderCreate.Outcome.AlreadyExists>(
-      creator.installPublished(actor, document.copy(home = DesignHomeV1.Repo("designs/p.uid")))
+      creator.installPublished(actor, document.copy(home = DesignHomeV1.Repo("designs/p.uid"))),
     )
     // A library entry whose canonical home is its repository opens as a copy pointing back at it,
     // rather than being refused like an ad-hoc import.
@@ -650,7 +650,7 @@ class ServeUiBuilderCreateRoutesTest {
     // With no configured public origin nothing is stamped: a bind address is not an identity.
     val unconfigured = ServeUiBuilderCreate(service, serverOrigin = null)
     assertIs<ServeUiBuilderCreate.Outcome.Created>(
-      unconfigured.installPublished(actor, document.copy(id = "unhomed"))
+      unconfigured.installPublished(actor, document.copy(id = "unhomed")),
     )
     assertEquals(null, createdDocuments.getValue("unhomed").home)
     assertEquals(

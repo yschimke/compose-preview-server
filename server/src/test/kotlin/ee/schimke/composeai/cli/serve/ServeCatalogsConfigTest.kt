@@ -30,7 +30,7 @@ class ServeCatalogsConfigTest {
         """
         { "catalogs": [ { "system": "compose-m3" } ] }
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
     val entry = config.catalogs.single()
@@ -53,7 +53,7 @@ class ServeCatalogsConfigTest {
           ]
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
     assertEquals(listOf(20, 0), config.catalogs.map { it.loadPriority })
@@ -80,7 +80,7 @@ class ServeCatalogsConfigTest {
           "catalogs": [ { "system": "m3-catalog", "group": "design-systems" } ]
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
     assertEquals(listOf(100, 0), config.groups.map { it.priority })
@@ -100,7 +100,7 @@ class ServeCatalogsConfigTest {
         """
         { "catalogs": [ { "system": "cadence", "listed": false, "somethingNew": 7 } ] }
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
     assertEquals(false, config.catalogs.single().listed)
@@ -122,7 +122,7 @@ class ServeCatalogsConfigTest {
           ]
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
     val problems = config.problems()
@@ -144,7 +144,7 @@ class ServeCatalogsConfigTest {
         """
         { "catalogs": [ { "system": "api" }, { "system": "status" }, { "system": "wear-m3" } ] }
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
     val problems = config.problems()
@@ -170,7 +170,7 @@ class ServeCatalogsConfigTest {
           "catalogs": [ { "system": "jetnews", "group": "samples" } ]
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
     val group = config.groupFor(config.catalogs.single())

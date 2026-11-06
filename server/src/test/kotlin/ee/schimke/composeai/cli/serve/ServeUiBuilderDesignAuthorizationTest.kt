@@ -31,7 +31,7 @@ class ServeUiBuilderDesignAuthorizationTest {
                 UiBuilderServiceError(
                   ServiceErrorCodeV1.CATALOG_UNAVAILABLE,
                   "catalog unavailable for stored design ${request.designId}",
-                )
+                ),
               )
             is UiBuilderServiceRequest.ListDesigns ->
               if (request.cursor == null)
@@ -64,7 +64,7 @@ class ServeUiBuilderDesignAuthorizationTest {
           when (call.request) {
             is UiBuilderServiceRequest.GetDesignActions ->
               UiBuilderServiceResponse.Error(
-                UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "not found")
+                UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "not found"),
               )
             is UiBuilderServiceRequest.ListDesigns ->
               UiBuilderServiceResponse.Designs(emptyList(), nextCursor = null)

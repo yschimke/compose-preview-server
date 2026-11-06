@@ -57,7 +57,7 @@ class ServeParityIssueSystemScopeRouteTest {
            "raster":{"path":"references/button.png","width":2,"height":2},
            "source":{"provider":"figma"}}]}
         """
-          .trimIndent()
+          .trimIndent(),
       )
     File(dir, "parity").mkdirs()
     File(dir, "parity/issues.json")
@@ -86,7 +86,7 @@ class ServeParityIssueSystemScopeRouteTest {
            "previewIds":["button-filled"]}
         ]}
         """
-          .trimIndent()
+          .trimIndent(),
       )
     return ServeBundleHost(
       dir,

@@ -14,7 +14,7 @@ class ServeStartupBundlesTest {
   fun `bare url spec derives the session name from the file basename`() {
     val specs =
       ServeStartupBundles.parse(
-        listOf("https://raw.githubusercontent.com/o/r/main/bundle/compose-m3.bundle")
+        listOf("https://raw.githubusercontent.com/o/r/main/bundle/compose-m3.bundle"),
       )
     assertEquals(1, specs.size)
     assertEquals("compose-m3", specs.single().name)
@@ -67,7 +67,7 @@ class ServeStartupBundlesTest {
   fun `candidate origins are enumerated only for a raw githubusercontent url`() {
     val origins =
       ServeStartupBundles.candidateOrigins(
-        "https://raw.githubusercontent.com/o/r/main/bundle/app.bundle"
+        "https://raw.githubusercontent.com/o/r/main/bundle/app.bundle",
       )
     // ref splits leaving ≥1 path segment: "main", "main/bundle".
     assertEquals(listOf("o/r"), origins.map { it.repo }.distinct())
@@ -77,11 +77,11 @@ class ServeStartupBundlesTest {
   @Test
   fun `candidate origins is empty for a non-github host or a local path`() {
     assertTrue(
-      ServeStartupBundles.candidateOrigins("https://example.com/o/r/main/app.bundle").isEmpty()
+      ServeStartupBundles.candidateOrigins("https://example.com/o/r/main/app.bundle").isEmpty(),
     )
     assertTrue(ServeStartupBundles.candidateOrigins("/tmp/app.bundle").isEmpty())
     assertTrue(
-      ServeStartupBundles.candidateOrigins("https://raw.githubusercontent.com/only/two").isEmpty()
+      ServeStartupBundles.candidateOrigins("https://raw.githubusercontent.com/only/two").isEmpty(),
     )
   }
 
@@ -94,11 +94,11 @@ class ServeStartupBundlesTest {
     val trust =
       TrustStore(
         branches =
-          listOf(TrustedBranch(repo = "yschimke/compose-ai-tools", branch = "design-artifacts/*"))
+          listOf(TrustedBranch(repo = "yschimke/compose-ai-tools", branch = "design-artifacts/*")),
       )
     val origins =
       ServeStartupBundles.candidateOrigins(
-        "https://raw.githubusercontent.com/yschimke/compose-ai-tools/design-artifacts/compose-m3/bundle/app.bundle"
+        "https://raw.githubusercontent.com/yschimke/compose-ai-tools/design-artifacts/compose-m3/bundle/app.bundle",
       )
     // The caller's selection: first candidate the trust store trusts.
     val trusted = origins.firstOrNull { trust.trustsBranch(it.repo, it.branch) }
@@ -113,7 +113,7 @@ class ServeStartupBundlesTest {
     val trust = TrustStore(branches = listOf(TrustedBranch(repo = "o/r", branch = "*")))
     val origin =
       ServeStartupBundles.candidateOrigins(
-          "https://raw.githubusercontent.com/o/r/main/b/app.bundle"
+          "https://raw.githubusercontent.com/o/r/main/b/app.bundle",
         )
         .first { trust.trustsBranch(it.repo, it.branch) }
     // An unsigned bundle (no signatures.json); origin alone must still make it Trusted (branch
@@ -128,7 +128,7 @@ class ServeStartupBundlesTest {
   fun `without a matching trusted branch a fetched bundle stays Unverified`() {
     val origin =
       ServeStartupBundles.candidateOrigins(
-          "https://raw.githubusercontent.com/o/r/main/b/app.bundle"
+          "https://raw.githubusercontent.com/o/r/main/b/app.bundle",
         )
         .first()
     val bundle = ServeBundle.zip(linkedMapOf("previews/x.png" to byteArrayOf(1)))

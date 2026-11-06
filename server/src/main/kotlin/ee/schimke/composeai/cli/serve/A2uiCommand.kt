@@ -103,7 +103,7 @@ internal object A2uiCommand {
           timeout =
             raw.toLongOrNull()?.takeIf { it > 0 }
               ?: return Parsed.Invalid(
-                "a2ui: --timeout must be a positive number of seconds, not '$raw'"
+                "a2ui: --timeout must be a positive number of seconds, not '$raw'",
               )
         }
         "--no-authorize" -> {
@@ -115,12 +115,12 @@ internal object A2uiCommand {
           return Parsed.Invalid(
             "a2ui: there is no --token flag on purpose — a credential on a command line lands in " +
               "a shell history and a CI log. Set \$${DesignCommand.TOKEN_ENV}, or let this " +
-              "command ask a human for a grant."
+              "command ask a human for a grant.",
           )
         else ->
           return Parsed.Invalid(
             if (argument.startsWith("-")) "a2ui: unknown option '$argument'"
-            else "a2ui $verb: unexpected argument '$argument'"
+            else "a2ui $verb: unexpected argument '$argument'",
           )
       }
       // Every flag that reaches here took a value.
@@ -143,7 +143,7 @@ internal object A2uiCommand {
         out = out ?: defaultOut(source),
         authorize = authorize,
         timeoutSeconds = timeout,
-      )
+      ),
     )
   }
 
@@ -234,7 +234,7 @@ internal class A2uiCommandRunner(
           throw DesignCommandFailure(
             "a2ui: ${options.catalog} answered with its published render, not this document — " +
               (provenance["overridesIgnoredReason"]?.jsonPrimitive?.contentOrNull
-                ?: "the catalog has no live renderer")
+                ?: "the catalog has no live renderer"),
           )
         }
       }
@@ -304,7 +304,7 @@ internal class A2uiCommandRunner(
       ?.contentOrNull
       ?: throw DesignCommandFailure(
         "a2ui: ${options.catalog} declares no preview with a string `$DOCUMENT_KNOB` knob. " +
-          "Name one with --preview, or check --catalog."
+          "Name one with --preview, or check --catalog.",
       )
   }
 
@@ -426,13 +426,13 @@ internal object A2uiCommandEntry {
           err.println(refused.message)
           err.println(
             "a2ui: --no-authorize, so no grant was requested. Set " +
-              "\$${DesignCommand.TOKEN_ENV} to a token with the live scope."
+              "\$${DesignCommand.TOKEN_ENV} to a token with the live scope.",
           )
           return DesignCommandRunner.EXIT_NO_PERMISSION
         }
         err.println(
           if (token == null) "a2ui: no credential, and rendering a document needs a live grant."
-          else "a2ui: this server does not honour that token for a live render."
+          else "a2ui: this server does not honour that token for a live render.",
         )
         token =
           DesignAuthorizer(

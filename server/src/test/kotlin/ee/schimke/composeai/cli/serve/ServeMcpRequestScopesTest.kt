@@ -81,7 +81,7 @@ class ServeMcpRequestScopesTest {
       assertNull(
         scopes
           .interaction(unsupported) { emitted = true }
-          .elicitForm("Choose", JsonObject(emptyMap()), 1_000)
+          .elicitForm("Choose", JsonObject(emptyMap()), 1_000),
       )
       assertFalse(emitted)
 

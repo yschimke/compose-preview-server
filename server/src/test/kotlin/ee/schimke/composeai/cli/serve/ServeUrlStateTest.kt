@@ -191,7 +191,7 @@ class ServeUrlStateTest {
     // would otherwise clear it.
     assertTrue(
       script.contains(
-        """var initialUrlMode = new URLSearchParams(location.search).get("mode") || "";"""
+        """var initialUrlMode = new URLSearchParams(location.search).get("mode") || "";""",
       ),
       "the viewer must capture a bookmarked ?mode= before the first URL sync",
     )

@@ -95,7 +95,7 @@ class UiBuilderEnumExportTest {
                     id = "label",
                     componentId = "m3/text",
                     properties = mapOf("text" to StringValueV1("Peak hour"), "style" to style),
-                  )
+                  ),
               ),
           ),
           record,
@@ -226,7 +226,7 @@ class UiBuilderEnumExportTest {
     assertTrue("""TextField(value = "Sofia"""" in filled.source, filled.source)
     assertTrue("label = {" in filled.source, filled.source)
     assertTrue(
-      "OutlinedTextField(" in (textField("outlined") as ScreenExportGate.Outcome.Emitted).source
+      "OutlinedTextField(" in (textField("outlined") as ScreenExportGate.Outcome.Emitted).source,
     )
 
     fun indicator(
@@ -243,18 +243,19 @@ class UiBuilderEnumExportTest {
                   id = "bar",
                   componentId = "m3/progress-indicator",
                   properties = mapOf("variant" to EnumValueV1(variant)) + extra,
-                )
+                ),
             ),
         ),
         record,
       )
 
     assertTrue(
-      "LinearProgressIndicator(" in (indicator("linear") as ScreenExportGate.Outcome.Emitted).source
+      "LinearProgressIndicator(" in
+        (indicator("linear") as ScreenExportGate.Outcome.Emitted).source,
     )
     assertTrue(
       "CircularProgressIndicator(" in
-        (indicator("circular") as ScreenExportGate.Outcome.Emitted).source
+        (indicator("circular") as ScreenExportGate.Outcome.Emitted).source,
     )
     // The determinate overload takes `progress: () -> Float`, which was refused for as long as no
     // value in this vocabulary was a lambda. `ScreenValue.Lambda` (compose-ai-tools#5219) ended
@@ -287,7 +288,7 @@ class UiBuilderEnumExportTest {
                   id = "carousel",
                   componentId = "layout/horizontal-carousel",
                   properties = mapOf("kind" to EnumValueV1("uncontained")),
-                )
+                ),
             ),
         ),
         record,
@@ -357,7 +358,7 @@ class UiBuilderEnumExportTest {
                   id = "label",
                   componentId = "m3/text",
                   properties = mapOf("text" to StateValueV1("caption")),
-                )
+                ),
             ),
         ),
         record,

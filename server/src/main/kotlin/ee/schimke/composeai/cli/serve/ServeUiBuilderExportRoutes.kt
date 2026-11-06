@@ -261,7 +261,7 @@ private suspend fun ApplicationCall.serveSuppliedDocument(
     }
   val outcome =
     service.execute(
-      UiBuilderServiceCall(actor, UiBuilderServiceRequest.ExportDocument(document, format))
+      UiBuilderServiceCall(actor, UiBuilderServiceRequest.ExportDocument(document, format)),
     )
   serveExportArtifact(
     outcome,
@@ -272,7 +272,7 @@ private suspend fun ApplicationCall.serveSuppliedDocument(
 }
 
 private suspend fun ApplicationCall.authorizeExport(
-  authorization: ServeUiBuilderAuthorization
+  authorization: ServeUiBuilderAuthorization,
 ): AuthenticatedUiBuilderActor? = authorizeRoute(authorization, UiBuilderRouteCapability.EXPORT)
 
 /** A thumbnail asks the route for read; the design's own EXPORT action is checked per design. */
@@ -281,13 +281,13 @@ private suspend fun ApplicationCall.authorizeExport(
  * runs Kotlin: the export capability's to grant, not the read access a thumbnail needs.
  */
 private suspend fun ApplicationCall.mayCompileThumbnails(
-  authorization: ServeUiBuilderAuthorization
+  authorization: ServeUiBuilderAuthorization,
 ): Boolean =
   authorization.authorize(this, UiBuilderRouteCapability.EXPORT) is
     UiBuilderAuthorizationDecision.Authorized
 
 private suspend fun ApplicationCall.authorizeThumbnail(
-  authorization: ServeUiBuilderAuthorization
+  authorization: ServeUiBuilderAuthorization,
 ): AuthenticatedUiBuilderActor? = authorizeRoute(authorization, UiBuilderRouteCapability.READ)
 
 private suspend fun ApplicationCall.authorizeRoute(

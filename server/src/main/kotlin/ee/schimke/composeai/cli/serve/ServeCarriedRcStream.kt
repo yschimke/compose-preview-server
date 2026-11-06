@@ -108,7 +108,7 @@ internal constructor(
           // it; never below a short gap, so a waiting `/render` can take the queue between frames.
           is Tick.Frame ->
             (paint(tick.png) - (System.nanoTime() - renderStartNanos) / 1_000_000).coerceAtLeast(
-              MIN_FRAME_GAP_MILLIS
+              MIN_FRAME_GAP_MILLIS,
             )
           is Tick.Retry -> tick.millis.coerceAtLeast(MIN_RETRY_MILLIS)
           is Tick.Failed -> {
@@ -149,7 +149,7 @@ internal constructor(
         keyframe = !unchanged,
         final = false,
         payloadBase64 = if (unchanged) null else Base64.getEncoder().encodeToString(png),
-      )
+      ),
     )
     return intervalMillis
   }

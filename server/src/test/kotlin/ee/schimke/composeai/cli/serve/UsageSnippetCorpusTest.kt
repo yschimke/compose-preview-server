@@ -60,7 +60,7 @@ class UsageSnippetCorpusTest {
   private fun sources(root: File): List<File> {
     val testSourceSet =
       Regex(
-        """/src/(test|testFixtures|[A-Za-z0-9]*Test|[A-Za-z0-9]*TestFixtures)([A-Z][A-Za-z0-9]*)?/"""
+        """/src/(test|testFixtures|[A-Za-z0-9]*Test|[A-Za-z0-9]*TestFixtures)([A-Z][A-Za-z0-9]*)?/""",
       )
     return root
       .walkTopDown()
@@ -255,7 +255,7 @@ class UsageSnippetCorpusTest {
       report.appendLine(
         // Count the catalog's own scaffolds, not the merged map, so inherited generic rules aren't
         // credited.
-        "## $system — ${samples.size} samples, rules: ${if (declared) "declared (${with(UsageRules.Companion) { rules.catalogScaffolds() }.size} scaffolds)" else "GENERIC (none declared)"}"
+        "## $system — ${samples.size} samples, rules: ${if (declared) "declared (${with(UsageRules.Companion) { rules.catalogScaffolds() }.size} scaffolds)" else "GENERIC (none declared)"}",
       )
       for (sample in samples) {
         val found = findFunction(files, sample.function)

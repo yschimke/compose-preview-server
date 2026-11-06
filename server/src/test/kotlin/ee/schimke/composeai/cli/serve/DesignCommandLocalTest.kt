@@ -90,11 +90,11 @@ class DesignCommandLocalTest {
     assertTrue(invalid("render", "--document", "d.json").contains("Add --local"))
     assertTrue(
       invalid("render", "--document", "d.json", "--local", "--catalog", "b", "--revision", "3")
-        .contains("--revision")
+        .contains("--revision"),
     )
     assertTrue(
       invalid("render", "w", "--document", "d.json", "--local", "--catalog", "b")
-        .contains("second one")
+        .contains("second one"),
     )
   }
 
@@ -107,14 +107,14 @@ class DesignCommandLocalTest {
   @Test
   fun `a local render draws, so it cannot answer with SVG`() {
     assertTrue(
-      invalid("render", "w", "--local", "--catalog", "b", "--format", "svg").contains("only png")
+      invalid("render", "w", "--local", "--catalog", "b", "--format", "svg").contains("only png"),
     )
   }
 
   @Test
   fun `--components takes a catalog and a file`() {
     assertTrue(
-      invalid("export", "w", "--local", "--components", "m3.json").contains("--components")
+      invalid("export", "w", "--local", "--components", "m3.json").contains("--components"),
     )
   }
 

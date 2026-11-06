@@ -168,7 +168,7 @@ internal object LocalUiBuilder {
     val jar =
       File(
         LocalUiBuilder::class.java.protectionDomain?.codeSource?.location?.toURI()
-          ?: return@runCatching null
+          ?: return@runCatching null,
       )
     jar.parentFile?.parentFile?.resolve(name)
   }

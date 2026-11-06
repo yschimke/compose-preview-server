@@ -127,7 +127,7 @@ class PreviewUsageIndexTest {
     assertEquals(
       listOf(
         "https://raw.githubusercontent.com/yschimke/m3-catalog/main/" +
-          "catalog/src/main/kotlin/sections/Buttons.kt"
+          "catalog/src/main/kotlin/sections/Buttons.kt",
       ),
       fetched,
     )

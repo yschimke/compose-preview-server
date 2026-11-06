@@ -493,7 +493,7 @@ class ServeUiBuilderAdminRoutingTest {
         .newCall(
           Request.Builder()
             .url("http://127.0.0.1:${server!!.port}/auth/github/start?return=/admin/ui-builder")
-            .build()
+            .build(),
         )
         .execute()
         .use { response ->
@@ -507,7 +507,7 @@ class ServeUiBuilderAdminRoutingTest {
         Request.Builder()
           .url("http://127.0.0.1:${server!!.port}/auth/github/callback?code=ok&state=$state")
           .header("Cookie", start.second)
-          .build()
+          .build(),
       )
       .execute()
       .use { response ->

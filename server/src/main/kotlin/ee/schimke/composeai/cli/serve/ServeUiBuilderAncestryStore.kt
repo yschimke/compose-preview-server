@@ -69,7 +69,7 @@ internal class ServeUiBuilderAncestryStore(private val root: Path) {
     synchronized(lock) {
       val child =
         (readFile(fileFor(forkId)) ?: StoredAncestry(designId = forkId)).copy(
-          forkedFrom = forkedFrom
+          forkedFrom = forkedFrom,
         )
       val parentId = forkedFrom.designId
       val parent = readFile(fileFor(parentId)) ?: StoredAncestry(designId = parentId)
@@ -78,7 +78,7 @@ internal class ServeUiBuilderAncestryStore(private val root: Path) {
           forks =
             (parent.forks.filterNot { it.designId == forkId } +
                 DesignForkV1(forkId, forkedFrom.revision, atEpochMillis))
-              .takeLast(MAX_FORKS)
+              .takeLast(MAX_FORKS),
         )
       val recorded = write(fileFor(forkId), child) && write(fileFor(parentId), updatedParent)
       // Announced only once both ends are on disk: a fork the record does not know about is not
@@ -149,7 +149,7 @@ internal class ServeUiBuilderAncestryStore(private val root: Path) {
     root.resolve(
       MessageDigest.getInstance("SHA-256")
         .digest(designId.toByteArray(StandardCharsets.UTF_8))
-        .joinToString("") { "%02x".format(it) } + ".json"
+        .joinToString("") { "%02x".format(it) } + ".json",
     )
 
   companion object {

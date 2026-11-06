@@ -19,7 +19,7 @@ class StandaloneServerMainTest {
         "GreetingPreview.Dark",
         "GreetingPreview",
         "Dark",
-      )
+      ),
     )
     assertFalse(previewIdMatchesStandaloneRequest(id, "other", null, null, null, null))
   }

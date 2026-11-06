@@ -101,7 +101,7 @@ class ProcessBuildHostTest {
 
     val host =
       assertNotNull(
-        ProcessBuildHost.spawn(script.path, workingDirectory = dir, module = ":remote-catalog")
+        ProcessBuildHost.spawn(script.path, workingDirectory = dir, module = ":remote-catalog"),
       )
     try {
       assertEquals(

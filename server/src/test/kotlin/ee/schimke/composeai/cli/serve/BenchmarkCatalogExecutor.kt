@@ -10,7 +10,7 @@ import kotlinx.serialization.json.Json
 /** Historical Jetcaster input for tests, supplied explicitly rather than by a runtime fallback. */
 internal fun benchmarkCatalog(source: String? = null): CatalogCapabilityV1 =
   Json.decodeFromString(
-    source ?: File("../docs/design/fixtures/ui-builder/m3-catalog-capabilities-v1.json").readText()
+    source ?: File("../docs/design/fixtures/ui-builder/m3-catalog-capabilities-v1.json").readText(),
   )
 
 /**
@@ -47,7 +47,7 @@ internal fun benchmarkCatalogExecutor(
               benchmarkCatalog(source)
                 .newBuilder()
                 .also { it.exportCapabilities = exportCapabilities }
-                .build()
+                .build(),
           )
         else emptyMap()) + published
     }

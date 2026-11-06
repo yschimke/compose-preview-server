@@ -74,7 +74,7 @@ class UiBuilderGeneratedPreviewAdapterTest {
         )
       assertTrue(
         source.contains(
-          "androidx.compose.material3.MaterialTheme(colorScheme = androidx.compose.material3.${theme}ColorScheme()) { GeneratedUiBuilderScreen() }"
+          "androidx.compose.material3.MaterialTheme(colorScheme = androidx.compose.material3.${theme}ColorScheme()) { GeneratedUiBuilderScreen() }",
         ),
         source,
       )

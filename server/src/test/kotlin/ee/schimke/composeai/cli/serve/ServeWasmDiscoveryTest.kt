@@ -26,7 +26,7 @@ class ServeWasmDiscoveryTest {
         kotlin { wasmJs { browser(); binaries.executable() } }
         dependencies { implementation(project(":shared:ui")) }
         """
-          .trimIndent()
+          .trimIndent(),
       )
     val dist = File(web, "build/dist/wasmJs/productionExecutable").apply { mkdirs() }
     File(dist, "index.html").writeText("<html></html>")

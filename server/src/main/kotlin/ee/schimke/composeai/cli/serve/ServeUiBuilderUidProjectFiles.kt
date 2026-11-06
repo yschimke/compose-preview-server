@@ -52,10 +52,10 @@ internal object ServeUiBuilderUidProjectFiles {
       val encoded =
         JsonObject(
           UID_WRITE_JSON.encodeToJsonElement(
-              remapProjectNavigation(document.copy(id = sourceId), navigation, strict = false)
+              remapProjectNavigation(document.copy(id = sourceId), navigation, strict = false),
             )
             .jsonObject +
-            ("stateVariables" to PROJECT_JSON.encodeToJsonElement(document.stateVariables))
+            ("stateVariables" to PROJECT_JSON.encodeToJsonElement(document.stateVariables)),
         )
       val nodeKeys =
         descriptorKeys(ee.schimke.composeai.uibuilder.protocol.DesignNodeV1.serializer().descriptor)
@@ -63,7 +63,8 @@ internal object ServeUiBuilderUidProjectFiles {
       val nodes =
         encoded.getValue("nodes").jsonObject.mapValues { (id, node) ->
           JsonObject(
-            originalNodes[id]?.jsonObject.orEmpty().filterKeys { it !in nodeKeys } + node.jsonObject
+            originalNodes[id]?.jsonObject.orEmpty().filterKeys { it !in nodeKeys } +
+              node.jsonObject,
           )
         }
       // Remove modelled keys before merging so clearing a default does not restore its old value.
@@ -76,7 +77,7 @@ internal object ServeUiBuilderUidProjectFiles {
           JsonObject(
             original +
               ("designs" to
-                JsonArray(original.getValue("designs").jsonArray.map { replace(it.jsonObject) }))
+                JsonArray(original.getValue("designs").jsonArray.map { replace(it.jsonObject) })),
           )
         "compose-ui-builder-production/v1" ->
           JsonObject(original + ("design" to replace(original.getValue("design").jsonObject)))
@@ -96,12 +97,12 @@ internal object ServeUiBuilderUidProjectFiles {
         (entry.bindings.map { it.nodeId } +
             entry.eventBindings.map { it.nodeId } +
             entry.components.map { it.nodeId })
-          .all { it in design.nodes }
+          .all { it in design.nodes },
       ) {
         "production contract references a removed node"
       }
       require(
-        design.stateVariables.isEmpty() && design.nodes.values.all { it.eventBindings.isEmpty() }
+        design.stateVariables.isEmpty() && design.nodes.values.all { it.eventBindings.isEmpty() },
       ) {
         "production state and callbacks must come from its declared API"
       }
@@ -117,7 +118,7 @@ private val UID_WRITE_JSON =
   }
 
 private fun descriptorKeys(
-  descriptor: kotlinx.serialization.descriptors.SerialDescriptor
+  descriptor: kotlinx.serialization.descriptors.SerialDescriptor,
 ): Set<String> = (0 until descriptor.elementsCount).map { descriptor.getElementName(it) }.toSet()
 
 internal fun remapProjectNavigation(
@@ -126,7 +127,7 @@ internal fun remapProjectNavigation(
   strict: Boolean = true,
 ): DesignDocumentV1 =
   PROJECT_JSON.decodeFromJsonElement(
-    rewriteProjectNavigation(PROJECT_JSON.encodeToJsonElement(document), mapping, strict)
+    rewriteProjectNavigation(PROJECT_JSON.encodeToJsonElement(document), mapping, strict),
   )
 
 private fun rewriteProjectNavigation(

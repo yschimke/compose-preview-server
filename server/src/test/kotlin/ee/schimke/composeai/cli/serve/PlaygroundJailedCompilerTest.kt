@@ -95,9 +95,9 @@ class PlaygroundJailedCompilerTest {
               file = "Snippet.kt",
               line = 4,
               ch = 8,
-            )
+            ),
           )
-        }
+        },
       )
 
     assertEquals(1, diags.size)
@@ -119,7 +119,7 @@ class PlaygroundJailedCompilerTest {
           seen =
             Json.decodeFromString(PlaygroundCompileRequest.serializer(), requestFile.readText())
           report()
-        }
+        },
       )
 
     assertEquals(emptyList(), diags)
@@ -140,7 +140,7 @@ class PlaygroundJailedCompilerTest {
       compiler { command, _ ->
         argv = command
         report()
-      }
+      },
     )
 
     assertEquals("bwrap", argv.first(), "the compile runs inside the jail, not beside it")
@@ -173,7 +173,7 @@ class PlaygroundJailedCompilerTest {
             stdout = "",
             stderr = "the compile exceeded its 180s budget",
           )
-        }
+        },
       )
 
     val only = diags.single()
@@ -192,7 +192,7 @@ class PlaygroundJailedCompilerTest {
             stdout = PlaygroundJailedCompiler.REPORT_PREFIX + "{not json",
             stderr = "",
           )
-        }
+        },
       )
 
     assertTrue("unreadable compile report" in diags.single().message, diags.single().message)

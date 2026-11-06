@@ -18,7 +18,7 @@ class ServeLiveCanvasFocusRingTest {
     assertTrue(
       css.contains(
         ":where(a, button, summary, input, select, textarea, [tabindex]):focus-visible {\n" +
-          "  outline: 3px solid var(--md-sys-color-secondary);"
+          "  outline: 3px solid var(--md-sys-color-secondary);",
       ),
       "the site-wide M3 focus indicator is intact",
     )
@@ -28,7 +28,7 @@ class ServeLiveCanvasFocusRingTest {
   fun `the live canvas draws no focus ring of its own`() {
     assertTrue(
       css.contains(
-        ".cp-stage canvas#cp-canvas:focus, .cp-stage canvas#cp-canvas:focus-visible { outline: none; }"
+        ".cp-stage canvas#cp-canvas:focus, .cp-stage canvas#cp-canvas:focus-visible { outline: none; }",
       ),
       "the live render pane suppresses the page's focus ring",
     )

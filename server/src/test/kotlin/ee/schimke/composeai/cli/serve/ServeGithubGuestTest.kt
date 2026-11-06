@@ -114,7 +114,7 @@ class ServeGithubGuestTest {
         uiBuilderService = service,
         uiBuilderAuthorization =
           ServeUiBuilderAuthorization.fromMachineAuthorization(
-            ServeMachineAuthorization("operator-token", auth, agentGrants = null)
+            ServeMachineAuthorization("operator-token", auth, agentGrants = null),
           ),
       )
       .also { it.start() }
@@ -134,7 +134,7 @@ class ServeGithubGuestTest {
         Request.Builder()
           .url("http://127.0.0.1:${server.port}/auth/github/callback?code=ok&state=$state")
           .header("Cookie", stateCookie.substringBefore(";"))
-          .build()
+          .build(),
       )
       .execute()
       .use { response ->
@@ -163,7 +163,7 @@ class ServeGithubGuestTest {
           .url("http://127.0.0.1:${server.port}$UI_BUILDER_REQUEST_PATH")
           .header("Cookie", cookie)
           .post(body.toRequestBody())
-          .build()
+          .build(),
       )
       .execute()
       .use { it.code }

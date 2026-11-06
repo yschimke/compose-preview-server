@@ -82,7 +82,7 @@ class ServeLocalRebuildTest {
       open = { state ->
         opened += state
         FakeHost(state.previews)
-      }
+      },
     )
 
   private fun writeOutput(
@@ -99,7 +99,7 @@ class ServeLocalRebuildTest {
             variant = "",
             previews = previews.map { PreviewInfo(id = it, functionName = it, className = "Kt") },
           ),
-        )
+        ),
       )
   }
 
@@ -348,7 +348,7 @@ class ServeLocalRebuildTest {
             .url("http://127.0.0.1:${server.port}/app/rebuild")
             .apply { token?.let { header(ServeHttpServer.TOKEN_HEADER, it) } }
             .post("".toRequestBody("application/json".toMediaType()))
-            .build()
+            .build(),
         )
         .execute()
         .use { it.code }

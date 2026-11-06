@@ -161,7 +161,7 @@ class ServeUiBuilderEditorStore(
     val manifest = ServeUiBuilderEditor.readManifest(target)
     if (manifest == null) {
       return Result.Failed(
-        "editor ${pin.version} has no readable ${ServeUiBuilderEditor.MANIFEST_FILE}"
+        "editor ${pin.version} has no readable ${ServeUiBuilderEditor.MANIFEST_FILE}",
       )
     }
     ServeUiBuilderEditor.contractProblem(manifest, pin.version)?.let {
@@ -181,7 +181,7 @@ class ServeUiBuilderEditorStore(
       val digest = download(url, archive)
       if (!digest.equals(pin.sha256, ignoreCase = true)) {
         return Result.Failed(
-          "editor ${pin.version} digest mismatch: pinned ${pin.sha256.lowercase()}, got $digest"
+          "editor ${pin.version} digest mismatch: pinned ${pin.sha256.lowercase()}, got $digest",
         )
       }
       unpack(archive, staging)
@@ -191,7 +191,7 @@ class ServeUiBuilderEditorStore(
       val manifest =
         ServeUiBuilderEditor.readManifest(staging)
           ?: return Result.Failed(
-            "editor ${pin.version} has no readable ${ServeUiBuilderEditor.MANIFEST_FILE}"
+            "editor ${pin.version} has no readable ${ServeUiBuilderEditor.MANIFEST_FILE}",
           )
       ServeUiBuilderEditor.contractProblem(manifest, pin.version)?.let {
         return Result.Failed(it)
@@ -374,7 +374,7 @@ class ServeUiBuilderEditorAdmin(
     if (configuredPin() == null) return Result.Conflict("an editor pin is not configured")
     file.update { it.copy(editor = null) }
     onLog(
-      "serve: UI-builder editor pin removed via admin API; the bundled editor serves next start"
+      "serve: UI-builder editor pin removed via admin API; the bundled editor serves next start",
     )
     return Result.Ok(null, restartRequired = servingState().servingPin != null)
   }

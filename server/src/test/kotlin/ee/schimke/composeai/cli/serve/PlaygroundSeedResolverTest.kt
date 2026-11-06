@@ -58,7 +58,7 @@ class PlaygroundSeedResolverTest {
     assertEquals(
       listOf(
         "https://raw.githubusercontent.com/yschimke/compose-ai-tools/main/" +
-          "samples/design-catalog-compose-m3/src/main/kotlin/buttons/FilledButton.kt"
+          "samples/design-catalog-compose-m3/src/main/kotlin/buttons/FilledButton.kt",
       ),
       fetched,
     )
@@ -140,7 +140,7 @@ class PlaygroundSeedResolverTest {
     assertEquals(
       listOf(
         "https://raw.githubusercontent.com/yschimke/compose-ai-tools/main/" +
-          "src/main/kotlin/buttons/FilledButton.kt"
+          "src/main/kotlin/buttons/FilledButton.kt",
       ),
       fetched,
     )

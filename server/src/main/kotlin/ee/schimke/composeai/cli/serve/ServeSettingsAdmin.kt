@@ -127,7 +127,7 @@ class ServeSettingsAdmin(
       .getOrElse {
         return listOf(
           "serve: settings: ${displayPath ?: "settings.json"} could not be read (${it.message}); " +
-            "serving the environment's values"
+            "serving the environment's values",
         )
       }
     val lines = mutableListOf<String>()

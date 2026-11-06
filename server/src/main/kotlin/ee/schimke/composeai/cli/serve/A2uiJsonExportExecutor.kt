@@ -39,7 +39,7 @@ internal class A2uiJsonExportExecutor(private val delegate: UiBuilderExportExecu
         }
           .getOrElse {
             A2uiDocumentExporter.Result.Refused(
-              listOf("document: the A2UI export could not read the design: ${it.message}")
+              listOf("document: the A2UI export could not read the design: ${it.message}"),
             )
           }
       ) {

@@ -239,7 +239,7 @@ internal object ServeSiteIcon {
                   put("sizes", str(sizes))
                   put("type", str(type))
                   put("purpose", str(purpose))
-                }
+                },
               )
             icon(APP_ICON_192_PATH, "192x192", "image/png", "any")
             icon(APP_ICON_512_PATH, "512x512", "image/png", "any")
@@ -263,7 +263,7 @@ internal object ServeSiteIcon {
                     put("type", str("image/png"))
                     put("form_factor", str(shot.formFactor))
                     put("label", str(shot.label))
-                  }
+                  },
                 )
               }
             },
@@ -295,7 +295,7 @@ internal object ServeSiteIcon {
                               ServeShareTarget.ACCEPTED_IMAGE_TYPES.forEach { add(str(it)) }
                             },
                           )
-                        }
+                        },
                       )
                     },
                   )
@@ -320,11 +320,11 @@ internal object ServeSiteIcon {
                           kotlinx.serialization.json.buildJsonObject {
                             put("src", str(APP_ICON_192_PATH))
                             put("sizes", str("192x192"))
-                          }
+                          },
                         )
                       },
                     )
-                  }
+                  },
                 )
               }
             },
@@ -381,7 +381,7 @@ internal object ServeSiteIcon {
 
   private val SURFACE_PAIR =
     Regex(
-      "--md-sys-color-surface:\\s*light-dark\\(\\s*(#[0-9a-fA-F]{6})\\s*,\\s*(#[0-9a-fA-F]{6})\\s*\\)"
+      "--md-sys-color-surface:\\s*light-dark\\(\\s*(#[0-9a-fA-F]{6})\\s*,\\s*(#[0-9a-fA-F]{6})\\s*\\)",
     )
 
   /** One manifest screenshot, served from the classpath at [path]. */

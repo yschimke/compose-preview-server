@@ -54,12 +54,12 @@ internal object ServeBanner {
       networkOrigins.forEach { add("  Network: ${url(it, "/")}") }
       add(
         "  ⚠ Bound to all interfaces — reachable by anyone on your LAN. The token in the link is " +
-          "the only gate; share it only with people you'd let see these previews."
+          "the only gate; share it only with people you'd let see these previews.",
       )
       add(
         "  ⓘ A plain-http LAN address is not a secure context: installing the app, Web Share, " +
           "clipboard and offline need HTTPS, or `adb reverse tcp:${portOf(localOrigin)} " +
-          "tcp:${portOf(localOrigin)}` so an Android phone can open http://localhost instead."
+          "tcp:${portOf(localOrigin)}` so an Android phone can open http://localhost instead.",
       )
       val first = networkOrigins.firstOrNull()
       if (qr && first != null) {

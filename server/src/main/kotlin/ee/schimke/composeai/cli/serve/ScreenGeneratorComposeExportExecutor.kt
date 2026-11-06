@@ -553,7 +553,7 @@ internal class ScreenGeneratorComposeExportExecutor(
    * record. A missing, unreadable or unsupported pack record refuses naming the pack.
    */
   private fun packRecordsFor(
-    document: ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
+    document: ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1,
   ): PackRecords {
     val records =
       packsUsedBy(document, packs).map { pack ->
@@ -567,7 +567,7 @@ internal class ScreenGeneratorComposeExportExecutor(
                   "the component record for pack `$pack` is schema ${aliased.schemaVersion}, and " +
                     "this build generates from $COMPONENT_RECORD_OPT_IN_MECHANISM_SCHEMA to " +
                     "$COMPONENT_RECORD_SCHEMA_VERSION; re-run discovery against a matching " +
-                    "plugin version"
+                    "plugin version",
                 ),
               )
             }
@@ -580,7 +580,7 @@ internal class ScreenGeneratorComposeExportExecutor(
               listOf(
                 "this design uses components from the `$pack` pack, and this host has no " +
                   "discovered component record for it; run a preview bundle for that catalog's " +
-                  "module and pass it as `--ui-builder-components $pack=<components.json>`"
+                  "module and pass it as `--ui-builder-components $pack=<components.json>`",
               ),
             )
           is ComponentRecordSource.Lookup.Unusable ->
@@ -588,7 +588,7 @@ internal class ScreenGeneratorComposeExportExecutor(
               NO_COMPONENT_RECORD,
               listOf(
                 "the component record configured for the `$pack` pack could not be loaded: " +
-                  lookup.reason
+                  lookup.reason,
               ),
             )
         }
@@ -625,7 +625,7 @@ internal class ScreenGeneratorComposeExportExecutor(
             "the component record for catalog `$catalogSystemId` is schema " +
               "${lookup.record.schemaVersion}, and this build generates from " +
               "$COMPONENT_RECORD_OPT_IN_MECHANISM_SCHEMA to $COMPONENT_RECORD_SCHEMA_VERSION; " +
-              "re-run discovery against a matching plugin version"
+              "re-run discovery against a matching plugin version",
           ),
         )
       }
@@ -652,9 +652,9 @@ internal class ScreenGeneratorComposeExportExecutor(
               listOf(
                 "this host has no discovered component record for catalog `$catalogSystemId`, so " +
                   "no call site can be proven; run a preview bundle for that catalog's module and " +
-                  "pass it as `--ui-builder-components $catalogSystemId=<components.json>`"
+                  "pass it as `--ui-builder-components $catalogSystemId=<components.json>`",
               ),
-            )
+            ),
           )
         is ComponentRecordSource.Lookup.Unusable ->
           return UsableRecord.Refused(
@@ -662,9 +662,9 @@ internal class ScreenGeneratorComposeExportExecutor(
               NO_COMPONENT_RECORD,
               listOf(
                 "the component record configured for catalog `$catalogSystemId` could not be " +
-                  "loaded: ${lookup.reason}"
+                  "loaded: ${lookup.reason}",
               ),
-            )
+            ),
           )
       }
     if (!generatesFrom(record)) {
@@ -677,9 +677,9 @@ internal class ScreenGeneratorComposeExportExecutor(
             "the component record for catalog `$catalogSystemId` is schema " +
               "${record.schemaVersion}, and this build generates from " +
               "$COMPONENT_RECORD_OPT_IN_MECHANISM_SCHEMA to $COMPONENT_RECORD_SCHEMA_VERSION; " +
-              "re-run discovery against a matching plugin version"
+              "re-run discovery against a matching plugin version",
           ),
-        )
+        ),
       )
     }
     return UsableRecord.Found(record)
@@ -845,7 +845,7 @@ internal class ScreenGeneratorComposeExportExecutor(
           "written against" +
           (example.minOrNull()?.let { " — it names ids like `$it`" } ?: "") +
           ", and the design uses ids like `${own.min()}`; a catalog bundle's own discovery " +
-          "`components.json` is not that record"
+          "`components.json` is not that record",
       ) + collapsed
     }
 

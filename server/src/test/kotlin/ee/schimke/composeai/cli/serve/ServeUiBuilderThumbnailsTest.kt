@@ -57,7 +57,7 @@ class ServeUiBuilderThumbnailsTest {
               )
             else
               UiBuilderServiceResponse.Error(
-                UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "no design")
+                UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "no design"),
               )
           is UiBuilderServiceRequest.ListDesigns ->
             UiBuilderServiceResponse.Designs(emptyList(), null)
@@ -82,9 +82,9 @@ class ServeUiBuilderThumbnailsTest {
                       severity = DiagnosticSeverityV1.INFO,
                       code = "REVISION_PINNED_DAEMON_RENDER",
                       message = "Rendered design ${request.designId} revision $served (hash).",
-                    )
+                    ),
                   ),
-              )
+              ),
             )
           }
           else -> UiBuilderServiceResponse.Catalogs(emptyList())
@@ -132,7 +132,7 @@ class ServeUiBuilderThumbnailsTest {
     Request.Builder()
       .url(
         "http://127.0.0.1:${server.port}/api/ui-builder/v1/designs/$designId/thumbnail.png" +
-          (revision?.let { "?revision=$it" } ?: "")
+          (revision?.let { "?revision=$it" } ?: ""),
       )
       .also { builder -> actor?.let { builder.header("X-Test-Actor", it) } }
       .build()

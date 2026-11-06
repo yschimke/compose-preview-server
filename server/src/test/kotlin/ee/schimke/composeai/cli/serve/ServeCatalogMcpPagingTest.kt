@@ -51,9 +51,9 @@ class ServeCatalogMcpPagingTest {
     val reply = runBlocking {
       mcp.handle(
         Json.parseToJsonElement(
-            """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"$name","arguments":$arguments}}"""
+            """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"$name","arguments":$arguments}}""",
           )
-          .jsonObject
+          .jsonObject,
       ) {
         ServeMachineAuthorization.Decision.Authorized("agent:test")
       }
@@ -127,7 +127,7 @@ class ServeCatalogMcpPagingTest {
     assertNull(loaded["complete"])
     assertNull(loaded["loading"])
     assertTrue(
-      Json.parseToJsonElement(tool("status").text()).jsonObject["ready"]!!.jsonPrimitive.boolean
+      Json.parseToJsonElement(tool("status").text()).jsonObject["ready"]!!.jsonPrimitive.boolean,
     )
   }
 

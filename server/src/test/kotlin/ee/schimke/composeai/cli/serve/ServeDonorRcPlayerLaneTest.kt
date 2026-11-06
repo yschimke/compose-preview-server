@@ -162,7 +162,7 @@ class ServeDonorRcPlayerLaneTest {
         Request.Builder()
           .url("http://127.0.0.1:${server.port}$path")
           .header(ServeHttpServer.TOKEN_HEADER, bearer)
-          .build()
+          .build(),
       )
       .execute()
       .use { it.code }
@@ -173,7 +173,7 @@ class ServeDonorRcPlayerLaneTest {
         Request.Builder()
           .url("http://127.0.0.1:${server.port}$path")
           .post(body.toRequestBody(contentType.toMediaType()))
-          .build()
+          .build(),
       )
       .execute()
       .use { it.body.string() }

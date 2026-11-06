@@ -33,7 +33,7 @@ class ServeMcpOAuthTest {
     Base64.getUrlEncoder()
       .withoutPadding()
       .encodeToString(
-        MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.US_ASCII))
+        MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.US_ASCII)),
       )
 
   /** RFC 7636 §4.1 wants 43..128 chars; this is the shortest legal one. */
@@ -116,7 +116,7 @@ class ServeMcpOAuthTest {
         "code",
         challengeFor(verifier),
         "S256",
-      )
+      ),
     )
   }
 
@@ -212,7 +212,7 @@ class ServeMcpOAuthTest {
 
     now += (ServeMcpOAuth.CLIENT_TTL_SECONDS + 1) * 1000
     assertNotNull(
-      store.register("after the aged-out ones are swept", listOf("https://good.example/cb"))
+      store.register("after the aged-out ones are swept", listOf("https://good.example/cb")),
     )
   }
 
@@ -302,8 +302,8 @@ class ServeMcpOAuthTest {
     assertTrue(
       challenge.contains(
         "resource_metadata=\"https://preview.example" +
-          "${ServeMcpOAuth.PROTECTED_RESOURCE_METADATA_MCP_PATH}\""
-      )
+          "${ServeMcpOAuth.PROTECTED_RESOURCE_METADATA_MCP_PATH}\"",
+      ),
     )
     assertTrue(challenge.startsWith("Bearer "))
   }

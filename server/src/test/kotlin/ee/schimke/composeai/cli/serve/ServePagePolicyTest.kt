@@ -154,7 +154,7 @@ class ServePagePolicyTest {
           fetchDest = "document",
           serverOwned = true,
         )
-        .endsWith("; sandbox allow-scripts")
+        .endsWith("; sandbox allow-scripts"),
     )
   }
 
@@ -177,13 +177,15 @@ class ServePagePolicyTest {
   fun `only the UI-builder editor may reach OpenRouter, not the runtimes it frames`() {
     assertTrue(directives("/ui-builder").getValue("connect-src").contains("https://openrouter.ai"))
     assertTrue(
-      directives("/ui-builder/designs/x").getValue("connect-src").contains("https://openrouter.ai")
+      directives("/ui-builder/designs/x").getValue("connect-src").contains("https://openrouter.ai"),
     )
     assertTrue(
-      directives("/ui-builder/x").getValue("connect-src").contains("https://openrouter.ai")
+      directives("/ui-builder/x").getValue("connect-src").contains("https://openrouter.ai"),
     )
     assertFalse(
-      directives("/ui-builder/runtime/r1/index.html").getValue("connect-src").contains("openrouter")
+      directives("/ui-builder/runtime/r1/index.html")
+        .getValue("connect-src")
+        .contains("openrouter"),
     )
     assertFalse(directives("/m3-catalog/").getValue("connect-src").contains("openrouter"))
   }

@@ -317,7 +317,7 @@ public class ServeCommandOptions(
         it.deleteOnExit()
         if (preferred != null) {
           System.err.println(
-            "serve: catalog feed cache ${preferred.absolutePath} is not writable; using ${it.absolutePath}"
+            "serve: catalog feed cache ${preferred.absolutePath} is not writable; using ${it.absolutePath}",
           )
         }
       }
@@ -440,7 +440,7 @@ public class ServeCommandOptions(
     args.flagValue("--agent-grant-max-active")?.let {
       it.toIntOrNull()?.takeIf { n -> n > 0 }
         ?: throw IllegalArgumentException(
-          "--agent-grant-max-active '$it' is not a positive whole number"
+          "--agent-grant-max-active '$it' is not a positive whole number",
         )
     } ?: ServeDefaults.AGENT_GRANT_MAX_ACTIVE
 
@@ -448,7 +448,7 @@ public class ServeCommandOptions(
     args.flagValue("--agent-grant-rate-limit")?.let {
       it.toIntOrNull()?.takeIf { n -> n >= 0 }
         ?: throw IllegalArgumentException(
-          "--agent-grant-rate-limit '$it' is not a whole number of requests per minute (0 disables)"
+          "--agent-grant-rate-limit '$it' is not a whole number of requests per minute (0 disables)",
         )
     } ?: ServeDefaults.DEFAULT_AGENT_GRANT_RATE_LIMIT
 
@@ -846,7 +846,7 @@ public class ServeCommandOptions(
         else {
           System.err.println(
             "serve: --rc-player-wasm-dir ${dir.path} has no index.html — skipping (build it with " +
-              ":rc-player-wasm:wasmPlayerDist)."
+              ":rc-player-wasm:wasmPlayerDist).",
           )
           null
         }
@@ -856,7 +856,7 @@ public class ServeCommandOptions(
     ServeRcPlayerIds.parsePreferredPlayer(args.flagValue("--rc-default-player")) { value ->
       System.err.println(
         "serve: --rc-default-player '$value' names no Remote Compose player (expected one of " +
-          "${ServeRcPlayerIds.UNIVERSE.joinToString(", ") { it.id }}) — keeping the built-in default."
+          "${ServeRcPlayerIds.UNIVERSE.joinToString(", ") { it.id }}) — keeping the built-in default.",
       )
     }
 
@@ -1463,7 +1463,7 @@ public class ServeCommandOptions(
 
       The shareable link carries an unguessable token; requests without it get 404.
       """
-        .trimIndent()
+        .trimIndent(),
     )
   }
 

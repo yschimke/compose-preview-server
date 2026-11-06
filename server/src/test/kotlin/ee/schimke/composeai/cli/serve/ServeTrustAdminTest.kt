@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test
 class ServeTrustAdminTest {
 
   private fun fixture(
-    initial: TrustStore = TrustStore.EMPTY
+    initial: TrustStore = TrustStore.EMPTY,
   ): Triple<ServeTrustAdmin, MutableTrustStore, ServeTrustStoreFile> {
     val fs = FakeFileSystem()
     fs.createDirectories("/config".toPath())
@@ -36,7 +36,7 @@ class ServeTrustAdminTest {
           kind = "branch",
           repo = "yschimke/horologist",
           branch = "design-artifacts/*",
-        )
+        ),
       )
 
     assertTrue(result is ServeTrustAdmin.Result.Ok)
@@ -56,8 +56,8 @@ class ServeTrustAdminTest {
             listOf(
               TrustedBranch("yschimke/horologist", "design-artifacts/*"),
               TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"),
-            )
-        )
+            ),
+        ),
       )
 
     val result =
@@ -66,7 +66,7 @@ class ServeTrustAdminTest {
           kind = "branch",
           repo = "yschimke/horologist",
           branch = "design-artifacts/*",
-        )
+        ),
       )
 
     assertTrue(result is ServeTrustAdmin.Result.Ok)
@@ -135,7 +135,7 @@ class ServeTrustAdminTest {
     val identity = "repo:yschimke/compose-ai-tools:ref:refs/heads/main"
 
     assertTrue(
-      admin.add(AdminTrustEntry(kind = "oidc", identity = identity)) is ServeTrustAdmin.Result.Ok
+      admin.add(AdminTrustEntry(kind = "oidc", identity = identity)) is ServeTrustAdmin.Result.Ok,
     )
 
     assertTrue(store.get().trustsIdentity(identity))
@@ -185,8 +185,8 @@ class ServeTrustAdminTest {
           listOf(
             TrustedBranch("a/one", "design-artifacts/*"),
             TrustedBranch("b/two", "design-artifacts/*"),
-          )
-      )
+          ),
+      ),
     )
 
     assertTrue(store.get().trustsBranch("b/two", "design-artifacts/x"))
@@ -263,7 +263,7 @@ class ServeTrustAdminTest {
       (1..8).map { i ->
         Thread {
           admin.add(
-            AdminTrustEntry(kind = "branch", repo = "owner/repo$i", branch = "design-artifacts/*")
+            AdminTrustEntry(kind = "branch", repo = "owner/repo$i", branch = "design-artifacts/*"),
           )
         }
       }

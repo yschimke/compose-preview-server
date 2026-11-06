@@ -259,7 +259,7 @@ internal object DesignCommand {
           revision =
             raw.toLongOrNull()?.takeIf { it >= 0 }
               ?: return Parsed.Invalid(
-                "design: --revision must be a non-negative integer, not '$raw'"
+                "design: --revision must be a non-negative integer, not '$raw'",
               )
           revisionWasSet = true
           index++
@@ -277,7 +277,7 @@ internal object DesignCommand {
           timeout =
             raw.toLongOrNull()?.takeIf { it > 0 }
               ?: return Parsed.Invalid(
-                "design: --timeout must be a positive number of seconds, not '$raw'"
+                "design: --timeout must be a positive number of seconds, not '$raw'",
               )
           index++
         }
@@ -300,7 +300,7 @@ internal object DesignCommand {
           val file = raw.substringAfter('=', "")
           if (catalogId.isBlank() || file.isBlank()) {
             return Parsed.Invalid(
-              "design: --components takes <catalog>=<components.json>, not '$raw'"
+              "design: --components takes <catalog>=<components.json>, not '$raw'",
             )
           }
           components[catalogId] = file
@@ -328,7 +328,7 @@ internal object DesignCommand {
           if (unknown.isNotEmpty()) {
             return Parsed.Invalid(
               "design view: --include takes ${ServeUiBuilderView.INCLUDES.joinToString(",")}, " +
-                "not '${unknown.joinToString(",")}'"
+                "not '${unknown.joinToString(",")}'",
             )
           }
           include = requested
@@ -341,7 +341,7 @@ internal object DesignCommand {
           if (edges.size != 2 || edges.any { it !in 1..ServeUiBuilderView.MAX_VIEWPORT_PX }) {
             return Parsed.Invalid(
               "design view: --viewport takes <width>x<height> in pixels, each 1 to " +
-                "${ServeUiBuilderView.MAX_VIEWPORT_PX}, not '$raw'"
+                "${ServeUiBuilderView.MAX_VIEWPORT_PX}, not '$raw'",
             )
           }
           viewport = edges[0] to edges[1]
@@ -355,7 +355,7 @@ internal object DesignCommand {
           ) {
             return Parsed.Invalid(
               "design view: --renderer is ${ServeUiBuilderView.RENDERER_EXPORT} or " +
-                "${ServeUiBuilderView.RENDERER_NATIVE}, not '$raw'"
+                "${ServeUiBuilderView.RENDERER_NATIVE}, not '$raw'",
             )
           }
           renderer = raw
@@ -372,7 +372,7 @@ internal object DesignCommand {
           density =
             raw.toDoubleOrNull()?.takeIf { it > 0.0 && it <= 8.0 }
               ?: return Parsed.Invalid(
-                "design reference: --density is pixels per dp, above 0 and at most 8, not '$raw'"
+                "design reference: --density is pixels per dp, above 0 and at most 8, not '$raw'",
               )
           referenceFlagWasSet = true
           index++
@@ -414,7 +414,7 @@ internal object DesignCommand {
           return Parsed.Invalid(
             "design: there is no --token flag on purpose — a credential on a command line lands " +
               "in a shell history and a CI log. Set \$$TOKEN_ENV, or let this command ask a human " +
-              "for a grant."
+              "for a grant.",
           )
         argument.startsWith("-") && argument != STDOUT ->
           return Parsed.Invalid("design: unknown option '$argument'")
@@ -434,13 +434,13 @@ internal object DesignCommand {
     }
     if (designId != null && document != null) {
       return Parsed.Invalid(
-        "design $verb: --document names the design, so a design id would name a second one"
+        "design $verb: --document names the design, so a design id would name a second one",
       )
     }
     if (local && verb !in LOCAL_VERBS) {
       return Parsed.Invalid(
         "design $verb: --local applies to ${LOCAL_VERBS.joinToString(" and ")} only — the other " +
-          "verbs read a server's state, which is not something this process holds a copy of"
+          "verbs read a server's state, which is not something this process holds a copy of",
       )
     }
     if (operations != null && verb != VALIDATE) {
@@ -449,13 +449,13 @@ internal object DesignCommand {
     if (operations != null && document != null) {
       return Parsed.Invalid(
         "design validate: --operations are checked against a stored design; name it by id, or " +
-          "validate the whole edited --document instead"
+          "validate the whole edited --document instead",
       )
     }
     if (verb == VALIDATE && revision != null) {
       return Parsed.Invalid(
         "design validate: checks the current revision, which is what an apply lands on; " +
-          "--revision does not apply"
+          "--revision does not apply",
       )
     }
     // `validate` sends the file to the server to be checked — it never stores it — so a
@@ -463,24 +463,24 @@ internal object DesignCommand {
     if (document != null && !local && verb != VALIDATE) {
       return Parsed.Invalid(
         "design $verb: --document is a local input — a server renders its own copy of a design, " +
-          "not one from this disk. Add --local."
+          "not one from this disk. Add --local.",
       )
     }
     if (local && verb == RENDER && catalog == null) {
       return Parsed.Invalid(
         "design render --local: --catalog <bundle> names the classpath to compile against; " +
-          "there is no server here to have one configured"
+          "there is no server here to have one configured",
       )
     }
     if (!local && (catalog != null || assets != null || components.isNotEmpty())) {
       return Parsed.Invalid(
         "design $verb: --catalog, --assets and --components configure the local compile lane. " +
-          "Add --local, or drop them and let the server use its own."
+          "Add --local, or drop them and let the server use its own.",
       )
     }
     if (document != null && revision != null) {
       return Parsed.Invalid(
-        "design $verb: --revision pins which revision a server hands over; a file is already one"
+        "design $verb: --revision pins which revision a server hands over; a file is already one",
       )
     }
     // `--renderer` is shared by view and compare; the other view flags are view's alone.
@@ -490,17 +490,17 @@ internal object DesignCommand {
         !(verb == COMPARE && include == null && selection.isEmpty() && viewport == null)
     ) {
       return Parsed.Invalid(
-        "design $verb: --select, --include, --viewport and --renderer apply to view only"
+        "design $verb: --select, --include, --viewport and --renderer apply to view only",
       )
     }
     if (verb != REFERENCE && referenceFlagWasSet) {
       return Parsed.Invalid(
-        "design $verb: --attach, --density, --source-url and --clear apply to reference only"
+        "design $verb: --attach, --density, --source-url and --clear apply to reference only",
       )
     }
     if (verb != COMPARE && compareFlagWasSet) {
       return Parsed.Invalid(
-        "design $verb: --node, --fit and --no-differences apply to compare only"
+        "design $verb: --node, --fit and --no-differences apply to compare only",
       )
     }
     if (verb == REFERENCE && (attach == null) == !clear) {
@@ -528,13 +528,13 @@ internal object DesignCommand {
     if (local && resolvedFormat == ExportFormatV1.SVG) {
       return Parsed.Invalid(
         "design render --local: only png. SVG is drawn by the server's own exporter rather than " +
-          "by the compile-and-render lane this mode reproduces."
+          "by the compile-and-render lane this mode reproduces.",
       )
     }
     if (resolvedFormat == null && verb in setOf(RENDER, EXPORT)) {
       val allowed = if (verb == RENDER) RENDER_FORMATS else EXPORT_FORMATS
       return Parsed.Invalid(
-        "design $verb: --format must be one of ${allowed.joinToString(", ") { it.wire() }}, not '$format'"
+        "design $verb: --format must be one of ${allowed.joinToString(", ") { it.wire() }}, not '$format'",
       )
     }
 
@@ -569,7 +569,7 @@ internal object DesignCommand {
         nodes = nodes,
         fit = fit,
         differences = differences,
-      )
+      ),
     )
   }
 

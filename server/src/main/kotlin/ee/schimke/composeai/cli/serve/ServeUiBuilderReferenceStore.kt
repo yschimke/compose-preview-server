@@ -135,7 +135,7 @@ class ServeUiBuilderReferenceStore(
       totalBytes += decoded.size
       if (totalBytes > maximumBytes) {
         return ReferenceWriteResult.Refused(
-          "a design's reference must be under ${maximumBytes / (1024 * 1024)} MB in total"
+          "a design's reference must be under ${maximumBytes / (1024 * 1024)} MB in total",
         )
       }
       // The identity the editor caches its decode against is the content, not whatever the client
@@ -153,7 +153,7 @@ class ServeUiBuilderReferenceStore(
     val file = fileFor(designId)
     if (!Files.exists(file) && storedDesigns() >= maximumDesigns) {
       return ReferenceWriteResult.Refused(
-        "this host already holds references for $maximumDesigns designs"
+        "this host already holds references for $maximumDesigns designs",
       )
     }
     val stored =

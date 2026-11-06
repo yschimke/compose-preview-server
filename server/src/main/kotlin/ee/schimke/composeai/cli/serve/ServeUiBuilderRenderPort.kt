@@ -103,7 +103,7 @@ private constructor(
             fonts?.let {
               mapOf(
                 PackagedUiBuilderRenderBundle.GOOGLE_FONTS_DIRECTORY_PROPERTY to
-                  it.cacheDirectory.absolutePath
+                  it.cacheDirectory.absolutePath,
               )
             } ?: emptyMap(),
           onLog = onLog,

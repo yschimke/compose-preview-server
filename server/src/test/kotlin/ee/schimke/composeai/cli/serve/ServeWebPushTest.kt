@@ -151,7 +151,7 @@ class ServeWebPushTest {
     val (jwt, k) = match.destructured
     assertEquals(
       ServeWebPush.base64Url(
-        ServeWebPush.rawPublicKey(keys.public as java.security.interfaces.ECPublicKey)
+        ServeWebPush.rawPublicKey(keys.public as java.security.interfaces.ECPublicKey),
       ),
       k,
     )

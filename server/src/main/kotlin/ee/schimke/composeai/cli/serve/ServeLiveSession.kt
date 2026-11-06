@@ -204,7 +204,7 @@ private constructor(
         frame.heightPx,
         payload,
         codec,
-      )
+      ),
     )
   }
 

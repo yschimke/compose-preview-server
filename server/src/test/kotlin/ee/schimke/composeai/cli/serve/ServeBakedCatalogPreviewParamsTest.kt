@@ -54,7 +54,7 @@ class ServeBakedCatalogPreviewParamsTest {
           "previewParams":{"uiMode":32,"showBackground":true,"backgroundColor":4278190080,
             "device":"id:wearos_large_round","widthDp":227,"heightDp":227}}}
         """
-          .trimIndent()
+          .trimIndent(),
       )
     val preview = previewOf(host, "timetext")
     assertTrue(preview.showBackground, "showBackground survives the catalog round trip")
@@ -84,7 +84,7 @@ class ServeBakedCatalogPreviewParamsTest {
          "sticker":{"componentId":"Template/Sticker",
           "previewParams":{"device":"id:pixel_5"}}}
         """
-          .trimIndent()
+          .trimIndent(),
       )
     // Wear is 2.0, which is why the Wear catalogs were right by luck under the old constant…
     assertEquals(2.0f, host.renderDensityFor("timetext"))
@@ -96,7 +96,7 @@ class ServeBakedCatalogPreviewParamsTest {
   fun `a preview naming no device leaves the density to the page's fallback`() {
     val host =
       bakedCatalog(
-        """{"timetext":{"componentId":"Template/TimeText","previewParams":{"widthDp":227}}}"""
+        """{"timetext":{"componentId":"Template/TimeText","previewParams":{"widthDp":227}}}""",
       )
     assertNull(
       host.renderDensityFor("timetext"),
@@ -133,7 +133,7 @@ class ServeBakedCatalogPreviewParamsTest {
         {"timetext":{"previewParams":{"device":"id:pixel_5"}},
          "sticker":{"previewParams":{"widthDp":120}}}
         """
-          .trimIndent()
+          .trimIndent(),
       )
     assertEquals(2.75f, catalog.rcLaneDensityFor("timetext"), "the device's density")
     assertNull(
@@ -187,7 +187,7 @@ class ServeBakedCatalogPreviewParamsTest {
         {"timetext":{"previewParams":{"showBackground":true,"backgroundColor":4278190080,
           "device":"id:wearos_large_round","widthDp":227,"heightDp":227}}}
         """
-          .trimIndent()
+          .trimIndent(),
       )
     val preview = previewOf(host, "timetext")
     val backdrop = ServeWeb.backdropFor(preview, darkFirst = true)

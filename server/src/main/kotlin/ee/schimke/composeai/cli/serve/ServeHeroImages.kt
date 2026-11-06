@@ -231,7 +231,7 @@ class ServeHeroImages(private val cacheDir: java.io.File? = null) {
             Region(0, 0, src.width, src.height),
             max(1, (src.width * fit).roundToInt()),
             max(1, (src.height * fit).roundToInt()),
-          )
+          ),
         )
     val bytes = if (scaled != null && scaled.size < png.size) scaled else png
     val hash = sha256Hex(bytes).take(HASH_CHARS)

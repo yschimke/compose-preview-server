@@ -56,15 +56,15 @@ class CardContentBoxExportTest {
   @Test
   fun `the box fills only the axes the card was sized on`() {
     assertTrue(
-      "Box(modifier = Modifier.fillMaxWidth()) {" in generate(card(FillMaxWidthModifierV1))
+      "Box(modifier = Modifier.fillMaxWidth()) {" in generate(card(FillMaxWidthModifierV1)),
     )
     assertTrue(
       "Box(modifier = Modifier.fillMaxSize()) {" in
-        generate(card(FillMaxWidthModifierV1, HeightModifierV1(heightDp = JsonPrimitive(200))))
+        generate(card(FillMaxWidthModifierV1, HeightModifierV1(heightDp = JsonPrimitive(200)))),
     )
     assertTrue(
       "Box(modifier = Modifier.fillMaxHeight()) {" in
-        generate(card(HeightModifierV1(heightDp = JsonPrimitive(200))))
+        generate(card(HeightModifierV1(heightDp = JsonPrimitive(200)))),
     )
     assertTrue("Box {" in generate(card()))
   }

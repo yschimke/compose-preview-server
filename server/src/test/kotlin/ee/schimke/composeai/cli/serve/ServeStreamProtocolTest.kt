@@ -15,7 +15,7 @@ class ServeStreamProtocolTest {
   fun `parses setOverrides into a string map`() {
     val msg =
       ServeStreamProtocol.parseClient(
-        """{"type":"setOverrides","overrides":{"uiMode":"dark","device":"id:pixel_5"}}"""
+        """{"type":"setOverrides","overrides":{"uiMode":"dark","device":"id:pixel_5"}}""",
       )
     assertTrue(msg is ServeStreamProtocol.ClientMessage.SetOverrides, "got $msg")
     assertEquals(mapOf("uiMode" to "dark", "device" to "id:pixel_5"), msg.overrides)
@@ -50,7 +50,7 @@ class ServeStreamProtocolTest {
   fun `parses input with pointerId, scroll delta and keyCode`() {
     val drag =
       ServeStreamProtocol.parseClient(
-        """{"type":"input","kind":"pointerMove","pixelX":3,"pixelY":4,"pointerId":2}"""
+        """{"type":"input","kind":"pointerMove","pixelX":3,"pixelY":4,"pointerId":2}""",
       )
     assertTrue(drag is ServeStreamProtocol.ClientMessage.Input, "got $drag")
     assertEquals("pointerMove", drag.kind)
@@ -58,7 +58,7 @@ class ServeStreamProtocolTest {
 
     val scroll =
       ServeStreamProtocol.parseClient(
-        """{"type":"input","kind":"rotaryScroll","scrollDeltaY":-8.5}"""
+        """{"type":"input","kind":"rotaryScroll","scrollDeltaY":-8.5}""",
       )
     assertTrue(scroll is ServeStreamProtocol.ClientMessage.Input, "got $scroll")
     assertEquals(-8.5f, scroll.scrollDeltaY)
@@ -79,7 +79,7 @@ class ServeStreamProtocolTest {
 
     val withOverrides =
       ServeStreamProtocol.parseClient(
-        """{"type":"switch","previewId":"com.example.Blue","overrides":{"uiMode":"dark"}}"""
+        """{"type":"switch","previewId":"com.example.Blue","overrides":{"uiMode":"dark"}}""",
       )
     assertTrue(withOverrides is ServeStreamProtocol.ClientMessage.Switch, "got $withOverrides")
     assertEquals(mapOf("uiMode" to "dark"), withOverrides.overrides)
@@ -89,7 +89,7 @@ class ServeStreamProtocolTest {
   fun `switch without a previewId is Unsupported`() {
     assertTrue(
       ServeStreamProtocol.parseClient("""{"type":"switch"}""")
-        is ServeStreamProtocol.ClientMessage.Unsupported
+        is ServeStreamProtocol.ClientMessage.Unsupported,
     )
   }
 
@@ -97,11 +97,11 @@ class ServeStreamProtocolTest {
   fun `unknown type and malformed json are Unsupported, never thrown`() {
     assertTrue(
       ServeStreamProtocol.parseClient("""{"type":"wat"}""")
-        is ServeStreamProtocol.ClientMessage.Unsupported
+        is ServeStreamProtocol.ClientMessage.Unsupported,
     )
     assertTrue(
       ServeStreamProtocol.parseClient("not json at all")
-        is ServeStreamProtocol.ClientMessage.Unsupported
+        is ServeStreamProtocol.ClientMessage.Unsupported,
     )
   }
 
@@ -110,11 +110,11 @@ class ServeStreamProtocolTest {
     // type is not a string → unknown type → Unsupported (not a ClassCastException).
     assertTrue(
       ServeStreamProtocol.parseClient("""{"type":{}}""")
-        is ServeStreamProtocol.ClientMessage.Unsupported
+        is ServeStreamProtocol.ClientMessage.Unsupported,
     )
     // a non-object root.
     assertTrue(
-      ServeStreamProtocol.parseClient("[]") is ServeStreamProtocol.ClientMessage.Unsupported
+      ServeStreamProtocol.parseClient("[]") is ServeStreamProtocol.ClientMessage.Unsupported,
     )
     // overrides as an array → degrade to empty, don't throw.
     val arr = ServeStreamProtocol.parseClient("""{"type":"setOverrides","overrides":[]}""")
@@ -123,7 +123,7 @@ class ServeStreamProtocolTest {
     // a non-string override value is skipped, valid ones kept.
     val mixed =
       ServeStreamProtocol.parseClient(
-        """{"type":"setOverrides","overrides":{"uiMode":"dark","bad":{}}}"""
+        """{"type":"setOverrides","overrides":{"uiMode":"dark","bad":{}}}""",
       )
     assertTrue(mixed is ServeStreamProtocol.ClientMessage.SetOverrides, "got $mixed")
     assertEquals(mapOf("uiMode" to "dark"), mixed.overrides)
@@ -152,11 +152,11 @@ class ServeStreamProtocolTest {
     // it hidden strands a visible one at 1 fps.
     assertTrue(
       ServeStreamProtocol.parseClient("""{"type":"visibility"}""")
-        is ServeStreamProtocol.ClientMessage.Unsupported
+        is ServeStreamProtocol.ClientMessage.Unsupported,
     )
     assertTrue(
       ServeStreamProtocol.parseClient("""{"type":"visibility","visible":"maybe"}""")
-        is ServeStreamProtocol.ClientMessage.Unsupported
+        is ServeStreamProtocol.ClientMessage.Unsupported,
     )
 
     // fps=0 would mean "never emit"; fall back to the daemon's default instead.
@@ -202,7 +202,7 @@ class ServeStreamProtocolTest {
             heightPx = 640,
             dataBase64 = "PAYLOAD",
             codec = "webp",
-          )
+          ),
         )
         .jsonObject
 

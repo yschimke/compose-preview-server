@@ -45,7 +45,7 @@ class ServeUiBuilderPublicDesignIntegrationTest {
         exporter =
           ScreenGeneratorComposeExportExecutor(
             ComponentRecordSource(mapOf(CATALOG to ScreenGeneratorScreenFixture.componentsFile()))::
-              record
+              record,
           ),
       ),
       visibility,
@@ -61,7 +61,7 @@ class ServeUiBuilderPublicDesignIntegrationTest {
     val service = service(UiBuilderDefaultVisibility.PUBLIC)
     val created =
       assertIs<UiBuilderServiceResponse.Snapshot>(
-        service.run(owner, UiBuilderServiceRequest.CreateDesign(document()))
+        service.run(owner, UiBuilderServiceRequest.CreateDesign(document())),
       )
     // The answer describes the design as it now is — public, at the access revision the grant
     // moved it to — so the creator's next access update is not refused as stale.
@@ -76,7 +76,7 @@ class ServeUiBuilderPublicDesignIntegrationTest {
       )
       val listed =
         assertIs<UiBuilderServiceResponse.Designs>(
-          service.run(reader, UiBuilderServiceRequest.ListDesigns(null, 10))
+          service.run(reader, UiBuilderServiceRequest.ListDesigns(null, 10)),
         )
       assertTrue(listed.designs.isEmpty(), "a public design is not in ${reader.actorId}'s list")
     }
@@ -104,7 +104,7 @@ class ServeUiBuilderPublicDesignIntegrationTest {
     val created =
       withDesignCreationVisibility(UiBuilderDefaultVisibility.PRIVATE) {
         service.execute(
-          UiBuilderServiceCall(owner, UiBuilderServiceRequest.CreateDesign(document()))
+          UiBuilderServiceCall(owner, UiBuilderServiceRequest.CreateDesign(document())),
         )
       }
     val snapshot = assertIs<UiBuilderServiceResponse.Snapshot>(created)
@@ -115,8 +115,8 @@ class ServeUiBuilderPublicDesignIntegrationTest {
         UiBuilderServiceCall(
           anonymous,
           UiBuilderServiceRequest.OpenDesign(DESIGN_ID),
-        )
-      )
+        ),
+      ),
     )
   }
 
@@ -132,43 +132,43 @@ class ServeUiBuilderPublicDesignIntegrationTest {
         UiBuilderServiceCall(
           anonymous,
           UiBuilderServiceRequest.OpenDesign(DESIGN_ID),
-        )
-      )
+        ),
+      ),
     )
     assertIs<UiBuilderServiceResponse.Error>(
       service.execute(
         UiBuilderServiceCall(
           anonymous,
           UiBuilderServiceRequest.RenameDesign(DESIGN_ID, "Not allowed"),
-        )
-      )
+        ),
+      ),
     )
     assertIs<UiBuilderServiceResponse.Error>(
-      service.setDesignVisibility(stranger, DESIGN_ID, UiBuilderDefaultVisibility.PRIVATE)
+      service.setDesignVisibility(stranger, DESIGN_ID, UiBuilderDefaultVisibility.PRIVATE),
     )
     assertIs<UiBuilderServiceResponse.DesignAccess>(
-      service.setDesignVisibility(agent, DESIGN_ID, UiBuilderDefaultVisibility.PRIVATE)
+      service.setDesignVisibility(agent, DESIGN_ID, UiBuilderDefaultVisibility.PRIVATE),
     )
     assertIs<UiBuilderServiceResponse.Error>(
       service.execute(
         UiBuilderServiceCall(
           anonymous,
           UiBuilderServiceRequest.OpenDesign(DESIGN_ID),
-        )
-      )
+        ),
+      ),
     )
     assertIs<UiBuilderServiceResponse.DesignRenamed>(
       service.execute(
         UiBuilderServiceCall(
           agent,
           UiBuilderServiceRequest.RenameDesign(DESIGN_ID, "Still mine"),
-        )
-      )
+        ),
+      ),
     )
     // Revocation is durable, and reopening with a public default does not republish old designs.
     assertIs<UiBuilderServiceResponse.Error>(
       service(UiBuilderDefaultVisibility.PUBLIC)
-        .execute(UiBuilderServiceCall(anonymous, UiBuilderServiceRequest.OpenDesign(DESIGN_ID)))
+        .execute(UiBuilderServiceCall(anonymous, UiBuilderServiceRequest.OpenDesign(DESIGN_ID))),
     )
   }
 
@@ -200,7 +200,7 @@ class ServeUiBuilderPublicDesignIntegrationTest {
               id = "text",
               componentId = "m3/text",
               properties = mapOf("text" to StringValueV1("Hello")),
-            )
+            ),
         ),
     )
 

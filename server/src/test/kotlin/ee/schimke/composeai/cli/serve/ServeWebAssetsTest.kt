@@ -69,7 +69,7 @@ class ServeWebAssetsTest {
     assertTrue(
       svgHtml.contains(
         """<script src="${ServeWebAssets.href("format-compare.js")}" """ +
-          """data-cp-scorer-worker="${ServeWebAssets.href("compare-scorer.js")}"></script>"""
+          """data-cp-scorer-worker="${ServeWebAssets.href("compare-scorer.js")}"></script>""",
       ),
       svgHtml,
     )
@@ -100,7 +100,7 @@ class ServeWebAssetsTest {
         assertNotNull(
             ServeWebAssets::class
               .java
-              .getResourceAsStream("/ee/schimke/composeai/cli/serve/assets/$name")
+              .getResourceAsStream("/ee/schimke/composeai/cli/serve/assets/$name"),
           )
           .use { it.readBytes() }
       val copy = File.createTempFile("serve-asset-", "-$name").apply { deleteOnExit() }

@@ -109,7 +109,7 @@ class ServeBundleStore(
   fun addFromUrl(name: String, url: String, isSecurityChecked: Boolean): Result {
     if (!isAllowedUrl(url)) {
       return Result.Failed(
-        "refusing to fetch $url: host is not on the --accept-bundles-from allowlist"
+        "refusing to fetch $url: host is not on the --accept-bundles-from allowlist",
       )
     }
     val bytes =

@@ -66,7 +66,7 @@ class DecoderShapeFixtureTest {
     if (System.getenv("UPDATE_DECODER_SHAPES") == "1") {
       val updated =
         JsonObject(
-          committed() + ("record" to record) + ("componentPolicy" to releasedComponentPolicy())
+          committed() + ("record" to record) + ("componentPolicy" to releasedComponentPolicy()),
         )
       Files.writeString(fixture, updated.pretty() + "\n")
       return
@@ -111,7 +111,7 @@ class DecoderShapeFixtureTest {
     }
     seen.remove(descriptor.serialName)
     return JsonObject(
-      mapOf("kind" to JsonPrimitive("object"), "members" to JsonObject(members.toSortedMap()))
+      mapOf("kind" to JsonPrimitive("object"), "members" to JsonObject(members.toSortedMap())),
     )
   }
 
@@ -130,7 +130,7 @@ class DecoderShapeFixtureTest {
             JsonArray(
               (0 until descriptor.elementsCount).map {
                 JsonPrimitive(descriptor.getElementName(it))
-              }
+              },
             ),
         )
       StructureKind.LIST -> {
@@ -169,7 +169,7 @@ class DecoderShapeFixtureTest {
             "kind" to JsonPrimitive("object"),
             "values" to
               JsonObject(
-                if (value.isNullable) spec + ("nullable" to JsonPrimitive(true)) else spec
+                if (value.isNullable) spec + ("nullable" to JsonPrimitive(true)) else spec,
               ),
           )
       }

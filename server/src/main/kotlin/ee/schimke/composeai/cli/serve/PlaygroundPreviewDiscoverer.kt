@@ -19,7 +19,7 @@ import okio.Path
  * scan failure, which the orchestrator reports as "no @Preview found".
  */
 class PlaygroundPreviewDiscoverer(
-  private val previewAnnotationFqns: Set<String> = DEFAULT_PREVIEW_ANNOTATION_FQNS
+  private val previewAnnotationFqns: Set<String> = DEFAULT_PREVIEW_ANNOTATION_FQNS,
 ) : PlaygroundCompileService.PreviewDiscoverer {
 
   override val recognisedAnnotationFqns: Set<String>
@@ -39,7 +39,7 @@ class PlaygroundPreviewDiscoverer(
       }
     } catch (t: Throwable) {
       System.err.println(
-        "playground: preview discovery failed (${t.javaClass.simpleName}: ${t.message}); none found"
+        "playground: preview discovery failed (${t.javaClass.simpleName}: ${t.message}); none found",
       )
       emptyList()
     }
@@ -71,7 +71,7 @@ class PlaygroundPreviewDiscoverer(
     } catch (t: Throwable) {
       System.err.println(
         "playground: unrecognised-annotation scan failed " +
-          "(${t.javaClass.simpleName}: ${t.message}); reporting none"
+          "(${t.javaClass.simpleName}: ${t.message}); reporting none",
       )
       emptyList()
     }

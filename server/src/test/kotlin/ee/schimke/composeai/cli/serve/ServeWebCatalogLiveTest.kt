@@ -63,7 +63,7 @@ class ServeWebCatalogLiveTest {
     assertTrue(
       html.contains(
         "cards:[{l:\"filled-button__ideal__default__light\",d:\"filled-button__ideal__default__dark\"}," +
-          "{l:\"chip__ideal__default__compact\",d:\"chip__ideal__default__compact\"}]"
+          "{l:\"chip__ideal__default__compact\",d:\"chip__ideal__default__compact\"}]",
       ),
       html,
     )

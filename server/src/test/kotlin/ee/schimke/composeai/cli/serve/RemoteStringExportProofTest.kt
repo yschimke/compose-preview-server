@@ -43,8 +43,8 @@ class RemoteStringExportProofTest {
     val source =
       json.decodeFromString<DesignDocumentV1>(
         Files.readString(
-          Path.of("../docs/design/evidence/ui-builder-remote-png-export/document.json")
-        )
+          Path.of("../docs/design/evidence/ui-builder-remote-png-export/document.json"),
+        ),
       )
     val text =
       StateVariableV1(
@@ -71,7 +71,7 @@ class RemoteStringExportProofTest {
             (root.id to
               root.copy(
                 eventBindings =
-                  mapOf("click" to listOf(SetValueActionV1("label", JsonPrimitive("@second"))))
+                  mapOf("click" to listOf(SetValueActionV1("label", JsonPrimitive("@second")))),
               )),
       )
     val service =
@@ -80,7 +80,7 @@ class RemoteStringExportProofTest {
         catalogs = catalogs,
         exporter =
           RemoteDocumentExportExecutor(
-            UiBuilderExportExecutor { error("Must use Remote document compiler") }
+            UiBuilderExportExecutor { error("Must use Remote document compiler") },
           ),
       )
     val registry = ServeSessionRegistry(open = { null })
@@ -108,7 +108,7 @@ class RemoteStringExportProofTest {
             .url("http://127.0.0.1:${server.port}$path")
             .header(ServeHttpServer.TOKEN_HEADER, "text-proof")
             .post(body.toRequestBody("application/json".toMediaType()))
-            .build()
+            .build(),
         )
         .execute()
         .use {
@@ -152,12 +152,12 @@ class RemoteStringExportProofTest {
                 .jsonObject
                 .getValue("text")
                 .jsonPrimitive
-                .content
+                .content,
             )
             .jsonObject
         val artifact =
           json.decodeFromJsonElement<ExportArtifactV1>(
-            envelope.getValue("response").jsonObject.getValue("artifact")
+            envelope.getValue("response").jsonObject.getValue("artifact"),
           )
         assertContentEquals(
           expected,

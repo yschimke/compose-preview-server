@@ -176,7 +176,7 @@ object ServeParityDashboard {
             hrefLabel = "view commit",
             previewIds = ids,
             components = displayComponents(event.components, ids, previewToComponent),
-          )
+          ),
         )
       }
       for (version in figmaLane?.versions.orEmpty()) {
@@ -189,7 +189,7 @@ object ServeParityDashboard {
             detail = version.description,
             href = ServeParityActivityStore.fileUrl(figmaLane?.fileKey),
             hrefLabel = "open file",
-          )
+          ),
         )
       }
       for (comment in figmaLane?.comments.orEmpty()) {
@@ -208,13 +208,13 @@ object ServeParityDashboard {
             previewIds = ids,
             components = displayComponents(comment.components, ids, previewToComponent),
             resolved = comment.resolved,
-          )
+          ),
         )
       }
     }
-      // Ties broken by lane so a code commit and a Figma save stamped to the same minute keep a
-      // stable order across rebuilds — the fixture goldens depend on it.
-      .sortedWith(compareByDescending<FeedEntry> { it.at }.thenBy { it.lane.ordinal })
+    // Ties broken by lane so a code commit and a Figma save stamped to the same minute keep a
+    // stable order across rebuilds — the fixture goldens depend on it.
+    .sortedWith(compareByDescending<FeedEntry> { it.at }.thenBy { it.lane.ordinal })
       .take(FEED_CAP)
 
     return Dashboard(
@@ -356,7 +356,7 @@ object ServeParityDashboard {
       .sortedWith(
         compareBy<ComponentActivity> { if (it.correlation == Correlation.BOTH) 1 else 0 }
           .thenByDescending { it.lastAt }
-          .thenBy { it.name.lowercase() }
+          .thenBy { it.name.lowercase() },
       )
   }
 

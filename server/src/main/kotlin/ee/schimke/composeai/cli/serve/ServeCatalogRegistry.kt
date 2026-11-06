@@ -133,7 +133,7 @@ object ServeCatalogRegistry {
           // indistinguishable from the flag never arriving.
           onProblem(
             "catalog registry $repo: no $FILE_PATH at ${tried.joinToString("/")} — " +
-              "contributing no catalogs this pass"
+              "contributing no catalogs this pass",
           )
           return null
         }

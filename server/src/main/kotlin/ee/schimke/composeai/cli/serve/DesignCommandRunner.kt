@@ -146,12 +146,12 @@ internal class DesignCommandRunner(
     }
       .getOrElse {
         throw DesignCommandFailure(
-          "design ${options.verb}: the reply's artifact is not one this build understands — ${it.message}"
+          "design ${options.verb}: the reply's artifact is not one this build understands — ${it.message}",
         )
       }
     if (artifact.format != format) {
       throw DesignCommandFailure(
-        "design ${options.verb}: asked for ${format.wire()} and got ${artifact.format.wire()}"
+        "design ${options.verb}: asked for ${format.wire()} and got ${artifact.format.wire()}",
       )
     }
 
@@ -164,7 +164,7 @@ internal class DesignCommandRunner(
       // writing it to --out would leave a file behind that looks like an export and is not one.
       emit(
         "design ${options.verb}: ${options.designId} cannot be exported as ${format.wire()} " +
-          "(${refused.size} error${if (refused.size == 1) "" else "s"} above). Nothing was written."
+          "(${refused.size} error${if (refused.size == 1) "" else "s"} above). Nothing was written.",
       )
       return EXIT_FAILURE
     }
@@ -180,7 +180,7 @@ internal class DesignCommandRunner(
       }
     write(options.destination, bytes)
     note(
-      "design ${options.verb}: ${bytes.size} bytes of ${artifact.mediaType} (${artifact.contentDigest.take(12)})"
+      "design ${options.verb}: ${bytes.size} bytes of ${artifact.mediaType} (${artifact.contentDigest.take(12)})",
     )
     return EXIT_OK
   }
@@ -203,7 +203,7 @@ internal class DesignCommandRunner(
           }
             ?: throw DesignCommandFailure(
               "design validate: --operations must hold a JSON array of mutations, or an object " +
-                "with one as `operations`"
+                "with one as `operations`",
             )
         put("operations", operations)
       }
@@ -222,7 +222,7 @@ internal class DesignCommandRunner(
       emit(
         "  ${problem.text("severity") ?: "error"}: ${problem.text("source").orEmpty()}/" +
           "${problem.text("code").orEmpty()}: ${problem.text("message").orEmpty()}" +
-          if (where.isEmpty()) "" else " ($where)"
+          if (where.isEmpty()) "" else " ($where)",
       )
     }
     write(
@@ -234,7 +234,7 @@ internal class DesignCommandRunner(
       val errors = problems.count { (it as? JsonObject)?.text("severity") == "error" }
       emit(
         "design validate: $subject is not valid ($errors error${if (errors == 1) "" else "s"} " +
-          "above). Nothing was saved."
+          "above). Nothing was saved.",
       )
       return EXIT_FAILURE
     }

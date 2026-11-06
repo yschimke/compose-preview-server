@@ -48,7 +48,7 @@ class ServeUiBuilderGuidelineFramesTest {
     frames.render = { document, _ ->
       drawn += document.revision to document.environment.widthDp
       ServeUiBuilderGuidelineFrames.Drawing(
-        png(document.environment.widthDp, document.environment.heightDp)
+        png(document.environment.widthDp, document.environment.heightDp),
       )
     }
     frames.planner = { _, _ ->
@@ -86,7 +86,7 @@ class ServeUiBuilderGuidelineFramesTest {
     frames.render = { document, _ ->
       drawn += document.environment.widthDp
       ServeUiBuilderGuidelineFrames.Drawing(
-        png(document.environment.widthDp, document.environment.heightDp)
+        png(document.environment.widthDp, document.environment.heightDp),
       )
     }
     val thumbnail = png(216, 124)
@@ -136,7 +136,7 @@ class ServeUiBuilderGuidelineFramesTest {
       if (document.environment.widthDp == 412) ServeUiBuilderGuidelineFrames.Drawing(null, reason)
       else
         ServeUiBuilderGuidelineFrames.Drawing(
-          png(document.environment.widthDp, document.environment.heightDp)
+          png(document.environment.widthDp, document.environment.heightDp),
         )
     }
     val result = runBlocking {
@@ -165,7 +165,7 @@ class ServeUiBuilderGuidelineFramesTest {
         UiBuilderNativePreviewOutcome.Refused(
           ServeUiBuilderNativePreview.NO_NATIVE_CATALOG,
           listOf("first reason", "second reason"),
-        )
+        ),
       )
     assertNull(refused.png)
     assertEquals(
@@ -198,7 +198,7 @@ class ServeUiBuilderGuidelineFramesTest {
       drawing.countDown()
       release.await()
       ServeUiBuilderGuidelineFrames.Drawing(
-        png(document.environment.widthDp, document.environment.heightDp)
+        png(document.environment.widthDp, document.environment.heightDp),
       )
     }
     val key = frames.keyOf("design", document(revision = 3), PHONE)
@@ -338,7 +338,7 @@ class ServeUiBuilderGuidelineFramesTest {
         216,
         124,
         mapOf(
-          WearWidgetHostShape.ENVIRONMENT_KEY to JsonPrimitive(WearWidgetHostShape.Squircle.id)
+          WearWidgetHostShape.ENVIRONMENT_KEY to JsonPrimitive(WearWidgetHostShape.Squircle.id),
         ),
       )
   }

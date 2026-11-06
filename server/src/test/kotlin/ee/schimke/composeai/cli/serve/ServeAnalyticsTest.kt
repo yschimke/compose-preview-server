@@ -38,7 +38,7 @@ class ServeAnalyticsTest {
             "SERVE_UMAMI_ENABLED" to "1",
             "SERVE_UMAMI_URL" to url,
             "SERVE_UMAMI_WEBSITE_ID" to website,
-          )
+          ),
         ),
       )
     }
@@ -48,7 +48,7 @@ class ServeAnalyticsTest {
           "SERVE_UMAMI_ENABLED" to "1",
           "SERVE_UMAMI_URL" to "https://preview.test/__analytics/",
           "SERVE_UMAMI_WEBSITE_ID" to website,
-        )
+        ),
       )
     assertTrue(tag.contains("analytics.js"))
     assertTrue(tag.contains("data-umami-url=\"https://preview.test/__analytics\""))

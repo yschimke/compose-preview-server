@@ -60,7 +60,7 @@ private constructor(private val process: Process, private val connection: BuildH
           tasks = tasks.toList(),
           arguments = arguments,
           silenceStdout = silenceStdout,
-        )
+        ),
       )
         as? BuildHostResponse.BuildResult)
       ?.buildOk == true
@@ -88,7 +88,7 @@ private constructor(private val process: Process, private val connection: BuildH
         reportedUnusable = true
         System.err.println(
           "compose-preview build host is no longer answering ($reason); serving published " +
-            "catalogs and prebuilt bundles only."
+            "catalogs and prebuilt bundles only.",
         )
       }
     }
@@ -148,7 +148,7 @@ private constructor(private val process: Process, private val connection: BuildH
         } catch (t: Throwable) {
           System.err.println(
             "compose-preview build host could not be started (${command.joinToString(" ")}): " +
-              "${t.message ?: t.javaClass.name}. Serving without a local Gradle build."
+              "${t.message ?: t.javaClass.name}. Serving without a local Gradle build.",
           )
           return null
         }
@@ -162,7 +162,7 @@ private constructor(private val process: Process, private val connection: BuildH
       if (!connection.handshake()) {
         System.err.println(
           "compose-preview build host did not agree a protocol " +
-            "(${connection.unusable ?: "no response"}); serving without a local Gradle build."
+            "(${connection.unusable ?: "no response"}); serving without a local Gradle build.",
         )
         runCatching { process.outputStream.close() }
         process.destroy()

@@ -375,7 +375,7 @@ class ServeWebTest {
       iconHtml.substringAfter("class=\"cp-tree cp-axes-tree\"").substringBefore("</nav>")
     assertTrue(
       iconNav.contains(
-        "/p/button-filled__ideal__default__light__content-icon-label?token=t\" aria-current=\"page\""
+        "/p/button-filled__ideal__default__light__content-icon-label?token=t\" aria-current=\"page\"",
       ),
       "the render on screen is a row of its own component's tree, and marked: $iconNav",
     )
@@ -572,7 +572,7 @@ class ServeWebTest {
     assertTrue(
       html.contains(
         "<meta property=\"og:image\" content=\"https://preview.example/render/red.png?" +
-          "theme=dark&amp;fontScale=1.5\">"
+          "theme=dark&amp;fontScale=1.5\">",
       ),
       "Open Graph image points at the rendered PNG",
     )
@@ -583,7 +583,7 @@ class ServeWebTest {
     assertTrue(
       html.contains(
         "<meta name=\"twitter:image\" content=\"https://preview.example/render/red.png?" +
-          "theme=dark&amp;fontScale=1.5\">"
+          "theme=dark&amp;fontScale=1.5\">",
       ),
       "Twitter card uses the same rendered PNG",
     )
@@ -734,7 +734,7 @@ class ServeWebTest {
           systems = setOf("m3-catalog"),
           signedIn = true,
           permitted = true,
-        )
+        ),
       )
 
     val header =
@@ -768,7 +768,7 @@ class ServeWebTest {
       html.substringAfter("<header class=\"cp-site-header\">").substringBefore("</header>")
     assertTrue(
       header.contains(
-        "<a class=\"cp-site-builder-link\" href=\"https://ui.coo.ee/?token=test-token\">"
+        "<a class=\"cp-site-builder-link\" href=\"https://ui.coo.ee/?token=test-token\">",
       ),
       header,
     )
@@ -779,7 +779,7 @@ class ServeWebTest {
   fun `no header builder link when the builder serves no listed catalog`() {
     val html =
       builderHome(
-        ServeWeb.UiBuilderInvite(systems = setOf("elsewhere"), signedIn = true, permitted = true)
+        ServeWeb.UiBuilderInvite(systems = setOf("elsewhere"), signedIn = true, permitted = true),
       )
 
     assertFalse(html.contains("UI Builder"), html)
@@ -795,7 +795,7 @@ class ServeWebTest {
           signedIn = true,
           permitted = false,
           deniedReason = "Creating a design needs write access to acme/design.",
-        )
+        ),
       )
 
     val header =
@@ -804,7 +804,7 @@ class ServeWebTest {
     assertTrue(
       html.contains(
         "<span class=\"cp-action-note-body\">" +
-          "Creating a design needs write access to acme/design.</span>"
+          "Creating a design needs write access to acme/design.</span>",
       ),
       html,
     )
@@ -822,7 +822,7 @@ class ServeWebTest {
           signedIn = false,
           permitted = false,
           deniedReason = "Creating a design needs write access to acme/design.",
-        )
+        ),
       )
 
     assertFalse(html.contains("UI Builder"), html)
@@ -918,7 +918,7 @@ class ServeWebTest {
         "<a class=\"cp-action-chip cp-action-chip--compact\" " +
           "href=\"/compose-m3/compare?format=reference\" " +
           "aria-label=\"compose-m3: compare to Figma\" " +
-          "title=\"compose-m3: compare to Figma\">Figma</a>"
+          "title=\"compose-m3: compare to Figma\">Figma</a>",
       ),
       html,
     )
@@ -979,7 +979,7 @@ class ServeWebTest {
           "href=\"/remote-m3/compare?format=parallel\" " +
           "aria-label=\"remote-m3: compare to wear-m3-catalog — M3 Wear OS Apps Design Kit\" " +
           "title=\"remote-m3: compare to wear-m3-catalog — M3 Wear OS Apps Design Kit\">" +
-          "wear-m3-catalog</a>"
+          "wear-m3-catalog</a>",
       ),
       html,
     )
@@ -1035,7 +1035,7 @@ class ServeWebTest {
     assertTrue(
       html.contains(
         "aria-label=\"Wear Material 3: compare to Figma\" " +
-          "title=\"Wear Material 3: compare to Figma\">Figma</a>"
+          "title=\"Wear Material 3: compare to Figma\">Figma</a>",
       ),
       html,
     )
@@ -1103,7 +1103,7 @@ class ServeWebTest {
             heroPreviewId = null,
             hasReferenceComparison = true,
             designToolLabel = "Figma",
-          )
+          ),
         ),
         token = "unused",
         isPublic = true,
@@ -1167,7 +1167,7 @@ class ServeWebTest {
             componentId = "Button/Filled",
             state = "pressed",
           ),
-        )
+        ),
       )
 
     assertEquals(1, entries.size)
@@ -1367,7 +1367,7 @@ class ServeWebTest {
     val fallback = page(withCmpAndroid - "cmp-android", "cmp-android")
     assertTrue(fallback.contains("data-rc-default=\"androidx-embedded\""), fallback)
     assertTrue(
-      page(listOf("camaelon-js"), "cmp-android").contains("data-rc-default=\"camaelon-js\"")
+      page(listOf("camaelon-js"), "cmp-android").contains("data-rc-default=\"camaelon-js\""),
     )
   }
 
@@ -1488,7 +1488,7 @@ class ServeWebTest {
       )
     assertTrue(
       landing.contains(
-        """<div class="cp-engage"><span ${ServeWeb.VOLATILE_ATTR}>12 views</span></div>"""
+        """<div class="cp-engage"><span ${ServeWeb.VOLATILE_ATTR}>12 views</span></div>""",
       ),
       landing,
     )
@@ -1506,7 +1506,7 @@ class ServeWebTest {
       )
     assertTrue(
       viewer.contains(
-        """<span class="cp-viewer-engage"><span ${ServeWeb.VOLATILE_ATTR}>13 views</span></span>"""
+        """<span class="cp-viewer-engage"><span ${ServeWeb.VOLATILE_ATTR}>13 views</span></span>""",
       ),
       viewer,
     )
@@ -1526,7 +1526,7 @@ class ServeWebTest {
               trust = null,
               heroPreviewId = null,
               views = 12_345,
-            )
+            ),
           ),
         token = "t",
       )
@@ -1563,7 +1563,7 @@ class ServeWebTest {
     assertTrue(
       html.contains(
         "<details class=\"cp-report\" id=\"cp-report\" data-cp-repo=\"o/r\"" +
-          " data-cp-subject=\"this preview\">"
+          " data-cp-subject=\"this preview\">",
       ) &&
         html.contains("<summary class=\"cp-report-link\"") &&
         html.contains("<form class=\"cp-report-form\" method=\"get\"") &&
@@ -1573,7 +1573,7 @@ class ServeWebTest {
     // The reporter writes the title; `required` enforces it with or without the page script.
     assertTrue(
       html.contains(
-        "<input class=\"cp-report-summary-input\" type=\"text\" name=\"title\" required"
+        "<input class=\"cp-report-summary-input\" type=\"text\" name=\"title\" required",
       ),
       "the reporter is asked for a summary, and cannot skip it",
     )
@@ -1646,7 +1646,7 @@ class ServeWebTest {
           referenceId = preview.id,
           variant = "ideal/large",
           overrides = emptyMap(),
-        )
+        ),
       )
     val html =
       ServeWeb.viewerPage(
@@ -1676,11 +1676,11 @@ class ServeWebTest {
     // pre-writing an answer that the label could contradict for a no-JS visitor.
     val body =
       ServeIssueReport.body(
-        ServeIssueReport.Context(repo = "yschimke/m3-catalog", previewId = "button")
+        ServeIssueReport.Context(repo = "yschimke/m3-catalog", previewId = "button"),
       )
     assertTrue(
       body.contains(
-        "${ServeIssueReport.CLASSIFICATION_PREFIX}${ServeIssueReport.CLASSIFICATION_UNSTATED}"
+        "${ServeIssueReport.CLASSIFICATION_PREFIX}${ServeIssueReport.CLASSIFICATION_UNSTATED}",
       ),
       body,
     )
@@ -1737,7 +1737,7 @@ class ServeWebTest {
               label = "titleLarge 22sp/28sp",
               role = "Title",
               detail = mapOf("token" to "titleLarge", "fontFamily" to "Roboto Flex"),
-            )
+            ),
           ),
       )
     assertTrue(html.contains("id=\"cp-spec-lane\""), "the spec lane carrier is rendered")
@@ -1767,7 +1767,7 @@ class ServeWebTest {
     assertTrue(
       html.contains(
         "/meshcore-mobile/compare/com.example.ProfileScreenPreview?token=t" +
-          "&amp;reference=contact-chat-figma"
+          "&amp;reference=contact-chat-figma",
       ),
       html,
     )
@@ -1870,7 +1870,8 @@ class ServeWebTest {
     )
     assertTrue(
       html.contains(
-        "var atSpecBaseline = el.disabled || " + "el.getAttribute(\"data-theme-active\") !== \"1\";"
+        "var atSpecBaseline = el.disabled || " +
+          "el.getAttribute(\"data-theme-active\") !== \"1\";",
       ),
       "a disabled control cannot move the initial spec verdict off baseline: $html",
     )
@@ -1933,7 +1934,7 @@ class ServeWebTest {
               label = "titleLarge 22sp/28sp",
               role = "Title",
               detail = mapOf("token" to "titleLarge", "fontFamily" to "Roboto Flex"),
-            )
+            ),
           ),
       )
     // Four views of the same pair, all on the stage, so the viewer's overrides aren't lost.
@@ -1961,7 +1962,7 @@ class ServeWebTest {
     assertTrue(
       html.contains(
         "id=\"cp-spec-compare\" hidden data-view=\"triptych\" " +
-          "data-reference=\"/meshcore-mobile/reference/contact-chat-figma.png?token=t\""
+          "data-reference=\"/meshcore-mobile/reference/contact-chat-figma.png?token=t\"",
       ),
       html,
     )
@@ -2195,7 +2196,7 @@ class ServeWebTest {
 
     assertTrue(
       html.contains(
-        "data-history-url=\"https://raw.githubusercontent.com/yschimke/compose-ai-tools/compose-preview/main/history.json\""
+        "data-history-url=\"https://raw.githubusercontent.com/yschimke/compose-ai-tools/compose-preview/main/history.json\"",
       ),
       "viewer must tell the client where the manifest lives",
     )
@@ -2319,13 +2320,13 @@ class ServeWebTest {
         listOf(
           ServePreview("failed", "Failed", section = "Screens", renderFailure = failure),
           ServePreview("working", "Working"),
-        )
+        ),
       ),
     )
     assertEquals(
       null,
       ServeWeb.representativePreviewId(
-        listOf(ServePreview("failed", "Failed", renderFailure = failure))
+        listOf(ServePreview("failed", "Failed", renderFailure = failure)),
       ),
     )
   }
@@ -2456,7 +2457,7 @@ class ServeWebTest {
     assertTrue(
       html.contains(
         "<details class=\"cp-report\" id=\"cp-report\"" +
-          " data-cp-repo=\"yschimke/wear-m3-catalog\" data-cp-subject=\"these comparisons\">"
+          " data-cp-repo=\"yschimke/wear-m3-catalog\" data-cp-subject=\"these comparisons\">",
       ),
       "the launcher reads both the repo and what the report is about: $html",
     )
@@ -2652,7 +2653,7 @@ class ServeWebTest {
         token = "t",
         componentVariants =
           listOf(
-            ServeWeb.ComponentVariant(previewId = "card__ideal__default__light", variant = "")
+            ServeWeb.ComponentVariant(previewId = "card__ideal__default__light", variant = ""),
           ),
       )
     assertFalse(html.contains("cp-compare-strip"), html)
@@ -2796,7 +2797,7 @@ class ServeWebTest {
     assertTrue(
       html.contains(
         "<th class=\"cp-compare-render-head\"><span class=\"cp-compare-head-name\">" +
-          "Material 3</span><span class=\"cp-compare-head-role\">ours</span></th>"
+          "Material 3</span><span class=\"cp-compare-head-role\">ours</span></th>",
       ),
       html,
     )
@@ -2842,7 +2843,7 @@ class ServeWebTest {
           DesignReferenceMatch(
             percent = percent,
             scoreVersion = ServeDesignReferenceStore.SCORE_VERSION,
-          )
+          ),
       )
 
   @Test
@@ -2975,7 +2976,7 @@ class ServeWebTest {
     // wall for "does anyone know about this?" reads without opening anything.
     assertTrue(
       summary.contains(
-        "<span class=\"cp-compare-bug-chip\" data-bug-scope=\"component\">#40</span>"
+        "<span class=\"cp-compare-bug-chip\" data-bug-scope=\"component\">#40</span>",
       ),
       cell,
     )
@@ -2998,7 +2999,7 @@ class ServeWebTest {
     assertTrue(
       cell.contains(
         "<span class=\"cp-compare-bug-title\" title=\"Glyph colour is darker than the design " +
-          "token\">Glyph colour is darker than the design token</span>"
+          "token\">Glyph colour is darker than the design token</span>",
       ),
       cell,
     )
@@ -3021,7 +3022,7 @@ class ServeWebTest {
     assertTrue(
       html.contains(
         "data-hay=\"button #40 glyph colour is darker than the design token " +
-          "#41 verified after the token update\""
+          "#41 verified after the token update\"",
       ),
       html,
     )
@@ -3064,14 +3065,14 @@ class ServeWebTest {
     assertTrue(
       cell.contains(
         "<span class=\"cp-compare-bug-chip\" data-bug-scope=\"variant\" " +
-          "data-bug-preview-ids=\"${dark.id}\" hidden>#43</span>"
+          "data-bug-preview-ids=\"${dark.id}\" hidden>#43</span>",
       ),
       "the dark issue is serialized for the browser's theme switch but hidden at light: $cell",
     )
     assertTrue(
       cell.contains(
         "<li class=\"cp-compare-bug-item\" data-bug-scope=\"variant\" " +
-          "data-bug-preview-ids=\"${dark.id}\" hidden>"
+          "data-bug-preview-ids=\"${dark.id}\" hidden>",
       ),
       "…and so is the panel entry it belongs to: $cell",
     )

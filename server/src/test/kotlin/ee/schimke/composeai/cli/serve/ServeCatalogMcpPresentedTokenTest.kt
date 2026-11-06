@@ -61,15 +61,15 @@ class ServeCatalogMcpPresentedTokenTest {
       "cpat_resource",
       ServeCatalogMcp.presentedToken(
         json(
-          """{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"compose-preview://catalog/m3/card","_meta":{"compose-preview/token":"cpat_resource"}}}"""
-        )
+          """{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"compose-preview://catalog/m3/card","_meta":{"compose-preview/token":"cpat_resource"}}}""",
+        ),
       ),
     )
   }
 
   private fun presented(params: String): String? =
     ServeCatalogMcp.presentedToken(
-      json("""{"jsonrpc":"2.0","id":1,"method":"tools/call","params":$params}""")
+      json("""{"jsonrpc":"2.0","id":1,"method":"tools/call","params":$params}"""),
     )
 
   // ------------------------------------------------------------------ schema
@@ -109,8 +109,8 @@ class ServeCatalogMcpPresentedTokenTest {
       runBlocking {
           mcp.handle(
             json(
-              """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"status","arguments":{}}}"""
-            )
+              """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"status","arguments":{}}}""",
+            ),
           ) {
             ServeMachineAuthorization.Decision.Missing
           }
@@ -214,8 +214,8 @@ class ServeCatalogMcpPresentedTokenTest {
       mcp.handle(
         json(
           """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_list_previews",
-             "arguments":{"catalog":"nope","token":"cpat_secret"}}}"""
-        )
+             "arguments":{"catalog":"nope","token":"cpat_secret"}}}""",
+        ),
       ) {
         ServeMachineAuthorization.Decision.Authorized("agent:test")
       }
@@ -231,8 +231,8 @@ class ServeCatalogMcpPresentedTokenTest {
       mcp.handle(
         json(
           """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_render_preview",
-             "arguments":{"catalog":"m3","previewId":"card","token":"cpat_abc"}}}"""
-        )
+             "arguments":{"catalog":"m3","previewId":"card","token":"cpat_abc"}}}""",
+        ),
       ) { token ->
         asked = token
         ServeMachineAuthorization.Decision.Missing

@@ -33,7 +33,7 @@ class PlaygroundErrorsWireTest {
             line = 1,
             ch = 2,
           ),
-        )
+        ),
       )
 
     assertEquals(setOf("A.kt", "B.kt"), errors.keys)
@@ -54,8 +54,8 @@ class PlaygroundErrorsWireTest {
               ch = 5,
               endLine = 3,
               endCh = 12,
-            )
-          )
+            ),
+          ),
         )
         .getValue("A.kt")
         .single()
@@ -72,8 +72,8 @@ class PlaygroundErrorsWireTest {
     val error =
       PlaygroundErrorsWire.project(
           listOf(
-            PlaygroundDiagnostic(PlaygroundSeverity.WARNING, "w", file = "A.kt", line = 4, ch = 2)
-          )
+            PlaygroundDiagnostic(PlaygroundSeverity.WARNING, "w", file = "A.kt", line = 4, ch = 2),
+          ),
         )
         .getValue("A.kt")
         .single()
@@ -87,7 +87,7 @@ class PlaygroundErrorsWireTest {
   fun `a file-less diagnostic lands under the default file key at the origin`() {
     val errors =
       PlaygroundErrorsWire.project(
-        listOf(PlaygroundDiagnostic(PlaygroundSeverity.ERROR, "module-level failure"))
+        listOf(PlaygroundDiagnostic(PlaygroundSeverity.ERROR, "module-level failure")),
       )
 
     val error = errors.getValue(PlaygroundErrorsWire.DEFAULT_FILE).single()

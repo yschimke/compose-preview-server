@@ -120,7 +120,7 @@ class ServeUiBuilderCommentStore(
       if (request.threadId == null) {
         if (board.threads.size >= MAXIMUM_THREADS) {
           return@mutate CommentMutation.Refused(
-            "a design may carry at most $MAXIMUM_THREADS comment threads"
+            "a design may carry at most $MAXIMUM_THREADS comment threads",
           )
         }
         CommentMutation.Applied(
@@ -137,8 +137,8 @@ class ServeUiBuilderCommentStore(
                   // their own sentence.
                   acknowledgedBy = mapOf(authorId to sequence),
                   comments = listOf(comment),
-                )
-          )
+                ),
+          ),
         )
       } else {
         val existing =
@@ -146,7 +146,7 @@ class ServeUiBuilderCommentStore(
             ?: return@mutate CommentMutation.Refused("no such comment thread")
         if (existing.comments.size >= MAXIMUM_COMMENTS_PER_THREAD) {
           return@mutate CommentMutation.Refused(
-            "a thread may carry at most $MAXIMUM_COMMENTS_PER_THREAD comments"
+            "a thread may carry at most $MAXIMUM_COMMENTS_PER_THREAD comments",
           )
         }
         CommentMutation.Applied(
@@ -157,8 +157,8 @@ class ServeUiBuilderCommentStore(
                 updatedAtEpochMillis = timestamp,
                 updatedAtSequence = sequence,
               )
-              .caughtUpBy(authorId)
-          )
+              .caughtUpBy(authorId),
+          ),
         )
       }
     }
@@ -191,8 +191,8 @@ class ServeUiBuilderCommentStore(
               // something to catch up with; the actor who said it does not.
               updatedAtSequence = sequence,
             )
-            .caughtUpBy(actorId)
-        )
+            .caughtUpBy(actorId),
+        ),
       )
     }
 
@@ -231,7 +231,7 @@ class ServeUiBuilderCommentStore(
     if (emoji.isEmpty()) return CommentWriteResult.Refused("a reaction needs a character in it")
     if (emoji.length > MAX_COMMENT_REACTION) {
       return CommentWriteResult.Refused(
-        "a reaction must be under $MAX_COMMENT_REACTION characters; it is an emoji, not a reply"
+        "a reaction must be under $MAX_COMMENT_REACTION characters; it is an emoji, not a reply",
       )
     }
     if (emoji.any { it.isWhitespace() }) {
@@ -245,12 +245,12 @@ class ServeUiBuilderCommentStore(
       val actors = comment.reactions[emoji].orEmpty()
       if (on && actors.size >= MAXIMUM_ACTORS_PER_REACTION) {
         return@mutate CommentMutation.Refused(
-          "at most $MAXIMUM_ACTORS_PER_REACTION actors may leave the same reaction"
+          "at most $MAXIMUM_ACTORS_PER_REACTION actors may leave the same reaction",
         )
       }
       if (on && emoji !in comment.reactions && comment.reactions.size >= MAXIMUM_REACTIONS) {
         return@mutate CommentMutation.Refused(
-          "a comment may carry at most $MAXIMUM_REACTIONS different reactions"
+          "a comment may carry at most $MAXIMUM_REACTIONS different reactions",
         )
       }
       if (!on && actorId !in actors) return@mutate CommentMutation.Unchanged
@@ -267,7 +267,7 @@ class ServeUiBuilderCommentStore(
                     else candidate.reactions + (emoji to next)
                   candidate.copy(reactions = reactions)
                 }
-              }
+              },
           )
           // A reaction is not something said, so the thread's own cursor does not move and nobody
           // else is told to catch up; the actor who reacted has, by reacting.
@@ -309,7 +309,7 @@ class ServeUiBuilderCommentStore(
         onLog(
           "serve: comment thread $threadId on design $designId deleted by $actorId " +
             "(opened by ${thread.comments.firstOrNull()?.authorId ?: "nobody"}, " +
-            "${thread.comments.size} comments)"
+            "${thread.comments.size} comments)",
         )
       }
     }
@@ -397,7 +397,7 @@ class ServeUiBuilderCommentStore(
         val current = read(designId)
         if (current == null && storedDesigns() >= maximumDesigns) {
           return CommentWriteResult.Refused(
-            "this host already holds discussions for $maximumDesigns designs"
+            "this host already holds discussions for $maximumDesigns designs",
           )
         }
         previous = current

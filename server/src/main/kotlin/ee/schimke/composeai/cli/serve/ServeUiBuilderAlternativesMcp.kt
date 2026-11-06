@@ -130,13 +130,13 @@ internal class ServeUiBuilderAlternativeTools(
       append(
         "${rows.size} alternative${if (rows.size == 1) "" else "s"} of $designId " +
           "(parent r${parent.revision}${device?.let { ", on ${it.label}" } ?: ""}), each " +
-          "against the parent at its fork:"
+          "against the parent at its fork:",
       )
       rows.forEach { append("\n${it.number}. ${it.line}") }
       append(
         "\nShow the sheet, then let the person choose with $PICK_BRANCH (or ask them to reply " +
           "with the number); merge the choice with ${ServeUiBuilderBranchTools.MERGE_BRANCH} " +
-          "(dryRun first)."
+          "(dryRun first).",
       )
       val failed = pictures.count { it.png == null }
       if (failed > 0) append(" $failed picture(s) could not be rendered; see each `problem`.")
@@ -261,12 +261,12 @@ internal class ServeUiBuilderAlternativeTools(
                         "enum" to JsonArray(rows.map { JsonPrimitive(it.branchId) }),
                         "enumNames" to
                           JsonArray(rows.map { JsonPrimitive("${it.number}. ${it.name}") }),
-                      )
-                    )
-                )
+                      ),
+                    ),
+                ),
               ),
             "required" to JsonArray(listOf(JsonPrimitive(FIELD))),
-          )
+          ),
         )
       val answer = interaction.elicitForm(question, schema, PICK_TIMEOUT_MILLIS)
       if (answer != null) {
@@ -303,7 +303,7 @@ internal class ServeUiBuilderAlternativeTools(
       rows.forEach { append("\n${it.number}. ${it.line}") }
       append(
         "\nThen merge their choice with ${ServeUiBuilderBranchTools.MERGE_BRANCH} (dryRun " +
-          "first). Do not choose for them."
+          "first). Do not choose for them.",
       )
     }
     return DesignBranchPickV1(
@@ -427,7 +427,7 @@ internal class ServeUiBuilderAlternativeTools(
                 (if (lines.size > MAX_SUMMARY_LINES) {
                   listOf(
                     "… ${lines.size - MAX_SUMMARY_LINES} more; " +
-                      "${ServeUiBuilderHistoryTools.DIFF_DESIGNS} has the rest"
+                      "${ServeUiBuilderHistoryTools.DIFF_DESIGNS} has the rest",
                   )
                 } else emptyList()))
               .joinToString("\n"),
@@ -468,12 +468,12 @@ internal class ServeUiBuilderAlternativeTools(
             listed.firstOrNull { it.branchId == id }
               ?: throw McpRequestException(
                 "`$id` is not a branch of `$designId`; " +
-                  "${ServeUiBuilderBranchTools.LIST_BRANCHES} lists them"
+                  "${ServeUiBuilderBranchTools.LIST_BRANCHES} lists them",
               )
           if (openOnly && branch.status != UiBuilderBranchStatus.OPEN) {
             throw McpRequestException(
               "`$id` is ${branch.status.name.lowercase()}; only an open branch can be picked " +
-                "and merged"
+                "and merged",
             )
           }
           branch
@@ -482,7 +482,7 @@ internal class ServeUiBuilderAlternativeTools(
     if (picked.size > MAX_ALTERNATIVES) {
       throw McpRequestException(
         "${picked.size} branches is more than $MAX_ALTERNATIVES side by side; name the ones to " +
-          "compare in `branchIds`"
+          "compare in `branchIds`",
       )
     }
     return picked
@@ -509,19 +509,19 @@ internal class ServeUiBuilderAlternativeTools(
     val lane =
       validator
         ?: throw McpRequestException(
-          "this host cannot render a design at another size without saving it; omit `device`"
+          "this host cannot render a design at another size without saving it; omit `device`",
         )
     val documents = designIds.map { id ->
       snapshot(actor, id, null).let {
         it.copy(
-          environment = it.environment.copy(widthDp = device.widthDp, heightDp = device.heightDp)
+          environment = it.environment.copy(widthDp = device.widthDp, heightDp = device.heightDp),
         )
       }
     }
     val drawn =
       lane.exportPngs(actor, documents)
         ?: throw McpRequestException(
-          "this host cannot render a design at another size without saving it; omit `device`"
+          "this host cannot render a design at another size without saving it; omit `device`",
         )
     return designIds.indices.map { index ->
       val picture = drawn.getOrNull(index)
@@ -537,7 +537,7 @@ internal class ServeUiBuilderAlternativeTools(
           UiBuilderServiceCall(
             actor,
             UiBuilderServiceRequest.ExportDesign(designId, null, ExportFormatV1.PNG),
-          )
+          ),
         )
       } catch (cancelled: CancellationException) {
         throw cancelled
@@ -569,7 +569,7 @@ internal class ServeUiBuilderAlternativeTools(
     when (
       val response =
         service.execute(
-          UiBuilderServiceCall(actor, UiBuilderServiceRequest.GetSnapshot(designId, revision))
+          UiBuilderServiceCall(actor, UiBuilderServiceRequest.GetSnapshot(designId, revision)),
         )
     ) {
       is UiBuilderServiceResponse.Snapshot -> response.snapshot.state.document
@@ -610,7 +610,7 @@ internal class ServeUiBuilderAlternativeTools(
           ?: throw McpRequestException(
             "`${raw.content}` is not a device preset; presets are " +
               UiBuilderDesignMatrix.PRESETS.joinToString(", ") { it.id } +
-              ", or pass {\"widthDp\":…,\"heightDp\":…}"
+              ", or pass {\"widthDp\":…,\"heightDp\":…}",
           )
       is JsonObject -> {
         fun edge(name: String): Int =
@@ -619,7 +619,7 @@ internal class ServeUiBuilderAlternativeTools(
             ?.takeIf { it in 1..UiBuilderDesignMatrix.MAX_DEVICE_DP }
             ?.toInt()
             ?: throw McpRequestException(
-              "`device.$name` must be an integer from 1 to ${UiBuilderDesignMatrix.MAX_DEVICE_DP}"
+              "`device.$name` must be an integer from 1 to ${UiBuilderDesignMatrix.MAX_DEVICE_DP}",
             )
         val width = edge("widthDp")
         val height = edge("heightDp")

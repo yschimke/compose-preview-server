@@ -313,7 +313,7 @@ class ServeCacheGenerationTest {
     val stale =
       get(
         "http://127.0.0.1:$port/$system/render/$previewId.png" +
-          "?${ServeHeroImages.THUMB_PARAM}=$hash&gen=$oldCommit"
+          "?${ServeHeroImages.THUMB_PARAM}=$hash&gen=$oldCommit",
       )
     assertEquals(200, stale.first)
     assertContentEquals(historicalRender, stale.second)
@@ -322,7 +322,7 @@ class ServeCacheGenerationTest {
       200,
       get(
           "http://127.0.0.1:$port/$system/render/$previewId.png" +
-            "?${ServeHeroImages.THUMB_PARAM}=$hash&gen=$newCommit"
+            "?${ServeHeroImages.THUMB_PARAM}=$hash&gen=$newCommit",
         )
         .first,
     )

@@ -86,7 +86,7 @@ class ServeImageStore(
     val format =
       ServeImageFormats.detect(bytes)
         ?: return Result.Failed(
-          "unrecognised image format — this host accepts ${ServeImageFormats.knownSummary()}"
+          "unrecognised image format — this host accepts ${ServeImageFormats.knownSummary()}",
         )
     val now = clock()
     purgeExpired(now)

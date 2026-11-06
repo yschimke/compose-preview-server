@@ -99,7 +99,7 @@ class MotionCaptureLabelsTest {
         listOf(
           capture("Toggle repeatedly. Baseline swaps the shape."),
           capture("Toggle repeatedly. Expressive travels between them."),
-        )
+        ),
       )
     assertEquals(listOf("Toggle repeatedly 1", "Toggle repeatedly 2"), labels.map { it.title })
     assertEquals(
@@ -134,7 +134,7 @@ class MotionCaptureLabelsTest {
         listOf(
           capture("Press and hold. Expressive travels.", id = "iconbutton__ideal__default__light"),
           capture("Press and hold. Expressive travels.", id = "iconbutton__ideal__default__dark"),
-        )
+        ),
       )
     assertEquals(
       listOf("Press and hold (Light)", "Press and hold (Dark)"),
@@ -152,7 +152,7 @@ class MotionCaptureLabelsTest {
           listOf(
             capture("Toggle repeatedly. One.", id = "switch-on__ideal__default__light"),
             capture("Toggle repeatedly. Two.", id = "switch-on__anim"),
-          )
+          ),
         )
         .map { it.title },
     )
@@ -163,7 +163,7 @@ class MotionCaptureLabelsTest {
           listOf(
             capture("Toggle repeatedly. One.", id = "switch-on__ideal__default__light"),
             capture("Toggle repeatedly. Two.", id = "switch-on__ideal__default__light__anim"),
-          )
+          ),
         )
         .map { it.title },
     )
@@ -179,7 +179,7 @@ class MotionCaptureLabelsTest {
           listOf(
             capture("Scroll. One.", id = "theme-meshcore-light"),
             capture("Scroll. Two.", id = "theme-meshcore-dark"),
-          )
+          ),
         )
         .map { it.title },
     )

@@ -36,7 +36,7 @@ class ServeCatalogMcpObservabilityTest {
   private val pixel: ByteArray =
     Base64.getDecoder()
       .decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
       )
 
   private class FakeHost(
@@ -82,14 +82,14 @@ class ServeCatalogMcpObservabilityTest {
     val request =
       Json.parseToJsonElement(
           """{"jsonrpc":"2.0","id":1,"method":"tools/call",
-              "params":{"name":"$tool","arguments":$arguments}}"""
+              "params":{"name":"$tool","arguments":$arguments}}""",
         )
         .jsonObject
     return requireNotNull(
       runBlocking {
         mcp.handle(request) { ServeMachineAuthorization.Decision.Authorized("agent:test") }
       }
-        .body
+        .body,
     )
   }
 
@@ -170,7 +170,7 @@ class ServeCatalogMcpObservabilityTest {
     assertEquals("baked", observation["generation"]!!.jsonPrimitive.content)
     assertEquals(false, observation["overridesApplied"]!!.jsonPrimitive.content.toBoolean())
     assertTrue(
-      observation["overridesIgnoredReason"]!!.jsonPrimitive.content.contains("not reflected")
+      observation["overridesIgnoredReason"]!!.jsonPrimitive.content.contains("not reflected"),
     )
   }
 
@@ -209,7 +209,7 @@ class ServeCatalogMcpObservabilityTest {
     val mcp = ServeCatalogMcp(registry, Semaphore(1))
     val toolRequest =
       Json.parseToJsonElement(
-          """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"catalog":"m3","previewId":"card","observe":"png","overrides":{"uiMode":"dark","device":"spec:width=400dp,height=800dp,dpi=320"}}}}"""
+          """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"catalog":"m3","previewId":"card","observe":"png","overrides":{"uiMode":"dark","device":"spec:width=400dp,height=800dp,dpi=320"}}}}""",
         )
         .jsonObject
     val toolBody =
@@ -217,7 +217,7 @@ class ServeCatalogMcpObservabilityTest {
           runBlocking {
             mcp.handle(toolRequest) { ServeMachineAuthorization.Decision.Authorized("agent:test") }
           }
-            .body
+            .body,
         )
         .content()
     val resourceUri =
@@ -235,7 +235,7 @@ class ServeCatalogMcpObservabilityTest {
     }
     val denied =
       requireNotNull(
-        runBlocking { mcp.handle(readRequest) { ServeMachineAuthorization.Decision.Missing } }.body
+        runBlocking { mcp.handle(readRequest) { ServeMachineAuthorization.Decision.Missing } }.body,
       )
     assertTrue(denied["error"] != null, "override-bearing resource reads require live access")
     assertEquals(1, host.seen.size)
@@ -246,8 +246,8 @@ class ServeCatalogMcpObservabilityTest {
             JsonObject(
               readRequest["params"]!!.jsonObject +
                 ("_meta" to
-                  buildJsonObject { put("compose-preview/token", JsonPrimitive("cpat_live")) })
-            ))
+                  buildJsonObject { put("compose-preview/token", JsonPrimitive("cpat_live")) }),
+            )),
       )
     var presentedToken: String? = null
     requireNotNull(
@@ -257,7 +257,7 @@ class ServeCatalogMcpObservabilityTest {
           ServeMachineAuthorization.Decision.Authorized("agent:test")
         }
       }
-        .body
+        .body,
     )
 
     assertEquals("cpat_live", presentedToken)

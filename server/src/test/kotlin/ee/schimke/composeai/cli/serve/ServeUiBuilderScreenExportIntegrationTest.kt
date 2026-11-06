@@ -223,9 +223,9 @@ class ServeUiBuilderScreenExportIntegrationTest {
             .post(
               json
                 .encodeToString(HttpRequestEnvelopeV1.serializer(), envelope)
-                .toRequestBody(JSON_MEDIA_TYPE)
+                .toRequestBody(JSON_MEDIA_TYPE),
             )
-            .build()
+            .build(),
         )
         .execute()
     return http.use {
@@ -269,7 +269,7 @@ class ServeUiBuilderScreenExportIntegrationTest {
               id = "session",
               componentId = "m3/text",
               properties = mapOf("text" to StringValueV1("Opening keynote")),
-            )
+            ),
         ),
     )
 

@@ -68,8 +68,8 @@ class ServeAgentGrantResolutionTest {
         Base64.getDecoder()
           .decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUB" +
-              "AScY42YAAAAASUVORK5CYII="
-          )
+              "AScY42YAAAAASUVORK5CYII=",
+          ),
       )
     registry.register("demo", host = ServeBundleHost(dir, label = "demo"), pinned = true)
 

@@ -14,13 +14,13 @@ import kotlinx.serialization.json.Json
 class DesignLocalCompileLaneTest {
 
   private val executor =
-    ScreenGeneratorComposeExportExecutor({
-      ComponentRecordSource.Lookup.Found(ExportRecords.m3Catalog())
-    })
+    ScreenGeneratorComposeExportExecutor(
+      { ComponentRecordSource.Lookup.Found(ExportRecords.m3Catalog()) },
+    )
 
   private fun source(backend: String?): String =
     assertIs<DesignLocalLane.Source.Emitted>(
-        DesignLocalCompileLane.generateFor(executor, darkDesignWithDevices(), backend)
+        DesignLocalCompileLane.generateFor(executor, darkDesignWithDevices(), backend),
       )
       .source
 
@@ -59,6 +59,6 @@ class DesignLocalCompileLaneTest {
             "slots": {}, "modifiers": []}
         }
       }
-      """
+      """,
     )
 }

@@ -242,7 +242,7 @@ class ServeBundleHost(
           readByteArray(
             (ServeUidReference.MAX_BYTES + 1)
               .toLong()
-              .coerceAtMost(fileSystem.metadata(file.toOkioPath()).size ?: 0)
+              .coerceAtMost(fileSystem.metadata(file.toOkioPath()).size ?: 0),
           )
         }
       }
@@ -302,7 +302,7 @@ class ServeBundleHost(
   }
 
   override fun guidelineResultFor(
-    previewId: String
+    previewId: String,
   ): ee.schimke.composeai.guidelines.protocol.GuidelineRecordV1? =
     guidelineResults.forPreview(previewId)
 
@@ -365,7 +365,7 @@ class ServeBundleHost(
       }
     if (published.isEmpty()) return AnnotationsOutcome.NotFound
     return AnnotationsOutcome.Ok(
-      ServeAnnotationsPayload.encode(previewId, published, tagIndexForPreview(previewId))
+      ServeAnnotationsPayload.encode(previewId, published, tagIndexForPreview(previewId)),
     )
   }
 
@@ -587,7 +587,7 @@ class ServeBundleHost(
     // embedded default could serve a view-pinned capture. Legacy `cmp-android` / `java` values are
     // mapped by [ServeRcPlayerIds.fromCaptureRecord].
     return ServeRcPlayerIds.playerKindOf(
-      ServeRcPlayerIds.fromCaptureRecord(variantMeta[previewId]?.previewParams?.capturePlayer)
+      ServeRcPlayerIds.fromCaptureRecord(variantMeta[previewId]?.previewParams?.capturePlayer),
     )
   }
 
@@ -744,7 +744,7 @@ class ServeBundleHost(
    * since this host can't re-render.
    */
   private fun readOverrides(
-    id: String
+    id: String,
   ): List<ee.schimke.composeai.data.overrides.PreviewOverrideDeclaration> {
     val sidecar = File(previewsDir, "$id$OVERRIDES_SUFFIX").toOkioPath()
     if (!fileSystem.exists(sidecar)) return emptyList()
@@ -761,7 +761,7 @@ class ServeBundleHost(
    * [readOverrides].
    */
   private fun readRemoteComposeKnobs(
-    id: String
+    id: String,
   ): List<ee.schimke.composeai.data.remotecompose.RemoteComposeKnobDeclaration> {
     val sidecar = File(previewsDir, "$id$REMOTECOMPOSE_SUFFIX").toOkioPath()
     if (!fileSystem.exists(sidecar)) return emptyList()

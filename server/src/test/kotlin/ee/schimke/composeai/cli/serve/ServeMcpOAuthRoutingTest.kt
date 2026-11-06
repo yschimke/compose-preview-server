@@ -48,8 +48,8 @@ class ServeMcpOAuthRoutingTest {
         Base64.getDecoder()
           .decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUB" +
-              "AScY42YAAAAASUVORK5CYII="
-          )
+              "AScY42YAAAAASUVORK5CYII=",
+          ),
       )
     registry.register("demo", host = ServeBundleHost(dir, label = "demo"), pinned = true)
     ServeHttpServer(
@@ -124,7 +124,7 @@ class ServeMcpOAuthRoutingTest {
     Base64.getUrlEncoder()
       .withoutPadding()
       .encodeToString(
-        MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.US_ASCII))
+        MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.US_ASCII)),
       )
 
   private val redirectUri = "http://127.0.0.1:8976/callback"
@@ -170,7 +170,7 @@ class ServeMcpOAuthRoutingTest {
               .url("http://127.0.0.1:${first.port}${ServeMcpOAuth.REGISTER_PATH}")
               .post(
                 """{"client_name":"cached host","redirect_uris":["$redirectUri"]}"""
-                  .toRequestBody("application/json".toMediaType())
+                  .toRequestBody("application/json".toMediaType()),
               )
               .build()
           client.newCall(request).execute().use { response ->
@@ -192,7 +192,9 @@ class ServeMcpOAuthRoutingTest {
         }
         client
           .newCall(
-            Request.Builder().url(authorize.replace(redirectUri, "https://evil.example/cb")).build()
+            Request.Builder()
+              .url(authorize.replace(redirectUri, "https://evil.example/cb"))
+              .build(),
           )
           .execute()
           .use { response ->
@@ -394,8 +396,8 @@ class ServeMcpOAuthRoutingTest {
       Request.Builder()
         .url(
           url(
-            if (path.contains('?')) "$path&token=$operatorToken" else "$path?token=$operatorToken"
-          )
+            if (path.contains('?')) "$path&token=$operatorToken" else "$path?token=$operatorToken",
+          ),
         )
         .post(body.toRequestBody("application/x-www-form-urlencoded".toMediaType()))
         .header(ServeHttpServer.TOKEN_HEADER, operatorToken)

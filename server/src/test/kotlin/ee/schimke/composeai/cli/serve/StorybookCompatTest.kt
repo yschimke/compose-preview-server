@@ -42,7 +42,7 @@ class StorybookCompatTest {
         listOf(
           preview("com.example.PreviewsKt.RedBoxPreview_Red Box", "Red Box"),
           preview("com.example.MainKt.GreetingPreview", "Greeting"),
-        )
+        ),
       )
     assertEquals(listOf("previews--red-box", "main--greeting"), stories.map { it.storyId })
     assertEquals("Previews", stories[0].title)
@@ -55,7 +55,7 @@ class StorybookCompatTest {
   fun `catalog axis ids group by the component slug`() {
     val stories =
       StorybookCompat.stories(
-        listOf(preview("button__dark", "Button"), preview("button__light", "Button"))
+        listOf(preview("button__dark", "Button"), preview("button__light", "Button")),
       )
     assertEquals("button", stories[0].title)
     // Two previews minting the same slug get a deterministic collision suffix, staying 1:1.

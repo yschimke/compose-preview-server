@@ -68,7 +68,7 @@ class ServeUiBuilderWidgetMatrixTest {
                   DesignStateV1(lastSequence = 0, document = documents.getValue(request.designId)),
                 catalog = catalog,
                 retainedFromSequence = 0,
-              )
+              ),
             )
           else -> UiBuilderServiceResponse.Catalogs(emptyList())
         }
@@ -231,7 +231,7 @@ class ServeUiBuilderWidgetMatrixTest {
     val round = UiBuilderDesignMatrix.preset("widget_small_round")!!
     val sheet =
       UiBuilderDesignMatrix.compose(
-        listOf(UiBuilderDesignMatrix.Cell(round, "light", 1.0, png(230, 76), null))
+        listOf(UiBuilderDesignMatrix.Cell(round, "light", 1.0, png(230, 76), null)),
       )
     val image = ImageIO.read(sheet.png.inputStream())
     val placed = sheet.placed.single()

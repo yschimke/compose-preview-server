@@ -85,7 +85,7 @@ class ServeWebIssueSystemScopeTest {
               component = "Button/Filled",
               variant = "default",
               referenceIds = listOf("button-figma"),
-            )
+            ),
           ),
       )
     assertTrue("\"number\":99" in html, "full issue evidence must reach the lifecycle payload")

@@ -189,7 +189,7 @@ class ServeCarriedRcLiveLaneTest {
       .newCall(
         Request.Builder()
           .url("http://127.0.0.1:${server!!.port}/examples/p/$EXAMPLE_ID?token=$TOKEN")
-          .build()
+          .build(),
       )
       .execute()
       .use { it.body.string() }

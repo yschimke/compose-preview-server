@@ -55,7 +55,7 @@ class UiBuilderExportComparisonTest {
     val design =
       dir.resolve("contacts.uid").apply {
         writeText(
-          "{\"schema\": \"compose-ui-builder-document/v1-candidate\", \"id\": \"contacts\"}"
+          "{\"schema\": \"compose-ui-builder-document/v1-candidate\", \"id\": \"contacts\"}",
         )
       }
     val index =

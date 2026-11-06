@@ -85,13 +85,13 @@ object PlaygroundCatalogClasspath {
     (recordedCoords - mavenCoords.toSet()).forEach {
       onLog(
         "playground $system: bundle's Skiko native ${it.version} does not match its bindings — " +
-          "dropping ${it.group}:${it.artifact}:${it.version}"
+          "dropping ${it.group}:${it.artifact}:${it.version}",
       )
     }
     (mavenCoords - recordedCoords.toSet()).forEach {
       onLog(
         "playground $system: bundle carries Skiko bindings ${it.version} with no native for " +
-          "this host at that version — adding ${it.group}:${it.artifact}:${it.version}"
+          "this host at that version — adding ${it.group}:${it.artifact}:${it.version}",
       )
     }
     val resolutions =
@@ -146,7 +146,7 @@ object PlaygroundCatalogClasspath {
     if (androidJar == null) {
       onLog(
         "playground $system: this is an android bundle and no android.jar was found; mode " +
-          "unavailable — set ANDROID_HOME / ANDROID_SDK_ROOT"
+          "unavailable — set ANDROID_HOME / ANDROID_SDK_ROOT",
       )
       return null
     }
@@ -234,7 +234,7 @@ object PlaygroundCatalogClasspath {
     if (unresolved.isNotEmpty()) {
       onLog(
         "playground $system: ${unresolved.size} unresolved dependency coordinate(s), mode " +
-          "unavailable: ${unresolved.joinToString { it.coordinate.toString() }}"
+          "unavailable: ${unresolved.joinToString { it.coordinate.toString() }}",
       )
       return null
     }

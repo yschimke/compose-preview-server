@@ -19,7 +19,7 @@ class UiBuilderOwnedCatalogHealthTest {
     assertEquals(
       mapOf(
         "wear-m3" to
-          "unavailable: ui-builder.json was generated against a record not available here"
+          "unavailable: ui-builder.json was generated against a record not available here",
       ),
       health.problems(),
     )

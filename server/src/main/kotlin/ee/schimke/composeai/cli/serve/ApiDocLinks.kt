@@ -71,7 +71,7 @@ internal object ApiDocLinks {
    */
   private val QUALIFIED =
     Regex(
-      """(?<![A-Za-z0-9_.])((?:androidx|android)(?:\.[a-z][A-Za-z0-9_]*)+\.[A-Z][A-Za-z0-9_]*)"""
+      """(?<![A-Za-z0-9_.])((?:androidx|android)(?:\.[a-z][A-Za-z0-9_]*)+\.[A-Z][A-Za-z0-9_]*)""",
     )
 
   /**

@@ -12,8 +12,8 @@ class ServeCatalogRevisionTest {
   fun `a full-sha raw URL is commit-pinned`() {
     assertTrue(
       ServeCatalogRevision.isCommitPinned(
-        "https://raw.githubusercontent.com/o/r/${"a".repeat(40)}/images/button/ideal.png"
-      )
+        "https://raw.githubusercontent.com/o/r/${"a".repeat(40)}/images/button/ideal.png",
+      ),
     )
   }
 
@@ -24,11 +24,11 @@ class ServeCatalogRevisionTest {
     // cacheable, which is the whole point: a branch ref moves.
     assertFalse(
       ServeCatalogRevision.isCommitPinned(
-        "https://raw.githubusercontent.com/o/r/design-artifacts/compose-m3/catalog.json"
-      )
+        "https://raw.githubusercontent.com/o/r/design-artifacts/compose-m3/catalog.json",
+      ),
     )
     assertFalse(
-      ServeCatalogRevision.isCommitPinned("https://raw.githubusercontent.com/o/r/main/x.png")
+      ServeCatalogRevision.isCommitPinned("https://raw.githubusercontent.com/o/r/main/x.png"),
     )
   }
 
@@ -38,7 +38,7 @@ class ServeCatalogRevisionTest {
     // builds for itself carries a resolved head. Admitting both spellings would file one commit's
     // bytes under two cache keys.
     assertFalse(
-      ServeCatalogRevision.isCommitPinned("https://raw.githubusercontent.com/o/r/abc1234/x.png")
+      ServeCatalogRevision.isCommitPinned("https://raw.githubusercontent.com/o/r/abc1234/x.png"),
     )
   }
 

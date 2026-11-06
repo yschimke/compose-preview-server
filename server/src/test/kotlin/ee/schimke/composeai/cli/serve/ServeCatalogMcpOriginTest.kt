@@ -36,7 +36,7 @@ class ServeCatalogMcpOriginTest {
     val reply = runBlocking {
       handle(
         Json.parseToJsonElement("""{"jsonrpc":"2.0","id":1,"method":"$method","params":$params}""")
-          .jsonObject
+          .jsonObject,
       ) {
         ServeMachineAuthorization.Decision.Authorized("agent:test")
       }
@@ -51,7 +51,7 @@ class ServeCatalogMcpOriginTest {
           .first()
           .jsonObject["text"]!!
           .jsonPrimitive
-          .content
+          .content,
       )
       .jsonObject
 

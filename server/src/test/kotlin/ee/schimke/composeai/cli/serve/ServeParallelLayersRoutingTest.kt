@@ -56,7 +56,7 @@ class ServeParallelLayersRoutingTest {
              "source":{"provider":"figma"},
              "raster":{"path":"references/$previewId-figma.png"}}]}
           """
-            .trimIndent()
+            .trimIndent(),
         )
     }
     if (family != null) {
@@ -69,7 +69,7 @@ class ServeParallelLayersRoutingTest {
              "bounds":{"x":0,"y":0,"width":8,"height":8},
              "detail":{"fontFamily":"$family","fontSize":"16.0sp","token":"bodyLarge"}}]}}
           """
-            .trimIndent()
+            .trimIndent(),
         )
     }
     return ServeBundleHost(

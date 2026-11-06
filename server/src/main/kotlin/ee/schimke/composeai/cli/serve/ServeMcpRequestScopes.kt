@@ -238,7 +238,7 @@ internal class ServeMcpRequestScopes(
             put("id", id)
             put("method", method)
             put("params", params)
-          }
+          },
         )
         Exchange.Response(response.await())
       } ?: Exchange.TimedOut
@@ -279,7 +279,7 @@ internal class ServeMcpRequestScopes(
   }
 
   private fun parseElicitationResponse(
-    response: JsonObject
+    response: JsonObject,
   ): ServeCatalogMcp.FormElicitationResult? {
     if (response["error"] != null) return null
     val result = response["result"] as? JsonObject ?: return null

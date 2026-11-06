@@ -251,7 +251,7 @@ internal class ServeSocialCard {
           h.toDouble(),
           IMAGE_RADIUS,
           IMAGE_RADIUS,
-        )
+        ),
       )
       g.drawImage(hero, x, y, w, h, null)
       g.clip = clip

@@ -93,7 +93,8 @@ class ServeBundleStoreTest {
     assertEquals("java.lang.IllegalStateException", preview.renderFailure?.errorClass)
     assertEquals("boom", preview.renderFailure?.message)
     assertTrue(
-      registered.getValue("broken").render(preview.id, PreviewOverrides()) is RenderOutcome.NotFound
+      registered.getValue("broken").render(preview.id, PreviewOverrides())
+        is RenderOutcome.NotFound,
     )
   }
 
@@ -217,7 +218,7 @@ class ServeBundleStoreTest {
   fun `unsafe session names are rejected`() {
     val zip = zipOf("previews/p.png" to byteArrayOf(1))
     assertTrue(
-      store().add("../etc", zip, isSecurityChecked = true) is ServeBundleStore.Result.Failed
+      store().add("../etc", zip, isSecurityChecked = true) is ServeBundleStore.Result.Failed,
     )
     assertTrue(store().add("a/b", zip, isSecurityChecked = true) is ServeBundleStore.Result.Failed)
     // Dot-only names match the char class but would delete the upload root / its parent.
@@ -381,7 +382,7 @@ class ServeBundleStoreTest {
         digest = BundleSigning.hex(digest),
         signature =
           BundleSigning.base64(
-            BundleSigning.signEd25519(BundleSigning.parsePrivateKey(keys.privateKeyB64), digest)
+            BundleSigning.signEd25519(BundleSigning.parsePrivateKey(keys.privateKeyB64), digest),
           ),
       ),
     )

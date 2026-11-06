@@ -52,7 +52,7 @@ class ServeParityActivityStoreTest {
                   author = "Yuri",
                   previewIds = listOf("nav-rail__ideal__default__light"),
                   components = listOf("Navigation/Rail"),
-                )
+                ),
               ),
           ),
         figma =
@@ -68,7 +68,7 @@ class ServeParityActivityStoreTest {
                   author = "Dana",
                   nodeId = "51592:4768",
                   previewIds = listOf("nav-rail__ideal__default__light"),
-                )
+                ),
               ),
           ),
         gaps =
@@ -77,9 +77,9 @@ class ServeParityActivityStoreTest {
               kind = MappingGap.Kind.DANGLING_MAPPING,
               detail = "design-map names a preview the catalog no longer publishes",
               previewId = "gone__ideal__default__light",
-            )
+            ),
           ),
-      )
+      ),
     )
 
     val loaded = assertNotNull(load())
@@ -101,9 +101,9 @@ class ServeParityActivityStoreTest {
         schema = "something-else/v9",
         code =
           CodeLane(
-            events = listOf(CodeEvent(sha = sha, subject = "x", at = "2026-08-05T10:00:00Z"))
+            events = listOf(CodeEvent(sha = sha, subject = "x", at = "2026-08-05T10:00:00Z")),
           ),
-      )
+      ),
     )
     assertNull(load())
   }
@@ -145,7 +145,7 @@ class ServeParityActivityStoreTest {
               MappingGap(kind = "invented-kind", detail = "dropped"),
               MappingGap(kind = MappingGap.Kind.UNMAPPED_DESIGN_NODE, detail = "kept"),
             ),
-        )
+        ),
       )
 
     val loaded = assertNotNull(sanitized)
@@ -162,8 +162,8 @@ class ServeParityActivityStoreTest {
     val sanitized =
       ServeParityActivityStore.sanitize(
         ParityActivity(
-          code = CodeLane(events = listOf(CodeEvent(sha = "nope", subject = "x", at = "x")))
-        )
+          code = CodeLane(events = listOf(CodeEvent(sha = "nope", subject = "x", at = "x"))),
+        ),
       )
     assertNull(sanitized, "an empty dashboard is worse than not offering the page")
   }
@@ -180,10 +180,10 @@ class ServeParityActivityStoreTest {
                   listOf(
                     CodeEvent(sha = sha, subject = "older", at = "2026-08-01T10:00:00Z"),
                     CodeEvent(sha = sha, subject = "newer", at = "2026-08-05T10:00:00Z"),
-                  )
-              )
-          )
-        )
+                  ),
+              ),
+          ),
+        ),
       )
     assertEquals(listOf("newer", "older"), sanitized.code?.events?.map { it.subject })
   }
@@ -197,10 +197,10 @@ class ServeParityActivityStoreTest {
           ParityActivity(
             code =
               CodeLane(
-                events = listOf(CodeEvent(sha = sha, subject = long, at = "2026-08-05T10:00:00Z"))
-              )
-          )
-        )
+                events = listOf(CodeEvent(sha = sha, subject = long, at = "2026-08-05T10:00:00Z")),
+              ),
+          ),
+        ),
       )
     val subject = assertNotNull(sanitized.code?.events?.single()?.subject)
     assertTrue(subject.length <= 400, "expected clamped subject, got ${subject.length}")
@@ -244,7 +244,7 @@ class ServeParityActivityStoreTest {
     val loaded =
       assertNotNull(
         ServeParityActivityStore.sanitize(
-          wireJson.decodeFromString<ParityActivity>(fixture.readText())
+          wireJson.decodeFromString<ParityActivity>(fixture.readText()),
         ),
         "the emitter's output must survive the reader's validation",
       )
@@ -296,7 +296,7 @@ class ServeParityActivityStoreTest {
       ServeParityActivityStore.nodeUrl(
         figma.fileKey,
         figma.comments.single().nodeId,
-      )
+      ),
     )
   }
 

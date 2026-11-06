@@ -61,7 +61,7 @@ class RemoteNativeRenderProofTest {
         PlaygroundDaemonOpeners.android(
           PlaygroundSandbox(profile = PlaygroundSandbox.Profile.NONE),
           ::println,
-        )
+        ),
       )
     val sequence = AtomicInteger()
     val renderer =
@@ -119,8 +119,8 @@ class RemoteNativeRenderProofTest {
       json
         .decodeFromString<DesignDocumentV1>(
           Files.readString(
-            Path.of("../docs/design/evidence/ui-builder-unsaved-remote-preview/document.json")
-          )
+            Path.of("../docs/design/evidence/ui-builder-unsaved-remote-preview/document.json"),
+          ),
         )
         .copy(
           revision = 0,
@@ -144,9 +144,9 @@ class RemoteNativeRenderProofTest {
           UiBuilderServiceCall(
             AuthenticatedUiBuilderActor("operator"),
             UiBuilderServiceRequest.CreateDesign(doc),
-          )
+          ),
         )
-      }
+      },
     )
     val registry = ServeSessionRegistry(open = { null })
     val server =
@@ -174,7 +174,7 @@ class RemoteNativeRenderProofTest {
             .url("http://127.0.0.1:${server.port}$path")
             .header(ServeHttpServer.TOKEN_HEADER, "native-proof")
             .post(body.toRequestBody("application/json".toMediaType()))
-            .build()
+            .build(),
         )
         .execute()
         .use {
@@ -231,7 +231,7 @@ class RemoteNativeRenderProofTest {
             post(
               "/mcp",
               """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ui_builder_render_native","arguments":{"designId":"${doc.id}","revision":0}}}""",
-            )
+            ),
           )
           .jsonObject
           .getValue("result")
@@ -240,7 +240,7 @@ class RemoteNativeRenderProofTest {
       val content = response.getValue("content").jsonArray
       val result =
         json.decodeFromString<NativePreviewResultV1>(
-          content.first().jsonObject.getValue("text").jsonPrimitive.content
+          content.first().jsonObject.getValue("text").jsonPrimitive.content,
         )
       assertNull(result.compileError)
       val mcpImage = content.single { it.jsonObject["type"] == JsonPrimitive("image") }.jsonObject

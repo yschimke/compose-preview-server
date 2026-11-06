@@ -122,7 +122,7 @@ class ServeSourceWatcherTest {
       mapOf(
         "a" to listOf(WatchRoot(a, recursive = true)),
         "b" to listOf(WatchRoot(b, recursive = true)),
-      )
+      ),
     ) {
       rebuilds += it
       LocalRebuildResult.Reloaded(1)
@@ -158,7 +158,7 @@ class ServeSourceWatcherTest {
          "manifestPath":"previews.json",
          "systemProperties":{"composeai.daemon.workspaceRoot":"${workspace.path}"}}
         """
-          .trimIndent()
+          .trimIndent(),
       )
     File(output, "build-artifacts.json")
       .writeText(
@@ -167,7 +167,7 @@ class ServeSourceWatcherTest {
           "app/src/ui/Preview.kt","app/src/ui/Theme.kt","lib/Shared.kt",
           "bazel-out/k8-fastbuild/bin/app/Gen.kt","external/rules/Dep.kt"]}
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
     assertEquals(

@@ -67,7 +67,7 @@ class ServeUiBuilderWidgetThumbnailTest {
                   DesignStateV1(lastSequence = 0, document = documents.getValue(request.designId)),
                 catalog = catalog,
                 retainedFromSequence = 0,
-              )
+              ),
             )
           is UiBuilderServiceRequest.ExportDesign -> {
             exports.incrementAndGet()
@@ -84,9 +84,9 @@ class ServeUiBuilderWidgetThumbnailTest {
                       severity = DiagnosticSeverityV1.INFO,
                       code = "REVISION_PINNED_DAEMON_RENDER",
                       message = "Rendered design ${request.designId} revision 7 (hash).",
-                    )
+                    ),
                   ),
-              )
+              ),
             )
           }
           else -> UiBuilderServiceResponse.Catalogs(emptyList())

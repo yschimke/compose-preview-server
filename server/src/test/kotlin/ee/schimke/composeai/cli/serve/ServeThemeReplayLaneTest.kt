@@ -62,7 +62,7 @@ class ServeThemeReplayLaneTest {
           type = "bool",
           label = "enabled",
           default = ee.schimke.composeai.daemon.protocol.PreviewOverrideValue.BooleanValue(true),
-        )
+        ),
       )
 
     override val previews =

@@ -101,7 +101,7 @@ class ServeOnboarding(
     if (systems.isEmpty()) return Result.Empty(repo, branchPrefix)
     val catalogs = systems.map { publish(it, repo, group, listed) }
     onLog(
-      "serve: onboarded $repo — ${catalogs.count { it.served }}/${catalogs.size} catalog(s) serving"
+      "serve: onboarded $repo — ${catalogs.count { it.served }}/${catalogs.size} catalog(s) serving",
     )
     return Result.Ok(repo, catalogs)
   }

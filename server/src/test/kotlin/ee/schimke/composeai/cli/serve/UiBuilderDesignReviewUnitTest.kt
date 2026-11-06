@@ -45,7 +45,7 @@ class UiBuilderDesignReviewUnitTest {
       UiBuilderAccessibilityCheck.contrastRatio(
         UiBuilderAccessibilityCheck.parseHex("#49454F")!!,
         UiBuilderAccessibilityCheck.parseHex("#FEF7FF")!!,
-      ) > 4.5
+      ) > 4.5,
     )
     // Fully transparent black over white is white: no contrast at all.
     assertEquals(
@@ -191,7 +191,7 @@ class UiBuilderDesignReviewUnitTest {
             listOf(
               PropertyCapabilityV1.Builder("value", JsonPrimitive("number"))
                 .also { property -> property.required = true }
-                .build()
+                .build(),
             )
         }
         .build()
@@ -202,7 +202,7 @@ class UiBuilderDesignReviewUnitTest {
             id = "volume",
             componentId = "m3/slider",
             properties = mapOf("value" to DecimalValueV1(0.4)),
-          )
+          ),
       )
     val place =
       UiBuilderExportDiagnosticLocation.locate(
@@ -314,7 +314,7 @@ class UiBuilderDesignReviewUnitTest {
             id = "go",
             componentId = "m3/button",
             properties = mapOf("text" to StringValueV1("Go")),
-          )
+          ),
       )
     // No declared size: nothing to say from the document alone.
     assertTrue(UiBuilderAccessibilityCheck.check(document, emptyMap()).isEmpty())
@@ -331,10 +331,10 @@ class UiBuilderDesignReviewUnitTest {
   fun `decisions are validated, bounded and idempotent by id`() {
     val store = ServeUiBuilderReviewStore(directory)
     assertIs<ReviewWriteResult.Refused>(
-      store.decide("d", "alice", "human", DecisionRequest(revision = 1, verdict = "lgtm"))
+      store.decide("d", "alice", "human", DecisionRequest(revision = 1, verdict = "lgtm")),
     )
     assertIs<ReviewWriteResult.Refused>(
-      store.decide("d", "alice", "human", DecisionRequest(revision = -1, verdict = "approve"))
+      store.decide("d", "alice", "human", DecisionRequest(revision = -1, verdict = "approve")),
     )
     val first =
       store.decide("d", "alice", "human", DecisionRequest(1, "APPROVE", decisionId = "x"))
@@ -347,7 +347,7 @@ class UiBuilderDesignReviewUnitTest {
     assertEquals(first.review.sequence, replay.review.sequence)
     // Somebody else may not reuse the id.
     assertIs<ReviewWriteResult.Refused>(
-      store.decide("d", "bob", "human", DecisionRequest(1, "approve", decisionId = "x"))
+      store.decide("d", "bob", "human", DecisionRequest(1, "approve", decisionId = "x")),
     )
     repeat(ServeUiBuilderReviewStore.MAX_DECISIONS + 5) {
       store.decide("d", "alice", "human", DecisionRequest(1, "reject"))
@@ -382,7 +382,7 @@ class UiBuilderDesignReviewUnitTest {
     assertEquals("open", first.review.implementation?.status)
     assertEquals(listOf("d"), store.implementedBy(pr))
     assertIs<ReviewWriteResult.Refused>(
-      store.setImplementation("d", "alice", ImplementationRequest(pr = "ftp://x/y"))
+      store.setImplementation("d", "alice", ImplementationRequest(pr = "ftp://x/y")),
     )
     val cleared = store.setImplementation("d", "alice", null) as ReviewWriteResult.Stored
     assertNull(cleared.review.implementation)

@@ -471,9 +471,9 @@ class ServeUiBuilderDecisionElicitationTest {
           .header(ServeHttpServer.TOKEN_HEADER, OPERATOR_TOKEN)
           .post(
             """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"$tool","arguments":$arguments}}"""
-              .toRequestBody(JSON_MEDIA_TYPE)
+              .toRequestBody(JSON_MEDIA_TYPE),
           )
-          .build()
+          .build(),
       )
       .execute()
       .use {
@@ -522,9 +522,9 @@ class ServeUiBuilderDecisionElicitationTest {
             callStateless(
               ServeUiBuilderMcp.GET_DESIGN,
               """{"designId":"$designId","includeCatalog":true}""",
-            )
-          )
-        )
+            ),
+          ),
+        ),
       )
       .snapshot
       .state

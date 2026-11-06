@@ -51,7 +51,7 @@ class ServeUiBuilderHistoryAndUnfurlTest {
     val builderDir = Files.createTempDirectory("serve-ui-builder-history").toFile()
     File(builderDir, "index.html")
       .writeText(
-        "<!doctype html><html><head><title>Compose UI Builder Preview</title></head></html>"
+        "<!doctype html><html><head><title>Compose UI Builder Preview</title></head></html>",
       )
     val registry = ServeSessionRegistry(open = { null })
     val server =
@@ -75,7 +75,7 @@ class ServeUiBuilderHistoryAndUnfurlTest {
             ),
           uiBuilderAuthorization =
             ServeUiBuilderAuthorization.fromMachineAuthorization(
-              ServeMachineAuthorization(OPERATOR_TOKEN, null, null, isPublic = true)
+              ServeMachineAuthorization(OPERATOR_TOKEN, null, null, isPublic = true),
             ),
           uiBuilderLinksStore = links,
         )
@@ -158,7 +158,7 @@ class ServeUiBuilderHistoryAndUnfurlTest {
               .url("http://127.0.0.1:$port/ui-builder/$DESIGN_ID/history/0/fork")
               .header(ServeHttpServer.TOKEN_HEADER, OPERATOR_TOKEN)
               .post(FormBody.Builder().build())
-              .build()
+              .build(),
           )
           .execute()
           .use { it.code to it.header("Location").orEmpty() }
@@ -199,9 +199,9 @@ class ServeUiBuilderHistoryAndUnfurlTest {
             .post(
               json
                 .encodeToString(HttpRequestEnvelopeV1.serializer(), envelope)
-                .toRequestBody("application/json".toMediaType())
+                .toRequestBody("application/json".toMediaType()),
             )
-            .build()
+            .build(),
         )
         .execute()
     response.use { assertEquals(200, it.code, it.body.string()) }
@@ -242,7 +242,7 @@ class ServeUiBuilderHistoryAndUnfurlTest {
               id = "text",
               componentId = "m3/text",
               properties = mapOf("text" to StringValueV1("Opening keynote")),
-            )
+            ),
         ),
     )
   }

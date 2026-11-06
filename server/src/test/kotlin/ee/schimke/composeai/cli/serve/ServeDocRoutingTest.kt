@@ -92,7 +92,7 @@ class ServeDocRoutingTest {
         Request.Builder()
           .url(url("/docs?name=$name"))
           .post(bytes.toRequestBody(contentType.toMediaType()))
-          .build()
+          .build(),
       )
       .execute()
 
@@ -190,7 +190,7 @@ class ServeDocRoutingTest {
         Request.Builder()
           .url(url("$path/render.png$gated&rcPlayer=cmp-jvm", gatedServer.port))
           .head()
-          .build()
+          .build(),
       )
       .execute()
       .use { assertEquals(405, it.code) }
@@ -232,7 +232,7 @@ class ServeDocRoutingTest {
         Request.Builder()
           .url(url("/docs?url=https%3A%2F%2Fexample.com%2Fa.json"))
           .post(ByteArray(0).toRequestBody())
-          .build()
+          .build(),
       )
       .execute()
       .use {
@@ -293,7 +293,7 @@ class ServeDocRoutingTest {
     // A public host adds nothing (its links are token-free by design).
     assertTrue(
       ServeWeb.docUploadPage("s3cret", isPublic = true, ttlSeconds = 60, urlUploadAllowed = false)
-        .contains("var suffix = \"\"")
+        .contains("var suffix = \"\""),
     )
   }
 

@@ -64,7 +64,7 @@ internal fun Route.installPushRoutes(lane: ServePushLane, siteHosts: () -> Set<S
       PushKeyResponse(
         publicKey = lane.keys.publicKey,
         kinds = PushKind.entries.map { PushKindV1(it.wire, it.label) },
-      )
+      ),
     )
   }
 
@@ -89,7 +89,7 @@ internal fun Route.installPushRoutes(lane: ServePushLane, siteHosts: () -> Set<S
         // Names this browser's subscription to the sign-out route, which drops it: see
         // [forgetSignedOutBrowser].
         call.response.cookies.append(
-          pushDeviceCookie(ServePushSubscriptionStore.deviceOf(result.subscription.endpoint), call)
+          pushDeviceCookie(ServePushSubscriptionStore.deviceOf(result.subscription.endpoint), call),
         )
         call.respondPush(
           preferencesOf(lane, actor),
@@ -202,7 +202,7 @@ private suspend fun ApplicationCall.parseKinds(words: List<String>): Set<PushKin
 }
 
 private suspend fun <T> ApplicationCall.receivePush(
-  serializer: kotlinx.serialization.DeserializationStrategy<T>
+  serializer: kotlinx.serialization.DeserializationStrategy<T>,
 ): T? {
   // Always JSON, whatever the credential: a form or a no-CORS fetch cannot send it, which is what
   // keeps a page elsewhere from driving these routes even where `Origin` is missing.

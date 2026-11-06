@@ -102,7 +102,7 @@ class ServeUiBuilderGuidelinesTest {
               verdict("wear.layout.time-text-shown", "pass", 0.9),
             ),
           )
-        }
+        },
       )
     val request = ServeUiBuilderGuidelines.prepare("d", 3, wearDocument(), emptyList(), null)
 
@@ -208,21 +208,21 @@ class ServeUiBuilderGuidelinesTest {
     assertTrue((read.recordedAtEpochMillis ?: 0) > 0)
 
     assertIs<ServeUiBuilderGuidelineStore.GuidelineWriteResult.Refused>(
-      store.record("workout", "agent:me", body.copy(asked = listOf("made.up")))
+      store.record("workout", "agent:me", body.copy(asked = listOf("made.up"))),
     )
     assertIs<ServeUiBuilderGuidelineStore.GuidelineWriteResult.Refused>(
       store.record(
         "workout",
         "agent:me",
         body.copy(verdicts = body.verdicts + DesignGuidelineVerdict("other", "pass")),
-      )
+      ),
     )
     assertIs<ServeUiBuilderGuidelineStore.GuidelineWriteResult.Refused>(
       store.record(
         "workout",
         "agent:me",
         body.copy(verdicts = listOf(DesignGuidelineVerdict(ruleId, "maybe"))),
-      )
+      ),
     )
     assertTrue(store.delete("workout"))
     assertNull(store.read("workout"))
@@ -299,7 +299,7 @@ class ServeUiBuilderGuidelinesTest {
   private fun completion(vararg verdicts: JsonObject): String =
     completionText(
       buildJsonObject { put("verdicts", buildJsonArray { verdicts.forEach { add(it) } }) }
-        .toString()
+        .toString(),
     )
 
   private fun completionText(content: String): String = buildJsonObject {
@@ -315,7 +315,7 @@ class ServeUiBuilderGuidelinesTest {
                 put("content", content)
               },
             )
-          }
+          },
         )
       },
     )
@@ -346,7 +346,7 @@ class ServeUiBuilderGuidelinesTest {
               "modifiers": [{"type": "width", "value": 80}]}
           }
         }
-        """
+        """,
       )
       .jsonObject
 

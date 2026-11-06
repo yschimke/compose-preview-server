@@ -100,7 +100,7 @@ class ServeUiBuilderBranchMcpTest {
             Json.parseToJsonElement("""{"designId":"bold","includeCatalog":true}""").jsonObject,
             owner,
             callId = "get",
-          )
+          ),
         )
       val document = assertIs<SnapshotResponseV1>(snapshot.response).snapshot.state.document
       assertEquals(2L, document.revision)
@@ -349,32 +349,32 @@ class ServeUiBuilderBranchMcpTest {
 
       // The branch is not named by the grant, but its parent is.
       assertIs<UiBuilderServiceResponse.Snapshot>(
-        scoped.execute(UiBuilderServiceCall(agent, UiBuilderServiceRequest.OpenDesign("try")))
+        scoped.execute(UiBuilderServiceCall(agent, UiBuilderServiceRequest.OpenDesign("try"))),
       )
       // An unrelated design of the same approver is not reachable.
       assertIs<UiBuilderServiceResponse.Error>(
-        scoped.execute(UiBuilderServiceCall(agent, UiBuilderServiceRequest.OpenDesign("other")))
+        scoped.execute(UiBuilderServiceCall(agent, UiBuilderServiceRequest.OpenDesign("other"))),
       )
       // The branch lane: branch the named design, merge its branch; not the other design.
       assertIs<UiBuilderBranchResponse.Branch>(
         scopedBranches.executeBranch(
-          UiBuilderBranchCall(agent, UiBuilderBranchRequest.CreateBranch(DESIGN, "Second"))
-        )
+          UiBuilderBranchCall(agent, UiBuilderBranchRequest.CreateBranch(DESIGN, "Second")),
+        ),
       )
       assertIs<UiBuilderBranchResponse.Merge>(
         scopedBranches.executeBranch(
-          UiBuilderBranchCall(agent, UiBuilderBranchRequest.MergeBranch("try", dryRun = true))
-        )
+          UiBuilderBranchCall(agent, UiBuilderBranchRequest.MergeBranch("try", dryRun = true)),
+        ),
       )
       assertIs<UiBuilderBranchResponse.Error>(
         scopedBranches.executeBranch(
-          UiBuilderBranchCall(agent, UiBuilderBranchRequest.CreateBranch("other", "Nope"))
-        )
+          UiBuilderBranchCall(agent, UiBuilderBranchRequest.CreateBranch("other", "Nope")),
+        ),
       )
       // Without the parent lookup the branch is just another unnamed design.
       val unaware = ServeUiBuilderGrantScope.limit(port, lookup)
       assertIs<UiBuilderServiceResponse.Error>(
-        unaware.execute(UiBuilderServiceCall(agent, UiBuilderServiceRequest.OpenDesign("try")))
+        unaware.execute(UiBuilderServiceCall(agent, UiBuilderServiceRequest.OpenDesign("try"))),
       )
     }
 
@@ -460,7 +460,7 @@ class ServeUiBuilderBranchMcpTest {
       mcp.call(
         ServeUiBuilderMcp.CREATE_DESIGN,
         Json.parseToJsonElement(
-            """{"designId":"$designId","includeCatalog":true,"document":$document}"""
+            """{"designId":"$designId","includeCatalog":true,"document":$document}""",
           )
           .jsonObject,
         owner,
@@ -494,7 +494,7 @@ class ServeUiBuilderBranchMcpTest {
       mcp.call(
         ServeUiBuilderMcp.APPLY,
         Json.parseToJsonElement(
-            """{"designId":"$designId","operationId":"$operationId","baseRevision":$baseRevision,"operations":$operations}"""
+            """{"designId":"$designId","operationId":"$operationId","baseRevision":$baseRevision,"operations":$operations}""",
           )
           .jsonObject,
         owner,
@@ -520,8 +520,8 @@ class ServeUiBuilderBranchMcpTest {
   private suspend fun document(designId: String): DesignDocumentV1 =
     assertIs<UiBuilderServiceResponse.Snapshot>(
         service.execute(
-          UiBuilderServiceCall(owner, UiBuilderServiceRequest.GetSnapshot(designId, null))
-        )
+          UiBuilderServiceCall(owner, UiBuilderServiceRequest.GetSnapshot(designId, null)),
+        ),
       )
       .snapshot
       .state

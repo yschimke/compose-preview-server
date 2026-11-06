@@ -282,7 +282,7 @@ class ServeSessionRegistry(
     // in [entryFor], the only two places a session id is bound.
     if (sessionId in ServeSites.RESERVED_SYSTEMS) {
       System.err.println(
-        "serve: refusing session '$sessionId' — that name is one of the server's own routes"
+        "serve: refusing session '$sessionId' — that name is one of the server's own routes",
       )
       return
     }

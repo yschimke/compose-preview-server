@@ -98,9 +98,9 @@ class ServeUiBuilderCatalogRecoveryTest {
       assertIs<UiBuilderServiceResponse.Delta>(
           runBlocking {
             service.execute(
-              UiBuilderServiceCall(owner, UiBuilderServiceRequest.GetDelta(DESIGN, 0, 10))
+              UiBuilderServiceCall(owner, UiBuilderServiceRequest.GetDelta(DESIGN, 0, 10)),
             )
-          }
+          },
         )
         .delta
     assertEquals(

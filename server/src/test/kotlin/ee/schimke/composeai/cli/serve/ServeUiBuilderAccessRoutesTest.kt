@@ -54,7 +54,7 @@ class ServeUiBuilderAccessRoutesTest {
             allowedActions = listOf(DesignAccessActionV1.READ, DesignAccessActionV1.WRITE),
             grantedByActorId = "github:owner",
             grantedAtEpochMillis = 1_000,
-          )
+          ),
         ),
     )
 
@@ -83,7 +83,7 @@ class ServeUiBuilderAccessRoutesTest {
                 UiBuilderServiceError(
                   ServiceErrorCodeV1.CATALOG_UNAVAILABLE,
                   "catalog unavailable for stored design broken",
-                )
+                ),
               )
             else UiBuilderServiceResponse.Catalogs(emptyList())
           is UiBuilderServiceRequest.GetDesignAccess ->
@@ -93,7 +93,7 @@ class ServeUiBuilderAccessRoutesTest {
               UiBuilderServiceResponse.DesignAccess(request.designId, access)
             else
               UiBuilderServiceResponse.Error(
-                UiBuilderServiceError(ServiceErrorCodeV1.FORBIDDEN, "not yours")
+                UiBuilderServiceError(ServiceErrorCodeV1.FORBIDDEN, "not yours"),
               )
           is UiBuilderServiceRequest.UpdateDesignAccess -> {
             mutations += request

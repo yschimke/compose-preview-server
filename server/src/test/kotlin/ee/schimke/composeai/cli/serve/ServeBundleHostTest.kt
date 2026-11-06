@@ -32,7 +32,7 @@ class ServeBundleHostTest {
     File(dir, "${ServeAnnotationStore.DIRECTORY}/${ServeAnnotationStore.INDEX_FILE}")
       .writeText(
         """{"schema":"compose-preview-annotations/v1",
-           "previews":{"$previewId":[${records.joinToString(",")}]}}"""
+           "previews":{"$previewId":[${records.joinToString(",")}]}}""",
       )
     return dir
   }
@@ -55,7 +55,7 @@ class ServeBundleHostTest {
     file.writeText(
       """{"schema":"${ServeKnownDifferences.SCHEMA}","acceptances":[
         {"id":"glyph","issue":"https://github.com/yschimke/m3-catalog/issues/40",
-         "mask":"mask.png"}]}"""
+         "mask":"mask.png"}]}""",
     )
 
     val served = host.knownDifferences()
@@ -198,7 +198,7 @@ class ServeBundleHostTest {
           ]
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
     val host = ServeBundleHost(dir, label = "compose-m3")
     assertEquals(RemoteComposePlayerKind.EMBEDDED, host.bakedRcPlayer("com.example.Card"))
@@ -236,7 +236,7 @@ class ServeBundleHostTest {
           "com.example.Pinned": {"previewParams":{"capturePlayer":"java"}}
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
     val host = ServeBundleHost(dir, label = "remote-m3")
     assertEquals(RemoteComposePlayerKind.EMBEDDED, host.bakedRcPlayer("com.example.Card"))
@@ -278,7 +278,7 @@ class ServeBundleHostTest {
           "com.example.Pinned": {"previewParams":{"capturePlayer":"androidx-view"}}
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
     val host = ServeBundleHost(dir, label = "remote-m3")
     assertEquals(RemoteComposePlayerKind.EMBEDDED, host.bakedRcPlayer("com.example.Card"))
@@ -309,7 +309,7 @@ class ServeBundleHostTest {
           ]
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
     val host = ServeBundleHost(dir, label = "compose-m3")
     assertEquals(
@@ -343,7 +343,7 @@ class ServeBundleHostTest {
           ]
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
     assertEquals(0x20, ServeBundleHost(dir, label = "b").previews.single().uiMode)
@@ -375,7 +375,7 @@ class ServeBundleHostTest {
           "checkbox__ideal__unchecked__light": { "state": "unchecked", "theme": "light" }
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
     val host = ServeBundleHost(dir, label = "compose-m3")
     val byId = host.previews.associateBy { it.id }
@@ -438,7 +438,7 @@ class ServeBundleHostTest {
     val slugDir = File(figma, "speakerdetails").apply { mkdirs() }
     File(slugDir, "ideal__default__dark__compact.svg")
       .writeText(
-        "<svg data-variant=\"dark\"><image href=\"ideal__default__dark__compact.figma-raster/n.png\"/></svg>"
+        "<svg data-variant=\"dark\"><image href=\"ideal__default__dark__compact.figma-raster/n.png\"/></svg>",
       )
     File(slugDir, "ideal__default__dark__compact.figma-raster").mkdirs()
     File(slugDir, "ideal__default__dark__compact.figma-raster/n.png").writeBytes(byteArrayOf(7))
@@ -488,7 +488,7 @@ class ServeBundleHostTest {
     assertTrue(
       svg.contains(
         "href=\"https://raw.githubusercontent.com/joreilly/Confetti/design-artifacts/" +
-          "confetti-mobile/figma/speakerdetails/ideal__default__dark__compact.figma-raster/232.png\""
+          "confetti-mobile/figma/speakerdetails/ideal__default__dark__compact.figma-raster/232.png\"",
       ),
       "web mode must link the crop to its published branch file: $svg",
     )
@@ -702,7 +702,7 @@ class ServeBundleHostTest {
            "params":{"density":2.625,"captureGutter":{"start":4,"top":4,"end":4,"bottom":5}}}
         ]}
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
     val crop =
@@ -734,11 +734,11 @@ class ServeBundleHostTest {
            "className":"ButtonsKt","params":{"density":2.625}}
         ]}
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
     assertNull(
-      ServeBundleHost(dir, label = "b").contentCrop("button-filled__ideal__default__light")
+      ServeBundleHost(dir, label = "b").contentCrop("button-filled__ideal__default__light"),
     )
   }
 
@@ -756,7 +756,7 @@ class ServeBundleHostTest {
                      "captureGutter":{"start":4,"top":1,"end":12,"bottom":5}}}
         ]}
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
     val crop = ServeBundleHost(dir, label = "b").contentCrop("sticker__ideal__rtl")
@@ -780,7 +780,7 @@ class ServeBundleHostTest {
            "params":{"density":1.0,"captureGutter":{"start":4,"top":4,"end":4,"bottom":4}}}
         ]}
         """
-          .trimIndent()
+          .trimIndent(),
       )
     val figma = File(dir, "figma").apply { mkdirs() } // no vector for this id yet
 
@@ -813,7 +813,7 @@ class ServeBundleHostTest {
            "params":{"density":1.0,"captureGutter":{"start":4,"top":4,"end":4,"bottom":4}}}
         ]}
         """
-          .trimIndent()
+          .trimIndent(),
       )
     assertEquals(
       192,

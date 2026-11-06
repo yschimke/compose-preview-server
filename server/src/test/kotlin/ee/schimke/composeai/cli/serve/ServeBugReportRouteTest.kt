@@ -47,7 +47,7 @@ class ServeBugReportRouteTest {
            "raster":{"path":"references/button.png","width":2,"height":2},
            "source":{"provider":"figma"}}]}
         """
-          .trimIndent()
+          .trimIndent(),
       )
     return ServeBundleHost(
       dir,
@@ -188,7 +188,7 @@ class ServeBugReportRouteTest {
     server = newServer(public = true, token = "unused")
     val (_, body) =
       get(
-        "/report-bug?from=%2Fcompose-m3%2Fp%2Fbutton-filled%3Fat%3DABCDEF123456%26session%3Dcompose-m3"
+        "/report-bug?from=%2Fcompose-m3%2Fp%2Fbutton-filled%3Fat%3DABCDEF123456%26session%3Dcompose-m3",
       )
     assertTrue(body.contains("render/button-filled.png?at=abcdef123456"), body)
     assertFalse(body.contains("render/button-filled.png?session"), body)

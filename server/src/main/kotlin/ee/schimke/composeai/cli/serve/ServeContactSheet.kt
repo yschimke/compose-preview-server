@@ -189,7 +189,7 @@ internal object ServeContactSheet {
                 y.toDouble(),
                 size.first.toDouble(),
                 size.second.toDouble(),
-              )
+              ),
             )
           } else if (arc > 0) {
             g.clip(
@@ -200,7 +200,7 @@ internal object ServeContactSheet {
                 size.second.toDouble(),
                 arc,
                 arc,
-              )
+              ),
             )
           }
           g.drawImage(image, x, y, size.first, size.second, null)

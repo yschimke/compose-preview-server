@@ -59,7 +59,7 @@ internal class ServeMcpOAuthClients(file: Path?, private val clock: () -> Long) 
   /** Reload under an OS lock so overlapping deployments cannot overwrite each other's clients. */
   @Synchronized
   private fun <T> transaction(
-    action: (MutableMap<String, ServeMcpOAuth.RegisteredClient>) -> T
+    action: (MutableMap<String, ServeMcpOAuth.RegisteredClient>) -> T,
   ): T {
     val target = file
     if (target == null) {

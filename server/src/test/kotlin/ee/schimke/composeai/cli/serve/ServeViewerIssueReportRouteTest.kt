@@ -44,7 +44,7 @@ class ServeViewerIssueReportRouteTest {
       .writeText(
         previewIds.joinToString(prefix = "{", postfix = "}") { id ->
           "\"$id\":{\"componentId\":\"Button/Filled\"}"
-        }
+        },
       )
     // A design reference for the first preview, so the focused comparison is a real pair.
     File(dir, "references").apply { mkdirs() }
@@ -57,7 +57,7 @@ class ServeViewerIssueReportRouteTest {
            "raster":{"path":"references/button.png","width":2,"height":2},
            "source":{"provider":"figma"}}]}
         """
-          .trimIndent()
+          .trimIndent(),
       )
     File(dir, "parity").mkdirs()
     File(dir, "parity/issues.json")
@@ -70,7 +70,7 @@ class ServeViewerIssueReportRouteTest {
            "previewIds":["button-large"]}
         ]}
         """
-          .trimIndent()
+          .trimIndent(),
       )
     return ServeBundleHost(
       dir,
@@ -182,7 +182,7 @@ class ServeViewerIssueReportRouteTest {
     val (_, body) = get("/compose-m3/p/button-filled")
     assertTrue(
       body.contains(
-        "<input class=\"cp-report-summary-input\" type=\"text\" name=\"title\" required"
+        "<input class=\"cp-report-summary-input\" type=\"text\" name=\"title\" required",
       ),
       body,
     )

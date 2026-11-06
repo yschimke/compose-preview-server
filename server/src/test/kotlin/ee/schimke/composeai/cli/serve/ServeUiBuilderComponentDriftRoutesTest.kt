@@ -178,7 +178,7 @@ class ServeUiBuilderComponentDriftRoutesTest {
     File(components, "index.json")
       .writeText(
         """{"schema":"${ServeUiBuilderComponentLibrary.INDEX_SCHEMA}",
-           "components":[{"id":"$COMPONENT_KEY","title":"Cell","file":"../escape.json"}]}"""
+           "components":[{"id":"$COMPONENT_KEY","title":"Cell","file":"../escape.json"}]}""",
       )
 
     assertEquals(
@@ -264,7 +264,7 @@ class ServeUiBuilderComponentDriftRoutesTest {
     File(components, "index.json")
       .writeText(
         """{"schema":"${ServeUiBuilderComponentLibrary.INDEX_SCHEMA}",
-           "components":[{"id":"$COMPONENT_KEY","title":"$title"}]}"""
+           "components":[{"id":"$COMPONENT_KEY","title":"$title"}]}""",
       )
     File(components, "$COMPONENT_KEY.json")
       .writeText(
@@ -298,7 +298,7 @@ class ServeUiBuilderComponentDriftRoutesTest {
           }
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
   }
 
@@ -319,7 +319,7 @@ class ServeUiBuilderComponentDriftRoutesTest {
     val request =
       Request.Builder()
         .url(
-          "http://127.0.0.1:${server.server.port}/api/ui-builder/v1/designs/$designId/component-drift$query"
+          "http://127.0.0.1:${server.server.port}/api/ui-builder/v1/designs/$designId/component-drift$query",
         )
         .apply { if (token != null) header(ServeHttpServer.TOKEN_HEADER, token) }
         .build()
@@ -341,7 +341,7 @@ class ServeUiBuilderComponentDriftRoutesTest {
           .url("http://127.0.0.1:${server.server.port}/api/ui-builder/v1/requests")
           .header(ServeHttpServer.TOKEN_HEADER, OPERATOR_TOKEN)
           .post(json.encodeToString(envelope).toRequestBody(JSON_MEDIA_TYPE))
-          .build()
+          .build(),
       )
       .execute()
       .use { assertEquals(200, it.code, it.body?.string()) }
@@ -375,7 +375,7 @@ class ServeUiBuilderComponentDriftRoutesTest {
               id = "cell",
               componentId = "m3/text",
               properties = mapOf("text" to StringValueV1("Contributions")),
-            )
+            ),
         ),
       components =
         mapOf(
@@ -387,7 +387,7 @@ class ServeUiBuilderComponentDriftRoutesTest {
                 importedDigest?.let {
                   ComponentSourceV1(system = SYSTEM, componentId = COMPONENT_KEY, digest = it)
                 },
-            )
+            ),
         ),
     )
 
@@ -402,7 +402,7 @@ class ServeUiBuilderComponentDriftRoutesTest {
         exporter =
           ScreenGeneratorComposeExportExecutor(
             ComponentRecordSource(mapOf(SYSTEM to ScreenGeneratorScreenFixture.componentsFile()))::
-              record
+              record,
           ),
       )
     val server =
@@ -442,7 +442,7 @@ class ServeUiBuilderComponentDriftRoutesTest {
             code = ServiceErrorCodeV1.CATALOG_UNAVAILABLE,
             message = "the base catalog is rebuilding",
             retryable = true,
-          )
+          ),
         )
       else delegate.execute(call)
   }

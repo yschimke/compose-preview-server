@@ -33,7 +33,7 @@ class ServeUiBuilderComponentStoreTest {
 
     val published =
       assertIs<ServeUiBuilderComponentStore.PublishResult.Published>(
-        store.publish(SYSTEM, "inbox-email", "Inbox email", "One row", symbol(), null)
+        store.publish(SYSTEM, "inbox-email", "Inbox email", "One row", symbol(), null),
       )
 
     assertTrue(published.created)
@@ -60,20 +60,20 @@ class ServeUiBuilderComponentStoreTest {
           components =
             document.components.mapValues { (_, component) ->
               component.copy(source = ComponentSourceV1(SYSTEM, "inbox-email", "sha256:old"))
-            }
+            },
         )
       }
 
     val published =
       assertIs<ServeUiBuilderComponentStore.PublishResult.Published>(
-        store.publish(SYSTEM, "inbox-email", "Inbox email", null, imported, null)
+        store.publish(SYSTEM, "inbox-email", "Inbox email", null, imported, null),
       )
 
     assertNull(published.symbol.component.source)
     val plain =
       assertIs<ServeUiBuilderComponentStore.PublishResult.Published>(
         ServeUiBuilderComponentStore(root.resolve("other"))
-          .publish(SYSTEM, "inbox-email", "Inbox email", null, symbol(), null)
+          .publish(SYSTEM, "inbox-email", "Inbox email", null, symbol(), null),
       )
     assertEquals(plain.symbol.digest, published.symbol.digest)
   }
@@ -83,12 +83,12 @@ class ServeUiBuilderComponentStoreTest {
     val store = ServeUiBuilderComponentStore(root)
     val first =
       assertIs<ServeUiBuilderComponentStore.PublishResult.Published>(
-        store.publish(SYSTEM, "inbox-email", "Inbox email", null, symbol(), null)
+        store.publish(SYSTEM, "inbox-email", "Inbox email", null, symbol(), null),
       )
 
     val again =
       assertIs<ServeUiBuilderComponentStore.PublishResult.Conflict>(
-        store.publish(SYSTEM, "inbox-email", "Inbox email", null, symbol("Changed"), null)
+        store.publish(SYSTEM, "inbox-email", "Inbox email", null, symbol("Changed"), null),
       )
 
     assertEquals(first.symbol.digest, again.currentDigest)
@@ -99,7 +99,7 @@ class ServeUiBuilderComponentStoreTest {
     val store = ServeUiBuilderComponentStore(root)
     val first =
       assertIs<ServeUiBuilderComponentStore.PublishResult.Published>(
-        store.publish(SYSTEM, "inbox-email", "Inbox email", null, symbol(), null)
+        store.publish(SYSTEM, "inbox-email", "Inbox email", null, symbol(), null),
       )
 
     val second =
@@ -111,7 +111,7 @@ class ServeUiBuilderComponentStoreTest {
           null,
           symbol("Changed"),
           first.symbol.digest,
-        )
+        ),
       )
     assertEquals(false, second.created)
     assertNotEquals(first.symbol.digest, second.symbol.digest)
@@ -127,11 +127,11 @@ class ServeUiBuilderComponentStoreTest {
           null,
           symbol("Mine"),
           first.symbol.digest,
-        )
+        ),
       )
     assertEquals(second.symbol.digest, stale.currentDigest)
     assertIs<ServeUiBuilderComponentStore.PublishResult.Conflict>(
-      store.publish(SYSTEM, "absent", "Absent", null, symbol(key = "absent"), first.symbol.digest)
+      store.publish(SYSTEM, "absent", "Absent", null, symbol(key = "absent"), first.symbol.digest),
     )
   }
 
@@ -160,13 +160,13 @@ class ServeUiBuilderComponentStoreTest {
                 ("row" to
                   document.nodes
                     .getValue("row")
-                    .copy(slots = mapOf("children" to listOf("sender", "placed"))))
+                    .copy(slots = mapOf("children" to listOf("sender", "placed")))),
           )
         }
 
     val refused =
       assertIs<ServeUiBuilderComponentStore.PublishResult.Refused>(
-        store.publish(SYSTEM, "inbox-email", "Inbox email", null, nested, null)
+        store.publish(SYSTEM, "inbox-email", "Inbox email", null, nested, null),
       )
     assertTrue("places another component" in refused.reason, refused.reason)
 
@@ -174,17 +174,17 @@ class ServeUiBuilderComponentStoreTest {
       symbol().let { document ->
         document.copy(
           components =
-            document.components + ("again" to DesignComponentV1(name = "Again", root = "sender"))
+            document.components + ("again" to DesignComponentV1(name = "Again", root = "sender")),
         )
       }
     assertIs<ServeUiBuilderComponentStore.PublishResult.Refused>(
-      store.publish(SYSTEM, "inbox-email", "Inbox email", null, twice, null)
+      store.publish(SYSTEM, "inbox-email", "Inbox email", null, twice, null),
     )
     assertIs<ServeUiBuilderComponentStore.PublishResult.Refused>(
-      store.publish("other-system", "inbox-email", "Inbox email", null, symbol(), null)
+      store.publish("other-system", "inbox-email", "Inbox email", null, symbol(), null),
     )
     assertIs<ServeUiBuilderComponentStore.PublishResult.Refused>(
-      store.publish(SYSTEM, "../escape", "Escape", null, symbol(key = "../escape"), null)
+      store.publish(SYSTEM, "../escape", "Escape", null, symbol(key = "../escape"), null),
     )
     assertTrue(store.coordinates().isEmpty())
     assertEquals(emptyList(), File(root.toFile(), SYSTEM).list()?.toList().orEmpty())

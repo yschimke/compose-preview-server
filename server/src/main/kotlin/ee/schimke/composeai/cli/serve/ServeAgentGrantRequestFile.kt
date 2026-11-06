@@ -389,7 +389,7 @@ internal class ServeAgentGrantRequestFile(
       }
     if (snapshot.format != FORMAT || snapshot.version != VERSION) {
       throw IOException(
-        "not an access requests file of this format: ${snapshot.format} v${snapshot.version}"
+        "not an access requests file of this format: ${snapshot.format} v${snapshot.version}",
       )
     }
     return snapshot.requests.filter { it.id.isNotBlank() }.associateBy { it.id }

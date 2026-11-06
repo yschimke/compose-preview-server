@@ -118,7 +118,7 @@ object ScreenGeneratorScreenFixture {
                     topDp = JsonPrimitive(24),
                     endDp = JsonPrimitive(16),
                     bottomDp = JsonPrimitive(16),
-                  )
+                  ),
                 ),
               slots = mapOf("content" to listOf("heading", "card")),
             ),

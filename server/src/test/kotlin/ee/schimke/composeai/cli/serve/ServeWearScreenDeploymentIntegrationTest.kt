@@ -96,7 +96,7 @@ class ServeWearScreenDeploymentIntegrationTest {
            "published-list":{"id":"published-list","componentId":"wear-m3/transforming-lazy-column",
              "properties":{},"modifiers":[],"slots":{"items":[$items]}}$extra}}
         """
-        }
+        },
       )
       .templates
 
@@ -142,7 +142,7 @@ class ServeWearScreenDeploymentIntegrationTest {
       // 4. Export the saved design through the host's configured exporter.
       val exported =
         assertIs<ExportResponseV1>(
-          response(running, ExportDesignRequestV1("activity", format = ExportFormatV1.COMPOSE))
+          response(running, ExportDesignRequestV1("activity", format = ExportFormatV1.COMPOSE)),
         )
       val source = exported.artifact?.content.orEmpty()
       assertTrue(source.isNotBlank(), "the server must delegate to the configured Wear exporter")
@@ -167,7 +167,7 @@ class ServeWearScreenDeploymentIntegrationTest {
 
       val exported =
         assertIs<ExportResponseV1>(
-          response(running, ExportDesignRequestV1("blank-watch", format = ExportFormatV1.COMPOSE))
+          response(running, ExportDesignRequestV1("blank-watch", format = ExportFormatV1.COMPOSE)),
         )
       assertTrue(exported.artifact?.content.orEmpty().isNotBlank())
     } finally {
@@ -207,7 +207,7 @@ class ServeWearScreenDeploymentIntegrationTest {
             .url("http://127.0.0.1:${running.server.port}/ui-builder/designs")
             .header(ServeHttpServer.TOKEN_HEADER, OPERATOR_TOKEN)
             .post(form.toRequestBody("application/x-www-form-urlencoded".toMediaType()))
-            .build()
+            .build(),
         )
         .execute()
     return http.use { it.code to (it.header("Location") ?: it.body.string()) }
@@ -229,9 +229,9 @@ class ServeWearScreenDeploymentIntegrationTest {
             .post(
               json
                 .encodeToString(HttpRequestEnvelopeV1.serializer(), envelope)
-                .toRequestBody("application/json".toMediaType())
+                .toRequestBody("application/json".toMediaType()),
             )
-            .build()
+            .build(),
         )
         .execute()
     return http.use {
@@ -256,7 +256,7 @@ class ServeWearScreenDeploymentIntegrationTest {
           .takeIf { it.isFile }
           ?.readText()
           ?: File("docs/design/fixtures/ui-builder/jetcaster-discover-operations-v1.json")
-            .readText()
+            .readText(),
       )
     val registry = ServeSessionRegistry(open = { null })
     val service =

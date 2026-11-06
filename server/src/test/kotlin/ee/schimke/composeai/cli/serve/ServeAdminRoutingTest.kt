@@ -60,8 +60,8 @@ class ServeAdminRoutingTest {
           listed = true,
           repo = "yschimke/compose-ai-tools",
           branch = "design-artifacts/compose-m3",
-        )
-      )
+        ),
+      ),
     )
 
   /** Systems the stubbed "fetch" refuses, so the failure path is reachable from a request. */
@@ -145,8 +145,8 @@ class ServeAdminRoutingTest {
               pluginPreApplied = false,
               buildable = true,
               skipReason = null,
-            )
-          )
+            ),
+          ),
         )
       },
       onLog = {},
@@ -220,7 +220,7 @@ class ServeAdminRoutingTest {
             override fun apply(values: Map<String, String?>) {
               liveModels += values.values.single()
             }
-          }
+          },
         ),
       fileSystem = fs,
     )
@@ -632,7 +632,7 @@ class ServeAdminRoutingTest {
     configFile.save(
       configFile
         .load()
-        .withEntry(ServeCatalogsConfig.Entry("compose-m3", repo = "yschimke/compose-ai-tools"))
+        .withEntry(ServeCatalogsConfig.Entry("compose-m3", repo = "yschimke/compose-ai-tools")),
     )
     assertEquals(
       409,
@@ -732,8 +732,8 @@ class ServeAdminRoutingTest {
       configFile
         .load()
         .withEntry(
-          ServeCatalogsConfig.Entry(system = "newcat", repo = "someorg/newcat", group = "later")
-        )
+          ServeCatalogsConfig.Entry(system = "newcat", repo = "someorg/newcat", group = "later"),
+        ),
     )
 
     val (code, _) =

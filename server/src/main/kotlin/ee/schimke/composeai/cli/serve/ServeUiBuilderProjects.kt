@@ -88,7 +88,7 @@ internal class ServeUiBuilderProjects(
               if (it.id == existing.id)
                 it.copy(original = existing.original, working = request.content)
               else it
-            }
+            },
         )
       store.save(stored, project.revision)
       stored
@@ -104,7 +104,7 @@ internal class ServeUiBuilderProjects(
     if (project.role(actor) != ProjectRole.OWNER)
       throw ProjectAccessDenied("only the project owner can manage membership")
     require(
-      request.members.size <= 100 && request.members.values.none { it == ProjectRole.OWNER }
+      request.members.size <= 100 && request.members.values.none { it == ProjectRole.OWNER },
     ) {
       "grant viewer or editor access"
     }
@@ -114,7 +114,7 @@ internal class ServeUiBuilderProjects(
           it.length <= 256 &&
           !ServeUiBuilderVisibility.isReservedActor(it) &&
           it != project.owner
-      }
+      },
     ) {
       "invalid project member"
     }
@@ -175,7 +175,7 @@ internal class ServeUiBuilderProjects(
                   .filter { it.kind in setOf("components", "tokens", "themes") }
                   .groupBy { it.kind }
                   .mapValues { (_, entries) -> entries.map { it.path } },
-            )
+            ),
           )
           .jsonObject
       files["project.json"] =
@@ -186,7 +186,7 @@ internal class ServeUiBuilderProjects(
       projectDigest(
         files.toSortedMap().entries.joinToString("\u0000") {
           it.key + "\u0000" + projectDigest(it.value)
-        }
+        },
       )
     return ProjectReview(
       project.revision,
@@ -222,7 +222,7 @@ internal class ServeUiBuilderProjects(
                 "project.json",
                 reviewed.files.getValue("project.json"),
                 kind = "manifest",
-              )
+              ),
         )
       else project
     val publication = github.publish(candidate, reviewed.files, token)
@@ -272,7 +272,7 @@ internal class ServeUiBuilderProjects(
               document.home
                 ?: if (project.source != null)
                   DesignHomeV1.Repo(
-                    (project.source.root.takeIf { it.isNotEmpty() }?.plus('/') ?: "") + file.path
+                    (project.source.root.takeIf { it.isNotEmpty() }?.plus('/') ?: "") + file.path,
                   )
                 else serverOrigin()?.let { DesignHomeV1.Server(it, id) }
             val candidate =
@@ -289,9 +289,9 @@ internal class ServeUiBuilderProjects(
                   UiBuilderServiceCall(
                     owner,
                     UiBuilderServiceRequest.CreateDesign(
-                      remapProjectNavigation(candidate, navigation)
+                      remapProjectNavigation(candidate, navigation),
                     ),
-                  )
+                  ),
                 )
               }
             require(response is UiBuilderServiceResponse.Snapshot) { serviceFailure(response) }

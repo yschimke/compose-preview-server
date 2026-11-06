@@ -126,10 +126,10 @@ class M3CatalogComponentRecordTest {
         checkNotNull(
             CurrentM3UiBuilderCatalogExecutor::class
               .java
-              .getResourceAsStream("/ee/schimke/composeai/uibuilder/catalogs/m3-catalog-v1.json")
+              .getResourceAsStream("/ee/schimke/composeai/uibuilder/catalogs/m3-catalog-v1.json"),
           )
           .bufferedReader()
-          .use { it.readText() }
+          .use { it.readText() },
       )
       .jsonObject
       .getValue("components")
@@ -179,7 +179,7 @@ class M3CatalogComponentRecordTest {
     val discovered =
       json
         .decodeFromString<ComponentRecordFile>(
-          File("../docs/design/fixtures/ui-builder/m3-catalog-generated-record-v1.json").readText()
+          File("../docs/design/fixtures/ui-builder/m3-catalog-generated-record-v1.json").readText(),
         )
         .components
         .associateBy { it.symbol.name }
@@ -285,7 +285,7 @@ class M3CatalogComponentRecordTest {
             document = document,
             catalog = catalog,
             format = ExportFormatV1.COMPOSE,
-          )
+          ),
         )
     val source = artifact.content
 

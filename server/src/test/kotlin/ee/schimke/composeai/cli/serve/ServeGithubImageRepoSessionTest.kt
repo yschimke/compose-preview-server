@@ -197,7 +197,7 @@ class ServeGithubImageRepoSessionTest {
       val start =
         http
           .newCall(
-            Request.Builder().url("http://127.0.0.1:${server.port}/auth/github/start").build()
+            Request.Builder().url("http://127.0.0.1:${server.port}/auth/github/start").build(),
           )
           .execute()
           .use { resp ->
@@ -211,7 +211,7 @@ class ServeGithubImageRepoSessionTest {
             Request.Builder()
               .url("http://127.0.0.1:${server.port}/auth/github/callback?code=ok&state=$state")
               .header("Cookie", start.second)
-              .build()
+              .build(),
           )
           .execute()
           .use { resp -> resp.headers("Set-Cookie").first { it.startsWith("cp_gh_auth=") } }

@@ -43,7 +43,7 @@ class ServeWebThumbCropTest {
     // shrink it on a narrow card) rather than a fixed height.
     assertTrue(
       html.contains(
-        "class=\"cp-crop\" style=\"--cp-crop-w-per-cap:1;--cp-crop-w-per-h:2.5;--cp-crop-max-w:120px;aspect-ratio:120/48\""
+        "class=\"cp-crop\" style=\"--cp-crop-w-per-cap:1;--cp-crop-w-per-h:2.5;--cp-crop-max-w:120px;aspect-ratio:120/48\"",
       ),
       "clip window sized to the box by aspect-ratio",
     )
@@ -78,7 +78,7 @@ class ServeWebThumbCropTest {
     val html = ServeWeb.homeIndexPage(listOf(system), token = "t", isPublic = true)
     assertTrue(
       html.contains(
-        "class=\"cp-crop\" style=\"--cp-crop-w-per-cap:1;--cp-crop-w-per-h:2.5;--cp-crop-max-w:120px;aspect-ratio:120/48\""
+        "class=\"cp-crop\" style=\"--cp-crop-w-per-cap:1;--cp-crop-w-per-h:2.5;--cp-crop-max-w:120px;aspect-ratio:120/48\"",
       ),
       "hero framed to its box",
     )
@@ -126,7 +126,7 @@ class ServeWebThumbCropTest {
     // `--cp-crop-w-per-h`.
     assertTrue(
       html.contains(
-        "class=\"cp-crop\" style=\"--cp-crop-w-per-cap:1;--cp-crop-w-per-h:3;--cp-crop-max-w:300px;aspect-ratio:240/80\""
+        "class=\"cp-crop\" style=\"--cp-crop-w-per-cap:1;--cp-crop-w-per-h:3;--cp-crop-max-w:300px;aspect-ratio:240/80\"",
       ),
       "window width published as a ratio of the cap",
     )
@@ -193,14 +193,14 @@ class ServeWebThumbCropTest {
     // scale. The cap is applied by `computeThumbCrop`/`computeGutterCrop`.
     assertFalse(
       css.contains(
-        ".cp-crop { position: relative; overflow: hidden; display: block; max-width: 100%; max-height"
+        ".cp-crop { position: relative; overflow: hidden; display: block; max-width: 100%; max-height",
       ),
       "no CSS height cap on an aspect-ratio window",
     )
     // The cap the window resolves its ratio against, and the narrow-viewport drop (#4544).
     assertTrue(
       css.contains(
-        "width: min(var(--cp-crop-max-w, 100%), calc(var(--cp-crop-w-per-cap, 9999) * var(--cp-thumb-cap, 240px)));"
+        "width: min(var(--cp-crop-max-w, 100%), calc(var(--cp-crop-w-per-cap, 9999) * var(--cp-thumb-cap, 240px)));",
       ),
       "window width derived from the cap, defaulting to the desktop 240px",
     )
@@ -212,7 +212,7 @@ class ServeWebThumbCropTest {
     // row's content height (196px, after 12px padding each side) or it draws at the grid's cap.
     assertTrue(
       css.contains(
-        "width: min(var(--cp-crop-max-w, 100%), calc(var(--cp-crop-w-per-h, var(--cp-crop-w-per-cap, 9999)) * 196px)); }"
+        "width: min(var(--cp-crop-max-w, 100%), calc(var(--cp-crop-w-per-h, var(--cp-crop-w-per-cap, 9999)) * 196px)); }",
       ),
       "a system-card window sizes against the box's own height, capped at the well's 196px",
     )
@@ -381,7 +381,7 @@ class ServeWebThumbCropTest {
           system("confetti-wear", "joreilly/Confetti"),
           system("cadence", "yschimke/cadence"),
           system("confetti-mobile", "joreilly/Confetti"),
-        )
+        ),
       )
 
     assertEquals(
@@ -462,7 +462,7 @@ class ServeWebThumbCropTest {
           system("legacy", "someorg/legacy", unlifted),
           system("jetnews", "yschimke/compose-samples", androidSamples),
           system("m3-catalog", "yschimke/m3-catalog", lifted),
-        )
+        ),
       )
 
     assertEquals(listOf("Design Systems", "android/compose-samples"), sections.map { it.heading })
@@ -495,7 +495,7 @@ class ServeWebThumbCropTest {
             designSystems.copy(priority = 100),
           ),
           system("m3-catalog", "yschimke/compose-ai-tools", designSystems.copy(priority = 100)),
-        )
+        ),
       )
 
     assertEquals(listOf("Design Systems", "Other"), sections.map { it.heading })

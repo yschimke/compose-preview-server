@@ -134,7 +134,7 @@ class ServeUiBuilderRoutesTest {
                 publicationDigest,
                 publicationRuntime,
               ) to published
-            }
+            },
           ) {
             published.takeIf { _ -> it == "custom-kit" }
           },
@@ -165,14 +165,14 @@ class ServeUiBuilderRoutesTest {
               .build(),
             emptyList(),
           )
-          .build()
+          .build(),
       )
     client
       .newCall(
         Request.Builder()
           .url("http://127.0.0.1:${server.port}/api/ui-builder/v1/catalogs/custom-kit/templates")
           .header(ACTOR_HEADER, "reader")
-          .build()
+          .build(),
       )
       .execute()
       .use { response ->
@@ -201,7 +201,7 @@ class ServeUiBuilderRoutesTest {
           Request.Builder()
             .url("http://127.0.0.1:${server.port}/api/ui-builder/v1/catalogs/custom-kit/templates")
             .header(ACTOR_HEADER, "reader")
-            .build()
+            .build(),
         )
         .execute()
         .use { response ->
@@ -251,7 +251,7 @@ class ServeUiBuilderRoutesTest {
           .url("http://127.0.0.1:${server.port}/api/ui-builder/v1/documents/export.json")
           .header(ACTOR_HEADER, "tester")
           .post("{}".toRequestBody())
-          .build()
+          .build(),
       )
       .execute()
       .use { assertEquals(400, it.code) }
@@ -262,7 +262,7 @@ class ServeUiBuilderRoutesTest {
             .url("http://127.0.0.1:${server.port}/api/ui-builder/v1/documents/export.$format")
             .header(ACTOR_HEADER, "tester")
             .post("{}".toRequestBody())
-            .build()
+            .build(),
         )
         .execute()
         .use { assertEquals(404, it.code) }
@@ -299,7 +299,7 @@ class ServeUiBuilderRoutesTest {
             AgentGrantCapability.UI_BUILDER_READ,
             AgentGrantCapability.UI_BUILDER_WRITE,
             AgentGrantCapability.UI_BUILDER_EXPORT,
-          )
+          ),
       )
     val request =
       requireNotNull(
@@ -309,7 +309,7 @@ class ServeUiBuilderRoutesTest {
           requestedScope = AgentGrantScope.PREVIEW,
           requestedTtlSeconds = 60,
           requestedCapabilities = setOf(AgentGrantCapability.UI_BUILDER_READ),
-        )
+        ),
       )
     val grant =
       requireNotNull(
@@ -319,7 +319,7 @@ class ServeUiBuilderRoutesTest {
           scope = AgentGrantScope.PREVIEW,
           ttlSeconds = 60,
           capabilities = setOf(AgentGrantCapability.UI_BUILDER_READ),
-        )
+        ),
       )
     val isolatedRegistry = ServeSessionRegistry(open = { null })
     val isolated =
@@ -382,7 +382,7 @@ class ServeUiBuilderRoutesTest {
             AgentGrantCapability.UI_BUILDER_READ,
             AgentGrantCapability.UI_BUILDER_WRITE,
             AgentGrantCapability.UI_BUILDER_EXPORT,
-          )
+          ),
       )
     val request =
       requireNotNull(
@@ -392,7 +392,7 @@ class ServeUiBuilderRoutesTest {
           requestedScope = AgentGrantScope.PREVIEW,
           requestedTtlSeconds = 600,
           requestedCapabilities = setOf(AgentGrantCapability.UI_BUILDER_READ),
-        )
+        ),
       )
     val grant =
       requireNotNull(
@@ -403,7 +403,7 @@ class ServeUiBuilderRoutesTest {
           scope = AgentGrantScope.PREVIEW,
           ttlSeconds = 600,
           capabilities = setOf(AgentGrantCapability.UI_BUILDER_READ),
-        )
+        ),
       )
     val isolatedRegistry = ServeSessionRegistry(open = { null })
     val isolated =
@@ -431,10 +431,10 @@ class ServeUiBuilderRoutesTest {
             Request.Builder()
               .url(
                 "http://127.0.0.1:${isolated.port}/ui-builder/?session=live&" +
-                  "actor=agent%3A${grant.fingerprint}&token=${grant.token}"
+                  "actor=agent%3A${grant.fingerprint}&token=${grant.token}",
               )
               .header("Accept", "text/html,application/xhtml+xml")
-              .build()
+              .build(),
           )
           .execute()
           .use { response ->
@@ -460,7 +460,7 @@ class ServeUiBuilderRoutesTest {
             Request.Builder()
               .url("http://127.0.0.1:${isolated.port}$UI_BUILDER_IDENTITY_PATH")
               .header("Cookie", cookie)
-              .build()
+              .build(),
           )
           .execute()
           .use {
@@ -476,7 +476,7 @@ class ServeUiBuilderRoutesTest {
           Request.Builder()
             .url("http://127.0.0.1:${isolated.port}/status")
             .header("Cookie", cookie)
-            .build()
+            .build(),
         )
         .execute()
         .use {
@@ -518,7 +518,7 @@ class ServeUiBuilderRoutesTest {
             .url("http://127.0.0.1:${isolated.port}/status")
             .header(ServeHttpServer.TOKEN_HEADER, "operator-token")
             .header("Cookie", cookie)
-            .build()
+            .build(),
         )
         .execute()
         .use {
@@ -535,7 +535,7 @@ class ServeUiBuilderRoutesTest {
             .header(ServeHttpServer.TOKEN_HEADER, "operator-token")
             .header("Cookie", cookie)
             .post("{}".toRequestBody())
-            .build()
+            .build(),
         )
         .execute()
         .use {
@@ -543,7 +543,7 @@ class ServeUiBuilderRoutesTest {
           assertTrue(
             it.headers("Set-Cookie").any { value ->
               value.startsWith("${ServeAgentGrantCookie.NAME}=") && value.contains("Max-Age=0")
-            }
+            },
           )
         }
       browser
@@ -556,7 +556,7 @@ class ServeUiBuilderRoutesTest {
             )
             .header("Origin", "http://127.0.0.1:${isolated.port}")
             .post("{}".toRequestBody())
-            .build()
+            .build(),
         )
         .execute()
         .use {
@@ -568,7 +568,7 @@ class ServeUiBuilderRoutesTest {
             .url("http://127.0.0.1:${isolated.port}${ServeAgentGrants.LEAVE_PATH}")
             .header("Cookie", cookie)
             .post("".toRequestBody())
-            .build()
+            .build(),
         )
         .execute()
         .use {
@@ -587,7 +587,7 @@ class ServeUiBuilderRoutesTest {
           Request.Builder()
             .url("http://127.0.0.1:${isolated.port}$UI_BUILDER_IDENTITY_PATH")
             .header("Cookie", cookie)
-            .build()
+            .build(),
         )
         .execute()
         .use { assertEquals(401, it.code) }
@@ -652,7 +652,7 @@ class ServeUiBuilderRoutesTest {
       client.newWebSocket(
         Request.Builder()
           .url(
-            "ws://127.0.0.1:${server.port}/api/ui-builder/v1/designs/design/updates?afterSequence=41"
+            "ws://127.0.0.1:${server.port}/api/ui-builder/v1/designs/design/updates?afterSequence=41",
           )
           .header(ACTOR_HEADER, "browser")
           .build(),
@@ -752,7 +752,7 @@ class ServeUiBuilderRoutesTest {
     { request ->
       if (request.designId == "missing") {
         UiBuilderServiceResponse.Error(
-          UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "design missing does not exist")
+          UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "design missing does not exist"),
         )
       } else {
         val provenance =
@@ -773,7 +773,7 @@ class ServeUiBuilderRoutesTest {
                 content = LIVE_SVG,
                 contentDigest = "svg-digest",
                 diagnostics = listOf(provenance),
-              )
+              ),
             )
           ExportFormatV1.PNG ->
             UiBuilderServiceResponse.Export(
@@ -784,7 +784,7 @@ class ServeUiBuilderRoutesTest {
                 content = java.util.Base64.getEncoder().encodeToString(LIVE_PNG),
                 contentDigest = "png-digest",
                 diagnostics = listOf(provenance),
-              )
+              ),
             )
           ExportFormatV1.COMPOSE -> error("the live routes never ask for Compose")
           ExportFormatV1.BUNDLE -> error("the live routes never ask for a bundle")
@@ -864,9 +864,9 @@ class ServeUiBuilderRoutesTest {
                   DiagnosticSeverityV1.INFO,
                   "REVISION_PINNED_REMOTE_EXPORT",
                   "Exported design design-1 revision 3 (hash).",
-                )
+                ),
               ),
-          )
+          ),
         )
       }
       val suffix = "export.${format.name.lowercase()}?revision=3&download=1"
@@ -888,9 +888,9 @@ class ServeUiBuilderRoutesTest {
                   DiagnosticSeverityV1.ERROR,
                   "REMOTE_EXPORT_UNSUPPORTED",
                   "nodes[choice]: unmapped component",
-                )
-              )
-          )
+                ),
+              ),
+          ),
         )
       }
       liveExport("actor", suffix).use {
@@ -920,9 +920,9 @@ class ServeUiBuilderRoutesTest {
                 DiagnosticSeverityV1.INFO,
                 "REVISION_PINNED_LOVELACE_EXPORT",
                 "Exported design design-1 revision 12 (hash).",
-              )
+              ),
             ),
-        )
+        ),
       )
     }
     assertEquals(401, liveExport(null, "export.json").use { it.code })
@@ -959,7 +959,7 @@ class ServeUiBuilderRoutesTest {
           requestId = "request-${capabilities.size}",
           actorId = envelopeActor,
           request = request,
-        )
+        ),
       )
     val builder =
       Request.Builder()
@@ -986,7 +986,7 @@ class ServeUiBuilderRoutesTest {
   ): Int {
     val body =
       json.encodeToString(
-        HttpRequestEnvelopeV1(requestId = "real-auth", actorId = actorId, request = request)
+        HttpRequestEnvelopeV1(requestId = "real-auth", actorId = actorId, request = request),
       )
     val builder =
       Request.Builder()
