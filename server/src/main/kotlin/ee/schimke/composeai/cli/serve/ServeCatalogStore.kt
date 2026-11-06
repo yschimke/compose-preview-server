@@ -728,7 +728,7 @@ class ServeCatalogStore(
         (listOfNotNull(heroPath) + bakedPathById.values).distinct().take(PUBLISH_SAMPLE_IMAGES)
       val landed =
         fetchCatalogAssetsToFiles(
-          sample.map { path -> (base + path) to File(previewsDir, "${previewIdFor(path)}.png") }
+          sample.map { path -> (base + path) to File(previewsDir, "${previewIdFor(path)}.png") },
         )
       if (landed.isEmpty()) {
         staging.deleteRecursively()
@@ -972,7 +972,7 @@ class ServeCatalogStore(
             ServePinnedManifest(
               fetch = { commit, file ->
                 ServeCatalogRevision.manifestUrl(repo, commit, file)?.let { fetchCatalogAsset(it) }
-              }
+              },
             ),
         )
       }
@@ -1016,7 +1016,7 @@ class ServeCatalogStore(
             prepared.clear()
             liveBundleFallback =
               ServeDegradation.liveBundleUnavailable(
-                "the ${descriptor.module.ifBlank { "primary" }} module bundle could not be fetched"
+                "the ${descriptor.module.ifBlank { "primary" }} module bundle could not be fetched",
               )
             break
           }
@@ -1044,7 +1044,7 @@ class ServeCatalogStore(
                 prepared.clear()
                 liveBundleFallback =
                   ServeDegradation.liveBundleUnavailable(
-                    "a resource for ${descriptor.module.ifBlank { "the primary module" }} could not be rehydrated"
+                    "a resource for ${descriptor.module.ifBlank { "the primary module" }} could not be rehydrated",
                   )
                 break
               }
@@ -1101,7 +1101,7 @@ class ServeCatalogStore(
         if (liveBundleFallback == null) {
           liveBundleFallback =
             ServeDegradation.liveBundleUnavailable(
-              withLaunchReason("the module bundle daemons could not be started", safe)
+              withLaunchReason("the module bundle daemons could not be started", safe),
             )
         }
       }
@@ -1113,7 +1113,7 @@ class ServeCatalogStore(
       if (bundleFile == null) {
         liveBundleFallback =
           ServeDegradation.liveBundleUnavailable(
-            "the bundle could not be fetched from the delivery branch"
+            "the bundle could not be fetched from the delivery branch",
           )
       } else {
         recordTrustedBundles(
@@ -1178,14 +1178,14 @@ class ServeCatalogStore(
               ServeDegradation.liveBundleUnavailable(
                 if (serverSideRenderEnabled)
                   withLaunchReason("the live bundle daemon could not be started", safe)
-                else "server-side re-render is not enabled on this server"
+                else "server-side re-render is not enabled on this server",
               )
           }
           // Fall through to source/static — a declared resource couldn't be rehydrated.
           ResRehydrate.Unavailable ->
             liveBundleFallback =
               ServeDegradation.liveBundleUnavailable(
-                "a required font or resource could not be rehydrated"
+                "a required font or resource could not be rehydrated",
               )
         }
       }
@@ -1718,7 +1718,7 @@ class ServeCatalogStore(
       runCatching { fetchCatalogAsset("$base$declared") }.getOrNull()
         ?: run {
           System.err.println(
-            "serve: $system declares uiBuilderFile $declared and it could not be fetched from $branch"
+            "serve: $system declares uiBuilderFile $declared and it could not be fetched from $branch",
           )
           return null
         }
@@ -1840,7 +1840,7 @@ class ServeCatalogStore(
       val bytes =
         runCatching { componentRecordEntry(bundleFile) }.getOrNull()
           ?: return stop(
-            "the live bundle carries no components.json (packed by ${catalog.renderer ?: "an older renderer"})"
+            "the live bundle carries no components.json (packed by ${catalog.renderer ?: "an older renderer"})",
           )
       target.writeBytes(bytes)
       target
@@ -2015,7 +2015,7 @@ class ServeCatalogStore(
         }
           .onFailure {
             System.err.println(
-              "serve: $system per-preview '$stem' classpath hydration failed (${it.message})"
+              "serve: $system per-preview '$stem' classpath hydration failed (${it.message})",
             )
           }
           .getOrNull()
@@ -2155,7 +2155,7 @@ class ServeCatalogStore(
       val sha = res.sha256
       if (sha.length != 64 || sha.any { it !in '0'..'9' && it !in 'a'..'f' }) {
         System.err.println(
-          "serve: $system external resource '$sha' is not a sha256 — skipping live bundle"
+          "serve: $system external resource '$sha' is not a sha256 — skipping live bundle",
         )
         return ResRehydrate.Unavailable
       }
@@ -2168,21 +2168,21 @@ class ServeCatalogStore(
       if (cached == null) {
         System.err.println(
           "serve: $system external resource could not be fetched or verified ($url) — " +
-            "skipping live bundle"
+            "skipping live bundle",
         )
         return ResRehydrate.Unavailable
       }
       // Materialize at the recorded classpath path (path-contained — reject traversal/absolute).
       if (res.path.isBlank() || res.path.startsWith("/") || ".." in res.path.split("/")) {
         System.err.println(
-          "serve: $system external resource path '${res.path}' is invalid — skipping live bundle"
+          "serve: $system external resource path '${res.path}' is invalid — skipping live bundle",
         )
         return ResRehydrate.Unavailable
       }
       val dest = File(materialized, res.path)
       if (!dest.canonicalFile.toPath().startsWith(matRoot)) {
         System.err.println(
-          "serve: $system external resource path '${res.path}' escapes — skipping live bundle"
+          "serve: $system external resource path '${res.path}' escapes — skipping live bundle",
         )
         return ResRehydrate.Unavailable
       }
@@ -2404,7 +2404,7 @@ class ServeCatalogStore(
     val bytes =
       runCatching {
         fetchCatalogAsset(
-          "$base${ServeAnnotationStore.DIRECTORY}/${ServeAnnotationStore.INDEX_FILE}"
+          "$base${ServeAnnotationStore.DIRECTORY}/${ServeAnnotationStore.INDEX_FILE}",
         )
       }
         .getOrNull() ?: return
@@ -2514,7 +2514,7 @@ class ServeCatalogStore(
     // engine refuses it whole, so fetching any artifact would be wasted.
     if (documentBytes.size > ServeKnownDifferences.MAX_DOCUMENT_BYTES) return emptyList()
     return oneWritePerFile(
-      publishedArtifactIndex(base) ?: knownDifferenceArtifactPaths(documentBytes)
+      publishedArtifactIndex(base) ?: knownDifferenceArtifactPaths(documentBytes),
     )
   }
 
@@ -2749,7 +2749,7 @@ class ServeCatalogStore(
     val pages = declared.take(MAX_DESIGN_PAGES)
     if (declared.size > pages.size) {
       System.err.println(
-        "serve: catalog declares ${declared.size} design pages — staging the first $MAX_DESIGN_PAGES"
+        "serve: catalog declares ${declared.size} design pages — staging the first $MAX_DESIGN_PAGES",
       )
     }
     if (pages.isEmpty()) return
@@ -2781,7 +2781,7 @@ class ServeCatalogStore(
         DesignPagesJson.encodeToString(
           DesignPagesManifest.serializer(),
           manifest.newBuilder().also { it.pages = accepted }.build(),
-        )
+        ),
       )
   }
 
@@ -2836,7 +2836,7 @@ class ServeCatalogStore(
         json.encodeToString(
           DesignReferenceManifest.serializer(),
           DesignReferenceManifest(references = accepted),
-        )
+        ),
       )
     return branchPaths
   }
@@ -2849,7 +2849,7 @@ class ServeCatalogStore(
     val manifestBytes =
       runCatching {
         fetchCatalogAsset(
-          "$base${ServeDesignReferenceStore.DIRECTORY}/${ServeDesignReferenceStore.INDEX_FILE}"
+          "$base${ServeDesignReferenceStore.DIRECTORY}/${ServeDesignReferenceStore.INDEX_FILE}",
         )
       }
         .getOrNull() ?: return emptyList()
@@ -3836,7 +3836,7 @@ class ServeCatalogStore(
       if (blobs.audit(url, fresh) == CatalogBlobPool.AuditResult.MISMATCHED) {
         System.err.println(
           "serve: $system cached bytes for $url did not match the branch — entry dropped. " +
-            "This should be impossible; check /status.json catalogCache.mismatched."
+            "This should be impossible; check /status.json catalogCache.mismatched.",
         )
       }
     }

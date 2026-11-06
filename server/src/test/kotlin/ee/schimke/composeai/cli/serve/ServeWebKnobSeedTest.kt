@@ -140,7 +140,7 @@ class ServeWebKnobSeedTest {
               type = "string",
               label = "label",
               default = PreviewOverrideValue.StringValue(""),
-            )
+            ),
           ),
       )
     val html =
@@ -260,7 +260,7 @@ class ServeWebKnobSeedTest {
               type = "int",
               label = "count",
               default = PreviewOverrideValue.IntValue(5),
-            )
+            ),
           ),
       )
     fun rowFor(seed: String): String {
@@ -294,7 +294,7 @@ class ServeWebKnobSeedTest {
               type = "string",
               label = "label",
               default = PreviewOverrideValue.StringValue("Tap me"),
-            )
+            ),
           ),
       )
     val html =

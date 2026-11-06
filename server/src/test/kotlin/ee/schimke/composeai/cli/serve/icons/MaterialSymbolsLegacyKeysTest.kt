@@ -189,19 +189,19 @@ class MaterialSymbolsLegacyKeysTest {
   fun `a key this catalog never issued is not guessed at`() {
     assertTrue(
       MaterialSymbolsLegacyKeys.migrate("engraved/search", known)
-        is LegacyIconMigration.Unrecognised
+        is LegacyIconMigration.Unrecognised,
     )
     assertTrue(
-      MaterialSymbolsLegacyKeys.migrate("filled/", known) is LegacyIconMigration.Unrecognised
+      MaterialSymbolsLegacyKeys.migrate("filled/", known) is LegacyIconMigration.Unrecognised,
     )
     assertTrue(
-      MaterialSymbolsLegacyKeys.migrate("a/b/c", known) is LegacyIconMigration.Unrecognised
+      MaterialSymbolsLegacyKeys.migrate("a/b/c", known) is LegacyIconMigration.Unrecognised,
     )
     // A well-formed key naming an icon nothing carries is a different answer: the spelling is fine,
     // the icon is not there.
     assertTrue(
       MaterialSymbolsLegacyKeys.migrate("filled/noSuchIcon", known)
-        is LegacyIconMigration.NoEquivalent
+        is LegacyIconMigration.NoEquivalent,
     )
   }
 

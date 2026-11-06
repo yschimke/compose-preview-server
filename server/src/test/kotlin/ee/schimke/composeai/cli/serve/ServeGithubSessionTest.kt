@@ -128,7 +128,7 @@ class ServeGithubSessionTest {
         Request.Builder()
           .url("http://127.0.0.1:${server.port}/auth/github/callback?code=ok&state=$state")
           .header("Cookie", start.second)
-          .build()
+          .build(),
       )
       .execute()
       .use { resp ->
@@ -144,7 +144,7 @@ class ServeGithubSessionTest {
         Request.Builder()
           .url("http://127.0.0.1:${server.port}/version")
           .header("Cookie", cookie.substringBefore(";"))
-          .build()
+          .build(),
       )
       .execute()
       .use { resp -> resp.headers("Set-Cookie").firstOrNull { it.startsWith("cp_gh_auth=") } }
@@ -242,7 +242,7 @@ class ServeGithubSessionTest {
         Request.Builder()
           .url("http://127.0.0.1:${server.port}/playground")
           .header("Cookie", cookie.substringBefore(";"))
-          .build()
+          .build(),
       )
       .execute()
       .use { resp -> resp.code == 200 }
@@ -255,7 +255,7 @@ class ServeGithubSessionTest {
           .url("http://127.0.0.1:${server.port}${ServeGithubAuth.LOGOUT_PATH}$query")
           .header("Cookie", cookie.substringBefore(";"))
           .post(EMPTY_FORM)
-          .build()
+          .build(),
       )
       .execute()
       .use { resp ->
@@ -292,7 +292,7 @@ class ServeGithubSessionTest {
           Request.Builder()
             .url("http://127.0.0.1:${server.port}${ServeGithubAuth.LOGOUT_PATH}")
             .header("Cookie", cookie.substringBefore(";"))
-            .build()
+            .build(),
         )
         .execute()
         .use { resp ->

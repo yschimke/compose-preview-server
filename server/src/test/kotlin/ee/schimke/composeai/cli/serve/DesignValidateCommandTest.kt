@@ -44,7 +44,7 @@ class DesignValidateCommandTest {
     assertTrue(invalid("validate").contains("a design id is required"))
     assertTrue(
       invalid("validate", "--document", "d.json", "--operations", "o.json")
-        .contains("stored design")
+        .contains("stored design"),
     )
     assertTrue(invalid("get", "w", "--operations", "o.json").contains("validate only"))
     assertTrue(invalid("validate", "w", "--revision", "3").contains("--revision"))

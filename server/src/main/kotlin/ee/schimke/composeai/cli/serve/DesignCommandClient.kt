@@ -133,7 +133,7 @@ internal class DesignHttpTransport(
         throw DesignCommandFailure("$tool: interrupted")
       } catch (e: Exception) {
         throw DesignCommandFailure(
-          "$tool: cannot reach $base — ${e.message ?: e::class.simpleName}"
+          "$tool: cannot reach $base — ${e.message ?: e::class.simpleName}",
         )
       }
     if (response.statusCode() == 401 || response.statusCode() == 403) {
@@ -145,7 +145,7 @@ internal class DesignHttpTransport(
     if (response.statusCode() == 404) throw DesignCommandFailure(noMcpEndpoint(tool))
     if (response.statusCode() !in 200..299) {
       throw DesignCommandFailure(
-        "$tool: $base answered HTTP ${response.statusCode()} — ${response.body().firstLine()}"
+        "$tool: $base answered HTTP ${response.statusCode()} — ${response.body().firstLine()}",
       )
     }
     return response.body()
@@ -354,7 +354,7 @@ internal class DesignAuthorizer(
     if (missing.isNotEmpty()) {
       log(
         "design: note — this server does not offer ${missing.joinToString(", ")}; " +
-          "it grants ${opened.maxCapabilities.joinToString(", ").ifBlank { "no capabilities" }}."
+          "it grants ${opened.maxCapabilities.joinToString(", ").ifBlank { "no capabilities" }}.",
       )
     }
     val deadline = now() + deadlineSeconds * 1000
@@ -383,7 +383,7 @@ internal class DesignAuthorizer(
             "design: approved" +
               (polled.approvedBy?.let { " by $it" } ?: "") +
               (polled.capabilities.takeIf { it.isNotEmpty() }?.let { " (${it.joinToString(", ")})" }
-                ?: "")
+                ?: ""),
           )
           return token
         }
@@ -392,12 +392,12 @@ internal class DesignAuthorizer(
           throw DesignCommandFailure(
             "design: the grant was ${polled.status}" +
               (polled.message?.let { " — $it" } ?: "") +
-              "."
+              ".",
           )
       }
     }
     throw DesignCommandFailure(
-      "design: nobody approved the grant within ${deadlineSeconds}s. Re-run when you have a human."
+      "design: nobody approved the grant within ${deadlineSeconds}s. Re-run when you have a human.",
     )
   }
 
@@ -417,13 +417,13 @@ internal class DesignAuthorizer(
         throw DesignCommandFailure("design: interrupted while asking for a grant")
       } catch (e: Exception) {
         throw DesignCommandFailure(
-          "design: cannot reach $target — ${e.message ?: e::class.simpleName}"
+          "design: cannot reach $target — ${e.message ?: e::class.simpleName}",
         )
       }
     if (response.statusCode() !in 200..299) {
       throw DesignCommandFailure(
         "design: $target answered HTTP ${response.statusCode()} — ${response.body().firstLine()}. " +
-          "A server started without --agent-grants cannot mint one; set \$${DesignCommand.TOKEN_ENV} instead."
+          "A server started without --agent-grants cannot mint one; set \$${DesignCommand.TOKEN_ENV} instead.",
       )
     }
     return response.body()

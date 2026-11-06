@@ -830,8 +830,8 @@ class ServeTopLevelSiteTest {
             listed = true,
             repo = "yschimke/compose-ai-tools",
             branch = "design-artifacts/compose-m3",
-          )
-        )
+          ),
+        ),
       )
     tracker.recordSuccess("compose-m3")
     val admin =
@@ -925,7 +925,7 @@ class ServeTopLevelSiteTest {
           "sites": [{ "host": "m3.preview.coo.ee", "system": "m3-catalog" }]
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
     assertEquals(emptyList(), config.problems())
     assertEquals("m3-catalog", config.siteMap().systemFor("m3.preview.coo.ee"))

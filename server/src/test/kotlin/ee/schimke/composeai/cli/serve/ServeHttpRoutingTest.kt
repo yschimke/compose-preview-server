@@ -193,7 +193,7 @@ class ServeHttpRoutingTest {
                     "embedded" to RcCompareCell(rendered = true, render = "embedded/0.png"),
                     "cmp-jvm" to RcCompareCell(rendered = true, render = "cmp-jvm/0.png"),
                   ),
-              )
+              ),
             ),
         )
 
@@ -256,7 +256,7 @@ class ServeHttpRoutingTest {
         "root": [ { "box": { "modifiers": [ { "size": 100.0 }, { "background": "@colors.bg" } ] } } ]
       }
       """
-        .trimIndent()
+        .trimIndent(),
     )
 
   /** Bytes that are not a document at all — the 422 lane's fixture. */
@@ -323,9 +323,9 @@ class ServeHttpRoutingTest {
                       DesignReferenceRaster("references/red-design.png", width = 2, height = 2),
                     source = DesignReferenceSource(provider = "penpot", revision = "8"),
                   ),
-                )
+                ),
             ),
-          )
+          ),
         )
     }
     if (tagIndex) {
@@ -356,10 +356,10 @@ class ServeHttpRoutingTest {
                           bounds = AnnotationBounds(x = 0, y = 0, width = 90, height = 20),
                           space = ServeSemanticsTags.RENDER_PIXELS,
                         ),
-                    )
-                )
+                    ),
+                ),
             ),
-          )
+          ),
         )
     }
     if (parityFeed) {
@@ -383,7 +383,7 @@ class ServeHttpRoutingTest {
                         at = "2026-08-05T10:00:00Z",
                         previewIds = listOf(previewId),
                         components = listOf("Red"),
-                      )
+                      ),
                     ),
                 ),
               figma =
@@ -398,7 +398,7 @@ class ServeHttpRoutingTest {
                         message = "swatch is off",
                         nodeId = "51592:4768",
                         components = listOf("Blue"),
-                      )
+                      ),
                     ),
                 ),
               gaps =
@@ -407,10 +407,10 @@ class ServeHttpRoutingTest {
                     kind = MappingGap.Kind.UNMAPPED_DESIGN_NODE,
                     detail = "Figma component with no code entry",
                     ref = "figma:abc123/1:2",
-                  )
+                  ),
                 ),
             ),
-          )
+          ),
         )
     }
     if (overrides.isNotEmpty()) {
@@ -471,7 +471,7 @@ class ServeHttpRoutingTest {
         </g>
         </svg>
         """
-          .trimIndent()
+          .trimIndent(),
       )
     return ServeBundleHost(dir, label = label, figmaDir = figma, isCatalog = true)
   }
@@ -768,7 +768,7 @@ class ServeHttpRoutingTest {
           Request.Builder()
             .url("http://127.0.0.1:${server.port}${ServeSiteIcon.BADGE_PATH}")
             .header("If-None-Match", etag)
-            .build()
+            .build(),
         )
         .execute()
     revalidated.use { assertEquals(304, it.code) }
@@ -1647,8 +1647,8 @@ class ServeHttpRoutingTest {
             listed = true,
             repo = "yschimke/compose-samples",
             branch = "design-artifacts/reply",
-          )
-        )
+          ),
+        ),
       )
     loads.recordFailure("reply", "could not parse catalog.json")
     val partialServer =
@@ -1729,7 +1729,7 @@ class ServeHttpRoutingTest {
       assertTrue(body.contains("src=\"$heroPath\""))
       val card =
         Regex(
-          """<a href="/jetnews/" class="cp-card cp-sys cp-sys-loading"[^>]*data-cp-system="jetnews">"""
+          """<a href="/jetnews/" class="cp-card cp-sys cp-sys-loading"[^>]*data-cp-system="jetnews">""",
         )
       assertTrue(card.containsMatchIn(body), "the pending catalog keeps a loading card: $body")
       assertTrue(body.contains("href=\"/jetnews/"), "a pending catalog can be opened: $body")
@@ -1778,7 +1778,7 @@ class ServeHttpRoutingTest {
             repo = "yschimke/compose-samples",
             branch = "design-artifacts/reply",
           ),
-        )
+        ),
       )
     loads.recordFailure("compose-m3", "could not parse catalog.json")
     loads.recordSuccess("reply")
@@ -1820,8 +1820,8 @@ class ServeHttpRoutingTest {
             listed = false,
             repo = "yschimke/meshcore-mobile",
             branch = "design-artifacts/meshcore-mobile",
-          )
-        )
+          ),
+        ),
       )
     val catalogServer =
       ServeHttpServer(
@@ -1975,7 +1975,7 @@ class ServeHttpRoutingTest {
             Request.Builder()
               .url("http://127.0.0.1:${scopedServer.port}$path")
               .header("Sec-Fetch-Dest", "document")
-              .build()
+              .build(),
           )
           .execute()
           .use { assertNotNull(it.header(ServePagePolicy.HEADER), path) }
@@ -1987,7 +1987,7 @@ class ServeHttpRoutingTest {
         Request.Builder()
           .url(
             "http://127.0.0.1:${scopedServer.port}/wasm/preview-ui/" +
-              "?session=compose-m3&token=secret&preview=button"
+              "?session=compose-m3&token=secret&preview=button",
           )
           .build()
       noRedirects.newCall(oldUrl).execute().use { response ->
@@ -2009,7 +2009,7 @@ class ServeHttpRoutingTest {
       Files.createTempDirectory("serve-ui-builder").toFile().also { it.deleteOnExit() }
     File(builderDir, "index.html")
       .writeText(
-        "<!doctype html><title>Compose UI builder</title><script src=builder.mjs></script>"
+        "<!doctype html><title>Compose UI builder</title><script src=builder.mjs></script>",
       )
     File(builderDir, "builder.mjs").writeText("window.composeUiBuilder = true")
     File(builderDir, "builder.wasm").writeBytes(byteArrayOf(0, 97, 115, 109))
@@ -2214,7 +2214,7 @@ class ServeHttpRoutingTest {
           Request.Builder()
             .url("http://127.0.0.1:${builderServer.port}/wasm/compose-m3/")
             .header("Sec-Fetch-Dest", "iframe")
-            .build()
+            .build(),
         )
         .execute()
         .use { response ->
@@ -2324,7 +2324,7 @@ class ServeHttpRoutingTest {
     // The code lane's commit link is rebuilt from the validated repo + sha, not taken verbatim.
     assertTrue(
       page.contains(
-        "https://github.com/yschimke/compose-ai-tools/commit/4e73ec2b9f0a1c3d5e7f9a1b3c5d7e9f0a1b3c5d"
+        "https://github.com/yschimke/compose-ai-tools/commit/4e73ec2b9f0a1c3d5e7f9a1b3c5d7e9f0a1b3c5d",
       ),
       "commit link: $page",
     )
@@ -2480,7 +2480,7 @@ class ServeHttpRoutingTest {
     val request =
       Request.Builder()
         .url(
-          "http://127.0.0.1:${server.port}/compose-m3/p/$previewId" + "?fontScale=1.5&locale=en-US"
+          "http://127.0.0.1:${server.port}/compose-m3/p/$previewId" + "?fontScale=1.5&locale=en-US",
         )
         .header("Host", "preview.coo.ee")
         .header("X-Forwarded-Proto", "https")
@@ -2492,7 +2492,7 @@ class ServeHttpRoutingTest {
       assertTrue(
         html.contains(
           "<meta property=\"og:url\" content=\"https://preview.coo.ee/compose-m3/p/" +
-            "$previewId?fontScale=1.5&amp;locale=en-US\">"
+            "$previewId?fontScale=1.5&amp;locale=en-US\">",
         ),
         "canonical external viewer URL: $html",
       )
@@ -2528,7 +2528,7 @@ class ServeHttpRoutingTest {
     // proxy's origin, not a portrait render.
     val cardImage =
       Regex(
-        """<meta property="og:image" content="(https://preview\.coo\.ee/social/[a-f0-9]+\.png)">"""
+        """<meta property="og:image" content="(https://preview\.coo\.ee/social/[a-f0-9]+\.png)">""",
       )
 
     val (homeCode, home) = proxied("/")
@@ -2636,7 +2636,7 @@ class ServeHttpRoutingTest {
       Request.Builder()
         .url(
           "http://127.0.0.1:${server.port}/compose-m3/render/$previewId.png" +
-            "?fontScale=1.5&fallback=baked"
+            "?fontScale=1.5&fallback=baked",
         )
         .build()
     client.newCall(req).execute().use { response ->
@@ -2935,14 +2935,16 @@ class ServeHttpRoutingTest {
       .newCall(
         Request.Builder()
           .url("http://127.0.0.1:${server.port}/assets/serve/stale/vue-runtime.js")
-          .build()
+          .build(),
       )
       .execute()
       .use { r -> assertEquals(404, r.code) }
 
     client
       .newCall(
-        Request.Builder().url("http://127.0.0.1:${server.port}/assets/serve/vue-runtime.js").build()
+        Request.Builder()
+          .url("http://127.0.0.1:${server.port}/assets/serve/vue-runtime.js")
+          .build(),
       )
       .execute()
       .use { r ->
@@ -3472,7 +3474,7 @@ class ServeHttpRoutingTest {
     assertTrue(
       pathBody.contains(
         ">Compose Material 3</a><span class=\"cp-crumb-sep\" aria-hidden=\"true\">/</span>" +
-          "<span class=\"cp-crumb-current\">Compare formats</span>"
+          "<span class=\"cp-crumb-current\">Compare formats</span>",
       ),
       "the comparison breadcrumb — now in the site header — uses the catalog's human title: " +
         pathBody,
@@ -3486,7 +3488,7 @@ class ServeHttpRoutingTest {
       pathBody.contains("data-compare-format=\"reference\"") &&
         pathBody.contains("data-reference-neutral=\"/compose-m3/reference/red-design.png\"") &&
         pathBody.contains(
-          "data-reference-detail-neutral=\"/compose-m3/compare/$previewId?reference=red-design\""
+          "data-reference-detail-neutral=\"/compose-m3/compare/$previewId?reference=red-design\"",
         ),
       "the native comparison gallery also exposes the exact design reference: $pathBody",
     )
@@ -3587,7 +3589,7 @@ class ServeHttpRoutingTest {
           Button(onClick = {}) {}
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
     }
     val localId = "example.LocalButton"
@@ -3600,7 +3602,7 @@ class ServeHttpRoutingTest {
               label = "Local button",
               sourceFile = relative,
               bodyLine = 7,
-            )
+            ),
           )
         override val label = "local"
 

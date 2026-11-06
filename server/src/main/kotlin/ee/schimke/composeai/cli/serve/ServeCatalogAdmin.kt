@@ -227,7 +227,7 @@ class ServeCatalogAdmin(
         }
         onLog(
           "serve: catalog ${entry.system} is running from $repo but the config file disagreed" +
-            " — rewriting it"
+            " — rewriting it",
         )
         return Result.Ok(entry.system, persist { it.withEntry(entry.copy(repo = repo)) })
       }
@@ -263,7 +263,7 @@ class ServeCatalogAdmin(
     // falls through to the global front door). Fail closed: drop the site first.
     sites.hostFor(system)?.let { host ->
       return Result.Conflict(
-        "catalog '$system' is published as the top-level site '$host'; remove the site first"
+        "catalog '$system' is published as the top-level site '$host'; remove the site first",
       )
     }
     if (!tracker.remove(system)) {

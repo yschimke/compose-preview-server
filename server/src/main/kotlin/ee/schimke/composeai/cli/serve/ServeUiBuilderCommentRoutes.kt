@@ -52,7 +52,7 @@ internal fun Route.installUiBuilderCommentRoutes(
         ?: return@get
     // An empty board, not a 404: no discussion yet is not a missing design.
     call.respondBoard(
-      actor.shape(withContext(Dispatchers.IO) { store.readOrEmpty(actor.designId) })
+      actor.shape(withContext(Dispatchers.IO) { store.readOrEmpty(actor.designId) }),
     )
   }
 
@@ -248,7 +248,9 @@ internal fun Route.installUiBuilderCommentRoutes(
           for (board in boards) {
             val shaped = view?.board(board) ?: board
             send(
-              Frame.Text(COMMENT_ROUTE_JSON.encodeToString(StoredCommentBoard.serializer(), shaped))
+              Frame.Text(
+                COMMENT_ROUTE_JSON.encodeToString(StoredCommentBoard.serializer(), shaped),
+              ),
             )
           }
           if (overflowed.get()) {
@@ -373,7 +375,7 @@ private suspend fun ApplicationCall.authorizedCommentActor(
 }
 
 private suspend fun <T> ApplicationCall.receiveCommentBody(
-  serializer: kotlinx.serialization.DeserializationStrategy<T>
+  serializer: kotlinx.serialization.DeserializationStrategy<T>,
 ): T? {
   // The editor's own requests label their JSON; a session-cookie request that does not is not one
   // of them. Header-credential clients are left to the parser as before.

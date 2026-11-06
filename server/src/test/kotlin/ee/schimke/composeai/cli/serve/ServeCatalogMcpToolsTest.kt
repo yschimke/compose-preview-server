@@ -30,7 +30,7 @@ class ServeCatalogMcpToolsTest {
   private val pixel: ByteArray =
     Base64.getDecoder()
       .decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
       )
 
   /**
@@ -105,14 +105,14 @@ class ServeCatalogMcpToolsTest {
     val request =
       Json.parseToJsonElement(
           """{"jsonrpc":"2.0","id":1,"method":"tools/call",
-              "params":{"name":"$tool","arguments":$arguments}}"""
+              "params":{"name":"$tool","arguments":$arguments}}""",
         )
         .jsonObject
     return requireNotNull(
       runBlocking {
         mcp.handle(request) { ServeMachineAuthorization.Decision.Authorized("agent:test") }
       }
-        .body
+        .body,
     )
   }
 
@@ -143,7 +143,7 @@ class ServeCatalogMcpToolsTest {
                 ee.schimke.composeai.guidelines.protocol.GuidelineVerdictV1.FAIL,
               )
               .apply { reason = "Fixed width." }
-              .build()
+              .build(),
           ),
       )
       .build()
@@ -154,7 +154,7 @@ class ServeCatalogMcpToolsTest {
 
     val listed =
       Json.parseToJsonElement(
-          call(host, "catalog_list_data_products", """{"catalog":"m3"}""").firstText()
+          call(host, "catalog_list_data_products", """{"catalog":"m3"}""").firstText(),
         )
         .jsonArray
         .associate {
@@ -244,14 +244,14 @@ class ServeCatalogMcpToolsTest {
       Json.parseToJsonElement(
           """{"jsonrpc":"2.0","id":1,"method":"tools/call",
               "params":{"name":"catalog_render_preview",
-                        "arguments":{"catalog":"m3","previewId":"card","observe":"png"}}}"""
+                        "arguments":{"catalog":"m3","previewId":"card","observe":"png"}}}""",
         )
         .jsonObject
     return requireNotNull(
         runBlocking {
           mcp.handle(request) { ServeMachineAuthorization.Decision.Authorized("agent:test") }
         }
-          .body
+          .body,
       )
       .get("result")!!
       .jsonObject
@@ -286,7 +286,9 @@ class ServeCatalogMcpToolsTest {
     )
     // The inline image stays for hosts that render it.
     assertTrue(
-      result["content"]!!.jsonArray.any { it.jsonObject["type"]!!.jsonPrimitive.content == "image" }
+      result["content"]!!.jsonArray.any {
+        it.jsonObject["type"]!!.jsonPrimitive.content == "image"
+      },
     )
 
     val query =

@@ -43,8 +43,8 @@ class ServeSiteAdminTest {
   fun `publishing a site routes the host immediately and writes it back`() {
     file.save(
       ServeCatalogsConfig(
-        catalogs = listOf(ServeCatalogsConfig.Entry(system = "wear-m3-catalog", repo = "a/b"))
-      )
+        catalogs = listOf(ServeCatalogsConfig.Entry(system = "wear-m3-catalog", repo = "a/b")),
+      ),
     )
     val registry = ServeSiteRegistry.empty()
     val result = admin(registry).add(site("wear.preview.coo.ee", "wear-m3-catalog"))
@@ -126,7 +126,7 @@ class ServeSiteAdminTest {
   fun `retiring a site drops the host and leaves its neighbours serving`() {
     val registry =
       ServeSiteRegistry.of(
-        listOf("m3.preview.coo.ee" to "m3-catalog", "wear.preview.coo.ee" to "wear-m3-catalog")
+        listOf("m3.preview.coo.ee" to "m3-catalog", "wear.preview.coo.ee" to "wear-m3-catalog"),
       )
     val result = admin(registry).remove("wear.preview.coo.ee")
 
@@ -159,7 +159,7 @@ class ServeSiteAdminTest {
   fun `listing reports the configured sites in order`() {
     val registry =
       ServeSiteRegistry.of(
-        listOf("m3.preview.coo.ee" to "m3-catalog", "wear.preview.coo.ee" to "wear-m3-catalog")
+        listOf("m3.preview.coo.ee" to "m3-catalog", "wear.preview.coo.ee" to "wear-m3-catalog"),
       )
     assertEquals(
       listOf(
@@ -177,8 +177,8 @@ class ServeSiteAdminTest {
     // admin left in memory.
     file.save(
       ServeCatalogsConfig(
-        catalogs = listOf(ServeCatalogsConfig.Entry(system = "wear-m3-catalog", repo = "a/b"))
-      )
+        catalogs = listOf(ServeCatalogsConfig.Entry(system = "wear-m3-catalog", repo = "a/b")),
+      ),
     )
     admin(ServeSiteRegistry.empty()).add(site("wear.preview.coo.ee", "wear-m3-catalog"))
 

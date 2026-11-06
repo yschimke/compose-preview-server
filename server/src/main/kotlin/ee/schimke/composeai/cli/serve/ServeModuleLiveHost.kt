@@ -50,7 +50,7 @@ internal class ServeModuleLiveHost(
     host.renderSlots(local(previewId), overrides)
 
   override fun guidelineResultFor(
-    previewId: String
+    previewId: String,
   ): ee.schimke.composeai.guidelines.protocol.GuidelineRecordV1? =
     host.guidelineResultFor(local(previewId))
 

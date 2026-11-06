@@ -22,7 +22,7 @@ class ServePinnedManifestTest {
             {"path":"images/button-filled/ideal__default__light.png","theme":"dark"}]},
           {"componentId":"Card","images":[{"path":"images/card/ideal.png"}]}]}
         """
-          .trimIndent()
+          .trimIndent(),
       )!!
 
     // Keyed by ServeCatalogStore.previewIdFor, so a pinned id and a served id are the same string
@@ -58,7 +58,7 @@ class ServePinnedManifestTest {
            "images":[{"path":"images/button-loading/ideal.png"}]},
           {"componentId":"Card","images":[{"path":"images/card/ideal.png"}]}]}
         """
-          .trimIndent()
+          .trimIndent(),
       )!!
 
     assertEquals("The kit's loading pattern.", entries.captions["button-loading__ideal"])
@@ -77,7 +77,7 @@ class ServePinnedManifestTest {
            "images":[{"path":"images/shared/ideal.png"}]},
           {"componentId":"New","images":[{"path":"images/shared/ideal.png"}]}]}
         """
-          .trimIndent()
+          .trimIndent(),
       )!!
 
     assertEquals("New", entries.labels["shared__ideal"])
@@ -93,7 +93,7 @@ class ServePinnedManifestTest {
           {"id":"button-figma","previewId":"button","raster":{"path":"references/legacy/b.png"}},
           {"id":"card-figma","previewId":"card","raster":{"path":"design-references/c.png"}}]}
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
     assertEquals(
@@ -117,7 +117,7 @@ class ServePinnedManifestTest {
     assertEquals(
       mapOf("card__ideal" to "images/card/ideal.png"),
       ServePinnedManifest.parseCatalog(
-          """{"components":[{"images":[{"nopath":1},{"path":"images/card/ideal.png"}]}]}"""
+          """{"components":[{"images":[{"nopath":1},{"path":"images/card/ideal.png"}]}]}""",
         )
         ?.paths,
     )
@@ -132,7 +132,7 @@ class ServePinnedManifestTest {
       mapOf("foo__bar__baz" to "images/foo/bar__baz.png"),
       ServePinnedManifest.parseCatalog(
           """{"components":[{"images":[
-             {"path":"images/foo__bar/baz.png"},{"path":"images/foo/bar__baz.png"}]}]}"""
+             {"path":"images/foo__bar/baz.png"},{"path":"images/foo/bar__baz.png"}]}]}""",
         )
         ?.paths,
     )
@@ -143,7 +143,7 @@ class ServePinnedManifestTest {
       mapOf("foo__bar__baz" to "images/foo__bar/baz.png"),
       ServePinnedManifest.parseCatalog(
           """{"components":[{"images":[
-             {"path":"images/foo__bar/baz.png"},{"path":"foo/bar__baz.png"}]}]}"""
+             {"path":"images/foo__bar/baz.png"},{"path":"foo/bar__baz.png"}]}]}""",
         )
         ?.paths,
     )
@@ -151,7 +151,7 @@ class ServePinnedManifestTest {
       emptyMap(),
       ServePinnedManifest.parseCatalog(
           """{"components":[{"images":[
-             {"path":"images/a/../../secret.png"},{"path":"images/b/c.svg"}]}]}"""
+             {"path":"images/a/../../secret.png"},{"path":"images/b/c.svg"}]}]}""",
         )
         ?.paths,
     )
@@ -161,7 +161,7 @@ class ServePinnedManifestTest {
       ServePinnedManifest.parseCatalog(
         """{"components":[
              {"componentId":"Named","images":[{"path":"images/foo__bar/baz.png"}]},
-             {"images":[{"path":"images/foo/bar__baz.png"}]}]}"""
+             {"images":[{"path":"images/foo/bar__baz.png"}]}]}""",
       )!!
     assertEquals("images/foo/bar__baz.png", collided.paths["foo__bar__baz"])
     assertNull(collided.labels["foo__bar__baz"])
@@ -172,7 +172,7 @@ class ServePinnedManifestTest {
       ServePinnedManifest.parseReferences(
         """{"references":[
              {"id":"dup","raster":{"path":"references/first.png"}},
-             {"id":"dup","raster":{"path":"references/second.png"}}]}"""
+             {"id":"dup","raster":{"path":"references/second.png"}}]}""",
       ),
     )
   }
@@ -190,7 +190,7 @@ class ServePinnedManifestTest {
                 .encodeToByteArray()
             else -> null
           }
-        }
+        },
       )
 
     repeat(5) {
@@ -222,7 +222,7 @@ class ServePinnedManifestTest {
           if (file == ServeCatalogRevision.CATALOG_FILE)
             """{"components":[{"images":[{"path":"images/card/ideal.png"}]}]}""".encodeToByteArray()
           else null
-        }
+        },
       )
 
     val paths = readable.forCommit(commit)
@@ -243,7 +243,7 @@ class ServePinnedManifestTest {
         fetch = { commit, _ ->
           asked += commit
           null
-        }
+        },
       )
 
     assertTrue(manifest.forCommit("main").isEmpty)

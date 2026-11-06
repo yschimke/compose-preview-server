@@ -91,7 +91,7 @@ class ServeCatalogMcpHistoryTest {
     File(dir, "previews.json")
       .writeText(
         """{"module":":m","variant":"debug","previews":[
-             {"id":"$previewId","functionName":"$previewId","className":"ProfileKt"}]}"""
+             {"id":"$previewId","functionName":"$previewId","className":"ProfileKt"}]}""",
       )
     return ServeBundleHost(dir, label = "m3", provenance = provenance)
   }
@@ -115,14 +115,14 @@ class ServeCatalogMcpHistoryTest {
     val request =
       Json.parseToJsonElement(
           """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"$tool",
-              "arguments":{"catalog":"m3","previewId":"$previewId"$extraArgs}}}"""
+              "arguments":{"catalog":"m3","previewId":"$previewId"$extraArgs}}}""",
         )
         .jsonObject
     return requireNotNull(
       runBlocking {
         mcp.handle(request) { ServeMachineAuthorization.Decision.Authorized("agent:test") }
       }
-        .body
+        .body,
     )
   }
 
@@ -253,7 +253,7 @@ class ServeCatalogMcpHistoryTest {
               observations = versions.size,
               unstable = unstable,
               flapCount = if (unstable) 3 else 0,
-            )
+            ),
         ),
     )
 
@@ -267,7 +267,7 @@ class ServeCatalogMcpHistoryTest {
     File(dir, "previews.json")
       .writeText(
         """{"module":":m","variant":"debug","previews":[
-             {"id":"$previewId","functionName":"$previewId","className":"ProfileKt"}]}"""
+             {"id":"$previewId","functionName":"$previewId","className":"ProfileKt"}]}""",
       )
     return ServeBundleHost(
       dir,
@@ -470,7 +470,7 @@ class ServeCatalogMcpHistoryTest {
       body["to"]!!.jsonObject["renderUrl"]!!.jsonPrimitive.content,
     )
     assertTrue(
-      !body["from"]!!.jsonObject["renderUrl"]!!.jsonPrimitive.content.contains("githubusercontent")
+      !body["from"]!!.jsonObject["renderUrl"]!!.jsonPrimitive.content.contains("githubusercontent"),
     )
   }
 

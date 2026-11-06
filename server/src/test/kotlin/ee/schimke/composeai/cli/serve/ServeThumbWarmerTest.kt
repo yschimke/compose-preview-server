@@ -128,7 +128,7 @@ class ServeThumbWarmerTest {
     warmer.enqueue(fresh, "a")
     val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
     while ((old.calls.get() + fresh.calls.get()) < 2 && System.nanoTime() < deadline) Thread.sleep(
-      5
+      5,
     )
     warmer.stop()
 

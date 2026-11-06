@@ -189,7 +189,7 @@ class ServeHtmlEntityTagTest {
     // Markup that changes gets a different validator — which is what makes the 304 a true claim…
     assertTrue(
       ServeHttpServer.pageEntityTag("<html>a</html>") !=
-        ServeHttpServer.pageEntityTag("<html>b</html>")
+        ServeHttpServer.pageEntityTag("<html>b</html>"),
     )
     // …except inside the marked element, whose whole job is to not decide this.
     val volatile = ServeWeb.VOLATILE_ATTR
@@ -199,7 +199,7 @@ class ServeHtmlEntityTagTest {
     )
     assertTrue(
       ServeHttpServer.pageEntityTag("<p>x<span $volatile>1 view</span></p>") !=
-        ServeHttpServer.pageEntityTag("<p>y<span $volatile>1 view</span></p>")
+        ServeHttpServer.pageEntityTag("<p>y<span $volatile>1 view</span></p>"),
     )
   }
 

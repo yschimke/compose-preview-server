@@ -66,8 +66,8 @@ class ServeSourceCheckouts(
         return Result.failure(
           CheckoutException(
             "could not clone $repo${ref?.let { " at '$it'" }.orEmpty()} — " +
-              "is it public, and does that ref exist? (${clone.stdout.trim().takeLast(400)})"
-          )
+              "is it public, and does that ref exist? (${clone.stdout.trim().takeLast(400)})",
+          ),
         )
       }
     } else {
@@ -76,8 +76,8 @@ class ServeSourceCheckouts(
       if (!fetch.ok) {
         return Result.failure(
           CheckoutException(
-            "could not fetch '$target' from $repo (${fetch.stdout.trim().takeLast(400)})"
-          )
+            "could not fetch '$target' from $repo (${fetch.stdout.trim().takeLast(400)})",
+          ),
         )
       }
       // Detached, and --force: the working tree is the server's own scratch space, and a previous
@@ -85,7 +85,7 @@ class ServeSourceCheckouts(
       val checkout = git.run(dir, listOf("checkout", "--detach", "--force", "FETCH_HEAD"))
       if (!checkout.ok) {
         return Result.failure(
-          CheckoutException("could not check out '$target' of $repo — ${checkout.stdout.trim()}")
+          CheckoutException("could not check out '$target' of $repo — ${checkout.stdout.trim()}"),
         )
       }
     }

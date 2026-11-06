@@ -197,7 +197,7 @@ class LocalUiBuilderTest {
     assertEquals(
       listOf("--discover", "--export"),
       LocalUiBuilder.conflictingProjectFlags(
-        listOf("--export", "out", LocalUiBuilder.NO_PROJECT, "--discover")
+        listOf("--export", "out", LocalUiBuilder.NO_PROJECT, "--discover"),
       ),
       "reported in the order the help lists them, not the order they were typed",
     )
@@ -207,7 +207,7 @@ class LocalUiBuilderTest {
       // exists to prevent, through the one option that was missing from the list.
       listOf("--catalog-source-root"),
       LocalUiBuilder.conflictingProjectFlags(
-        listOf(LocalUiBuilder.NO_PROJECT, "--catalog-source-root", "/src/app")
+        listOf(LocalUiBuilder.NO_PROJECT, "--catalog-source-root", "/src/app"),
       ),
     )
     assertEquals(

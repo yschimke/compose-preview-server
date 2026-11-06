@@ -31,8 +31,8 @@ class RemotePngExportProofTest {
       val source =
         Json.decodeFromString<DesignDocumentV1>(
             Files.readString(
-              Path.of("../docs/design/evidence/ui-builder-remote-native-preview/document.json")
-            )
+              Path.of("../docs/design/evidence/ui-builder-remote-native-preview/document.json"),
+            ),
           )
           .let {
             if (repetition) repetitionDocument(it)
@@ -52,7 +52,7 @@ class RemotePngExportProofTest {
           val exporter =
             RemotePngExportExecutor(
               RemoteDocumentExportExecutor(
-                UiBuilderExportExecutor { error("PNG must play the compiled RC document") }
+                UiBuilderExportExecutor { error("PNG must play the compiled RC document") },
               ),
               renderer,
             )
@@ -66,7 +66,7 @@ class RemotePngExportProofTest {
                 document,
                 catalog,
                 ExportFormatV1.PNG,
-              )
+              ),
             )
           assertTrue(
             artifact.diagnostics.none { it.severity == DiagnosticSeverityV1.ERROR },
@@ -109,8 +109,8 @@ class RemotePngExportProofTest {
     val fixture =
       Json.parseToJsonElement(
           Files.readString(
-            Path.of("../docs/design/evidence/ui-builder-repetition-proof/rows-1.document.json")
-          )
+            Path.of("../docs/design/evidence/ui-builder-repetition-proof/rows-1.document.json"),
+          ),
         )
         .jsonObject
     val base =
@@ -122,7 +122,7 @@ class RemotePngExportProofTest {
               source.stateVariables.mapValues { (_, state) ->
                 state.copy(initialValue = JsonPrimitive(10))
               },
-          )
+          ),
         )
         .jsonObject
     return Json.decodeFromJsonElement(
@@ -132,8 +132,8 @@ class RemotePngExportProofTest {
             "nodes" to fixture.getValue("nodes"),
             "roots" to fixture.getValue("roots"),
             "components" to fixture.getValue("components"),
-          )
-      )
+          ),
+      ),
     )
   }
 
@@ -162,11 +162,11 @@ class RemotePngExportProofTest {
                         "selector" to StateValueV1("page"),
                         "cases" to
                           ObjectValueV1(
-                            mapOf("First" to DecimalValueV1(1.25), "Second" to DecimalValueV1(2.5))
+                            mapOf("First" to DecimalValueV1(1.25), "Second" to DecimalValueV1(2.5)),
                           ),
                         "fallback" to StringValueV1("Fallback"),
-                      )
-                    )
+                      ),
+                    ),
                 )
               else node.properties,
             eventBindings =
@@ -180,8 +180,8 @@ class RemotePngExportProofTest {
                             10 -> 1.25
                             20 -> 2.5
                             else -> 3.75
-                          }
-                        )
+                          },
+                        ),
                     )
                   else action
                 }
@@ -221,7 +221,7 @@ class RemotePngExportProofTest {
             catalog.benchmark.catalogRevision,
             "candidate",
             catalog.benchmark.nativeRuntimeId,
-          )
+          ),
       )
     val exporter =
       RemotePngExportExecutor(
@@ -233,7 +233,7 @@ class RemotePngExportProofTest {
                 ee.schimke.composeai.uibuilder.export.UiBuilderCatalogPlatform.REMOTE_COMPOSE
               },
             )
-          else UiBuilderExportExecutor { error("Remote PNG must not render the editor tree") }
+          else UiBuilderExportExecutor { error("Remote PNG must not render the editor tree") },
         ),
         renderer,
       )
@@ -309,7 +309,8 @@ class RemotePngExportProofTest {
       val png = request("/api/ui-builder/v1/documents/export.png", encoded)
       val artifact =
         json.decodeFromString<ExportArtifactV1>(
-          request("/api/ui-builder/v1/documents/export.png?artifact=true", encoded).decodeToString()
+          request("/api/ui-builder/v1/documents/export.png?artifact=true", encoded)
+            .decodeToString(),
         )
       assertContentEquals(png, Base64.getDecoder().decode(artifact.content))
       val exported =
@@ -323,13 +324,13 @@ class RemotePngExportProofTest {
       val mcpArtifactJson =
         JsonObject(
           exported.getValue("artifact").jsonObject +
-            ("content" to JsonPrimitive(assertNotNull(mcpPng)))
+            ("content" to JsonPrimitive(assertNotNull(mcpPng))),
         )
       val mcpArtifact = json.decodeFromJsonElement<ExportArtifactV1>(mcpArtifactJson)
       assertEquals(artifact, mcpArtifact)
       val unsupported =
         json.encodeToString(
-          doc.copy(environment = doc.environment.copy(layoutDirection = LayoutDirectionV1.RTL))
+          doc.copy(environment = doc.environment.copy(layoutDirection = LayoutDirectionV1.RTL)),
         )
       val refusal =
         request("/api/ui-builder/v1/documents/export.png", unsupported, 422).decodeToString()
@@ -337,13 +338,13 @@ class RemotePngExportProofTest {
       val refusedArtifact =
         json.decodeFromString<ExportArtifactV1>(
           request("/api/ui-builder/v1/documents/export.png?artifact=true", unsupported)
-            .decodeToString()
+            .decodeToString(),
         )
       assertEquals("", refusedArtifact.content)
       assertTrue(
         refusedArtifact.diagnostics.any {
           it.severity == DiagnosticSeverityV1.ERROR && it.code == "REMOTE_EXPORT_UNSUPPORTED"
-        }
+        },
       )
       assertTrue(
         mcp("ui_builder_list_designs", buildJsonObject {}).getValue("designs").jsonArray.isEmpty(),
@@ -354,7 +355,7 @@ class RemotePngExportProofTest {
           UiBuilderServiceCall(
             AuthenticatedUiBuilderActor("operator"),
             UiBuilderServiceRequest.CreateDesign(doc),
-          )
+          ),
         )
       }
       assertContentEquals(

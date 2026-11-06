@@ -78,7 +78,7 @@ class ServeAgentGrantRequestPersistenceTest {
     approvedByActorId: String,
   ): ServeAgentGrantStore.Approval =
     assertIs<ServeAgentGrantStore.Decision.Approved>(
-        decide(id, approvedBy, scope, ttlSeconds, capabilities, approvedByActorId)
+        decide(id, approvedBy, scope, ttlSeconds, capabilities, approvedByActorId),
       )
       .approval
 
@@ -131,7 +131,7 @@ class ServeAgentGrantRequestPersistenceTest {
         600,
         setOf(AgentGrantCapability.IMAGES),
         "github:yuri",
-      )
+      ),
     )
 
     // Restart five minutes later: the in-memory grant is gone with the process.
@@ -197,12 +197,12 @@ class ServeAgentGrantRequestPersistenceTest {
           600,
           setOf(AgentGrantCapability.UI_BUILDER_WRITE),
           requesterActorId = "github:ana",
-        )
+        ),
       )
     val reloaded = store()
     assertEquals("github:ana", assertNotNull(reloaded.request(request.id)).requesterActorId)
     assertNotNull(
-      reloaded.approveOk(request.id, "@yuri", AgentGrantScope.PREVIEW, 600, emptySet(), "u")
+      reloaded.approveOk(request.id, "@yuri", AgentGrantScope.PREVIEW, 600, emptySet(), "u"),
     )
     assertNotNull(reloaded.activeGrantForRequester("github:ana"))
     // Nobody polls a session-carried grant, so its approval is not kept to be minted again.
@@ -254,15 +254,15 @@ class ServeAgentGrantRequestPersistenceTest {
     val denied = first.ask().also { first.deny(it.id, "@yuri") }
     val self =
       assertNotNull(
-        first.openRequest("mine", "10.0.0.1", AgentGrantScope.PREVIEW, 600, requesterActorId = "a")
+        first.openRequest("mine", "10.0.0.1", AgentGrantScope.PREVIEW, 600, requesterActorId = "a"),
       )
     // A person's own request is minted at approval (nobody polls it): its token stays off disk too.
     val grant =
       assertNotNull(
         assertIs<ServeAgentGrantStore.Decision.Approved>(
-            first.decide(self.id, "@yuri", AgentGrantScope.PREVIEW, 600, emptySet(), "u")
+            first.decide(self.id, "@yuri", AgentGrantScope.PREVIEW, 600, emptySet(), "u"),
           )
-          .grant
+          .grant,
       )
 
     val text = file.readText()
@@ -285,7 +285,7 @@ class ServeAgentGrantRequestPersistenceTest {
     val memoryOnly = store(file = null)
     val request = memoryOnly.ask()
     assertNotNull(
-      memoryOnly.approve(request.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "")
+      memoryOnly.approve(request.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), ""),
     )
     assertIs<ServeAgentGrantStore.Poll.Approved>(memoryOnly.poll(request.id, request.deviceSecret))
     assertFalse(file.exists())
@@ -302,7 +302,7 @@ class ServeAgentGrantRequestPersistenceTest {
     assertIs<ServeAgentGrantStore.Poll.Pending>(newProcess.poll(request.id, request.deviceSecret))
     // ...and a human approves it on the old process before it stops.
     assertNotNull(
-      oldProcess.approveOk(request.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "")
+      oldProcess.approveOk(request.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), ""),
     )
     assertIs<ServeAgentGrantStore.Poll.Approved>(newProcess.poll(request.id, request.deviceSecret))
   }
@@ -335,7 +335,7 @@ class ServeAgentGrantRequestPersistenceTest {
     assertTrue(newProcess.activeGrants().isEmpty())
     // And a third process, later, does not resurrect it either.
     assertTrue(
-      store().poll(request.id, request.deviceSecret) !is ServeAgentGrantStore.Poll.Approved
+      store().poll(request.id, request.deviceSecret) !is ServeAgentGrantStore.Poll.Approved,
     )
   }
 
@@ -344,7 +344,7 @@ class ServeAgentGrantRequestPersistenceTest {
     val oldProcess = store()
     val request = oldProcess.ask()
     assertNotNull(
-      oldProcess.approveOk(request.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "u")
+      oldProcess.approveOk(request.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "u"),
     )
     val newProcess = store()
     assertIs<ServeAgentGrantStore.Poll.Approved>(oldProcess.poll(request.id, request.deviceSecret))
@@ -362,7 +362,7 @@ class ServeAgentGrantRequestPersistenceTest {
     repeat(2) {
       val request = first.ask()
       assertNotNull(
-        first.approveOk(request.id, "@ana", AgentGrantScope.LIVE, 600, emptySet(), "a$it")
+        first.approveOk(request.id, "@ana", AgentGrantScope.LIVE, 600, emptySet(), "a$it"),
       )
     }
 
@@ -383,7 +383,7 @@ class ServeAgentGrantRequestPersistenceTest {
     val first = store(maxActiveGrantsPerApprover = 1)
     val request = first.ask()
     assertNotNull(
-      first.approveOk(request.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "github:yuri")
+      first.approveOk(request.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "github:yuri"),
     )
 
     val reloaded = store(maxActiveGrantsPerApprover = 1)
@@ -393,7 +393,7 @@ class ServeAgentGrantRequestPersistenceTest {
     )
     val second = reloaded.ask()
     assertIs<ServeAgentGrantStore.Decision.NoCapacity>(
-      reloaded.decide(second.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "github:yuri")
+      reloaded.decide(second.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "github:yuri"),
     )
   }
 
@@ -406,7 +406,7 @@ class ServeAgentGrantRequestPersistenceTest {
       listOf(a, a, b, b).mapIndexed { i, process ->
         val request = process.ask()
         assertNotNull(
-          process.approveOk(request.id, "@p$i", AgentGrantScope.LIVE, 600, emptySet(), "p$i")
+          process.approveOk(request.id, "@p$i", AgentGrantScope.LIVE, 600, emptySet(), "p$i"),
         )
         request
       }
@@ -449,7 +449,7 @@ class ServeAgentGrantRequestPersistenceTest {
         600,
         setOf(AgentGrantCapability.IMAGES),
         "u",
-      )
+      ),
     )
 
     val reloaded = store(maxCapabilities = emptySet())
@@ -477,7 +477,7 @@ class ServeAgentGrantRequestPersistenceTest {
           if (interleaved == null && point == "collect") {
             interleaved = a.poll(request.id, request.deviceSecret)
           }
-        }
+        },
       )
     val fromB = b.poll(request.id, request.deviceSecret)
     val fromA = assertNotNull(interleaved, "the interleaving hook ran")
@@ -493,7 +493,7 @@ class ServeAgentGrantRequestPersistenceTest {
     val approver = store()
     val request = approver.ask()
     assertNotNull(
-      approver.approveOk(request.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "u")
+      approver.approveOk(request.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "u"),
     )
     assertTrue(approver.activeGrants().isEmpty(), "no grant exists before collection")
     // A new process restored it and collected first.
@@ -517,7 +517,7 @@ class ServeAgentGrantRequestPersistenceTest {
         1800,
         setOf(AgentGrantCapability.IMAGES),
         "u",
-      )
+      ),
     )
     // Past the request's 30-minute deadline, inside the grant's 40.
     now += 25 * 60_000
@@ -527,7 +527,7 @@ class ServeAgentGrantRequestPersistenceTest {
 
     val denied =
       assertIs<ServeAgentGrantStore.Poll.Denied>(
-        store(maxCapabilities = emptySet()).poll(request.id, request.deviceSecret)
+        store(maxCapabilities = emptySet()).poll(request.id, request.deviceSecret),
       )
     assertNotNull(denied.reason)
   }
@@ -564,7 +564,7 @@ class ServeAgentGrantRequestPersistenceTest {
           if (inner == null && point == "decide") {
             inner = a.decide(request.id, "@ana", AgentGrantScope.LIVE, 600, emptySet(), "ana")
           }
-        }
+        },
       )
     val outer = b.decide(request.id, "@yuri", AgentGrantScope.PREVIEW, 600, emptySet(), "yuri")
 
@@ -588,7 +588,7 @@ class ServeAgentGrantRequestPersistenceTest {
       store(
         interleave = { point ->
           if (deniedFirst == null && point == "decide") deniedFirst = a.deny(denied.id, "@ana")
-        }
+        },
       )
     val lost = b.decide(denied.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "yuri")
     assertEquals(true, deniedFirst)
@@ -608,7 +608,7 @@ class ServeAgentGrantRequestPersistenceTest {
             approvedFirst =
               a.decide(approved.id, "@ana", AgentGrantScope.LIVE, 600, emptySet(), "ana")
           }
-        }
+        },
       )
     assertFalse(c.deny(approved.id, "@yuri"), "the denial lost")
     assertIs<ServeAgentGrantStore.Decision.Approved>(approvedFirst)
@@ -675,7 +675,7 @@ class ServeAgentGrantRequestPersistenceTest {
     assertEquals(ServeAgentGrantStore.Capacity.BOX_FULL, a.capacityFor("@ana", "github:ana"))
     val second = a.ask()
     assertIs<ServeAgentGrantStore.Decision.NoCapacity>(
-      a.decide(second.id, "@ana", AgentGrantScope.LIVE, 600, emptySet(), "github:ana")
+      a.decide(second.id, "@ana", AgentGrantScope.LIVE, 600, emptySet(), "github:ana"),
     )
     // Counted once in B, which holds it.
     assertEquals(ServeAgentGrantStore.Capacity.BOX_FULL, b.capacityFor("@ana", "github:ana"))
@@ -697,7 +697,7 @@ class ServeAgentGrantRequestPersistenceTest {
     assertEquals(ServeAgentGrantStore.Capacity.OK, a.capacityFor("@ana", "github:ana"))
     val second = a.ask()
     assertIs<ServeAgentGrantStore.Decision.NoCapacity>(
-      a.decide(second.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "github:yuri")
+      a.decide(second.id, "@yuri", AgentGrantScope.LIVE, 600, emptySet(), "github:yuri"),
     )
   }
 
@@ -857,7 +857,7 @@ class ServeAgentGrantRequestPersistenceTest {
           600,
           setOf(AgentGrantCapability.UI_BUILDER_WRITE),
           requesterActorId = "github:ana",
-        )
+        ),
       )
     assertNotNull(a.approveOk(request.id, "@yuri", AgentGrantScope.PREVIEW, 600, emptySet(), "u"))
     assertNotNull(a.activeGrantForRequester("github:ana"))

@@ -22,7 +22,7 @@ class ServeSourceOnboardingTest {
   private val repos =
     mutableMapOf(
       "joreilly/PeopleInSpace" to
-        listOf(module("shared", previews = 3), module("androidApp", previews = 0))
+        listOf(module("shared", previews = 3), module("androidApp", previews = 0)),
     )
 
   private fun module(path: String, previews: Int) =
@@ -91,7 +91,7 @@ class ServeSourceOnboardingTest {
   fun `a repository that cannot be read is upstream trouble, and a non-GitHub URL is the caller's`() {
     assertTrue(onboarding().scan("someone/missing") is ServeSourceOnboarding.ScanResult.Unreachable)
     assertTrue(
-      onboarding().scan("https://gitlab.com/a/b") is ServeSourceOnboarding.ScanResult.Invalid
+      onboarding().scan("https://gitlab.com/a/b") is ServeSourceOnboarding.ScanResult.Invalid,
     )
   }
 
@@ -100,7 +100,7 @@ class ServeSourceOnboardingTest {
     // The ref reaches a command line, so a value starting with `-` is an argument, not a branch.
     assertTrue(
       onboarding().scan("joreilly/PeopleInSpace", ref = "--upload-pack=touch /tmp/x")
-        is ServeSourceOnboarding.ScanResult.Invalid
+        is ServeSourceOnboarding.ScanResult.Invalid,
     )
     assertTrue(commands.isEmpty(), "$commands")
   }

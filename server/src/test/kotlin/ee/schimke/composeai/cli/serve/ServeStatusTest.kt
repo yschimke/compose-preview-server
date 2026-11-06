@@ -189,7 +189,7 @@ class ServeStatusTest {
     )
     assertTrue(
       body.contains(
-        "\"id\":\"compose-m3\",\"label\":\"compose-m3\",\"backend\":\"static\",\"seatWeight\":0"
+        "\"id\":\"compose-m3\",\"label\":\"compose-m3\",\"backend\":\"static\",\"seatWeight\":0",
       ),
       "static hosts must not claim a daemon backend or live seat: $body",
     )
@@ -537,7 +537,7 @@ class ServeStatusTest {
               open = true,
               fatal = true,
               reason = "render linkage failure",
-            )
+            ),
         )
     val broken =
       object : ServeHost {
@@ -600,7 +600,7 @@ class ServeStatusTest {
     assertTrue(body.contains("href=\"/status.json\""), body)
     assertTrue(
       body.contains(
-        "href=\"https://github.com/yschimke/compose-ai-tools/tree/design-artifacts/compose-m3\""
+        "href=\"https://github.com/yschimke/compose-ai-tools/tree/design-artifacts/compose-m3\"",
       ),
       body,
     )
@@ -671,7 +671,7 @@ class ServeStatusTest {
                   backend = "desktop",
                   activeStreams = 0,
                   upForText = "1m",
-                )
+                ),
               ),
             failures = emptyList(),
           ),
@@ -730,7 +730,7 @@ class ServeStatusTest {
                       dirty = dirty,
                       fullyOptimized = cached == 8,
                     ),
-                )
+                ),
               ),
             servers = emptyList(),
             failures = emptyList(),
@@ -884,8 +884,8 @@ class ServeStatusTest {
         trust =
           BundleVerifier.Verdict.Trusted(
             listOf(
-              BundleVerifier.Basis.Branch("joreilly/Confetti", "design-artifacts/confetti-wear")
-            )
+              BundleVerifier.Basis.Branch("joreilly/Confetti", "design-artifacts/confetti-wear"),
+            ),
           ),
         title = "Confetti Wear",
       )
@@ -915,7 +915,7 @@ class ServeStatusTest {
       assertTrue(whileResident.contains("\"metaStale\":false"), whileResident)
       assertTrue(
         whileResident.contains(
-          "\"trust\":\"branch:joreilly/Confetti@design-artifacts/confetti-wear\""
+          "\"trust\":\"branch:joreilly/Confetti@design-artifacts/confetti-wear\"",
         ),
         whileResident,
       )

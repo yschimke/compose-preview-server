@@ -100,7 +100,7 @@ internal class ComponentRecordSource(
         // Still logged as well as returned. The export names the failure to whoever asked for it;
         // the operator watching the process is a different reader with a different problem.
         System.err.println(
-          "serve: UI-builder component record for $catalogSystemId not readable at $path"
+          "serve: UI-builder component record for $catalogSystemId not readable at $path",
         )
         Lookup.Unusable("no readable file at `$path`")
       } else {
@@ -109,7 +109,7 @@ internal class ComponentRecordSource(
             onSuccess = { Lookup.Found(it.withFoundation()) },
             onFailure = {
               System.err.println(
-                "serve: UI-builder component record at $path is not readable: ${it.message}"
+                "serve: UI-builder component record at $path is not readable: ${it.message}",
               )
               Lookup.Unusable("the file at `$path` did not parse as a component record")
             },
@@ -163,14 +163,14 @@ internal class ComponentRecordSource(
         if (text == null) {
           System.err.println(
             "serve: packaged $FOUNDATION_RECORD_RESOURCE is missing — layout/, shape/ and asset/ " +
-              "components will have no record and every export using one refuses by name"
+              "components will have no record and every export using one refuses by name",
           )
           return@lazy null
         }
         runCatching { JSON.decodeFromString<ComponentRecordFile>(text) }
           .onFailure {
             System.err.println(
-              "serve: packaged $FOUNDATION_RECORD_RESOURCE did not parse: ${it.message}"
+              "serve: packaged $FOUNDATION_RECORD_RESOURCE did not parse: ${it.message}",
             )
           }
           .getOrNull()

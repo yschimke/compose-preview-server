@@ -129,7 +129,7 @@ class ServeWebValueSetTest {
           current = "en-US",
           options = listOf(PreviewOverrideOption("en-XA", "Accented (pseudo)")),
           exhaustive = false,
-        )
+        ),
       )
 
     val panel = knobsPanel(html)

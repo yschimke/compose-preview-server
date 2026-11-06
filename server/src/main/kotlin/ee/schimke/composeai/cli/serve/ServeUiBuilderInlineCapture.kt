@@ -47,7 +47,7 @@ internal class ServeUiBuilderInlineCapture(
           UNREADABLE_DESIGN,
           listOf(
             "this design could not be read as a builder document" +
-              (failure.message?.let { ": $it" } ?: "")
+              (failure.message?.let { ": $it" } ?: ""),
           ),
         )
       }
@@ -74,7 +74,7 @@ internal class ServeUiBuilderInlineCapture(
           listOf(
             "this host serves no catalog that compiles Remote Compose, so there is nothing to " +
               "capture `$nodeId` against — serve an Android-backend catalog whose bundle carries " +
-              "the Remote Compose creation library, and the canvas plays this content for real"
+              "the Remote Compose creation library, and the canvas plays this content for real",
           ),
         )
     val environment = document.environment
@@ -92,7 +92,7 @@ internal class ServeUiBuilderInlineCapture(
           heightDp = environment.heightDp,
           confType = REMOTE_COMPOSE_CONF_TYPE,
           remoteCapture = true,
-        )
+        ),
       )
     val url = response.documentUrl
     if (url.isNullOrBlank()) {

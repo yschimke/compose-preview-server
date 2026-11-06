@@ -393,7 +393,7 @@ object ServeSettings {
             runCatching { AgentGrantCapability.parseAll(names.joinToString(",")) }
               .exceptionOrNull()
               ?.let { it.message ?: "names an unknown capability" }
-          }
+          },
         ),
         Apply.RESTART,
         "Capabilities an agent grant may be given, beyond the defaults. `images` is dropped " +
@@ -672,7 +672,7 @@ object ServeSettings {
     appendLine()
     appendLine(
       "<!-- Generated from server/src/main/kotlin/ee/schimke/composeai/cli/serve/ServeSettings.kt. " +
-        "Regenerate with UPDATE_SERVE_SETTINGS_REFERENCE=true on ServeSettingsTest. -->"
+        "Regenerate with UPDATE_SERVE_SETTINGS_REFERENCE=true on ServeSettingsTest. -->",
     )
     appendLine()
     appendLine(
@@ -681,12 +681,12 @@ object ServeSettings {
         "validated against [`settings.schema.json`](settings.schema.json) and published to the box " +
         "through `PUT /admin/settings`. Precedence is built-in default, then `settings.json`, " +
         "then the environment (`.env`): an `.env` line still wins, and `GET /admin/settings` says " +
-        "which source each value came from."
+        "which source each value came from.",
     )
     appendLine()
     appendLine(
       "**live** settings take effect when published; **restart** settings are stored and apply " +
-        "at the next start. Secrets and machine sizing stay in `.env` (see README.md)."
+        "at the next start. Secrets and machine sizing stay in `.env` (see README.md).",
     )
     appendLine()
     appendLine("| Setting | Variable | Applies | Read by | Description |")

@@ -202,7 +202,7 @@ class ServeUiBuilderEditorTest {
   fun `catalogs json round-trips an editor pin and validates it`() {
     val config =
       ServeCatalogsConfig.parse(
-        """{ "editor": { "version": "3.48.0", "sha256": "${"a".repeat(64)}" }, "catalogs": [] }"""
+        """{ "editor": { "version": "3.48.0", "sha256": "${"a".repeat(64)}" }, "catalogs": [] }""",
       )
     assertEquals(ServeCatalogsConfig.EditorPin("3.48.0", "a".repeat(64)), config.editor)
     assertEquals(config, ServeCatalogsConfig.parse(ServeCatalogsConfig.encode(config)))
@@ -213,15 +213,15 @@ class ServeUiBuilderEditorTest {
       ServeCatalogsConfig(editor = ServeCatalogsConfig.EditorPin("../x", "a".repeat(64)))
         .problems()
         .single()
-        .startsWith("invalid editor version")
+        .startsWith("invalid editor version"),
     )
     assertNotNull(
-      ServeCatalogsConfig.validateEditor(ServeCatalogsConfig.EditorPin("3.48.0", "abc"))
+      ServeCatalogsConfig.validateEditor(ServeCatalogsConfig.EditorPin("3.48.0", "abc")),
     )
     assertNotNull(
       ServeCatalogsConfig.validateEditor(
-        ServeCatalogsConfig.EditorPin("3.48.0", "a".repeat(64), url = "http://insecure/x.zip")
-      )
+        ServeCatalogsConfig.EditorPin("3.48.0", "a".repeat(64), url = "http://insecure/x.zip"),
+      ),
     )
   }
 
@@ -230,7 +230,7 @@ class ServeUiBuilderEditorTest {
   private val configFile by lazy {
     ServeCatalogsConfigFile(File(tmp, "catalogs.json").toOkioPath()).also {
       it.save(
-        ServeCatalogsConfig(catalogs = listOf(ServeCatalogsConfig.Entry("m3-catalog", "a/b")))
+        ServeCatalogsConfig(catalogs = listOf(ServeCatalogsConfig.Entry("m3-catalog", "a/b"))),
       )
     }
   }

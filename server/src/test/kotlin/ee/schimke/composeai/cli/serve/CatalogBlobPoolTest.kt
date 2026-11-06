@@ -75,7 +75,7 @@ class CatalogBlobPoolTest {
         pool.contentAddressed(digest, 64) {
           fetches.incrementAndGet()
           bytes
-        }
+        },
       )
 
     assertContentEquals(bytes, blob.readBytes())
@@ -113,7 +113,7 @@ class CatalogBlobPoolTest {
       CatalogBlobPool(root).keyed(url) { dest ->
         dest.writeBytes(bytes)
         true
-      }
+      },
     )
 
     val reopened = CatalogBlobPool(root)
@@ -124,7 +124,7 @@ class CatalogBlobPoolTest {
           produced.incrementAndGet()
           dest.writeBytes(bytes)
           true
-        }
+        },
       )
 
     assertContentEquals(bytes, blob.readBytes())
@@ -147,7 +147,7 @@ class CatalogBlobPoolTest {
         pool.keyed(url) { dest ->
           dest.writeBytes("landed".toByteArray())
           true
-        }
+        },
       )
     assertContentEquals("landed".toByteArray(), blob.readBytes())
     assertTrue(pool.holds(url))
@@ -162,7 +162,7 @@ class CatalogBlobPoolTest {
       pool.keyed(url) { dest ->
         dest.writeBytes(bytes)
         true
-      }
+      },
     )
     assertTrue(pool.contentFile(sha(bytes)).delete())
 
@@ -174,7 +174,7 @@ class CatalogBlobPoolTest {
           produced.incrementAndGet()
           dest.writeBytes(bytes)
           true
-        }
+        },
       )
 
     assertEquals(1, produced.get())
@@ -193,7 +193,7 @@ class CatalogBlobPoolTest {
         pool.keyed(url) { dest ->
           dest.writeBytes(bytes)
           true
-        }
+        },
       )
 
     val addressed =
@@ -445,7 +445,7 @@ class CatalogBlobPoolTest {
           pool.keyed("https://raw.githubusercontent.com/o/r/$COMMIT/b$i.png") { dest ->
             dest.writeBytes(ByteArray(100) { i.toByte() })
             true
-          }
+          },
         )
       }
 
@@ -472,7 +472,7 @@ class CatalogBlobPoolTest {
         pool.keyed("https://raw.githubusercontent.com/o/r/$COMMIT/fresh.png") { dest ->
           dest.writeBytes(ByteArray(100))
           true
-        }
+        },
       )
 
     val snapshot = pool.sweep()
@@ -492,7 +492,7 @@ class CatalogBlobPoolTest {
       pool.keyed(url) { dest ->
         dest.writeBytes(bytes)
         true
-      }
+      },
     )
     assertTrue(pool.contentFile(sha(bytes)).delete())
 

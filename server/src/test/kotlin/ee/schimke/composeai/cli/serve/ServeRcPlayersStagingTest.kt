@@ -18,7 +18,7 @@ class ServeRcPlayersStagingTest {
     File(
         checkNotNull(System.getProperty("composeai.test.rcPlayersAndroidDir")) {
           "composeai.test.rcPlayersAndroidDir is set by the server's Gradle test task"
-        }
+        },
       )
       .listFiles { file -> file.extension == "jar" }
       .orEmpty()

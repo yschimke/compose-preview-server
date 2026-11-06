@@ -50,7 +50,7 @@ class RemoteProfileGuidelinesTest {
            "source":"https://developer.android.com/b","surfaces":["widget"],
            "profiles":["launcher-widgets-v7"]}
          ]}
-        """
+        """,
       )
     suspend fun asked(stated: String?): List<String> {
       val document = document(LauncherWidgetCodeExporter.ROOT, stated)

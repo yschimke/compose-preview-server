@@ -210,7 +210,7 @@ class ServeWebPlaygroundCatalogTest {
     // wear is android-backed; preselecting it must not leave Mode on the desktop entry's CMP.
     val html = page(listOf(m3, wear), preselectCatalog = "compose-wear")
     assertTrue(
-      html.contains("""<option value="compose-android" selected>Compose (Android)</option>""")
+      html.contains("""<option value="compose-android" selected>Compose (Android)</option>"""),
     )
     assertFalse(html.contains("""<option value="compose-cmp" selected>"""))
   }
@@ -251,7 +251,7 @@ class ServeWebPlaygroundCatalogTest {
   fun `an android catalog seeds the mode control with its own modes`() {
     val html = page(listOf(wear))
     assertTrue(
-      html.contains("""<option value="compose-android" selected>Compose (Android)</option>""")
+      html.contains("""<option value="compose-android" selected>Compose (Android)</option>"""),
     )
     assertTrue(html.contains("""<option value="remote-compose">Remote Compose</option>"""))
     assertFalse(html.contains("""value="compose-cmp""""), "an android catalog offers no CMP mode")
@@ -342,8 +342,8 @@ class ServeWebPlaygroundCatalogTest {
             label = "b<script>y</script>",
             backend = "desktop",
             modes = listOf(PlaygroundMode.CMP),
-          )
-        )
+          ),
+        ),
       )
     assertFalse(html.contains("<script>x</script>"))
     assertFalse(html.contains("<script>y</script>"))

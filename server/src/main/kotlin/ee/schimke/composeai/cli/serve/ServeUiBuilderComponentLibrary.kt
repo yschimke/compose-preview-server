@@ -131,7 +131,7 @@ class ServeUiBuilderComponentLibrary(
             // publishing nothing.
             onLog(
               "serve: ${catalog.system} publishes a component index that is not readable " +
-                "(${it.message})"
+                "(${it.message})",
             )
             null
           }
@@ -162,7 +162,7 @@ class ServeUiBuilderComponentLibrary(
         .onFailure {
           onLog(
             "serve: ${catalog.system}'s component ${entry.componentId} is not a design document " +
-              "(${it.message})"
+              "(${it.message})",
           )
         }
         .getOrNull() ?: return null
@@ -196,7 +196,7 @@ class ServeUiBuilderComponentLibrary(
     if (declared.size != 1) {
       onLog(
         "serve: $system's component $id declares ${declared.size} components; a symbol file " +
-          "declares exactly one"
+          "declares exactly one",
       )
       return null
     }
@@ -243,7 +243,7 @@ class ServeUiBuilderComponentLibrary(
     if (cyclic.isNotEmpty()) {
       onLog(
         "serve: $system's component $id has a body that contains itself at " +
-          "${cyclic.sorted().joinToString()}; a symbol is a tree"
+          "${cyclic.sorted().joinToString()}; a symbol is a tree",
       )
       return null
     }
@@ -251,7 +251,7 @@ class ServeUiBuilderComponentLibrary(
     if (missing.isNotEmpty()) {
       onLog(
         "serve: $system's component $id has a body reaching ${missing.sorted().joinToString()}, " +
-          "which its file does not carry"
+          "which its file does not carry",
       )
       return null
     }
@@ -261,7 +261,7 @@ class ServeUiBuilderComponentLibrary(
       onLog(
         "serve: $system's component $id places another component at " +
           "${placements.sorted().joinToString()}; a published symbol uses only its catalog's " +
-          "components"
+          "components",
       )
       return null
     }
@@ -372,9 +372,9 @@ class ServeUiBuilderComponentLibrary(
                   .sortedBy { it.key }
                   .associate { (id, node) ->
                     id to canonicalise(json.encodeToJsonElement(DesignNodeV1.serializer(), node))
-                  }
+                  },
               ),
-          )
+          ),
         )
       val bytes = json.encodeToString(JsonObject.serializer(), canonical).toByteArray()
       return "sha256:" +
@@ -386,7 +386,7 @@ class ServeUiBuilderComponentLibrary(
       when (element) {
         is JsonObject ->
           JsonObject(
-            element.entries.sortedBy { it.key }.associate { it.key to canonicalise(it.value) }
+            element.entries.sortedBy { it.key }.associate { it.key to canonicalise(it.value) },
           )
         is JsonArray -> JsonArray(element.map(::canonicalise))
         else -> element

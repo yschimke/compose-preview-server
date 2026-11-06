@@ -47,15 +47,15 @@ internal fun helloWidgetUiBuilderDocument(
               "text" to literal("string", JsonPrimitive("Hello, World!")),
               "color" to colorToken("onPrimary"),
               "fontSize" to literal("float", JsonPrimitive(20)),
-            )
+            ),
           ),
         modifiers =
           JsonArray(
             listOf(
               JsonObject(
-                mapOf("type" to JsonPrimitive("align"), "alignment" to JsonPrimitive("center"))
-              )
-            )
+                mapOf("type" to JsonPrimitive("align"), "alignment" to JsonPrimitive("center")),
+              ),
+            ),
           ),
         slots = emptyMap(),
       ),
@@ -121,7 +121,7 @@ internal fun wearScreenUiBuilderDocument(
             mapOf(
               "timeText" to literal("string", JsonPrimitive("10:10")),
               "scrollIndicator" to literal("bool", JsonPrimitive(true)),
-            )
+            ),
           ),
         modifiers = JsonArray(emptyList()),
         slots = mapOf("content" to listOf("wear-list"), "edgeButton" to emptyList()),
@@ -172,7 +172,7 @@ private fun wearScreenText(
           "color" to colorToken(color),
           "textAlign" to literal("enum", JsonPrimitive("start")),
           "fontSizeSp" to literal("float", JsonPrimitive(fontSizeSp)),
-        )
+        ),
       ),
     modifiers = JsonArray(listOf(modifier("fillMaxWidth"))),
     slots = emptyMap(),

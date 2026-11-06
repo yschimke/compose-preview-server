@@ -42,7 +42,7 @@ class ServeUiBuilderLinksStoreTest {
             thread = "https://example.slack.com/archives/C1/p1700000000",
             previous = "checkout-v1",
           ),
-        )
+        ),
       )
     val reopened = requireNotNull(store.read("design-1"))
     assertEquals("design-1", reopened.designId, "the host names the design, not the caller")
@@ -73,7 +73,7 @@ class ServeUiBuilderLinksStoreTest {
     assertEquals(
       "`previous` must be a design id on this host, not a URL",
       refusal(
-        store.replace("design-1", StoredLinks(previous = "https://example.com/designs/checkout"))
+        store.replace("design-1", StoredLinks(previous = "https://example.com/designs/checkout")),
       ),
     )
   }
@@ -97,7 +97,7 @@ class ServeUiBuilderLinksStoreTest {
     assertEquals(long, store.read("design-1")?.previous)
 
     assertIs<LinksWriteResult.Stored>(
-      store.replace("design-2", StoredLinks(previous = "Ünicode-café"))
+      store.replace("design-2", StoredLinks(previous = "Ünicode-café")),
     )
     assertEquals("Ünicode-café", store.read("design-2")?.previous)
   }

@@ -92,7 +92,7 @@ class ServeCarriedRcSeatTest {
             final = false,
             payloadBase64 =
               Base64.getEncoder().encodeToString(ServeCarriedRcStreamTest.png(marker)),
-          )
+          ),
         )
       frame(HELD_FIRST_FRAME)
       return object : StreamHandle {
@@ -277,7 +277,7 @@ class ServeCarriedRcSeatTest {
         }
       }
     assertIs<ServeRcPlayerDaemon.LiveOutcome.Busy>(
-      daemon.openLive(carried(), null, null, streamSeat = racing) {}
+      daemon.openLive(carried(), null, null, streamSeat = racing) {},
     )
     assertNotNull(intruder, "the race happened")
     assertFalse(taken, "nothing is taken over unless the rest of the weight was had first")
@@ -294,7 +294,7 @@ class ServeCarriedRcSeatTest {
     val streamSeat = ServeCarriedRcStreamSeat(seats, 1).also { assertTrue(it.acquire()) }
     val busy =
       assertIs<ServeRcPlayerDaemon.LiveOutcome.Busy>(
-        daemon.openLive(carried(), null, null, streamSeat = streamSeat) {}
+        daemon.openLive(carried(), null, null, streamSeat = streamSeat) {},
       )
     assertTrue(streamSeat.holdsTicket)
     assertTrue("no live seat" in busy.reason, busy.reason)

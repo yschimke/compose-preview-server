@@ -101,7 +101,7 @@ class PlaygroundCatalogTargets(
           )
       }
       .sortedWith(
-        compareBy<PlaygroundCatalogTarget>({ it.system }, { it.id != it.system }, { it.module })
+        compareBy<PlaygroundCatalogTarget>({ it.system }, { it.id != it.system }, { it.module }),
       )
 
   /** How many catalogs currently hold a resolved classpath — for `/status.json`. */
@@ -123,7 +123,7 @@ class PlaygroundCatalogTargets(
     if (mode !in target.modes) {
       onLog(
         "catalog target '$id' is a ${target.backend} bundle and cannot serve mode ${mode.name} here " +
-          "(offers ${target.modes.joinToString { it.name }})"
+          "(offers ${target.modes.joinToString { it.name }})",
       )
       return null
     }
@@ -152,7 +152,7 @@ class PlaygroundCatalogTargets(
         onLog(
           "playground catalog budget spent: $limit catalog(s) already hold a resolved classpath " +
             "and they cannot be evicted while snippet JVMs hold their jars open, so '$id' is " +
-            "refused. Raise --playground-catalog-limit, or restart to pick a different set."
+            "refused. Raise --playground-catalog-limit, or restart to pick a different set.",
         )
         return null
       }

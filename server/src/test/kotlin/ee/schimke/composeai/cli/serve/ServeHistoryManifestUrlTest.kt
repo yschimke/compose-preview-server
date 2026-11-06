@@ -48,7 +48,7 @@ class ServeHistoryManifestUrlTest {
               observations = 0,
               unstable = false,
               flapCount = 0,
-            )
+            ),
         ),
     )
 
@@ -103,7 +103,7 @@ class ServeHistoryManifestUrlTest {
     val body = viewer("with-history")
     assertTrue(
       body.contains(
-        "data-history-url=\"https://raw.githubusercontent.com/yschimke/design/design/m3/history.json\""
+        "data-history-url=\"https://raw.githubusercontent.com/yschimke/design/design/m3/history.json\"",
       ),
       "expected the manifest URL the load already read",
     )

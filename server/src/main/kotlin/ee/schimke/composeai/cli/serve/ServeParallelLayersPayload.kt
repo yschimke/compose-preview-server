@@ -125,7 +125,7 @@ object ServeParallelLayersPayload {
           },
         differing = diff.differing,
         unpaired = diff.unpaired,
-      )
+      ),
     )
 
   internal fun pairedByWire(basis: ServeParallelPairing.Basis): String =

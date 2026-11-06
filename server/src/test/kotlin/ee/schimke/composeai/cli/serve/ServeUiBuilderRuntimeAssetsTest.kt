@@ -37,7 +37,7 @@ class ServeUiBuilderRuntimeAssetsTest {
           Request.Builder()
             .url("http://127.0.0.1:${server.port}$path")
             .apply { etag?.let { header("If-None-Match", it) } }
-            .build()
+            .build(),
         )
         .execute()
     try {
@@ -179,7 +179,7 @@ class ServeUiBuilderRuntimeAssetsTest {
           staging,
           descriptor.runtimeId,
           listOf("renderer.mjs"),
-        )
+        ),
       )
     assertEquals("export const wear = true", asset.bytes.decodeToString())
     assertFailsWith<IllegalArgumentException> {
@@ -267,7 +267,7 @@ class ServeUiBuilderRuntimeAssetsTest {
         .newCall(
           Request.Builder()
             .url("http://127.0.0.1:${server.port}/ui-builder/runtime/$runtimeId/renderer.mjs")
-            .build()
+            .build(),
         )
         .execute()
         .use { response ->
@@ -308,7 +308,7 @@ class ServeUiBuilderRuntimeAssetsTest {
         .newCall(
           Request.Builder()
             .url("http://127.0.0.1:${server.port}/ui-builder/runtime/$runtimeId/renderer.mjs")
-            .build()
+            .build(),
         )
         .execute()
         .use { response -> assertEquals(404, response.code) }
@@ -353,7 +353,7 @@ class ServeUiBuilderRuntimeAssetsTest {
     val integrity = ServeUiBuilderRuntimeAssets.treeIntegrity(assets)
     File(directory, ServeUiBuilderRuntimeAssets.RUNTIME_MANIFEST_NAME)
       .writeText(
-        """{"schema":"$schema","runtimeId":"$runtimeId","protocolVersion":$protocolVersion,"entrypoint":"index.html","integritySha256":"$integrity"$extraManifest}"""
+        """{"schema":"$schema","runtimeId":"$runtimeId","protocolVersion":$protocolVersion,"entrypoint":"index.html","integritySha256":"$integrity"$extraManifest}""",
       )
     return directory
   }

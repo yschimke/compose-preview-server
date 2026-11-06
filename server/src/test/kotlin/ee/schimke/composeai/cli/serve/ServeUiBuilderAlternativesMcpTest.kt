@@ -149,8 +149,8 @@ class ServeUiBuilderAlternativesMcpTest {
       val errors =
         SchemaCheck(
             ServeUiBuilderAlternativeTools.outputSchema(
-              ServeUiBuilderAlternativeTools.COMPARE_BRANCHES
-            )!!
+              ServeUiBuilderAlternativeTools.COMPARE_BRANCHES,
+            )!!,
           )
           .errors(text)
       assertTrue(errors.isEmpty(), "$errors in $text")
@@ -241,7 +241,7 @@ class ServeUiBuilderAlternativesMcpTest {
               buildJsonObject {
                 put(ServeUiBuilderAlternativeTools.FIELD, options[1].string("uri"))
               },
-            )
+            ),
           )
         }
       val reply =
@@ -309,7 +309,7 @@ class ServeUiBuilderAlternativesMcpTest {
       val declining =
         FakeInteraction(openAi = true, form = true) {
           OpenAiFormElicitation.Answered(
-            ServeCatalogMcp.FormElicitationResult(ServeCatalogMcp.FormElicitationAction.DECLINE)
+            ServeCatalogMcp.FormElicitationResult(ServeCatalogMcp.FormElicitationAction.DECLINE),
           )
         }
       val declined = pick(declining)
@@ -332,7 +332,7 @@ class ServeUiBuilderAlternativesMcpTest {
               buildJsonObject {
                 put(ServeUiBuilderAlternativeTools.FIELD, "https://evil.example/")
               },
-            )
+            ),
           )
         }
       assertEquals(
@@ -564,7 +564,7 @@ class ServeUiBuilderAlternativesMcpTest {
     assertTrue(names(true).containsAll(ServeUiBuilderAlternativeTools.TOOL_NAMES))
     assertTrue(names(false).none { it in ServeUiBuilderAlternativeTools.TOOL_NAMES })
     assertTrue(
-      ServeUiBuilderMcp.BRANCH_TOOL_NAMES.containsAll(ServeUiBuilderAlternativeTools.TOOL_NAMES)
+      ServeUiBuilderMcp.BRANCH_TOOL_NAMES.containsAll(ServeUiBuilderAlternativeTools.TOOL_NAMES),
     )
     val without = ServeUiBuilderMcp(service)
     assertTrue(ServeUiBuilderAlternativeTools.TOOL_NAMES.all { without.capabilityFor(it) == null })
@@ -606,17 +606,17 @@ class ServeUiBuilderAlternativesMcpTest {
               "openai/thumbnail":{"src":"data:image/png;base64,AAAA","mimeType":"image/png"},
               "openai/preview":{"target":{"type":"mcp_app_tool","name":"cad.open","arguments":{"x":1}}}}},
            {"uri":"cad://parts/washer","name":"washer","title":"M6 washer"}]}}
-        """
+        """,
       ),
       field,
     )
     assertTrue(
       ServeOpenAiForms.declaredIn(
         Json.parseToJsonElement(
-            """{"capabilities":{"extensions":{"openai/elicitation":{"form":{}}}}}"""
+            """{"capabilities":{"extensions":{"openai/elicitation":{"form":{}}}}}""",
           )
-          .jsonObject
-      )
+          .jsonObject,
+      ),
     )
     for (capabilities in
       listOf(
@@ -626,7 +626,7 @@ class ServeUiBuilderAlternativesMcpTest {
       )) {
       assertFalse(
         ServeOpenAiForms.declaredIn(
-          Json.parseToJsonElement("""{"capabilities":$capabilities}""").jsonObject
+          Json.parseToJsonElement("""{"capabilities":$capabilities}""").jsonObject,
         ),
         capabilities,
       )
@@ -643,7 +643,7 @@ class ServeUiBuilderAlternativesMcpTest {
             ServeCatalogMcp.MCP_PROTOCOL_VERSION,
             formElicitationSupported = false,
             openAiFormsSupported = true,
-          )
+          ),
         )
       var sent: JsonObject? = null
       val answering =
@@ -652,7 +652,7 @@ class ServeUiBuilderAlternativesMcpTest {
           scopes.acceptResponse(
             scope.id,
             Json.parseToJsonElement(
-                """{"jsonrpc":"2.0","id":"${request["id"]!!.jsonPrimitive.content}","result":{"action":"accept","content":{"branch":"x"}}}"""
+                """{"jsonrpc":"2.0","id":"${request["id"]!!.jsonPrimitive.content}","result":{"action":"accept","content":{"branch":"x"}}}""",
               )
               .jsonObject,
           )
@@ -662,7 +662,7 @@ class ServeUiBuilderAlternativesMcpTest {
       assertNull(answering.elicitForm("Pick", JsonObject(emptyMap()), 1_000), "no plain form")
       val answered =
         assertIs<OpenAiFormElicitation.Answered>(
-          answering.elicitOpenAiForm("Pick", buildJsonObject { put("type", "object") }, 1_000)
+          answering.elicitOpenAiForm("Pick", buildJsonObject { put("type", "object") }, 1_000),
         )
       assertEquals(ServeCatalogMcp.FormElicitationAction.ACCEPT, answered.result.action)
       assertEquals(ServeOpenAiForms.METHOD, sent!!.string("method"))
@@ -675,7 +675,7 @@ class ServeUiBuilderAlternativesMcpTest {
           scopes.acceptResponse(
             scope.id,
             Json.parseToJsonElement(
-                """{"jsonrpc":"2.0","id":"${request["id"]!!.jsonPrimitive.content}","error":{"code":-32601,"message":"Method not found"}}"""
+                """{"jsonrpc":"2.0","id":"${request["id"]!!.jsonPrimitive.content}","error":{"code":-32601,"message":"Method not found"}}""",
               )
               .jsonObject,
           )
@@ -716,14 +716,14 @@ class ServeUiBuilderAlternativesMcpTest {
             .header(ServeHttpServer.TOKEN_HEADER, OPERATOR_TOKEN)
             .apply { session?.let { header("MCP-Session-Id", it) } }
             .post(body.toRequestBody(JSON))
-            .build()
+            .build(),
         )
         .execute()
 
     // Declares only the OpenAI extension — no plain `elicitation` — and still gets a session.
     val session =
       post(
-          """{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"${ServeCatalogMcp.MCP_PROTOCOL_VERSION}","capabilities":{"extensions":{"openai/elicitation":{"form":{}}}},"clientInfo":{"name":"openai","version":"1"}}}"""
+          """{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"${ServeCatalogMcp.MCP_PROTOCOL_VERSION}","capabilities":{"extensions":{"openai/elicitation":{"form":{}}}},"clientInfo":{"name":"openai","version":"1"}}}""",
         )
         .use { assertNotNull(it.header("MCP-Session-Id"), "an OpenAI-forms client needs a scope") }
 
@@ -900,7 +900,7 @@ class ServeUiBuilderAlternativesMcpTest {
       mcp.call(
         ServeUiBuilderMcp.CREATE_DESIGN,
         Json.parseToJsonElement(
-            """{"designId":"$designId","includeCatalog":true,"document":$document}"""
+            """{"designId":"$designId","includeCatalog":true,"document":$document}""",
           )
           .jsonObject,
         author,
@@ -925,7 +925,7 @@ class ServeUiBuilderAlternativesMcpTest {
       mcp.call(
         ServeUiBuilderMcp.APPLY,
         Json.parseToJsonElement(
-            """{"designId":"$designId","operationId":"$operationId","baseRevision":$baseRevision,"operations":$operations}"""
+            """{"designId":"$designId","operationId":"$operationId","baseRevision":$baseRevision,"operations":$operations}""",
           )
           .jsonObject,
         author,

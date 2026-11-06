@@ -72,7 +72,7 @@ class ServeWebBreakpointFoldTest {
 
     val rows =
       Regex(
-          "class=\"cp-tree-component cp-tree-link\"[^>]*>(?:<img[^>]*>)?<span class=\"cp-tree-label\">([^<]*)<"
+          "class=\"cp-tree-component cp-tree-link\"[^>]*>(?:<img[^>]*>)?<span class=\"cp-tree-label\">([^<]*)<",
         )
         .findAll(html)
         .map { it.groupValues[1] }

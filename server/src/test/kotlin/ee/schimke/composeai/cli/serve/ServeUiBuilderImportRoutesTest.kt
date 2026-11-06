@@ -56,7 +56,7 @@ class ServeUiBuilderImportRoutesTest {
         when (val request = call.request) {
           is UiBuilderServiceRequest.OpenDesign ->
             UiBuilderServiceResponse.Error(
-              UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "missing")
+              UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "missing"),
             )
           is UiBuilderServiceRequest.ListCatalogs ->
             UiBuilderServiceResponse.Catalogs(listOf(catalog))
@@ -272,10 +272,10 @@ class ServeUiBuilderImportRoutesTest {
     assertNull(ServeUiBuilderImport.normalizeOrigin("https://ha.coo.ee/seeds"))
     assertNull(ServeUiBuilderImport.normalizeOrigin("https://user@ha.coo.ee"))
     assertIs<URI>(
-      ServeUiBuilderImport.allowed("https://ha.coo.ee/s/x.json", listOf("https://ha.coo.ee"))
+      ServeUiBuilderImport.allowed("https://ha.coo.ee/s/x.json", listOf("https://ha.coo.ee")),
     )
     assertNull(
-      ServeUiBuilderImport.allowed("https://ha.coo.ee.evil/x", listOf("https://ha.coo.ee"))
+      ServeUiBuilderImport.allowed("https://ha.coo.ee.evil/x", listOf("https://ha.coo.ee")),
     )
     assertNull(ServeUiBuilderImport.allowed("https://ha.coo.ee/x", emptyList()))
   }
@@ -284,11 +284,11 @@ class ServeUiBuilderImportRoutesTest {
   fun `a seed is a design document`() {
     assertIs<ServeUiBuilderImport.Fetched.Document>(ServeUiBuilderImport.decode(seed("ok")))
     assertIs<ServeUiBuilderImport.Fetched.Refused>(
-      ServeUiBuilderImport.decode("{\"schema\":\"x\"}")
+      ServeUiBuilderImport.decode("{\"schema\":\"x\"}"),
     )
     assertIs<ServeUiBuilderImport.Fetched.Refused>(ServeUiBuilderImport.decode("not json"))
     assertIs<DesignDocumentV1>(
-      (ServeUiBuilderImport.decode(seed("ok")) as ServeUiBuilderImport.Fetched.Document).document
+      (ServeUiBuilderImport.decode(seed("ok")) as ServeUiBuilderImport.Fetched.Document).document,
     )
   }
 }

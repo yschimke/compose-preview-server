@@ -97,7 +97,7 @@ object StorybookCompat {
               name = s.name,
               importPath = IMPORT_PATH_PREFIX + s.previewId,
             )
-        }
+        },
     )
 
   /**

@@ -149,7 +149,7 @@ class ServeGithubHandoffTest {
           .header("X-Forwarded-Host", host)
           .header("Cookie", cookie)
           .post(ByteArray(0).toRequestBody(null))
-          .build()
+          .build(),
       )
       .execute()
 
@@ -566,7 +566,7 @@ class ServeGithubHandoffTest {
         assertTrue(cleared.any { c -> c.contains("domain=$domain") }, "$domain: $cleared")
       }
       assertTrue(
-        cleared.all { c -> c.startsWith("cp_gh_auth=;") || c.startsWith("cp_gh_auth=\"\"") }
+        cleared.all { c -> c.startsWith("cp_gh_auth=;") || c.startsWith("cp_gh_auth=\"\"") },
       )
     }
   }

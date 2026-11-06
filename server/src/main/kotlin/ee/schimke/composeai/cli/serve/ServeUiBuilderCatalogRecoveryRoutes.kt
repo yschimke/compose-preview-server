@@ -60,7 +60,7 @@ internal fun Route.installUiBuilderCatalogRecoveryRoutes(
             UiBuilderServiceCall(
               actor,
               UiBuilderServiceRequest.PreviewCurrentCatalogUpgrade(designId),
-            )
+            ),
           )
         }
     ) {

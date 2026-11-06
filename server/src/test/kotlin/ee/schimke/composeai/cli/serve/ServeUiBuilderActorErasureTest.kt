@@ -45,7 +45,7 @@ class ServeUiBuilderActorErasureTest {
       exporter =
         ScreenGeneratorComposeExportExecutor(
           ComponentRecordSource(mapOf(CATALOG to ScreenGeneratorScreenFixture.componentsFile()))::
-            record
+            record,
         ),
     )
   }
@@ -63,7 +63,7 @@ class ServeUiBuilderActorErasureTest {
   private fun create(by: AuthenticatedUiBuilderActor, id: String, sharedWith: List<String>) {
     val created =
       assertIs<UiBuilderServiceResponse.Snapshot>(
-        run(by, UiBuilderServiceRequest.CreateDesign(document(id)))
+        run(by, UiBuilderServiceRequest.CreateDesign(document(id))),
       )
     if (sharedWith.isEmpty()) return
     assertIs<UiBuilderServiceResponse.DesignAccess>(
@@ -80,13 +80,13 @@ class ServeUiBuilderActorErasureTest {
             )
           },
         ),
-      )
+      ),
     )
   }
 
   private fun grantees(id: String): List<String> =
     assertIs<UiBuilderServiceResponse.DesignAccess>(
-        run(owner, UiBuilderServiceRequest.GetDesignAccess(id))
+        run(owner, UiBuilderServiceRequest.GetDesignAccess(id)),
       )
       .access
       .actorGrants
@@ -99,7 +99,7 @@ class ServeUiBuilderActorErasureTest {
 
     val opened =
       assertIs<CommentWriteResult.Stored>(
-        comments.post("shared", alice.actorId, CommentPostRequest(body = "Hi", displayName = "Al"))
+        comments.post("shared", alice.actorId, CommentPostRequest(body = "Hi", displayName = "Al")),
       )
     val thread = opened.board.threads.single()
     comments.post(
@@ -191,7 +191,7 @@ class ServeUiBuilderActorErasureTest {
               id = "text",
               componentId = "m3/text",
               properties = mapOf("text" to StringValueV1("Hello")),
-            )
+            ),
         ),
     )
 

@@ -32,7 +32,7 @@ internal class LovelaceJsonExportExecutor(private val delegate: UiBuilderExportE
         }
           .getOrElse {
             LovelaceConfigExporter.Result.Refused(
-              listOf("document: the Lovelace export could not read the design: ${it.message}")
+              listOf("document: the Lovelace export could not read the design: ${it.message}"),
             )
           }
       ) {

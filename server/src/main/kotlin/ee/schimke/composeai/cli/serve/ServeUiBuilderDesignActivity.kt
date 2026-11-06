@@ -361,12 +361,12 @@ private fun DesignActivityWebhookEventV1.teamsCard(): JsonObject = buildJsonObje
                   put("type", "Action.OpenUrl")
                   put("title", label)
                   put("url", target)
-                }
+                },
               )
             }
           }
         }
-      }
+      },
     )
   }
 }

@@ -89,7 +89,7 @@ class ServeWebDesignFoldersTest {
         .substringBefore("</nav>")
     val picks =
       Regex(
-          """<span class="cp-design-folder-pick-name">([^<]+)</span> <span class="cp-designs-count">([^<]+)</span>"""
+          """<span class="cp-design-folder-pick-name">([^<]+)</span> <span class="cp-designs-count">([^<]+)</span>""",
         )
         .findAll(picker)
         .map { "${it.groupValues[1]} · ${it.groupValues[2]}" }
@@ -132,7 +132,7 @@ class ServeWebDesignFoldersTest {
               systemId = "m3-catalog",
               label = "m3-catalog",
               templates = listOf(ServeWeb.UiBuilderNewDesignTemplate("blank", "Blank screen")),
-            )
+            ),
           ),
       )
 
@@ -153,18 +153,18 @@ class ServeWebDesignFoldersTest {
                 copySuggestedId = "watch-copy",
                 deleteAction = "/delete",
                 folderAction = "/folder",
-              )
+              ),
           ),
         viewerActorId = "github:octocat",
       )
     val actions = page.substringAfter("""<div class="cp-design-actions">""")
     assertTrue(
-      actions.substringBefore("""<details class="cp-design-menu">""").contains(">Open</a>")
+      actions.substringBefore("""<details class="cp-design-menu">""").contains(">Open</a>"),
     )
     assertTrue(
       actions
         .substringBefore("""<details class="cp-design-menu">""")
-        .contains(">Duplicate</summary>")
+        .contains(">Duplicate</summary>"),
     )
     val more = actions.substringAfter("""<div class="cp-design-menu-panel">""")
     assertTrue("More actions for watch" in actions)

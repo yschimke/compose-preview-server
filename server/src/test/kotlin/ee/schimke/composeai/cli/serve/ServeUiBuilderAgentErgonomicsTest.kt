@@ -106,9 +106,9 @@ class ServeUiBuilderAgentErgonomicsTest {
         .newCall(
           Request.Builder()
             .url(
-              "http://127.0.0.1:${server.server.port}/api/ui-builder/v1/designs/agent-screen/agents"
+              "http://127.0.0.1:${server.server.port}/api/ui-builder/v1/designs/agent-screen/agents",
             )
-            .build()
+            .build(),
         )
         .execute()
         .use { it.code }
@@ -357,9 +357,9 @@ class ServeUiBuilderAgentErgonomicsTest {
               Json.parseToJsonElement(
                 """{"pipeline":[{"name":"jev-router","data":{"version":"1","reason":"initial",""" +
                   """"selection_probabilities":[{"model":"deepseek/deepseek-v4.1-flash-20260910",""" +
-                  """"probability":0.9}],"answers":{"big_model_gain":{"type":"noul","noul":0.26}}}}]}"""
+                  """"probability":0.9}],"answers":{"big_model_gain":{"type":"noul","noul":0.26}}}}]}""",
               ),
-          )
+          ),
       )
       .toString()
   }
@@ -375,7 +375,7 @@ class ServeUiBuilderAgentErgonomicsTest {
           UiBuilderNativePreviewLane { document, _ ->
             drawn += document.environment.widthDp to document.environment.heightDp
             nativeFrame(document.environment.widthDp / 8, document.environment.heightDp / 8)
-          }
+          },
       )
     create(server, cleanDocument())
 
@@ -389,7 +389,7 @@ class ServeUiBuilderAgentErgonomicsTest {
     assertTrue(
       SchemaCheck(outputSchema(server, ServeUiBuilderMcp.GUIDELINES_PROMPT))
         .errors(prompt)
-        .isEmpty()
+        .isEmpty(),
     )
     assertEquals("compose-ui-builder/guidelines-prompt/v1", prompt.text("schema"))
     assertEquals("mobile", prompt.text("platform"))
@@ -602,7 +602,7 @@ class ServeUiBuilderAgentErgonomicsTest {
       server,
       ServeUiBuilderMcp.APPLY,
       """{"designId":"agent-screen","operationId":"move-1","baseRevision":$revision,"operations":${operations(
-        SetPropertyMutationV1("session", "text", StringValueV1("Moved"))
+        SetPropertyMutationV1("session", "text", StringValueV1("Moved")),
       )}}""",
     )
     val stale = typed(server, ServeUiBuilderMcp.GET_GUIDELINES, """{"designId":"agent-screen"}""")
@@ -667,9 +667,9 @@ class ServeUiBuilderAgentErgonomicsTest {
         .newCall(
           Request.Builder()
             .url(
-              "http://127.0.0.1:${server.server.port}/api/ui-builder/v1/designs/agent-screen/guidelines"
+              "http://127.0.0.1:${server.server.port}/api/ui-builder/v1/designs/agent-screen/guidelines",
             )
-            .build()
+            .build(),
         )
         .execute()
         .use { it.code }
@@ -791,7 +791,7 @@ class ServeUiBuilderAgentErgonomicsTest {
           nodes =
             mapOf(
               "widget" to
-                DesignNodeV1(id = "widget", componentId = "remote-m3/widget-container-large")
+                DesignNodeV1(id = "widget", componentId = "remote-m3/widget-container-large"),
             ),
         )
     val frames =
@@ -882,7 +882,7 @@ class ServeUiBuilderAgentErgonomicsTest {
               properties = mapOf("iconKey" to StringValueV1("add")),
             ),
           location = NodeLocationV1(parent = ParentSlotV1("column", "children")),
-        )
+        ),
       )
 
     val reply =
@@ -903,7 +903,7 @@ class ServeUiBuilderAgentErgonomicsTest {
     assertEquals(before, revisionOf(server))
     assertFalse(
       envelope(server, ServeUiBuilderMcp.GET_DESIGN, """{"designId":"agent-screen"}""")
-        .contains("newIcon")
+        .contains("newIcon"),
     )
   }
 
@@ -922,7 +922,7 @@ class ServeUiBuilderAgentErgonomicsTest {
               properties = mapOf("iconKey" to StringValueV1("add")),
             ),
           location = NodeLocationV1(parent = ParentSlotV1("column", "children")),
-        )
+        ),
       )
 
     // The fixture's component records stop short of `m3/icon`, so the generator refuses it with a
@@ -951,7 +951,7 @@ class ServeUiBuilderAgentErgonomicsTest {
         InsertNodeMutationV1(
           node = DesignNodeV1(id = "newIcon", componentId = "m3/icon", properties = mapOf("iconKey" to StringValueV1("add"))),
           location = NodeLocationV1(parent = ParentSlotV1("column", "children")),
-        )
+        ),
       )}}""",
     )
 
@@ -994,7 +994,7 @@ class ServeUiBuilderAgentErgonomicsTest {
     val actor = AuthenticatedUiBuilderActor(OPERATOR_ACTOR)
     fun reply(mcp: ServeUiBuilderMcp, tool: String, arguments: String) = runBlocking {
       Json.parseToJsonElement(
-          mcp.call(tool, Json.parseToJsonElement(arguments).jsonObject, actor, callId = "1")
+          mcp.call(tool, Json.parseToJsonElement(arguments).jsonObject, actor, callId = "1"),
         )
         .jsonObject
     }
@@ -1057,15 +1057,15 @@ class ServeUiBuilderAgentErgonomicsTest {
                       "UiBuilderGeneratedScreen.kt",
                       line = 7,
                       ch = 46,
-                    )
-                  )
+                    ),
+                  ),
               )
             UiBuilderNativePreviewOutcome.Rendered(
               response,
               taggedNodeIds = emptyList(),
               failure = response.noFrameReason(),
             )
-          }
+          },
       )
     val base = cleanDocument()
     val document =
@@ -1080,8 +1080,8 @@ class ServeUiBuilderAgentErgonomicsTest {
                     mapOf(
                       "text" to StringValueV1("Opening keynote"),
                       "imageVector" to StringValueV1("pauseCircle"),
-                    )
-                ))
+                    ),
+                )),
       )
 
     val reply =
@@ -1116,7 +1116,7 @@ class ServeUiBuilderAgentErgonomicsTest {
               taggedNodeIds = emptyList(),
               failure = response.noFrameReason(),
             )
-          }
+          },
       )
     // Admission control answers with an ERROR that names no file: the source was never compiled.
     val busy =
@@ -1127,9 +1127,9 @@ class ServeUiBuilderAgentErgonomicsTest {
               PlaygroundDiagnostic(
                 PlaygroundSeverity.ERROR,
                 "the playground is busy compiling (all 1 compile slots in use) — try again shortly",
-              )
-            )
-        )
+              ),
+            ),
+        ),
       )
     create(busy, cleanDocument())
     val busyReply =
@@ -1156,9 +1156,9 @@ class ServeUiBuilderAgentErgonomicsTest {
                 "Unresolved reference 'Card'.",
                 "UiBuilderGeneratedScreen.kt",
                 line = 3,
-              )
-            )
-        )
+              ),
+            ),
+        ),
       )
     val base = cleanDocument()
     val document =
@@ -1168,7 +1168,7 @@ class ServeUiBuilderAgentErgonomicsTest {
             ("session" to
               base.nodes
                 .getValue("session")
-                .copy(properties = mapOf("text" to StringValueV1("card"))))
+                .copy(properties = mapOf("text" to StringValueV1("card")))),
       )
     val reply =
       check(
@@ -1194,7 +1194,7 @@ class ServeUiBuilderAgentErgonomicsTest {
               taggedNodeIds = emptyList(),
               failure = response.noFrameReason(),
             )
-          }
+          },
       )
     create(server, cleanDocument())
 
@@ -1246,7 +1246,7 @@ class ServeUiBuilderAgentErgonomicsTest {
       ImageIO.read(
         Base64.getDecoder()
           .decode(content.single { it.text("type") == "image" }.text("data"))
-          .inputStream()
+          .inputStream(),
       )
     assertEquals(reply["image"]!!.jsonObject["widthPx"]!!.jsonPrimitive.int, sheet.width)
     fun centre(cell: JsonObject): Int {
@@ -1275,7 +1275,9 @@ class ServeUiBuilderAgentErgonomicsTest {
     )
     val wear = matrix(server, """{"designId":"agent-screen","formFactor":"wear"}""")
     assertTrue(
-      wear["cells"]!!.jsonArray.all { it.jsonObject["round"]!!.jsonPrimitive.booleanOrNull == true }
+      wear["cells"]!!.jsonArray.all {
+        it.jsonObject["round"]!!.jsonPrimitive.booleanOrNull == true
+      },
     )
 
     val tool = ServeUiBuilderMcp.RENDER_DESIGN_MATRIX
@@ -1414,13 +1416,13 @@ class ServeUiBuilderAgentErgonomicsTest {
         .newCall(
           Request.Builder()
             .url(
-              "http://127.0.0.1:${server.server.port}/api/ui-builder/v1/designs/agent-screen/decisions"
+              "http://127.0.0.1:${server.server.port}/api/ui-builder/v1/designs/agent-screen/decisions",
             )
             .post(
               """{"revision":1,"verdict":"approve"}"""
-                .toRequestBody("application/json".toMediaType())
+                .toRequestBody("application/json".toMediaType()),
             )
-            .build()
+            .build(),
         )
         .execute()
         .use { it.code }
@@ -1525,7 +1527,7 @@ class ServeUiBuilderAgentErgonomicsTest {
         InsertNodeMutationV1(
           node = DesignNodeV1(id = "more", componentId = "m3/text", properties = mapOf("text" to StringValueV1("More"))),
           location = NodeLocationV1(parent = ParentSlotV1("column", "children")),
-        )
+        ),
       )}}""",
     )
     val stale =
@@ -1544,7 +1546,7 @@ class ServeUiBuilderAgentErgonomicsTest {
         server,
         ServeUiBuilderMcp.IMPLEMENTATION_STATUS,
         """{"designId":"agent-screen","includeExport":false}""",
-      )["implementation"]
+      )["implementation"],
     )
   }
 
@@ -1590,7 +1592,7 @@ class ServeUiBuilderAgentErgonomicsTest {
       mcp.additionalCapabilityFor(
         ServeUiBuilderMcp.IMPLEMENTATION_STATUS,
         JsonObject(mapOf("includeExport" to JsonPrimitive(false))),
-      )
+      ),
     )
     // Without a review store the tools are absent, not refusing.
     val bare = ServeUiBuilderMcp(service(stateDirectory.resolve("unit2")))
@@ -1743,7 +1745,7 @@ class ServeUiBuilderAgentErgonomicsTest {
               componentId = "m3/text",
               properties = mapOf("text" to StringValueV1("Squeezed")),
             ),
-        )
+        ),
     )
   }
 
@@ -1784,7 +1786,7 @@ class ServeUiBuilderAgentErgonomicsTest {
                   put("content", content)
                 },
               )
-            }
+            },
           )
         },
       )
@@ -1846,7 +1848,7 @@ class ServeUiBuilderAgentErgonomicsTest {
 
   private fun revisionOf(server: Running): Long =
     Json.parseToJsonElement(
-        envelope(server, ServeUiBuilderMcp.GET_DESIGN, """{"designId":"agent-screen"}""")
+        envelope(server, ServeUiBuilderMcp.GET_DESIGN, """{"designId":"agent-screen"}"""),
       )
       .jsonObject["response"]!!
       .jsonObject["snapshot"]!!
@@ -1900,7 +1902,7 @@ class ServeUiBuilderAgentErgonomicsTest {
           .url("http://127.0.0.1:${server.server.port}$path")
           .header(ServeHttpServer.TOKEN_HEADER, OPERATOR_TOKEN)
           .method(method, body?.toRequestBody("application/json".toMediaType()))
-          .build()
+          .build(),
       )
       .execute()
       .use { it.code to it.body.string() }
@@ -1932,8 +1934,8 @@ class ServeUiBuilderAgentErgonomicsTest {
     val compose =
       ScreenGeneratorComposeExportExecutor(
         ComponentRecordSource(
-          mapOf(CATALOG_SYSTEM_ID to ScreenGeneratorScreenFixture.componentsFile())
-        )::record
+          mapOf(CATALOG_SYSTEM_ID to ScreenGeneratorScreenFixture.componentsFile()),
+        )::record,
       )
     return UiBuilderExportExecutor { request ->
       if (request.format != ExportFormatV1.PNG) compose.export(request)

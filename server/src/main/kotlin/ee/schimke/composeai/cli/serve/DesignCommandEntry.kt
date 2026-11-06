@@ -119,7 +119,7 @@ internal object DesignCommandEntry {
           err.println(refused.message)
           err.println(
             "design: --no-authorize, so no grant was requested. Set \$${DesignCommand.TOKEN_ENV} " +
-              "to a token this server still honours."
+              "to a token this server still honours.",
           )
           return DesignCommandRunner.EXIT_NO_PERMISSION
         }
@@ -127,7 +127,7 @@ internal object DesignCommandEntry {
         // and the server restarted, which is a different afternoon from "you never had access".
         err.println(
           if (token == null) "design: no credential, and this server requires one."
-          else "design: this server no longer honours that token — a restart drops every grant."
+          else "design: this server no longer honours that token — a restart drops every grant.",
         )
         token =
           DesignAuthorizer(
@@ -154,7 +154,7 @@ internal object DesignCommandEntry {
       err.println(
         "design: the new grant still cannot do this. It needs " +
           "${options.capabilities.joinToString(", ") { it.wire }}, and designs are private to " +
-          "their owner and collaborators."
+          "their owner and collaborators.",
       )
       DesignCommandRunner.EXIT_NO_PERMISSION
     } catch (failure: DesignCommandFailure) {
@@ -198,7 +198,7 @@ internal object DesignCommandEntry {
    * host can still hand over the document that reproduces its own failure here.
    */
   private fun DesignCommand.Options.designDocument(
-    transport: DesignMcpTransport
+    transport: DesignMcpTransport,
   ): ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1 {
     val json =
       document?.let { path ->
@@ -217,7 +217,7 @@ internal object DesignCommandEntry {
     }
       .getOrElse {
         throw DesignCommandFailure(
-          "design: that document is not one this build understands — ${it.message}"
+          "design: that document is not one this build understands — ${it.message}",
         )
       }
   }

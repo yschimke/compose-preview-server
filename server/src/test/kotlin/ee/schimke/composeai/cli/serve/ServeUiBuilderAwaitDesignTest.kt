@@ -80,7 +80,7 @@ class ServeUiBuilderAwaitDesignTest {
           server,
           ServeUiBuilderMcp.AWAIT_DESIGN,
           """{"designId":"$DESIGN_ID","afterSequence":0,"waitSeconds":30}""",
-        )
+        ),
       )
     }
       .also { it.isDaemon = true }
@@ -126,7 +126,7 @@ class ServeUiBuilderAwaitDesignTest {
           server,
           ServeUiBuilderMcp.AWAIT_DESIGN,
           """{"designId":"$DESIGN_ID","afterSequence":0,"waitSeconds":3}""",
-        )
+        ),
       )
     }
       .also { it.isDaemon = true }
@@ -156,7 +156,7 @@ class ServeUiBuilderAwaitDesignTest {
                       observedRevision = 0,
                     ),
                 ),
-            )
+            ),
           ),
         )
       assertEquals(200, presence.first, presence.second)
@@ -271,11 +271,11 @@ class ServeUiBuilderAwaitDesignTest {
                           properties = mapOf("text" to StringValueV1("Two sessions today")),
                         ),
                       location = NodeLocationV1(parent = ParentSlotV1("column", "children")),
-                    )
+                    ),
                   ),
-              )
+              ),
             ),
-        )
+        ),
       ),
     )
 
@@ -289,7 +289,7 @@ class ServeUiBuilderAwaitDesignTest {
             requestId = "create-1",
             actorId = "operator",
             request = CreateDesignRequestV1(document()),
-          )
+          ),
         ),
       )
     assertEquals(200, created.first, created.second)
@@ -302,7 +302,7 @@ class ServeUiBuilderAwaitDesignTest {
           .url("http://127.0.0.1:${server.server.port}$path")
           .header(ServeHttpServer.TOKEN_HEADER, OPERATOR_TOKEN)
           .post(body.toRequestBody(JSON_MEDIA_TYPE))
-          .build()
+          .build(),
       )
       .execute()
       .use { it.code to it.body.string() }
@@ -327,8 +327,8 @@ class ServeUiBuilderAwaitDesignTest {
         exporter =
           ScreenGeneratorComposeExportExecutor(
             ComponentRecordSource(
-              mapOf(CATALOG_SYSTEM_ID to ScreenGeneratorScreenFixture.componentsFile())
-            )::record
+              mapOf(CATALOG_SYSTEM_ID to ScreenGeneratorScreenFixture.componentsFile()),
+            )::record,
           ),
       )
     val server =
@@ -375,7 +375,7 @@ class ServeUiBuilderAwaitDesignTest {
           .url("http://127.0.0.1:${server.server.port}/mcp")
           .header(ServeHttpServer.TOKEN_HEADER, OPERATOR_TOKEN)
           .post(body.toRequestBody(JSON_MEDIA_TYPE))
-          .build()
+          .build(),
       )
       .execute()
       .use {

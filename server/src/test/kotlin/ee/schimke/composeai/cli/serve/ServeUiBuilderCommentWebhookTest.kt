@@ -62,7 +62,7 @@ class ServeUiBuilderCommentWebhookTest {
           "t-1",
           comment("c-1", "Yuri", "Why is the padding 24?"),
           comment("c-2", "", "Because the spec pins it.", kind = StoredComment.AUTHOR_KIND_AGENT),
-        )
+        ),
       )
 
     val change = diffCommentBoards(before, after).single()
@@ -201,7 +201,7 @@ class ServeUiBuilderCommentWebhookTest {
     // those characters, not as a ping to everybody in it.
     val text =
       Json.parseToJsonElement(
-          CommentWebhookFormat.SLACK.body(event(excerpt = "<!channel> the & in <Button> is wrong"))
+          CommentWebhookFormat.SLACK.body(event(excerpt = "<!channel> the & in <Button> is wrong")),
         )
         .jsonObject["text"]!!
         .jsonPrimitive
@@ -254,7 +254,7 @@ class ServeUiBuilderCommentWebhookTest {
     // Markdown and allow arbitrary links under a colleague's name.
     val body =
       CommentWebhookFormat.TEAMS.body(
-        event(excerpt = "[Open the design](https://attacker.example) **now**")
+        event(excerpt = "[Open the design](https://attacker.example) **now**"),
       )
     val content =
       Json.parseToJsonElement(body)
@@ -304,8 +304,8 @@ class ServeUiBuilderCommentWebhookTest {
     val text =
       Json.parseToJsonElement(
           CommentWebhookFormat.SLACK.body(
-            event(author = "Assistant", kind = StoredComment.AUTHOR_KIND_AGENT)
-          )
+            event(author = "Assistant", kind = StoredComment.AUTHOR_KIND_AGENT),
+          ),
         )
         .jsonObject["text"]!!
         .jsonPrimitive
@@ -480,7 +480,7 @@ class ServeUiBuilderCommentWebhookTest {
       val store = ServeUiBuilderCommentStore(root)
       val current =
         java.util.concurrent.atomic.AtomicReference(
-          CommentWebhookDesign("Checkout", "m3-catalog", readableByAnyone = true)
+          CommentWebhookDesign("Checkout", "m3-catalog", readableByAnyone = true),
         )
       val delivered = CopyOnWriteArrayList<String>()
       val releaseFirst = CountDownLatch(1)
@@ -507,7 +507,7 @@ class ServeUiBuilderCommentWebhookTest {
 
           // The id now means a different design. The comment written next belongs to that one.
           current.set(
-            CommentWebhookDesign("Something else", "other-catalog", readableByAnyone = true)
+            CommentWebhookDesign("Something else", "other-catalog", readableByAnyone = true),
           )
           store.post("design-1", "Yuri", CommentPostRequest(body = "On the new one."))
 
@@ -535,7 +535,7 @@ class ServeUiBuilderCommentWebhookTest {
         thread(
           "t-1",
           comment("c-1", "Yuri Schimke", "Ship it.", authorId = "github:someone-else"),
-        )
+        ),
       )
 
     val change = diffCommentBoards(before, after).single()
@@ -595,7 +595,7 @@ class ServeUiBuilderCommentWebhookTest {
             .getValue("url")
             .jsonPrimitive
             .content
-            .startsWith("https://preview.example/ui-builder/design-1#thread=")
+            .startsWith("https://preview.example/ui-builder/design-1#thread="),
         )
         val comment = event.getValue("comment").jsonObject
         assertEquals("", comment.getValue("excerpt").jsonPrimitive.content)
@@ -609,8 +609,8 @@ class ServeUiBuilderCommentWebhookTest {
         val text =
           Json.parseToJsonElement(
               CommentWebhookFormat.SLACK.body(
-                Json.decodeFromString(DesignCommentWebhookEventV1.serializer(), body)
-              )
+                Json.decodeFromString(DesignCommentWebhookEventV1.serializer(), body),
+              ),
             )
             .jsonObject
             .getValue("text")

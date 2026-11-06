@@ -178,7 +178,7 @@ internal class ServePushNotifier(
               .toByteArray(StandardCharsets.UTF_8),
           topic = topic,
           attempt = 1,
-        )
+        ),
       )
     }
   }
@@ -196,7 +196,7 @@ internal class ServePushNotifier(
   private suspend fun deliver(delivery: PushDelivery) {
     if (!endpointAllowed(delivery.endpoint)) {
       onLog(
-        "serve: push to ${delivery.fingerprint} refused: the endpoint is no longer a public https host"
+        "serve: push to ${delivery.fingerprint} refused: the endpoint is no longer a public https host",
       )
       return
     }
@@ -242,7 +242,7 @@ internal class ServePushNotifier(
         // Unsubscribed or expired: it will never accept anything again.
         if (store.remove(delivery.endpoint)) {
           onLog(
-            "serve: push subscription ${delivery.fingerprint} is gone (${response.status}); removed it"
+            "serve: push subscription ${delivery.fingerprint} is gone (${response.status}); removed it",
           )
         }
       }
@@ -266,7 +266,7 @@ internal class ServePushNotifier(
     if (delivery.attempt >= MAX_ATTEMPTS) {
       onLog(
         "serve: push to ${delivery.fingerprint} was not delivered after ${delivery.attempt} attempts" +
-          (reason?.let { " ($it)" } ?: "")
+          (reason?.let { " ($it)" } ?: ""),
       )
       return
     }
@@ -313,7 +313,7 @@ internal class ServePushNotifier(
     fun topicFor(designId: String, threadId: String?): String =
       ServeWebPush.base64Url(
           MessageDigest.getInstance("SHA-256")
-            .digest("$designId\n${threadId.orEmpty()}".toByteArray(StandardCharsets.UTF_8))
+            .digest("$designId\n${threadId.orEmpty()}".toByteArray(StandardCharsets.UTF_8)),
         )
         .take(32)
 
@@ -368,7 +368,7 @@ private data class PendingPush(val intent: PushIntent, val count: Int) {
   fun merge(next: PushIntent): PendingPush =
     PendingPush(
       next.copy(
-        kinds = (next.kinds + intent.kinds).distinct().sortedBy { KIND_PRIORITY.indexOf(it) }
+        kinds = (next.kinds + intent.kinds).distinct().sortedBy { KIND_PRIORITY.indexOf(it) },
       ),
       count + 1,
     )
@@ -475,7 +475,7 @@ internal fun reviewPushIntent(activity: DesignActivity, ownerActorId: String?): 
 }
 
 internal fun ServePushSubscriptionStore.forActorIgnoringCase(
-  actor: String
+  actor: String,
 ): List<StoredPushSubscription> = all().filter { it.actor.equals(actor, ignoreCase = true) }
 
 /** A push service's answer: the status, and `Retry-After` in seconds where it sent one. */
@@ -496,7 +496,7 @@ internal class HttpPushTransport(
     HttpClient.newBuilder()
       .connectTimeout(Duration.ofSeconds(5))
       .followRedirects(HttpClient.Redirect.NEVER)
-      .build()
+      .build(),
 ) : PushTransport {
   override suspend fun send(
     endpoint: String,

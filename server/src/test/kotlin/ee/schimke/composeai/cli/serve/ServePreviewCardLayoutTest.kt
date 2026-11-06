@@ -12,7 +12,7 @@ class ServePreviewCardLayoutTest {
   fun `preview cards fill the tallest family and center short content`() {
     assertTrue(
       css.contains(
-        ".cp-section, .cp-grid-groups { display: flex; flex-wrap: wrap; align-items: stretch;"
+        ".cp-section, .cp-grid-groups { display: flex; flex-wrap: wrap; align-items: stretch;",
       ),
       "family groups stretch to the tallest group on their flex line",
     )
@@ -22,19 +22,19 @@ class ServePreviewCardLayoutTest {
     )
     assertTrue(
       css.contains(
-        ".cp-cards { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: stretch;"
+        ".cp-cards { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: stretch;",
       ),
       "the card row fills the family and stretches every card",
     )
     assertTrue(
       css.contains(
-        "display: flex; flex-direction: column; }\n.cp-cards > .cp-card > .cp-imgwrap { flex: 1 1 auto; }"
+        "display: flex; flex-direction: column; }\n.cp-cards > .cp-card > .cp-imgwrap { flex: 1 1 auto; }",
       ),
       "the image well fills the card so its existing centering centers short previews vertically",
     )
     assertTrue(
       css.contains(
-        ".cp-imgwrap { position: relative; display: flex; align-items: center; justify-content: center;"
+        ".cp-imgwrap { position: relative; display: flex; align-items: center; justify-content: center;",
       ),
       "expanded image wells center their preview content",
     )

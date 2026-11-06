@@ -42,7 +42,7 @@ internal object UiBuilderDevicePresets {
           // insertion order, which already runs oldest-to-newest inside each family.
           .sortedBy {
             GROUP_ORDER.indexOf(it.group).takeIf { index -> index >= 0 } ?: GROUP_ORDER.size
-          }
+          },
     )
   }
 

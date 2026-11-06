@@ -164,7 +164,7 @@ class ServeBrowseCookieTest {
           client = "test",
           requestedScope = AgentGrantScope.PREVIEW,
           requestedTtlSeconds = 600,
-        )
+        ),
       )
     val grant =
       requireNotNull(
@@ -173,7 +173,7 @@ class ServeBrowseCookieTest {
           approvedBy = "operator",
           scope = AgentGrantScope.PREVIEW,
           ttlSeconds = 600,
-        )
+        ),
       )
     val access = requireNotNull(grants.wasmCredentialFor(grant))
     assertNotEquals(grant.token, access)

@@ -51,7 +51,7 @@ class ServeUidReferenceTest {
       assertEquals(
         200,
         get(
-            "/app/reference/phone.html?sha=${reference.source.attributes.getValue("documentSha256")}"
+            "/app/reference/phone.html?sha=${reference.source.attributes.getValue("documentSha256")}",
           )
           .first,
       )
@@ -114,7 +114,7 @@ class ServeUidReferenceTest {
                 Json.encodeToString(DesignReferenceManifest(references = listOf(reference)))
                   .toByteArray(),
               "references/unsafe.html" to "<script>alert(1)</script>".toByteArray(),
-            )
+            ),
           ),
           isSecurityChecked = true,
         )
@@ -134,7 +134,7 @@ class ServeUidReferenceTest {
       ServeUidReference.valid(
         reference.copy(artifact = DesignReferenceArtifact("uid", "../secret.uid")),
         document,
-      )
+      ),
     )
   }
 

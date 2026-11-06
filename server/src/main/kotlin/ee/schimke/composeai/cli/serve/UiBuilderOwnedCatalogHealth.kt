@@ -19,7 +19,7 @@ class UiBuilderOwnedCatalogHealth(private val log: (String) -> Unit = System.err
     if (withheld.put(systemId, reason) != reason) {
       log(
         "serve: ERROR UI-builder catalog $systemId is UNAVAILABLE — $reason. " +
-          "It is not served until a republish composes; there is no built-in fallback."
+          "It is not served until a republish composes; there is no built-in fallback.",
       )
     }
     return true
@@ -30,7 +30,7 @@ class UiBuilderOwnedCatalogHealth(private val log: (String) -> Unit = System.err
     if (degraded.put(systemId, reason) != reason) {
       log(
         "serve: ERROR UI-builder catalog $systemId templates do not read — $reason; " +
-          "new designs start blank until it republishes"
+          "new designs start blank until it republishes",
       )
     }
   }

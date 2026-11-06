@@ -148,7 +148,7 @@ class ServeAuthTest {
     // paint the pre-sign-in HTML after the OAuth round-trip.
     assertFalse(
       ServeHttpServer.pageCacheControl(true, isPublic = true, signedIn = false)
-        .contains("stale-while-revalidate")
+        .contains("stale-while-revalidate"),
     )
     // A token-gated host stays on `no-store` whoever is asking: its URLs carry a credential, and
     // "nobody is signed in" says nothing about whether a shared cache may store the response.

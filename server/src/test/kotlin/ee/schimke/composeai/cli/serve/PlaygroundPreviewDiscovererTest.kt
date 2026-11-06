@@ -37,7 +37,7 @@ class PlaygroundPreviewDiscovererTest {
   fun `scans a classes dir for @Preview-annotated methods, ignoring the rest`() {
     val discoverer =
       PlaygroundPreviewDiscoverer(
-        previewAnnotationFqns = setOf("ee.schimke.composeai.cli.serve.FakePreviewMarker")
+        previewAnnotationFqns = setOf("ee.schimke.composeai.cli.serve.FakePreviewMarker"),
       )
 
     val ids = discoverer.discover(testClassesDir().absolutePath.toPath(), classpath = emptyList())
@@ -69,7 +69,7 @@ class PlaygroundPreviewDiscovererTest {
   fun `preview-shaped annotations outside the accepted set are reported, not the rest`() {
     val discoverer =
       PlaygroundPreviewDiscoverer(
-        previewAnnotationFqns = setOf("ee.schimke.composeai.cli.serve.FakePreviewMarker")
+        previewAnnotationFqns = setOf("ee.schimke.composeai.cli.serve.FakePreviewMarker"),
       )
 
     val found = discoverer.unrecognisedPreviewAnnotations(testClassesDir().absolutePath.toPath())

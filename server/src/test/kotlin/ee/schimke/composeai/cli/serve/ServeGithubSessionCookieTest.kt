@@ -135,7 +135,7 @@ class ServeGithubSessionCookieTest {
         Request.Builder()
           .url(url(server, "/auth/github/callback?code=ok&state=$state"))
           .header("Cookie", cookie)
-          .build()
+          .build(),
       )
       .execute()
       .use { resp -> resp.code to resp.headers("Set-Cookie") }
@@ -218,7 +218,7 @@ class ServeGithubSessionCookieTest {
             .url(url(server, "/auth/github/callback?code=ok&state=$state"))
             .header("Host", "m3.preview.coo.ee")
             .header("Cookie", "cp_gh_state=stale; $stateCookie")
-            .build()
+            .build(),
         )
         .execute()
         .use { resp ->
@@ -253,7 +253,7 @@ class ServeGithubSessionCookieTest {
             .url(url(server, "/version"))
             .header("Host", "preview.coo.ee")
             .header("Cookie", "cp_gh_auth=stale; cp_gh_auth=$cookie")
-            .build()
+            .build(),
         )
         .execute()
         .use { resp -> resp.headers("Set-Cookie").filter { it.startsWith("cp_gh_auth=") } }
@@ -304,7 +304,7 @@ class ServeGithubSessionCookieTest {
     fun visit(path: String): Pair<String?, String?> =
       noRedirect
         .newCall(
-          Request.Builder().url(url(server, path)).header("Cookie", "cp_gh_auth=$cookie").build()
+          Request.Builder().url(url(server, path)).header("Cookie", "cp_gh_auth=$cookie").build(),
         )
         .execute()
         .use { resp ->
@@ -330,7 +330,7 @@ class ServeGithubSessionCookieTest {
           Request.Builder()
             .url(url(server, ServeGithubAuth.LOGOUT_PATH))
             .post("".toRequestBody("application/x-www-form-urlencoded".toMediaType()))
-            .build()
+            .build(),
         )
         .execute()
         .use { resp -> resp.headers("Set-Cookie").filter { it.startsWith("cp_gh_auth=;") } }
@@ -349,7 +349,7 @@ class ServeGithubSessionCookieTest {
           Request.Builder()
             .url(url(server, "/version"))
             .header("Cookie", "cp_gh_auth=stale; cp_gh_auth=$cookie")
-            .build()
+            .build(),
         )
         .execute()
         .use { resp -> resp.headers("Set-Cookie").filter { it.startsWith("cp_gh_auth=") } }
@@ -368,7 +368,7 @@ class ServeGithubSessionCookieTest {
           Request.Builder()
             .url(url(server, "/rc-player/bundle.js"))
             .header("Cookie", "cp_gh_auth=stale; cp_gh_auth=$cookie")
-            .build()
+            .build(),
         )
         .execute()
         .use { resp ->

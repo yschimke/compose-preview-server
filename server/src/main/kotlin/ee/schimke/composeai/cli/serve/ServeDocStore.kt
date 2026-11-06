@@ -102,7 +102,7 @@ class ServeDocStore(
     val format =
       ServeDocFormats.detect(bytes)
         ?: return Result.Failed(
-          "unrecognised document format — this host accepts ${ServeDocFormats.knownSummary()}"
+          "unrecognised document format — this host accepts ${ServeDocFormats.knownSummary()}",
         )
     format.unsupported(bytes)?.let {
       return Result.Failed(it)
@@ -132,7 +132,7 @@ class ServeDocStore(
   fun addFromUrl(name: String?, url: String, isSecurityChecked: Boolean): Result {
     if (!isAllowedUrl(url)) {
       return Result.Failed(
-        "refusing to fetch $url: host is not on the --accept-docs-from allowlist"
+        "refusing to fetch $url: host is not on the --accept-docs-from allowlist",
       )
     }
     val bytes =

@@ -80,7 +80,7 @@ class ServeContactSheetTest {
 
     assertTrue(sheet.size < 3_750_000, "sheet was ${sheet.size} bytes")
     assertTrue(
-      image.width <= 12 + ServeContactSheet.MAX_COLUMNS * (ServeContactSheet.MAX_TILE_EDGE + 12)
+      image.width <= 12 + ServeContactSheet.MAX_COLUMNS * (ServeContactSheet.MAX_TILE_EDGE + 12),
     )
   }
 
@@ -119,7 +119,7 @@ class ServeContactSheetTest {
   fun `a missing tile still gets a placement`() {
     val sheet =
       ServeContactSheet.compose(
-        listOf(ServeContactSheet.Tile(null, caption = "gone"), ServeContactSheet.Tile(png(10, 20)))
+        listOf(ServeContactSheet.Tile(null, caption = "gone"), ServeContactSheet.Tile(png(10, 20))),
       )
     assertEquals(2, sheet.placed.size)
     assertEquals(sheet.placed[1].height, sheet.placed[0].height)

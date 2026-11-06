@@ -185,7 +185,7 @@ class ServeUiBuilderPrecompressedTest {
           .url(base + name)
           .header("Accept-Encoding", acceptEncoding)
           .apply { ifNoneMatch?.let { header("If-None-Match", it) } }
-          .build()
+          .build(),
       )
       .execute()
 }

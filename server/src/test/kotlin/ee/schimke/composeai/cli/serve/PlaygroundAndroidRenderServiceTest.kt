@@ -102,8 +102,8 @@ class PlaygroundAndroidRenderServiceTest {
                           key = "label",
                           type = "string",
                           default = PreviewOverrideValue.StringValue(previewId),
-                        )
-                      )
+                        ),
+                      ),
                   ),
                 ),
             )
@@ -294,7 +294,7 @@ class PlaygroundAndroidRenderServiceTest {
         buildJsonObject {
           put("id", "p")
           put("message", "boom")
-        }
+        },
       ),
     )
     assertEquals(
@@ -302,11 +302,11 @@ class PlaygroundAndroidRenderServiceTest {
       PlaygroundAndroidRenderService.renderFailureDetail(buildJsonObject { put("error", "kaput") }),
     )
     assertNull(
-      PlaygroundAndroidRenderService.renderFailureDetail(buildJsonObject { put("id", "p") })
+      PlaygroundAndroidRenderService.renderFailureDetail(buildJsonObject { put("id", "p") }),
     )
     assertNull(
       PlaygroundAndroidRenderService.renderFailureDetail(
-        buildJsonObject { put("error", buildJsonObject { put("kind", "runtime") }) }
+        buildJsonObject { put("error", buildJsonObject { put("kind", "runtime") }) },
       ),
       "a kind alone names no cause",
     )

@@ -62,8 +62,8 @@ class ServeStatusCatalogRegistryTest {
             repo = "yschimke/compose-preview-imports",
             catalogs = 2,
             systems = listOf("joreilly-peopleinspace", "joreilly-bikeshare"),
-          )
-        )
+          ),
+        ),
       )
 
     val json = statusJson(s)
@@ -98,8 +98,8 @@ class ServeStatusCatalogRegistryTest {
             repo = "yschimke/compose-preview-imports",
             catalogs = 0,
             error = "catalog registry yschimke/compose-preview-imports: document not found",
-          )
-        )
+          ),
+        ),
       )
 
     // Nominated-but-broken and nominated-but-empty both contribute 0 catalogs and need opposite
@@ -118,7 +118,7 @@ class ServeStatusCatalogRegistryTest {
           repo = "yschimke/compose-preview-imports",
           catalogs = 1,
           systems = listOf("joreilly-peopleinspace"),
-        )
+        ),
       )
     val s = start { live }
     assertTrue(!statusJson(s).contains("compose-samples-jetsnack"))
@@ -130,7 +130,7 @@ class ServeStatusCatalogRegistryTest {
           .copy(
             catalogs = 2,
             systems = listOf("joreilly-peopleinspace", "compose-samples-jetsnack"),
-          )
+          ),
       )
 
     assertTrue(statusJson(s).contains("compose-samples-jetsnack"), "status.json is a boot snapshot")

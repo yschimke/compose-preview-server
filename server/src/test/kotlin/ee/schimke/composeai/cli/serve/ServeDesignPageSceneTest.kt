@@ -93,8 +93,8 @@ class ServeDesignPageSceneTest {
               y = 250.0
               width = 1000.0
               height = 500.0
-            }
-          )
+            },
+          ),
       )
     assertContains(html, "left:25.0000%")
     assertContains(html, "top:25.0000%")
@@ -124,7 +124,7 @@ class ServeDesignPageSceneTest {
   fun `blends are emitted as data attributes, not inline style`() {
     val html =
       render(
-        page = page(designBlend = PageBlendMode.SCREEN, renderBlend = PageBlendMode.PLUS_LIGHTER)
+        page = page(designBlend = PageBlendMode.SCREEN, renderBlend = PageBlendMode.PLUS_LIGHTER),
       )
     assertContains(html, """data-design-blend="screen"""")
     assertContains(html, """data-render-blend="plus-lighter"""")
@@ -148,8 +148,8 @@ class ServeDesignPageSceneTest {
             placement {
               blend = PageBlendMode.MULTIPLY
               fit = PageLayerPlacement.CONTAIN
-            }
-          )
+            },
+          ),
       )
     assertContains(html, """data-blend="multiply"""")
     assertContains(html, """data-fit="contain"""")

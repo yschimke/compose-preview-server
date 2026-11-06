@@ -71,9 +71,9 @@ class ServeWebParityVerdictTest {
                     mapOf("token" to "spacing.padding", "expected" to "12", "actual" to "24"),
                 ),
                 finding("layout", message = "layout \"Label\": offset (1, -12)"),
-              )
-          )
-        )
+              ),
+          ),
+        ),
       )
     assertTrue("Accessibility &amp; i18n" in html, html)
     assertTrue("Token compliance" in html, html)
@@ -92,8 +92,8 @@ class ServeWebParityVerdictTest {
           ParityFindingSet(
             status = "pass",
             findings = listOf(finding("token", severity = "error", message = "e")),
-          )
-        )
+          ),
+        ),
       )
     // A run that declared `pass` over a finding it accepted is not overruled by this page.
     assertTrue("cp-parity-status--pass" in html, html)
@@ -119,9 +119,9 @@ class ServeWebParityVerdictTest {
               listOf(
                 finding("layout", message = "anchored", anchors = listOf(anchor(label = "Label"))),
                 finding("layout", message = "prose only"),
-              )
-          )
-        )
+              ),
+          ),
+        ),
       )
     // One row carries an anchor id…
     assertEquals(1, Regex("data-cp-parity-finding=").findAll(html).count(), html)
@@ -162,10 +162,10 @@ class ServeWebParityVerdictTest {
                   severity = "info",
                   message = "radius: candidate resolved no radius tokens",
                   detail = mapOf("token" to "shape.corner", "unverified" to "true"),
-                )
-              )
-          )
-        )
+                ),
+              ),
+          ),
+        ),
       )
     // The spec token IS the finding's subject; the delta row is optional metadata around it.
     assertTrue("shape.corner" in html, html)
@@ -190,9 +190,9 @@ class ServeWebParityVerdictTest {
               listOf(
                 finding("token", anchors = listOf(anchor(side = "reference"))),
                 finding("layout", anchors = listOf(anchor(), anchor(side = "reference"))),
-              )
-          )
-        )
+              ),
+          ),
+        ),
       )
     assertTrue("data-cp-parity-finding=\"tokens-0\"" in html, html)
     assertTrue("data-cp-parity-finding=\"layout-0\"" in html, html)
@@ -213,10 +213,10 @@ class ServeWebParityVerdictTest {
                   "a11y",
                   message = "<img src=x onerror=alert(1)>",
                   anchors = listOf(anchor(label = "</script><script>alert(1)</script>")),
-                )
-              )
-          )
-        )
+                ),
+              ),
+          ),
+        ),
       )
     assertFalse("<img src=x" in html, html)
     assertTrue("&lt;img src=x" in html, html)

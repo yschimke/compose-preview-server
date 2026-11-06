@@ -152,7 +152,7 @@ class PlaygroundClasspathSupplier(
           if (it == null) {
             onLog(
               "catalog '${source.system}' has not published a live bundle yet — the mode stays " +
-                "unavailable until it loads (or it carries none)"
+                "unavailable until it loads (or it carries none)",
             )
           }
         }

@@ -86,9 +86,9 @@ class RemoteDocumentExportExecutorTest {
             .post(
               json
                 .encodeToString(HttpRequestEnvelopeV1.serializer(), envelope)
-                .toRequestBody("application/json".toMediaType())
+                .toRequestBody("application/json".toMediaType()),
             )
-            .build()
+            .build(),
         )
         .execute()
         .use {
@@ -110,9 +110,9 @@ class RemoteDocumentExportExecutorTest {
             .post(
               json
                 .encodeToString(DesignDocumentV1.serializer(), doc)
-                .toRequestBody("application/json".toMediaType())
+                .toRequestBody("application/json".toMediaType()),
             )
-            .build()
+            .build(),
         )
         .execute()
         .use { it.code to it.body.bytes() }
@@ -155,7 +155,7 @@ class RemoteDocumentExportExecutorTest {
       assertTrue(
         refusal.diagnostics.any {
           it.severity == DiagnosticSeverityV1.ERROR && "environment.layoutDirection" in it.message
-        }
+        },
       )
       assertEquals("", refusal.content)
       assertTrue(assertIs<DesignsResponseV1>(request(ListDesignsRequestV1())).designs.isEmpty())
@@ -173,7 +173,7 @@ class RemoteDocumentExportExecutorTest {
           stateVariables =
             draft.stateVariables.mapValues { (_, value) ->
               value.copy(initialValue = JsonPrimitive(16777216))
-            }
+            },
         )
       assertEquals(200, supplied(changed, "rc").first)
       assertEquals(beforeDraft, storedFiles())
@@ -192,10 +192,10 @@ class RemoteDocumentExportExecutorTest {
         .newCall(
           Request.Builder()
             .url(
-              "http://127.0.0.1:${server.port}/api/ui-builder/v1/designs/${document.id}/export.rc?revision=0&download=1"
+              "http://127.0.0.1:${server.port}/api/ui-builder/v1/designs/${document.id}/export.rc?revision=0&download=1",
             )
             .header(ServeHttpServer.TOKEN_HEADER, token)
-            .build()
+            .build(),
         )
         .execute()
         .use {
@@ -229,7 +229,7 @@ class RemoteDocumentExportExecutorTest {
                 StateValueTypeV1.INTEGER,
                 initialValue = JsonPrimitive(16777217),
                 persistence = StatePersistenceV1.PREVIEW,
-              )
+              ),
           ),
         roots = listOf("choice"),
         nodes =
@@ -249,10 +249,10 @@ class RemoteDocumentExportExecutorTest {
                               mapOf(
                                 "first" to IntegerValueV1(16777216),
                                 "second" to IntegerValueV1(16777217),
-                              )
+                              ),
                             ),
-                        )
-                      )
+                        ),
+                      ),
                   ),
                 slots = mapOf("children" to listOf("first", "second")),
               ),
@@ -322,7 +322,7 @@ class RemoteDocumentExportExecutorTest {
     assertFalse(compiled)
     assertEquals("", result.content)
     assertTrue(
-      result.diagnostics.any { it.severity == DiagnosticSeverityV1.ERROR && "first" in it.message }
+      result.diagnostics.any { it.severity == DiagnosticSeverityV1.ERROR && "first" in it.message },
     )
   }
 
@@ -347,13 +347,13 @@ class RemoteDocumentExportExecutorTest {
         RemoteDocumentExportSupport.supports(
           catalogs.getValue("remote-m3").exportCapabilities,
           format,
-        )
+        ),
       )
       assertFalse(
         RemoteDocumentExportSupport.supports(
           catalogs.getValue("m3-catalog").exportCapabilities,
           format,
-        )
+        ),
       )
     }
   }

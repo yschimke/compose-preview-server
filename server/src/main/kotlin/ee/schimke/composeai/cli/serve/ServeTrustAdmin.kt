@@ -256,7 +256,7 @@ class ServeTrustAdmin(
               onLog("serve: refusing to rewrite unreadable ${target.displayPath}: ${e.message}")
               return Result.Invalid(
                 "trust store ${target.displayPath} is present but unreadable " +
-                  "(${e.message ?: "parse failed"}); fix or remove it before editing trust"
+                  "(${e.message ?: "parse failed"}); fix or remove it before editing trust",
               )
             }
       val updated = edit(current) ?: return Result.Conflict("$summary: no change")

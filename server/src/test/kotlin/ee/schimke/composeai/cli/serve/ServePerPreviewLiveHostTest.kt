@@ -104,7 +104,7 @@ class ServePerPreviewLiveHostTest {
       lastRenderOverrides = overrides
       return A11yOutcome.Ok(
         """{"previewId":"$previewId","nodes":[],"findings":[],"touchTargets":[]}"""
-          .encodeToByteArray()
+          .encodeToByteArray(),
       )
     }
 
@@ -118,7 +118,7 @@ class ServePerPreviewLiveHostTest {
       if (annotationsNotFound) return AnnotationsOutcome.NotFound
       if (!streaming && previewId !in publishedTypography) return AnnotationsOutcome.NotFound
       return AnnotationsOutcome.Ok(
-        """{"previewId":"$previewId","annotations":[],"tags":{}}""".encodeToByteArray()
+        """{"previewId":"$previewId","annotations":[],"tags":{}}""".encodeToByteArray(),
       )
     }
 
@@ -210,7 +210,7 @@ class ServePerPreviewLiveHostTest {
 
   private fun knobOverride() =
     PreviewOverrides(
-      namedOverrides = mapOf("label" to PreviewOverrideValue.StringValue("Televise"))
+      namedOverrides = mapOf("label" to PreviewOverrideValue.StringValue("Televise")),
     )
 
   @Test

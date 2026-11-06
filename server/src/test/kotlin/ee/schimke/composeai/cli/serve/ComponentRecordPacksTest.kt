@@ -50,12 +50,12 @@ class ComponentRecordPacksTest {
     assertEquals(
       "number",
       ComponentRecordPacks.jsonTypeOf(
-        parameter("fontSize", "androidx.compose.remote.creation.compose.state.RemoteTextUnit")
+        parameter("fontSize", "androidx.compose.remote.creation.compose.state.RemoteTextUnit"),
       ),
     )
     assertNull(
       ComponentRecordPacks.jsonTypeOf(
-        parameter("style", "androidx.compose.remote.creation.compose.text.RemoteTextStyle")
+        parameter("style", "androidx.compose.remote.creation.compose.text.RemoteTextStyle"),
       ),
       "a type with no JSON form is not a property; declaring one would be authorable and " +
         "unexportable",
@@ -82,13 +82,13 @@ class ComponentRecordPacksTest {
     assertEquals(
       "tonalElevationDp",
       ComponentRecordPacks.propertyNameOf(
-        parameter("tonalElevation", "androidx.compose.ui.unit.Dp")
+        parameter("tonalElevation", "androidx.compose.ui.unit.Dp"),
       ),
     )
     assertEquals(
       "fontSizeSp",
       ComponentRecordPacks.propertyNameOf(
-        parameter("fontSize", "androidx.compose.ui.unit.TextUnit")
+        parameter("fontSize", "androidx.compose.ui.unit.TextUnit"),
       ),
     )
   }
@@ -179,7 +179,7 @@ class ComponentRecordPacksTest {
     assertEquals(
       listOf(
         "confetti-wear/session-speaker-chip — no call site: no placeholder can be written for " +
-          "required parameter `speaker: SessionSpeakerDetails`"
+          "required parameter `speaker: SessionSpeakerDetails`",
       ),
       derived.skipped,
     )

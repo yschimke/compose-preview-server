@@ -127,7 +127,7 @@ class DesignCommandRunnerTest {
               seen += tool to arguments
               return Json.parseToJsonElement(
                   """{"schema":"compose-preview/ui-builder-view/v1","designId":"spotify-wear-widget",
-                  "revision":3,"notes":["selected node `title` has no box in this render"]}"""
+                  "revision":3,"notes":["selected node `title` has no box in this render"]}""",
                 )
                 .jsonObject to png
             }
@@ -316,7 +316,7 @@ class DesignEnvelopeTest {
               buildJsonObject {
                 put("type", "text")
                 put("text", text)
-              }
+              },
             )
           },
         )
@@ -338,7 +338,7 @@ class DesignEnvelopeTest {
       unwrap(
         ServeUiBuilderMcp.GET_DESIGN,
         rpc(
-          """{"callId":"1","response":{"type":"snapshot","snapshot":{"state":{"document":{}}}},"unacknowledgedComments":3}"""
+          """{"callId":"1","response":{"type":"snapshot","snapshot":{"state":{"document":{}}}},"unacknowledgedComments":3}""",
         ),
       )
     assertEquals(3, response[ServeUiBuilderMcp.UNACKNOWLEDGED_COMMENTS_KEY]?.jsonPrimitive?.int)
@@ -380,7 +380,7 @@ class DesignEnvelopeTest {
       unwrap(
         "t",
         rpc(
-          """{"callId":"1","response":{"type":"error","error":{"code":"unauthorized","message":"nope"}}}"""
+          """{"callId":"1","response":{"type":"error","error":{"code":"unauthorized","message":"nope"}}}""",
         ),
       )
     }
@@ -393,7 +393,7 @@ class DesignEnvelopeTest {
         unwrap(
           "t",
           rpc(
-            """{"callId":"1","response":{"type":"error","error":{"code":"notFound","message":"no such design"}}}"""
+            """{"callId":"1","response":{"type":"error","error":{"code":"notFound","message":"no such design"}}}""",
           ),
         )
       }

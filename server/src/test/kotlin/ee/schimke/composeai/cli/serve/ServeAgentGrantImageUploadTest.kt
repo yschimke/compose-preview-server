@@ -159,7 +159,7 @@ class ServeAgentGrantImageUploadTest {
           .url(url("/images?name=after.png", port))
           .apply { token?.let { header(ServeHttpServer.TOKEN_HEADER, it) } }
           .post(ServeImageFixtures.png().toRequestBody("application/octet-stream".toMediaType()))
-          .build()
+          .build(),
       )
       .execute()
 

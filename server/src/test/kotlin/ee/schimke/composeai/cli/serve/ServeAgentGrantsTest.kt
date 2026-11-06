@@ -208,7 +208,7 @@ class ServeAgentGrantsTest {
   fun `seals from one process do not verify in another`() {
     val seal = ServeAgentGrants.Csrf().seal("req-1", "@yuri", ServeAgentGrants.Csrf.ACTION_APPROVE)
     assertFalse(
-      ServeAgentGrants.Csrf().verify("req-1", "@yuri", ServeAgentGrants.Csrf.ACTION_APPROVE, seal)
+      ServeAgentGrants.Csrf().verify("req-1", "@yuri", ServeAgentGrants.Csrf.ACTION_APPROVE, seal),
     )
   }
 

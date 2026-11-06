@@ -172,7 +172,7 @@ class RecordFreeComposeExportTest {
       json.decodeFromString<DesignDocumentV1>(
         java.io
           .File("../docs/design/evidence/ui-builder-live-document-preview/sample.document.json")
-          .readText()
+          .readText(),
       )
     val document = original.copy(catalogPin = original.catalogPin.copy(systemId = "custom-remote"))
     val capabilities =
@@ -212,7 +212,7 @@ class RecordFreeComposeExportTest {
           document = design,
           catalog = catalog,
           format = ExportFormatV1.COMPOSE,
-        )
+        ),
       )
 
     assertEquals(emptyList(), artifact.diagnostics, artifact.content)
@@ -240,7 +240,7 @@ class RecordFreeComposeExportTest {
       ScreenGeneratorComposeExportExecutor(
         {
           ComponentRecordSource.Lookup.Found(
-            remoteM3Record.newBuilder().apply { schemaVersion = 99 }.build()
+            remoteM3Record.newBuilder().apply { schemaVersion = 99 }.build(),
           )
         },
         PACKAGE_NAME,
@@ -257,7 +257,7 @@ class RecordFreeComposeExportTest {
           document = widgetAroundRemoteText(),
           catalog = catalog,
           format = ExportFormatV1.COMPOSE,
-        )
+        ),
       )
 
     assertEquals(
@@ -279,7 +279,7 @@ class RecordFreeComposeExportTest {
    */
   private val remoteM3Record: ComponentRecordFile by lazy {
     json.decodeFromString(
-      java.io.File("../docs/design/fixtures/ui-builder/remote-m3-record-v1.json").readText()
+      java.io.File("../docs/design/fixtures/ui-builder/remote-m3-record-v1.json").readText(),
     )
   }
 
@@ -325,7 +325,7 @@ class RecordFreeComposeExportTest {
     val design = widgetAroundRemoteIcon("pauseCircle")
     val expected =
       assertIs<RecordFreeExport.Generated.Emitted>(
-          RecordFreeExport.generate(design, UiBuilderCatalogPlatform.REMOTE_COMPOSE, PACKAGE_NAME)
+          RecordFreeExport.generate(design, UiBuilderCatalogPlatform.REMOTE_COMPOSE, PACKAGE_NAME),
         )
         .diagnostics
     assertTrue(expected.isNotEmpty(), "the emitter reported nothing for this design")
@@ -347,10 +347,10 @@ class RecordFreeComposeExportTest {
                 JsonObject(
                   mapOf(
                     "imageVector" to
-                      json.parseToJsonElement("""{"type":"string","value":"$iconKey"}""")
-                  )
+                      json.parseToJsonElement("""{"type":"string","value":"$iconKey"}"""),
+                  ),
                 ),
-            ))
+            )),
     )
   }
 
@@ -368,10 +368,10 @@ class RecordFreeComposeExportTest {
                 properties =
                   JsonObject(
                     mapOf(
-                      "text" to json.parseToJsonElement("""{"type":"string","value":"Hello"}""")
-                    )
+                      "text" to json.parseToJsonElement("""{"type":"string","value":"Hello"}"""),
+                    ),
                   ),
-              ))
+              )),
       )
       .toDesignDocumentV1()
   }
@@ -384,11 +384,17 @@ class RecordFreeComposeExportTest {
     )
     val document =
       json.decodeFromString<UiBuilderDocument>(
-        java.io.File("../experiments/remote-state-selection/bound-actions.document.json").readText()
+        java.io
+          .File("../experiments/remote-state-selection/bound-actions.document.json")
+          .readText(),
       )
     val expected =
       assertIs<RecordFreeExport.Generated.Emitted>(
-          RecordFreeExport.generate(document, UiBuilderCatalogPlatform.REMOTE_COMPOSE, PACKAGE_NAME)
+          RecordFreeExport.generate(
+            document,
+            UiBuilderCatalogPlatform.REMOTE_COMPOSE,
+            PACKAGE_NAME,
+          ),
         )
         .source
     val remote =
@@ -414,7 +420,7 @@ class RecordFreeComposeExportTest {
         document = document,
         catalog = capabilities,
         format = ExportFormatV1.COMPOSE,
-      )
+      ),
     )
 
   /** The Hello sample, optionally with a padding the widget host does not let a design choose. */
@@ -434,10 +440,10 @@ class RecordFreeComposeExportTest {
                       root.properties +
                         ("horizontalPaddingDp" to
                           json.parseToJsonElement(
-                            """{"type":"float","value":$horizontalPaddingDp}"""
-                          ))
-                    )
-                ))
+                            """{"type":"float","value":$horizontalPaddingDp}""",
+                          )),
+                    ),
+                )),
         )
       }
     return document.toDesignDocumentV1()
@@ -454,7 +460,7 @@ class RecordFreeComposeExportTest {
           catalogRevision = "candidate",
           capabilityDigest = "candidate",
           nativeRuntimeId = "candidate",
-        )
+        ),
       )
       .let { it as JsonObject }
 
@@ -472,7 +478,7 @@ class RecordFreeComposeExportTest {
           windowPosture = WindowPostureV1.FLAT,
           animations = AnimationStateV1.SETTLED,
           networkAccess = false,
-        )
+        ),
       )
       .let { it as JsonObject }
 

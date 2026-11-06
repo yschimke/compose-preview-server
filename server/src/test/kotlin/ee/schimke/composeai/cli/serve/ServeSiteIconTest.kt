@@ -270,13 +270,13 @@ class ServeSiteIconTest {
     val tags = ServeSiteIcon.linkTags()
     assertTrue(
       tags.contains(
-        """<meta name="theme-color" media="(prefers-color-scheme: light)" content="#fef7ff">"""
+        """<meta name="theme-color" media="(prefers-color-scheme: light)" content="#fef7ff">""",
       ),
       tags,
     )
     assertTrue(
       tags.contains(
-        """<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141218">"""
+        """<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141218">""",
       ),
       tags,
     )

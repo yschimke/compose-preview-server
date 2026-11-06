@@ -45,7 +45,7 @@ class ServeUiBuilderHostRootTest {
         File(dir, ServeUiBuilderEditor.MANIFEST_FILE)
           .writeText(
             """{"schema":"${ServeUiBuilderEditor.MANIFEST_SCHEMA}","version":"$editorVersion",""" +
-              """"serverApi":1}"""
+              """"serverApi":1}""",
           )
       }
     }
@@ -113,7 +113,7 @@ class ServeUiBuilderHostRootTest {
         assertTrue("importScripts('/ui-builder/ui-builder-sw.js')" in body)
         val config =
           kotlinx.serialization.json.Json.parseToJsonElement(
-              body.substringAfter("self.composeUiBuilderOffline = ").substringBefore(";\n")
+              body.substringAfter("self.composeUiBuilderOffline = ").substringBefore(";\n"),
             )
             .jsonObject
         assertEquals("/ui-builder/", config.getValue("assetBase").jsonPrimitive.content)
@@ -167,7 +167,7 @@ class ServeUiBuilderHostRootTest {
     assertFalse(
       server.call("/projects", OTHER).use {
         "<title>UI Builder projects</title>" in it.body!!.string()
-      }
+      },
     )
     assertTrue(server(projects = false).call("/projects", BUILDER).isShell())
   }

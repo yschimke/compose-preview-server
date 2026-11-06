@@ -30,7 +30,7 @@ class ServeCatalogRegistryTest {
             ]
           }
           """
-            .trimIndent()
+            .trimIndent(),
         ),
         problems::add,
       )!!
@@ -56,7 +56,7 @@ class ServeCatalogRegistryTest {
             listOf(
               ServeCatalogsConfig.Entry(system = "mine"),
               ServeCatalogsConfig.Entry(system = "theirs", repo = "someone/else"),
-            )
+            ),
         ),
         problems::add,
       )
@@ -80,7 +80,7 @@ class ServeCatalogRegistryTest {
                 system = "mine",
                 group = "imports",
                 attributionRepos = listOf("google/android-samples"),
-              )
+              ),
             ),
         ),
       )
@@ -97,7 +97,7 @@ class ServeCatalogRegistryTest {
       ServeCatalogRegistry.normalize(
         "yschimke/compose-preview-imports",
         ServeCatalogsConfig(
-          catalogs = listOf(ServeCatalogsConfig.Entry(system = "mine", group = "design-systems"))
+          catalogs = listOf(ServeCatalogsConfig.Entry(system = "mine", group = "design-systems")),
         ),
       )
 
@@ -120,7 +120,7 @@ class ServeCatalogRegistryTest {
               ServeCatalogsConfig.Entry(system = "../etc/passwd"),
               ServeCatalogsConfig.Entry(system = "ok"),
               ServeCatalogsConfig.Entry(system = "ok"),
-            )
+            ),
         ),
         problems::add,
       )
@@ -143,7 +143,7 @@ class ServeCatalogRegistryTest {
     problems.clear()
 
     assertNull(
-      ServeCatalogRegistry.fetch(nomination("a/b"), bytesOf("not json at all"), problems::add)
+      ServeCatalogRegistry.fetch(nomination("a/b"), bytesOf("not json at all"), problems::add),
     )
     assertTrue(problems.single().contains("not readable"))
   }

@@ -65,7 +65,7 @@ class ServePushNotifierTest {
             comment("c1", "github:alice"),
             comment("c2", "github:bob"),
             comment("c3", "github:bob"),
-          )
+          ),
       )
     val intents = commentPushIntents(before, after)
     assertEquals(listOf("github:alice"), intents.map { it.recipient })
@@ -79,8 +79,8 @@ class ServePushNotifierTest {
       board(
         "t1" to
           listOf(
-            comment("c1", "github:alice", "@Carol can you look? cc bob@example.com and @alice")
-          )
+            comment("c1", "github:alice", "@Carol can you look? cc bob@example.com and @alice"),
+          ),
       )
     val intents = commentPushIntents(null, after)
     assertEquals(listOf("github:carol"), intents.map { it.recipient })
@@ -92,7 +92,7 @@ class ServePushNotifierTest {
     val before = board("t1" to listOf(comment("c1", "github:alice")))
     val after =
       board(
-        "t1" to listOf(comment("c1", "github:alice"), comment("c2", "github:bob", "@alice yes"))
+        "t1" to listOf(comment("c1", "github:alice"), comment("c2", "github:bob", "@alice yes")),
       )
     val intent = commentPushIntents(before, after).single()
     assertEquals("github:alice", intent.recipient)

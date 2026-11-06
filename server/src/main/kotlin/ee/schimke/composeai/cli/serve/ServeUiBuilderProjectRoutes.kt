@@ -26,7 +26,7 @@ internal fun Route.installUiBuilderProjectRoutes(
           projects.store
             .all()
             .filter { it.role(actor) != null }
-            .map { PROJECT_JSON.encodeToJsonElement(it) }
+            .map { PROJECT_JSON.encodeToJsonElement(it) },
         )
       }
     }
@@ -40,7 +40,7 @@ internal fun Route.installUiBuilderProjectRoutes(
       get {
         call.projectAction(authorization, UiBuilderRouteCapability.READ, grants) { actor ->
           PROJECT_JSON.encodeToJsonElement(
-            projects.permitted(actor, call.parameters["projectId"].orEmpty())
+            projects.permitted(actor, call.parameters["projectId"].orEmpty()),
           )
         }
       }
@@ -51,7 +51,7 @@ internal fun Route.installUiBuilderProjectRoutes(
               actor,
               call.parameters["projectId"].orEmpty(),
               call.projectBody<ProjectPutFile>(),
-            )
+            ),
           )
         }
       }
@@ -62,14 +62,14 @@ internal fun Route.installUiBuilderProjectRoutes(
               actor,
               call.parameters["projectId"].orEmpty(),
               call.projectBody<ProjectMembers>(),
-            )
+            ),
           )
         }
       }
       get("/review") {
         call.projectAction(authorization, UiBuilderRouteCapability.READ, grants) { actor ->
           PROJECT_JSON.encodeToJsonElement(
-            projects.review(actor, call.parameters["projectId"].orEmpty())
+            projects.review(actor, call.parameters["projectId"].orEmpty()),
           )
         }
       }
@@ -82,7 +82,7 @@ internal fun Route.installUiBuilderProjectRoutes(
               call.parameters["projectId"].orEmpty(),
               request,
               request.githubToken.orEmpty(),
-            )
+            ),
           )
         }
       }

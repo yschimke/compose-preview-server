@@ -101,7 +101,7 @@ class PlaygroundRcCaptureService(
         "renderFailed" -> {
           failure.set(
             params["error"]?.jsonObject?.get("message")?.jsonPrimitive?.contentOrNull
-              ?: "daemon reported renderFailed"
+              ?: "daemon reported renderFailed",
           )
           latch.countDown()
         }

@@ -63,7 +63,7 @@ internal fun Route.installUiBuilderAssetRoutes(
             designId = designId,
             assetKey = assetKey,
             bytes = bytes,
-          )
+          ),
         )
     ) {
       is UiBuilderServiceResponse.OperationOutcome ->

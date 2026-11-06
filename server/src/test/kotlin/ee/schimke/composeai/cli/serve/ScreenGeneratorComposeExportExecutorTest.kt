@@ -50,20 +50,20 @@ class ScreenGeneratorComposeExportExecutorTest {
             root,
             "docs/design/evidence/ui-builder-repetition-export/repetition-initial.document.json",
           )
-          .readText()
+          .readText(),
       )
     val record = ExportRecords.m3Catalog()
     val browser = ScreenExportGate.export(document, record)
     val scopedGeneratorAvailable = runCatching {
       Json.decodeFromString<ee.schimke.composeai.discovery.ScreenDocument>(
-        """{"name":"Probe","functions":[],"root":{"componentId":"","repetition":{"fields":{},"rows":[]}}}"""
+        """{"name":"Probe","functions":[],"root":{"componentId":"","repetition":{"fields":{},"rows":[]}}}""",
       )
     }
       .isSuccess
     if (!scopedGeneratorAvailable) {
       assertTrue(
         browser is ScreenExportGate.Outcome.Refused &&
-          browser.reasons.any { "shared generator support" in it }
+          browser.reasons.any { "shared generator support" in it },
       )
       return
     }
@@ -76,7 +76,7 @@ class ScreenGeneratorComposeExportExecutorTest {
     if (!UiBuilderBuildFeatures.remoteCompose) {
       assertTrue(
         browser is ScreenExportGate.Outcome.Refused &&
-          browser.reasons.any { "disabled in this build" in it }
+          browser.reasons.any { "disabled in this build" in it },
       )
       return
     }
@@ -94,7 +94,7 @@ class ScreenGeneratorComposeExportExecutorTest {
             document = document,
             catalog = catalog,
             format = ExportFormatV1.COMPOSE,
-          )
+          ),
         )
     assertEquals(emptyList(), artifact.diagnostics)
     val provenance =
@@ -146,7 +146,7 @@ class ScreenGeneratorComposeExportExecutorTest {
           document = document,
           catalog = catalog,
           format = ExportFormatV1.COMPOSE,
-        )
+        ),
       )
 
   @Test
@@ -193,14 +193,14 @@ class ScreenGeneratorComposeExportExecutorTest {
         """
         { "targets": [ { "record": "test-catalog/androidx.compose.material3.TextKt.Text",
             "parameters": { "text": { "property": "label", "codec": "text" } } } ] }
-        """
+        """,
       )
     val semantics =
       JsonObject(
         mapOf(
           "components" to
-            JsonObject(mapOf("m3/text" to JsonObject(mapOf("exportProjection" to projection))))
-        )
+            JsonObject(mapOf("m3/text" to JsonObject(mapOf("exportProjection" to projection)))),
+        ),
       )
     val document =
       ScreenGeneratorScreenFixture.document()
@@ -213,7 +213,7 @@ class ScreenGeneratorComposeExportExecutorTest {
                   id = "go",
                   componentId = "m3/text",
                   properties = mapOf("label" to StringValueV1("Go")),
-                )
+                ),
             ),
         )
 
@@ -255,14 +255,14 @@ class ScreenGeneratorComposeExportExecutorTest {
   fun `a projected catalog with no record says how to configure one`() {
     val projection =
       Json.parseToJsonElement(
-        """{ "targets": [ { "record": "test-catalog/androidx.compose.material3.TextKt.Text" } ] }"""
+        """{ "targets": [ { "record": "test-catalog/androidx.compose.material3.TextKt.Text" } ] }""",
       )
     val semantics =
       JsonObject(
         mapOf(
           "components" to
-            JsonObject(mapOf("m3/text" to JsonObject(mapOf("exportProjection" to projection))))
-        )
+            JsonObject(mapOf("m3/text" to JsonObject(mapOf("exportProjection" to projection)))),
+        ),
       )
 
     val artifact =
@@ -322,7 +322,7 @@ class ScreenGeneratorComposeExportExecutorTest {
             document = document,
             catalog = catalog,
             format = ExportFormatV1.COMPOSE,
-          )
+          ),
         )
     assertEquals(emptyList(), artifact.diagnostics)
     val source = (browser as ScreenExportGate.Outcome.Emitted).source
@@ -347,7 +347,7 @@ class ScreenGeneratorComposeExportExecutorTest {
 
     val desktop =
       assertIs<ScreenGeneratorComposeExportExecutor.Generated.Emitted>(
-        executor.generate(themedDocument(), typefaces = TypefaceTarget.DESKTOP)
+        executor.generate(themedDocument(), typefaces = TypefaceTarget.DESKTOP),
       )
     assertTrue("SystemFont(\"Michroma\"" in desktop.source, desktop.source)
     assertFalse("GoogleFont" in desktop.source, desktop.source)
@@ -355,7 +355,7 @@ class ScreenGeneratorComposeExportExecutorTest {
 
     val android =
       assertIs<ScreenGeneratorComposeExportExecutor.Generated.Emitted>(
-        executor.generate(themedDocument())
+        executor.generate(themedDocument()),
       )
     assertTrue("GoogleFont(\"Michroma\")" in android.source, android.source)
     assertEquals(emptyList(), android.systemFontFamilies)
@@ -400,9 +400,9 @@ class ScreenGeneratorComposeExportExecutorTest {
                   id = "text",
                   componentId = "m3/text",
                   properties = mapOf("text" to StateValueV1("query")),
-                )
+                ),
             ),
-        )
+        ),
       )
     val diagnostic = artifact.diagnostics.single()
     assertEquals(DiagnosticSeverityV1.ERROR, diagnostic.severity)
@@ -422,9 +422,9 @@ class ScreenGeneratorComposeExportExecutorTest {
             ScreenGeneratorScreenFixture.components()
               .newBuilder()
               .apply { schemaVersion = 99 }
-              .build()
+              .build(),
           )
-        }
+        },
       )
     val diagnostic = artifact.diagnostics.single()
     assertEquals(ScreenGeneratorComposeExportExecutor.NO_COMPONENT_RECORD, diagnostic.code)
@@ -445,9 +445,9 @@ class ScreenGeneratorComposeExportExecutorTest {
                   id = "text",
                   componentId = "m3/marquee",
                   properties = mapOf("text" to StringValueV1("hi")),
-                )
+                ),
             ),
-        )
+        ),
       )
     val diagnostic = artifact.diagnostics.single()
     assertEquals(ScreenGeneratorComposeExportExecutor.UNPROVEN_CALL_SITE, diagnostic.code)
@@ -460,9 +460,9 @@ class ScreenGeneratorComposeExportExecutorTest {
     // explicitly and would not catch a different default.
     val document = ScreenGeneratorScreenFixture.document()
     val artifact =
-      ScreenGeneratorComposeExportExecutor({
-          ComponentRecordSource.Lookup.Found(ScreenGeneratorScreenFixture.components())
-        })
+      ScreenGeneratorComposeExportExecutor(
+          { ComponentRecordSource.Lookup.Found(ScreenGeneratorScreenFixture.components()) },
+        )
         .export(
           RevisionPinnedUiBuilderExport(
             actor = AuthenticatedUiBuilderActor("tester"),
@@ -472,12 +472,12 @@ class ScreenGeneratorComposeExportExecutorTest {
             document = document,
             catalog = catalog,
             format = ExportFormatV1.COMPOSE,
-          )
+          ),
         )
     assertTrue(artifact.content.contains("\npackage generated.uibuilder\n"), artifact.content)
     assertTrue(
       UiBuilderGeneratedPreviewAdapter.previewEntry("Screen", 1, 1)
-        .contains("import generated.uibuilder.Screen")
+        .contains("import generated.uibuilder.Screen"),
     )
   }
 
@@ -500,9 +500,9 @@ class ScreenGeneratorComposeExportExecutorTest {
                       "text" to StringValueV1("hi"),
                       "color" to ColorValueV1("bad\nval injected = 1\u2028val also = 2"),
                     ),
-                )
+                ),
             ),
-        )
+        ),
       )
     val lines = artifact.content.trimEnd('\n').split("\n")
     assertTrue(lines.size >= 3, artifact.content)
@@ -574,7 +574,7 @@ fun ScheduleOperations() {
           base.environment.copy(
             theme = ThemeV1.DARK,
             exportDevices = listOf("id:pixel_6", "id:pixel_fold"),
-          )
+          ),
       )
 
     val source = export(document).content
@@ -686,6 +686,6 @@ fun ScheduleOperations() {
             "slots": {}, "modifiers": []}
         }
       }
-      """
+      """,
     )
 }

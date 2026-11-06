@@ -57,7 +57,7 @@ class ServeAgentGrantStoreTest {
           600,
           emptySet(),
           approver.actorId,
-        )
+        ),
       )
 
     // The display name is for a page and a log line; the actor id is what a design is owned by,
@@ -361,7 +361,7 @@ class ServeAgentGrantStoreTest {
           600,
           emptySet(),
           "github:alice",
-        )
+        ),
       )
     assertTrue(grant.isApprovedBy("@alice", "github:alice"))
     assertFalse(

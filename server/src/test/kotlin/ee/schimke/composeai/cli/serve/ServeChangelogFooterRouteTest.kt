@@ -99,7 +99,7 @@ class ServeChangelogFooterRouteTest {
           .substringBefore("</head>")
           .contains(
             "<link rel=\"alternate\" type=\"application/rss+xml\" title=\"Catalog changes\"" +
-              " href=\"/demo/feed.xml\">"
+              " href=\"/demo/feed.xml\">",
           ),
         "$path declares the feed for a reader's subscribe affordance",
       )

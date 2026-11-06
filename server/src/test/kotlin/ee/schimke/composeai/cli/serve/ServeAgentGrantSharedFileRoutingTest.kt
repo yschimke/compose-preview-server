@@ -129,7 +129,7 @@ class ServeAgentGrantSharedFileRoutingTest {
     val match =
       Regex(
           "action=\"(/agent-access/[^/\"]+/revoke)[^\"]*\">" +
-            "<input type=\"hidden\" name=\"csrf\" value=\"([^\"]*)\""
+            "<input type=\"hidden\" name=\"csrf\" value=\"([^\"]*)\"",
         )
         .find(page) ?: error("no revoke form in the page")
     return match.groupValues[1] to match.groupValues[2]

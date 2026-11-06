@@ -100,8 +100,8 @@ class DesignLocalRunnerTest {
           lane(
             frame =
               DesignLocalLane.Frame.NoFrame(
-                "the design compiled, but this host's renderer produced no frame for it"
-              )
+                "the design compiled, but this host's renderer produced no frame for it",
+              ),
           ),
         )
         .run()
@@ -123,8 +123,8 @@ class DesignLocalRunnerTest {
           lane(
             frame =
               DesignLocalLane.Frame.NoFrame(
-                "UiBuilderGeneratedScreen.kt:7:8: Unresolved reference 'graphics'"
-              )
+                "UiBuilderGeneratedScreen.kt:7:8: Unresolved reference 'graphics'",
+              ),
           ),
         )
         .run()
@@ -143,7 +143,7 @@ class DesignLocalRunnerTest {
               DesignLocalLane.Frame.Refused(
                 ServeUiBuilderNativePreview.MIXED_PACKS,
                 listOf("this design uses components from 2 packs"),
-              )
+              ),
           ),
         )
         .run()
@@ -205,7 +205,7 @@ class DesignLocalRunnerTest {
               DesignLocalLane.Source.Refused(
                 "UNEXPRESSIBLE_DOCUMENT",
                 listOf("`asset/image` has no Remote Compose counterpart"),
-              )
+              ),
           ),
         )
         .run()

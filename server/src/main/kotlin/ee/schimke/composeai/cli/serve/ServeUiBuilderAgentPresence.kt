@@ -48,7 +48,7 @@ class ServeUiBuilderAgentPresence(private val now: () -> Long = System::currentT
           if (redact) entry.participant.copy(name = "MCP agent", model = null)
           else entry.participant
         }
-        .sortedWith(compareBy(Participant::name, Participant::id))
+        .sortedWith(compareBy(Participant::name, Participant::id)),
     )
   }
 

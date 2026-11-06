@@ -60,7 +60,7 @@ class ServeCatalogStoreTest {
       mapOf(
         "index.html" to "<script src=renderer.mjs></script>".encodeToByteArray(),
         "renderer.mjs" to renderer,
-      )
+      ),
     )
 
   private fun runtimeArchive(runtimeId: String, renderer: ByteArray): ByteArray {
@@ -116,7 +116,7 @@ class ServeCatalogStoreTest {
             }
           },
         )
-        .load("glimmer-catalog") is ServeCatalogStore.Result.Ok
+        .load("glimmer-catalog") is ServeCatalogStore.Result.Ok,
     )
     return registered.getValue("glimmer-catalog").declaredHeroPreviewId
   }
@@ -177,7 +177,7 @@ class ServeCatalogStoreTest {
             }
           },
         )
-        .load("compose-m3") is ServeCatalogStore.Result.Ok
+        .load("compose-m3") is ServeCatalogStore.Result.Ok,
     )
 
     assertEquals(
@@ -391,7 +391,7 @@ class ServeCatalogStoreTest {
     // registration.
     val trust =
       TrustStore(
-        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"))
+        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*")),
       )
     val missing = "images/button-filled/ideal__default__dark.png"
     val result =
@@ -639,7 +639,7 @@ class ServeCatalogStoreTest {
   fun `a catalog from a trusted branch is served and attributed by origin`() {
     val trust =
       TrustStore(
-        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"))
+        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*")),
       )
     val result = store(trust).load("compose-m3")
 
@@ -674,7 +674,8 @@ class ServeCatalogStoreTest {
          "images":[{"path":"images/example/ideal.png"}]}]}"""
     val trust =
       TrustStore(
-        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/compose-m3"))
+        branches =
+          listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/compose-m3")),
       )
     val fetch: (String) -> ByteArray? = { url ->
       requested += url
@@ -697,7 +698,7 @@ class ServeCatalogStoreTest {
     assertEquals(1, requested.count { it.endsWith("/documents/example.rc") })
 
     assertTrue(
-      store(TrustStore.EMPTY, fetch = fetch).load("compose-m3") is ServeCatalogStore.Result.Ok
+      store(TrustStore.EMPTY, fetch = fetch).load("compose-m3") is ServeCatalogStore.Result.Ok,
     )
     val untrusted = registered.getValue("compose-m3")
     assertFalse(untrusted.hasRemoteComposeDoc(untrusted.previews.single().id))
@@ -732,7 +733,7 @@ class ServeCatalogStoreTest {
 
   private val trustedCompose =
     TrustStore(
-      branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/compose-m3"))
+      branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/compose-m3")),
     )
 
   /** A summary row scored by the Camaelon JS and vendored AndroidX Embedded harness lanes. */
@@ -826,9 +827,9 @@ class ServeCatalogStoreTest {
           okhttp3.Request.Builder()
             .url(
               "http://127.0.0.1:${server.port}/compose-m3$path" +
-                "${if ('?' in path) "&" else "?"}token=doc-only"
+                "${if ('?' in path) "&" else "?"}token=doc-only",
             )
-            .build()
+            .build(),
         )
         .execute()
     try {
@@ -886,7 +887,7 @@ class ServeCatalogStoreTest {
   fun `a document-only catalog's document that declares its density is replayed at it`() {
     val host =
       documentOnlyCatalog(
-        ServeDocFixtures.remoteComposeDoc(width = 2, height = 2, densityAtGeneration = 2.0f)
+        ServeDocFixtures.remoteComposeDoc(width = 2, height = 2, densityAtGeneration = 2.0f),
       )
     assertNotNull(host.remoteComposeDoc(PRESSURE_GAUGE))
     assertEquals(RcJvmRenderSpec(2, 2, 2.0f), host.remoteComposeRenderSpec(PRESSURE_GAUGE))
@@ -968,7 +969,7 @@ class ServeCatalogStoreTest {
         .newCall(
           okhttp3.Request.Builder()
             .url("http://127.0.0.1:${server.port}/compose-m3$path&token=doc-only")
-            .build()
+            .build(),
         )
         .execute()
     try {
@@ -1047,7 +1048,8 @@ class ServeCatalogStoreTest {
     val requested = CopyOnWriteArrayList<String>()
     val trust =
       TrustStore(
-        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/compose-m3"))
+        branches =
+          listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/compose-m3")),
       )
     assertTrue(
       store(trust) { url ->
@@ -1058,7 +1060,7 @@ class ServeCatalogStoreTest {
             else -> null
           }
         }
-        .load("compose-m3") is ServeCatalogStore.Result.Ok
+        .load("compose-m3") is ServeCatalogStore.Result.Ok,
     )
     val host = registered.getValue("compose-m3")
     assertTrue(host.previews.none { host.hasRemoteComposeDoc(it.id) })
@@ -1345,7 +1347,7 @@ class ServeCatalogStoreTest {
         {"schema":"compose-preview-known-difference-artifacts/v1",
          "artifacts":["glyph/mask.png","glyph/accepted-candidate.png"]}
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
     assertTrue(
@@ -1354,7 +1356,7 @@ class ServeCatalogStoreTest {
     )
     assertTrue(
       host.knownDifferenceArtifact("glyph/accepted-candidate.png")
-        is ServeKnownDifferences.Artifact.Bytes
+        is ServeKnownDifferences.Artifact.Bytes,
     )
     // The document still reaches the host verbatim — the index says what to copy, never what the
     // engine may read.
@@ -1499,7 +1501,7 @@ class ServeCatalogStoreTest {
         {"schema":"compose-preview-known-difference-artifacts/v1",
          "artifacts":["glyph/mask.png","../../secrets.png","glyph/../../escape.png"]}
         """
-          .trimIndent()
+          .trimIndent(),
       )
 
     assertTrue(
@@ -1519,7 +1521,7 @@ class ServeCatalogStoreTest {
     // Falls back to the derivation, which refuses this document whole — the same answer a catalog
     // with no index at all gets.
     assertTrue(
-      host.knownDifferenceArtifact("glyph/mask.png") !is ServeKnownDifferences.Artifact.Bytes
+      host.knownDifferenceArtifact("glyph/mask.png") !is ServeKnownDifferences.Artifact.Bytes,
     )
   }
 
@@ -1594,7 +1596,7 @@ class ServeCatalogStoreTest {
     assertEquals("mask", mask.bytes.decodeToString())
     assertTrue(
       host.knownDifferenceArtifact("glyph/accepted-candidate.png")
-        is ServeKnownDifferences.Artifact.Bytes
+        is ServeKnownDifferences.Artifact.Bytes,
     )
 
     // A path the reader would refuse to look up is never fetched, so it cannot be written either.
@@ -1647,7 +1649,7 @@ class ServeCatalogStoreTest {
     // The document itself is still staged: `too-many-acceptances` is the consumer's verdict to
     // voice, and it needs the bytes to voice it.
     assertTrue(
-      registered.getValue("compose-m3").knownDifferences() is ServeKnownDifferences.Document.Text
+      registered.getValue("compose-m3").knownDifferences() is ServeKnownDifferences.Document.Text,
     )
   }
 
@@ -1695,7 +1697,7 @@ class ServeCatalogStoreTest {
     // Staged anyway, because `document-too-large` is a verdict the reader has to be able to voice.
     assertTrue(
       registered.getValue("compose-m3").knownDifferences()
-        is ServeKnownDifferences.Document.TooLarge
+        is ServeKnownDifferences.Document.TooLarge,
     )
   }
 
@@ -2002,7 +2004,7 @@ class ServeCatalogStoreTest {
     )
     assertTrue(
       registered.getValue("compose-m3").knownDifferenceArtifact("glyph/mask.png")
-        is ServeKnownDifferences.Artifact.Bytes
+        is ServeKnownDifferences.Artifact.Bytes,
     )
   }
 
@@ -2049,7 +2051,7 @@ class ServeCatalogStoreTest {
 
   /** A catalog whose only optional extra is its parity issue index, fetched through one seam. */
   private fun loadWithIssueIndexOutcome(
-    issues: BranchFetch
+    issues: BranchFetch,
   ): Pair<ServeCatalogStore.Result, List<String>> {
     val catalog =
       """
@@ -2430,7 +2432,7 @@ class ServeCatalogStoreTest {
     }
 
     assertTrue(
-      store(TrustStore.EMPTY, fetch = fetch).load("compose-m3") is ServeCatalogStore.Result.Ok
+      store(TrustStore.EMPTY, fetch = fetch).load("compose-m3") is ServeCatalogStore.Result.Ok,
     )
 
     val reference = registered.getValue("compose-m3").designReferencesFor("button").single()
@@ -2642,7 +2644,7 @@ class ServeCatalogStoreTest {
     assertTrue(
       text.contains(
         "\"checkbox__ideal__unchecked__light\":{" +
-          "\"state\":\"unchecked\",\"theme\":\"light\",\"componentId\":\"Checkbox\"}"
+          "\"state\":\"unchecked\",\"theme\":\"light\",\"componentId\":\"Checkbox\"}",
       ),
       "manifest carries the unchecked/light entry: $text",
     )
@@ -2721,7 +2723,7 @@ class ServeCatalogStoreTest {
     }
 
     assertTrue(
-      store(TrustStore.EMPTY, fetch = fetch).load("meshcore") is ServeCatalogStore.Result.Ok
+      store(TrustStore.EMPTY, fetch = fetch).load("meshcore") is ServeCatalogStore.Result.Ok,
     )
 
     val preview = registered.getValue("meshcore").previews.single()
@@ -2754,7 +2756,7 @@ class ServeCatalogStoreTest {
     }
 
     assertTrue(
-      store(TrustStore.EMPTY, fetch = fetch).load("meshcore") is ServeCatalogStore.Result.Ok
+      store(TrustStore.EMPTY, fetch = fetch).load("meshcore") is ServeCatalogStore.Result.Ok,
     )
 
     assertTrue(registered.getValue("meshcore").previews.single().fixedTheme)
@@ -2784,7 +2786,7 @@ class ServeCatalogStoreTest {
     }
 
     assertTrue(
-      store(TrustStore.EMPTY, fetch = fetch).load("meshcore") is ServeCatalogStore.Result.Ok
+      store(TrustStore.EMPTY, fetch = fetch).load("meshcore") is ServeCatalogStore.Result.Ok,
     )
 
     val preview = registered.getValue("meshcore").previews.single()
@@ -2827,7 +2829,7 @@ class ServeCatalogStoreTest {
     assertTrue(store.load("reply") is ServeCatalogStore.Result.Ok)
     val expected =
       Json.parseToJsonElement(
-          """{"enabled":true,"count":3,"nullable":null,"nested":{"mode":"compact"},"items":[1,"two"]}"""
+          """{"enabled":true,"count":3,"nullable":null,"nested":{"mode":"compact"},"items":[1,"two"]}""",
         )
         .jsonObject
     val preview = registered.getValue("reply").previews.single()
@@ -2946,7 +2948,7 @@ class ServeCatalogStoreTest {
     }
     val trust =
       TrustStore(
-        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"))
+        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*")),
       )
     var captured: Map<String, String>? = null
     val store =
@@ -2988,7 +2990,7 @@ class ServeCatalogStoreTest {
     val bundle =
       polyglotBundle(
         manifest =
-          """{"schemaVersion":8,"backend":"desktop","previewIds":["activity__MainActivity","${prefix}activity__MainActivity"],"coverPreviewId":"activity__MainActivity","classpath":[{"kind":"module","path":"classes/app.jar"}],"modulePath":":app","producedBy":"test"}"""
+          """{"schemaVersion":8,"backend":"desktop","previewIds":["activity__MainActivity","${prefix}activity__MainActivity"],"coverPreviewId":"activity__MainActivity","classpath":[{"kind":"module","path":"classes/app.jar"}],"modulePath":":app","producedBy":"test"}""",
       )
     val requested = java.util.concurrent.CopyOnWriteArrayList<String>()
     val fetch: (String) -> ByteArray? = { url ->
@@ -3003,7 +3005,7 @@ class ServeCatalogStoreTest {
     }
     val trust =
       TrustStore(
-        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"))
+        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*")),
       )
     var captured: List<ServeCatalogStore.TrustedModuleBundle>? = null
     var recorded: List<ServeCatalogStore.VerifiedModuleBundle>? = null
@@ -3034,7 +3036,7 @@ class ServeCatalogStoreTest {
     assertTrue(
       requested.any {
         it.endsWith("bundle/modules/module_3a7476/previews/${prefix}activity__MainActivity.png")
-      }
+      },
     )
     assertTrue(registered["all-modules"] == null)
   }
@@ -3057,12 +3059,12 @@ class ServeCatalogStoreTest {
     val mobileBundle =
       polyglotBundle(
         manifest =
-          """{"schemaVersion":8,"backend":"desktop","previewIds":["activity__MainActivity"],"coverPreviewId":"activity__MainActivity","classpath":[{"kind":"module","path":"classes/app.jar"}],"modulePath":":app","producedBy":"test","externalResources":[]}"""
+          """{"schemaVersion":8,"backend":"desktop","previewIds":["activity__MainActivity"],"coverPreviewId":"activity__MainActivity","classpath":[{"kind":"module","path":"classes/app.jar"}],"modulePath":":app","producedBy":"test","externalResources":[]}""",
       )
     val tvBundle =
       polyglotBundle(
         manifest =
-          """{"schemaVersion":8,"backend":"desktop","previewIds":["activity__MainActivity"],"coverPreviewId":"activity__MainActivity","classpath":[{"kind":"module","path":"classes/app.jar"}],"modulePath":":app","producedBy":"test","externalResources":[]}"""
+          """{"schemaVersion":8,"backend":"desktop","previewIds":["activity__MainActivity"],"coverPreviewId":"activity__MainActivity","classpath":[{"kind":"module","path":"classes/app.jar"}],"modulePath":":app","producedBy":"test","externalResources":[]}""",
       )
     val requested = java.util.concurrent.CopyOnWriteArrayList<String>()
     val fetch: (String) -> ByteArray? = { url ->
@@ -3077,7 +3079,7 @@ class ServeCatalogStoreTest {
     }
     val trust =
       TrustStore(
-        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"))
+        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*")),
       )
     var captured: List<ServeCatalogStore.TrustedModuleBundle>? = null
     var recorded: List<ServeCatalogStore.VerifiedModuleBundle>? = null
@@ -3112,7 +3114,7 @@ class ServeCatalogStoreTest {
     assertTrue(
       requested.any {
         it.endsWith("bundle/modules/module_3a7476/previews/activity__MainActivity.png")
-      }
+      },
     )
     assertTrue(registered["all-modules"] == null)
   }
@@ -3136,7 +3138,7 @@ class ServeCatalogStoreTest {
     val bundle =
       polyglotBundle(
         manifest =
-          """{"schemaVersion":8,"backend":"desktop","previewIds":["activity__MainActivity"],"coverPreviewId":"activity__MainActivity","classpath":[{"kind":"module","path":"classes/app.jar"}],"modulePath":":app","producedBy":"test","externalResources":[]}"""
+          """{"schemaVersion":8,"backend":"desktop","previewIds":["activity__MainActivity"],"coverPreviewId":"activity__MainActivity","classpath":[{"kind":"module","path":"classes/app.jar"}],"modulePath":":app","producedBy":"test","externalResources":[]}""",
       )
     val fetch: (String) -> ByteArray? = { url ->
       when {
@@ -3149,7 +3151,7 @@ class ServeCatalogStoreTest {
     }
     val trust =
       TrustStore(
-        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"))
+        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*")),
       )
     var captured: List<ServeCatalogStore.TrustedModuleBundle>? = null
     var recorded: List<ServeCatalogStore.VerifiedModuleBundle>? = null
@@ -3228,7 +3230,7 @@ class ServeCatalogStoreTest {
         register = { n, h -> registered[n] = h },
         trust = {
           TrustStore(
-            branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"))
+            branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*")),
           )
         },
         fetch = fetch,
@@ -3283,7 +3285,7 @@ class ServeCatalogStoreTest {
     }
     val trust =
       TrustStore(
-        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"))
+        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*")),
       )
     var builderCalled = false
     val store =
@@ -3343,7 +3345,7 @@ class ServeCatalogStoreTest {
     }
     val trust =
       TrustStore(
-        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"))
+        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*")),
       )
     val store =
       ServeCatalogStore(
@@ -3387,7 +3389,7 @@ class ServeCatalogStoreTest {
         .trimIndent()
     val perPreviewBytes =
       polyglotBundle(
-        """{"schemaVersion":8,"backend":"desktop","previewIds":["a"],"coverPreviewId":"a","classpath":[{"kind":"module","path":"classes/app.jar"}],"modulePath":":app","producedBy":"test"}"""
+        """{"schemaVersion":8,"backend":"desktop","previewIds":["a"],"coverPreviewId":"a","classpath":[{"kind":"module","path":"classes/app.jar"}],"modulePath":":app","producedBy":"test"}""",
       )
     // Thread-safe: background fetch lanes write this recorder while assertions read it.
     val requested = java.util.concurrent.CopyOnWriteArrayList<String>()
@@ -3405,7 +3407,7 @@ class ServeCatalogStoreTest {
     }
     val trust =
       TrustStore(
-        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"))
+        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*")),
       )
     var perPreviewAccess: PerPreviewBundleAccess? = null
     val store =
@@ -3486,7 +3488,7 @@ class ServeCatalogStoreTest {
         register = { n, h -> registered[n] = h },
         trust = {
           TrustStore(
-            branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"))
+            branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*")),
           )
         },
         fetch = fetch,
@@ -3531,7 +3533,7 @@ class ServeCatalogStoreTest {
     }
     val trust =
       TrustStore(
-        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"))
+        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*")),
       )
     var fetchPerPreview: ((String) -> File?)? = null
     val store =
@@ -3572,7 +3574,7 @@ class ServeCatalogStoreTest {
            "modulePath":":samples:design-catalog-m3","producedBy":"test",
            "externalResources":[{"path":"fonts/Roboto-Regular.ttf","sha256":"$sha","size":2048}]}
           """
-            .trimIndent()
+            .trimIndent(),
       )
     val catalog =
       """
@@ -3593,7 +3595,7 @@ class ServeCatalogStoreTest {
     }
     val trust =
       TrustStore(
-        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"))
+        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*")),
       )
     val root = tempRoot()
     var capturedDir: File? = null
@@ -3635,7 +3637,7 @@ class ServeCatalogStoreTest {
            "modulePath":":m","producedBy":"test",
            "externalResources":[{"path":"fonts/x.ttf","sha256":"$sha","size":10}]}
           """
-            .trimIndent()
+            .trimIndent(),
       )
     val catalog =
       """
@@ -3656,7 +3658,7 @@ class ServeCatalogStoreTest {
     }
     val trust =
       TrustStore(
-        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"))
+        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*")),
       )
     var builderCalled = false
     val store =
@@ -3695,7 +3697,7 @@ class ServeCatalogStoreTest {
            "classpath":[{"kind":"module","path":"classes/app.jar"}],
            "modulePath":":m","producedBy":"test"}
           """
-            .trimIndent()
+            .trimIndent(),
       )
     val catalog =
       """
@@ -3707,7 +3709,7 @@ class ServeCatalogStoreTest {
         .trimIndent()
     val trust =
       TrustStore(
-        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"))
+        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*")),
       )
     val store =
       ServeCatalogStore(
@@ -3745,7 +3747,7 @@ class ServeCatalogStoreTest {
            "classpath":[{"kind":"module","path":"classes/app.jar"}],
            "modulePath":":m","producedBy":"test"}
           """
-            .trimIndent()
+            .trimIndent(),
       )
     val catalog =
       """
@@ -3757,7 +3759,7 @@ class ServeCatalogStoreTest {
         .trimIndent()
     val trust =
       TrustStore(
-        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"))
+        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*")),
       )
     val store =
       ServeCatalogStore(
@@ -3802,7 +3804,7 @@ class ServeCatalogStoreTest {
            "modulePath":":m","producedBy":"test",
            "externalResources":[{"path":"fonts/Roboto-Regular.ttf","sha256":"$sha","size":2048}]}
           """
-            .trimIndent()
+            .trimIndent(),
       )
     val catalog =
       """
@@ -3827,7 +3829,7 @@ class ServeCatalogStoreTest {
     }
     val trust =
       TrustStore(
-        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"))
+        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*")),
       )
     val root = tempRoot()
     // Pre-seed the shared blob pool with a same-size but WRONG-content entry.
@@ -4040,7 +4042,7 @@ class ServeCatalogStoreTest {
     polyglotBundle(
       """{"schemaVersion":8,"backend":"desktop","previewIds":["FilledButton_Dark"],
          "coverPreviewId":"FilledButton_Dark","classpath":[{"kind":"module","path":"classes/app.jar"}],
-         "modulePath":":app","producedBy":"test"}"""
+         "modulePath":":app","producedBy":"test"}""",
     )
   }
 
@@ -4207,7 +4209,7 @@ class ServeCatalogStoreTest {
           store.liveDir("compose-m3"),
           "${ServeCatalogStore.UI_BUILDER_RUNTIME_DIR}/$runtimeId/renderer.mjs",
         )
-        .isFile
+        .isFile,
     )
   }
 
@@ -4489,7 +4491,7 @@ class ServeCatalogStoreTest {
     }
     val trust =
       TrustStore(
-        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*"))
+        branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*")),
       )
     val store =
       ServeCatalogStore(
@@ -4563,7 +4565,7 @@ class ServeCatalogStoreTest {
     val oldBundle =
       polyglotBundle(
         manifest =
-          """{"schemaVersion":8,"backend":"desktop","previewIds":["a"],"coverPreviewId":"a","externalResources":[]}"""
+          """{"schemaVersion":8,"backend":"desktop","previewIds":["a"],"coverPreviewId":"a","externalResources":[]}""",
       )
     val fromOldBundle =
       store(TrustStore.EMPTY) { url ->
@@ -4728,7 +4730,7 @@ class ServeCatalogStoreTest {
     assertTrue(
       fetchedUrls.all {
         it.startsWith(
-          "https://raw.githubusercontent.com/yschimke/meshcore-mobile/design-artifacts/meshcore-mobile/"
+          "https://raw.githubusercontent.com/yschimke/meshcore-mobile/design-artifacts/meshcore-mobile/",
         ) ||
           it ==
             ServeCatalogRevision.commitsFeedUrl(

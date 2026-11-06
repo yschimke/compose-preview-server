@@ -49,7 +49,8 @@ class ServeUiBuilderNativePreviewTest {
 
   private val executor =
     ScreenGeneratorComposeExportExecutor(
-      ComponentRecordSource(mapOf(CATALOG to ScreenGeneratorScreenFixture.componentsFile()))::record
+      ComponentRecordSource(mapOf(CATALOG to ScreenGeneratorScreenFixture.componentsFile()))::
+        record,
     )
 
   private var boundsCaptures = 0
@@ -162,7 +163,7 @@ class ServeUiBuilderNativePreviewTest {
               }
               .build(),
           format = ExportFormatV1.COMPOSE,
-        )
+        ),
       )
 
     assertTrue(submitted.single().source.contains("testTag("))
@@ -181,7 +182,7 @@ class ServeUiBuilderNativePreviewTest {
       document().let {
         it.copy(
           environment =
-            it.environment.copy(theme = ThemeV1.DARK, exportDevices = listOf("id:pixel_9"))
+            it.environment.copy(theme = ThemeV1.DARK, exportDevices = listOf("id:pixel_9")),
         )
       }
     lane.render(dark)
@@ -204,8 +205,8 @@ class ServeUiBuilderNativePreviewTest {
                 "heading" to
                   document.nodes
                     .getValue("heading")
-                    .copy(modifiers = listOf(MatchParentSizeModifierV1))
-              )
+                    .copy(modifiers = listOf(MatchParentSizeModifierV1)),
+              ),
         )
       }
 
@@ -282,7 +283,7 @@ class ServeUiBuilderNativePreviewTest {
                   line = 11,
                   ch = 4,
                 ),
-              )
+              ),
           )
         },
       )
@@ -379,6 +380,6 @@ class ServeUiBuilderNativePreviewTest {
             "slots": {}, "modifiers": []}
         }
       }
-      """
+      """,
     )
 }

@@ -42,8 +42,8 @@ class ServeUiBuilderSettingsTest {
     val effective =
       resolve(
           UiBuilderSettings(
-            catalogs = mapOf("remote-widgets" to UiBuilderCatalogSettings(serve = true))
-          )
+            catalogs = mapOf("remote-widgets" to UiBuilderCatalogSettings(serve = true)),
+          ),
         )
         .effective
     assertEquals(setOf("m3-catalog", "remote-m3", "wear-m3", "remote-widgets"), effective.catalogs)
@@ -59,8 +59,8 @@ class ServeUiBuilderSettingsTest {
     val effective =
       resolve(
           UiBuilderSettings(
-            catalogs = mapOf("a2ui-catalog" to UiBuilderCatalogSettings(serve = true))
-          )
+            catalogs = mapOf("a2ui-catalog" to UiBuilderCatalogSettings(serve = true)),
+          ),
         )
         .effective
     assertTrue("a2ui-catalog" in effective.catalogs)
@@ -71,7 +71,7 @@ class ServeUiBuilderSettingsTest {
   fun `withdrawing a catalog also drops what only made sense while it was served`() {
     val resolution =
       resolve(
-        UiBuilderSettings(catalogs = mapOf("wear-m3" to UiBuilderCatalogSettings(serve = false)))
+        UiBuilderSettings(catalogs = mapOf("wear-m3" to UiBuilderCatalogSettings(serve = false))),
       )
     val effective = resolution.effective
     assertEquals(setOf("m3-catalog", "remote-m3"), effective.catalogs)
@@ -108,8 +108,8 @@ class ServeUiBuilderSettingsTest {
             UiBuilderSettings(
               catalogs = mapOf("remote-widgets" to UiBuilderCatalogSettings(serve = true)),
               packs = mapOf("confetti-mobile" to "toaster"),
-            )
-        )
+            ),
+        ),
       )
     val logs = mutableListOf<String>()
     val options =
@@ -128,8 +128,8 @@ class ServeUiBuilderSettingsTest {
     val resolution =
       resolve(
         UiBuilderSettings(
-          catalogs = environment.catalogs.associateWith { UiBuilderCatalogSettings(serve = false) }
-        )
+          catalogs = environment.catalogs.associateWith { UiBuilderCatalogSettings(serve = false) },
+        ),
       )
     assertEquals(environment.catalogs, resolution.effective.catalogs)
     assertTrue(resolution.problems.isNotEmpty())
@@ -143,7 +143,7 @@ class ServeUiBuilderSettingsTest {
             catalogs = mapOf("wear-m3" to UiBuilderCatalogSettings(nativeCatalog = "")),
             packs = mapOf("confetti-mobile" to null, "confetti-wear" to "wear"),
             widgetPlayer = "androidx",
-          )
+          ),
         )
         .effective
     assertEquals(emptyMap(), effective.nativeCatalogs)
@@ -162,8 +162,8 @@ class ServeUiBuilderSettingsTest {
                 "wear-m3-typed-pilot" to pilot,
                 // Unlisting a catalog nobody serves is dropped rather than carried.
                 "never-served" to UiBuilderCatalogSettings(listed = false),
-              )
-          )
+              ),
+          ),
         )
         .effective
     assertTrue("wear-m3-typed-pilot" in effective.catalogs)
@@ -175,7 +175,7 @@ class ServeUiBuilderSettingsTest {
       ServeUiBuilderSettings.resolve(
           environment.copy(unlisted = setOf("remote-m3")),
           UiBuilderSettings(
-            catalogs = mapOf("remote-m3" to UiBuilderCatalogSettings(listed = true))
+            catalogs = mapOf("remote-m3" to UiBuilderCatalogSettings(listed = true)),
           ),
         )
         .effective
@@ -189,18 +189,18 @@ class ServeUiBuilderSettingsTest {
       ServeUiBuilderSettings.resolve(
           all,
           UiBuilderSettings(
-            catalogs = mapOf("remote-widgets" to UiBuilderCatalogSettings(serve = true))
+            catalogs = mapOf("remote-widgets" to UiBuilderCatalogSettings(serve = true)),
           ),
         )
         .effective
-        .publishedCatalogs
+        .publishedCatalogs,
     )
     assertEquals(
       setOf("m3-catalog", "remote-m3"),
       ServeUiBuilderSettings.resolve(
           all,
           UiBuilderSettings(
-            catalogs = mapOf("wear-m3" to UiBuilderCatalogSettings(published = false))
+            catalogs = mapOf("wear-m3" to UiBuilderCatalogSettings(published = false)),
           ),
         )
         .effective
@@ -212,19 +212,19 @@ class ServeUiBuilderSettingsTest {
   fun `validation refuses what the flags would refuse`() {
     assertNotNull(
       ServeUiBuilderSettings.validate(
-        UiBuilderSettings(catalogs = mapOf("../etc" to UiBuilderCatalogSettings(serve = true)))
-      )
+        UiBuilderSettings(catalogs = mapOf("../etc" to UiBuilderCatalogSettings(serve = true))),
+      ),
     )
     assertNotNull(
-      ServeUiBuilderSettings.validate(UiBuilderSettings(packs = mapOf("confetti" to "toaster")))
+      ServeUiBuilderSettings.validate(UiBuilderSettings(packs = mapOf("confetti" to "toaster"))),
     )
     assertNotNull(ServeUiBuilderSettings.validate(UiBuilderSettings(widgetPlayer = "vlc")))
     assertNull(
       ServeUiBuilderSettings.validate(
         UiBuilderSettings(
-          catalogs = mapOf("remote-widgets" to UiBuilderCatalogSettings(serve = true))
-        )
-      )
+          catalogs = mapOf("remote-widgets" to UiBuilderCatalogSettings(serve = true)),
+        ),
+      ),
     )
   }
 
@@ -238,8 +238,8 @@ class ServeUiBuilderSettingsTest {
     val result =
       admin.set(
         UiBuilderSettings(
-          catalogs = mapOf("../Remote-M3" to UiBuilderCatalogSettings(serve = true))
-        )
+          catalogs = mapOf("../Remote-M3" to UiBuilderCatalogSettings(serve = true)),
+        ),
       )
     assertTrue(result is ServeUiBuilderSettingsAdmin.Result.Invalid, result.toString())
     assertNull(file.load().uiBuilder)
@@ -255,7 +255,7 @@ class ServeUiBuilderSettingsTest {
     // One variable feeds both the entrypoint's own derivation and the server's flag.
     assertTrue("for candidate in \${ui_builder_published_default}; do" in entrypoint)
     assertTrue(
-      "--ui-builder-published-default \"\${ui_builder_published_default// /,}\"" in entrypoint
+      "--ui-builder-published-default \"\${ui_builder_published_default// /,}\"" in entrypoint,
     )
   }
 
@@ -265,7 +265,7 @@ class ServeUiBuilderSettingsTest {
     // fail on one.
     val config =
       ServeCatalogsConfig.parse(
-        """{"uiBuilder": {"catalogs": {"wear-m3": {"published": true, "shadow": true}}}}"""
+        """{"uiBuilder": {"catalogs": {"wear-m3": {"published": true, "shadow": true}}}}""",
       )
     val resolution = resolve(config.uiBuilder)
     assertEquals(emptyList(), resolution.problems)

@@ -77,7 +77,7 @@ internal object ServeRcJvmFonts {
   private fun inferredInstallDir(): File? = runCatching {
     File(
         ServeRcJvmFonts::class.java.protectionDomain?.codeSource?.location?.toURI()
-          ?: return@runCatching null
+          ?: return@runCatching null,
       )
       .parentFile
       ?.parentFile

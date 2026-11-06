@@ -87,7 +87,7 @@ class ServeUiBuilderReviewStore(private val root: Path) {
             return@synchronized if (same) ReviewWriteResult.Stored(current, existing, replay = true)
             else
               ReviewWriteResult.Refused(
-                "`decisionId` $decisionId already records a different decision; use a new id"
+                "`decisionId` $decisionId already records a different decision; use a new id",
               )
           }
       }
@@ -144,7 +144,7 @@ class ServeUiBuilderReviewStore(private val root: Path) {
       }
       if (candidate.status !in IMPLEMENTATION_STATUSES) {
         return ReviewWriteResult.Refused(
-          "`status` must be one of ${IMPLEMENTATION_STATUSES.joinToString(", ")}"
+          "`status` must be one of ${IMPLEMENTATION_STATUSES.joinToString(", ")}",
         )
       }
       if (candidate.revision != null && candidate.revision < 0) {
@@ -153,7 +153,7 @@ class ServeUiBuilderReviewStore(private val root: Path) {
       candidate.previewMatch?.let { match ->
         if (match.status !in PREVIEW_MATCH_STATUSES) {
           return ReviewWriteResult.Refused(
-            "`previewMatch.status` must be one of ${PREVIEW_MATCH_STATUSES.joinToString(", ")}"
+            "`previewMatch.status` must be one of ${PREVIEW_MATCH_STATUSES.joinToString(", ")}",
           )
         }
         match.evidence?.let { evidence ->
@@ -163,7 +163,7 @@ class ServeUiBuilderReviewStore(private val root: Path) {
         }
         if ((match.note?.toByteArray(StandardCharsets.UTF_8)?.size ?: 0) > MAX_NOTE_BYTES) {
           return ReviewWriteResult.Refused(
-            "`previewMatch.note` must be under $MAX_NOTE_BYTES bytes"
+            "`previewMatch.note` must be under $MAX_NOTE_BYTES bytes",
           )
         }
       }
@@ -320,7 +320,7 @@ class ServeUiBuilderReviewStore(private val root: Path) {
     root.resolve(
       MessageDigest.getInstance("SHA-256")
         .digest(designId.toByteArray(StandardCharsets.UTF_8))
-        .joinToString("") { "%02x".format(it) } + ".json"
+        .joinToString("") { "%02x".format(it) } + ".json",
     )
 
   companion object {

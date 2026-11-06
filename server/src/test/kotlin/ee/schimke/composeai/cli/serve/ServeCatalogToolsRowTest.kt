@@ -66,7 +66,7 @@ class ServeCatalogToolsRowTest {
         listOf(
           ServePreview(id = "solo-a", label = "Solo A"),
           ServePreview(id = "solo-b", label = "Solo B"),
-        )
+        ),
       )
 
     val tools = html.indexOf("class=\"cp-catalog-tools\"")

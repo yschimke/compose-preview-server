@@ -33,7 +33,7 @@ class ServeUiBuilderProjectsTest {
           is UiBuilderServiceRequest.CreateDesign -> {
             if (request.document.title == "refuse")
               return UiBuilderServiceResponse.Error(
-                UiBuilderServiceError(ServiceErrorCodeV1.BAD_REQUEST, "invalid design")
+                UiBuilderServiceError(ServiceErrorCodeV1.BAD_REQUEST, "invalid design"),
               )
             check(documents.putIfAbsent(request.document.id, request.document) == null)
             snapshot(request.document)
@@ -45,7 +45,7 @@ class ServeUiBuilderProjectsTest {
               else (request as UiBuilderServiceRequest.OpenDesign).designId
             documents[id]?.let(::snapshot)
               ?: UiBuilderServiceResponse.Error(
-                UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "missing")
+                UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "missing"),
               )
           }
           is UiBuilderServiceRequest.DeleteDesign -> {
@@ -80,7 +80,7 @@ class ServeUiBuilderProjectsTest {
         state = DesignStateV1(lastSequence = 0, document = doc),
         catalog = catalog,
         retainedFromSequence = 0,
-      )
+      ),
     )
 
   @Test
@@ -140,7 +140,7 @@ class ServeUiBuilderProjectsTest {
             override suspend fun readAsset(read: UiBuilderAssetRead): UiBuilderAssetReadResult {
               delegated += read.actor
               return UiBuilderAssetReadResult.Failed(
-                UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "fixture has no image")
+                UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "fixture has no image"),
               )
             }
           },
@@ -157,7 +157,7 @@ class ServeUiBuilderProjectsTest {
       assertEquals(AuthenticatedUiBuilderActor(editor.actorId, owner.actorId), delegated.last())
       val outsider =
         assets.readAsset(
-          UiBuilderAssetRead(AuthenticatedUiBuilderActor("outsider"), "stored", "image")
+          UiBuilderAssetRead(AuthenticatedUiBuilderActor("outsider"), "stored", "image"),
         )
       assertEquals(
         ServiceErrorCodeV1.NOT_FOUND,
@@ -192,7 +192,7 @@ class ServeUiBuilderProjectsTest {
       )
       val manifest =
         PROJECT_JSON.parseToJsonElement(
-            projects.review(owner, copy.id).files.getValue("project.json")
+            projects.review(owner, copy.id).files.getValue("project.json"),
           )
           .jsonObject
       assertEquals("canonical-app", manifest["id"]!!.jsonPrimitive.content)
@@ -222,26 +222,26 @@ class ServeUiBuilderProjectsTest {
         )
       val id = project.files.single().designs.getValue("login")
       assertIs<UiBuilderServiceResponse.Snapshot>(
-        guarded.execute(UiBuilderServiceCall(viewer, UiBuilderServiceRequest.OpenDesign(id)))
+        guarded.execute(UiBuilderServiceCall(viewer, UiBuilderServiceRequest.OpenDesign(id))),
       )
       assertEquals(viewer.actorId, calls.last().actor.actorId)
       assertEquals(owner.actorId, calls.last().actor.onBehalfOfActorId)
       assertIs<UiBuilderServiceResponse.Error>(
         guarded.execute(
-          UiBuilderServiceCall(viewer, UiBuilderServiceRequest.RenameDesign(id, "changed"))
-        )
+          UiBuilderServiceCall(viewer, UiBuilderServiceRequest.RenameDesign(id, "changed")),
+        ),
       )
       val stranger = AuthenticatedUiBuilderActor("github:stranger")
       assertEquals(
         ServiceErrorCodeV1.NOT_FOUND,
         assertIs<UiBuilderServiceResponse.Error>(
-            guarded.execute(UiBuilderServiceCall(stranger, UiBuilderServiceRequest.OpenDesign(id)))
+            guarded.execute(UiBuilderServiceCall(stranger, UiBuilderServiceRequest.OpenDesign(id))),
           )
           .error
           .code,
       )
       assertIs<UiBuilderServiceResponse.Error>(
-        guarded.execute(UiBuilderServiceCall(editor, UiBuilderServiceRequest.DeleteDesign(id)))
+        guarded.execute(UiBuilderServiceCall(editor, UiBuilderServiceRequest.DeleteDesign(id))),
       )
       var updates = 0
       guarded.subscribe(UiBuilderSubscriptionCall(viewer, id, null)) { updates++ }
@@ -266,7 +266,7 @@ class ServeUiBuilderProjectsTest {
             listOf(
               PROJECT_JSON.parseToJsonElement(documentText("first")),
               PROJECT_JSON.parseToJsonElement(documentText("bad", "refuse")),
-            )
+            ),
           ),
         )
       }
@@ -305,7 +305,7 @@ class ServeUiBuilderProjectsTest {
     val second =
       JsonObject(
         PROJECT_JSON.parseToJsonElement(documentText("second")).jsonObject +
-          ("future" to JsonPrimitive("keep"))
+          ("future" to JsonPrimitive("keep")),
       )
     val original = buildJsonObject {
       put("schema", "compose-ui-builder-designs/v1")
@@ -359,8 +359,8 @@ class ServeUiBuilderProjectsTest {
                   buildJsonObject {
                     put("type", "navigatePage")
                     put("pageKey", "second")
-                  }
-                )
+                  },
+                ),
               ),
             )
           },
@@ -387,18 +387,18 @@ class ServeUiBuilderProjectsTest {
       val stored = documents.getValue(id)
       val target =
         assertIs<NavigatePageActionV1>(
-          stored.nodes.getValue("button").eventBindings.getValue("onClick").single()
+          stored.nodes.getValue("button").eventBindings.getValue("onClick").single(),
         )
       assertEquals(file.designs.getValue("second"), target.pageKey)
       documents[id] = stored.copy(title = "Edited", revision = 1)
       val downloaded =
         ServeUiBuilderUidProjectFiles.designs(
-          projects.review(owner, "app").files.getValue("screens.uid")
+          projects.review(owner, "app").files.getValue("screens.uid"),
         )
       assertEquals(
         "second",
         assertIs<NavigatePageActionV1>(
-            downloaded.first().nodes.getValue("button").eventBindings.getValue("onClick").single()
+            downloaded.first().nodes.getValue("button").eventBindings.getValue("onClick").single(),
           )
           .pageKey,
       )
@@ -414,14 +414,14 @@ class ServeUiBuilderProjectsTest {
                 "button",
                 "onClick",
                 listOf(NavigatePageActionV1("other-project")),
-              )
+              ),
             ),
-          )
+          ),
         )
       assertEquals(
         ServiceErrorCodeV1.FORBIDDEN,
         assertIs<UiBuilderServiceResponse.Error>(
-            guarded.execute(UiBuilderServiceCall(owner, request))
+            guarded.execute(UiBuilderServiceCall(owner, request)),
           )
           .error
           .code,

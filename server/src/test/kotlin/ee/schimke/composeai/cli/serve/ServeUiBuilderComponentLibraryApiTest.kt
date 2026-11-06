@@ -106,7 +106,7 @@ class ServeUiBuilderComponentLibraryApiTest {
     File(components, "index.json")
       .writeText(
         """{"schema":"${ServeUiBuilderComponentLibrary.INDEX_SCHEMA}",
-           "components":[{"id":"broken","title":"Broken"}]}"""
+           "components":[{"id":"broken","title":"Broken"}]}""",
       )
     assertEquals(404, send("$LIBRARY/local/broken", viewerToken).first)
   }
@@ -115,7 +115,7 @@ class ServeUiBuilderComponentLibraryApiTest {
     File(components, "index.json")
       .writeText(
         """{"schema":"${ServeUiBuilderComponentLibrary.INDEX_SCHEMA}",
-           "components":[{"id":"contribution-cell","title":"Contribution cell"}]}"""
+           "components":[{"id":"contribution-cell","title":"Contribution cell"}]}""",
       )
     File(components, "contribution-cell.json")
       .writeText(
@@ -148,7 +148,7 @@ class ServeUiBuilderComponentLibraryApiTest {
           }
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
   }
 
@@ -164,7 +164,7 @@ class ServeUiBuilderComponentLibraryApiTest {
 
   private fun start(
     library: ServeUiBuilderComponentLibrary? =
-      ServeUiBuilderComponentLibrary(fetch = { _, _ -> null })
+      ServeUiBuilderComponentLibrary(fetch = { _, _ -> null }),
   ) {
     server =
       ServeHttpServer(
@@ -181,7 +181,7 @@ class ServeUiBuilderComponentLibraryApiTest {
               ServeUiBuilderDesignLibrary.Coordinate(
                 system = "local",
                 source = ServeUiBuilderDesignLibrary.Source.Directory(dir),
-              )
+              ),
             )
           },
         )

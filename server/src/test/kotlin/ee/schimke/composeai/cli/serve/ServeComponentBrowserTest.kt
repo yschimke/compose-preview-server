@@ -24,7 +24,7 @@ class ServeComponentBrowserTest {
               sourceRepo = "androidx/androidx",
               heroPreviewId = "button-filled",
               views = 120,
-            )
+            ),
           ),
         token = token,
         componentBrowser = true,
@@ -44,7 +44,7 @@ class ServeComponentBrowserTest {
     assertTrue(html.contains("var key=\"cp_chrome\""))
     assertFalse(html.contains("document.querySelectorAll('a[href]')"))
     assertTrue(
-      html.indexOf("</main>") < html.indexOf("querySelectorAll(\"[data-cp-interface-mode]\")")
+      html.indexOf("</main>") < html.indexOf("querySelectorAll(\"[data-cp-interface-mode]\")"),
     )
     assertTrue(html.contains("androidx/androidx"))
     // The card is named by the title link's text (the card is a div so it can hold the compare
@@ -386,7 +386,7 @@ class ServeComponentBrowserTest {
               previewCount = 1,
               trust = null,
               heroPreviewId = null,
-            )
+            ),
           ),
         token = token,
       )

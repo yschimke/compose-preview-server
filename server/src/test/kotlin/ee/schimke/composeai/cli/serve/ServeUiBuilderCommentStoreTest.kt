@@ -112,7 +112,7 @@ class ServeUiBuilderCommentStoreTest {
   fun `an anchor keeps a mark, a node and a point, and drops an unusable one`() {
     val anchored =
       board(
-        post(anchor = StoredCommentAnchor(markId = "mark-3", nodeId = "row", x = 0.5f, y = 0.25f))
+        post(anchor = StoredCommentAnchor(markId = "mark-3", nodeId = "row", x = 0.5f, y = 0.25f)),
       )
     val anchor = assertNotNull(anchored.threads.single().anchor)
     assertEquals("mark-3", anchor.markId)
@@ -268,7 +268,7 @@ class ServeUiBuilderCommentStoreTest {
           "design-2",
           ServeAgentGrants.agentActorId("abc123"),
           CommentPostRequest(body = "Hi."),
-        )
+        ),
       )
     val comment = agent.threads.single().comments.single()
     assertEquals(StoredComment.AUTHOR_KIND_AGENT, comment.authorKind)
@@ -381,21 +381,21 @@ class ServeUiBuilderCommentStoreTest {
     assertTrue(
       assertIs<CommentWriteResult.Refused>(store.react("design-1", "a", commentId, "  ", true))
         .reason
-        .contains("needs a character")
+        .contains("needs a character"),
     )
     assertTrue(
       assertIs<CommentWriteResult.Refused>(
-          store.react("design-1", "a", commentId, "👍 nice work", true)
+          store.react("design-1", "a", commentId, "👍 nice work", true),
         )
         .reason
-        .contains("no whitespace")
+        .contains("no whitespace"),
     )
     assertTrue(
       assertIs<CommentWriteResult.Refused>(
-          store.react("design-1", "a", commentId, "x".repeat(MAX_COMMENT_REACTION + 1), true)
+          store.react("design-1", "a", commentId, "x".repeat(MAX_COMMENT_REACTION + 1), true),
         )
         .reason
-        .contains("under")
+        .contains("under"),
     )
     assertEquals(
       "no such comment",
@@ -420,7 +420,7 @@ class ServeUiBuilderCommentStoreTest {
           author = "designer",
           body = "The play icon looks like a cross.",
           anchor = StoredCommentAnchor(nodeId = "play-button"),
-        )
+        ),
       )
     val notice = assertNotNull(opened.noticeFor("agent"))
     assertEquals(1, notice.unacknowledged)

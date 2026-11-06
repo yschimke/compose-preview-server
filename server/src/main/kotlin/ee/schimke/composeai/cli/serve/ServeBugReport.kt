@@ -152,7 +152,7 @@ internal object ServeBugReport {
             "the catalog changes, so they may stop showing what you saw. The diff between them " +
             "is drawn in your browser and has no URL — a pasted capture is the only way it " +
             "reaches this issue, and it stays put because GitHub hosts those pixels itself. " +
-            "-->\n\n\n"
+            "-->\n\n\n",
         )
       } else if (embed) {
         append("### Base render").append(onView).append("\n\n")
@@ -163,7 +163,7 @@ internal object ServeBugReport {
           "<!-- That image is a LIVE render: it re-renders if the catalog changes, so it may " +
             "stop showing what you saw. GitHub displays it through Camo, but Camo proxies the " +
             "source URL; it does not make a versioned snapshot. A pasted screenshot of the " +
-            "page stays put because GitHub hosts those pixels itself. -->\n\n\n"
+            "page stays put because GitHub hosts those pixels itself. -->\n\n\n",
         )
       } else if (render != null) {
         append("### Base render").append(onView).append("\n\n")

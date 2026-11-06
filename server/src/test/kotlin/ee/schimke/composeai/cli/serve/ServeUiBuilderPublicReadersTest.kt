@@ -57,7 +57,7 @@ class ServeUiBuilderPublicReadersTest {
         exporter =
           ScreenGeneratorComposeExportExecutor(
             ComponentRecordSource(mapOf(CATALOG to ScreenGeneratorScreenFixture.componentsFile()))::
-              record
+              record,
           ),
       ),
       UiBuilderDefaultVisibility.PUBLIC,
@@ -72,7 +72,7 @@ class ServeUiBuilderPublicReadersTest {
   private fun createShared() {
     val created =
       assertIs<UiBuilderServiceResponse.Snapshot>(
-        service.run(owner, UiBuilderServiceRequest.CreateDesign(document()))
+        service.run(owner, UiBuilderServiceRequest.CreateDesign(document())),
       )
     val revision = assertNotNull(created.snapshot.access).accessRevision
     assertIs<UiBuilderServiceResponse.DesignAccess>(
@@ -94,7 +94,7 @@ class ServeUiBuilderPublicReadersTest {
             ),
           ),
         ),
-      )
+      ),
     )
   }
 
@@ -207,8 +207,8 @@ class ServeUiBuilderPublicReadersTest {
               UiBuilderRevisionSummary(2, 2, 2_000, editor.actorId),
               UiBuilderRevisionSummary(1, 1, 1_000, null),
             ),
-          )
-        )
+          ),
+        ),
       )
     assertEquals(view.actor(editor.actorId), revisions.revisions.first().actorId)
     assertNull(revisions.revisions.last().actorId)
@@ -217,9 +217,9 @@ class ServeUiBuilderPublicReadersTest {
     val upsert =
       assertIs<PresenceUpsertV1>(
         assertIs<UiBuilderServiceUpdate.Presence>(
-            view.update(UiBuilderServiceUpdate.Presence(PresenceUpsertV1(cursor)))
+            view.update(UiBuilderServiceUpdate.Presence(PresenceUpsertV1(cursor))),
           )
-          .update
+          .update,
       )
     assertEquals(view.actor(editor.actorId), upsert.presence.actorId)
     assertEquals(PublicReaderView.COLLABORATOR_DISPLAY_NAME, upsert.presence.displayName)
@@ -227,9 +227,9 @@ class ServeUiBuilderPublicReadersTest {
     val leave =
       assertIs<PresenceLeaveV1>(
         assertIs<UiBuilderServiceUpdate.Presence>(
-            view.update(UiBuilderServiceUpdate.Presence(PresenceLeaveV1(editor.actorId)))
+            view.update(UiBuilderServiceUpdate.Presence(PresenceLeaveV1(editor.actorId))),
           )
-          .update
+          .update,
       )
     assertEquals(upsert.presence.actorId, leave.actorId, "a leave matches the cursor it removes")
   }
@@ -241,7 +241,7 @@ class ServeUiBuilderPublicReadersTest {
       service.shapeForReader(
         stranger,
         service.execute(
-          UiBuilderServiceCall(stranger, UiBuilderServiceRequest.OpenDesign(DESIGN_ID))
+          UiBuilderServiceCall(stranger, UiBuilderServiceRequest.OpenDesign(DESIGN_ID)),
         ),
       )
     }
@@ -285,7 +285,7 @@ class ServeUiBuilderPublicReadersTest {
               id = "text",
               componentId = "m3/text",
               properties = mapOf("text" to StringValueV1("Hello")),
-            )
+            ),
         ),
     )
 

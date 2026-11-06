@@ -211,7 +211,7 @@ internal class ServeUiBuilderProjectAssets(
         write.designId,
         write.assetKey,
         write.bytes,
-      )
+      ),
     )
   }
 
@@ -219,7 +219,7 @@ internal class ServeUiBuilderProjectAssets(
     val project = scope.projectForDesign(read.designId) ?: return delegate.readAsset(read)
     if (project.role(read.actor) == null)
       return UiBuilderAssetReadResult.Failed(
-        UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "design not found")
+        UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "design not found"),
       )
     return delegate.readAsset(read.copy(actor = projectActor(read.actor, project)))
   }
@@ -268,7 +268,7 @@ internal class ServeUiBuilderProjectScope(
               UiBuilderBranchCall(
                 AuthenticatedUiBuilderActor(owner),
                 UiBuilderBranchRequest.GetBranch(current),
-              )
+              ),
             ) as? UiBuilderBranchResponse.Branch)
             ?.branch
         } ?: return null

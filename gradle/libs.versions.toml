@@ -24,7 +24,7 @@
 java-server = "17"
 java-ui-builder = "21"
 kotlin = "2.4.21"
-ktfmt = "0.27.0"
+ktfmt = "0.28.0"
 ktfmt-cli = "0.64"
 compose-multiplatform = "1.12.2"
 # Material 3 adaptive, for the real `SupportingPaneScaffold` on the editor's canvas and preview

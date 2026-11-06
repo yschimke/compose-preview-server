@@ -44,7 +44,7 @@ enum class UiBuilderDefaultVisibility(val wire: String) {
         ?.let { raw ->
           entries.firstOrNull { it.wire.equals(raw, ignoreCase = true) }
             ?: throw IllegalArgumentException(
-              "$label '$raw' is not one of " + entries.joinToString(", ") { it.wire }
+              "$label '$raw' is not one of " + entries.joinToString(", ") { it.wire },
             )
         }
   }
@@ -111,13 +111,13 @@ internal object ServeUiBuilderVisibility {
                   accessRevision,
                   listOf(makePublic()),
                 ),
-              )
+              ),
             )
           }
             .getOrNull()
           if (granted !is UiBuilderServiceResponse.DesignAccess) {
             System.err.println(
-              "serve: ui-builder: $designId could not be made public by default; it stays private"
+              "serve: ui-builder: $designId could not be made public by default; it stays private",
             )
             return response
           }
@@ -126,7 +126,7 @@ internal object ServeUiBuilderVisibility {
           // updates access next would otherwise send a stale revision and be refused.
           return runCatching {
             delegate.execute(
-              UiBuilderServiceCall(call.actor, UiBuilderServiceRequest.OpenDesign(designId))
+              UiBuilderServiceCall(call.actor, UiBuilderServiceRequest.OpenDesign(designId)),
             )
           }
             .getOrNull()
@@ -166,9 +166,9 @@ internal suspend fun UiBuilderServicePort.setDesignVisibility(
         current.access.accessRevision,
         listOf(
           if (visibility == UiBuilderDefaultVisibility.PUBLIC) ServeUiBuilderVisibility.makePublic()
-          else ServeUiBuilderVisibility.makePrivate()
+          else ServeUiBuilderVisibility.makePrivate(),
         ),
       ),
-    )
+    ),
   )
 }

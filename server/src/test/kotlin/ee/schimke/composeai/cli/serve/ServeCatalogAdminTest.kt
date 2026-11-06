@@ -87,7 +87,7 @@ class ServeCatalogAdminTest {
           repo = "yschimke/compose-samples",
           group = "ds",
           attributionRepos = listOf("android/compose-samples"),
-        )
+        ),
       )
 
     val group = assertNotNull(tracker.configFor("jetnews")?.group)
@@ -108,7 +108,7 @@ class ServeCatalogAdminTest {
           system = "joreilly-peopleinspace",
           repo = "yschimke/compose-preview-imports",
           importedFrom = "joreilly/PeopleInSpace",
-        )
+        ),
       )
 
     assertEquals(
@@ -130,9 +130,9 @@ class ServeCatalogAdminTest {
             ServeCatalogsConfig.Entry(
               system = "joreilly-bikeshare",
               repo = "yschimke/compose-preview-imports",
-            )
-          )
-      )
+            ),
+          ),
+      ),
     )
     val tracker =
       tracker(
@@ -141,7 +141,7 @@ class ServeCatalogAdminTest {
           true,
           "yschimke/compose-preview-imports",
           "b",
-        )
+        ),
       )
     tracker.recordSuccess("joreilly-bikeshare")
 
@@ -152,7 +152,7 @@ class ServeCatalogAdminTest {
             system = "joreilly-bikeshare",
             repo = "yschimke/compose-preview-imports",
             importedFrom = "joreilly/BikeShare",
-          )
+          ),
         )
 
     assertTrue(result is ServeCatalogAdmin.Result.Ok, "$result")
@@ -233,8 +233,8 @@ class ServeCatalogAdminTest {
           listOf(
             ServeCatalogsConfig.Entry("compose-m3"),
             ServeCatalogsConfig.Entry("cadence", listed = false),
-          )
-      )
+          ),
+      ),
     )
     val tracker =
       tracker(
@@ -310,7 +310,7 @@ class ServeCatalogAdminTest {
             ServeCatalogsConfig.Entry("remote-m3", repo = "yschimke/compose-ai-tools"),
             ServeCatalogsConfig.Entry("cadence", repo = "yschimke/cadence"),
           ),
-      )
+      ),
     )
     val tracker =
       tracker(
@@ -327,7 +327,7 @@ class ServeCatalogAdminTest {
     val result =
       admin(tracker)
         .register(
-          ServeCatalogsConfig.Entry("remote-m3", repo = "yschimke/wear-m3-catalog", listed = true)
+          ServeCatalogsConfig.Entry("remote-m3", repo = "yschimke/wear-m3-catalog", listed = true),
         )
 
     assertEquals(ServeCatalogAdmin.Result.Ok("remote-m3", warning = null), result)
@@ -351,8 +351,8 @@ class ServeCatalogAdminTest {
   fun `a repo change that cannot be fetched leaves the old catalog serving`() {
     seedConfig(
       ServeCatalogsConfig(
-        catalogs = listOf(ServeCatalogsConfig.Entry("remote-m3", repo = "yschimke/old-home"))
-      )
+        catalogs = listOf(ServeCatalogsConfig.Entry("remote-m3", repo = "yschimke/old-home")),
+      ),
     )
     val tracker =
       tracker(
@@ -361,7 +361,7 @@ class ServeCatalogAdminTest {
           true,
           "yschimke/old-home",
           "design-artifacts/remote-m3",
-        )
+        ),
       )
     // Actually serving, which is what makes the message below true. See the sibling test for the
     // case where it is not.
@@ -391,8 +391,8 @@ class ServeCatalogAdminTest {
     // here with nothing at all behind the old configuration.
     seedConfig(
       ServeCatalogsConfig(
-        catalogs = listOf(ServeCatalogsConfig.Entry("remote-m3", repo = "yschimke/old-home"))
-      )
+        catalogs = listOf(ServeCatalogsConfig.Entry("remote-m3", repo = "yschimke/old-home")),
+      ),
     )
     val tracker =
       tracker(
@@ -401,7 +401,7 @@ class ServeCatalogAdminTest {
           true,
           "yschimke/old-home",
           "design-artifacts/remote-m3",
-        )
+        ),
       )
     // Never loaded — `available` is false and no session is behind it.
     assertEquals("pending", assertNotNull(tracker.stateFor("remote-m3")).loadState)
@@ -427,8 +427,8 @@ class ServeCatalogAdminTest {
     // next restart reverted the catalog to the repo it had left.
     seedConfig(
       ServeCatalogsConfig(
-        catalogs = listOf(ServeCatalogsConfig.Entry("remote-m3", repo = "yschimke/old-home"))
-      )
+        catalogs = listOf(ServeCatalogsConfig.Entry("remote-m3", repo = "yschimke/old-home")),
+      ),
     )
     val tracker =
       tracker(
@@ -437,7 +437,7 @@ class ServeCatalogAdminTest {
           true,
           "yschimke/new-home",
           "design-artifacts/remote-m3",
-        )
+        ),
       )
     tracker.recordSuccess("remote-m3")
 
@@ -463,7 +463,7 @@ class ServeCatalogAdminTest {
     // registration monitor, and that is true either side of a re-point.
     val tracker =
       tracker(
-        CatalogLoadTracker.Config("remote-m3", true, "yschimke/old-home", "design-artifacts/x")
+        CatalogLoadTracker.Config("remote-m3", true, "yschimke/old-home", "design-artifacts/x"),
       )
     assertTrue(tracker.stillPointsAt("remote-m3", "yschimke/old-home"))
 
@@ -486,8 +486,8 @@ class ServeCatalogAdminTest {
     // named the new one.
     seedConfig(
       ServeCatalogsConfig(
-        catalogs = listOf(ServeCatalogsConfig.Entry("remote-m3", repo = "yschimke/old-home"))
-      )
+        catalogs = listOf(ServeCatalogsConfig.Entry("remote-m3", repo = "yschimke/old-home")),
+      ),
     )
     val tracker =
       tracker(
@@ -496,7 +496,7 @@ class ServeCatalogAdminTest {
           true,
           "yschimke/old-home",
           "design-artifacts/remote-m3",
-        )
+        ),
       )
     tracker.recordSuccess("remote-m3")
 

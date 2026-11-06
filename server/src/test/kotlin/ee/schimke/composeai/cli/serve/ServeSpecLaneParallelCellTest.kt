@@ -91,7 +91,7 @@ class ServeSpecLaneParallelCellTest {
       listOf(
         Triple("child-button__default", "default", null),
         Triple("child-button__disabled", "disabled", null),
-      )
+      ),
   ): ServeHttpServer {
     registry.register(
       "remote-m3",
@@ -208,7 +208,7 @@ class ServeSpecLaneParallelCellTest {
           listOf(
             Triple("child-button__default", "default", "10:1"),
             Triple("child-button__not-enabled", "not-enabled", "10:2"),
-          )
+          ),
       )
     try {
       val html = page(server, "button-child__disabled")

@@ -58,7 +58,7 @@ class ServeUiBuilderProductionIntegrationTest {
             restarted.server.port,
             ExportDesignRequestV1(document().id, revision = 0, ExportFormatV1.COMPOSE),
             OPERATOR_TOKEN,
-          )
+          ),
         )
       val artifact = assertIs<ExportResponseV1>(exported).artifact
       assertEquals(ExportFormatV1.COMPOSE, artifact.format)
@@ -108,7 +108,7 @@ class ServeUiBuilderProductionIntegrationTest {
         .post(
           json
             .encodeToString(HttpRequestEnvelopeV1.serializer(), envelope)
-            .toRequestBody(JSON_MEDIA_TYPE)
+            .toRequestBody(JSON_MEDIA_TYPE),
         )
     token?.let { builder.header(ServeHttpServer.TOKEN_HEADER, it) }
     return client.newCall(builder.build()).execute()
@@ -148,7 +148,7 @@ class ServeUiBuilderProductionIntegrationTest {
               id = "text",
               componentId = "m3/text",
               properties = mapOf("text" to StringValueV1("Restart-persistent content")),
-            )
+            ),
         ),
     )
 

@@ -16,8 +16,8 @@ public fun openIsolatedSharedDaemonReplica(
         mapOf(
           // Both engines derive their data root as outputDir.parent/data, so this isolates PNGs
           // and every file-backed data product in one override.
-          "composeai.render.outputDir" to File(replicaRoot, "renders").absolutePath
-        )
+          "composeai.render.outputDir" to File(replicaRoot, "renders").absolutePath,
+        ),
       )
     } catch (t: Throwable) {
       replicaRoot.deleteRecursively()

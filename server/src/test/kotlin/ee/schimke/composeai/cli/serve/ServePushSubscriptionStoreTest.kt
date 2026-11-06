@@ -21,7 +21,7 @@ class ServePushSubscriptionStoreTest {
 
   private val browserKey =
     ServeWebPush.base64Url(
-      ServeWebPush.rawPublicKey(ServeWebPush.generateKeyPair().public as ECPublicKey)
+      ServeWebPush.rawPublicKey(ServeWebPush.generateKeyPair().public as ECPublicKey),
     )
   private val auth = ServeWebPush.base64Url(ByteArray(16) { it.toByte() })
 
@@ -81,10 +81,12 @@ class ServePushSubscriptionStoreTest {
     assertTrue(
       ServePushEndpoints.resolvesPublic("push.example.com") {
         arrayOf(InetAddress.getByName("93.184.216.34"))
-      }
+      },
     )
     assertFalse(
-      ServePushEndpoints.resolvesPublic("nowhere.invalid") { throw java.net.UnknownHostException() }
+      ServePushEndpoints.resolvesPublic("nowhere.invalid") {
+        throw java.net.UnknownHostException()
+      },
     )
   }
 
@@ -96,7 +98,7 @@ class ServePushSubscriptionStoreTest {
     assertNotNull(ServePushEndpoints.keyRejection("!!!", auth))
     assertNotNull(ServePushEndpoints.keyRejection(browserKey, ServeWebPush.base64Url(ByteArray(8))))
     assertNotNull(
-      ServePushEndpoints.keyRejection(browserKey, ServeWebPush.base64Url(ByteArray(32)))
+      ServePushEndpoints.keyRejection(browserKey, ServeWebPush.base64Url(ByteArray(32))),
     )
   }
 
@@ -128,7 +130,7 @@ class ServePushSubscriptionStoreTest {
     assertIs<PushSubscribeResult.Refused>(bad)
     assertTrue(bad.reason.startsWith("the endpoint"))
     assertIs<PushSubscribeResult.Refused>(
-      store.subscribe("github:alice", ENDPOINT, browserKey, "short", null)
+      store.subscribe("github:alice", ENDPOINT, browserKey, "short", null),
     )
     assertTrue(store.all().isEmpty())
   }
@@ -259,15 +261,15 @@ class ServePushSubscriptionStoreTest {
     store.subscribe("github:alice", "$ENDPOINT-1", browserKey, auth, null)
     store.subscribe("github:alice", "$ENDPOINT-2", browserKey, auth, null)
     assertIs<PushSubscribeResult.Refused>(
-      store.subscribe("github:alice", "$ENDPOINT-3", browserKey, auth, null)
+      store.subscribe("github:alice", "$ENDPOINT-3", browserKey, auth, null),
     )
     // Re-subscribing an existing endpoint is a replacement, not a new device.
     assertIs<PushSubscribeResult.Stored>(
-      store.subscribe("github:alice", "$ENDPOINT-2", browserKey, auth, null)
+      store.subscribe("github:alice", "$ENDPOINT-2", browserKey, auth, null),
     )
     store.subscribe("github:bob", "$ENDPOINT-4", browserKey, auth, null)
     assertIs<PushSubscribeResult.Refused>(
-      store.subscribe("github:carol", "$ENDPOINT-5", browserKey, auth, null)
+      store.subscribe("github:carol", "$ENDPOINT-5", browserKey, auth, null),
     )
     assertEquals(2, store.forActor("github:alice").size)
   }
@@ -303,14 +305,14 @@ class ServePushSubscriptionStoreTest {
     val public = ServeWebPush.base64Url(ServeWebPush.rawPublicKey(pair.public as ECPublicKey))
     val private =
       ServeWebPush.base64Url(
-        ServeWebPush.rawPrivateKey(pair.private as java.security.interfaces.ECPrivateKey)
+        ServeWebPush.rawPrivateKey(pair.private as java.security.interfaces.ECPrivateKey),
       )
     val configured = ServeVapidKeys.loadOrCreate(root.resolve("a"), "mailto:x@y.z", public, private)
     assertEquals(public, configured.publicKey)
     assertFalse(Files.exists(root.resolve("a").resolve(ServeVapidKeys.FILE_NAME)))
     val other =
       ServeWebPush.base64Url(
-        ServeWebPush.rawPublicKey(ServeWebPush.generateKeyPair().public as ECPublicKey)
+        ServeWebPush.rawPublicKey(ServeWebPush.generateKeyPair().public as ECPublicKey),
       )
     assertFailsWith<IllegalArgumentException> {
       ServeVapidKeys.loadOrCreate(root.resolve("b"), "mailto:x@y.z", other, private)

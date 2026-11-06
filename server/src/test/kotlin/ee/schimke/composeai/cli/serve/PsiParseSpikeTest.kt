@@ -147,7 +147,7 @@ class PsiParseSpikeTest {
         |    named arguments        : $namedArgs   (bind by label; positional still needs `params`)
         |    qualified expressions  : $qualified   (receiver vs package, structurally)
         """
-          .trimMargin()
+          .trimMargin(),
       )
 
       assertTrue(files > 0, "no sources parsed")
@@ -197,7 +197,7 @@ class PsiParseSpikeTest {
       println(
         "previewOverrideString: ${positional.size} positional → " +
           "${positional.map { c -> c.valueArguments.map { it.getArgumentExpression()?.text } }}" +
-          " (no label; still needs the callee's parameter list)"
+          " (no label; still needs the callee's parameter list)",
       )
       assertTrue(defaults == listOf("\"Shopping\""), "named-argument binding failed: $defaults")
       // Two of them: the bare `("subtitle", "Basket")` and the package-qualified `("k", "v")`.
@@ -217,7 +217,7 @@ class PsiParseSpikeTest {
       val qualifiedTrailing = trailingOnly.filter { it.parent is KtDotQualifiedExpression }
       println(
         "counted: ${tally.size} calls — ${trailingOnly.size} trailing-lambda " +
-          "(${qualifiedTrailing.size} of them qualified), ${parenthesised.size} parenthesised"
+          "(${qualifiedTrailing.size} of them qualified), ${parenthesised.size} parenthesised",
       )
       assertTrue(tally.size == 3, "expected 3 counted calls, got ${tally.size}")
       assertTrue(trailingOnly.size == 2, "trailing-lambda calls: ${trailingOnly.size}")
@@ -310,7 +310,7 @@ class PsiParseSpikeTest {
       val storage =
         loader
           .loadClass(
-            "org.jetbrains.kotlin.compiler.plugin.CompilerPluginRegistrar\u0024ExtensionStorage"
+            "org.jetbrains.kotlin.compiler.plugin.CompilerPluginRegistrar\u0024ExtensionStorage",
           )
           .getDeclaredConstructor()
           .newInstance()
@@ -320,7 +320,7 @@ class PsiParseSpikeTest {
           "setExtensionsStorage",
           loader.loadClass("org.jetbrains.kotlin.config.CompilerConfiguration"),
           loader.loadClass(
-            "org.jetbrains.kotlin.compiler.plugin.CompilerPluginRegistrar\u0024ExtensionStorage"
+            "org.jetbrains.kotlin.compiler.plugin.CompilerPluginRegistrar\u0024ExtensionStorage",
           ),
         )
         .invoke(null, config, storage)
@@ -387,7 +387,7 @@ class PsiParseSpikeTest {
 
     println(
       "lib-bta isolated load + parse: $elapsed over ${jars.size} jars; " +
-        "${callees.size} call nodes walked: ${callees.distinct()}"
+        "${callees.size} call nodes walked: ${callees.distinct()}",
     )
     assertTrue(
       callees.containsAll(listOf("previewOverrideString", "counted", "toggleable")),

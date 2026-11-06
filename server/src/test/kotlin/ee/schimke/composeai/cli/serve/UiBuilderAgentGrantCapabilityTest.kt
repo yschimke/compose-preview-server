@@ -26,7 +26,7 @@ class UiBuilderAgentGrantCapabilityTest {
           AgentGrantCapability.UI_BUILDER_READ,
           AgentGrantCapability.UI_BUILDER_WRITE,
           AgentGrantCapability.UI_BUILDER_EXPORT,
-        )
+        ),
       ),
     )
   }

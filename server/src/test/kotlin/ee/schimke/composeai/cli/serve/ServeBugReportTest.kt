@@ -87,7 +87,7 @@ class ServeBugReportTest {
     val body = ServeBugReport.body(server, page)
     assertTrue(
       body.contains(
-        "| Page | [`/jetnews/p/Article__dark`](https://preview.coo.ee/jetnews/p/Article__dark) |"
+        "| Page | [`/jetnews/p/Article__dark`](https://preview.coo.ee/jetnews/p/Article__dark) |",
       ),
       body,
     )
@@ -199,7 +199,7 @@ class ServeBugReportTest {
   fun `the client placeholder is present only for the template the page script rewrites`() {
     assertTrue(
       ServeBugReport.body(server, page, clientPlaceholder = true)
-        .contains(ServeBugReport.CLIENT_PLACEHOLDER)
+        .contains(ServeBugReport.CLIENT_PLACEHOLDER),
     )
     // The visible copy must not show a literal {{client}} — with JS off that is what would be
     // filed.
@@ -309,7 +309,7 @@ class ServeBugReportTest {
     assertTrue(
       body.contains(
         "| ![reference](https://preview.coo.ee/jetnews/reference/article-card-figma.png) | " +
-          "![render](https://preview.coo.ee/jetnews/render/Article__dark.png) |"
+          "![render](https://preview.coo.ee/jetnews/render/Article__dark.png) |",
       ),
       body,
     )

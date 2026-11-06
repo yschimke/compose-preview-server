@@ -201,7 +201,7 @@ class ServeRcPlayerDaemonLaneTest {
         Request.Builder()
           .url(url("/docs?name=button.rc"))
           .post(bytes.toRequestBody("application/octet-stream".toMediaType()))
-          .build()
+          .build(),
       )
       .execute()
       .use { response ->
@@ -274,7 +274,7 @@ class ServeRcPlayerDaemonLaneTest {
       assertTrue(it.acquire(4) != null)
       assertEquals(4, it.availablePermits())
       assertNull(
-        it.acquireBackground(ServeBundleDaemon.ANDROID_LIVE_SEAT_WEIGHT, dedicatedSlice = false)
+        it.acquireBackground(ServeBundleDaemon.ANDROID_LIVE_SEAT_WEIGHT, dedicatedSlice = false),
       )
     }
 
@@ -530,8 +530,8 @@ class ServeRcPlayerDaemonLaneTest {
             RcPlayerBackend.ANDROIDX_EMBEDDED,
             RcPlayerBackend.ANDROIDX_VIEW,
             RcPlayerBackend.CMP_ANDROID,
-          )
-      )
+          ),
+      ),
     )
     get("/examples/p/$EXAMPLE_ID").use { response ->
       val html = response.body.string()
@@ -548,7 +548,7 @@ class ServeRcPlayerDaemonLaneTest {
     assertNull(
       ServeRcPlayerDaemon.subprocess(Files.createTempDirectory("rc").toFile(), null) {
         reasons += it
-      }
+      },
     )
     assertTrue(reasons.isNotEmpty())
   }

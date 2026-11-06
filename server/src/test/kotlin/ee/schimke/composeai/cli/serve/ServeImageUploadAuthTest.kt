@@ -116,8 +116,8 @@ class ServeImageUploadAuthTest {
         verifier = { _, _, _ ->
           Result.failure(
             ImageUploadTokenRefusedException(
-              "that token was issued to a different OAuth app than this server's"
-            )
+              "that token was issued to a different OAuth app than this server's",
+            ),
           )
         },
       )

@@ -47,20 +47,20 @@ class ServeViewerThemeBarTest {
     assertTrue(
       html.contains(
         "<span class=\"cp-theme cp-theme-bar\" id=\"cp-theme-bar\" role=\"group\"" +
-          " aria-label=\"Preview theme\">"
+          " aria-label=\"Preview theme\">",
       ),
       html,
     )
     // The built-in uiMode pair uses the same plain Light/Dark wording as the rest of the UI.
     assertTrue(
       html.contains(
-        """<button type="button" class="cp-theme-btn" data-theme-choice="light">Light</button>"""
+        """<button type="button" class="cp-theme-btn" data-theme-choice="light">Light</button>""",
       ),
       html,
     )
     assertTrue(
       html.contains(
-        """<button type="button" class="cp-theme-btn" data-theme-choice="dark">Dark</button>"""
+        """<button type="button" class="cp-theme-btn" data-theme-choice="dark">Dark</button>""",
       ),
       html,
     )

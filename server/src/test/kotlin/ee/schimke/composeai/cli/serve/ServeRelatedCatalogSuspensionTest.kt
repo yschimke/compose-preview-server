@@ -77,7 +77,7 @@ class ServeRelatedCatalogSuspensionTest {
           related =
             mapOf(
               "Button/ButtonSample" to
-                listOf(ServeRelatedCatalogs.Declared("glimmer-catalog", "Button"))
+                listOf(ServeRelatedCatalogs.Declared("glimmer-catalog", "Button")),
             ),
         ),
     )

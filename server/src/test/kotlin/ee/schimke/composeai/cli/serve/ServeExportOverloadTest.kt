@@ -61,7 +61,7 @@ class ServeExportOverloadTest {
         "overload must fail fast",
       )
       assertNotNull(
-        call(server, "ui_builder_get_design", """{"designId":"load-design"}""")["result"]
+        call(server, "ui_builder_get_design", """{"designId":"load-design"}""")["result"],
       )
       assertNotNull(post(server, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""")["result"])
       assertEquals(400, get(server, "export.png?revision=invalid").first)
@@ -78,9 +78,9 @@ class ServeExportOverloadTest {
             .header(ServeHttpServer.TOKEN_HEADER, "local-fixture")
             .post(
               Json.encodeToString(HttpRequestEnvelopeV1.serializer(), envelope)
-                .toRequestBody("application/json".toMediaType())
+                .toRequestBody("application/json".toMediaType()),
             )
-            .build()
+            .build(),
         )
         .execute()
         .use {
@@ -102,7 +102,7 @@ class ServeExportOverloadTest {
       assertEquals(200, get(server, "export.png").first)
       assertNull(
         call(server, "ui_builder_export", """{"designId":"load-design"}""")["result"]!!
-          .jsonObject["isError"]
+          .jsonObject["isError"],
       )
     } finally {
       release.countDown()
@@ -118,7 +118,7 @@ class ServeExportOverloadTest {
       listOf("concurrent export limit reached", "concurrent export worker limit reached")) {
       val error =
         UiBuilderServiceResponse.Error(
-          UiBuilderServiceError(ServiceErrorCodeV1.BAD_REQUEST, message, retryable = true)
+          UiBuilderServiceError(ServiceErrorCodeV1.BAD_REQUEST, message, retryable = true),
         )
       assertEquals(503, error.httpStatusValue())
       assertEquals(400, error.copy(error = error.error.copy(retryable = false)).httpStatusValue())
@@ -130,14 +130,14 @@ class ServeExportOverloadTest {
     assertEquals(
       400,
       UiBuilderServiceResponse.Error(
-          UiBuilderServiceError(ServiceErrorCodeV1.BAD_REQUEST, "invalid format", retryable = true)
+          UiBuilderServiceError(ServiceErrorCodeV1.BAD_REQUEST, "invalid format", retryable = true),
         )
         .httpStatusValue(),
     )
     assertEquals(
       500,
       UiBuilderServiceResponse.Error(
-          UiBuilderServiceError(ServiceErrorCodeV1.INTERNAL, "export timed out", retryable = true)
+          UiBuilderServiceError(ServiceErrorCodeV1.INTERNAL, "export timed out", retryable = true),
         )
         .httpStatusValue(),
     )
@@ -216,11 +216,11 @@ class ServeExportOverloadTest {
           .newCall(
             Request.Builder()
               .url(
-                "http://127.0.0.1:${server.port}/api/ui-builder/v1/designs/load-design/native-preview"
+                "http://127.0.0.1:${server.port}/api/ui-builder/v1/designs/load-design/native-preview",
               )
               .header(ServeHttpServer.TOKEN_HEADER, "local-fixture")
               .post("{}".toRequestBody("application/json".toMediaType()))
-              .build()
+              .build(),
           )
           .execute()
       response.use {
@@ -241,7 +241,7 @@ class ServeExportOverloadTest {
       held.forEach { assertNotNull(it.get(5, TimeUnit.SECONDS)["result"]) }
       assertNull(
         call(server, "ui_builder_render_native", """{"designId":"load-design"}""")["result"]!!
-          .jsonObject["isError"]
+          .jsonObject["isError"],
       )
     } finally {
       release.countDown()
@@ -335,8 +335,8 @@ class ServeExportOverloadTest {
           UiBuilderExportExecutor { export ->
             port.renderPng(request)
             artifact(export.format)
-          }
-        )
+          },
+        ),
       )
     val workers = Executors.newSingleThreadExecutor()
     try {
@@ -367,8 +367,8 @@ class ServeExportOverloadTest {
       .writeBytes(
         java.util.Base64.getDecoder()
           .decode(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-          )
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+          ),
       )
     val registry = ServeSessionRegistry(open = { null })
     val permits = java.util.concurrent.Semaphore(0)
@@ -382,9 +382,9 @@ class ServeExportOverloadTest {
       mcp
         .handle(
           Json.parseToJsonElement(
-              """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"catalog":"load-fixture","previewId":"load-preview","observe":"hash"}}}"""
+              """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"catalog":"load-fixture","previewId":"load-preview","observe":"hash"}}}""",
             )
-            .jsonObject
+            .jsonObject,
         ) {
           ServeMachineAuthorization.Decision.Authorized("load-fixture")
         }
@@ -415,7 +415,7 @@ class ServeExportOverloadTest {
             emptyList(),
             failure = "fixture",
           )
-        }
+        },
       )
     val admission =
       PlaygroundDiagnostic(
@@ -424,13 +424,13 @@ class ServeExportOverloadTest {
       )
     assertFailsWith<ExportOverloadedException> { lane(admission).render(document()) }
     assertIs<UiBuilderNativePreviewOutcome.Rendered>(
-      lane(admission.copy(file = "Widget.kt")).render(document())
+      lane(admission.copy(file = "Widget.kt")).render(document()),
     )
     assertIs<UiBuilderNativePreviewOutcome.Rendered>(
-      lane(admission.copy(severity = PlaygroundSeverity.WARNING)).render(document())
+      lane(admission.copy(severity = PlaygroundSeverity.WARNING)).render(document()),
     )
     assertIs<UiBuilderNativePreviewOutcome.Rendered>(
-      lane(admission.copy(message = "compile sandbox failed: fixture")).render(document())
+      lane(admission.copy(message = "compile sandbox failed: fixture")).render(document()),
     )
   }
 
@@ -456,9 +456,9 @@ class ServeExportOverloadTest {
         assertIs<UiBuilderServiceResponse.Snapshot>(
           runBlocking {
             it.execute(
-              UiBuilderServiceCall(actor, UiBuilderServiceRequest.CreateDesign(document()))
+              UiBuilderServiceCall(actor, UiBuilderServiceRequest.CreateDesign(document())),
             )
-          }
+          },
         )
       }
   }
@@ -492,7 +492,7 @@ class ServeExportOverloadTest {
         Request.Builder()
           .url("http://127.0.0.1:${server.port}/api/ui-builder/v1/designs/load-design/$path")
           .header(ServeHttpServer.TOKEN_HEADER, "local-fixture")
-          .build()
+          .build(),
       )
       .execute()
       .use { Triple(it.code, it.body.string(), it.header("Retry-After")) }
@@ -505,7 +505,7 @@ class ServeExportOverloadTest {
           .header(ServeHttpServer.TOKEN_HEADER, "local-fixture")
           .header("Accept", "application/json, text/event-stream")
           .post(body.toRequestBody("application/json".toMediaType()))
-          .build()
+          .build(),
       )
       .execute()
       .use {
@@ -548,7 +548,7 @@ class ServeExportOverloadTest {
               id = "text",
               componentId = "m3/text",
               properties = mapOf("text" to StringValueV1("Local export load fixture")),
-            )
+            ),
         ),
     )
 

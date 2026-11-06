@@ -21,7 +21,7 @@ class ServeUrlFetchTest {
 
   /** A canned transport: an exact-URL → [ServeUrlFetch.Hop] table, anything else fails. */
   private fun transport(
-    vararg chain: Pair<String, ServeUrlFetch.Hop>
+    vararg chain: Pair<String, ServeUrlFetch.Hop>,
   ): (String) -> ServeUrlFetch.Hop = { url ->
     chain.firstOrNull { it.first == url }?.second ?: ServeUrlFetch.Hop.Failed
   }
@@ -34,7 +34,7 @@ class ServeUrlFetchTest {
     val send =
       transport(
         "https://good.example/a.zip" to
-          ServeUrlFetch.Hop.Redirect("http://169.254.169.254/latest/meta-data")
+          ServeUrlFetch.Hop.Redirect("http://169.254.169.254/latest/meta-data"),
       )
 
     val bytes =
@@ -83,7 +83,7 @@ class ServeUrlFetchTest {
     assertNull(
       ServeUrlFetch.followingRedirects("https://good.example/a.zip", onGoodHost) {
         ServeUrlFetch.Hop.Failed
-      }
+      },
     )
   }
 

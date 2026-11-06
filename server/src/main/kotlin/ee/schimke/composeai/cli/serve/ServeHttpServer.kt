@@ -1069,7 +1069,7 @@ class ServeHttpServer(
         if (problem != null) {
           System.err.println(
             "serve: ERROR --ui-builder-host-root ignored, $uiBuilderHost stays on /ui-builder/: " +
-              problem
+              problem,
           )
         }
         problem == null
@@ -1111,7 +1111,7 @@ class ServeHttpServer(
           val current: ApplicationCall = context
           val target = ServeBrowseCookie.exchangeTarget(current, serverToken) ?: return@intercept
           current.response.cookies.append(
-            ServeBrowseCookie.cookie(serverToken, secure = isSecure(current))
+            ServeBrowseCookie.cookie(serverToken, secure = isSecure(current)),
           )
           current.response.headers.append(HttpHeaders.CacheControl, "no-store")
           current.response.headers.append(HttpHeaders.Location, target)
@@ -1137,7 +1137,7 @@ class ServeHttpServer(
                 current.request.cookies.rawCookies[ServeAgentGrantCookie.NAME] != null
             ) {
               current.response.cookies.append(
-                ServeAgentGrantCookie.clearedCookie(secure = isSecure(current))
+                ServeAgentGrantCookie.clearedCookie(secure = isSecure(current)),
               )
             }
             if (exchange == null) return@intercept
@@ -1157,7 +1157,7 @@ class ServeHttpServer(
             return@intercept
           }
           current.response.cookies.append(
-            ServeAgentGrantCookie.cookie(exchange.credential, secure = isSecure(current))
+            ServeAgentGrantCookie.cookie(exchange.credential, secure = isSecure(current)),
           )
           current.response.headers.append(HttpHeaders.CacheControl, "no-store")
           current.response.headers.append(HttpHeaders.Location, exchange.target)
@@ -1266,7 +1266,7 @@ class ServeHttpServer(
             on(ResponseBodyReadyForSend) { call, content ->
               auth.refreshSession(call, content.headers.getAll(HttpHeaders.CacheControl).orEmpty())
             }
-          }
+          },
         )
       }
       // The Content-Security-Policy on every HTML response ([ServePagePolicy]). Installed before
@@ -1553,7 +1553,7 @@ class ServeHttpServer(
               return@post
             }
             call.response.cookies.append(
-              ServeAgentGrantCookie.clearedCookie(secure = isSecure(call))
+              ServeAgentGrantCookie.clearedCookie(secure = isSecure(call)),
             )
             call.response.headers.append(HttpHeaders.CacheControl, "no-store")
             call.respond(HttpStatusCode.NoContent)
@@ -2194,7 +2194,7 @@ class ServeHttpServer(
             val designId = call.parameters["designId"].orEmpty()
             val body = call.receiveText()
             respondAdminUiBuilderResult(
-              withContext(Dispatchers.IO) { admin.repair(designId, body) }
+              withContext(Dispatchers.IO) { admin.repair(designId, body) },
             )
           }
           delete("/admin/ui-builder/designs/{designId}") {
@@ -2605,7 +2605,7 @@ class ServeHttpServer(
     if (sites.isEmpty) return null
     return sites.systemFor(
       forwardedHeader(this, "X-Forwarded-Host", trustForwardedFor)
-        ?: request.headers[HttpHeaders.Host]
+        ?: request.headers[HttpHeaders.Host],
     )
   }
 
@@ -2674,7 +2674,7 @@ class ServeHttpServer(
    * enforces one catalog per host. The pinned "Server default" entry is kept.
    */
   private fun RoutingContext.siteScopedCatalogChoices(
-    service: PlaygroundCompileService
+    service: PlaygroundCompileService,
   ): List<PlaygroundCatalogInfo> {
     val choices = service.catalogChoices()
     val site = siteSystem() ?: return choices
@@ -2921,7 +2921,7 @@ class ServeHttpServer(
    * only case `--github-auth-repo` is named.
    */
   private fun RoutingContext.githubAuthStatus(
-    lane: ServeWeb.GatedLane = ServeWeb.GatedLane.LIVE
+    lane: ServeWeb.GatedLane = ServeWeb.GatedLane.LIVE,
   ): ServeWeb.GitHubAuthStatus? =
     githubAuth
       ?.takeIf { oauthCanRoundTrip() }
@@ -3421,7 +3421,7 @@ class ServeHttpServer(
   }
 
   private suspend fun RoutingContext.handlePlaygroundRunAdmitted(
-    service: PlaygroundCompileService
+    service: PlaygroundCompileService,
   ) {
     val body = receivePlaygroundBody() ?: return
     val request =
@@ -3464,7 +3464,7 @@ class ServeHttpServer(
   }
 
   private suspend fun RoutingContext.handlePlaygroundEditLeaseAcquire(
-    service: PlaygroundCompileService
+    service: PlaygroundCompileService,
   ) {
     if (rejectBadToken()) return
     if (rejectMissingGithubAuth(api = true)) return
@@ -3502,7 +3502,7 @@ class ServeHttpServer(
   }
 
   private suspend fun RoutingContext.handlePlaygroundEditLeaseRelease(
-    service: PlaygroundCompileService
+    service: PlaygroundCompileService,
   ) {
     if (rejectBadToken()) return
     if (rejectMissingGithubAuth(api = true)) return
@@ -3777,7 +3777,7 @@ class ServeHttpServer(
    * disabled.
    */
   private suspend fun RoutingContext.acquireImagePermit(
-    key: String
+    key: String,
   ): ServeRateLimiter.Decision.Admitted? {
     val limiter = imageUploadLimiter ?: return ServeRateLimiter.Decision.Admitted {}
     return when (val decision = limiter.tryAcquire(key)) {
@@ -3812,7 +3812,7 @@ class ServeHttpServer(
    * refusal shapes in one place.
    */
   private suspend fun RoutingContext.authorizeImageUpload(
-    auth: ServeImageUploadAuth
+    auth: ServeImageUploadAuth,
   ): ServeImageUploadAuth.Identity.Ok? {
     val header = call.request.headers[HttpHeaders.Authorization]
     val bearer = header?.takeIf { it.startsWith("Bearer ", ignoreCase = true) }?.substring(7)
@@ -4149,7 +4149,7 @@ class ServeHttpServer(
                   subtitle = ServeWeb.catalogCardSubtitle(gridPreviews.size),
                   heroes = listOf(hero),
                   system = selectedSessionId,
-                )
+                ),
               )
             }
           }
@@ -4535,7 +4535,7 @@ class ServeHttpServer(
         if (json) call.respond(HttpStatusCode.NotFound)
         else
           respondNotFoundHtml(
-            "This session publishes no design references and no parity activity feed."
+            "This session publishes no design references and no parity activity feed.",
           )
         return@withLeasedSession
       }
@@ -5171,7 +5171,7 @@ class ServeHttpServer(
         if (
           overrideParams.isEmpty() &&
             ServeCatalogRevision.normalize(
-              call.request.queryParameters[ServeCatalogRevision.PARAM]
+              call.request.queryParameters[ServeCatalogRevision.PARAM],
             ) == null
         )
           ServeCacheGeneration.scope(requestQuerySuffix(), catalogGeneration(renderHost))
@@ -5193,14 +5193,14 @@ class ServeHttpServer(
           renderUrl =
             ServeIssueReport.withoutToken(
               "${externalOrigin()}$basePath/render/${WebEscaping.urlEncodeSegment(preview.id)}" +
-                ".png$assetQuerySuffix"
+                ".png$assetQuerySuffix",
             ),
           // …and the reference panel, so the issue shows both sides. The reference the page
           // resolved, since `?reference=` may be absent.
           referenceUrl =
             ServeIssueReport.withoutToken(
               "${externalOrigin()}$basePath/reference/" +
-                "${WebEscaping.urlEncodeSegment(reference.id)}.png$assetQuerySuffix"
+                "${WebEscaping.urlEncodeSegment(reference.id)}.png$assetQuerySuffix",
             ),
           publicRender = isPublic,
         )
@@ -5446,7 +5446,7 @@ class ServeHttpServer(
   }
 
   private suspend fun RoutingContext.rejectCrossOriginUiBuilderAdminMutation(
-    access: UiBuilderAdminAccess
+    access: UiBuilderAdminAccess,
   ): Boolean {
     if (!access.browserSession || isSameOriginFormSubmission()) return false
     call.respondText(
@@ -5537,7 +5537,7 @@ class ServeHttpServer(
       JSON.encodeToString(
         AdminGroupsResponse.serializer(),
         AdminGroupsResponse(
-          groups = groups.map { AdminGroupDto(it.id, it.heading, it.noun, it.priority) }
+          groups = groups.map { AdminGroupDto(it.id, it.heading, it.noun, it.priority) },
         ),
       ),
       ContentType.Application.Json,
@@ -5724,7 +5724,7 @@ class ServeHttpServer(
    * is serving, and what the next start will serve.
    */
   private suspend fun RoutingContext.respondAdminUiBuilderSettings(
-    admin: ServeUiBuilderSettingsAdmin
+    admin: ServeUiBuilderSettingsAdmin,
   ) {
     val configured = withContext(Dispatchers.IO) { admin.configured() }
     val next = withContext(Dispatchers.IO) { admin.next() }
@@ -5747,7 +5747,7 @@ class ServeHttpServer(
 
   /** `PUT /admin/ui-builder/config`: replace the `uiBuilder` block with the JSON body. */
   private suspend fun RoutingContext.handleAdminUiBuilderSettingsSet(
-    admin: ServeUiBuilderSettingsAdmin
+    admin: ServeUiBuilderSettingsAdmin,
   ) {
     val body =
       withContext(Dispatchers.IO) {
@@ -5774,7 +5774,7 @@ class ServeHttpServer(
   }
 
   private suspend fun RoutingContext.respondAdminUiBuilderSettingsResult(
-    result: ServeUiBuilderSettingsAdmin.Result
+    result: ServeUiBuilderSettingsAdmin.Result,
   ) {
     when (result) {
       is ServeUiBuilderSettingsAdmin.Result.Ok ->
@@ -5891,7 +5891,7 @@ class ServeHttpServer(
   }
 
   private suspend fun RoutingContext.respondAdminEditorResult(
-    result: ServeUiBuilderEditorAdmin.Result
+    result: ServeUiBuilderEditorAdmin.Result,
   ) {
     when (result) {
       is ServeUiBuilderEditorAdmin.Result.Ok ->
@@ -5962,7 +5962,7 @@ class ServeHttpServer(
    * is an HTTP round trip per catalog), best-effort per catalog.
    */
   private suspend fun RoutingContext.respondAdminUiBuilderLibrary(
-    library: ServeUiBuilderDesignLibrary
+    library: ServeUiBuilderDesignLibrary,
   ) {
     val catalogs = uiBuilderDesignCatalogs()
     val entries = withContext(Dispatchers.IO) { library.list(catalogs) }
@@ -5999,7 +5999,7 @@ class ServeHttpServer(
     uiBuilderDesignCatalogs() + uiBuilderComponentStore?.coordinates().orEmpty()
 
   private suspend fun RoutingContext.respondAdminUiBuilderComponentLibrary(
-    library: ServeUiBuilderComponentLibrary
+    library: ServeUiBuilderComponentLibrary,
   ) {
     val catalogs = uiBuilderComponentCatalogs()
     val entries = withContext(Dispatchers.IO) { library.list(catalogs) }
@@ -6147,7 +6147,7 @@ class ServeHttpServer(
       if (entry != null && entry.designId != document.id) {
         System.err.println(
           "serve: ${catalog.system} publishes design ${entry.designId} as a document with id " +
-            "${document.id}; its links were not carried across"
+            "${document.id}; its links were not carried across",
         )
       }
     }
@@ -6252,7 +6252,7 @@ class ServeHttpServer(
 
   /** Map a [ServeUiBuilderAdmin.Result] onto its HTTP status + JSON body. */
   private suspend fun RoutingContext.respondAdminUiBuilderResult(
-    result: ServeUiBuilderAdmin.Result
+    result: ServeUiBuilderAdmin.Result,
   ) {
     when (result) {
       is ServeUiBuilderAdmin.Result.Repaired ->
@@ -6774,7 +6774,7 @@ class ServeHttpServer(
         // document would read as agreement.
         missing(
           "Neither this catalog nor its sibling publishes annotation layers for this render, " +
-            "so there is nothing to compare."
+            "so there is nothing to compare.",
         )
         return@withLeasedSession
       }
@@ -7157,7 +7157,7 @@ class ServeHttpServer(
                 .mapNotNull { catalogMetaSeen[it.system]?.heroImage }
                 .take(ServeSocialCard.MAX_HEROES)
                 .toList(),
-          )
+          ),
         )
       }
     val unfurl =
@@ -7460,7 +7460,7 @@ class ServeHttpServer(
           put(
             "reservedPaths",
             kotlinx.serialization.json.JsonArray(
-              ServeSites.RESERVED_SYSTEMS.sorted().map(::JsonPrimitive)
+              ServeSites.RESERVED_SYSTEMS.sorted().map(::JsonPrimitive),
             ),
           )
         }
@@ -7696,7 +7696,7 @@ class ServeHttpServer(
           previewId?.let {
             ServeIssueReport.withoutToken(
               "${externalOrigin()}$basePath/render/${WebEscaping.urlEncodeSegment(it)}.png" +
-                overrideSuffix
+                overrideSuffix,
             )
           },
         // The same suffix as the render: the reference lane ignores overrides but honours the `at=`
@@ -7705,7 +7705,7 @@ class ServeHttpServer(
           stageReference?.let {
             ServeIssueReport.withoutToken(
               "${externalOrigin()}$basePath/reference/${WebEscaping.urlEncodeSegment(it.id)}.png" +
-                overrideSuffix
+                overrideSuffix,
             )
           },
         publicRender = isPublic,
@@ -7920,7 +7920,7 @@ class ServeHttpServer(
         "<p class=\"cp-lan-caveat\">A plain-http LAN address is not a secure context, so " +
           "installing the app, sharing, the clipboard and offline use need HTTPS — or, on an " +
           "Android phone over USB, <code>adb reverse tcp:$port tcp:$port</code> and open " +
-          "<code>http://localhost:$port/</code>.</p></div></section>"
+          "<code>http://localhost:$port/</code>.</p></div></section>",
       )
     }
   }
@@ -8066,7 +8066,7 @@ class ServeHttpServer(
       val key = pair.substringBefore('=')
       if (key != ServeCatalogRevision.PARAM) return@firstNotNullOfOrNull null
       ServeCatalogRevision.normalize(
-        decodeQueryValue(pair.substringAfter('=', missingDelimiterValue = ""))
+        decodeQueryValue(pair.substringAfter('=', missingDelimiterValue = "")),
       )
     }
     val params =
@@ -8125,7 +8125,7 @@ class ServeHttpServer(
           server.java?.let { add("Server JVM" to it) }
           server.os?.let { add("Server OS" to it) }
         },
-      )
+      ),
     )
     add(
       ServeWeb.BugReportSection(
@@ -8141,20 +8141,20 @@ class ServeHttpServer(
           page.view?.let { add("View" to it) }
           page.degradations.forEach { add("Degraded" to it) }
         },
-      )
+      ),
     )
     add(
       ServeWeb.BugReportSection(
         "Catalogs not loaded",
         server.unhealthyCatalogs.map { "" to it },
-      )
+      ),
     )
     add(ServeWeb.BugReportSection("Recent failures", server.recentFailures.map { "" to it }))
     add(
       ServeWeb.BugReportSection(
         "Browser",
         listOf("User agent, viewport, pixel ratio, colour scheme" to "added by your browser"),
-      )
+      ),
     )
   }
 
@@ -8225,7 +8225,7 @@ class ServeHttpServer(
       if (notYet.isNotEmpty()) {
         System.err.println(
           "[serve] readiness: waiting for ${notYet.size} of ${designSystems.size} design " +
-            "system(s) to render: ${notYet.joinToString(", ")}"
+            "system(s) to render: ${notYet.joinToString(", ")}",
         )
         return false
       }
@@ -8428,7 +8428,7 @@ class ServeHttpServer(
           catalogSourceLocationsSeen.remove(sessionId)
           relatedCatalogsSeen.remove(sessionId)
         }
-      }
+      },
     )
   }
 
@@ -8947,7 +8947,9 @@ class ServeHttpServer(
           RenderPerfSnapshot.aggregate(
             // A fresh daemon reports an all-zero snapshot; keep the roll-up null until something
             // has actually rendered so a quiet server doesn't advertise a block of zeros.
-            running.mapNotNull { it.renderStats }.filter { it.renders + it.cacheHits + it.busy > 0 }
+            running
+              .mapNotNull { it.renderStats }
+              .filter { it.renders + it.cacheHits + it.busy > 0 },
           ),
         // Scoped like everything else on a site host: a per-site monitor is told about its own
         // live lane, never a neighbour's.
@@ -9098,7 +9100,7 @@ class ServeHttpServer(
         else "${liveSeats.availablePermits()} free / ${liveSeats.totalPermits}"
       val renderAgg =
         RenderPerfSnapshot.aggregate(
-          running.mapNotNull { it.renderStats }.filter { it.renders + it.cacheHits + it.busy > 0 }
+          running.mapNotNull { it.renderStats }.filter { it.renders + it.cacheHits + it.busy > 0 },
         )
       val summary = buildList {
         val loadedCatalogs = catalogs.count { it.available }
@@ -9117,7 +9119,7 @@ class ServeHttpServer(
                 ),
               ),
             ),
-          )
+          ),
         )
         val published = catalogs.sumOf { it.previews ?: 0 }
         val publishedFailures = catalogs.sumOf { it.failedRenders }
@@ -9136,7 +9138,7 @@ class ServeHttpServer(
                 ServeWeb.MeterSegment("deferred", publishedDeferred.toLong(), "muted"),
               ),
             ),
-          )
+          ),
         )
         add(ServeWeb.Stat("Live daemons running", liveDaemons.size.toString()))
         add(ServeWeb.Stat("Active streams", activeStreams.toString()))
@@ -9184,7 +9186,7 @@ class ServeHttpServer(
                     ),
                   ),
                 ),
-            )
+            ),
           )
         }
         add(
@@ -9203,7 +9205,7 @@ class ServeHttpServer(
                 ),
               )
             },
-          )
+          ),
         )
         add(ServeWeb.Stat("Known sessions", knownSessions.toString()))
         // Subprocesses, which session counts miss. Zombies are shown separately from live JVMs
@@ -9236,7 +9238,7 @@ class ServeHttpServer(
                   ),
                 )
               },
-            )
+            ),
           )
         }
         add(ServeWeb.Stat("Uptime", formatDuration(uptimeSeconds)))
@@ -9254,7 +9256,7 @@ class ServeHttpServer(
                   ServeWeb.MeterSegment("cached", renderAgg.cacheHits, "secondary"),
                 ),
               ),
-            )
+            ),
           )
           renderAgg.avgMs?.let { add(ServeWeb.Stat("Average render latency", "${it}ms")) }
           renderAgg.firstRenderMs?.let { add(ServeWeb.Stat("Worst first render", "${it}ms")) }
@@ -9945,7 +9947,8 @@ class ServeHttpServer(
     }
 
     suspend fun dispatch(
-      interaction: ServeCatalogMcp.ClientInteraction = ServeCatalogMcp.ClientInteraction.Unsupported
+      interaction: ServeCatalogMcp.ClientInteraction =
+        ServeCatalogMcp.ClientInteraction.Unsupported,
     ): ServeCatalogMcp.Reply =
       mcp.handle(
         request,
@@ -10281,7 +10284,7 @@ class ServeHttpServer(
               MaterialSymbolsSource.readAtMost(body.byteStream(), expectedBytes)
             }
         },
-      )
+      ),
     )
   }
 
@@ -10328,7 +10331,7 @@ class ServeHttpServer(
    * offline host with a cold cache; the message names the wanted file so it can be warmed by hand.
    */
   private suspend fun <T> RoutingContext.iconResultOrNull(
-    block: () -> IconResult<T>
+    block: () -> IconResult<T>,
   ): IconResult<T>? =
     try {
       // On [Dispatchers.IO]: a cold call downloads 9-15 MB and parses a font under one monitor.
@@ -11379,7 +11382,7 @@ class ServeHttpServer(
       if (preview == null) {
         respondNotFoundHtml(
           if (requested.isNullOrBlank()) "This design system declares no A2UI document preview."
-          else "That preview is not an A2UI document preview."
+          else "That preview is not an A2UI document preview.",
         )
         return@withLeasedSession
       }
@@ -12088,7 +12091,7 @@ class ServeHttpServer(
             .newBuilder()
             .also { it.player = null }
             .build()
-            .takeIf { it.profile != null || it.namedValues.isNotEmpty() }
+            .takeIf { it.profile != null || it.namedValues.isNotEmpty() },
       )
     if (
       CatalogLiveRouting.overridesAffectRender(
@@ -12376,7 +12379,7 @@ class ServeHttpServer(
               key to (values.firstOrNull() ?: "")
             },
           )
-          .params
+          .params,
       )
     // `?uiMode=dark` selects the document's dark `ColorTheme` branch; for a replayed document it is
     // a player setting.
@@ -12467,7 +12470,7 @@ class ServeHttpServer(
    * document with ([canDrawCarriedRc]). Behind the same gate as [handleDocRender].
    */
   private fun RoutingContext.docServerPlayers(
-    doc: ServeDocStore.Doc
+    doc: ServeDocStore.Doc,
   ): List<ServeWeb.DocServerPlayer> {
     if (doc.format.id != ServeDocFormats.REMOTE_COMPOSE.id) return emptyList()
     if (!mayRenderDocServerSide(call)) return emptyList()
@@ -12479,7 +12482,7 @@ class ServeHttpServer(
     val swift =
       if (RcSwiftServerRenderer.isAvailable())
         listOf(
-          ServeWeb.DocServerPlayer(ServeRcPlayerIds.SWIFT_APPKIT, "Swift (AppKit)", renderPath)
+          ServeWeb.DocServerPlayer(ServeRcPlayerIds.SWIFT_APPKIT, "Swift (AppKit)", renderPath),
         )
       else emptyList()
     val android =
@@ -12603,7 +12606,7 @@ class ServeHttpServer(
       )
     val seeds =
       ServeOverrides.rcNamedValueSeeds(
-        params.entries().associate { (key, values) -> key to (values.firstOrNull() ?: "") }
+        params.entries().associate { (key, values) -> key to (values.firstOrNull() ?: "") },
       )
     val theme = cmpJvmRenderTheme(params["uiMode"], bakedUiMode = 0)
     // An expiring capability URL must never be stored by a shared cache — no-store, as the page.
@@ -12649,7 +12652,7 @@ class ServeHttpServer(
         },
       namedValues =
         ServeOverrides.rcNamedValueSeeds(
-          params.entries().associate { (key, values) -> key to (values.firstOrNull() ?: "") }
+          params.entries().associate { (key, values) -> key to (values.firstOrNull() ?: "") },
         ),
       // An expiring capability URL must never be stored by a shared cache — no-store, as the page.
       generation = "document",
@@ -12895,7 +12898,7 @@ class ServeHttpServer(
         if (player !in players) {
           onUnavailable?.invoke(
             "${ServeRcPlayerIds.of(player)} cannot stream this document here; live players: " +
-              players.joinToString { ServeRcPlayerIds.of(it) }
+              players.joinToString { ServeRcPlayerIds.of(it) },
           )
           return null
         }
@@ -13244,7 +13247,7 @@ class ServeHttpServer(
     if (bytes.size > maxProjectableDocumentBytes) {
       throw RemoteComposeJsonException(
         "document is ${bytes.size} bytes, above the ${maxProjectableDocumentBytes}-byte " +
-          "projection limit; fetch the .rc lane for the bytes themselves"
+          "projection limit; fetch the .rc lane for the bytes themselves",
       )
     }
     return RemoteComposeJson.dump(bytes)
@@ -13930,7 +13933,7 @@ class ServeHttpServer(
 
   /** Whether this call's resolved grant came from the short-lived browser cookie. */
   private fun ApplicationCall.browsesByAgentGrantCookie(
-    grant: ServeAgentGrantStore.Grant
+    grant: ServeAgentGrantStore.Grant,
   ): Boolean =
     agentGrants?.browserCredentialMatches(
       request.cookies.rawCookies[ServeAgentGrantCookie.NAME],
@@ -14494,7 +14497,7 @@ class ServeHttpServer(
             val anonymous = AuthenticatedUiBuilderActor(ServeUiBuilderVisibility.ANONYMOUS_ACTOR_ID)
             (runCatching {
                 service.execute(
-                  UiBuilderServiceCall(anonymous, UiBuilderServiceRequest.OpenDesign(id))
+                  UiBuilderServiceCall(anonymous, UiBuilderServiceRequest.OpenDesign(id)),
                 )
               }
                 .getOrNull() as? UiBuilderServiceResponse.Snapshot)
@@ -14530,7 +14533,7 @@ class ServeHttpServer(
           ServeSocialCard.Spec(
             title = product,
             subtitle = if (profile == null) UI_BUILDER_UNFURL_SUBTITLE else "",
-          )
+          ),
         )
       }
     val unfurl =
@@ -15011,7 +15014,7 @@ class ServeHttpServer(
           service.shapeForReader(
             actor,
             service.execute(
-              UiBuilderServiceCall(actor, UiBuilderServiceRequest.ListRevisions(designId))
+              UiBuilderServiceCall(actor, UiBuilderServiceRequest.ListRevisions(designId)),
             ),
           )
       ) {
@@ -15121,7 +15124,7 @@ class ServeHttpServer(
             base,
             operationId = "restore-" + java.util.UUID.randomUUID(),
           ),
-        )
+        ),
       )
     val historyPath = call.request.path().substringBefore("/history/") + "/history"
     val outcome = (response as? UiBuilderServiceResponse.OperationOutcome)?.outcome
@@ -15180,7 +15183,7 @@ class ServeHttpServer(
       when (
         val opened =
           service.execute(
-            UiBuilderServiceCall(actor, UiBuilderServiceRequest.GetSnapshot(designId, revision))
+            UiBuilderServiceCall(actor, UiBuilderServiceRequest.GetSnapshot(designId, revision)),
           )
       ) {
         is UiBuilderServiceResponse.Snapshot -> opened.snapshot.state.document
@@ -15289,7 +15292,7 @@ class ServeHttpServer(
     val title = call.receiveParameters()["title"].orEmpty()
     val response =
       service.execute(
-        UiBuilderServiceCall(actor, UiBuilderServiceRequest.RenameDesign(designId, title))
+        UiBuilderServiceCall(actor, UiBuilderServiceRequest.RenameDesign(designId, title)),
       )
     when (response) {
       is UiBuilderServiceResponse.DesignRenamed -> {
@@ -15332,7 +15335,7 @@ class ServeHttpServer(
     when (
       val response =
         service.execute(
-          UiBuilderServiceCall(actor, UiBuilderServiceRequest.RestoreDesign(designId))
+          UiBuilderServiceCall(actor, UiBuilderServiceRequest.RestoreDesign(designId)),
         )
     ) {
       is UiBuilderServiceResponse.DesignRestored -> {
@@ -15658,7 +15661,7 @@ class ServeHttpServer(
    */
   private fun uiBuilderNewDesignOptions(
     /** The catalogs the request's host offers ([uiBuilderCatalogsFor]). */
-    offered: Set<String> = uiBuilderCatalogs
+    offered: Set<String> = uiBuilderCatalogs,
   ): List<ServeWeb.UiBuilderNewDesignOption> =
     offered.sorted().map { catalog ->
       ServeWeb.UiBuilderNewDesignOption(
@@ -15790,7 +15793,7 @@ class ServeHttpServer(
         // fixed template plus its two values, so a refresh repeats the message and not the change.
         redirectToAccessPage(
           if (revoking) listOf("changed" to "removed", "actor" to target)
-          else listOf("changed" to "shared", "actor" to target, "role" to role.name.lowercase())
+          else listOf("changed" to "shared", "actor" to target, "role" to role.name.lowercase()),
         )
       }
       is UiBuilderServiceResponse.Error ->
@@ -15824,7 +15827,7 @@ class ServeHttpServer(
    * Who is asking and which design, for both access routes; null once a refusal has been written.
    */
   private suspend fun RoutingContext.uiBuilderAccessTarget(
-    capability: UiBuilderRouteCapability
+    capability: UiBuilderRouteCapability,
   ): Pair<AuthenticatedUiBuilderActor, String>? {
     val service = designService
     val authorization = uiBuilderAuthorization
@@ -16064,7 +16067,7 @@ class ServeHttpServer(
             approvedBy = approval.approvedBy,
             expiresInText =
               AgentGrantProtocol.formatDuration(
-                ((approval.expiresAtMillis - now) / 1000).coerceAtLeast(0)
+                ((approval.expiresAtMillis - now) / 1000).coerceAtLeast(0),
               ),
             revokeCsrf =
               agentGrantCsrf.seal(held.grantId, approver.name, ServeAgentGrants.Csrf.ACTION_DENY),
@@ -16484,7 +16487,7 @@ class ServeHttpServer(
    * error.
    */
   private fun RoutingContext.catalogMcpAgentAccess(
-    store: ServeAgentGrantStore
+    store: ServeAgentGrantStore,
   ): ServeCatalogMcp.AgentAccess =
     object : ServeCatalogMcp.AgentAccess {
       override suspend fun open(
@@ -16569,7 +16572,7 @@ class ServeHttpServer(
    * independent, so report the most informative state.
    */
   private fun RoutingContext.presentedTokenState(
-    store: ServeAgentGrantStore
+    store: ServeAgentGrantStore,
   ): ServeAgentGrantStore.TokenState {
     val bearer =
       call.request.headers[HttpHeaders.Authorization]
@@ -16831,7 +16834,7 @@ class ServeHttpServer(
               "access_denied",
               "The request was declined.",
               authorization.state,
-            )
+            ),
           )
           return
         }
@@ -16938,7 +16941,7 @@ class ServeHttpServer(
           authorization.redirectUri,
           authorization.code,
           authorization.state,
-        )
+        ),
       )
       return
     }
@@ -16974,7 +16977,7 @@ class ServeHttpServer(
               "access_denied",
               "The request was declined.",
               authorization.state,
-            )
+            ),
           )
           return true
         }
@@ -16985,7 +16988,7 @@ class ServeHttpServer(
                 authorization.redirectUri,
                 authorization.code,
                 authorization.state,
-              )
+              ),
             )
             return true
           }
@@ -17014,7 +17017,7 @@ class ServeHttpServer(
           message =
             "The agent can now use this server for " +
               AgentGrantProtocol.formatDuration(
-                ((expiresAt - System.currentTimeMillis()) / 1000).coerceAtLeast(0)
+                ((expiresAt - System.currentTimeMillis()) / 1000).coerceAtLeast(0),
               ) +
               ". You can end it early from the server status page at any time.",
           detail =
@@ -17062,7 +17065,7 @@ class ServeHttpServer(
 
   /** RFC 8414: where to register, where to send the human, where to redeem the code. */
   private suspend fun RoutingContext.respondAuthorizationServerMetadata(
-    store: ServeAgentGrantStore
+    store: ServeAgentGrantStore,
   ) {
     val origin = externalOrigin()
     markGeneration("static-page", "no-store")
@@ -17210,7 +17213,7 @@ class ServeHttpServer(
             rejection.error,
             rejection.description,
             state,
-          )
+          ),
         )
         return
       }
@@ -17234,7 +17237,7 @@ class ServeHttpServer(
           "temporarily_unavailable",
           "Too many pending access requests on this server; try again shortly.",
           state,
-        )
+        ),
       )
       return
     }
@@ -17254,7 +17257,7 @@ class ServeHttpServer(
           "temporarily_unavailable",
           "Too many authorizations in flight on this server; try again shortly.",
           state,
-        )
+        ),
       )
       return
     }
@@ -17436,7 +17439,7 @@ class ServeHttpServer(
    * only.
    */
   private fun RoutingContext.agentGrantApprover(
-    store: ServeAgentGrantStore
+    store: ServeAgentGrantStore,
   ): ServeAgentGrants.Approver? {
     // The server's front door first: on a private box with OAuth, a GitHub session alone would let
     // any allowed account approve its own request without the browse token. A `--public` box has no
@@ -17608,7 +17611,7 @@ class ServeHttpServer(
    * grant" and admit the request.
    */
   private fun RoutingContext.grantBelowScope(
-    required: AgentGrantScope
+    required: AgentGrantScope,
   ): ServeAgentGrantStore.Grant? = agentGrantFor(call)?.takeIf { !it.allows(required) }
 
   private suspend fun RoutingContext.respondBelowScope(

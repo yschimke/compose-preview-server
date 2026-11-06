@@ -41,7 +41,7 @@ class ServeUiBuilderProjectCollaborationTest {
                   "text",
                   "m3/text",
                   properties = mapOf("text" to StringValueV1("Initial")),
-                )
+                ),
             ),
         )
     project =
@@ -74,8 +74,8 @@ class ServeUiBuilderProjectCollaborationTest {
   ) =
     assertIs<UiBuilderServiceResponse.Designs>(
       service.execute(
-        UiBuilderServiceCall(actor, UiBuilderServiceRequest.ListDesigns(cursor, limit))
-      )
+        UiBuilderServiceCall(actor, UiBuilderServiceRequest.ListDesigns(cursor, limit)),
+      ),
     )
 
   private suspend fun branch(actor: AuthenticatedUiBuilderActor, request: UiBuilderBranchRequest) =
@@ -88,11 +88,11 @@ class ServeUiBuilderProjectCollaborationTest {
       assertTrue(
         assertIs<UiBuilderServiceResponse.Designs>(
             raw.execute(
-              UiBuilderServiceCall(viewer, UiBuilderServiceRequest.ListDesigns(null, 200))
-            )
+              UiBuilderServiceCall(viewer, UiBuilderServiceRequest.ListDesigns(null, 200)),
+            ),
           )
           .designs
-          .isEmpty()
+          .isEmpty(),
       )
       for (n in 1..3) {
         assertIs<UiBuilderServiceResponse.Snapshot>(
@@ -100,10 +100,10 @@ class ServeUiBuilderProjectCollaborationTest {
             UiBuilderServiceCall(
               viewer,
               UiBuilderServiceRequest.CreateDesign(
-                PROJECT_JSON.decodeFromString(documentText("own-$n"))
+                PROJECT_JSON.decodeFromString(documentText("own-$n")),
               ),
-            )
-          )
+            ),
+          ),
         )
       }
       assertIs<UiBuilderServiceResponse.Snapshot>(
@@ -111,10 +111,10 @@ class ServeUiBuilderProjectCollaborationTest {
           UiBuilderServiceCall(
             owner,
             UiBuilderServiceRequest.CreateDesign(
-              PROJECT_JSON.decodeFromString(documentText("unrelated-owner"))
+              PROJECT_JSON.decodeFromString(documentText("unrelated-owner")),
             ),
-          )
-        )
+          ),
+        ),
       )
       val first = list(viewer, limit = 1)
       val shared = first.designs.single { it.designId == id }
@@ -133,7 +133,7 @@ class ServeUiBuilderProjectCollaborationTest {
       assertTrue(DesignAccessActionV1.WRITE in editable.requesterAccess.allowedActions)
       assertFalse(
         DesignAccessActionV1.MANAGE_ACCESS in
-          list(owner).designs.single { it.designId == id }.requesterAccess.allowedActions
+          list(owner).designs.single { it.designId == id }.requesterAccess.allowedActions,
       )
     }
 
@@ -146,15 +146,15 @@ class ServeUiBuilderProjectCollaborationTest {
             branch(
               editor,
               UiBuilderBranchRequest.CreateBranch(id, "Alternative", branchId = "alternative"),
-            )
+            ),
           )
           .branch
       assertEquals(owner.actorId, created.ownerActorId)
       assertIs<UiBuilderBranchResponse.Branches>(
-        branch(viewer, UiBuilderBranchRequest.ListBranches(id))
+        branch(viewer, UiBuilderBranchRequest.ListBranches(id)),
       )
       assertIs<UiBuilderBranchResponse.Branch>(
-        branch(viewer, UiBuilderBranchRequest.GetBranch(created.branchId))
+        branch(viewer, UiBuilderBranchRequest.GetBranch(created.branchId)),
       )
       for (request in
         listOf(
@@ -170,7 +170,7 @@ class ServeUiBuilderProjectCollaborationTest {
       assertEquals(
         ServiceErrorCodeV1.NOT_FOUND,
         assertIs<UiBuilderBranchResponse.Error>(
-            branch(stranger, UiBuilderBranchRequest.GetBranch(created.branchId))
+            branch(stranger, UiBuilderBranchRequest.GetBranch(created.branchId)),
           )
           .error
           .code,
@@ -178,8 +178,8 @@ class ServeUiBuilderProjectCollaborationTest {
       val opened =
         assertIs<UiBuilderServiceResponse.Snapshot>(
           service.execute(
-            UiBuilderServiceCall(editor, UiBuilderServiceRequest.OpenDesign(created.branchId))
-          )
+            UiBuilderServiceCall(editor, UiBuilderServiceRequest.OpenDesign(created.branchId)),
+          ),
         )
       val edited =
         service.execute(
@@ -192,23 +192,23 @@ class ServeUiBuilderProjectCollaborationTest {
                 "editor",
                 opened.snapshot.state.document.revision,
                 listOf(SetPropertyMutationV1("text", "text", StringValueV1("Edited"))),
-              )
+              ),
             ),
-          )
+          ),
         )
       assertIs<AcceptedOutcomeV1>(
-        assertIs<UiBuilderServiceResponse.OperationOutcome>(edited).outcome
+        assertIs<UiBuilderServiceResponse.OperationOutcome>(edited).outcome,
       )
       assertTrue(
         assertIs<UiBuilderBranchResponse.Merge>(
-            branch(editor, UiBuilderBranchRequest.MergeBranch(created.branchId))
+            branch(editor, UiBuilderBranchRequest.MergeBranch(created.branchId)),
           )
           .report
-          .merged
+          .merged,
       )
       val parent =
         assertIs<UiBuilderServiceResponse.Snapshot>(
-          service.execute(UiBuilderServiceCall(viewer, UiBuilderServiceRequest.OpenDesign(id)))
+          service.execute(UiBuilderServiceCall(viewer, UiBuilderServiceRequest.OpenDesign(id))),
         )
       assertEquals(
         StringValueV1("Edited"),
@@ -216,11 +216,14 @@ class ServeUiBuilderProjectCollaborationTest {
       )
       val archived =
         assertIs<UiBuilderBranchResponse.Branch>(
-            branch(editor, UiBuilderBranchRequest.CreateBranch(id, "Discard", branchId = "discard"))
+            branch(
+              editor,
+              UiBuilderBranchRequest.CreateBranch(id, "Discard", branchId = "discard"),
+            ),
           )
           .branch
       assertIs<UiBuilderBranchResponse.Branch>(
-        branch(editor, UiBuilderBranchRequest.ArchiveBranch(archived.branchId))
+        branch(editor, UiBuilderBranchRequest.ArchiveBranch(archived.branchId)),
       )
     }
 
@@ -233,7 +236,7 @@ class ServeUiBuilderProjectCollaborationTest {
             branch(
               editor,
               UiBuilderBranchRequest.CreateBranch(id, "Alternative", branchId = "alternative"),
-            )
+            ),
           )
           .branch
       projects.members(owner, project.id, ProjectMembers(project.revision, emptyMap()))
@@ -241,7 +244,7 @@ class ServeUiBuilderProjectCollaborationTest {
       assertEquals(
         ServiceErrorCodeV1.NOT_FOUND,
         assertIs<UiBuilderBranchResponse.Error>(
-            branch(editor, UiBuilderBranchRequest.MergeBranch(created.branchId))
+            branch(editor, UiBuilderBranchRequest.MergeBranch(created.branchId)),
           )
           .error
           .code,
@@ -253,8 +256,8 @@ class ServeUiBuilderProjectCollaborationTest {
               UiBuilderServiceCall(
                 editor,
                 UiBuilderServiceRequest.OpenDesign(created.branchId),
-              )
-            )
+              ),
+            ),
           )
           .error
           .code,
@@ -276,10 +279,10 @@ class ServeUiBuilderProjectCollaborationTest {
           UiBuilderServiceCall(
             owner,
             UiBuilderServiceRequest.CreateDesign(
-              PROJECT_JSON.decodeFromString(documentText("ordinary"))
+              PROJECT_JSON.decodeFromString(documentText("ordinary")),
             ),
-          )
-        )
+          ),
+        ),
       )
       var branchReads = 0
       val indexed =
@@ -296,8 +299,8 @@ class ServeUiBuilderProjectCollaborationTest {
             UiBuilderServiceCall(
               owner,
               UiBuilderServiceRequest.ListDesigns(null, 200),
-            )
-          )
+            ),
+          ),
         )
       assertTrue(listing.designs.any { it.designId == "ordinary" })
       assertEquals(0, branchReads, "ordinary listing rows never request branch ancestry")
@@ -306,8 +309,8 @@ class ServeUiBuilderProjectCollaborationTest {
           UiBuilderServiceCall(
             owner,
             UiBuilderServiceRequest.OpenDesign("ordinary"),
-          )
-        )
+          ),
+        ),
       )
       assertEquals(1, branchReads, "the direct owner index avoids scanning 21 project owners")
       assertIs<UiBuilderServiceResponse.Error>(
@@ -315,8 +318,8 @@ class ServeUiBuilderProjectCollaborationTest {
           UiBuilderServiceCall(
             owner,
             UiBuilderServiceRequest.OpenDesign("missing"),
-          )
-        )
+          ),
+        ),
       )
       assertEquals(1, branchReads, "missing IDs need no branch read")
     }
@@ -330,7 +333,7 @@ class ServeUiBuilderProjectCollaborationTest {
             branch(
               editor,
               UiBuilderBranchRequest.CreateBranch(id, "Alternative", branchId = "alternative"),
-            )
+            ),
           )
           .branch
       val registry = ServeSessionRegistry(open = { null })
@@ -365,7 +368,7 @@ class ServeUiBuilderProjectCollaborationTest {
             okhttp3.Request.Builder()
               .url("http://127.0.0.1:${server.port}$path")
               .header("X-Test-Actor", actor.actorId)
-              .build()
+              .build(),
           )
           .execute()
           .use { it.code to it.body!!.string() }
@@ -390,7 +393,7 @@ class ServeUiBuilderProjectCollaborationTest {
             branch(
               editor,
               UiBuilderBranchRequest.CreateBranch(id, "Alternative", branchId = "alternative"),
-            )
+            ),
           )
           .branch
       val agent = AuthenticatedUiBuilderActor("agent:writer", editor.actorId)
@@ -402,20 +405,20 @@ class ServeUiBuilderProjectCollaborationTest {
       val scopedService = ServeUiBuilderGrantScope.limit(service, lookup, parents)
       assertIs<UiBuilderBranchResponse.Branch>(
         scopedBranches.executeBranch(
-          UiBuilderBranchCall(agent, UiBuilderBranchRequest.GetBranch(created.branchId))
-        )
+          UiBuilderBranchCall(agent, UiBuilderBranchRequest.GetBranch(created.branchId)),
+        ),
       )
       assertIs<UiBuilderServiceResponse.Snapshot>(
         scopedService.execute(
-          UiBuilderServiceCall(agent, UiBuilderServiceRequest.OpenDesign(created.branchId))
-        )
+          UiBuilderServiceCall(agent, UiBuilderServiceRequest.OpenDesign(created.branchId)),
+        ),
       )
       assertEquals(
         listOf(id),
         assertIs<UiBuilderServiceResponse.Designs>(
             scopedService.execute(
-              UiBuilderServiceCall(agent, UiBuilderServiceRequest.ListDesigns(null, 200))
-            )
+              UiBuilderServiceCall(agent, UiBuilderServiceRequest.ListDesigns(null, 200)),
+            ),
           )
           .designs
           .map { it.designId },
@@ -425,10 +428,10 @@ class ServeUiBuilderProjectCollaborationTest {
           UiBuilderServiceCall(
             editor,
             UiBuilderServiceRequest.CreateDesign(
-              PROJECT_JSON.decodeFromString(documentText("unrelated"))
+              PROJECT_JSON.decodeFromString(documentText("unrelated")),
             ),
-          )
-        )
+          ),
+        ),
       )
       val unrelated =
         assertIs<UiBuilderBranchResponse.Branch>(
@@ -440,30 +443,30 @@ class ServeUiBuilderProjectCollaborationTest {
                   "Outside grant",
                   branchId = "outside",
                 ),
-              )
-            )
+              ),
+            ),
           )
           .branch
       assertIs<UiBuilderServiceResponse.Error>(
         scopedService.execute(
-          UiBuilderServiceCall(agent, UiBuilderServiceRequest.OpenDesign("unrelated"))
-        )
+          UiBuilderServiceCall(agent, UiBuilderServiceRequest.OpenDesign("unrelated")),
+        ),
       )
       assertIs<UiBuilderServiceResponse.Error>(
         scopedService.execute(
           UiBuilderServiceCall(
             agent,
             UiBuilderServiceRequest.OpenDesign(unrelated.branchId),
-          )
-        )
+          ),
+        ),
       )
       assertIs<UiBuilderBranchResponse.Error>(
         scopedBranches.executeBranch(
           UiBuilderBranchCall(
             agent,
             UiBuilderBranchRequest.GetBranch(unrelated.branchId),
-          )
-        )
+          ),
+        ),
       )
     }
 }

@@ -12,7 +12,7 @@ class CatalogLoadTrackerTest {
       CatalogLoadTracker(
         listOf("first", "second", "third").map {
           CatalogLoadTracker.Config(it, true, "owner/repo", "design-artifacts/$it")
-        }
+        },
       )
     assertEquals("first", tracker.nextInitialLoad()?.system)
     assertFalse(tracker.prioritize("first"))
@@ -107,7 +107,7 @@ class CatalogLoadTrackerTest {
         repo = "yschimke/m3-catalog",
         branch = "design-artifacts/m3-catalog",
         loadPriority = 20,
-      )
+      ),
     )
     tracker.add(
       CatalogLoadTracker.Config(
@@ -116,7 +116,7 @@ class CatalogLoadTrackerTest {
         repo = "yschimke/wear-m3-catalog",
         branch = "design-artifacts/wear-m3-catalog",
         loadPriority = 10,
-      )
+      ),
     )
 
     // A runtime registration is APPENDED, which is exactly how the two catalogs a box most wants
@@ -149,7 +149,7 @@ class CatalogLoadTrackerTest {
     tracker.recordSuccess("jetnews")
 
     assertTrue(
-      tracker.repoint("jetnews", repo = "someorg/new-home", branch = "design-artifacts/jetnews")
+      tracker.repoint("jetnews", repo = "someorg/new-home", branch = "design-artifacts/jetnews"),
     )
 
     val jetnews = tracker.snapshot().single { it.config.system == "jetnews" }
@@ -182,7 +182,7 @@ class CatalogLoadTrackerTest {
         loadPriority = 5,
         importedFrom = null,
         designSystem = false,
-      )
+      ),
     )
 
     val reply = tracker.snapshot().single { it.config.system == "reply" }
@@ -205,7 +205,7 @@ class CatalogLoadTrackerTest {
         // queue with a number, because the queue exists to satisfy the readiness gate and the gate
         // does not wait on samples.
         loadPriority = 99,
-      )
+      ),
     )
     tracker.add(
       CatalogLoadTracker.Config(
@@ -214,7 +214,7 @@ class CatalogLoadTrackerTest {
         repo = "yschimke/m3-catalog",
         branch = "design-artifacts/glimmer-catalog",
         designSystem = true,
-      )
+      ),
     )
     tracker.add(
       CatalogLoadTracker.Config(
@@ -224,7 +224,7 @@ class CatalogLoadTrackerTest {
         branch = "design-artifacts/m3-catalog",
         loadPriority = 20,
         designSystem = true,
-      )
+      ),
     )
 
     // Both design systems first, ordered among themselves by priority; then the rest by theirs.
@@ -244,7 +244,7 @@ class CatalogLoadTrackerTest {
         repo = "yschimke/m3-catalog",
         branch = "design-artifacts/glimmer-catalog",
         designSystem = true,
-      )
+      ),
     )
 
     // Never fetched, so not available -- and still in the set. A readiness gate reading only the
@@ -268,7 +268,7 @@ class CatalogLoadTrackerTest {
         loadPriority = 0,
         importedFrom = null,
         designSystem = true,
-      )
+      ),
     )
     assertEquals(listOf("jetnews"), tracker.designSystemSystems())
     assertEquals(listOf("jetnews", "reply"), tracker.loadOrder().map { it.config.system })
@@ -281,7 +281,7 @@ class CatalogLoadTrackerTest {
         loadPriority = 0,
         importedFrom = null,
         designSystem = false,
-      )
+      ),
     )
     assertEquals(emptyList(), tracker.designSystemSystems())
   }

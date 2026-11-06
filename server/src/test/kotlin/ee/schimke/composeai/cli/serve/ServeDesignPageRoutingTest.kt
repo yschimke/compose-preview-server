@@ -302,7 +302,7 @@ class ServeDesignPageRoutingTest {
                         node.name = "Shape=Circle"
                         node.link = ee.schimke.composeai.designpages.PageNodeLink.MANIFEST
                       }
-                      .build()
+                      .build(),
                   )
               }
               .build(),

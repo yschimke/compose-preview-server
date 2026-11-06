@@ -114,7 +114,7 @@ class ServePushRoutesTest {
         Request.Builder()
           .url(url("/auth/github/callback?code=ok&state=$state"))
           .header("Cookie", start.second)
-          .build()
+          .build(),
       )
       .execute()
       .use { resp ->
@@ -124,7 +124,7 @@ class ServePushRoutesTest {
 
   private val browserKey =
     ServeWebPush.base64Url(
-      ServeWebPush.rawPublicKey(ServeWebPush.generateKeyPair().public as ECPublicKey)
+      ServeWebPush.rawPublicKey(ServeWebPush.generateKeyPair().public as ECPublicKey),
     )
   private val authSecret = ServeWebPush.base64Url(ByteArray(16) { 9 })
 

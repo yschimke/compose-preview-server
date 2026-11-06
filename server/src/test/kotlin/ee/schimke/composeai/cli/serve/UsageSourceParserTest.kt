@@ -33,7 +33,7 @@ class UsageSourceParserTest {
   fun `arguments carry their labels`() {
     val facts =
       assertNotNull(
-        parser?.facts("""fun x() = Text(previewOverrideString(key = "k", default = "v"))""")
+        parser?.facts("""fun x() = Text(previewOverrideString(key = "k", default = "v"))"""),
       )
     val call = assertNotNull(facts.calls.firstOrNull { it.callee == "previewOverrideString" })
     assertEquals(
@@ -78,8 +78,8 @@ class UsageSourceParserTest {
             state.metrics.counted { }
           }
           """
-            .trimIndent()
-        )
+            .trimIndent(),
+        ),
       )
     val byName = facts.calls.associateBy { it.callee }
     assertEquals("ee.schimke.composeai.overrides", byName["previewOverrideString"]?.receiver)
@@ -102,8 +102,8 @@ class UsageSourceParserTest {
             previewOverrideString("a", "b")
           }
           """
-            .trimIndent()
-        )
+            .trimIndent(),
+        ),
       )
     val calls = facts.calls.filter { it.callee == "previewOverrideString" }
     assertEquals(2, calls.size)

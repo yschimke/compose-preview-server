@@ -75,7 +75,7 @@ class ServeCatalogMcpChatFallbackTest {
     val request =
       Json.parseToJsonElement(
           """{"jsonrpc":"2.0","id":1,"method":"tools/call",
-              "params":{"name":"$tool","arguments":$arguments}}"""
+              "params":{"name":"$tool","arguments":$arguments}}""",
         )
         .jsonObject
     val body =
@@ -83,7 +83,7 @@ class ServeCatalogMcpChatFallbackTest {
         runBlocking {
           mcp.handle(request) { ServeMachineAuthorization.Decision.Authorized("agent:test") }
         }
-          .body
+          .body,
       )
     return body["result"]!!.jsonObject
   }
@@ -161,7 +161,7 @@ class ServeCatalogMcpChatFallbackTest {
     ChatFallbackAssertions.assertChatReadable(result, origin, png)
     val body =
       Json.parseToJsonElement(
-          result["content"]!!.jsonArray[0].jsonObject["text"]!!.jsonPrimitive.content
+          result["content"]!!.jsonArray[0].jsonObject["text"]!!.jsonPrimitive.content,
         )
         .jsonObject
     val cells = body["cells"]!!.jsonArray.map { it.jsonObject }
@@ -196,7 +196,7 @@ class ServeCatalogMcpChatFallbackTest {
       )
     val body =
       Json.parseToJsonElement(
-          result["content"]!!.jsonArray[0].jsonObject["text"]!!.jsonPrimitive.content
+          result["content"]!!.jsonArray[0].jsonObject["text"]!!.jsonPrimitive.content,
         )
         .jsonObject
     val cells = body["cells"]!!.jsonArray.map { it.jsonObject }

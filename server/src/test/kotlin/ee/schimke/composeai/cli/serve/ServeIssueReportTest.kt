@@ -40,7 +40,7 @@ class ServeIssueReportTest {
   /** The same report as filed from the focused comparison, which has the reference too. */
   private val pair =
     full.copy(
-      referenceUrl = "https://preview.coo.ee/jetnews/reference/article-card-figma.png?uiMode=dark"
+      referenceUrl = "https://preview.coo.ee/jetnews/reference/article-card-figma.png?uiMode=dark",
     )
 
   @Test
@@ -77,7 +77,7 @@ class ServeIssueReportTest {
     assertTrue(body.contains("| Preview | `Article__dark` |"), body)
     assertTrue(
       body.contains(
-        "| Source | https://github.com/yschimke/compose-samples/blob/previews/app/Article.kt |"
+        "| Source | https://github.com/yschimke/compose-samples/blob/previews/app/Article.kt |",
       ),
       body,
     )
@@ -203,7 +203,7 @@ class ServeIssueReportTest {
     // legible on GitHub's white page (see [ServeRenderMatte]).
     assertTrue(
       body.contains(
-        "![Article](https://preview.coo.ee/jetnews/render/Article__dark.png?uiMode=dark&bg=auto)"
+        "![Article](https://preview.coo.ee/jetnews/render/Article__dark.png?uiMode=dark&bg=auto)",
       ),
       body,
     )
@@ -227,7 +227,7 @@ class ServeIssueReportTest {
         "| ![reference](https://preview.coo.ee/jetnews/reference/article-card-figma.png" +
           "?uiMode=dark) | " +
           "![Article](https://preview.coo.ee/jetnews/render/Article__dark.png" +
-          "?uiMode=dark&bg=auto) |"
+          "?uiMode=dark&bg=auto) |",
       ),
       body,
     )
@@ -335,7 +335,7 @@ class ServeIssueReportTest {
     // The placeholder is not itself a URL, so embeddability is decided by the real render URL —
     // otherwise the JS swap could turn a working image into a broken one, or vice versa.
     assertTrue(
-      ServeIssueReport.body(full, renderPlaceholder = true).contains("![Article]({{render}})")
+      ServeIssueReport.body(full, renderPlaceholder = true).contains("![Article]({{render}})"),
     )
     val local = full.copy(renderUrl = "http://127.0.0.1:8080/render/a.png")
     val tpl = ServeIssueReport.body(local, renderPlaceholder = true)
@@ -397,7 +397,7 @@ class ServeIssueReportTest {
     // The lane is in the query, and it is the whole of what "which comparison" means here.
     assertTrue(
       body.contains(
-        "[Open this page](https://preview.coo.ee/wear-m3-catalog/compare?format=reference)"
+        "[Open this page](https://preview.coo.ee/wear-m3-catalog/compare?format=reference)",
       ),
       body,
     )
@@ -451,7 +451,7 @@ class ServeIssueReportTest {
     // back. A shared fixture is what stops each engine only testing itself.
     val fixture =
       Json.parseToJsonElement(
-          File(repoRoot(), "scripts/design-artifacts/fixtures/parity-locators.json").readText()
+          File(repoRoot(), "scripts/design-artifacts/fixtures/parity-locators.json").readText(),
         )
         .jsonObject
     assertEquals(ServeIssueReport.LOCATOR_FENCE, fixture["schema"]?.jsonPrimitive?.contentOrNull)
@@ -490,7 +490,7 @@ class ServeIssueReportTest {
     // names three).
     val fixture =
       Json.parseToJsonElement(
-          File(repoRoot(), "scripts/design-artifacts/fixtures/parity-locators.json").readText()
+          File(repoRoot(), "scripts/design-artifacts/fixtures/parity-locators.json").readText(),
         )
         .jsonObject
     val bodies =
@@ -545,7 +545,7 @@ class ServeIssueReportTest {
           overrides = emptyMap(),
           element = "glyph",
           bounds = bounds,
-        )
+        ),
       )
     assertEquals(bounds, ServeIssueReport.locatorFromBody(block)?.bounds)
     assertEquals("glyph", ServeIssueReport.locatorFromBody(block)?.element)
@@ -559,7 +559,7 @@ class ServeIssueReportTest {
         block.replace(
           """{"height":24,"space":"render-pixels","width":24,"x":18,"y":18}""",
           """{"x":18,"y":18,"width":24,"height":24,"space":"render-pixels"}""",
-        )
+        ),
       ),
       "non-canonical key order is refused, as it is for overrides",
     )
@@ -578,7 +578,7 @@ class ServeIssueReportTest {
           componentId = "IconButton/Tonal",
           referenceId = "iconbutton-tonal-figma",
           element = "  glyph  ",
-        )
+        ),
       )
     assertEquals("  glyph  ", locator?.element)
     val block = ServeIssueReport.locatorBlock(locator!!)
@@ -603,7 +603,7 @@ class ServeIssueReportTest {
           componentId = "IconButton/Tonal",
           referenceId = "iconbutton-tonal-figma",
           element = "row\nrevision: injected",
-        )
+        ),
       )!!
     val block = ServeIssueReport.locatorBlock(locator)
     assertTrue("""element: "row\nrevision: injected"""" in block, block)
@@ -612,7 +612,7 @@ class ServeIssueReportTest {
     assertNull(read?.revision, "the injected line is part of the tag, not a field of its own")
     // A bare tag is refused rather than read as syntax.
     assertNull(
-      ServeIssueReport.locatorFromBody(block.replace(""""row\nrevision: injected"""", "row"))
+      ServeIssueReport.locatorFromBody(block.replace(""""row\nrevision: injected"""", "row")),
     )
   }
 
@@ -685,7 +685,7 @@ class ServeIssueReportTest {
     assertFalse(ServeIssueReport.SELECTION_PLACEHOLDER in ServeIssueReport.body(ctx))
     assertTrue(
       ServeIssueReport.SELECTION_PLACEHOLDER in
-        ServeIssueReport.body(ctx, renderPlaceholder = true, selectionPlaceholder = true)
+        ServeIssueReport.body(ctx, renderPlaceholder = true, selectionPlaceholder = true),
     )
   }
 

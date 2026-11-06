@@ -47,7 +47,7 @@ class ServeUiBuilderVisibilityTest {
     val actor = AuthenticatedUiBuilderActor("github:owner")
     runBlocking {
       wrapped.execute(
-        UiBuilderServiceCall(actor, UiBuilderServiceRequest.ListDesigns(cursor = null, limit = 1))
+        UiBuilderServiceCall(actor, UiBuilderServiceRequest.ListDesigns(cursor = null, limit = 1)),
       )
     }
     assertEquals(1, calls.size, "nothing but a create is followed by a grant")
@@ -59,7 +59,7 @@ class ServeUiBuilderVisibilityTest {
     assertEquals(UiBuilderPublicAccess.ANYONE_ACTOR_ID, grant.actorId)
     assertTrue(grant.allowedActions.all { it in UiBuilderPublicAccess.PUBLIC_ACTIONS })
     assertTrue(
-      ServeUiBuilderVisibility.isReservedActor(ServeUiBuilderVisibility.ANONYMOUS_ACTOR_ID)
+      ServeUiBuilderVisibility.isReservedActor(ServeUiBuilderVisibility.ANONYMOUS_ACTOR_ID),
     )
     assertTrue(ServeUiBuilderVisibility.isReservedActor(grant.actorId))
     assertEquals(false, ServeUiBuilderVisibility.isReservedActor("github:octocat"))

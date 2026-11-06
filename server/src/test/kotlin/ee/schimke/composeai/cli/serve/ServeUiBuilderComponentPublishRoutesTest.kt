@@ -103,7 +103,7 @@ class ServeUiBuilderComponentPublishRoutesTest {
     File(committed, "index.json")
       .writeText(
         """{"schema":"${ServeUiBuilderComponentLibrary.INDEX_SCHEMA}",
-           "components":[$entry]}"""
+           "components":[$entry]}""",
       )
     val fromProject = ServeUiBuilderComponentLibrary(fetch = { _, _ -> null })
     val coordinate =
@@ -133,7 +133,7 @@ class ServeUiBuilderComponentPublishRoutesTest {
     File(committed, "index.json")
       .writeText(
         """{"schema":"${ServeUiBuilderComponentLibrary.INDEX_SCHEMA}",
-           "components":[{"id":"inbox-email","title":"Inbox email"}]}"""
+           "components":[{"id":"inbox-email","title":"Inbox email"}]}""",
       )
     start()
 
@@ -157,7 +157,7 @@ class ServeUiBuilderComponentPublishRoutesTest {
               nodeId = it.id,
             )
           }
-      }
+      },
     )
 
     val (code, body) = put("inbox-email", publishRequest())
@@ -176,7 +176,7 @@ class ServeUiBuilderComponentPublishRoutesTest {
           put("title", JsonPrimitive("Inbox email"))
           replacesDigest?.let { put("replacesDigest", JsonPrimitive(it)) }
           put("document", Json.parseToJsonElement(document(text)))
-        }
+        },
       )
       .toString()
 
@@ -245,7 +245,7 @@ class ServeUiBuilderComponentPublishRoutesTest {
               ServeUiBuilderDesignLibrary.Coordinate(
                 system = SYSTEM,
                 source = ServeUiBuilderDesignLibrary.Source.Directory(project),
-              )
+              ),
             )
           },
         )

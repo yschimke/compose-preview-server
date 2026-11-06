@@ -941,7 +941,7 @@ $noteBlock        <div class="cp-site-footer-links">
     reportBugForm(
       "<button type=\"submit\" class=\"cp-report-bug-link\"" +
         " title=\"Report a bug in the preview server itself — not in a preview\">" +
-        "$GITHUB_ICON report a server bug</button>"
+        "$GITHUB_ICON report a server bug</button>",
     )
 
   /**
@@ -989,7 +989,7 @@ ${reportBugForm(
         "<span class=\"cp-fab-what\">Something is wrong with the <strong>preview " +
         "server</strong></span>" +
         "<span class=\"cp-fab-who\">the page, a control, a render that failed &mdash; goes to " +
-        "<code>${WebEscaping.htmlEscape(ServeBugReport.REPO)}</code></span></button>"
+        "<code>${WebEscaping.htmlEscape(ServeBugReport.REPO)}</code></span></button>",
     )
       .prependIndent("          ")}
 ${captureControlsHtml().prependIndent("          ")}
@@ -1933,14 +1933,14 @@ ${captureControlsHtml().prependIndent("          ")}
     val items = buildList {
       add(
         "<span class=\"cp-prov-item\"><span class=\"cp-prov-key\">catalog</span> " +
-          "<a href=\"$branchUrl\">$GITHUB_ICON $repo@$branch</a></span>"
+          "<a href=\"$branchUrl\">$GITHUB_ICON $repo@$branch</a></span>",
       )
       // Which publish is on screen; the branch link alone names a moving target.
       ServeCatalogRevision.treeUrl(prov.repo, prov.commit)?.let { url ->
         add(
           "<span class=\"cp-prov-item\"><span class=\"cp-prov-key\">revision</span> " +
             "<a href=\"${WebEscaping.htmlEscape(url)}\"><code>" +
-            "${WebEscaping.htmlEscape(ServeCatalogRevision.short(prov.commit!!))}</code></a></span>"
+            "${WebEscaping.htmlEscape(ServeCatalogRevision.short(prov.commit!!))}</code></a></span>",
         )
       }
       prov.generatedAt
@@ -1948,7 +1948,7 @@ ${captureControlsHtml().prependIndent("          ")}
         ?.let {
           add(
             "<span class=\"cp-prov-item\"><span class=\"cp-prov-key\">generated</span> " +
-              "${WebEscaping.htmlEscape(prettyDate(it))}</span>"
+              "${WebEscaping.htmlEscape(prettyDate(it))}</span>",
           )
         }
       val tool = prov.toolVersion?.takeIf { it.isNotBlank() }
@@ -1960,7 +1960,7 @@ ${captureControlsHtml().prependIndent("          ")}
         }
         add(
           "<span class=\"cp-prov-item\"><span class=\"cp-prov-key\">rendered by</span> " +
-            "${parts.joinToString(" · ")}</span>"
+            "${parts.joinToString(" · ")}</span>",
         )
       }
       add("<span class=\"cp-prov-item\"><a href=\"$actionUrl\">regenerate ↗</a></span>")
@@ -1968,7 +1968,7 @@ ${captureControlsHtml().prependIndent("          ")}
         add(
           "<span class=\"cp-prov-item\"><button type=\"button\" class=\"cp-prov-refresh\" " +
             "data-refresh-url=\"${WebEscaping.htmlEscape(it)}\">refresh</button>" +
-            "<span class=\"cp-prov-refresh-status\" role=\"status\" aria-live=\"polite\"></span></span>"
+            "<span class=\"cp-prov-refresh-status\" role=\"status\" aria-live=\"polite\"></span></span>",
         )
       }
     }
@@ -3451,7 +3451,7 @@ ${captureControlsHtml().prependIndent("          ")}
     val allDirectories =
       listOfNotNull(
         if (!includeMotion) null
-        else motionDirectory(preview, default, variants, byHref, ::href, basePath, q)
+        else motionDirectory(preview, default, variants, byHref, ::href, basePath, q),
       ) + directories
     // One render and no directories: nothing to show. With a directory the subtree is worth drawing
     // even for a single render.
@@ -3719,7 +3719,7 @@ ${captureControlsHtml().prependIndent("          ")}
         append("\n$indent<button type=\"button\" class=\"cp-theme-btn\"")
         val modeAttr = t.mode?.let { " data-theme-mode=\"${WebEscaping.htmlEscape(it)}\"" } ?: ""
         append(
-          " data-theme-choice=\"theme:${WebEscaping.htmlEscape(t.providerFqn)}\"$modeAttr$title>"
+          " data-theme-choice=\"theme:${WebEscaping.htmlEscape(t.providerFqn)}\"$modeAttr$title>",
         )
         append("$label</button>")
       }
@@ -5425,7 +5425,7 @@ ${captureControlsHtml().prependIndent("          ")}
             (isNonDefaultState(it) ||
               hasNonDefaultProps(it) ||
               isNonPrimarySize(it, primarySizes, darkFirst))
-        }
+        },
       )
     val duplicateLabels =
       cards
@@ -5556,7 +5556,7 @@ ${captureControlsHtml().prependIndent("          ")}
       val why =
         WebEscaping.htmlEscape(
           invite.deniedReason.takeIf { it.isNotBlank() }
-            ?: "Your account does not carry the access creating a design needs."
+            ?: "Your account does not carry the access creating a design needs.",
         )
       return "<details class=\"cp-action-note cp-site-builder-note\">" +
         "<summary class=\"cp-action-chip cp-action-chip--locked\" " +
@@ -5841,7 +5841,7 @@ ${captureControlsHtml().prependIndent("          ")}
           homeRows(
               sections.mapIndexed { index, s ->
                 s to if (index == 0) "cp-grid" else "cp-grid-$index"
-              }
+              },
             ) {
               it.first.systems.size
             }
@@ -5916,14 +5916,14 @@ ${captureControlsHtml().prependIndent("          ")}
       append("<h1 class=\"cp-head\">All modules</h1>\n")
       append(
         "<p class=\"cp-sub\">${counted(sections.size, "module(s)")} · " +
-          "${counted(total, "preview(s)")}</p>\n"
+          "${counted(total, "preview(s)")}</p>\n",
       )
       for (section in sections) {
         val base = "/" + WebEscaping.urlEncodeSegment(section.sessionId)
         val label = WebEscaping.htmlEscape(section.label)
         append(
           "<section class=\"cp-all-module\" id=\"module-${WebEscaping.htmlEscape(section.sessionId)}\" " +
-            "data-session=\"${WebEscaping.htmlEscape(section.sessionId)}\">\n"
+            "data-session=\"${WebEscaping.htmlEscape(section.sessionId)}\">\n",
         )
         append(
           "<h2 class=\"cp-all-module-head\"><a href=\"$base/$suffix\">$label</a> " +
@@ -5931,7 +5931,7 @@ ${captureControlsHtml().prependIndent("          ")}
             (if (reloadUrl != null)
               " <span class=\"cp-sub cp-rebuild-status\" role=\"status\" aria-live=\"polite\"></span>"
             else "") +
-            "</h2>\n"
+            "</h2>\n",
         )
         append("<div class=\"cp-grid\">\n")
         for (preview in section.previews) {
@@ -5942,7 +5942,7 @@ ${captureControlsHtml().prependIndent("          ")}
               "<div class=\"cp-imgwrap\"><img loading=\"lazy\" decoding=\"async\" alt=\"$name\" " +
               "src=\"$base/render/$id.png$suffix\"></div>" +
               "<div class=\"cp-meta\"><div class=\"cp-label\" title=\"$name\">$name</div></div>" +
-              "</a>\n"
+              "</a>\n",
           )
         }
         append("</div>\n</section>\n")
@@ -6300,7 +6300,7 @@ ${captureControlsHtml().prependIndent("          ")}
   ): String {
     val suffix =
       querySuffix(
-        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token),
       )
     return document(
       title = "Not found — compose-preview",
@@ -6349,7 +6349,7 @@ ${captureControlsHtml().prependIndent("          ")}
   ): String {
     val suffix =
       querySuffix(
-        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token),
       )
     val signIn =
       signInHref
@@ -6943,7 +6943,7 @@ ${captureControlsHtml().prependIndent("          ")}
               "wear-m3", "wear-m3-catalog" -> "Wear app"
               "remote-m3" -> "Wear widget"
               else -> row.catalogSystemId
-            })} · updated ${esc(updated)}</p>
+            },)} · updated ${esc(updated)}</p>
             <p class="cp-design-meta"><code>${esc(row.designId)}</code></p>$unavailable
             <div class="cp-design-actions">
               <a class="cp-action-chip" href="${esc(row.designHref)}">Open</a>
@@ -6983,7 +6983,7 @@ ${captureControlsHtml().prependIndent("          ")}
           .entries
           .sortedWith(
             compareBy<Map.Entry<String?, List<UiBuilderDesignRow>>> { it.key == null }
-              .thenBy(String.CASE_INSENSITIVE_ORDER) { it.key.orEmpty() }
+              .thenBy(String.CASE_INSENSITIVE_ORDER) { it.key.orEmpty() },
           )
           .map { it.key to it.value }
     fun designCount(n: Int) = "$n design${if (n == 1) "" else "s"}"
@@ -7842,7 +7842,7 @@ ${captureControlsHtml().prependIndent("          ")}
       else "This preview was not published in catalog revision $pin."
     val suffix =
       querySuffix(
-        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token),
       )
     return document(
       title = "Preview unavailable — compose-preview",
@@ -8078,7 +8078,7 @@ ${captureControlsHtml().prependIndent("          ")}
         JSON_COMPACT.encodeToString(
           PlaygroundCatalogsResponse.serializer(),
           PlaygroundCatalogsResponse(catalogs),
-        )
+        ),
       )
     val editLeaseButton =
       if (!editingLeaseEnabled) ""
@@ -8662,7 +8662,7 @@ ${captureControlsHtml().prependIndent("          ")}
   ): String {
     val suffix =
       querySuffix(
-        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token),
       )
     return document(
       title = "Playground unavailable — compose-preview",
@@ -8808,7 +8808,7 @@ ${captureControlsHtml().prependIndent("          ")}
     else previews.firstOrNull { it.id == requested }?.takeIf { a2uiDocumentKnob(it) != null }
 
   private fun a2uiDocumentKnob(
-    preview: ServePreview
+    preview: ServePreview,
   ): ee.schimke.composeai.data.overrides.PreviewOverrideDeclaration? =
     preview.overrides.firstOrNull {
       it.seedKey == A2UI_DOCUMENT_KNOB &&
@@ -10934,7 +10934,7 @@ ${captureControlsHtml().prependIndent("          ")}
       if (themeRenderBurstCapacity > 1) "$basePath/api/theme-render-lease$q" else ""
     val navSuffix =
       querySuffix(
-        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token),
       )
     val heading = catalogHeading(displayTitle, moduleLabel)
     val catalogId =
@@ -10956,7 +10956,7 @@ ${captureControlsHtml().prependIndent("          ")}
               (isNonDefaultState(it) ||
                 hasNonDefaultProps(it) ||
                 isNonPrimarySize(it, primarySizes, darkFirst)))
-        }
+        },
       )
     val cardAnchors = mintCardAnchors(groups)
     val renderFailureSummary =
@@ -11040,7 +11040,7 @@ ${captureControlsHtml().prependIndent("          ")}
         parityIssueBadgeHtml(
           listOfNotNull(card.light, card.dark, card.neutral)
             .flatMap { issuesForPreview(parityIssues, it) }
-            .distinctBy { it.repository to it.number }
+            .distinctBy { it.repository to it.number },
         )
       // `data-def` is the variant a DECLARED theme re-renders (the server-side default), so picking
       // one doesn't also flip the card's light/dark base.
@@ -11613,7 +11613,7 @@ ${captureControlsHtml().prependIndent("          ")}
     val assetQ = ServeCacheGeneration.scope(q, generation)
     val navSuffix =
       querySuffix(
-        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token),
       )
     val heading = catalogHeading(displayTitle, moduleLabel)
     // Native-format rows keep the one-default-card presentation, but a design reference names an
@@ -11912,14 +11912,14 @@ ${captureControlsHtml().prependIndent("          ")}
       if (hasSvg)
         append(
           "<button type=\"button\" class=\"cp-theme-btn\" data-compare-format=\"svg\" " +
-            "aria-pressed=\"${defaultFormat == "svg"}\">PNG ↔ SVG</button>"
+            "aria-pressed=\"${defaultFormat == "svg"}\">PNG ↔ SVG</button>",
         )
       if (hasRc)
         append(
           "<button type=\"button\" class=\"cp-theme-btn\" data-compare-format=\"rc\" " +
             "aria-pressed=\"${defaultFormat == "rc"}\">" +
             (if (rcCompare != null) "Remote Compose players" else "PNG ↔ Remote Compose") +
-            "</button>"
+            "</button>",
         )
       if (hasReference)
         append(
@@ -11927,13 +11927,13 @@ ${captureControlsHtml().prependIndent("          ")}
             // Named in the order the columns stand: the spec leads this lane, so the button that
             // enters it does too. Every other lane keeps the render first and says "PNG ↔ …".
             "aria-pressed=\"${defaultFormat == "reference"}\">" +
-            "${WebEscaping.htmlEscape(referenceToolLabel)} ↔ PNG</button>"
+            "${WebEscaping.htmlEscape(referenceToolLabel)} ↔ PNG</button>",
         )
       if (hasParallel)
         append(
           "<button type=\"button\" class=\"cp-theme-btn\" data-compare-format=\"parallel\" " +
             "aria-pressed=\"${defaultFormat == "parallel"}\">" +
-            "${WebEscaping.htmlEscape(parallelLabel)} ↔ PNG</button>"
+            "${WebEscaping.htmlEscape(parallelLabel)} ↔ PNG</button>",
         )
     }
     val themeControls =
@@ -12228,7 +12228,7 @@ ${captureControlsHtml().prependIndent("          ")}
         querySuffix(
           listOf(liveQuery, "rcPlayer=${playerIdByWire[wire] ?: wire}")
             .filter { it.isNotEmpty() }
-            .joinToString("&")
+            .joinToString("&"),
         )
 
     // One cell, built once: the table below and the client model inlined under it must agree about
@@ -12271,7 +12271,7 @@ ${captureControlsHtml().prependIndent("          ")}
           { worst(it.first) == null },
           { -(worst(it.first) ?: 0.0) },
           { it.second },
-        )
+        ),
       )
 
     val head =
@@ -12543,7 +12543,7 @@ $rows
     val q = querySuffix(linkQuery)
     val navSuffix =
       querySuffix(
-        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token),
       )
     val heading = catalogHeading(displayTitle, moduleLabel)
     // Both panels take the pin or neither does; unpinned, both take the page's generation, so the
@@ -12603,7 +12603,7 @@ $rows
         </div>
         <script type="application/json" id="cp-annotations">${
           encodeAnnotationPayload(
-            AnnotationPayload(reference = referenceAnnotations, actual = actualAnnotations)
+            AnnotationPayload(reference = referenceAnnotations, actual = actualAnnotations),
           )
         }</script>
         """
@@ -12719,7 +12719,7 @@ ${if (annotationsSelectable) "          data-cp-selectable=\"1\"\n" else ""}    
                 )
               }
               .distinctBy { Triple(it.repository, it.number, it.state) },
-        )
+        ),
       )
     }
     val acceptanceScript =
@@ -12865,7 +12865,7 @@ ${scriptTag("known-differences.js")}
     val q = querySuffix(linkQuery(token, linkSessionId, basePath, isPublic))
     val navSuffix =
       querySuffix(
-        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token),
       )
     val heading = catalogHeading(displayTitle, moduleLabel)
     val cards =
@@ -12958,7 +12958,7 @@ ${scriptTag("known-differences.js")}
     val q = querySuffix(query)
     val navSuffix =
       querySuffix(
-        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token),
       )
     val heading = catalogHeading(displayTitle, moduleLabel)
 
@@ -13034,7 +13034,7 @@ ${scriptTag("known-differences.js")}
                 // dark renders purely because `dark` sorts before `light`.
                 { (it.theme ?: cardTheme(it.id)) != leadTheme },
                 { it.catalogOrder ?: Int.MAX_VALUE },
-              )
+              ),
             )
           val captures = LinkedHashMap<String, ServeMotion>()
           ranked.forEach { render -> render.motion.forEach { captures.putIfAbsent(it.id, it) } }
@@ -13347,7 +13347,7 @@ $cards
     val q = querySuffix(linkQuery(token, linkSessionId, basePath, isPublic))
     val navSuffix =
       querySuffix(
-        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token),
       )
     val heading = catalogHeading(displayTitle, moduleLabel)
 
@@ -13739,7 +13739,7 @@ $cards
     val assetQ = ServeCacheGeneration.scope(q, generation)
     val navSuffix =
       querySuffix(
-        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token),
       )
     val heading = catalogHeading(displayTitle, moduleLabel)
     val coverage = dashboard.coverage
@@ -14183,26 +14183,26 @@ ${scriptTag("known-differences.js")}
         val ref = dashboard.codeRef?.let { " @ ${esc(it)}" }.orEmpty()
         add(
           "<span class=\"cp-prov-item\"><span class=\"cp-prov-key\">code</span> " +
-            "<a href=\"${esc("https://github.com/$repo")}\">$GITHUB_ICON ${esc(repo)}</a>$ref</span>"
+            "<a href=\"${esc("https://github.com/$repo")}\">$GITHUB_ICON ${esc(repo)}</a>$ref</span>",
         )
       }
       dashboard.figmaFileHref?.let { href ->
         val name = dashboard.figmaFileName ?: "Figma file"
         add(
           "<span class=\"cp-prov-item\"><span class=\"cp-prov-key\">design</span> " +
-            "<a href=\"${esc(href)}\" rel=\"noopener\">${esc(name)} ↗</a></span>"
+            "<a href=\"${esc(href)}\" rel=\"noopener\">${esc(name)} ↗</a></span>",
         )
       }
       dashboard.generatedAt?.let {
         add(
           "<span class=\"cp-prov-item\"><span class=\"cp-prov-key\">snapshotted</span> " +
-            "${esc(prettyDate(it))}</span>"
+            "${esc(prettyDate(it))}</span>",
         )
       }
       dashboard.windowDays?.let {
         add(
           "<span class=\"cp-prov-item\"><span class=\"cp-prov-key\">window</span> " +
-            "last $it days</span>"
+            "last $it days</span>",
         )
       }
     }
@@ -14710,7 +14710,7 @@ ${scriptTag("known-differences.js")}
     val q = querySuffix(linkQuery(token, linkSessionId, basePath, isPublic))
     val navSuffix =
       querySuffix(
-        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token),
       )
     val displayName = previewDisplayName(preview)
     val issueRows =
@@ -15460,7 +15460,7 @@ ${scriptTag("known-differences.js")}
           liveAuthTitle
             ?: if (liveToggleDis.isEmpty())
               "Static snapshot — click for the live, interactive preview"
-            else "Static snapshot — this session has no live lane to switch to"
+            else "Static snapshot — this session has no live lane to switch to",
         ) +
         "\""
     // The verb half of the chip ("Java ▸ Live"), naming where a click goes so the chip reads as a
@@ -15709,28 +15709,28 @@ ${scriptTag("known-differences.js")}
       if (hasSlotInspection)
         append(
           "<label class=\"cp-live-row\"><input class=\"cp-inspect\" id=\"cp-inspect-slots\" " +
-            "data-cp-inspect=\"slots\" type=\"checkbox\"> Slots</label>\n"
+            "data-cp-inspect=\"slots\" type=\"checkbox\"> Slots</label>\n",
         )
       if (hasA11yOverlay)
         append(
           "<label class=\"cp-live-row\"><input class=\"cp-inspect\" id=\"cp-inspect-a11y\" " +
-            "data-cp-inspect=\"a11y\" type=\"checkbox\"> Accessibility</label>\n"
+            "data-cp-inspect=\"a11y\" type=\"checkbox\"> Accessibility</label>\n",
         )
       if (hasTypographyInspection) {
         append(
           "<label class=\"cp-live-row\"><input class=\"cp-inspect\" " +
             "id=\"cp-inspect-typography\" data-cp-inspect=\"typography\" type=\"checkbox\"> " +
-            "Typography</label>\n"
+            "Typography</label>\n",
         )
       }
       if (hasDesignAnnotations) {
         append(
           "<label class=\"cp-live-row\"><input class=\"cp-inspect\" id=\"cp-inspect-theme\" " +
-            "data-cp-inspect=\"theme\" type=\"checkbox\"> Theme attributes</label>\n"
+            "data-cp-inspect=\"theme\" type=\"checkbox\"> Theme attributes</label>\n",
         )
         append(
           "<label class=\"cp-live-row\"><input class=\"cp-inspect\" id=\"cp-inspect-layout\" " +
-            "data-cp-inspect=\"layout\" type=\"checkbox\"> Layout boxes</label>\n"
+            "data-cp-inspect=\"layout\" type=\"checkbox\"> Layout boxes</label>\n",
         )
       }
     }
@@ -15797,12 +15797,12 @@ ${scriptTag("known-differences.js")}
       if (preview.supportsFocus)
         append(
           "<label class=\"cp-live-row\"><input class=\"cp-feature\" id=\"cp-focus\" " +
-            "type=\"checkbox\"$featureDaemonDis> Keyboard focus</label>\n"
+            "type=\"checkbox\"$featureDaemonDis> Keyboard focus</label>\n",
         )
       if (showGestureRow) {
         append(
           "<label class=\"cp-live-row\"><input class=\"cp-feature\" id=\"cp-gestures\" " +
-            "type=\"checkbox\"$featureDaemonDis> Show gesture hints</label>\n"
+            "type=\"checkbox\"$featureDaemonDis> Show gesture hints</label>\n",
         )
         // Firing the gesture, not just hinting: double pinch and wrist turn are sensor events with
         // no pointer equivalent, so the daemon invokes the registered handler
@@ -15821,7 +15821,7 @@ ${scriptTag("known-differences.js")}
             "<button type=\"button\" class=\"cp-bg-btn cp-gesture-invoke\" " +
             "data-gesture=\"dismiss\"$featureDaemonDis>Wrist turn</button>" +
             "<input type=\"hidden\" id=\"cp-gesture-invoke\" value=\"\">" +
-            "</div>\n"
+            "</div>\n",
         )
       }
     }
@@ -16009,7 +16009,7 @@ ${scriptTag("known-differences.js")}
             ?.let { add("<span>${WebEscaping.htmlEscape(it)}</span>") }
           add(
             "<span${if (browserVariantLabel.isBlank()) " aria-current=\"page\"" else ""}>" +
-              "${WebEscaping.htmlEscape(displayName)}</span>"
+              "${WebEscaping.htmlEscape(displayName)}</span>",
           )
           if (browserVariantLabel.isNotBlank()) {
             add("<span aria-current=\"page\">${WebEscaping.htmlEscape(browserVariantLabel)}</span>")
@@ -16194,7 +16194,7 @@ ${scriptTag("known-differences.js")}
           compareScorerTag().takeIf {
             spatialSceneUrl == null &&
               ((hasSvgExport && !componentBrowser) || specSurfaceUrl != null)
-          }
+          },
         )
         .joinToString("") { "$it\n      " }
     // CodeMirror (the playground's Kotlin grammar) loads only on pages that can offer source, to
@@ -16542,7 +16542,7 @@ ${scriptTag("known-differences.js")}
               (isNonDefaultState(it) ||
                 hasNonDefaultProps(it) ||
                 isNonPrimarySize(it, navPrimarySizes, darkFirst))
-          }
+          },
         )
         .map {
           when (theme) {
@@ -16649,7 +16649,7 @@ ${scriptTag("known-differences.js")}
     val q = querySuffix(linkQuery(token, linkSessionId, basePath, isPublic))
     val navSuffix =
       querySuffix(
-        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token)
+        if (isPublic || token.isEmpty()) "" else "token=" + WebEscaping.urlEncodeSegment(token),
       )
     val heading = catalogHeading(displayTitle, moduleLabel)
     val subject = preview.componentId ?: preview.label
@@ -17432,7 +17432,7 @@ ${(if (brand == null) ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compo
 
   /** Human text for a [ee.schimke.composeai.daemon.protocol.PreviewOverrideValue] in the viewer. */
   private fun overrideValueText(
-    v: ee.schimke.composeai.daemon.protocol.PreviewOverrideValue
+    v: ee.schimke.composeai.daemon.protocol.PreviewOverrideValue,
   ): String =
     when (v) {
       is ee.schimke.composeai.daemon.protocol.PreviewOverrideValue.StringValue -> v.value

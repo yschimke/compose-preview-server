@@ -104,7 +104,7 @@ class ServeShareTargetTest {
         ServeShareTarget.parseMultipart(
           buffer.readByteArray(),
           "multipart/form-data; boundary=XyZ",
-        )
+        ),
       )
     assertEquals("Bug", fields.title)
     assertEquals("the chip clips", fields.text)
@@ -188,10 +188,12 @@ class ServeShareTargetTest {
     server = newServer()
     val image = png()
     val location =
-      share({
-          addFormDataPart("text", "the switch thumb is clipped")
-          addFormDataPart("image", "s.png", image.toRequestBody("image/png".toMediaType()))
-        })
+      share(
+          {
+            addFormDataPart("text", "the switch thumb is clipped")
+            addFormDataPart("image", "s.png", image.toRequestBody("image/png".toMediaType()))
+          },
+        )
         .use {
           assertEquals(303, it.code)
           assertNotNull(it.header("Location"))

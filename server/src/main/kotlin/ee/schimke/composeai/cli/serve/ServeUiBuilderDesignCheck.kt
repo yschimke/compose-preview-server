@@ -82,7 +82,7 @@ internal object UiBuilderAccessibilityCheck {
             "unlabelled button",
           node.id,
           field = CONTENT_DESCRIPTION.takeIf { tree.declares(node, it) },
-        )
+        ),
       )
     }
     if (!tree.describesContent(node)) return emptyList()
@@ -102,7 +102,7 @@ internal object UiBuilderAccessibilityCheck {
           "or set it to null if it is decorative",
         node.id,
         field = CONTENT_DESCRIPTION,
-      )
+      ),
     )
   }
 
@@ -128,7 +128,7 @@ internal object UiBuilderAccessibilityCheck {
             "${MIN_TOUCH_TARGET_DP.toInt()}×${MIN_TOUCH_TARGET_DP.toInt()}dp",
           node.id,
           measured = UiBuilderCheckMeasurementV1(width = width, height = height, unit = "dp"),
-        )
+        ),
       )
     }
     val declared = declaredSizeDp(node) ?: return emptyList()
@@ -143,7 +143,7 @@ internal object UiBuilderAccessibilityCheck {
         node.id,
         field = declared.first,
         measured = UiBuilderCheckMeasurementV1(width = declared.second, unit = "dp"),
-      )
+      ),
     )
   }
 
@@ -232,7 +232,7 @@ internal object UiBuilderAccessibilityCheck {
             required = required,
             theme = if (other != null) worst.theme else null,
           ),
-      )
+      ),
     )
   }
 
@@ -507,7 +507,7 @@ internal object UiBuilderAccessibilityCheck {
           "${needed.dp()}dp and will clip. Prefer `heightIn(min = …)`",
         node.id,
         measured = UiBuilderCheckMeasurementV1(height = height, required = needed, unit = "dp"),
-      )
+      ),
     )
   }
 

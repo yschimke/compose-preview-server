@@ -112,7 +112,7 @@ class ServeRcPlayerIdsTest {
     assertTrue(
       ServeRcPlayerIds.universe(swiftAppKitHost = true).any {
         it.id == "swift-appkit" && it.serverSide
-      }
+      },
     )
     assertFalse(ServeRcPlayerIds.universe(swiftAppKitHost = false).any { it.id == "swift-appkit" })
     assertEquals(
@@ -169,14 +169,14 @@ class ServeRcPlayerIdsTest {
         bundleWith(
           "androidx.compose.remote" to "remote-player-view",
           "ee.schimke.composeai" to "rc-player-compose",
-        )
-      )
+        ),
+      ),
     )
     // A KMP library resolves to its Android variant on an Android bundle's classpath.
     assertTrue(
       ServeRcPlayerIds.bundleCarriesCmpAndroidPlayer(
-        bundleWith("ee.schimke.composeai" to "rc-player-compose-android")
-      )
+        bundleWith("ee.schimke.composeai" to "rc-player-compose-android"),
+      ),
     )
   }
 
@@ -189,8 +189,8 @@ class ServeRcPlayerIdsTest {
           "ee.schimke.composeai" to "data-remotecompose-connector",
           // Same artifact name under another group is not the player.
           "com.example" to "rc-player-compose",
-        )
-      )
+        ),
+      ),
     )
     val notABundle =
       kotlin.io.path.createTempFile("bundle", ".png").toFile().apply {
@@ -209,14 +209,14 @@ class ServeRcPlayerIdsTest {
         bundleWith(
           "ee.schimke.composeai" to "third-party-rc-embedded-player",
           "ee.schimke.composeai" to "rc-player-compose-android",
-        )
+        ),
       ),
     )
     // homeassistant-remotecompose: the CMP player, no embedded player.
     assertEquals(
       setOf(RcPlayerBackend.CMP_ANDROID),
       ServeRcPlayerIds.bundleCarriedPlayers(
-        bundleWith("ee.schimke.composeai" to "rc-player-compose-android")
+        bundleWith("ee.schimke.composeai" to "rc-player-compose-android"),
       ),
     )
     // remote-widgets: the embedded player, no CMP player.
@@ -227,7 +227,7 @@ class ServeRcPlayerIdsTest {
           "ee.schimke.composeai" to "third-party-rc-embedded-player",
           // Same artifact name under another group is not the player.
           "com.example" to "rc-player-compose",
-        )
+        ),
       ),
     )
     assertTrue(ServeRcPlayerIds.bundleCarriedPlayers(java.io.File("/no/such/bundle.png")).isEmpty())

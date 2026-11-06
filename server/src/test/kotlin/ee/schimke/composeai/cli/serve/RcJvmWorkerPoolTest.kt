@@ -228,7 +228,7 @@ class RcJvmWorkerPoolTest {
       val reasons =
         (1..RcJvmWorkerPool.MAX_START_FAILURES + 1).map {
           assertIs<RcJvmWorkerPool.PoolResult.Unusable>(
-              pool.render(DOC, SPEC, "", RcJvmServerRenderer.Format.PNG)
+              pool.render(DOC, SPEC, "", RcJvmServerRenderer.Format.PNG),
             )
             .reason
         }

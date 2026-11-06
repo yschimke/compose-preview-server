@@ -213,7 +213,7 @@ internal fun DesignDocumentV1.withServerHome(serverOrigin: String?): DesignDocum
           },
           id,
         )
-      }
+      },
   )
 
 /** A same-server duplicate is a request to edit the original, not an idempotent import. */

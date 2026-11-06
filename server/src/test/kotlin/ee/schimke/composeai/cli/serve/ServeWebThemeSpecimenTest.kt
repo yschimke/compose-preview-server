@@ -52,7 +52,7 @@ class ServeWebThemeSpecimenTest {
       listOf(
         ServePreview(id = "theme-meshcore-light", label = "Theme", section = specimenSection),
         ServePreview(id = "contactrow-chat", label = "Contact row", section = "Components"),
-      )
+      ),
     )
 
   @Test
@@ -92,7 +92,7 @@ class ServeWebThemeSpecimenTest {
         listOf(
           ServePreview(id = "theme-light", label = "Theme Light", section = "Themes"),
           ServePreview(id = "theme-dark", label = "Theme Dark", section = "Themes"),
-        )
+        ),
       )
     assertFalse(
       html.contains("data-theme-choice=\"theme:com.example.BrandTheme\""),
@@ -116,7 +116,7 @@ class ServeWebThemeSpecimenTest {
         listOf(
           ServePreview(id = "themecatalog__brand", label = "Brand theme", fixedTheme = true),
           ServePreview(id = "contactrow-chat", label = "Contact row"),
-        )
+        ),
       )
     val bases = themeBases(html)
     assertTrue(
@@ -144,8 +144,8 @@ class ServeWebThemeSpecimenTest {
               fixedTheme = true,
             ),
             ServePreview(id = "contactrow-chat", label = "Contact row", section = "Components"),
-          )
-        )
+          ),
+        ),
       )
     assertTrue(bases.none { it.contains("/render/swatches.png") })
     assertTrue(bases.any { it.contains("/render/contactrow-chat.png") })
@@ -233,7 +233,7 @@ class ServeWebThemeSpecimenTest {
         listOf(
           ServePreview(id = "themecatalog__light", label = "Light", fixedTheme = true),
           ServePreview(id = "themecatalog__dark", label = "Dark", fixedTheme = true),
-        )
+        ),
       )
     assertFalse(
       html.contains("data-theme-choice=\"theme:com.example.BrandTheme\""),

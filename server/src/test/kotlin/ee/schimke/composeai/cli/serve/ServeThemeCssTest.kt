@@ -153,7 +153,7 @@ class ServeThemeCssTest {
         // Visible, but never mistakable for text.
         assertTrue(contrast(v.getValue("--cp-border"), bg) < 2.0)
         assertTrue(
-          contrast(v.getValue("--cp-border-strong"), bg) >= contrast(v.getValue("--cp-border"), bg)
+          contrast(v.getValue("--cp-border-strong"), bg) >= contrast(v.getValue("--cp-border"), bg),
         )
       }
     }
@@ -321,8 +321,8 @@ class ServeThemeCssTest {
       vars(
         assertNotNull(
           ServeThemeCss.fromDtcg(
-            tokens("surface" to "#ffffff", "onSurface" to "#ffffff", "primary" to "#4b30edff")
-          )
+            tokens("surface" to "#ffffff", "onSurface" to "#ffffff", "primary" to "#4b30edff"),
+          ),
         ),
         dark = false,
       )
@@ -332,8 +332,8 @@ class ServeThemeCssTest {
       vars(
         assertNotNull(
           ServeThemeCss.fromDtcg(
-            tokens("surface" to "#ffffff", "onSurface" to "#8f8f5a", "primary" to "#4b30edff")
-          )
+            tokens("surface" to "#ffffff", "onSurface" to "#8f8f5a", "primary" to "#4b30edff"),
+          ),
         ),
         dark = false,
       )

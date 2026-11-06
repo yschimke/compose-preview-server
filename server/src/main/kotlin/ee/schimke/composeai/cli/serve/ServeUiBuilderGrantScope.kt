@@ -76,7 +76,7 @@ internal object ServeUiBuilderGrantScope {
     when (
       val response =
         branches.executeBranch(
-          UiBuilderBranchCall(actor, UiBuilderBranchRequest.GetBranch(designId))
+          UiBuilderBranchCall(actor, UiBuilderBranchRequest.GetBranch(designId)),
         )
     ) {
       is UiBuilderBranchResponse.Branch -> response.branch.parentDesignId
@@ -175,13 +175,13 @@ internal object ServeUiBuilderGrantScope {
         val actor = scopedActor(write.actor, write.designId, lookup, parents)
         return delegate.putAsset(
           if (actor === write.actor) write
-          else UiBuilderAssetWrite(actor, write.designId, write.assetKey, write.bytes)
+          else UiBuilderAssetWrite(actor, write.designId, write.assetKey, write.bytes),
         )
       }
 
       override suspend fun readAsset(read: UiBuilderAssetRead): UiBuilderAssetReadResult =
         delegate.readAsset(
-          read.copy(actor = scopedActor(read.actor, read.designId, lookup, parents))
+          read.copy(actor = scopedActor(read.actor, read.designId, lookup, parents)),
         )
     }
 

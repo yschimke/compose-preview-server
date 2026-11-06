@@ -121,8 +121,8 @@ class PlaygroundJailedCompiler(
     if (!compileSlots.tryAcquire(slotWaitSeconds, TimeUnit.SECONDS)) {
       return listOf(
         internalError(
-          "the playground is busy compiling (all $slots compile slots in use) — try again shortly"
-        )
+          "the playground is busy compiling (all $slots compile slots in use) — try again shortly",
+        ),
       )
     }
     return try {
@@ -135,8 +135,8 @@ class PlaygroundJailedCompiler(
           return listOf(
             internalError(
               "could not launch the compile sandbox '${argv.firstOrNull()}': " +
-                (e.message ?: e.javaClass.simpleName)
-            )
+                (e.message ?: e.javaClass.simpleName),
+            ),
           )
         }
       parse(launch)
@@ -159,7 +159,7 @@ class PlaygroundJailedCompiler(
           cliClasspath.map(::File))
         .distinct()
     return sandbox.command(
-      PlaygroundSandbox.Paths(workDir = workDir, readOnly = readOnly, javaHome = javaHome)
+      PlaygroundSandbox.Paths(workDir = workDir, readOnly = readOnly, javaHome = javaHome),
     ) +
       listOf(File(javaHome, "bin/java").absolutePath) +
       sandbox.jvmArgs(workDir) +
@@ -299,7 +299,7 @@ class PlaygroundJailedCompiler(
           "playground: cannot jail the compiler (" +
             (if (cliClasspath.isEmpty()) "the serve process reports no classpath"
             else "no lib-bta/ jars") +
-            ") — compiles run in-process; snippet execution is still sandboxed."
+            ") — compiles run in-process; snippet execution is still sandboxed.",
         )
         return inProcess
       }
@@ -311,7 +311,7 @@ class PlaygroundJailedCompiler(
             "sandbox could not launch here), $slots at a time (peak ${slots * sandbox.memoryMb}MB)"
         else
           "playground: compiles run inside the ${sandbox.profile.id} sandbox, " +
-            "$slots at a time (peak ${slots * sandbox.memoryMb}MB)"
+            "$slots at a time (peak ${slots * sandbox.memoryMb}MB)",
       )
       return PlaygroundJailedCompiler(
         sandbox = sandbox,
@@ -398,7 +398,7 @@ object PlaygroundCompileMain {
           PlaygroundDiagnostic(
             severity = PlaygroundSeverity.ERROR,
             message = "compile sandbox error: ${t.message ?: t.javaClass.simpleName}",
-          )
+          ),
         )
       }
     println(
@@ -406,7 +406,7 @@ object PlaygroundCompileMain {
         Json.encodeToString(
           PlaygroundCompileReport.serializer(),
           PlaygroundCompileReport(diagnostics),
-        )
+        ),
     )
   }
 }

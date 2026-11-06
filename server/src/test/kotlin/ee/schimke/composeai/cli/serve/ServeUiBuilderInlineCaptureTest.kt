@@ -116,7 +116,7 @@ class ServeUiBuilderInlineCaptureTest {
   fun `a host that compiles no Remote Compose refuses by naming itself`() {
     val refused =
       assertIs<UiBuilderInlineCaptureOutcome.Refused>(
-        lane(captureCatalog = { null }).capture(screen(), "remote")
+        lane(captureCatalog = { null }).capture(screen(), "remote"),
       )
 
     assertEquals(ServeUiBuilderInlineCapture.NO_REMOTE_COMPOSE_CATALOG, refused.code)
@@ -131,7 +131,7 @@ class ServeUiBuilderInlineCaptureTest {
   fun `a node that is not inline content is refused before the host is consulted`() {
     val refused =
       assertIs<UiBuilderInlineCaptureOutcome.Refused>(
-        lane(captureCatalog = { null }).capture(screen(), "screen")
+        lane(captureCatalog = { null }).capture(screen(), "screen"),
       )
 
     assertEquals(ServeUiBuilderInlineCapture.NO_BODY, refused.code)
@@ -153,7 +153,7 @@ class ServeUiBuilderInlineCaptureTest {
           PlaygroundRunResponse(
             exception =
               "no Remote Compose document was captured — a remote-compose snippet must " +
-                "declare an @Preview that emits a RemoteDocument"
+                "declare an @Preview that emits a RemoteDocument",
           )
         },
         captureCatalog = { "wear-m3-catalog" },

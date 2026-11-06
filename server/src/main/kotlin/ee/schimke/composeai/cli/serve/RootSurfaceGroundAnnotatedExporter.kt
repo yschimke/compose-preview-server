@@ -35,7 +35,7 @@ internal class RootSurfaceGroundAnnotatedExporter(private val delegate: UiBuilde
             code = RootSurfaceGround.CODE,
             message = notice.message,
             nodeId = notice.nodeId,
-          )
+          ),
     )
   }
 }

@@ -57,7 +57,7 @@ internal object UiBuilderExportComparison {
             document = pinned,
             catalog = catalog,
             format = ExportFormatV1.COMPOSE,
-          )
+          ),
         )
       val errors = artifact.diagnostics.filter { it.severity == DiagnosticSeverityV1.ERROR }
       return if (errors.isEmpty()) Outcome.Emitted(withoutProvenance(artifact.content))
@@ -84,7 +84,7 @@ internal object UiBuilderExportComparison {
         require(catalogId.isNotEmpty()) { "${policy.path} names no catalog id" }
         val records =
           ComponentRecordSource(
-            if (recordFile.isFile) mapOf(catalogId to recordFile) else emptyMap()
+            if (recordFile.isFile) mapOf(catalogId to recordFile) else emptyMap(),
           )
         val record = (records.record(catalogId) as? ComponentRecordSource.Lookup.Found)?.record
         val composed =
@@ -99,7 +99,7 @@ internal object UiBuilderExportComparison {
         // declaration routes it, never its id.
         val platform =
           CatalogExportRouting.recordFreePlatform(
-            CatalogExportRouting.route(composed.catalog, CatalogOwnership.of(setOf(catalogId)))
+            CatalogExportRouting.route(composed.catalog, CatalogOwnership.of(setOf(catalogId))),
           ) ?: UiBuilderCatalogPlatform.from(composed.catalog.statusSemantics)
         val published: Map<String, ComponentRecord> = composed.records
         val executor =
@@ -293,7 +293,7 @@ internal object UiBuilderExportComparison {
           append("{\"a\":\"${a.catalogId}\",\"b\":\"${b.catalogId}\",\"designs\":{")
           append(rows.joinToString(",") { "\"${it.design}\":\"${it.verdict.name}\"" })
           append("}}\n")
-        }
+        },
       )
   }
 
@@ -327,7 +327,7 @@ internal object UiBuilderExportComparison {
     write(out, title, a, b, rows)
     println(
       "$title: " +
-        Verdict.entries.joinToString(", ") { v -> "${rows.count { it.verdict == v }} ${v.label}" }
+        Verdict.entries.joinToString(", ") { v -> "${rows.count { it.verdict == v }} ${v.label}" },
     )
     // The reasons, in the log too: the report's artifact is not always where a reader is.
     for ((side, id) in listOf("A" to a.catalogId, "B" to b.catalogId)) {

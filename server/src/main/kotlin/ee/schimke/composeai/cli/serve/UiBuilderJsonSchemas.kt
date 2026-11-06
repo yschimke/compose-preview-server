@@ -231,7 +231,7 @@ internal object SerialDescriptorJsonSchema {
         put("description", JsonPrimitive(description))
         putAll(rootSchema)
         put("\$defs", JsonObject(builder.defs))
-      }
+      },
     )
   }
 
@@ -271,10 +271,10 @@ internal object SerialDescriptorJsonSchema {
         mapOf(
           "properties" to
             JsonObject(
-              properties + ("schema" to obj("type" to str("string"), "const" to str(schemaId)))
+              properties + ("schema" to obj("type" to str("string"), "const" to str(schemaId))),
             ),
           "required" to JsonArray((listOf(str("schema")) + required).distinctBy { it.content }),
-        )
+        ),
     )
   }
 
@@ -373,7 +373,7 @@ internal object SerialDescriptorJsonSchema {
           put("properties", JsonObject(properties))
           if (required.isNotEmpty()) put("required", JsonArray(required.map(::str)))
           put("additionalProperties", JsonPrimitive(false))
-        }
+        },
       )
     }
 

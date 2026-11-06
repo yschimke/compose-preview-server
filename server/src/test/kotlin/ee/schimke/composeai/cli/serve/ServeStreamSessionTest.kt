@@ -72,7 +72,7 @@ class ServeStreamSessionTest {
         ServeStreamSession(h, previewId, emptyMap(), sent::add, system = "confetti-wear")
       session.onClientMessage("""{"type":"setOverrides","overrides":{"uiMode":"chartreuse"}}""")
       session.onClientMessage(
-        """{"type":"switch","previewId":"$previewId","overrides":{"uiMode":"light"}}"""
+        """{"type":"switch","previewId":"$previewId","overrides":{"uiMode":"light"}}""",
       )
 
       assertEquals(listOf("frame", "frame"), sent.map(::typeOf))
@@ -158,7 +158,7 @@ class ServeStreamSessionTest {
       val session = ServeStreamSession(h, previewId, emptyMap(), sent::add, system = "compose-m3")
       session.onOpen()
       session.onClientMessage(
-        """{"type":"switch","previewId":"$previewId","overrides":{"uiMode":"chartreuse"}}"""
+        """{"type":"switch","previewId":"$previewId","overrides":{"uiMode":"chartreuse"}}""",
       )
       assertEquals("error", typeOf(sent.last()))
       // The bad override must not poison the session — the previous view still renders.

@@ -195,8 +195,8 @@ class ServeSocialCardTest {
             title = "Supercalifragilisticexpialidociousdesignsystemcatalogue".repeat(3),
             subtitle = "an unreasonably long supporting line ".repeat(10),
             heroes = listOf(hero(216, 480)),
-          )
-        )
+          ),
+        ),
       )
 
     assertEquals(1200, decode(long.bytes).width)

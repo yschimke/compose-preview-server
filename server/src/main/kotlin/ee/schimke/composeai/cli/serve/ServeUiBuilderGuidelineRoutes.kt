@@ -92,13 +92,13 @@ internal data class UiBuilderGuidelinesV1(
           buildString {
             append("Revision ").append(record.revision).append(", ")
             append(
-              record.served.takeIf { it.model != null }?.describe(record.model) ?: record.model
+              record.served.takeIf { it.model != null }?.describe(record.model) ?: record.model,
             )
             record.ranBy?.let { append(", run by ").append(it) }
             append(": ")
             append(
               if (broken == 0) "${record.verdicts.size} guideline(s) answered, none broken."
-              else "$broken of ${record.verdicts.size} guideline(s) look broken."
+              else "$broken of ${record.verdicts.size} guideline(s) look broken.",
             )
             if (unanswered.isNotEmpty()) append(" ${unanswered.size} unanswered.")
             if (record.revision < currentRevision) {

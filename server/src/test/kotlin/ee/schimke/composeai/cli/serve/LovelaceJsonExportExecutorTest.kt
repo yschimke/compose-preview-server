@@ -18,7 +18,7 @@ class LovelaceJsonExportExecutorTest {
   private val document =
     LovelaceConfigExporter.import(
         Json.parseToJsonElement(
-            """{"views":[{"type":"sections","sections":[{"cards":[{"type":"custom:test","future":{"x":1}}]}]}]}"""
+            """{"views":[{"type":"sections","sections":[{"cards":[{"type":"custom:test","future":{"x":1}}]}]}]}""",
           )
           .jsonObject,
         "dashboard",

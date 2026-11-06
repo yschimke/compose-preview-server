@@ -59,7 +59,7 @@ internal class ServeUiBuilderCatalogRecovery(
               UiBuilderServiceCall(
                 actor,
                 UiBuilderServiceRequest.PreviewCurrentCatalogUpgrade(design.designId),
-              )
+              ),
             )
         ) {
           is UiBuilderServiceResponse.CatalogUpgradePreview -> response.preview
@@ -97,7 +97,7 @@ internal class ServeUiBuilderCatalogRecovery(
           else "; ${blocked.size} need their owner (blocked preview): ${blocked.joinToString()}") +
           (if (failed.isEmpty()) ""
           else
-            "; ${failed.size} failed: " + failed.entries.joinToString { "${it.key}: ${it.value}" })
+            "; ${failed.size} failed: " + failed.entries.joinToString { "${it.key}: ${it.value}" }),
       )
     }
     return result
@@ -135,7 +135,7 @@ internal class ServeUiBuilderCatalogRecovery(
               sourceDocumentHash = sourceDocumentHash,
               targetDocumentHash = targetHash,
               previewDigest = previewDigest,
-            )
+            ),
           ),
       )
     }

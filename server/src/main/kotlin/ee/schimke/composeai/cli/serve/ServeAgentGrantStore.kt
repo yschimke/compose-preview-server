@@ -480,14 +480,14 @@ class ServeAgentGrantStore(
           "agent-grant: minted ${grant.fingerprint} scope=${granted.wire} " +
             capabilityAuditField(grantedCapabilities) +
             designAuditField(grant.designIds) +
-            "ttl=${ttl}s approver=$approvedBy label=\"${grant.label}\""
+            "ttl=${ttl}s approver=$approvedBy label=\"${grant.label}\"",
         )
       } else {
         audit(
           "agent-grant: approved scope=${granted.wire} " +
             capabilityAuditField(grantedCapabilities) +
             designAuditField(approval.designIds) +
-            "ttl=${ttl}s approver=$approvedBy label=\"${request.label}\" (minted when collected)"
+            "ttl=${ttl}s approver=$approvedBy label=\"${request.label}\" (minted when collected)",
         )
       }
       return Decision.Approved(approval, grant)
@@ -747,7 +747,7 @@ class ServeAgentGrantStore(
             capabilityAuditField(grant.capabilities) +
             designAuditField(grant.designIds) +
             "at collection, expires in ${grant.secondsUntilExpiry(now)}s " +
-            "approver=${grant.approvedBy} label=\"${grant.label}\""
+            "approver=${grant.approvedBy} label=\"${grant.label}\"",
         )
         Collection.Granted(grant)
       }
@@ -1467,7 +1467,7 @@ class ServeAgentGrantStore(
       Base64.getUrlEncoder()
         .withoutPadding()
         .encodeToString(
-          MessageDigest.getInstance("SHA-256").digest(secret.toByteArray(Charsets.UTF_8))
+          MessageDigest.getInstance("SHA-256").digest(secret.toByteArray(Charsets.UTF_8)),
         )
 
     /**

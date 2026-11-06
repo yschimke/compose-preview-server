@@ -73,7 +73,7 @@ class ServeNotoFallbackFontsTest {
     // The slice the CSP report named, and a numbered emoji slice.
     assertTrue(math in slices)
     assertTrue(
-      "notocoloremoji/v39/Yq6P-KqIXTD0t4D9z1ESnKM3-HpFabsE4tq3luCC7p-aXxcn.0.woff2" in slices
+      "notocoloremoji/v39/Yq6P-KqIXTD0t4D9z1ESnKM3-HpFabsE4tq3luCC7p-aXxcn.0.woff2" in slices,
     )
     assertTrue(slices.size > 1000, "${slices.size} slices")
     val shape = Regex("noto[a-z0-9]+/v[0-9]+/[A-Za-z0-9_-]+(\\.[0-9]+)?\\.woff2")

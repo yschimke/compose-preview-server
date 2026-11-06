@@ -111,7 +111,7 @@ class A2uiCommandTest {
     textResult(
       """{"catalogs":[{"catalog":"a2ui-catalog","previews":[""" +
         """{"id":"other","knobs":[{"key":"label","type":"string"}]},""" +
-        """{"id":"doc.Preview","knobs":[{"key":"document","type":"string"}]}]}]}"""
+        """{"id":"doc.Preview","knobs":[{"key":"document","type":"string"}]}]}]}""",
     )
 
   private val rendered =

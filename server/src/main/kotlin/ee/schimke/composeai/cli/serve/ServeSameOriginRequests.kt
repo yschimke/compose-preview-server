@@ -125,7 +125,7 @@ internal object ServeSameOriginRequests {
  * cannot read their answers.
  */
 internal fun ServeUiBuilderAuthorization.acceptingSessionWritesFromSameOrigin(
-  siteHosts: () -> Set<String>
+  siteHosts: () -> Set<String>,
 ): ServeUiBuilderAuthorization {
   val delegate = this
   return ServeUiBuilderAuthorization { call, capability, presented ->

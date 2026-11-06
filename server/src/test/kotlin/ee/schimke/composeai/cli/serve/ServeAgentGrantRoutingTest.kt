@@ -44,7 +44,7 @@ class ServeAgentGrantRoutingTest {
       Base64.getDecoder()
         .decode(
           "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUB" +
-            "AScY42YAAAAASUVORK5CYII="
+            "AScY42YAAAAASUVORK5CYII=",
         )
     File(dir, "previews/example.png").writeBytes(pixel)
     // A staged cmp-jvm raster for `example`, so a bare `?rcPlayer=cmp-jvm` can be answered without
@@ -66,7 +66,7 @@ class ServeAgentGrantRoutingTest {
           ]
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
     registry.register("demo", host = ServeBundleHost(dir, label = "demo"), pinned = true)
     val other = Files.createTempDirectory("grants-other").toFile().also { it.deleteOnExit() }
@@ -166,7 +166,7 @@ class ServeAgentGrantRoutingTest {
         .url(url("/agent-access/$requestId?token=$operatorToken"))
         .post(
           "action=approve&csrf=${field(page, "csrf")}&scope=live&ttl=1800"
-            .toRequestBody("application/x-www-form-urlencoded".toMediaType())
+            .toRequestBody("application/x-www-form-urlencoded".toMediaType()),
         )
         .build()
     val location =
@@ -198,7 +198,7 @@ class ServeAgentGrantRoutingTest {
       payload["approveUrl"]!!
         .jsonPrimitive
         .content
-        .contains(payload["deviceSecret"]!!.jsonPrimitive.content)
+        .contains(payload["deviceSecret"]!!.jsonPrimitive.content),
     )
   }
 
@@ -209,7 +209,7 @@ class ServeAgentGrantRoutingTest {
     assertEquals(401, unauthenticated.first)
     assertEquals("authorization_required", str(unauthenticated.second, "error"))
     assertTrue(
-      str(unauthenticated.second, "agentAccessRequestUrl").endsWith("/agent-access/request")
+      str(unauthenticated.second, "agentAccessRequestUrl").endsWith("/agent-access/request"),
     )
 
     val request = Request.Builder().url(url("/mcp")).get().build()
@@ -238,14 +238,14 @@ class ServeAgentGrantRoutingTest {
   fun `a private host permits only the static viewer resource before a grant`() {
     val viewer =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"${ServeCatalogMcp.MCP_APP_VIEWER_URI}"}}"""
+        """{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"${ServeCatalogMcp.MCP_APP_VIEWER_URI}"}}""",
       )
     assertEquals(200, viewer.first, viewer.second)
     assertTrue(viewer.second.contains("Compose Preview"), viewer.second)
 
     val catalogResource =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"compose-preview://catalog/demo/previews/example"}}"""
+        """{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"compose-preview://catalog/demo/previews/example"}}""",
       )
     assertEquals(401, catalogResource.first, catalogResource.second)
   }
@@ -325,7 +325,7 @@ class ServeAgentGrantRoutingTest {
         .header("MCP-Session-Id", sessionId)
         .post(
           """{"jsonrpc":"2.0","id":21,"method":"ping"}"""
-            .toRequestBody("application/json".toMediaType())
+            .toRequestBody("application/json".toMediaType()),
         )
         .build()
     // A call that does not elicit answers with plain JSON even on a negotiated session.
@@ -344,7 +344,7 @@ class ServeAgentGrantRoutingTest {
         .header("MCP-Session-Id", sessionId)
         .post(
           """{"jsonrpc":"2.0","id":"not-pending","result":{"action":"cancel"}}"""
-            .toRequestBody("application/json".toMediaType())
+            .toRequestBody("application/json".toMediaType()),
         )
         .build()
     client.newCall(unknownResponse).execute().use { assertEquals(400, it.code) }
@@ -424,7 +424,7 @@ class ServeAgentGrantRoutingTest {
   fun `an agent bootstraps a grant through MCP alone`() {
     val opened =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access","arguments":{"scope":"live","label":"from mcp"}}}"""
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access","arguments":{"scope":"live","label":"from mcp"}}}""",
       )
     assertEquals(200, opened.first)
     val payload = json(toolText(opened.second))
@@ -439,7 +439,7 @@ class ServeAgentGrantRoutingTest {
     // otherwise holds the call open for its default while nobody is there to approve.
     val pending =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"$secret","waitSeconds":0}}}"""
+        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"$secret","waitSeconds":0}}}""",
       )
     assertEquals("pending", json(toolText(pending.second))["status"]!!.jsonPrimitive.content)
 
@@ -452,7 +452,7 @@ class ServeAgentGrantRoutingTest {
 
     val approved =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"$secret"}}}"""
+        """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"$secret"}}}""",
       )
     val outcome = json(toolText(approved.second))
     assertEquals("approved", outcome["status"]!!.jsonPrimitive.content)
@@ -469,7 +469,7 @@ class ServeAgentGrantRoutingTest {
   fun `URL elicitation opens the existing grant request and the retry collects its token`() {
     val opened =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access","arguments":{"scope":"live","label":"url mode"}}}"""
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access","arguments":{"scope":"live","label":"url mode"}}}""",
       )
     val payload = json(toolText(opened.second))
     val requestId = payload["requestId"]!!.jsonPrimitive.content
@@ -478,7 +478,7 @@ class ServeAgentGrantRoutingTest {
 
     val required =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"$secret","urlMode":true}}}"""
+        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"$secret","urlMode":true}}}""",
       )
     assertEquals(200, required.first)
     val error = json(required.second)["error"]!!.jsonObject
@@ -494,7 +494,7 @@ class ServeAgentGrantRoutingTest {
     // A client with no URL-elicitation support omits urlMode and retains the complete text result.
     val fallback =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"$secret","waitSeconds":0}}}"""
+        """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"$secret","waitSeconds":0}}}""",
       )
     assertEquals("pending", json(toolText(fallback.second))["status"]!!.jsonPrimitive.content)
 
@@ -509,7 +509,7 @@ class ServeAgentGrantRoutingTest {
     // ordinary approved result instead of demanding the same URL again.
     val approved =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"$secret","urlMode":true}}}"""
+        """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"$secret","urlMode":true}}}""",
       )
     val outcome = json(toolText(approved.second))
     assertEquals("approved", outcome["status"]!!.jsonPrimitive.content)
@@ -522,9 +522,9 @@ class ServeAgentGrantRoutingTest {
       val result =
         json(
             mcpAnonymous(
-                """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"$version","capabilities":$capabilities,"clientInfo":{"name":"test","version":"1"}}}"""
+                """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"$version","capabilities":$capabilities,"clientInfo":{"name":"test","version":"1"}}}""",
               )
-              .second
+              .second,
           )["result"]!!
           .jsonObject
       return result["protocolVersion"]!!.jsonPrimitive.content to
@@ -545,14 +545,14 @@ class ServeAgentGrantRoutingTest {
   fun `a per-request capability declaration decides poll_access URL mode`() {
     val opened =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access","arguments":{}}}"""
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access","arguments":{}}}""",
       )
     val payload = json(toolText(opened.second))
     val requestId = payload["requestId"]!!.jsonPrimitive.content
     val secret = payload["deviceSecret"]!!.jsonPrimitive.content
     fun poll(meta: String, urlMode: Boolean?) =
       mcpAnonymous(
-          """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","_meta":{"${ServeCatalogMcp.CLIENT_CAPABILITIES_META}":$meta},"arguments":{"requestId":"$requestId","deviceSecret":"$secret","waitSeconds":0${urlMode?.let { ",\"urlMode\":$it" }.orEmpty()}}}}"""
+          """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","_meta":{"${ServeCatalogMcp.CLIENT_CAPABILITIES_META}":$meta},"arguments":{"requestId":"$requestId","deviceSecret":"$secret","waitSeconds":0${urlMode?.let { ",\"urlMode\":$it" }.orEmpty()}}}}""",
         )
         .second
 
@@ -571,7 +571,7 @@ class ServeAgentGrantRoutingTest {
   fun `a denied URL-mode access request returns text and never a token`() {
     val opened =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access","arguments":{}}}"""
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access","arguments":{}}}""",
       )
     val payload = json(toolText(opened.second))
     val requestId = payload["requestId"]!!.jsonPrimitive.content
@@ -585,7 +585,7 @@ class ServeAgentGrantRoutingTest {
 
     val denied =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"$secret","urlMode":true}}}"""
+        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"$secret","urlMode":true}}}""",
       )
     val outcome = json(toolText(denied.second))
     assertEquals("denied", outcome["status"]!!.jsonPrimitive.content)
@@ -601,7 +601,7 @@ class ServeAgentGrantRoutingTest {
   fun `a token obtained in this session is usable in it without a header`() {
     val listProjects = { arguments: String ->
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_list_projects","arguments":$arguments}}"""
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_list_projects","arguments":$arguments}}""",
       )
     }
     assertEquals(401, listProjects("{}").first)
@@ -616,7 +616,7 @@ class ServeAgentGrantRoutingTest {
     // stops only at the door.
     val rendered =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"catalog":"none","previewId":"none","token":"$token"}}}"""
+        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"catalog":"none","previewId":"none","token":"$token"}}}""",
       )
     assertEquals(200, rendered.first, rendered.second)
     // The catalog does not exist here; what matters is that the refusal is about the catalog rather
@@ -628,7 +628,7 @@ class ServeAgentGrantRoutingTest {
   fun `an in-band token authorizes the resource linked by its render`() {
     val opened =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access","arguments":{"scope":"live"}}}"""
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access","arguments":{"scope":"live"}}}""",
       )
     val request = json(toolText(opened.second))
     val requestId = request["requestId"]!!.jsonPrimitive.content
@@ -641,13 +641,13 @@ class ServeAgentGrantRoutingTest {
     )
     val polled =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"$deviceSecret"}}}"""
+        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"$deviceSecret"}}}""",
       )
     val token = json(toolText(polled.second))["token"]!!.jsonPrimitive.content
 
     val rendered =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"catalog":"demo","previewId":"example","observe":"png","overrides":{"uiMode":"dark"},"token":"$token"}}}"""
+        """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"catalog":"demo","previewId":"example","observe":"png","overrides":{"uiMode":"dark"},"token":"$token"}}}""",
       )
     assertEquals(200, rendered.first, rendered.second)
     val resourceUri =
@@ -663,7 +663,7 @@ class ServeAgentGrantRoutingTest {
 
     val read =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"$resourceUri","_meta":{"compose-preview/token":"$token"}}}"""
+        """{"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"$resourceUri","_meta":{"compose-preview/token":"$token"}}}""",
       )
     assertEquals(200, read.first, read.second)
     val contents = json(read.second)["result"]!!.jsonObject["contents"]!!.jsonArray
@@ -674,7 +674,7 @@ class ServeAgentGrantRoutingTest {
     assertTrue(resourceUri.contains("&exp=") && resourceUri.contains("&sig="), resourceUri)
     val hostRead =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":5,"method":"resources/read","params":{"uri":"$resourceUri"}}"""
+        """{"jsonrpc":"2.0","id":5,"method":"resources/read","params":{"uri":"$resourceUri"}}""",
       )
     assertEquals(200, hostRead.first, hostRead.second)
     assertTrue(
@@ -692,7 +692,7 @@ class ServeAgentGrantRoutingTest {
     // ...but a tampered signature, or a different override state, still needs live scope.
     val tampered =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":6,"method":"resources/read","params":{"uri":"${resourceUri.substringBeforeLast("&sig=")}&sig=AAAA"}}"""
+        """{"jsonrpc":"2.0","id":6,"method":"resources/read","params":{"uri":"${resourceUri.substringBeforeLast("&sig=")}&sig=AAAA"}}""",
       )
     assertTrue(tampered.second.contains("live grant scope is required"), tampered.second)
     val otherState =
@@ -705,13 +705,13 @@ class ServeAgentGrantRoutingTest {
       )
     val swapped =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":7,"method":"resources/read","params":{"uri":"$otherState"}}"""
+        """{"jsonrpc":"2.0","id":7,"method":"resources/read","params":{"uri":"$otherState"}}""",
       )
     assertTrue(swapped.second.contains("live grant scope is required"), swapped.second)
     // An unsigned default-state read is still gated at the door.
     val unsigned =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":8,"method":"resources/read","params":{"uri":"${resourceUri.substringBefore('?')}"}}"""
+        """{"jsonrpc":"2.0","id":8,"method":"resources/read","params":{"uri":"${resourceUri.substringBefore('?')}"}}""",
       )
     assertEquals(401, unsigned.first, unsigned.second)
 
@@ -719,7 +719,7 @@ class ServeAgentGrantRoutingTest {
     // default.
     val replayed =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"uri":"$resourceUri","observe":"png","token":"$token"}}}"""
+        """{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"uri":"$resourceUri","observe":"png","token":"$token"}}}""",
       )
     val replayedUri =
       json(replayed.second)["result"]!!
@@ -735,7 +735,7 @@ class ServeAgentGrantRoutingTest {
     )
     val conflicting =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"uri":"$resourceUri","overrides":{"uiMode":"light"},"token":"$token"}}}"""
+        """{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"uri":"$resourceUri","overrides":{"uiMode":"light"},"token":"$token"}}}""",
       )
     assertTrue(
       conflicting.second.contains("differ from the 'overrides' argument"),
@@ -743,7 +743,7 @@ class ServeAgentGrantRoutingTest {
     )
     val unsupported =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"catalog_history_list","arguments":{"uri":"$resourceUri","token":"$token"}}}"""
+        """{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"catalog_history_list","arguments":{"uri":"$resourceUri","token":"$token"}}}""",
       )
     assertTrue(unsupported.second.contains("does not apply"), unsupported.second)
   }
@@ -753,7 +753,7 @@ class ServeAgentGrantRoutingTest {
   fun `an unknown token argument is refused like none at all`() {
     val (code, body) =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_list_projects","arguments":{"token":"cpat_not-a-real-grant"}}}"""
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_list_projects","arguments":{"token":"cpat_not-a-real-grant"}}}""",
       )
     assertEquals(401, code, body)
   }
@@ -763,12 +763,12 @@ class ServeAgentGrantRoutingTest {
   fun `poll_access refuses a request it cannot prove it opened`() {
     val opened =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access","arguments":{}}}"""
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access","arguments":{}}}""",
       )
     val requestId = json(toolText(opened.second))["requestId"]!!.jsonPrimitive.content
     val stolen =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"not-the-secret"}}}"""
+        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"$requestId","deviceSecret":"not-the-secret"}}}""",
       )
     // The same answer an unknown id gets, deliberately: one must not distinguish the other.
     assertEquals("unknown", json(toolText(stolen.second))["status"]!!.jsonPrimitive.content)
@@ -880,7 +880,7 @@ class ServeAgentGrantRoutingTest {
 
     val opened =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access","arguments":{}}}"""
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access","arguments":{}}}""",
       )
     val payload = json(toolText(opened.second))
     val started = System.currentTimeMillis()
@@ -888,7 +888,7 @@ class ServeAgentGrantRoutingTest {
     // client that says nothing is one that would otherwise call again in three seconds.
     val polled =
       mcpAnonymous(
-        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"${payload["requestId"]!!.jsonPrimitive.content}","deviceSecret":"${payload["deviceSecret"]!!.jsonPrimitive.content}"}}}"""
+        """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"poll_access","arguments":{"requestId":"${payload["requestId"]!!.jsonPrimitive.content}","deviceSecret":"${payload["deviceSecret"]!!.jsonPrimitive.content}"}}}""",
       )
     val elapsed = System.currentTimeMillis() - started
     assertEquals("pending", json(toolText(polled.second))["status"]!!.jsonPrimitive.content)

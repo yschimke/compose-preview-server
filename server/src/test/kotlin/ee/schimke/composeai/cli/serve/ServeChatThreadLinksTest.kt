@@ -30,7 +30,7 @@ class ServeChatThreadLinksTest {
     val ref =
       ServeChatThreadLinks.slack(
         "https://acme.slack.com/archives/C0123ABCD/p1700000000000900" +
-          "?thread_ts=1700000000.000200&cid=C0123ABCD"
+          "?thread_ts=1700000000.000200&cid=C0123ABCD",
       )
 
     assertEquals("1700000000.000900", ref?.messageTs)
@@ -41,15 +41,15 @@ class ServeChatThreadLinksTest {
   fun `anything that is not a slack message permalink is not parsed as one`() {
     assertNull(ServeChatThreadLinks.slack("https://acme.slack.com/archives/C0123ABCD"))
     assertNull(
-      ServeChatThreadLinks.slack("http://acme.slack.com/archives/C0123ABCD/p1700000000000200")
+      ServeChatThreadLinks.slack("http://acme.slack.com/archives/C0123ABCD/p1700000000000200"),
     )
     assertNull(
       ServeChatThreadLinks.slack(
-        "https://slack.com.evil.example/archives/C0123ABCD/p1700000000000200"
-      )
+        "https://slack.com.evil.example/archives/C0123ABCD/p1700000000000200",
+      ),
     )
     assertNull(
-      ServeChatThreadLinks.slack("https://github.com/yschimke/compose-preview-server/issues/1254")
+      ServeChatThreadLinks.slack("https://github.com/yschimke/compose-preview-server/issues/1254"),
     )
     assertNull(ServeChatThreadLinks.slack("not a url"))
   }

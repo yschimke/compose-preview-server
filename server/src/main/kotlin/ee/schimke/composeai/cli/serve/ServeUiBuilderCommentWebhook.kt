@@ -142,7 +142,7 @@ internal class ServeUiBuilderCommentWebhook(
           kind = DesignActivityKind.FORK,
           revision = from.revision,
           forkId = forkId,
-        )
+        ),
       )
     }
 
@@ -166,7 +166,7 @@ internal class ServeUiBuilderCommentWebhook(
         throttled.remove(designId)?.let { held ->
           onLog(
             "serve: comment webhook $fingerprint resumed design $designId after holding back " +
-              "$held event(s) over the rate limit"
+              "$held event(s) over the rate limit",
           )
         }
         return true
@@ -179,7 +179,7 @@ internal class ServeUiBuilderCommentWebhook(
         onLog(
           "serve: comment webhook $fingerprint is over its rate limit " +
             "(${rateLimit.perDesignPerMinute}/min per design, ${rateLimit.totalPerMinute}/min " +
-            "in total); holding back $wire events on design $designId"
+            "in total); holding back $wire events on design $designId",
         )
       }
       return false
@@ -201,14 +201,14 @@ internal class ServeUiBuilderCommentWebhook(
     if (dropped != null) {
       onLog(
         "serve: comment webhook $fingerprint is behind; dropped the oldest queued event " +
-          "(${dropped.wire} on design ${dropped.designId})"
+          "(${dropped.wire} on design ${dropped.designId})",
       )
     }
     // The freed slot is not reserved; another writer may take it, and a drop must never be silent.
     if (!queue.trySend(queued).isSuccess) {
       onLog(
         "serve: comment webhook $fingerprint is behind; dropped a ${queued.wire} " +
-          "event on design ${queued.designId}"
+          "event on design ${queued.designId}",
       )
     }
   }
@@ -287,7 +287,7 @@ internal class ServeUiBuilderCommentWebhook(
     if (!drained) {
       onLog(
         "serve: comment webhook $fingerprint still had events queued at shutdown; " +
-          "they were not delivered"
+          "they were not delivered",
       )
     }
     worker.cancel()
@@ -633,7 +633,7 @@ private fun teamsBody(event: DesignCommentWebhookEventV1): JsonObject = buildJso
                 put("type", "Action.OpenUrl")
                 put("title", "Open the thread")
                 put("url", event.url)
-              }
+              },
             )
             event.design.thread?.let { thread ->
               add(
@@ -641,12 +641,12 @@ private fun teamsBody(event: DesignCommentWebhookEventV1): JsonObject = buildJso
                   put("type", "Action.OpenUrl")
                   put("title", ServeChatThreadLinks.label(thread))
                   put("url", thread)
-                }
+                },
               )
             }
           }
         }
-      }
+      },
     )
   }
 }
@@ -666,7 +666,7 @@ internal fun textBlock(text: String, bold: Boolean, subtle: Boolean = false): Js
           put("text", text)
           if (bold) put("weight", "Bolder")
           if (subtle) put("isSubtle", true)
-        }
+        },
       )
     }
   }

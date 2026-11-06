@@ -139,7 +139,7 @@ class ServeUiBuilderHistoryMcpTest {
             UiBuilderServiceLimits(
               retainedRevisionSnapshots = 2,
               minimumRetainedRevisionSnapshots = 2,
-            )
+            ),
         )
       create(mcp)
       apply(mcp, 0, setText("a", "One"))
@@ -501,7 +501,7 @@ class ServeUiBuilderHistoryMcpTest {
                 id = "column",
                 componentId = "layout/column",
                 slots = mapOf("children" to listOf("c", "a", "b", "row")),
-              ))
+              )),
       )
     val diff = UiBuilderDocumentDiff.diff(base, reordered)
     assertEquals(listOf("c"), diff.nodes.map { it.nodeId })
@@ -549,13 +549,15 @@ class ServeUiBuilderHistoryMcpTest {
   @Test
   fun `the four tools are always declared, with closed output schemas`() {
     val declared =
-      ServeUiBuilderMcp.declarations({ name, description, schema ->
-        kotlinx.serialization.json.buildJsonObject {
-          put("name", kotlinx.serialization.json.JsonPrimitive(name))
-          put("description", kotlinx.serialization.json.JsonPrimitive(description))
-          put("inputSchema", Json.parseToJsonElement(schema))
-        }
-      })
+      ServeUiBuilderMcp.declarations(
+        { name, description, schema ->
+          kotlinx.serialization.json.buildJsonObject {
+            put("name", kotlinx.serialization.json.JsonPrimitive(name))
+            put("description", kotlinx.serialization.json.JsonPrimitive(description))
+            put("inputSchema", Json.parseToJsonElement(schema))
+          }
+        },
+      )
     val names = declared.map { it["name"]!!.jsonPrimitive.content }
     assertTrue(names.containsAll(ServeUiBuilderHistoryTools.TOOL_NAMES), names.toString())
     assertTrue(ServeUiBuilderMcp.TOOL_NAMES.containsAll(ServeUiBuilderHistoryTools.TOOL_NAMES))
@@ -614,7 +616,7 @@ class ServeUiBuilderHistoryMcpTest {
       mcp.call(
         ServeUiBuilderMcp.CREATE_DESIGN,
         Json.parseToJsonElement(
-            """{"designId":"$designId","includeCatalog":true,"document":$document}"""
+            """{"designId":"$designId","includeCatalog":true,"document":$document}""",
           )
           .jsonObject,
         actor,
@@ -634,7 +636,7 @@ class ServeUiBuilderHistoryMcpTest {
       mcp.call(
         ServeUiBuilderMcp.APPLY,
         Json.parseToJsonElement(
-            """{"designId":"$DESIGN","operationId":"op-$baseRevision","baseRevision":$baseRevision,"operations":$operations}"""
+            """{"designId":"$DESIGN","operationId":"op-$baseRevision","baseRevision":$baseRevision,"operations":$operations}""",
           )
           .jsonObject,
         owner,

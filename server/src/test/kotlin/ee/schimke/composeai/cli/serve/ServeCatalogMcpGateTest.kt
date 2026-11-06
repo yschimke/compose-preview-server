@@ -28,18 +28,20 @@ class ServeCatalogMcpGateTest {
     assertFalse(gated("""{"jsonrpc":"2.0","id":1,"method":"prompts/list"}"""))
     assertFalse(
       gated(
-        """{"jsonrpc":"2.0","id":1,"method":"prompts/get","params":{"name":"design-status","arguments":{"designId":"demo"}}}"""
-      )
+        """{"jsonrpc":"2.0","id":1,"method":"prompts/get","params":{"name":"design-status","arguments":{"designId":"demo"}}}""",
+      ),
     )
   }
 
   @Test
   fun `the two tools that obtain a credential are open`() {
     assertFalse(
-      gated("""{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access"}}""")
+      gated(
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_access"}}""",
+      ),
     )
     assertFalse(
-      gated("""{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"poll_access"}}""")
+      gated("""{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"poll_access"}}"""),
     )
   }
 
@@ -49,23 +51,23 @@ class ServeCatalogMcpGateTest {
     assertTrue(gated("""{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"x"}}"""))
     assertFalse(
       gated(
-        """{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"${ServeCatalogMcp.MCP_APP_VIEWER_URI}"}}"""
-      )
+        """{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"${ServeCatalogMcp.MCP_APP_VIEWER_URI}"}}""",
+      ),
     )
     assertTrue(
       gated(
-        """{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"${ServeCatalogMcp.MCP_APP_VIEWER_URI}/other"}}"""
-      )
+        """{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"${ServeCatalogMcp.MCP_APP_VIEWER_URI}/other"}}""",
+      ),
     )
     assertTrue(
       gated(
-        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_list_projects"}}"""
-      )
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_list_projects"}}""",
+      ),
     )
     assertTrue(
       gated(
-        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_render_preview"}}"""
-      )
+        """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_render_preview"}}""",
+      ),
     )
   }
 

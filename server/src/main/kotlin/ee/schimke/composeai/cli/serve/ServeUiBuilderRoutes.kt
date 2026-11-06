@@ -145,7 +145,7 @@ internal fun Route.installUiBuilderRoutes(
           if (publicRead) "public" else "private",
           canWrite,
           canManage,
-        )
+        ),
       ),
       ContentType.Application.Json,
     )
@@ -250,19 +250,19 @@ internal fun Route.installUiBuilderRoutes(
                 ServiceErrorCodeV1.INTERNAL,
                 "UI-builder service failed",
                 retryable = true,
-              )
+              ),
             )
           }
         is ProtocolRequestMapping.Rejected -> UiBuilderServiceResponse.Error(mapping.error)
       }
     val protocol =
       UiBuilderProtocolMapper.toProtocolResponse(
-        response.exportTransportResponse().withinCatalogs(scope)
+        response.exportTransportResponse().withinCatalogs(scope),
       )
     call.exportRetryAfter(response)
     call.respondText(
       UI_BUILDER_JSON.encodeToString(
-        HttpResponseEnvelopeV1(requestId = envelope.requestId, response = protocol)
+        HttpResponseEnvelopeV1(requestId = envelope.requestId, response = protocol),
       ),
       ContentType.Application.Json,
       response.httpStatus(),
@@ -308,7 +308,7 @@ internal fun Route.installUiBuilderRoutes(
       service.shapeForReader(
         actor,
         service.execute(
-          UiBuilderServiceCall(actor, UiBuilderServiceRequest.GetSnapshot(designId, revision))
+          UiBuilderServiceCall(actor, UiBuilderServiceRequest.GetSnapshot(designId, revision)),
         ),
       )
     when (response) {
@@ -504,7 +504,7 @@ internal fun Route.installUiBuilderRoutes(
     val response =
       try {
         service.execute(
-          UiBuilderServiceCall(actor, UiBuilderServiceRequest.RenameDesign(designId, title))
+          UiBuilderServiceCall(actor, UiBuilderServiceRequest.RenameDesign(designId, title)),
         )
       } catch (cancelled: CancellationException) {
         throw cancelled
@@ -515,7 +515,7 @@ internal fun Route.installUiBuilderRoutes(
             ServiceErrorCodeV1.INTERNAL,
             "UI-builder service failed",
             retryable = true,
-          )
+          ),
         )
       }
     when (response) {
@@ -748,7 +748,7 @@ internal fun Route.installUiBuilderRoutes(
               UiBuilderIdentityRefusalV1(
                 message = "authentication is required",
                 signInUrl = identityDetails(call, false)?.signInUrl,
-              )
+              ),
             ),
             ContentType.Application.Json,
             HttpStatusCode.Unauthorized,
@@ -772,7 +772,7 @@ internal fun Route.installUiBuilderRoutes(
           canWrite = canWrite,
           writeDeniedReason = details?.writeDeniedReason?.takeIf { !canWrite },
           signInUrl = details?.signInUrl,
-        )
+        ),
       ),
       ContentType.Application.Json,
       HttpStatusCode.OK,
@@ -835,7 +835,7 @@ internal fun Route.installUiBuilderRoutes(
             actor = actor,
             designId = designId,
             afterSequence = afterSequence,
-          )
+          ),
         ) { update ->
           if (updates.trySend(update).isFailure) {
             overflowed.set(true)
@@ -1145,7 +1145,7 @@ internal data class UiBuilderVisibilityPayload(
  */
 internal fun logUiBuilderServiceFailure(failure: Exception) {
   System.err.println(
-    "serve: UI-builder service failed: ${failure::class.qualifiedName}: ${failure.message}"
+    "serve: UI-builder service failed: ${failure::class.qualifiedName}: ${failure.message}",
   )
   failure.printStackTrace()
 }
@@ -1155,7 +1155,7 @@ internal fun logUiBuilderServiceFailure(failure: Exception) {
  * those catalogs, everything else untouched. Null [catalogs] is every catalog.
  */
 internal fun UiBuilderServiceResponse.withinCatalogs(
-  catalogs: Set<String>?
+  catalogs: Set<String>?,
 ): UiBuilderServiceResponse =
   when {
     catalogs == null -> this

@@ -67,9 +67,9 @@ class ServeUiBuilderAssetRoutesTest {
     assertIs<UiBuilderServiceResponse.Snapshot>(
       runBlocking {
         service.execute(
-          UiBuilderServiceCall(OPERATOR, UiBuilderServiceRequest.CreateDesign(document()))
+          UiBuilderServiceCall(OPERATOR, UiBuilderServiceRequest.CreateDesign(document())),
         )
-      }
+      },
     )
     server =
       ServeHttpServer(
@@ -156,7 +156,7 @@ class ServeUiBuilderAssetRoutesTest {
         .url(url(designId, assetKey))
         .put(bytes.toRequestBody("application/octet-stream".toMediaType()))
         .also { if (token != null) it.header(ServeHttpServer.TOKEN_HEADER, token) }
-        .build()
+        .build(),
     )
 
   private fun get(assetKey: String, token: String?, designId: String = DESIGN_ID): Response =
@@ -165,7 +165,7 @@ class ServeUiBuilderAssetRoutesTest {
         .url(url(designId, assetKey))
         .get()
         .also { if (token != null) it.header(ServeHttpServer.TOKEN_HEADER, token) }
-        .build()
+        .build(),
     )
 
   private fun exchange(request: Request): Response =
@@ -187,9 +187,9 @@ class ServeUiBuilderAssetRoutesTest {
     assertIs<UiBuilderServiceResponse.Snapshot>(
         runBlocking {
           service.execute(
-            UiBuilderServiceCall(OPERATOR, UiBuilderServiceRequest.OpenDesign(DESIGN_ID))
+            UiBuilderServiceCall(OPERATOR, UiBuilderServiceRequest.OpenDesign(DESIGN_ID)),
           )
-        }
+        },
       )
       .snapshot
       .state

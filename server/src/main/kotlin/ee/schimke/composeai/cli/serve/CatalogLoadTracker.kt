@@ -221,7 +221,7 @@ class CatalogLoadTracker(
     snapshot()
       .sortedWith(
         compareByDescending<State> { it.config.designSystem }
-          .thenByDescending { it.config.loadPriority }
+          .thenByDescending { it.config.loadPriority },
       )
 
   private val requestedLoads = linkedSetOf<String>()

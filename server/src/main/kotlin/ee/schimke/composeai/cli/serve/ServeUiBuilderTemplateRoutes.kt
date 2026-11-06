@@ -84,7 +84,7 @@ internal fun Route.installUiBuilderTemplateRoutes(
               document.toDesignDocumentV1()
             }
           }
-          .build()
+          .build(),
       ),
       ContentType.Application.Json,
     )

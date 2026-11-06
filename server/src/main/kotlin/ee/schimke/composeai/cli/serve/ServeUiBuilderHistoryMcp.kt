@@ -156,7 +156,7 @@ internal class ServeUiBuilderHistoryTools(
             UiBuilderServiceCall(
               actor,
               UiBuilderServiceRequest.GetDelta(designId, after, DELTA_PAGE),
-            )
+            ),
           )
       ) {
         is UiBuilderServiceResponse.Delta -> {
@@ -259,7 +259,7 @@ internal class ServeUiBuilderHistoryTools(
     if (revision == current.revision) {
       throw McpRequestException(
         "revision $revision is already the current revision of `$designId`; there is nothing to " +
-          "restore"
+          "restore",
       )
     }
     if (dryRun) {
@@ -288,7 +288,7 @@ internal class ServeUiBuilderHistoryTools(
         UiBuilderServiceCall(
           actor,
           UiBuilderServiceRequest.RestoreRevision(designId, revision, baseRevision, operationId),
-        )
+        ),
       )
     val outcome =
       when (response) {
@@ -322,7 +322,7 @@ internal class ServeUiBuilderHistoryTools(
             "stale: baseRevision $baseRevision is not the current revision of `$designId` " +
               "(${outcome.currentRevision}); somebody changed it. Dry-run again and quote " +
               "${outcome.currentRevision}. Nothing was restored."
-          else "${outcome.code.name}: ${outcome.message}. Nothing was restored."
+          else "${outcome.code.name}: ${outcome.message}. Nothing was restored.",
         )
     }
   }
@@ -341,7 +341,7 @@ internal class ServeUiBuilderHistoryTools(
       when (
         val response =
           service.execute(
-            UiBuilderServiceCall(actor, UiBuilderServiceRequest.CreateDesign(document))
+            UiBuilderServiceCall(actor, UiBuilderServiceRequest.CreateDesign(document)),
           )
       ) {
         is UiBuilderServiceResponse.Snapshot -> response.snapshot.state.document
@@ -353,7 +353,7 @@ internal class ServeUiBuilderHistoryTools(
             )
               "design id `$forkId` is already taken; choose another `newDesignId`. Nothing was " +
                 "forked."
-            else "${response.error.code.name}: ${response.error.message}. Nothing was forked."
+            else "${response.error.code.name}: ${response.error.message}. Nothing was forked.",
           )
         else -> throw McpRequestException("the design service did not answer the fork")
       }
@@ -406,7 +406,7 @@ internal class ServeUiBuilderHistoryTools(
         service.shapeForReader(
           actor,
           service.execute(
-            UiBuilderServiceCall(actor, UiBuilderServiceRequest.ListRevisions(designId))
+            UiBuilderServiceCall(actor, UiBuilderServiceRequest.ListRevisions(designId)),
           ),
         )
     ) {
@@ -434,7 +434,7 @@ internal class ServeUiBuilderHistoryTools(
     return when (
       val response =
         service.execute(
-          UiBuilderServiceCall(actor, UiBuilderServiceRequest.GetSnapshot(designId, revision))
+          UiBuilderServiceCall(actor, UiBuilderServiceRequest.GetSnapshot(designId, revision)),
         )
     ) {
       is UiBuilderServiceResponse.Snapshot -> response.snapshot.state.document
@@ -445,7 +445,7 @@ internal class ServeUiBuilderHistoryTools(
             ?: if (response.error.code != ServiceErrorCodeV1.SNAPSHOT_REQUIRED) null
             else
               service.execute(
-                UiBuilderServiceCall(actor, UiBuilderServiceRequest.ListRevisions(designId))
+                UiBuilderServiceCall(actor, UiBuilderServiceRequest.ListRevisions(designId)),
               ) as? UiBuilderServiceResponse.Revisions
         throw refusal(designId, revision, response.error, known)
       }
@@ -478,7 +478,7 @@ internal class ServeUiBuilderHistoryTools(
           }
         }
         else -> "${error.code.name}: ${error.message}"
-      }
+      },
     )
 
   private fun JsonObject.text(name: String): String? =

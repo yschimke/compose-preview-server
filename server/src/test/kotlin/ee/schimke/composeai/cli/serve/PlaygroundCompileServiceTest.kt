@@ -165,7 +165,7 @@ class PlaygroundCompileServiceTest {
         fileSystem = fs,
         catalogTargets = {
           listOf(
-            PlaygroundCatalogTarget("m3", "desktop", listOf(PlaygroundMode.CMP), resolved = true)
+            PlaygroundCatalogTarget("m3", "desktop", listOf(PlaygroundMode.CMP), resolved = true),
           )
         },
       )
@@ -235,7 +235,7 @@ class PlaygroundCompileServiceTest {
           assertTrue(fs.exists(sources.single()), "the snippet is staged before compile")
           assertTrue(out.toString().endsWith("classes"))
           emptyList()
-        }
+        },
       )
 
     val resp = svc.run(request(), isSecurityChecked = true)
@@ -501,7 +501,7 @@ class PlaygroundCompileServiceTest {
         compile = { s, _, _ ->
           staged = s
           emptyList()
-        }
+        },
       )
     svc.run(
       PlaygroundRunRequest(
@@ -528,7 +528,7 @@ class PlaygroundCompileServiceTest {
           staged = sources
           sources.forEach { assertTrue(fs.exists(it), "${'$'}it should be staged before compile") }
           emptyList()
-        }
+        },
       )
 
     val resp =
@@ -592,7 +592,7 @@ class PlaygroundCompileServiceTest {
         compile = { s, _, _ ->
           staged = s
           emptyList()
-        }
+        },
       )
     svc.run(
       PlaygroundRunRequest(
@@ -920,7 +920,7 @@ class PlaygroundCompileServiceTest {
                   PlaygroundDiagnostic(
                     PlaygroundSeverity.ERROR,
                     "the playground is busy compiling (all 1 compile slots in use) — try again shortly",
-                  )
+                  ),
                 ),
               incremental = false,
             )
@@ -987,7 +987,7 @@ class PlaygroundCompileServiceTest {
                 PlaygroundDiagnostic(
                   PlaygroundSeverity.ERROR,
                   "the playground is busy compiling (all 1 compile slots in use) — try again shortly",
-                )
+                ),
               ),
               incremental = false,
             )
@@ -1093,7 +1093,7 @@ class PlaygroundCompileServiceTest {
               PlaygroundDiagnostic(
                 PlaygroundSeverity.ERROR,
                 "compilation failed: broken IC cache",
-              )
+              ),
             ),
             true,
           )

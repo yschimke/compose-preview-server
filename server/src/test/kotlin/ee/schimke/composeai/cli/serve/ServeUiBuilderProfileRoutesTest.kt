@@ -84,7 +84,7 @@ class ServeUiBuilderProfileRoutesTest {
         when (val request = call.request) {
           is UiBuilderServiceRequest.ListCatalogs ->
             UiBuilderServiceResponse.Catalogs(
-              listOf(capability("m3-catalog"), capability("remote-m3"))
+              listOf(capability("m3-catalog"), capability("remote-m3")),
             )
           is UiBuilderServiceRequest.ListDesigns ->
             UiBuilderServiceResponse.Designs(
@@ -101,7 +101,7 @@ class ServeUiBuilderProfileRoutesTest {
           is UiBuilderServiceRequest.ListTrash -> UiBuilderServiceResponse.Trash(emptyList())
           else ->
             UiBuilderServiceResponse.Error(
-              UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "missing")
+              UiBuilderServiceError(ServiceErrorCodeV1.NOT_FOUND, "missing"),
             )
         }
 
@@ -232,9 +232,9 @@ class ServeUiBuilderProfileRoutesTest {
             FormBody.Builder()
               .add("start", startFor(catalog))
               .add("designId", "new-$catalog")
-              .build()
+              .build(),
           )
-          .build()
+          .build(),
       )
       .execute()
       .use { it.code }
@@ -254,9 +254,9 @@ class ServeUiBuilderProfileRoutesTest {
           .header("X-Test-Actor", "github:octocat")
           .post(
             UI_BUILDER_JSON.encodeToString(HttpRequestEnvelopeV1.serializer(), envelope)
-              .toRequestBody("application/json".toMediaType())
+              .toRequestBody("application/json".toMediaType()),
           )
-          .build()
+          .build(),
       )
       .execute()
       .use {
@@ -324,7 +324,7 @@ class ServeUiBuilderProfileRoutesTest {
             Request.Builder()
               .url("http://127.0.0.1:${profileOnly.port}/start")
               .header("Host", "ha.coo.ee")
-              .build()
+              .build(),
           )
           .execute()
       response.use { assertEquals(302 to BUILDER_GUIDE, it.code to it.header("Location")) }
@@ -364,7 +364,7 @@ class ServeUiBuilderProfileRoutesTest {
     assertTrue("href=\"/manifest.webmanifest\"" in plain, plain)
     // Elsewhere the path is what it always was: not the profile's manifest.
     assertFalse(
-      "Home Assistant" in get("/ui-builder/manifest.webmanifest", "preview.coo.ee").second
+      "Home Assistant" in get("/ui-builder/manifest.webmanifest", "preview.coo.ee").second,
     )
   }
 
@@ -442,7 +442,7 @@ class ServeUiBuilderProfileRoutesTest {
             .header("X-Test-Actor", "github:octocat")
             .header("If-None-Match", "*")
             .put(body)
-            .build()
+            .build(),
         )
         .execute()
         .use { it.code }
@@ -484,7 +484,7 @@ class ServeUiBuilderProfileRoutesTest {
               .url("http://127.0.0.1:${shared.port}$path")
               .header("Host", "ha.coo.ee")
               .get()
-              .build()
+              .build(),
           )
           .execute()
           .use { it.code to it.header("Location") }
@@ -504,11 +504,11 @@ class ServeUiBuilderProfileRoutesTest {
           .newCall(
             Request.Builder()
               .url(
-                url("/auth/github/start?return=" + java.net.URLEncoder.encode(returnTo, "UTF-8"))
+                url("/auth/github/start?return=" + java.net.URLEncoder.encode(returnTo, "UTF-8")),
               )
               .header("Host", "preview.coo.ee")
               .get()
-              .build()
+              .build(),
           )
           .execute()
           .use {
@@ -526,7 +526,7 @@ class ServeUiBuilderProfileRoutesTest {
             .header("Host", "preview.coo.ee")
             .header("Cookie", started.second.substringBefore(";"))
             .get()
-            .build()
+            .build(),
         )
         .execute()
         .use {

@@ -92,7 +92,7 @@ object ServeParallelLayers {
         val ours = here.filter { it.kind == kind }
         val theirs = there.filter { it.kind == kind }
         if (ours.isEmpty() && theirs.isEmpty()) null else Layer(kind, rows(kind, ours, theirs))
-      }
+      },
     )
 
   /**
@@ -179,7 +179,7 @@ object ServeParallelLayers {
     val preferred = PREFERRED_FIELDS[kind].orEmpty()
     val keys =
       (here.keys + there.keys).sortedWith(
-        compareBy({ preferred.indexOf(it).takeIf { i -> i >= 0 } ?: preferred.size }, { it })
+        compareBy({ preferred.indexOf(it).takeIf { i -> i >= 0 } ?: preferred.size }, { it }),
       )
     return keys.map { Field(it, here[it], there[it]) }
   }

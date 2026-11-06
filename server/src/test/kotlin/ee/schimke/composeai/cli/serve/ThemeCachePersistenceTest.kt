@@ -418,7 +418,7 @@ class ThemeCachePersistenceTest {
             graceMillis = 60_000,
             clock = { now },
           )
-          .open("m3-catalog", fp, inputs(fp).copy(toolVersion = "1.15.0"))
+          .open("m3-catalog", fp, inputs(fp).copy(toolVersion = "1.15.0")),
       )
     // The incoming replica regenerates the key, inside the overlap window.
     incoming.put("seed|dark", ByteArray(8) { 2 }, replaceExisting = true)
@@ -428,7 +428,7 @@ class ThemeCachePersistenceTest {
     // file is unambiguous.
     val png =
       assertNotNull(
-        File(File(root, "m3-catalog"), fp).listFiles()?.singleOrNull { it.name.endsWith(".png") }
+        File(File(root, "m3-catalog"), fp).listFiles()?.singleOrNull { it.name.endsWith(".png") },
       )
     png.writeBytes(ByteArray(8) { 9 })
     assertTrue(png.setLastModified(now + 5_000), "the co-replica's write carries its own timestamp")
@@ -489,7 +489,7 @@ class ThemeCachePersistenceTest {
             graceMillis = 60_000,
             clock = { now },
           )
-          .open("m3-catalog", fp, inputs(fp).copy(toolVersion = "1.15.0"))
+          .open("m3-catalog", fp, inputs(fp).copy(toolVersion = "1.15.0")),
       )
     // Regenerated inside the overlap window, so the dirty set empties but the at-risk set does not.
     incoming.put("a|dark", ByteArray(8) { 2 }, replaceExisting = true)
@@ -776,7 +776,7 @@ class ThemeCachePersistenceTest {
             fontRoots = listOf(File(dir, "no-such-font-root")),
             libraryRoots = listOf(File(dir, "no-such-lib-root")),
           ),
-      )
+      ),
     )
   }
 
@@ -820,7 +820,7 @@ class ThemeCachePersistenceTest {
           classpath = listOf(framework.absolutePath),
           systemProperties =
             mapOf(ThemeCacheFingerprint.USER_CLASS_DIRS_PROPERTY to classes.absolutePath),
-        )
+        ),
       )
 
     val before = fingerprintNow()
@@ -855,7 +855,7 @@ class ThemeCachePersistenceTest {
         ThemeCacheFingerprint.renderedClasspath(
           classpath = listOf(framework.absolutePath),
           systemProperties = mapOf("composeai.fonts.cacheDir" to fonts.absolutePath),
-        )
+        ),
       )
 
     val before = fingerprintNow()
@@ -1018,7 +1018,7 @@ class ThemeCachePersistenceTest {
         ThemeCacheFingerprint.renderedClasspath(
           classpath = listOf(jarFile.absolutePath),
           systemProperties = mapOf(ThemeCacheFingerprint.PAYLOAD_PROPERTIES[0] to ir.absolutePath),
-        )
+        ),
       )
 
     val before = fingerprintNow()

@@ -20,8 +20,8 @@ class ServeUiBuilderRemoteNativePreviewTest {
   private val document =
     Json.decodeFromString<DesignDocumentV1>(
         Files.readString(
-          Path.of("../docs/design/evidence/ui-builder-unsaved-remote-preview/document.json")
-        )
+          Path.of("../docs/design/evidence/ui-builder-unsaved-remote-preview/document.json"),
+        ),
       )
       .let { it.copy(catalogPin = it.catalogPin.copy(systemId = "custom-remote-catalog")) }
   private val executor =

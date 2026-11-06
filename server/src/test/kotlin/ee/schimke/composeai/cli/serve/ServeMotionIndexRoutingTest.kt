@@ -48,7 +48,7 @@ class ServeMotionIndexRoutingTest {
             "extension":".apng"}]},
          "still-only":{"componentId":"Badge","section":"Components","order":2}}
         """
-          .trimIndent()
+          .trimIndent(),
       )
     return ServeBundleHost(
       dir,

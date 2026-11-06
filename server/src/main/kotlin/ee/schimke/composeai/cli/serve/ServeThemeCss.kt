@@ -278,7 +278,7 @@ internal object ServeThemeCss {
             tertiaryContainer,
             readableOn(tertiaryContainer),
             matches,
-          )
+          ),
         ),
       "--md-sys-color-error" to hex(error),
       "--md-sys-color-on-error" to hex(readableOn(error)),
@@ -291,7 +291,7 @@ internal object ServeThemeCss {
             errorContainer,
             readableOn(errorContainer),
             matches,
-          )
+          ),
         ),
       "--md-sys-color-surface" to hex(bg),
       "--md-sys-color-on-surface" to hex(fg),

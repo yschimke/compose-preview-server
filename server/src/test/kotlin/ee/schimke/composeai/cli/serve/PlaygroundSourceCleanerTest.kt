@@ -225,8 +225,8 @@ class PlaygroundSourceCleanerTest {
                 kind = UsageRules.Kind.RENAME,
                 renameTo = "MaterialTheme",
                 special = UsageRules.MATERIAL3_SYSTEM_THEME,
-              )
-          )
+              ),
+          ),
       )
 
     val result =
@@ -235,12 +235,12 @@ class PlaygroundSourceCleanerTest {
           source,
           source.lines().indexOfFirst { it.contains("Text(\"Card\")") } + 1,
           rules,
-        )
+        ),
       )
 
     assertTrue(
       result.text.contains(
-        "androidx.compose.material3.MaterialTheme(colorScheme = if (androidx.compose.foundation.isSystemInDarkTheme()) androidx.compose.material3.darkColorScheme() else androidx.compose.material3.lightColorScheme()) {"
+        "androidx.compose.material3.MaterialTheme(colorScheme = if (androidx.compose.foundation.isSystemInDarkTheme()) androidx.compose.material3.darkColorScheme() else androidx.compose.material3.lightColorScheme()) {",
       ),
       result.text,
     )
@@ -273,8 +273,8 @@ class PlaygroundSourceCleanerTest {
                 kind = UsageRules.Kind.RENAME,
                 renameTo = "MaterialTheme",
                 special = UsageRules.MATERIAL3_SYSTEM_THEME,
-              )
-          )
+              ),
+          ),
       )
 
     val result =
@@ -283,7 +283,7 @@ class PlaygroundSourceCleanerTest {
           source,
           source.lines().indexOfFirst { it.contains("Unit") } + 1,
           rules,
-        )
+        ),
       )
 
     assertFalse(result.text.contains("Sticker"), result.text)
@@ -302,8 +302,8 @@ class PlaygroundSourceCleanerTest {
                 kind = UsageRules.Kind.RENAME,
                 renameTo = "MaterialTheme",
                 special = UsageRules.MATERIAL3_SYSTEM_THEME,
-              )
-          )
+              ),
+          ),
       )
 
     for (arguments in
@@ -370,8 +370,8 @@ class PlaygroundSourceCleanerTest {
                     "androidx.compose.material3.lightColorScheme",
                     "androidx.compose.foundation.isSystemInDarkTheme",
                   ),
-              )
-          )
+              ),
+          ),
       )
 
     val result =
@@ -380,7 +380,7 @@ class PlaygroundSourceCleanerTest {
           source,
           source.lines().indexOfFirst { it.contains("MaterialTheme { Unit") } + 1,
           rules,
-        )
+        ),
       )
 
     assertTrue(result.text.contains("import com.example.brand.MaterialTheme"), result.text)
@@ -416,8 +416,8 @@ class PlaygroundSourceCleanerTest {
                 kind = UsageRules.Kind.RENAME,
                 renameTo = "MaterialTheme",
                 special = UsageRules.MATERIAL3_SYSTEM_THEME,
-              )
-          )
+              ),
+          ),
       )
 
     val result =
@@ -426,7 +426,7 @@ class PlaygroundSourceCleanerTest {
           source,
           source.lines().indexOfFirst { it.contains("Unit") } + 1,
           rules,
-        )
+        ),
       )
 
     assertTrue(result.text.contains("Sticker(\"brand\")"), result.text)
@@ -502,7 +502,7 @@ class PlaygroundSourceCleanerTest {
         .trimIndent()
     val result =
       assertNotNull(
-        PlaygroundSourceCleaner.clean(source, lineIn(source, "Caption(\"hello\")"), rules)
+        PlaygroundSourceCleaner.clean(source, lineIn(source, "Caption(\"hello\")"), rules),
       )
     assertTrue(result.text.contains("private fun Caption"), result.text)
     assertTrue(result.text.indexOf("fun Card") < result.text.indexOf("private fun Caption"))
@@ -590,7 +590,7 @@ class PlaygroundSourceCleanerTest {
           buttonsKt,
           lineOf("""caption = "Highest emphasis"""),
           UsageRules.GENERIC,
-        )
+        ),
       )
     assertFalse(withGeneric.text.contains("@CatalogComponent"), withGeneric.text)
     assertTrue(withGeneric.text.contains("Sticker {"), "generic rules must not invent a rename")
@@ -622,8 +622,8 @@ class PlaygroundSourceCleanerTest {
             }
           }
           """
-            .trimIndent()
-        )
+            .trimIndent(),
+        ),
       )
     // The rules either side of the retired one survived, which is the whole point.
     assertEquals(UsageRules.Kind.RENAME, rules.scaffolds["Sticker"]?.kind)
@@ -637,8 +637,8 @@ class PlaygroundSourceCleanerTest {
     val rules =
       assertNotNull(
         UsageRules.parse(
-          """{"scaffolds":{"Sticker":{"kind":"RENAME","renameTo":"MaterialTheme","special":"MATERIAL3_SYSTEM_THEME"}}}"""
-        )
+          """{"scaffolds":{"Sticker":{"kind":"RENAME","renameTo":"MaterialTheme","special":"MATERIAL3_SYSTEM_THEME"}}}""",
+        ),
       )
 
     val sticker = assertNotNull(rules.scaffolds["Sticker"])
@@ -675,8 +675,8 @@ class PlaygroundSourceCleanerTest {
                 kind = UsageRules.Kind.RENAME,
                 renameTo = "MaterialTheme",
                 special = "FUTURE_THEME_POLICY",
-              )
-          )
+              ),
+          ),
       )
 
     val result =
@@ -685,7 +685,7 @@ class PlaygroundSourceCleanerTest {
           source,
           source.lines().indexOfFirst { it.contains("Unit") } + 1,
           rules,
-        )
+        ),
       )
 
     assertTrue(result.text.contains("Sticker { Unit }"), result.text)
@@ -719,8 +719,8 @@ class PlaygroundSourceCleanerTest {
             "scaffolds": { "toggleable": { "kind": "DESTRUCTURE" } }
           }
           """
-            .trimIndent()
-        )
+            .trimIndent(),
+        ),
       )
     val source =
       """
@@ -738,7 +738,7 @@ class PlaygroundSourceCleanerTest {
         .trimIndent()
     val result =
       assertNotNull(
-        PlaygroundSourceCleaner.clean(source, lineIn(source, "fun SwitchSticker"), rules)
+        PlaygroundSourceCleaner.clean(source, lineIn(source, "fun SwitchSticker"), rules),
       )
     assertTrue(result.text.contains("ee.schimke.m3catalog.toggleable(true)"), result.text)
     assertTrue(result.residue.contains("toggleable"), "${result.residue}")
@@ -766,7 +766,7 @@ class PlaygroundSourceCleanerTest {
         .trimIndent()
     val result =
       assertNotNull(
-        PlaygroundSourceCleaner.clean(source, lineIn(source, "fun SwitchSticker"), rules)
+        PlaygroundSourceCleaner.clean(source, lineIn(source, "fun SwitchSticker"), rules),
       )
     assertTrue(result.text.contains("toggleable(true)"), result.text)
     assertTrue(result.residue.contains("toggleable"), "${result.residue}")
@@ -805,7 +805,11 @@ class PlaygroundSourceCleanerTest {
         .trimIndent()
     val cleaned =
       assertNotNull(
-        PlaygroundSourceCleaner.clean(source, lineIn(source, "fun NumberBadge"), UsageRules.GENERIC)
+        PlaygroundSourceCleaner.clean(
+          source,
+          lineIn(source, "fun NumberBadge"),
+          UsageRules.GENERIC,
+        ),
       )
     assertTrue(cleaned.text.contains("""Text("3")"""), cleaned.text)
     assertFalse(cleaned.text.contains("previewOverrideString"), cleaned.text)
@@ -831,7 +835,7 @@ class PlaygroundSourceCleanerTest {
         .trimIndent()
     val cleaned =
       assertNotNull(
-        PlaygroundSourceCleaner.clean(source, lineIn(source, "fun Title"), UsageRules.GENERIC)
+        PlaygroundSourceCleaner.clean(source, lineIn(source, "fun Title"), UsageRules.GENERIC),
       )
     assertTrue(cleaned.text.contains("""Text("Shopping")"""), cleaned.text)
   }
@@ -853,7 +857,7 @@ class PlaygroundSourceCleanerTest {
         .trimIndent()
     val cleaned =
       assertNotNull(
-        PlaygroundSourceCleaner.clean(source, lineIn(source, "fun Title"), UsageRules.GENERIC)
+        PlaygroundSourceCleaner.clean(source, lineIn(source, "fun Title"), UsageRules.GENERIC),
       )
     assertTrue(cleaned.text.contains("""Text("Shopping")"""), cleaned.text)
     assertFalse(cleaned.text.contains("previewOverrideString"), cleaned.text)
@@ -932,7 +936,7 @@ class PlaygroundSourceCleanerTest {
         .trimIndent()
     val cleaned =
       assertNotNull(
-        PlaygroundSourceCleaner.clean(source, lineIn(source, "fun Title"), UsageRules.GENERIC)
+        PlaygroundSourceCleaner.clean(source, lineIn(source, "fun Title"), UsageRules.GENERIC),
       )
     assertTrue(
       cleaned.text.contains("state.previewOverrideString(\"title\", \"Shopping\")"),
@@ -964,8 +968,8 @@ class PlaygroundSourceCleanerTest {
                     "androidx.compose.runtime.remember",
                     "androidx.compose.runtime.setValue",
                   ),
-              )
-          )
+              ),
+          ),
       )
     val source =
       """
@@ -986,7 +990,7 @@ class PlaygroundSourceCleanerTest {
         .trimIndent()
     val result =
       assertNotNull(
-        PlaygroundSourceCleaner.clean(source, lineIn(source, "fun SwitchSticker"), rules)
+        PlaygroundSourceCleaner.clean(source, lineIn(source, "fun SwitchSticker"), rules),
       )
     assertTrue(
       result.text.contains("var checked by remember { mutableStateOf(true) }"),
@@ -1011,8 +1015,8 @@ class PlaygroundSourceCleanerTest {
                 kind = UsageRules.Kind.INLINE,
                 members = mapOf("label" to "\$0", "onClick" to "{ Log.d(\"tap\") }"),
                 addImport = "android.util.Log",
-              )
-          )
+              ),
+          ),
       )
     val source =
       """
@@ -1032,7 +1036,7 @@ class PlaygroundSourceCleanerTest {
         .trimIndent()
     val result =
       assertNotNull(
-        PlaygroundSourceCleaner.clean(source, lineIn(source, "fun ButtonSticker"), rules)
+        PlaygroundSourceCleaner.clean(source, lineIn(source, "fun ButtonSticker"), rules),
       )
     assertTrue(
       result.text.contains("""Button(onClick = { Log.d("tap") }) { Text("Filled") }"""),
@@ -1059,7 +1063,7 @@ class PlaygroundSourceCleanerTest {
         .trimIndent()
     val cleaned =
       assertNotNull(
-        PlaygroundSourceCleaner.clean(source, lineIn(source, "fun Title"), UsageRules.GENERIC)
+        PlaygroundSourceCleaner.clean(source, lineIn(source, "fun Title"), UsageRules.GENERIC),
       )
     assertTrue(cleaned.text.contains("""Text("Shopping")"""), cleaned.text)
   }
@@ -1074,8 +1078,9 @@ class PlaygroundSourceCleanerTest {
       UsageRules(
         scaffolds =
           mapOf(
-            "catalogChoice" to UsageRules.Scaffold(kind = UsageRules.Kind.SUBSTITUTE, plain = "\$1")
-          )
+            "catalogChoice" to
+              UsageRules.Scaffold(kind = UsageRules.Kind.SUBSTITUTE, plain = "\$1"),
+          ),
       )
     val source =
       """
@@ -1105,7 +1110,7 @@ class PlaygroundSourceCleanerTest {
       assertFalse(assertNotNull(UsageRules.parse("{}")).declaresCatalogScaffolds())
       assertTrue(
         assertNotNull(UsageRules.parse("""{"scaffolds":{"Sticker":{"kind":"UNWRAP"}}}"""))
-          .declaresCatalogScaffolds()
+          .declaresCatalogScaffolds(),
       )
     }
   }
@@ -1121,7 +1126,7 @@ class PlaygroundSourceCleanerTest {
         scaffolds =
           rules.scaffolds +
             ("catalogChoice" to
-              UsageRules.Scaffold(kind = UsageRules.Kind.SUBSTITUTE, plain = "\$1"))
+              UsageRules.Scaffold(kind = UsageRules.Kind.SUBSTITUTE, plain = "\$1")),
       )
     val source =
       """
@@ -1156,8 +1161,9 @@ class PlaygroundSourceCleanerTest {
       rules.copy(
         scaffolds =
           mapOf(
-            "catalogChoice" to UsageRules.Scaffold(kind = UsageRules.Kind.SUBSTITUTE, plain = "\$7")
-          )
+            "catalogChoice" to
+              UsageRules.Scaffold(kind = UsageRules.Kind.SUBSTITUTE, plain = "\$7"),
+          ),
       )
     val source =
       """
@@ -1288,7 +1294,7 @@ class PlaygroundSourceCleanerTest {
         .trimIndent()
     val text =
       assertNotNull(
-          PlaygroundSourceCleaner.clean(source, lineIn(source, "Text(\"inside\")"), rules)
+          PlaygroundSourceCleaner.clean(source, lineIn(source, "Text(\"inside\")"), rules),
         )
         .text
     assertTrue(text.contains("fun Card() ="), text)
@@ -1369,7 +1375,7 @@ class PlaygroundSourceCleanerTest {
         .trimIndent()
     val text =
       assertNotNull(
-          PlaygroundSourceCleaner.clean(source, lineIn(source, "Use string"), rules, strings)
+          PlaygroundSourceCleaner.clean(source, lineIn(source, "Use string"), rules, strings),
         )
         .text
     assertTrue(
@@ -1386,8 +1392,8 @@ class PlaygroundSourceCleanerTest {
         scaffolds =
           mapOf(
             "counted" to
-              UsageRules.Scaffold(kind = UsageRules.Kind.INLINE, members = mapOf("label" to "\$3"))
-          )
+              UsageRules.Scaffold(kind = UsageRules.Kind.INLINE, members = mapOf("label" to "\$3")),
+          ),
       )
     val source =
       """
@@ -1539,7 +1545,7 @@ class PlaygroundSourceCleanerTest {
         cleanDelegating(
           "fun FilledButton",
           helpers = listOf(stickerHelper, sharedComponents, rival),
-        )
+        ),
       )
 
     assertTrue(result.text.contains("""Sticker("button-filled")"""), result.text)
@@ -1580,7 +1586,7 @@ class PlaygroundSourceCleanerTest {
           rules = delegatingRules,
           parser = null,
           helperSources = listOf(stickerHelper, sharedComponents),
-        )
+        ),
       )
 
     assertTrue(result.text.contains("CatalogComponent(slug)"), result.text)
@@ -1636,7 +1642,7 @@ class PlaygroundSourceCleanerTest {
           rules = delegatingRules,
           parser = null,
           helperSources = listOf(stickerHelper, components),
-        )
+        ),
       )
 
     // The component came along, under a name that does not collide...
@@ -1701,7 +1707,7 @@ class PlaygroundSourceCleanerTest {
           rules = delegatingRules,
           parser = null,
           helperSources = listOf(stickerHelper, components),
-        )
+        ),
       )
 
     // The branch inlines the button directly, so nothing calls `FilledButton` and no rename
@@ -1750,7 +1756,7 @@ class PlaygroundSourceCleanerTest {
           rules = delegatingRules,
           parser = null,
           helperSources = listOf(stickerHelper, components),
-        )
+        ),
       )
 
     // The scaffold annotation goes, everything else on that line stays, and the delegation still
@@ -1800,7 +1806,7 @@ class PlaygroundSourceCleanerTest {
           rules = delegatingRules,
           parser = null,
           helperSources = listOf(stickerHelper, components),
-        )
+        ),
       )
 
     assertFalse(result.text.contains("""id = "Text/Branded""""), result.text)
@@ -1860,7 +1866,7 @@ class PlaygroundSourceCleanerTest {
           rules = delegatingRules,
           parser = null,
           helperSources = listOf(stickerHelper, components),
-        )
+        ),
       )
 
     assertTrue(result.text.contains("fun ShapeMorphViewer"), result.text)
@@ -1877,17 +1883,17 @@ class PlaygroundSourceCleanerTest {
   @Test
   fun `a property read on a receiver does not pull in a same-named function`() {
     assertTrue(
-      PlaygroundSourceCleaner.mentionsExtensionCall("morph.toComposePath(0.5f)", "toComposePath")
+      PlaygroundSourceCleaner.mentionsExtensionCall("morph.toComposePath(0.5f)", "toComposePath"),
     )
     assertTrue(
-      PlaygroundSourceCleaner.mentionsExtensionCall("a.b().toComposePath (x)", "toComposePath")
+      PlaygroundSourceCleaner.mentionsExtensionCall("a.b().toComposePath (x)", "toComposePath"),
     )
     assertFalse(
-      PlaygroundSourceCleaner.mentionsExtensionCall("state.toComposePath", "toComposePath")
+      PlaygroundSourceCleaner.mentionsExtensionCall("state.toComposePath", "toComposePath"),
     )
     // A package qualifier is not a receiver call.
     assertFalse(
-      PlaygroundSourceCleaner.mentionsExtensionCall("\"morph.toComposePath(1f)\"", "toComposePath")
+      PlaygroundSourceCleaner.mentionsExtensionCall("\"morph.toComposePath(1f)\"", "toComposePath"),
     )
   }
 
@@ -1920,7 +1926,7 @@ class PlaygroundSourceCleanerTest {
           rules = UsageRules.GENERIC,
           parser = null,
           followedSources = listOf(huge),
-        )
+        ),
       )
     assertFalse("fun HugeSample" in result.text, result.text)
     assertEquals(listOf("HugeSample"), result.residue)

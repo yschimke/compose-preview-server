@@ -172,7 +172,7 @@ class ServeUiBuilderDesignActivityTest {
           designActivityBody(
             CommentWebhookFormat.SLACK,
             describeDesignActivity(fork, hostile, origin),
-          )
+          ),
         )
         .jsonObject["text"]!!
         .jsonPrimitive
@@ -198,7 +198,7 @@ class ServeUiBuilderDesignActivityTest {
           designActivityBody(
             CommentWebhookFormat.TEAMS,
             describeDesignActivity(activity, publicDesign, origin),
-          )
+          ),
         )
         .jsonObject
     val content = card["attachments"]!!.jsonArray[0].jsonObject["content"]!!.jsonObject
@@ -218,7 +218,7 @@ class ServeUiBuilderDesignActivityTest {
           designActivityBody(
             CommentWebhookFormat.PLAIN,
             describeDesignActivity(activity, publicDesign, origin),
-          )
+          ),
         )
         .jsonObject
     assertEquals(DESIGN_ACTIVITY_WEBHOOK_SCHEMA, plain["schema"]!!.jsonPrimitive.content)

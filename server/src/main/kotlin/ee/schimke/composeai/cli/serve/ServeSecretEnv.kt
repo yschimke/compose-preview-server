@@ -35,7 +35,7 @@ internal object ServeSecretEnv {
         File(path).readText().trim()
       } catch (e: Exception) {
         warn(
-          "serve: $name$FILE_SUFFIX names $path, which could not be read (${e.javaClass.simpleName})"
+          "serve: $name$FILE_SUFFIX names $path, which could not be read (${e.javaClass.simpleName})",
         )
         return null
       }

@@ -82,7 +82,7 @@ private constructor(private val runtimes: Map<String, RuntimeBundle>) {
             bytes.mapValues { (_, content) ->
               val digest = sha256(content)
               Asset(content, "\"sha256-$digest\"")
-            }
+            },
           )
       }
       return ServeUiBuilderRuntimeAssets(bundles)

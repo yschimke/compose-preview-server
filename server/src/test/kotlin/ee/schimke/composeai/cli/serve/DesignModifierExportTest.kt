@@ -155,9 +155,9 @@ class DesignModifierExportTest {
                 ScreenValue.Construct(
                   "androidx.compose.foundation.rememberScrollState",
                   typeFqn = "androidx.compose.foundation.ScrollState",
-                )
+                ),
               ),
-          )
+          ),
         ),
         links(modifier),
       )
@@ -324,7 +324,7 @@ class DesignModifierExportTest {
               receiver = ScreenValue.Whole(16),
               links = listOf(ChainLink("androidx.compose.ui.unit.dp", property = true)),
               typeFqn = "androidx.compose.ui.unit.Dp",
-            )
+            ),
           ),
         typeFqn = "androidx.compose.ui.graphics.Shape",
       )
@@ -352,9 +352,9 @@ class DesignModifierExportTest {
                 "androidx.compose.material3.MaterialTheme",
                 listOf("shapes", "medium"),
                 typeFqn = "androidx.compose.ui.graphics.Shape",
-              )
+              ),
             ),
-        )
+        ),
       ),
       links(ClipModifierV1(shape = "medium")),
     )
@@ -365,7 +365,7 @@ class DesignModifierExportTest {
     assertEquals(
       listOf(
         "node `text` fills with shape `squircle`, which is neither a theme shape (extraLarge, " +
-          "extraSmall, large, medium, small), one of circle, rectangle, nor a corner radius in dp"
+          "extraSmall, large, medium, small), one of circle, rectangle, nor a corner radius in dp",
       ),
       reasonsFor(document(text(BackgroundModifierV1(ColorValueV1("#000000"), shape = "squircle")))),
     )
@@ -378,7 +378,7 @@ class DesignModifierExportTest {
         ChainLink(
           "androidx.compose.ui.platform.testTag",
           positional = listOf(ScreenValue.Text("hero")),
-        )
+        ),
       ),
       links(TestTagModifierV1("hero")),
     )
@@ -400,9 +400,9 @@ class DesignModifierExportTest {
                 "androidx.compose.ui.Alignment",
                 listOf("TopEnd"),
                 typeFqn = "androidx.compose.ui.Alignment",
-              )
+              ),
             ),
-        )
+        ),
       ),
       links(WrapContentSizeModifierV1(AlignmentV1.TOP_END)),
     )
@@ -423,10 +423,10 @@ class DesignModifierExportTest {
                 "androidx.compose.ui.Alignment",
                 listOf("BottomEnd"),
                 typeFqn = "androidx.compose.ui.Alignment",
-              )
+              ),
             ),
           receiverScopeFqn = "androidx.compose.foundation.layout.BoxScope",
-        )
+        ),
       ),
       scopedLinks("layout/box", AlignModifierV1(AlignmentV1.BOTTOM_END)),
     )
@@ -440,10 +440,10 @@ class DesignModifierExportTest {
                 "androidx.compose.ui.Alignment",
                 listOf("CenterHorizontally"),
                 typeFqn = "androidx.compose.ui.Alignment\$Horizontal",
-              )
+              ),
             ),
           receiverScopeFqn = "androidx.compose.foundation.layout.ColumnScope",
-        )
+        ),
       ),
       scopedLinks(
         "layout/column",
@@ -460,10 +460,10 @@ class DesignModifierExportTest {
                 "androidx.compose.ui.Alignment",
                 listOf("Bottom"),
                 typeFqn = "androidx.compose.ui.Alignment\$Vertical",
-              )
+              ),
             ),
           receiverScopeFqn = "androidx.compose.foundation.layout.RowScope",
-        )
+        ),
       ),
       scopedLinks("layout/row", AlignVerticalModifierV1(VerticalAlignmentV1.BOTTOM)),
     )
@@ -476,7 +476,7 @@ class DesignModifierExportTest {
     assertEquals(
       listOf(
         "node `text` aligns itself, which `Modifier.align` supplies from a column's scope; this " +
-          "node sits in a `androidx.compose.foundation.layout.RowScope` slot"
+          "node sits in a `androidx.compose.foundation.layout.RowScope` slot",
       ),
       reasonsFor(
         document(
@@ -487,7 +487,7 @@ class DesignModifierExportTest {
           ),
           text(AlignHorizontalModifierV1(HorizontalAlignmentV1.START)),
           roots = listOf("container"),
-        )
+        ),
       ),
     )
   }
@@ -503,7 +503,7 @@ class DesignModifierExportTest {
           positional = listOf(ScreenValue.Fractional32(2f)),
           named = mapOf("fill" to ScreenValue.Bool(false)),
           receiverScopeFqn = "androidx.compose.foundation.layout.RowScope",
-        )
+        ),
       ),
       scopedLinks("layout/row", WeightModifierV1(JsonPrimitive(2), fill = false)),
     )
@@ -513,7 +513,7 @@ class DesignModifierExportTest {
           "androidx.compose.foundation.layout.ColumnScope.weight",
           positional = listOf(ScreenValue.Fractional32(1f)),
           receiverScopeFqn = "androidx.compose.foundation.layout.ColumnScope",
-        )
+        ),
       ),
       scopedLinks("layout/column", WeightModifierV1(JsonPrimitive(1), fill = null)),
     )

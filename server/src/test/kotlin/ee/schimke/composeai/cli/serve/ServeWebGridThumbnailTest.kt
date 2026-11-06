@@ -53,7 +53,7 @@ class ServeWebGridThumbnailTest {
     val html = page(thumbHash = { "abc123" })
     assertTrue(
       html.contains(
-        "src=\"/compose-m3/render/filled-button__ideal__default__compact.png?thumb=abc123\""
+        "src=\"/compose-m3/render/filled-button__ideal__default__compact.png?thumb=abc123\"",
       ),
       "the card's image is the prebaked thumbnail",
     )
@@ -97,7 +97,7 @@ class ServeWebGridThumbnailTest {
     val html = page(thumbHash = { "abc123" }, thumbCrop = { crop })
     assertTrue(
       html.contains(
-        "class=\"cp-crop\" style=\"--cp-crop-w-per-cap:1;--cp-crop-w-per-h:2.5;--cp-crop-max-w:120px;aspect-ratio:120/48\""
+        "class=\"cp-crop\" style=\"--cp-crop-w-per-cap:1;--cp-crop-w-per-h:2.5;--cp-crop-max-w:120px;aspect-ratio:120/48\"",
       ),
       "clip window still sized to the component box",
     )
@@ -143,13 +143,13 @@ class ServeWebGridThumbnailTest {
     assertTrue(html.contains("data-theme-choice=\"dark\">Dark</button>"))
     assertTrue(
       html.contains(
-        "data-theme-choice=\"theme:com.example.LightTheme\" data-theme-mode=\"light\">Example · Light</button>"
-      )
+        "data-theme-choice=\"theme:com.example.LightTheme\" data-theme-mode=\"light\">Example · Light</button>",
+      ),
     )
     assertTrue(
       html.contains(
-        "data-theme-choice=\"theme:com.example.DarkTheme\" data-theme-mode=\"dark\">Example · Dark</button>"
-      )
+        "data-theme-choice=\"theme:com.example.DarkTheme\" data-theme-mode=\"dark\">Example · Dark</button>",
+      ),
     )
   }
 

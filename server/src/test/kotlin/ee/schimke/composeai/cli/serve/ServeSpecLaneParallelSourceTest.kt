@@ -66,7 +66,7 @@ class ServeSpecLaneParallelSourceTest {
              "source":{"provider":"figma"},
              "raster":{"path":"references/$previewId-figma.png"}}]}
           """
-            .trimIndent()
+            .trimIndent(),
         )
     }
     return ServeBundleHost(
@@ -208,7 +208,7 @@ class ServeSpecLaneParallelSourceTest {
       assertTrue(
         html.contains(
           "data-spec-src=\"/wear-m3/reference/chip-filled-figma.png\" " +
-            "data-spec-label=\"Figma\""
+            "data-spec-label=\"Figma\"",
         ),
         "the paired Figma reference leads the comparison lane: $html",
       )
@@ -236,7 +236,7 @@ class ServeSpecLaneParallelSourceTest {
       assertTrue(
         html.contains("data-compare-format=\"reference\"") &&
           html.contains(
-            "data-reference-neutral=\"/wear-m3/reference/chip-filled-figma.png?token=$token\""
+            "data-reference-neutral=\"/wear-m3/reference/chip-filled-figma.png?token=$token\"",
           ),
         "the bulk Figma lane inherits the paired catalog's mapping: $html",
       )

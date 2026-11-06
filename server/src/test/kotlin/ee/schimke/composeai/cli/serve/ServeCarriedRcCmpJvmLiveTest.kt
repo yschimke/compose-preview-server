@@ -91,7 +91,7 @@ class ServeCarriedRcCmpJvmLiveTest {
             final = false,
             payloadBase64 =
               Base64.getEncoder().encodeToString(ServeCarriedRcStreamTest.png(marker)),
-          )
+          ),
         )
       frame(HELD_FIRST_FRAME)
       return object : StreamHandle {
@@ -235,7 +235,7 @@ class ServeCarriedRcCmpJvmLiveTest {
       .newCall(
         Request.Builder()
           .url("http://127.0.0.1:${server!!.port}/examples/p/$EXAMPLE_ID?token=$TOKEN")
-          .build()
+          .build(),
       )
       .execute()
       .use { it.body.string() }
@@ -380,7 +380,7 @@ class ServeCarriedRcCmpJvmLiveTest {
     // The legacy spelling still names the same player.
     val legacy =
       assertIs<OverrideParse.Ok>(
-        ServeRcPlayerIds.parseOverrides(mapOf("rcPlayer" to "rcplayer-jvm"), cmpJvmPlayerId = true)
+        ServeRcPlayerIds.parseOverrides(mapOf("rcPlayer" to "rcplayer-jvm"), cmpJvmPlayerId = true),
       )
     assertEquals(ServeRcPlayerIds.CMP_JVM, legacy.overrides.remoteCompose?.playerId)
     // Other players are untouched by the flag.
@@ -389,7 +389,7 @@ class ServeCarriedRcCmpJvmLiveTest {
         ServeRcPlayerIds.parseOverrides(
           mapOf("rcPlayer" to "androidx-embedded"),
           cmpJvmPlayerId = true,
-        )
+        ),
       )
     assertEquals(
       RcPlayerBackend.ANDROIDX_EMBEDDED.playerKind,
@@ -408,8 +408,8 @@ class ServeCarriedRcCmpJvmLiveTest {
           "skiko-awt-runtime-linux-x64-0.150.1.jar",
           "skiko-awt-runtime-linux-x64-0.144.6.jar",
           "skiko-awt-0.144.6.jar",
-        )
-      )
+        ),
+      ),
     )
     val missing =
       assertNotNull(ServeRcPlayerDaemon.skikoPairingProblem(jars("skiko-awt-0.150.1.jar")))
@@ -424,8 +424,8 @@ class ServeCarriedRcCmpJvmLiveTest {
             "skiko-awt-0.150.1.jar",
             "skiko-awt-runtime-linux-x64-0.144.6.jar",
             "skiko-awt-0.144.6.jar",
-          )
-        )
+          ),
+        ),
       )
     assertTrue(split.contains("0.150.1") && split.contains("0.144.6"), split)
   }

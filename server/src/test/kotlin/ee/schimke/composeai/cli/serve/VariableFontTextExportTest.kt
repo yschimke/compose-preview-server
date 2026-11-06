@@ -63,7 +63,7 @@ class VariableFontTextExportTest {
   fun `text the font cannot draw refuses by name`() {
     val refused =
       assertIs<ScreenGeneratorComposeExportExecutor.Generated.Refused>(
-        executor.generate(m3Design(text = "日本"))
+        executor.generate(m3Design(text = "日本")),
       )
     assertTrue(refused.reasons.any { "no glyph" in it }, refused.reasons.toString())
   }
@@ -118,7 +118,7 @@ class VariableFontTextExportTest {
         "roots": ["$roots"],
         "nodes": { $nodes }
       }
-      """
+      """,
     )
 
   private companion object {

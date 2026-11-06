@@ -132,7 +132,7 @@ class ServeCatalogLiveHostTest {
       if (!hasA11yOverlay) return A11yOutcome.NotFound
       return A11yOutcome.Ok(
         """{"previewId":"$previewId","nodes":[],"findings":[],"touchTargets":[]}"""
-          .encodeToByteArray()
+          .encodeToByteArray(),
       )
     }
 
@@ -150,7 +150,7 @@ class ServeCatalogLiveHostTest {
       if (!hasDesignAnnotations && previewId !in publishedTypography)
         return AnnotationsOutcome.NotFound
       return AnnotationsOutcome.Ok(
-        """{"previewId":"$previewId","annotations":[],"tags":{}}""".encodeToByteArray()
+        """{"previewId":"$previewId","annotations":[],"tags":{}}""".encodeToByteArray(),
       )
     }
 
@@ -342,7 +342,7 @@ class ServeCatalogLiveHostTest {
         cmpAndroidPlayerFor = {
           asked += it
           true
-        }
+        },
       )
     assertTrue(RcPlayerBackend.CMP_ANDROID in with.enabledRcPlayersFor(catalogId))
     assertEquals(listOf(daemonId), asked)
@@ -353,7 +353,7 @@ class ServeCatalogLiveHostTest {
     assertFalse(
       RcPlayerBackend.CMP_ANDROID in
         rcComposite(selectable = false, cmpAndroidPlayerFor = { true })
-          .enabledRcPlayersFor(catalogId)
+          .enabledRcPlayersFor(catalogId),
     )
   }
 
@@ -420,7 +420,7 @@ class ServeCatalogLiveHostTest {
         gesturesRenderable = true,
       )
     assertTrue(
-      ServeCatalogLiveHost(mapOf(catalogId to daemonId), androidLive, baked).gesturesRenderable
+      ServeCatalogLiveHost(mapOf(catalogId to daemonId), androidLive, baked).gesturesRenderable,
     )
     // …a desktop-backed daemon lane ⇒ the composite gates the control off.
     val desktopLive =
@@ -567,7 +567,7 @@ class ServeCatalogLiveHostTest {
     val document =
       PreviewOverrides(
         namedOverrides =
-          mapOf(ServeWeb.A2UI_DOCUMENT_KNOB to PreviewOverrideValue.StringValue("[]"))
+          mapOf(ServeWeb.A2UI_DOCUMENT_KNOB to PreviewOverrideValue.StringValue("[]")),
       )
     val out = composite.render(playgroundId, document) as RenderOutcome.Ok
     assertEquals("live:$playgroundId", out.png.decodeToString())
@@ -1555,7 +1555,7 @@ class ServeCatalogLiveHostTest {
               variant = "desktop",
               renderConfig = "density=2",
             ),
-          )
+          ),
       )
     val cache = CatalogThemeCache(persistence = generation)
     val live =
@@ -2407,7 +2407,7 @@ class ServeCatalogLiveHostTest {
       Thread.sleep(25)
     }
     error(
-      "theme optimization did not finish within ${slices * 25}ms: ${host.themeOptimizationSnapshot()}"
+      "theme optimization did not finish within ${slices * 25}ms: ${host.themeOptimizationSnapshot()}",
     )
   }
 
@@ -2740,7 +2740,7 @@ class ServeCatalogLiveHostTest {
       )
     val overrides =
       PreviewOverrides(
-        namedOverrides = mapOf("color" to PreviewOverrideValue.StringValue("outlined"))
+        namedOverrides = mapOf("color" to PreviewOverrideValue.StringValue("outlined")),
       )
 
     val outcome = composite.render(catalogId, overrides)
@@ -2808,7 +2808,7 @@ class ServeCatalogLiveHostTest {
       composite.render(
         catalogId,
         PreviewOverrides(
-          namedOverrides = mapOf("color" to PreviewOverrideValue.StringValue("outlined"))
+          namedOverrides = mapOf("color" to PreviewOverrideValue.StringValue("outlined")),
         ),
       )
 

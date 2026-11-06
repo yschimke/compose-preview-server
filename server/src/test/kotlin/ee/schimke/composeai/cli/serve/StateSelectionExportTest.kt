@@ -35,7 +35,7 @@ class StateSelectionExportTest {
                 valueType = StateValueTypeV1.INTEGER,
                 initialValue = JsonPrimitive(10),
                 persistence = StatePersistenceV1.PREVIEW,
-              )
+              ),
           ),
         roots = listOf("choice"),
         nodes =
@@ -52,11 +52,11 @@ class StateSelectionExportTest {
                           "selector" to StateValueV1("page"),
                           "cases" to
                             ObjectValueV1(
-                              mapOf("first" to IntegerValueV1(10), "second" to IntegerValueV1(20))
+                              mapOf("first" to IntegerValueV1(10), "second" to IntegerValueV1(20)),
                             ),
                           "fallback" to StringValueV1("other"),
-                        )
-                      )
+                        ),
+                      ),
                   ),
                 modifiers =
                   listOf(
@@ -65,7 +65,7 @@ class StateSelectionExportTest {
                       JsonPrimitive(12),
                       JsonPrimitive(12),
                       JsonPrimitive(12),
-                    )
+                    ),
                   ),
                 slots = mapOf("children" to listOf("first", "second", "other")),
               ),
@@ -131,11 +131,11 @@ class StateSelectionExportTest {
                                 mapOf(
                                   "first" to IntegerValueV1(10),
                                   "second" to StringValueV1("20"),
-                                )
-                              ))
-                      )
-                  )
-              ))
+                                ),
+                              )),
+                      ),
+                  ),
+              )),
       )
     val catalogs = benchmarkCatalogExecutor(catalogSystemIds = setOf("m3-catalog"))
     val issue = assertNotNull(catalogs.validate(invalid, catalogs.listCatalogs().single()))

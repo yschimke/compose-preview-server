@@ -40,7 +40,7 @@ class ServeCatalogMcpAppViewerTest {
       runBlocking {
         mcp.handle(body) { ServeMachineAuthorization.Decision.Authorized("agent:test") }
       }
-        .body
+        .body,
     )
   }
 
@@ -85,7 +85,9 @@ class ServeCatalogMcpAppViewerTest {
     assertTrue(html.contains("toolArguments = safeSelectionArguments(incomingArguments);"))
     assertTrue(html.contains("resourceToken = typeof incomingArguments.token === 'string'"))
     assertTrue(
-      html.contains("if (resourceToken) params._meta = { 'compose-preview/token': resourceToken };")
+      html.contains(
+        "if (resourceToken) params._meta = { 'compose-preview/token': resourceToken };",
+      ),
     )
     assertTrue(html.contains("function safeSelectionArguments(value)"))
     assertTrue(html.contains("/(token|authorization|password|secret|api[-_]?key|cookie|session)/i"))
@@ -99,8 +101,8 @@ class ServeCatalogMcpAppViewerTest {
     assertTrue(!html.contains("notify('ui/update-model-context'"))
     assertTrue(
       html.contains(
-        "if (image && !cells.some(cell => typeof cell?.png === 'string' && cell.png.length > 0))"
-      )
+        "if (image && !cells.some(cell => typeof cell?.png === 'string' && cell.png.length > 0))",
+      ),
     )
     assertTrue(html.contains("renderImage(image, value, resource);"))
     assertTrue(html.contains("const RESOURCE_READ_TIMEOUT_MS = 65000;"))
@@ -116,8 +118,8 @@ class ServeCatalogMcpAppViewerTest {
           { uri },
           REQUEST_TIMEOUT_MS,
           () => recoverLateSubscription(uri),
-        );"""
-      )
+        );""",
+      ),
     )
     assertTrue(html.contains("await request('resources/unsubscribe', { uri });"))
     assertTrue(html.contains("Unable to unsubscribe a stale Compose Preview resource"))
@@ -198,8 +200,8 @@ class ServeCatalogMcpAppViewerTest {
     assertTrue(
       html.contains(
         "'createSurface', 'updateComponents', 'updateDataModel', 'deleteSurface',\n" +
-          "    'surfaceUpdate', 'beginRendering', 'dataModelUpdate',"
-      )
+          "    'surfaceUpdate', 'beginRendering', 'dataModelUpdate',",
+      ),
     )
     // The basic catalog's component set.
     listOf(

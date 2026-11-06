@@ -74,7 +74,7 @@ internal class ServeUiBuilderComponentDrift(private val library: ServeUiBuilderC
       }
 
   private fun Finding.withCurrentState(
-    catalogs: List<ServeUiBuilderDesignLibrary.Coordinate>
+    catalogs: List<ServeUiBuilderDesignLibrary.Coordinate>,
   ): Finding {
     // Every coordinate for the recorded system, in configured order — the rule the library's own
     // routes follow, because a system can have both a local checkout and a served branch.

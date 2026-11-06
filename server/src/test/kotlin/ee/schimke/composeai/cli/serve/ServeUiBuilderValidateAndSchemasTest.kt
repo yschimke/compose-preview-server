@@ -77,7 +77,7 @@ class ServeUiBuilderValidateAndSchemasTest {
     running = null
     assertFalse(
       ServeUiBuilderMcp.VALIDATE in
-        tools(start(withValidator = false, directory = stateDirectory.resolve("bare")))
+        tools(start(withValidator = false, directory = stateDirectory.resolve("bare"))),
     )
 
     val unit = service(recordFile = null, directory = stateDirectory.resolve("unit"))
@@ -111,7 +111,7 @@ class ServeUiBuilderValidateAndSchemasTest {
         .copy(
           nodes =
             document().nodes +
-              ("session" to DesignNodeV1(id = "session", componentId = "m3/no-such-component"))
+              ("session" to DesignNodeV1(id = "session", componentId = "m3/no-such-component")),
         )
 
     val reply = validate(server, """{"document":${documentJson(broken)}}""")
@@ -171,7 +171,7 @@ class ServeUiBuilderValidateAndSchemasTest {
               properties = mapOf("text" to StringValueV1("Two sessions today")),
             ),
           location = NodeLocationV1(parent = ParentSlotV1("column", "children")),
-        )
+        ),
       )
     val accepted =
       validate(
@@ -265,7 +265,7 @@ class ServeUiBuilderValidateAndSchemasTest {
     assertFalse(
       check
         .errors(JsonObject(reply + ("schema" to JsonPrimitive(UI_BUILDER_VIEW_SCHEMA))))
-        .isEmpty()
+        .isEmpty(),
     )
   }
 
@@ -300,9 +300,9 @@ class ServeUiBuilderValidateAndSchemasTest {
         .newCall(
           Request.Builder()
             .url(
-              "http://127.0.0.1:${server.server.port}${UiBuilderJsonSchemas.HTTP_PREFIX}${served.name}"
+              "http://127.0.0.1:${server.server.port}${UiBuilderJsonSchemas.HTTP_PREFIX}${served.name}",
             )
-            .build()
+            .build(),
         )
         .execute()
         .use {
@@ -315,7 +315,7 @@ class ServeUiBuilderValidateAndSchemasTest {
       .newCall(
         Request.Builder()
           .url("http://127.0.0.1:${server.server.port}${UiBuilderJsonSchemas.HTTP_PREFIX}nope.json")
-          .build()
+          .build(),
       )
       .execute()
       .use { assertEquals(404, it.code) }
@@ -383,7 +383,7 @@ class ServeUiBuilderValidateAndSchemasTest {
               "name" to JsonPrimitive(name),
               "description" to JsonPrimitive(description),
               "inputSchema" to Json.parseToJsonElement(schema),
-            )
+            ),
           )
         },
         links = true,
@@ -429,7 +429,7 @@ class ServeUiBuilderValidateAndSchemasTest {
 
   private fun storedDocument(server: Running): JsonObject =
     Json.parseToJsonElement(
-        envelope(server, ServeUiBuilderMcp.GET_DESIGN, """{"designId":"agent-screen"}""")
+        envelope(server, ServeUiBuilderMcp.GET_DESIGN, """{"designId":"agent-screen"}"""),
       )
       .jsonObject["response"]!!
       .jsonObject["snapshot"]!!
@@ -473,7 +473,7 @@ class ServeUiBuilderValidateAndSchemasTest {
           .url("http://127.0.0.1:${server.server.port}/mcp")
           .header(ServeHttpServer.TOKEN_HEADER, OPERATOR_TOKEN)
           .post(body.toRequestBody("application/json".toMediaType()))
-          .build()
+          .build(),
       )
       .execute()
       .use {
@@ -497,7 +497,7 @@ class ServeUiBuilderValidateAndSchemasTest {
 
   private fun exporter(recordFile: File?) =
     ScreenGeneratorComposeExportExecutor(
-      ComponentRecordSource(recordFile?.let { mapOf(CATALOG_SYSTEM_ID to it) }.orEmpty())::record
+      ComponentRecordSource(recordFile?.let { mapOf(CATALOG_SYSTEM_ID to it) }.orEmpty())::record,
     )
 
   private fun service(recordFile: File?, directory: Path = stateDirectory) =

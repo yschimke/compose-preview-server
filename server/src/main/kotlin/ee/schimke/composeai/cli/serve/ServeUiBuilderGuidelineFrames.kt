@@ -431,9 +431,9 @@ internal constructor(
         filePrefix(key.revision) +
           digest(
             "${key.revision}|$generation|${key.kind}|${key.widthDp}x${key.heightDp}|" +
-              "${key.hostShape}|${key.environment}"
+              "${key.hostShape}|${key.environment}",
           ) +
-          ".png"
+          ".png",
       )
 
   /** `r<revision>-g<generation>-`: what [store] keeps when it tidies the design's directory. */
@@ -481,7 +481,7 @@ internal constructor(
                 theme = theme ?: environment.theme,
                 fontScale = fontScale ?: environment.fontScale,
               )
-            }
+            },
         )
 
     /**

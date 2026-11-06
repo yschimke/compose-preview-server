@@ -98,7 +98,7 @@ class PlaygroundBtaCompiler(
   }
 
   private inline fun compileWithCollector(
-    block: (DiagnosticCollector) -> Unit
+    block: (DiagnosticCollector) -> Unit,
   ): List<PlaygroundDiagnostic> {
     // Use the raw `error(...)` callbacks, not `DiagnosticCollector.errors`: the collector silently
     // drops messages that don't match a single-line `file:line:col message` shape, and K2 renders
@@ -137,7 +137,7 @@ class PlaygroundBtaCompiler(
             severity = PlaygroundSeverity.ERROR,
             message =
               "compilation failed: " + logged.ifEmpty { t.message ?: t.javaClass.simpleName },
-          )
+          ),
         )
       }
     }
@@ -218,7 +218,7 @@ class PlaygroundBtaCompiler(
             pluginJars,
             listOf(CompilerPluginOption("sourceInformation", "true")),
             emptySet(),
-          )
+          ),
         )
       }
 
@@ -258,8 +258,8 @@ class PlaygroundBtaCompiler(
                   // A head that is nothing but a position (the message wrapped onto line two, or
                   // an empty one) still deserves to be shown, so fall back to the raw text.
                   message = message.ifEmpty { text },
-                )
-              )
+                ),
+              ),
             )
             .single()
         }

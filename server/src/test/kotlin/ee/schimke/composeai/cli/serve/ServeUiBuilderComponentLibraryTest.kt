@@ -47,7 +47,7 @@ class ServeUiBuilderComponentLibraryTest {
     assertEquals(
       listOf(
         "https://raw.githubusercontent.com/yschimke/m3-catalog/design-artifacts/m3-catalog/" +
-          "ui-builder/components/index.json"
+          "ui-builder/components/index.json",
       ),
       asked,
     )
@@ -102,21 +102,21 @@ class ServeUiBuilderComponentLibraryTest {
     val plain =
       assertNotNull(
         library { url -> if (url.endsWith("index.json")) index(entry()) else symbol() }
-          .symbol(m3, "contribution-cell")
+          .symbol(m3, "contribution-cell"),
       )
     val reordered =
       assertNotNull(
         library { url ->
             if (url.endsWith("index.json")) index(entry()) else symbol(reorderedKeys = true)
           }
-          .symbol(m3, "contribution-cell")
+          .symbol(m3, "contribution-cell"),
       )
     val edited =
       assertNotNull(
         library { url ->
             if (url.endsWith("index.json")) index(entry()) else symbol(label = "Changed")
           }
-          .symbol(m3, "contribution-cell")
+          .symbol(m3, "contribution-cell"),
       )
 
     assertEquals(plain.digest, reordered.digest, "reformatting a file is not drift")
@@ -155,7 +155,7 @@ class ServeUiBuilderComponentLibraryTest {
       library(onLog = none::add) { url ->
           if (url.endsWith("index.json")) index(entry()) else symbol(components = "{}")
         }
-        .symbol(m3, "contribution-cell")
+        .symbol(m3, "contribution-cell"),
     )
     assertTrue(none.any { "declares 0 components" in it }, none.toString())
 
@@ -167,10 +167,10 @@ class ServeUiBuilderComponentLibraryTest {
             symbol(
               components =
                 """{"contribution-cell": {"name": "Contribution cell", "root": "cell"},
-                  "other": {"name": "Other", "root": "cell"}}"""
+                  "other": {"name": "Other", "root": "cell"}}""",
             )
         }
-        .symbol(m3, "contribution-cell")
+        .symbol(m3, "contribution-cell"),
     )
     assertTrue(two.any { "declares 2 components" in it }, two.toString())
   }
@@ -202,7 +202,7 @@ class ServeUiBuilderComponentLibraryTest {
           if (url.endsWith("index.json")) index(entry())
           else symbol(components = """{"contribution-cell": {"name": "Cell", "root": "absent"}}""")
         }
-        .symbol(m3, "contribution-cell")
+        .symbol(m3, "contribution-cell"),
     )
     assertTrue(noRoot.any { "does not carry" in it }, noRoot.toString())
 
@@ -211,7 +211,7 @@ class ServeUiBuilderComponentLibraryTest {
       library(onLog = danglingChild::add) { url ->
           if (url.endsWith("index.json")) index(entry()) else symbol(childId = "absent")
         }
-        .symbol(m3, "contribution-cell")
+        .symbol(m3, "contribution-cell"),
     )
     assertTrue(danglingChild.any { "absent" in it }, danglingChild.toString())
   }

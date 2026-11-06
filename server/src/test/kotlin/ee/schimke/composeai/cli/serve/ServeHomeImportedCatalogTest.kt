@@ -74,7 +74,7 @@ class ServeHomeImportedCatalogTest {
           "joreilly-peopleinspace",
           sourceRepo = "yschimke/compose-preview-imports",
           importedFrom = "joreilly/PeopleInSpace",
-        )
+        ),
       )
 
     assertTrue(html.contains("cp-sys-imported"), "no imported badge on the card")
@@ -137,7 +137,7 @@ class ServeHomeImportedCatalogTest {
           sourceRepo = "yschimke/compose-preview-imports",
           importedFrom = "joreilly/PeopleInSpace",
           catalogSourceRepo = "someone-else/fork",
-        )
+        ),
       )
 
     assertTrue(html.contains("<h1 class=\"cp-head\">joreilly repositories</h1>"))

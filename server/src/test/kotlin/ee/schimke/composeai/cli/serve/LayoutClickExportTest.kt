@@ -24,7 +24,7 @@ class LayoutClickExportTest {
     json
       .decodeFromString<DesignDocumentV1>(
         File("../docs/design/evidence/ui-builder-live-document-preview/sample.document.json")
-          .readText()
+          .readText(),
       )
       .copy(
         title = "Clickable state layout",
@@ -53,7 +53,7 @@ class LayoutClickExportTest {
             nodes =
               original.nodes.mapValues { (id, node) ->
                 if (id == "choice") node else node.copy(componentId = component)
-              }
+              },
           )
         }
       val result = ScreenExportGate.export(doc, record)

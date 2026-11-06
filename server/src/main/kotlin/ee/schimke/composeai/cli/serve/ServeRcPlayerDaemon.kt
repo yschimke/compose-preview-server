@@ -637,7 +637,7 @@ class ServeRcPlayerDaemon(
                 id = PREVIEW_ID,
                 functionName = PREVIEW_ID.substringAfterLast('.'),
                 className = PREVIEW_ID.substringBeforeLast('.'),
-              )
+              ),
             ),
         ),
       )
@@ -667,7 +667,7 @@ class ServeRcPlayerDaemon(
       if (players.isEmpty()) {
         log(
           "needs the Remote Compose players ($PLAYERS_SIDECAR/) — looked in " +
-            bundleSidecarSearchDescription(PLAYERS_SIDECAR)
+            bundleSidecarSearchDescription(PLAYERS_SIDECAR),
         )
         return null
       }
@@ -784,7 +784,7 @@ class ServeRcPlayerDaemon(
       if (!anyJarHas(playerJars, CMP_PLAYER_MARKER)) {
         log(
           "needs the CMP player ($DESKTOP_PLAYER_SIDECAR/) — looked in " +
-            bundleSidecarSearchDescription(DESKTOP_PLAYER_SIDECAR)
+            bundleSidecarSearchDescription(DESKTOP_PLAYER_SIDECAR),
         )
         return null
       }
@@ -797,7 +797,7 @@ class ServeRcPlayerDaemon(
       if (!anyJarHas(daemonJars, DESKTOP_BINDING_MARKER)) {
         log(
           "this daemon-desktop cannot play a carried Remote Compose document " +
-            "(it predates compose-preview-daemon#255); cmp-jvm stays on its one-shot lane"
+            "(it predates compose-preview-daemon#255); cmp-jvm stays on its one-shot lane",
         )
         return null
       }

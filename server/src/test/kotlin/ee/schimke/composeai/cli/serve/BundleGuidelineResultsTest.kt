@@ -33,7 +33,7 @@ class BundleGuidelineResultsTest {
   fun `a result is found by the bundle id it was written under`() {
     val results =
       BundleGuidelineResults(
-        ServeGuidelineResultsStore.parse(report("ee.x.ListsKt.WearList_192dp"))
+        ServeGuidelineResultsStore.parse(report("ee.x.ListsKt.WearList_192dp")),
       )
     assertEquals(
       "Fixed width.",
@@ -46,7 +46,7 @@ class BundleGuidelineResultsTest {
   fun `a report written under raw preview ids still answers for the bundle's safe ids`() {
     val results =
       BundleGuidelineResults(
-        ServeGuidelineResultsStore.parse(report("com.example.CardKt.Card:dark mode"))
+        ServeGuidelineResultsStore.parse(report("com.example.CardKt.Card:dark mode")),
       )
     // The bundle stored this preview as `com.example.CardKt.Card_dark_mode`.
     assertEquals(
@@ -59,7 +59,7 @@ class BundleGuidelineResultsTest {
   fun `raw ids that differ only by non-ASCII letters stay distinct, as the bundle keeps them`() {
     val results =
       BundleGuidelineResults(
-        ServeGuidelineResultsStore.parse(report("p.Über:dark", "p.Äber:dark", reason = "both"))
+        ServeGuidelineResultsStore.parse(report("p.Über:dark", "p.Äber:dark", reason = "both")),
       )
     assertEquals("p.Über_dark", bundleSafeId("p.Über:dark"))
     assertTrue(results.forPreview("p.Über_dark") != null)
@@ -69,7 +69,7 @@ class BundleGuidelineResultsTest {
   @Test
   fun `a malformed or absent file is no results, not an error`() {
     assertNull(
-      BundleGuidelineResults(ServeGuidelineResultsStore.parse("{not json")).forPreview("a")
+      BundleGuidelineResults(ServeGuidelineResultsStore.parse("{not json")).forPreview("a"),
     )
     assertNull(BundleGuidelineResults(null).forPreview("a"))
   }

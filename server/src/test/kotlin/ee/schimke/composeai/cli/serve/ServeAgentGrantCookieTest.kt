@@ -49,7 +49,7 @@ class ServeAgentGrantCookieTest {
           client = "test",
           requestedScope = AgentGrantScope.PREVIEW,
           requestedTtlSeconds = 600,
-        )
+        ),
       )
     return requireNotNull(
       grants.approve(
@@ -57,7 +57,7 @@ class ServeAgentGrantCookieTest {
         approvedBy = "operator",
         scope = AgentGrantScope.PREVIEW,
         ttlSeconds = 600,
-      )
+      ),
     )
   }
 

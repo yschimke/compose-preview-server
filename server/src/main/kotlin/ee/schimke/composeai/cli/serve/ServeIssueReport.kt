@@ -289,13 +289,13 @@ internal object ServeIssueReport {
           "<!-- The DIFF between those two panels is composed in your browser out of these very " +
             "pixels, so it has no URL to embed. Paste it here: the \"Report a problem\" launcher " +
             "on the comparison has a capture control that copies the whole view, a region, or " +
-            "one element to your clipboard. -->\n\n\n"
+            "one element to your clipboard. -->\n\n\n",
         )
         append(
           "<!-- Both images above are LIVE lanes: they re-render if the catalog changes, so " +
             "they may stop showing what you saw. GitHub displays them through Camo, but Camo " +
             "proxies the source URL; it does not make a versioned snapshot. A pasted capture " +
-            "stays put because GitHub hosts those pixels itself. -->\n\n\n"
+            "stays put because GitHub hosts those pixels itself. -->\n\n\n",
         )
       } else if (embed) {
         append("![${altText(ctx)}]($render)\n\n")
@@ -304,7 +304,7 @@ internal object ServeIssueReport {
             "stop showing what you saw. GitHub displays it through Camo, but Camo proxies the " +
             "source URL; it does not make a versioned snapshot. For a copy that stays put, use " +
             "Copy PNG in the viewer's \"Export & direct links\" panel and paste it here — " +
-            "GitHub then hosts the pixels itself. -->\n\n\n"
+            "GitHub then hosts the pixels itself. -->\n\n\n",
         )
       } else if (ctx.previewId.isNullOrBlank()) {
         // A page-scoped report has no export panel; point at the launcher's capture control
@@ -312,13 +312,13 @@ internal object ServeIssueReport {
         append(
           "<!-- Paste it here. The \"Report a problem\" launcher on the page has a capture " +
             "control that copies the whole view, a region, or one element to your clipboard, so " +
-            "Ctrl-V / Cmd-V lands it in this issue. -->\n\n\n"
+            "Ctrl-V / Cmd-V lands it in this issue. -->\n\n\n",
         )
       } else {
         append(
           "<!-- Paste it here. The viewer's \"Export & direct links\" panel has a Copy PNG " +
             "button that puts the image itself on your clipboard, so Ctrl-V / Cmd-V lands the " +
-            "exact render in this issue. -->\n\n\n"
+            "exact render in this issue. -->\n\n\n",
         )
       }
       append(if (ctx.previewId.isNullOrBlank()) "### Which page\n\n" else "### Which preview\n\n")
@@ -338,7 +338,7 @@ internal object ServeIssueReport {
   private fun formatRawScores(scores: RawScores): String = buildString {
     append(
       "%.1f%% structural match; %.2f%% pixels changed"
-        .format(Locale.ROOT, scores.structuralMatch, scores.pixelsChanged)
+        .format(Locale.ROOT, scores.structuralMatch, scores.pixelsChanged),
     )
     scores.proportionDifference?.let {
       append("; %.1f%% proportion difference".format(Locale.ROOT, it))
@@ -484,7 +484,7 @@ internal object ServeIssueReport {
           "width" to JsonPrimitive(bounds.width),
           "x" to JsonPrimitive(bounds.x),
           "y" to JsonPrimitive(bounds.y),
-        )
+        ),
       ),
     )
 

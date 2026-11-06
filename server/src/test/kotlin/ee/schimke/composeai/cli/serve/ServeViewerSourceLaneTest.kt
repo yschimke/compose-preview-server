@@ -61,7 +61,7 @@ class ServeViewerSourceLaneTest {
     assertTrue(html.contains("id=\"cp-source-chip\" class=\"cp-spec-chip cp-source-chip\""))
     assertTrue(html.contains("aria-pressed=\"false\" aria-controls=\"cp-source-panel\""))
     assertTrue(
-      html.contains("data-source-chip-tip=\"Show the plain Compose that produces this render\"")
+      html.contains("data-source-chip-tip=\"Show the plain Compose that produces this render\""),
     )
   }
 

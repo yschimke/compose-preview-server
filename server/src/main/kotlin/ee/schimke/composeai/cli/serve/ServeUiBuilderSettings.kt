@@ -252,7 +252,7 @@ object ServeUiBuilderSettings {
           resolution.effective.catalogs.sorted().joinToString() +
           " (environment: " +
           base.catalogs.sorted().joinToString() +
-          ")"
+          ")",
       )
     }
     return Overlay(options, resolution.effective)

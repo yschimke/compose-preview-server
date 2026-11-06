@@ -45,7 +45,7 @@ class ServeRcJvmFontsTest {
         assertNotNull(
           System.getProperty("composeai.test.rcJvmFontsDir"),
           "the test task passes the staged player fonts directory",
-        )
+        ),
       )
     val manifest = File(packaged, ServeRcJvmFonts.MANIFEST)
     assertTrue(manifest.isFile, "the distribution's player fonts carry no fonts.json: $packaged")

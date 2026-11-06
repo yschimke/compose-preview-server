@@ -1079,7 +1079,7 @@ class ServeWebFixtureTest {
                   live = false,
                 ),
               ),
-            )
+            ),
           ),
       )
     val spatialViewer =
@@ -1389,7 +1389,7 @@ class ServeWebFixtureTest {
         liveAuthPrompt =
           ServeWeb.LiveAuthPrompt(
             loginHref =
-              "/auth/github/start?return=%2Fremote-m3%2Fp%2Fappcard__ideal__default__compact"
+              "/auth/github/start?return=%2Fremote-m3%2Fp%2Fappcard__ideal__default__compact",
           ),
       )
     // A Remote Compose preview whose design target and implementation both come from its paired
@@ -1664,7 +1664,7 @@ class ServeWebFixtureTest {
               // reads true in both directions.
               "Compose Material 3",
               listOf(ServeWeb.ComponentDirectoryRow("Button", "/compose-m3/p/button-filled")),
-            )
+            ),
           ),
       )
     val samplesViewer = samplesFixture(ServeWeb.PageRole.SAMPLES)
@@ -1791,7 +1791,7 @@ class ServeWebFixtureTest {
                     changedPercent = 3.1,
                     scoreVersion = ServeDesignReferenceStore.SCORE_VERSION,
                   ),
-              )
+              ),
             )
           else emptyList()
         },
@@ -1934,7 +1934,7 @@ class ServeWebFixtureTest {
                       label = "Buttons: 16dp label padding",
                       description = "Aligns the filled/tonal pair with the spec update.",
                       author = "Dana",
-                    )
+                    ),
                   ),
                 comments =
                   listOf(
@@ -2044,7 +2044,7 @@ class ServeWebFixtureTest {
                     count = 1,
                     bounds = AnnotationBounds(x = 46, y = 26, width = 128, height = 20),
                     space = ServeSemanticsTags.RENDER_PIXELS,
-                  )
+                  ),
               ),
           ),
         // Both panels annotated: layout boxes agree, type styles don't.
@@ -2185,7 +2185,7 @@ class ServeWebFixtureTest {
                           side = "actual",
                           bounds = AnnotationBounds(x = 12, y = 12, width = 196, height = 48),
                           label = "Button",
-                        )
+                        ),
                       ),
                   ),
                   ParityFinding(
@@ -2200,7 +2200,7 @@ class ServeWebFixtureTest {
                           side = "actual",
                           bounds = AnnotationBounds(x = 46, y = 26, width = 128, height = 20),
                           label = "Label",
-                        )
+                        ),
                       ),
                   ),
                   ParityFinding(
@@ -2229,7 +2229,7 @@ class ServeWebFixtureTest {
                     detail = mapOf("ratio" to "4.9", "required" to "4.5"),
                   ),
                 ),
-            )
+            ),
           ),
         parityIssues = parityIssues,
         parityIssuesGeneratedAt = "2026-09-05T20:08:06.488Z",
@@ -2426,8 +2426,8 @@ class ServeWebFixtureTest {
             </g>
           </svg>
           """
-            .trimIndent()
-        )
+            .trimIndent(),
+        ),
       )
 
     // A design page: one specimen sheet with the node id of every component on it. Mix: two
@@ -2643,7 +2643,7 @@ class ServeWebFixtureTest {
                 caption =
                   "Press and hold the card. The container lifts to its pressed elevation and " +
                     "the ripple expands from the contact point.",
-              )
+              ),
             ),
         ),
         ServePreview(
@@ -3233,7 +3233,7 @@ class ServeWebFixtureTest {
                     actorId = "github:colleague",
                     role = "editor",
                     allowed = "read, write, export",
-                  )
+                  ),
                 ),
               unopenableReason = null,
               previewHref =
@@ -3333,7 +3333,7 @@ class ServeWebFixtureTest {
               backend = "desktop",
               modes = listOf(PlaygroundMode.CMP),
               resolved = true,
-            )
+            ),
           ),
         catalogSelectorEnabled = true,
         seed =
@@ -3442,7 +3442,7 @@ class ServeWebFixtureTest {
               "cmp-jvm",
               "CMP (JVM)",
               "/d/Tz3l9WcAq0Xj5RmB7dPuKw/render.png",
-            )
+            ),
           ),
       )
 
@@ -3783,7 +3783,7 @@ class ServeWebFixtureTest {
                   backend = "desktop",
                   activeStreams = 2,
                   upForText = "12m 5s",
-                )
+                ),
               ),
             failures =
               listOf(
@@ -3791,7 +3791,7 @@ class ServeWebFixtureTest {
                   whenText = "2026-07-17 09:41 UTC",
                   session = "wear-m3",
                   reason = "daemon launch timed out after 300s",
-                )
+                ),
               ),
             renderFailures =
               listOf(
@@ -3800,7 +3800,7 @@ class ServeWebFixtureTest {
                   session = "compose-m3 (live bundle)",
                   durationText = "120000ms (timeout)",
                   reason = "timed out waiting for renderFinished",
-                )
+                ),
               ),
           ),
       )
@@ -3818,7 +3818,7 @@ class ServeWebFixtureTest {
         recentFailures =
           listOf(
             "2026-07-17 09:43 UTC  compose-m3 (live bundle): render failed after " +
-              "120000ms (timeout) — timed out waiting for renderFinished"
+              "120000ms (timeout) — timed out waiting for renderFinished",
           ),
       )
     val bugReportPageContext =
@@ -3883,7 +3883,7 @@ class ServeWebFixtureTest {
               listOf(
                 "" to
                   "2026-07-17 09:43 UTC  compose-m3 (live bundle): render failed after " +
-                    "120000ms (timeout) — timed out waiting for renderFinished"
+                    "120000ms (timeout) — timed out waiting for renderFinished",
               ),
             ),
             ServeWeb.BugReportSection(
@@ -4153,10 +4153,10 @@ class ServeWebFixtureTest {
     assertUnfurlCardsInSync(pagesDir, unfurlCards)
     assertFalse(
       designPageHtml.contains(
-        "class=\"cp-page-node\" data-link=\"unlinked\" data-cp-node=\"1:0\""
+        "class=\"cp-page-node\" data-link=\"unlinked\" data-cp-node=\"1:0\"",
       ) ||
         designPageHtml.contains(
-          "class=\"cp-page-row\" data-link=\"unlinked\" data-cp-node=\"1:0\""
+          "class=\"cp-page-row\" data-link=\"unlinked\" data-cp-node=\"1:0\"",
         ),
       "a component-set grid is page structure, never a giant interactive hotspot or audit row",
     )
@@ -4257,7 +4257,7 @@ class ServeWebFixtureTest {
     )
     assertTrue(
       viewerCatalogKnobs.contains(
-        "class=\"cp-rc-knob\" data-rc-name=\"shaderColor\" " + "data-rc-kind=\"color\""
+        "class=\"cp-rc-knob\" data-rc-name=\"shaderColor\" " + "data-rc-kind=\"color\"",
       ),
       "the declared RC colour knob renders a control tagged with its name + kind",
     )
@@ -4359,11 +4359,11 @@ class ServeWebFixtureTest {
     assertTrue(
       landingThemed.contains("<span class=\"cp-actions-group-label\">Compare against</span>") &&
         landingThemed.contains(
-          "<a class=\"cp-action-chip\" href=\"/compare?format=svg&amp;session=compose-m3\">SVG</a>"
+          "<a class=\"cp-action-chip\" href=\"/compare?format=svg&amp;session=compose-m3\">SVG</a>",
         ) &&
         landingThemed.contains(
           "<a class=\"cp-action-chip\" href=\"/compare?format=rc&amp;session=compose-m3\">" +
-            "Remote Compose players</a>"
+            "Remote Compose players</a>",
         ),
       "a catalog with alternate formats links each one separately: $landingThemed",
     )
@@ -4371,11 +4371,11 @@ class ServeWebFixtureTest {
     // sits under `Reports`.
     assertTrue(
       landingPath.contains(
-        "<a class=\"cp-action-chip\" href=\"/meshcore-mobile/compare?format=reference\">Figma</a>"
+        "<a class=\"cp-action-chip\" href=\"/meshcore-mobile/compare?format=reference\">Figma</a>",
       ) &&
         landingPath.contains(
           "<div class=\"cp-actions-group\"><span class=\"cp-actions-group-label\">Reports</span>" +
-            "<a class=\"cp-action-chip\" href=\"/meshcore-mobile/parity\">design parity</a></div>"
+            "<a class=\"cp-action-chip\" href=\"/meshcore-mobile/parity\">design parity</a></div>",
         ),
       "a Figma-specified catalog compares against Figma and links the parity index separately",
     )
@@ -4524,7 +4524,7 @@ class ServeWebFixtureTest {
     assertTrue(
       rcLanesLiveComparison.contains(
         "This host does draw AndroidX Embedded · vendored Android — but through the same embedded " +
-          "player the baked column already went through"
+          "player the baked column already went through",
       ),
       "a player withheld to avoid duplicating baked is distinguished from one the host cannot draw",
     )
@@ -4543,7 +4543,7 @@ class ServeWebFixtureTest {
     // Each cell asks the server for that player's raster of this preview via `?rcPlayer=`.
     assertTrue(
       rcLanesLiveComparison.contains(
-        "/render/button-filled__ideal__default__light.png?session=remote-m3&amp;rcPlayer=cmp-jvm"
+        "/render/button-filled__ideal__default__light.png?session=remote-m3&amp;rcPlayer=cmp-jvm",
       ),
       "a live cell points at this host's render endpoint for that player and preview",
     )
@@ -4556,7 +4556,7 @@ class ServeWebFixtureTest {
     // cells still have to point at the host's render endpoint like any other live column.
     assertTrue(
       rcLanesLiveComparison.contains(
-        "/render/button-filled__ideal__default__light.png?session=remote-m3&amp;rcPlayer=androidx-view"
+        "/render/button-filled__ideal__default__light.png?session=remote-m3&amp;rcPlayer=androidx-view",
       ),
       "the wall-named androidx-view column renders through this host, not from staged bytes",
     )
@@ -4569,7 +4569,7 @@ class ServeWebFixtureTest {
           rcLanesLiveComparison
             .substringAfter("id=\"cp-rc-model\">")
             .substringBefore("</script>")
-            .substringBefore("\"rows\"")
+            .substringBefore("\"rows\""),
         )
         .map { it.groupValues[1] }
         .toList(),
@@ -4582,7 +4582,7 @@ class ServeWebFixtureTest {
     )
     assertTrue(
       rcLanesLiveComparison.contains(
-        "cp-rc-missing\">this host cannot draw this player for this preview"
+        "cp-rc-missing\">this host cannot draw this player for this preview",
       ),
       "a row the host has no document for says so rather than showing an empty frame",
     )
@@ -4617,7 +4617,7 @@ class ServeWebFixtureTest {
     assertTrue(
       referenceComparison.contains("compose-parity-locator/v1") &&
         referenceComparison.contains(
-          "overrides: {&quot;fontScale&quot;:&quot;1.5&quot;,&quot;knob.label&quot;:&quot;Send;now=x&quot;}"
+          "overrides: {&quot;fontScale&quot;:&quot;1.5&quot;,&quot;knob.label&quot;:&quot;Send;now=x&quot;}",
         ) &&
         referenceComparison.contains("{{rawScores}}"),
       "the focused comparison pins the locator, canonical overrides and score placeholder",
@@ -4649,7 +4649,7 @@ class ServeWebFixtureTest {
         // Built through the page's own link rules, so it carries whatever credential the reader
         // presented (including header / bearer auth).
         referenceComparison.contains(
-          "data-cp-tags=\"/tags/button-filled__ideal__default__light?session=compose-m3\""
+          "data-cp-tags=\"/tags/button-filled__ideal__default__light?session=compose-m3\"",
         ) &&
         referenceComparison.contains("id=\"cp-selection-layer\""),
       "the focused comparison offers both a tag picker and a drag region",
@@ -4800,7 +4800,7 @@ class ServeWebFixtureTest {
                 id = "pressed-reference",
                 previewId = id,
                 raster = DesignReferenceRaster("references/pressed.png"),
-              )
+              ),
             )
           },
         )
@@ -4811,16 +4811,16 @@ class ServeWebFixtureTest {
       formatComparison.substringAfter("data-label=\"button-filled\"").substringBefore("</tr>")
     assertTrue(
       buttonComparison.contains(
-        "data-png-light=\"/render/button-filled__ideal__default__light.png?session=compose-m3\""
+        "data-png-light=\"/render/button-filled__ideal__default__light.png?session=compose-m3\"",
       ) &&
         buttonComparison.contains(
-          "data-svg-light=\"/render/button-filled__ideal__default__light.svg?session=compose-m3\""
+          "data-svg-light=\"/render/button-filled__ideal__default__light.svg?session=compose-m3\"",
         ) &&
         buttonComparison.contains(
-          "data-png-dark=\"/render/button-filled__ideal__default__dark.png?session=compose-m3\""
+          "data-png-dark=\"/render/button-filled__ideal__default__dark.png?session=compose-m3\"",
         ) &&
         buttonComparison.contains(
-          "data-svg-dark=\"/render/button-filled__ideal__default__dark.svg?session=compose-m3\""
+          "data-svg-dark=\"/render/button-filled__ideal__default__dark.svg?session=compose-m3\"",
         ),
       "each comparison row pairs PNG and SVG from the exact same baked theme variant",
     )
@@ -4924,10 +4924,10 @@ class ServeWebFixtureTest {
       landingDeclaredThemes.contains("data-theme-choice=\"light\"") &&
         landingDeclaredThemes.contains("data-theme-choice=\"dark\"") &&
         landingDeclaredThemes.contains(
-          "data-theme-choice=\"theme:com.example.BrandLightThemeCatalog\""
+          "data-theme-choice=\"theme:com.example.BrandLightThemeCatalog\"",
         ) &&
         landingDeclaredThemes.contains(
-          "data-theme-choice=\"theme:com.example.HighContrastThemeCatalog\""
+          "data-theme-choice=\"theme:com.example.HighContrastThemeCatalog\"",
         ),
       "the catalog Theme control offers the baked pair plus every declared theme",
     )
@@ -4950,7 +4950,7 @@ class ServeWebFixtureTest {
     // by the server, never read from the DOM (CodeQL js/xss-through-dom).
     assertTrue(
       landingDeclaredThemes.contains(
-        "var themeBase = [\"/render/button-filled__ideal__default__light.png?session=compose-m3\""
+        "var themeBase = [\"/render/button-filled__ideal__default__light.png?session=compose-m3\"",
       ) && landingDeclaredThemes.contains("\"themeProvider=\" + encodeURIComponent(provider)"),
       "the server emits each card's themed-render URL for the script to use",
     )
@@ -4963,21 +4963,21 @@ class ServeWebFixtureTest {
     assertTrue(
       landingDeclaredThemes.contains("var job = {") &&
         landingDeclaredThemes.contains(
-          "var themeLeaseUrl = \"/api/theme-render-lease?session=compose-m3\""
+          "var themeLeaseUrl = \"/api/theme-render-lease?session=compose-m3\"",
         ) &&
         landingDeclaredThemes.contains("var themeRenderRetries = 3") &&
         landingDeclaredThemes.contains("function acquireThemeLease(gen, callback)") &&
         landingDeclaredThemes.contains("Math.max(1, Math.min(5, grant.concurrency))") &&
         landingDeclaredThemes.contains("function runThemeWorker(queue, gen, batch)") &&
         landingDeclaredThemes.contains(
-          "runThemeQueue(themeQueue, themeQueueGen, lease, concurrency)"
+          "runThemeQueue(themeQueue, themeQueueGen, lease, concurrency)",
         ) &&
         landingDeclaredThemes.contains("var workers = Math.min(concurrency, queue.length)") &&
         landingDeclaredThemes.contains("&_themeLease=\" + encodeURIComponent(lease)") &&
         landingDeclaredThemes.contains("job.src = job.baseSrc + \"&_retry=\" + job.retries") &&
         landingDeclaredThemes.contains("if (gen !== themeGen) return;") &&
         landingDeclaredThemes.contains(
-          "queue.push(job);\n        runThemeWorker(queue, gen, batch)"
+          "queue.push(job);\n        runThemeWorker(queue, gen, batch)",
         ) &&
         landingDeclaredThemes.contains("1000 * Math.pow(2, job.retries)") &&
         landingDeclaredThemes.contains("releaseThemeLease(batch.lease, false)") &&
@@ -4999,7 +4999,7 @@ class ServeWebFixtureTest {
         landingDeclaredTabbedThemes.contains("themeDeferredQueue.push(job)") &&
         landingDeclaredTabbedThemes.contains(
           "themeVisible = current === \"all\" || " +
-            "themeSection.getAttribute(\"data-section\") === current"
+            "themeSection.getAttribute(\"data-section\") === current",
         ) &&
         landingDeclaredTabbedThemes.contains("deferTheme(themeDeferredQueue, themeQueueGen)"),
       "current-tab cards are rendered first, including before hidden state is initialized",
@@ -5047,7 +5047,7 @@ class ServeWebFixtureTest {
     assertTrue(
       neutralWithThemes.contains("data-theme-choice=\"default\"") &&
         neutralWithThemes.contains(
-          "data-theme-choice=\"theme:com.example.BrandLightThemeCatalog\""
+          "data-theme-choice=\"theme:com.example.BrandLightThemeCatalog\"",
         ),
       "a theme-neutral module with declared themes gets a Default chip plus the declared themes",
     )
@@ -5068,7 +5068,7 @@ class ServeWebFixtureTest {
     )
     assertTrue(
       serveStatus.contains(
-        "href=\"https://github.com/yschimke/compose-ai-tools/tree/design-artifacts/compose-m3\""
+        "href=\"https://github.com/yschimke/compose-ai-tools/tree/design-artifacts/compose-m3\"",
       ) &&
         serveStatus.contains("2 hours ago") &&
         serveStatus.contains("2 days ago") &&
@@ -5157,7 +5157,7 @@ class ServeWebFixtureTest {
     assertTrue(
       landingSections.contains(
         "id=\"cp-tab-themes\" href=\"#cp-panel-themes\" data-tab=\"themes\"" +
-          " aria-controls=\"cp-panel-themes\" aria-selected=\"false\""
+          " aria-controls=\"cp-panel-themes\" aria-selected=\"false\"",
       ),
       "a section row's anchor targets its own panel",
     )
@@ -5166,7 +5166,7 @@ class ServeWebFixtureTest {
       landingSections.contains(
         "<a class=\"cp-tab\" role=\"treeitem\" id=\"cp-tab-all\" href=\"#cp-grid\"" +
           " data-tab=\"all\" aria-controls=\"cp-grid\" aria-selected=\"true\">" +
-          "All<span class=\"cp-tab-count\">"
+          "All<span class=\"cp-tab-count\">",
       ),
       "the tree leads with a selected All row controlling the whole grid",
     )
@@ -5310,7 +5310,7 @@ class ServeWebFixtureTest {
     assertTrue(
       landingSections.contains("aria-owns=\"cp-tree-children-components\"") &&
         landingSections.contains(
-          "<ul class=\"cp-tree-children\" id=\"cp-tree-children-components\""
+          "<ul class=\"cp-tree-children\" id=\"cp-tree-children-components\"",
         ),
       "a section row owns its group of sub-group rows",
     )
@@ -5371,7 +5371,7 @@ class ServeWebFixtureTest {
       landingGrouped.contains(
         "<div class=\"cp-id cp-id-elide\">" +
           "<span class=\"cp-id-head\">button-filled__ideal__default</span>" +
-          "<span class=\"cp-id-tail\">__light</span></div>"
+          "<span class=\"cp-id-tail\">__light</span></div>",
       ),
       "a card's id elides from the middle, keeping the mode and the scheme",
     )
@@ -5387,11 +5387,11 @@ class ServeWebFixtureTest {
     assertTrue(
       landingGrouped.contains(
         "<a class=\"cp-tree-page cp-tree-link\" href=\"/pages/shape\" data-search=\"Shape\"" +
-          " aria-expanded=\"true\" aria-controls=\"cp-page-sections-shape\">Shape"
+          " aria-expanded=\"true\" aria-controls=\"cp-page-sections-shape\">Shape",
       ) &&
         landingGrouped.contains(
           "<a class=\"cp-tree-variant cp-tree-link\" href=\"/pages/shape\"" +
-            " data-search=\"Corner radius\">Corner radius</a>"
+            " data-search=\"Corner radius\">Corner radius</a>",
         ) &&
         landingGrouped.contains("data-search=\"Shape scale\">Shape scale</a>"),
       "a page's major sections hang under it, each linking to that node's anchor",
@@ -5401,7 +5401,7 @@ class ServeWebFixtureTest {
     assertTrue(
       landingGrouped.contains(
         "<a class=\"cp-tree-page cp-tree-link\" href=\"/pages/type\"" +
-          " data-search=\"Typography\">Typography</a>"
+          " data-search=\"Typography\">Typography</a>",
       ) && landingGrouped.contains("<a class=\"cp-pane-all\" href=\"/pages\">All pages</a>"),
       "a page with no sections stays a plain filterable row, and the index link survives",
     )
@@ -5426,7 +5426,7 @@ class ServeWebFixtureTest {
     // The pane the switch reveals ships hidden, and the tree keeps the column when it is showing.
     assertTrue(
       landingGrouped.contains(
-        "<div class=\"cp-pane cp-pane-pages\" id=\"cp-pane-pages\" role=\"tabpanel\""
+        "<div class=\"cp-pane cp-pane-pages\" id=\"cp-pane-pages\" role=\"tabpanel\"",
       ) && landingGrouped.contains("aria-labelledby=\"cp-pane-tab-pages\" hidden>"),
       "the Pages pane starts hidden behind its tab",
     )
@@ -5457,7 +5457,7 @@ class ServeWebFixtureTest {
     assertTrue(
       landingTreeDepth.contains(
         "<a class=\"cp-tree-component cp-tree-link\" role=\"treeitem\"" +
-          " href=\"#cp-card-button-filled__ideal__default__light\""
+          " href=\"#cp-card-button-filled__ideal__default__light\"",
       ),
       "each component is a row pointing at its own grid card",
     )
@@ -5472,7 +5472,7 @@ class ServeWebFixtureTest {
     )
     assertTrue(
       landingTreeDepth.contains(
-        "href=\"/p/button-filled__ideal__default__light__direction-rtl?session=compose-m3\""
+        "href=\"/p/button-filled__ideal__default__light__direction-rtl?session=compose-m3\"",
       ),
       "a variant row links to the viewer rather than jumping within the page",
     )
@@ -5652,7 +5652,7 @@ class ServeWebFixtureTest {
     assertTrue(
       docRemoteComposePlayers.contains("data-doc-player=\"cmp-jvm\"") &&
         docRemoteComposePlayers.contains(
-          "data-doc-lane-path=\"/d/Tz3l9WcAq0Xj5RmB7dPuKw/render.png\""
+          "data-doc-lane-path=\"/d/Tz3l9WcAq0Xj5RmB7dPuKw/render.png\"",
         ),
       "a server-side player is offered as a lane rendered from the document's render path",
     )
@@ -5718,7 +5718,7 @@ class ServeWebFixtureTest {
     assertTrue(
       homeIndex.contains(
         "<img loading=\"eager\" decoding=\"async\" width=\"168\" height=\"68\"" +
-          " alt=\"Compose Material 3 preview\" src=\"/hero/compose-m3/1f0c9a4b7d2e6503.png\">"
+          " alt=\"Compose Material 3 preview\" src=\"/hero/compose-m3/1f0c9a4b7d2e6503.png\">",
       ),
       "a system card shows its prebaked hero, sized and eager",
     )
@@ -5746,7 +5746,7 @@ class ServeWebFixtureTest {
               previewCount = 1,
               trust = "unverified",
               heroPreviewId = null,
-            )
+            ),
           ),
         token = token,
         isPublic = true,
@@ -5823,7 +5823,7 @@ class ServeWebFixtureTest {
           ServePreview("button-filled__ideal__disabled__light", "Filled disabled"),
           ServePreview("button-filled__ideal__default__light", "Filled default"),
           ServePreview("button-filled__ideal__default__dark", "Filled dark"),
-        )
+        ),
       ),
       "the hero pick prefers a default-state, light, filled-button render",
     )
@@ -5839,7 +5839,7 @@ class ServeWebFixtureTest {
             section = "Screens",
           ),
           ServePreview("bookmarks-screen__ideal__default__dark", "Bookmarks", section = "Screens"),
-        )
+        ),
       ),
       "a catalog with screens fronts a screen, not a component",
     )
@@ -5911,10 +5911,10 @@ class ServeWebFixtureTest {
     // The swap re-points the image + viewer link + id + label to the chosen theme's baked render.
     assertTrue(
       landingThemed.contains(
-        "if (img) { if (withSrc) setCardSrc(img, src); img.setAttribute(\"alt\", lbl); }"
+        "if (img) { if (withSrc) setCardSrc(img, src); img.setAttribute(\"alt\", lbl); }",
       ) &&
         landingThemed.contains(
-          "c.setAttribute(\"href\", c.getAttribute(\"data-\" + k + \"-href\"))"
+          "c.setAttribute(\"href\", c.getAttribute(\"data-\" + k + \"-href\"))",
         ),
       "the toggle swaps the card's render and viewer link in place (not a filter)",
     )
@@ -6059,7 +6059,7 @@ class ServeWebFixtureTest {
               caption = "Elevation settle",
               extension = ".gif",
             ),
-          )
+          ),
       )
     // Path-mounted, which is how a published catalog is actually served — so the assertions below
     // cover the session scoping of the route as well as its shape.
@@ -6171,8 +6171,8 @@ class ServeWebFixtureTest {
                 caption =
                   "Toggle repeatedly. The container morphs between its unchecked and checked " +
                     "shapes through the theme's spatial animation.",
-              )
-            )
+              ),
+            ),
         ),
         token,
         sessionId = "compose-m3",
@@ -6184,7 +6184,7 @@ class ServeWebFixtureTest {
     assertTrue(
       prose.contains(
         "data-motion-detail=\"Toggle repeatedly. The container morphs between its unchecked " +
-          "and checked shapes through the theme&#39;s spatial animation.\""
+          "and checked shapes through the theme&#39;s spatial animation.\"",
       ),
       "…and the words themselves are kept, on the option the readout prints from",
     )
@@ -6198,7 +6198,7 @@ class ServeWebFixtureTest {
             listOf(
               ServeMotion(id = "card__a", kind = "interaction"),
               ServeMotion(id = "card__b", kind = "interaction"),
-            )
+            ),
         ),
         token,
         sessionId = "compose-m3",
@@ -6329,7 +6329,7 @@ class ServeWebFixtureTest {
         canApplyOverrides = true,
         liveAuthPrompt =
           ServeWeb.LiveAuthPrompt(
-            loginHref = "/auth/github/start?return=%2Fp%2FCardPreview%3Ftoken%3Dabc"
+            loginHref = "/auth/github/start?return=%2Fp%2FCardPreview%3Ftoken%3Dabc",
           ),
       )
 
@@ -6338,7 +6338,7 @@ class ServeWebFixtureTest {
     assertTrue(
       protectedLive.contains("id=\"cp-live-signin\"") &&
         protectedLive.contains(
-          "href=\"/auth/github/start?return=%2Fp%2FCardPreview%3Ftoken%3Dabc\""
+          "href=\"/auth/github/start?return=%2Fp%2FCardPreview%3Ftoken%3Dabc\"",
         ),
       "auth-blocked live preview offers a real sign-in link, not a dead control",
     )
@@ -6359,7 +6359,7 @@ class ServeWebFixtureTest {
     )
     assertTrue(
       protectedLive.contains(
-        "title=\"Sign in with GitHub to enable Live preview. Any GitHub account works.\""
+        "title=\"Sign in with GitHub to enable Live preview. Any GitHub account works.\"",
       ),
       "…and its tooltip states the real bar instead of naming that repo",
     )
@@ -6379,7 +6379,7 @@ class ServeWebFixtureTest {
     assertTrue(
       allowlisted.contains(
         "title=\"Sign in with GitHub to enable Live preview. " +
-          "This server allows named GitHub users only.\""
+          "This server allows named GitHub users only.\"",
       ),
       "an allowlisted server does not promise that any account works",
     )
@@ -6391,7 +6391,7 @@ class ServeWebFixtureTest {
     )
     assertTrue(
       protectedLive.contains(
-        "name=\"cp-mode\" value=\"live\" id=\"cp-live\" tabindex=\"-1\" disabled"
+        "name=\"cp-mode\" value=\"live\" id=\"cp-live\" tabindex=\"-1\" disabled",
       ),
       "the hidden live transport radio stays disabled — sign-in is offered, not granted",
     )
@@ -6409,7 +6409,7 @@ class ServeWebFixtureTest {
       openLive.contains(
         "id=\"cp-live-toggle\" class=\"cp-live-toggle\" aria-pressed=\"false\" " +
           "data-default-lane-label=\"Snapshot\" " +
-          "title=\"Static snapshot — click for the live, interactive preview\">"
+          "title=\"Static snapshot — click for the live, interactive preview\">",
       ),
       "live preview remains an ordinary toggle when no GitHub sign-in prompt is required",
     )
@@ -6446,7 +6446,7 @@ class ServeWebFixtureTest {
     assertTrue(
       openLive.contains(
         "<span class=\"cp-live-hint cp-stage-live-hint\" id=\"cp-stage-live-hint\" " +
-          "aria-hidden=\"true\">click for live</span>"
+          "aria-hidden=\"true\">click for live</span>",
       ),
       "the stage carries the grid's own live-hint badge, worded for the gesture it offers here",
     )
@@ -6461,7 +6461,7 @@ class ServeWebFixtureTest {
     assertTrue(
       openLive.contains(
         "<span class=\"cp-live-toggle-verb\" id=\"cp-live-toggle-verb\" aria-hidden=\"true\">" +
-          "▸ Live</span>"
+          "▸ Live</span>",
       ),
       "the chip states its destination, so \"Java\" alone can't read as a readout",
     )
@@ -6660,7 +6660,7 @@ class ServeWebFixtureTest {
         .substringBefore("<main class=\"cp-main\">")
         .contains(
           "<nav class=\"cp-breadcrumb\" aria-label=\"Breadcrumb\">" +
-            "<a href=\"/?token=$token&amp;session=compose-m3\">Material 3 Design Kit</a>"
+            "<a href=\"/?token=$token&amp;session=compose-m3\">Material 3 Design Kit</a>",
         ),
       "…and in the header's lead slot, still linking the catalog it came from",
     )
@@ -6671,7 +6671,7 @@ class ServeWebFixtureTest {
     assertTrue(head.contains("<code class=\"cp-preview-id\""), head)
     assertTrue(
       head.contains(
-        "<span class=\"cp-viewer-engage\"><span ${ServeWeb.VOLATILE_ATTR}>1 view</span></span>"
+        "<span class=\"cp-viewer-engage\"><span ${ServeWeb.VOLATILE_ATTR}>1 view</span></span>",
       ),
       head,
     )
@@ -6847,7 +6847,7 @@ class ServeWebFixtureTest {
     )
     assertTrue(
       css.contains(
-        ".cp-spec-panel canvas.cp-spec-canvas--upscaled { image-rendering: pixelated; }"
+        ".cp-spec-panel canvas.cp-spec-canvas--upscaled { image-rendering: pixelated; }",
       ),
       "only a frame the component marked as enlarged gets nearest-neighbour",
     )
@@ -6870,13 +6870,13 @@ class ServeWebFixtureTest {
     )
     assertTrue(
       css.contains(
-        ".cp-theme-menu-panel .cp-theme-bar .cp-theme-btn { display: flex; min-width: 12em;"
+        ".cp-theme-menu-panel .cp-theme-bar .cp-theme-btn { display: flex; min-width: 12em;",
       ),
       "menu rows out-specify the scroller's `inline-block`, so the swatch gets a real box",
     )
     assertTrue(
       css.contains(
-        ".cp-theme-menu-panel .cp-theme-bar .cp-theme-btn[data-theme-mode] { color-scheme: inherit;"
+        ".cp-theme-menu-panel .cp-theme-bar .cp-theme-btn[data-theme-mode] { color-scheme: inherit;",
       ),
       "…and resolve their label colour in the scheme the page is actually painted in",
     )
@@ -7094,19 +7094,19 @@ class ServeWebFixtureTest {
     assertTrue(
       css.contains(".cp-card:hover::after { opacity: var(--md-sys-state-hover-opacity); }") &&
         css.contains(
-          ".cp-card:focus-visible::after { opacity: var(--md-sys-state-focus-opacity); }"
+          ".cp-card:focus-visible::after { opacity: var(--md-sys-state-focus-opacity); }",
         ),
       "a state layer covers the card under the pointer and under keyboard focus",
     )
     assertTrue(
       css.contains(
-        ".cp-card:hover .cp-imgwrap img, .cp-card:focus-visible .cp-imgwrap img { transform: scale(1.035); }"
+        ".cp-card:hover .cp-imgwrap img, .cp-card:focus-visible .cp-imgwrap img { transform: scale(1.035); }",
       ),
       "the card's artwork eases in under the pointer",
     )
     assertTrue(
       css.contains(
-        ".cp-card:focus-visible { outline: 3px solid var(--md-sys-color-secondary); outline-offset: 2px; }"
+        ".cp-card:focus-visible { outline: 3px solid var(--md-sys-color-secondary); outline-offset: 2px; }",
       ),
       "keyboard focus gets the card treatment plus M3's own focus indicator",
     )
@@ -7127,7 +7127,7 @@ class ServeWebFixtureTest {
     assertTrue(
       viewer.contains(
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1, " +
-          "viewport-fit=cover, interactive-widget=resizes-content\">"
+          "viewport-fit=cover, interactive-widget=resizes-content\">",
       ),
       "the page declares a mobile viewport that reaches under a notch and resizes for the keyboard",
     )
@@ -7149,7 +7149,7 @@ class ServeWebFixtureTest {
     assertTrue(
       assetText("serve.css")
         .contains(
-          ".cp-preview-head { position: sticky; top: var(--site-header-height); z-index: 21;"
+          ".cp-preview-head { position: sticky; top: var(--site-header-height); z-index: 21;",
         ),
       "the disclosure row is sticky below the global header on mobile",
     )
@@ -7198,7 +7198,7 @@ class ServeWebFixtureTest {
     assertTrue(
       assetText("serve.css")
         .contains(
-          ".cp-card.cp-sys:focus-within:not(:has(.cp-action-chip:focus-visible)) .cp-sys-title"
+          ".cp-card.cp-sys:focus-within:not(:has(.cp-action-chip:focus-visible)) .cp-sys-title",
         ),
       "keyboard focus on the tile link gets the full card treatment, not just the outline",
     )
@@ -7206,7 +7206,7 @@ class ServeWebFixtureTest {
       assetText("serve.css")
         .contains(
           ".cp-card.cp-sys:focus-within:not(:has(.cp-action-chip:focus-visible)) " +
-            "{ transform: none; }"
+            "{ transform: none; }",
         ),
       "…and reduced motion still cancels the lift for it — the blanket reset is keyed on " +
         ":focus-visible, which the card div can never match",
@@ -7302,13 +7302,13 @@ class ServeWebFixtureTest {
     // Links to the delivery branch and the regenerating workflow.
     assertTrue(
       landing.contains(
-        "href=\"https://github.com/yschimke/compose-ai-tools/tree/design-artifacts/compose-m3\""
+        "href=\"https://github.com/yschimke/compose-ai-tools/tree/design-artifacts/compose-m3\"",
       ),
       "the strip links the delivery branch on GitHub",
     )
     assertTrue(
       landing.contains(
-        "href=\"https://github.com/yschimke/compose-ai-tools/actions/workflows/design-artifacts.yml\""
+        "href=\"https://github.com/yschimke/compose-ai-tools/actions/workflows/design-artifacts.yml\"",
       ),
       "the strip links the regenerating workflow",
     )
@@ -7344,7 +7344,7 @@ class ServeWebFixtureTest {
             previewCount = 1,
             trust = null,
             heroPreviewId = null,
-          )
+          ),
         ),
         token,
         isPublic = true,
@@ -7574,7 +7574,7 @@ class ServeWebFixtureTest {
     assertTrue(
       playground.contains(
         "title=\"The playground requires a GitHub sign-in with access to " +
-          "yschimke/compose-ai-tools\""
+          "yschimke/compose-ai-tools\"",
       ),
       "a playground-only catalog names the playground and its repository gate",
     )
@@ -7600,7 +7600,7 @@ class ServeWebFixtureTest {
         )
         .contains(
           "title=\"Playground access is limited to configured GitHub users with access to " +
-            "yschimke/compose-ai-tools\""
+            "yschimke/compose-ai-tools\"",
         ),
       "an allowlisted box says so on the playground wording too",
     )
@@ -7624,7 +7624,7 @@ class ServeWebFixtureTest {
     )
     assertTrue(
       landing.contains(
-        "src=\"/meshcore-mobile/render/com.example.ButtonPreview.png?token=$token\""
+        "src=\"/meshcore-mobile/render/com.example.ButtonPreview.png?token=$token\"",
       ),
       "render link stays on the path",
     )
@@ -7895,7 +7895,7 @@ class ServeWebFixtureTest {
       catalogKnobs.contains(
         "data-knob-key=\"label\" data-knob-kind=\"string\" data-knob-initial=\"Filled\" " +
           "data-knob-default=\"Filled\" " +
-          "value=\"Filled\">"
+          "value=\"Filled\">",
       ),
       "declared knobs are enabled on an override-renderable session",
     )
@@ -7919,7 +7919,7 @@ class ServeWebFixtureTest {
     assertTrue(
       viewerSource()
         .contains(
-          "function cancelSnapshotLoading() {\n    snapshotGen++;\n    status.textContent = \"\";"
+          "function cancelSnapshotLoading() {\n    snapshotGen++;\n    status.textContent = \"\";",
         ),
       "cancelling a snapshot render clears its stale rendering status",
     )
@@ -7955,7 +7955,7 @@ class ServeWebFixtureTest {
         !catalogKnobs.contains("id=\"cp-device\"") &&
         !catalogKnobs.contains("id=\"cp-orientation\"") &&
         !catalogKnobs.contains(
-          "id=\"cp-localeTag\" type=\"text\" list=\"cp-localeTag-list\" placeholder=\"e.g. en-GB, zh-Hant-TW\" autocomplete=\"off\" disabled"
+          "id=\"cp-localeTag\" type=\"text\" list=\"cp-localeTag-list\" placeholder=\"e.g. en-GB, zh-Hant-TW\" autocomplete=\"off\" disabled",
         ),
       "component display controls render enabled without device overrides on an on-demand catalog",
     )
@@ -7965,7 +7965,7 @@ class ServeWebFixtureTest {
       staticKnobs.contains(
         "data-knob-key=\"label\" data-knob-kind=\"string\" data-knob-initial=\"Filled\" " +
           "data-knob-default=\"Filled\" " +
-          "value=\"Filled\" disabled"
+          "value=\"Filled\" disabled",
       ),
       "a plain static bundle leaves declared knobs disabled",
     )
@@ -7991,7 +7991,7 @@ class ServeWebFixtureTest {
       wasmKnobs.contains(
         "data-knob-key=\"label\" data-knob-kind=\"string\" data-knob-initial=\"Filled\" " +
           "data-knob-default=\"Filled\" " +
-          "value=\"Filled\">"
+          "value=\"Filled\">",
       ),
       "a wasm-backed published catalog enables the declared knob controls (no trailing disabled)",
     )
@@ -8088,7 +8088,7 @@ class ServeWebFixtureTest {
       viewerSourceFlat()
         .contains(
           "if ( mayName && !rules.reportFollowsDisplayedFrame( renderUrl(snapshotExt), " +
-            "img.getAttribute(\"data-cp-src\"), ) ) return;"
+            "img.getAttribute(\"data-cp-src\"), ) ) return;",
         ),
       "the report is only recomposed while the landed frame is the requested one",
     )
@@ -8098,7 +8098,7 @@ class ServeWebFixtureTest {
       viewerSourceFlat()
         .contains(
           "var mayName = rules.reportMayCarryLocator( " +
-            "root.getAttribute(\"data-mode\") || \"snapshot\", );"
+            "root.getAttribute(\"data-mode\") || \"snapshot\", );",
         ) && viewerSourceFlat().contains("omitLocator: !mayName,"),
       "an interactive lane files a report with no locator in it",
     )
@@ -8169,7 +8169,7 @@ class ServeWebFixtureTest {
     )
     assertTrue(
       view.contains(
-        "<option value=\"theme:com.example.BrandLightThemeCatalog\" data-theme-mode=\"light\">Brand Light</option>"
+        "<option value=\"theme:com.example.BrandLightThemeCatalog\" data-theme-mode=\"light\">Brand Light</option>",
       ),
       "each declared theme is an option keyed by its provider FQN",
     )
@@ -8177,7 +8177,7 @@ class ServeWebFixtureTest {
     assertTrue(view.contains("<optgroup label=\"Brand\">"), "grouped themes get an <optgroup>")
     assertTrue(
       view.contains(
-        "<option value=\"theme:com.example.HighContrastThemeCatalog\">High Contrast</option>"
+        "<option value=\"theme:com.example.HighContrastThemeCatalog\">High Contrast</option>",
       ),
       "an ungrouped theme is a flat option",
     )
@@ -8226,7 +8226,7 @@ class ServeWebFixtureTest {
       Regex("<select id=\"cp-theme\"[^>]*data-has-declared-themes=\"true\"[^>]* disabled>")
         .containsMatchIn(staticThemed) &&
         staticThemed.contains(
-          "value=\"theme:com.example.BrandLightThemeCatalog\" data-theme-mode=\"light\" disabled"
+          "value=\"theme:com.example.BrandLightThemeCatalog\" data-theme-mode=\"light\" disabled",
         ),
       "the theme selector is disabled on a static bundle (no daemon to apply it)",
     )
@@ -8367,7 +8367,7 @@ class ServeWebFixtureTest {
               default = PreviewOverrideValue.StringValue("Roboto Flex"),
               suggestions = listOf("Roboto Flex", "Google Sans Flex", "Lobster Two"),
               googleFonts = true,
-            )
+            ),
           ),
       )
     val view =
@@ -8442,7 +8442,7 @@ class ServeWebFixtureTest {
       "the committed link-unfurl cards are out of sync with ServeSocialCard:\n  " +
         problems.joinToString("\n  ") +
         "\n\nRegenerate with UPDATE_SERVE_WEB_FIXTURES=true — and look at the result, because " +
-        "these are what a shared link shows in Slack, iMessage and search results."
+        "these are what a shared link shows in Slack, iMessage and search results.",
     )
   }
 
@@ -8459,7 +8459,7 @@ class ServeWebFixtureTest {
           "ServeWeb's asset URLs no longer match the shape ServeWebFixtureTest normalises " +
           "(`$ASSET_HREF_PATTERN`). Update stableAssetHrefs to match ServeWebAssets.href, or the " +
           "goldens will start pinning real content hashes again and every asset edit will drift " +
-          "every page."
+          "every page.",
       )
     }
     val missing = goldens.filterNot { (name, _) -> File(pagesDir, name).isFile }.map { it.first }
@@ -8481,7 +8481,7 @@ class ServeWebFixtureTest {
         "\n\nRegenerate with UPDATE_SERVE_WEB_FIXTURES=true — but read the list first. Drift across " +
           "pages this branch never touched usually means the goldens were regenerated before " +
           "merging main and main has since changed the markup, not that ServeWeb is broken; " +
-          "re-merge and regenerate again rather than assuming the check is flaky."
+          "re-merge and regenerate again rather than assuming the check is flaky.",
       )
     }
     fail(report)
@@ -8550,7 +8550,7 @@ class ServeWebFixtureTest {
             title = ServeWeb.HOME_TITLE,
             subtitle = ServeWeb.homeCardSubtitle(systems),
             heroes = listOf(phone, watch),
-          )
+          ),
         )
         ?.let { "_social-card-home.png" to it },
       cards
@@ -8559,7 +8559,7 @@ class ServeWebFixtureTest {
             title = "Wear Compose Material 3",
             subtitle = ServeWeb.catalogCardSubtitle(18),
             heroes = listOf(watch),
-          )
+          ),
         )
         ?.let { "_social-card-catalog.png" to it },
     )

@@ -326,7 +326,7 @@ class PlaygroundSeedResolver(
     if (paths.isEmpty()) return emptyList()
     if (paths.size > MAX_SCAFFOLD_SOURCES) {
       onLog(
-        "compose-usage.json names ${paths.size} scaffold sources; reading the first $MAX_SCAFFOLD_SOURCES"
+        "compose-usage.json names ${paths.size} scaffold sources; reading the first $MAX_SCAFFOLD_SOURCES",
       )
     }
     val wanted = paths.take(MAX_SCAFFOLD_SOURCES)

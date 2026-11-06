@@ -144,7 +144,7 @@ internal object ServeUiBuilderReferenceTools {
     val picture =
       decode(image)
         ?: throw ServeUiBuilderView.Refused(
-          "the reference (${image.mediaType}) cannot be decoded on this host"
+          "the reference (${image.mediaType}) cannot be decoded on this host",
         )
     val render =
       runCatching { ImageIO.read(ByteArrayInputStream(frame.png)) }.getOrNull()
@@ -256,13 +256,13 @@ internal object ServeUiBuilderReferenceTools {
           if (frame.bounds == null && differences) {
             add(
               "regions are not attributed to layers: the ${frame.renderer} render reports no " +
-                "node boxes"
+                "node boxes",
             )
           }
           if (fit == null && chosenFit != ReferenceFit.Contain) {
             add(
               "measured with the `${chosenFit.wireValue}` fit this picture calls for; pass " +
-                "`fit` to measure under another"
+                "`fit` to measure under another",
             )
           }
         },

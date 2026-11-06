@@ -178,7 +178,7 @@ class ServeImageRoutingTest {
           .url(url("/images?name=$name", port))
           .apply { if (bearer != null) header("Authorization", "Bearer $bearer") }
           .post(bytes.toRequestBody("application/octet-stream".toMediaType()))
-          .build()
+          .build(),
       )
       .execute()
 

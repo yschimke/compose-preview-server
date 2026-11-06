@@ -57,10 +57,10 @@ class ServeUiBuilderCapabilityRouteTest {
         Request.Builder()
           .url(
             "http://127.0.0.1:${server.port}/api/ui-builder/v1/catalog-capabilities/" +
-              "$system-capabilities-v1.json"
+              "$system-capabilities-v1.json",
           )
           .header("Origin", "https://sandbox.example")
-          .build()
+          .build(),
       )
       .execute()
 

@@ -36,7 +36,7 @@ class MaterialSymbolsIconsTest {
         codePointsBytes = codePoints.size,
       ) { url, _ ->
         served.getValue(url)
-      }
+      },
     )
   }
 
@@ -54,7 +54,7 @@ class MaterialSymbolsIconsTest {
   fun `answers a batch and reports only the names it does not know`(@TempDir temp: File) {
     val response =
       answered(
-        icons(temp).outlines("outlined", listOf("search", "home", "no_such_icon"), emptyMap())
+        icons(temp).outlines("outlined", listOf("search", "home", "no_such_icon"), emptyMap()),
       )
     assertEquals(setOf("search", "home"), response.icons.keys)
     assertEquals(listOf("no_such_icon"), response.missing)
@@ -128,7 +128,7 @@ class MaterialSymbolsIconsTest {
   fun `axis parameters are parsed, and refused when they are not numbers`() {
     val parsed =
       answered(
-        MaterialSymbolsIcons.parseAxes(mapOf("wght" to "300", "FILL" to "1", "opsz" to "40")::get)
+        MaterialSymbolsIcons.parseAxes(mapOf("wght" to "300", "FILL" to "1", "opsz" to "40")::get),
       )
     assertEquals(mapOf("FILL" to 1f, "opsz" to 40f, "wght" to 300f), parsed)
 
@@ -143,7 +143,7 @@ class MaterialSymbolsIconsTest {
     assertEquals(IconRequestFailure.BadAxis("wght", "heavy"), bad)
     assertTrue(
       refused(MaterialSymbolsIcons.parseAxes(mapOf("wght" to "NaN")::get))
-        is IconRequestFailure.BadAxis
+        is IconRequestFailure.BadAxis,
     )
   }
 

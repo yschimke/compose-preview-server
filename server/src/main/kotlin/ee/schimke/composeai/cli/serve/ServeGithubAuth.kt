@@ -136,7 +136,7 @@ data class ServeGithubAuthConfig(
           ?.takeIf { it.isNotEmpty() }
           ?.let { ServeSites.normalizeHost(it) }
       require(
-        callbackHost == null || callbackHost == normalized || callbackHost.endsWith(".$normalized")
+        callbackHost == null || callbackHost == normalized || callbackHost.endsWith(".$normalized"),
       ) {
         "GitHub auth cookie domain '$cookieDomain' does not cover the callback host '$callbackHost'"
       }
@@ -363,7 +363,7 @@ class ServeGithubAuth(
         ),
         maxAge = (expiresAt - now) / 1000,
         secure = secure,
-      )
+      ),
     )
     clearLegacyDomainCookies(call, secure)
     call.respondRedirect(grant.returnTo)
@@ -485,7 +485,7 @@ class ServeGithubAuth(
     }
     call.respondRedirect(
       if (returnHost == null) statePayload.returnTo
-      else "https://$returnHost${statePayload.returnTo}"
+      else "https://$returnHost${statePayload.returnTo}",
     )
   }
 
@@ -627,7 +627,7 @@ class ServeGithubAuth(
         // browser keeps sending and the server keeps rejecting.
         maxAge = (expiresAt - now) / 1000,
         secure = secure,
-      )
+      ),
     )
   }
 
@@ -1333,12 +1333,12 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
     // dressed up as another kind.
     if (kind == GitHubTokenKind.INSTALLATION && !tokens.installation) {
       throw ImageUploadTokenRefusedException(
-        "this host does not accept GitHub App installation tokens for image uploads"
+        "this host does not accept GitHub App installation tokens for image uploads",
       )
     }
     if (kind == GitHubTokenKind.PERSONAL && !tokens.personal) {
       throw ImageUploadTokenRefusedException(
-        "this host does not accept personal access tokens for image uploads"
+        "this host does not accept personal access tokens for image uploads",
       )
     }
     // Null when `/user` refuses the credential, which is the normal answer for a GitHub **App
@@ -1359,12 +1359,12 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
       // and only this server's own is one we can recognise.
       if (app == null) {
         throw ImageUploadTokenRefusedException(
-          "this host does not accept user tokens issued to OAuth apps"
+          "this host does not accept user tokens issued to OAuth apps",
         )
       }
       if (!isIssuedToApp(token, app)) {
         throw ImageUploadTokenRefusedException(
-          "that token was issued to a different OAuth app than this server's"
+          "that token was issued to a different OAuth app than this server's",
         )
       }
     }

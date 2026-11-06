@@ -85,7 +85,7 @@ class ServeAnnotationStoreTest {
     staged.parentFile.mkdirs()
     staged.writeText(
       """{"schema":"compose-preview-annotations/v1","previews":{"p":[
-         {"kind":"layout","bounds":{"x":0,"y":0,"width":8,"height":8},"label":"pad 8dp"}]}}"""
+         {"kind":"layout","bounds":{"x":0,"y":0,"width":8,"height":8},"label":"pad 8dp"}]}}""",
     )
     assertEquals(
       "pad 8dp",
@@ -108,9 +108,9 @@ class ServeAnnotationStoreTest {
                 kind = AnnotationKind.TYPOGRAPHY,
                 bounds = AnnotationBounds(0, 0, 4, 4),
                 label = "</script><img src=x>",
-              )
-            )
-        )
+              ),
+            ),
+        ),
       )
     assertTrue(encoded.contains("\\u003c"), "expected escaped markup in: $encoded")
     assertTrue(!encoded.contains("</script>"), "raw closing tag survived in: $encoded")

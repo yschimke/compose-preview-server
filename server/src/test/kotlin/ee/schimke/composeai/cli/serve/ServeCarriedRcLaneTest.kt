@@ -43,7 +43,13 @@ class ServeCarriedRcLaneTest {
 
     fun emit(seq: Long) =
       frames?.invoke(
-        StreamFrameParams(frameStreamId = name, seq = seq, ptsMillis = 0, widthPx = 1, heightPx = 1)
+        StreamFrameParams(
+          frameStreamId = name,
+          seq = seq,
+          ptsMillis = 0,
+          widthPx = 1,
+          heightPx = 1,
+        ),
       )
   }
 

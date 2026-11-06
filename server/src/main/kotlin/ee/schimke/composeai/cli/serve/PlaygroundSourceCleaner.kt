@@ -204,7 +204,7 @@ object PlaygroundSourceCleaner {
 
   private val DECLARATION =
     Regex(
-      """^$ANNOTATION_RUN(?:[a-z]+\s+)*(?:fun|val|var|class|object|interface|typealias)\s+(?:<[^>]*>\s+)?([A-Za-z_][A-Za-z0-9_]*)"""
+      """^$ANNOTATION_RUN(?:[a-z]+\s+)*(?:fun|val|var|class|object|interface|typealias)\s+(?:<[^>]*>\s+)?([A-Za-z_][A-Za-z0-9_]*)""",
     )
 
   /**
@@ -218,7 +218,7 @@ object PlaygroundSourceCleaner {
    */
   private val EXTENSION_DECLARATION =
     Regex(
-      """^$ANNOTATION_RUN(?:[a-z]+\s+)*fun\s+(?:<[^>]*>\s+)?[A-Za-z_][A-Za-z0-9_]*(?:<[^>]*>)?\??\.([A-Za-z_][A-Za-z0-9_]*)\s*\("""
+      """^$ANNOTATION_RUN(?:[a-z]+\s+)*fun\s+(?:<[^>]*>\s+)?[A-Za-z_][A-Za-z0-9_]*(?:<[^>]*>)?\??\.([A-Za-z_][A-Za-z0-9_]*)\s*\(""",
     )
 
   private fun declaredName(text: String): String? =
@@ -331,7 +331,7 @@ object PlaygroundSourceCleaner {
         AnnotationBlock(
           name = annotationName(lines[i]),
           text = lines.subList(i, end + 1).joinToString("\n"),
-        )
+        ),
       )
       i = end + 1
     }

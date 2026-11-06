@@ -167,9 +167,9 @@ class ServeUiBuilderDesignUrlRedirectTest {
             .post(
               json
                 .encodeToString(HttpRequestEnvelopeV1.serializer(), envelope)
-                .toRequestBody("application/json".toMediaType())
+                .toRequestBody("application/json".toMediaType()),
             )
-            .build()
+            .build(),
         )
         .execute()
     response.use { assertEquals(200, it.code, it.body.string()) }
@@ -203,7 +203,7 @@ class ServeUiBuilderDesignUrlRedirectTest {
               id = "text",
               componentId = if (catalog == "remote-m3") "remote-m3/remote-text" else "m3/text",
               properties = mapOf("text" to StringValueV1("Hello")),
-            )
+            ),
         ),
     )
 

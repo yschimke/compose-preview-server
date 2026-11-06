@@ -133,7 +133,7 @@ class ServeDesignReferenceStoreTest {
           ]
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
     }
 

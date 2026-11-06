@@ -25,7 +25,7 @@ class CatalogLiveRoutingTest {
 
   private fun player(kind: RemoteComposePlayerKind) =
     PreviewOverrides(
-      remoteCompose = RemoteComposeOverride.Builder().also { it.player = kind }.build()
+      remoteCompose = RemoteComposeOverride.Builder().also { it.player = kind }.build(),
     )
 
   /**
@@ -37,7 +37,7 @@ class CatalogLiveRoutingTest {
   fun `a player named by id always needs the renderer`() {
     val byId =
       PreviewOverrides(
-        remoteCompose = RemoteComposeOverride.Builder().also { it.playerId = "rcplayer-x" }.build()
+        remoteCompose = RemoteComposeOverride.Builder().also { it.playerId = "rcplayer-x" }.build(),
       )
     assertTrue(
       CatalogLiveRouting.overridesAffectRender(
@@ -113,7 +113,7 @@ class CatalogLiveRoutingTest {
               it.player = RemoteComposePlayerKind.EMBEDDED
               it.documentBase64 = "AQIDBA=="
             }
-            .build()
+            .build(),
       )
     assertTrue(
       CatalogLiveRouting.overridesAffectRender(
@@ -121,7 +121,7 @@ class CatalogLiveRoutingTest {
         carried,
         UiMode.LIGHT,
         RemoteComposePlayerKind.EMBEDDED,
-      )
+      ),
     )
     assertEquals(
       listOf("rcDocument"),

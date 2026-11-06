@@ -130,7 +130,7 @@ class ServeUiBuilderRenderPortTest {
               id = "text",
               componentId = "m3/text",
               properties = mapOf("text" to StringValueV1("Rendered by real daemon")),
-            )
+            ),
         ),
     )
 }

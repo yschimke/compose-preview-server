@@ -22,7 +22,7 @@ internal fun interface ProjectGithubTransport {
 
 /** Fixed GitHub origin, bounded bodies, no credential persistence, no raw GitHub errors in logs. */
 internal class ServeUiBuilderProjectGithub(
-  private val transport: ProjectGithubTransport = defaultTransport()
+  private val transport: ProjectGithubTransport = defaultTransport(),
 ) {
   fun connect(
     id: String,
@@ -115,7 +115,7 @@ internal class ServeUiBuilderProjectGithub(
     val source = requireNotNull(project.source) { "this project is hosted here" }
     check(
       get("/repos/${source.repository}", token).getValue("id").jsonPrimitive.long ==
-        source.repositoryId
+        source.repositoryId,
     ) {
       "repository identity changed; reconnect before publishing"
     }
@@ -313,7 +313,7 @@ private fun segment(value: String): String =
 private fun validateRepository(repository: String) {
   require(
     Regex("[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+").matches(repository) &&
-      repository.split('/').none { it == "." || it == ".." }
+      repository.split('/').none { it == "." || it == ".." },
   ) {
     "repository must be owner/name"
   }

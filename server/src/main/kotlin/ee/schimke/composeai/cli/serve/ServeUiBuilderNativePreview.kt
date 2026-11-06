@@ -108,7 +108,7 @@ internal class ServeUiBuilderNativePreview(
         listOf(
           "this design uses components from ${usedPacks.size} packs " +
             "(${usedPacks.joinToString(", ") { "`$it`" }}), and no served bundle carries all of " +
-            "them; a native render can draw a design against one pack's bundle at a time"
+            "them; a native render can draw a design against one pack's bundle at a time",
         ),
       )
     }
@@ -150,7 +150,7 @@ internal class ServeUiBuilderNativePreview(
             nativeTargetRefusal(catalogSystemId)
               ?: ("this host compiles no bundle for catalog `$catalogSystemId`, so there is " +
                 "nothing to render this design against; serve that catalog's bundle and map it " +
-                "with `--ui-builder-native-catalog $catalogSystemId=<served catalog>`")
+                "with `--ui-builder-native-catalog $catalogSystemId=<served catalog>`"),
           ),
         )
     val environment = document.environment
@@ -189,7 +189,7 @@ internal class ServeUiBuilderNativePreview(
           wearWidget = widget != null,
           remoteCapture = generated.remoteContent,
           widgetPlayer = player,
-        )
+        ),
       )
     // A widget's nodes are tagged with content descriptions, which only the CMP player turns into
     // semantics nodes; the AndroidX player builds none. Other Remote content is not tagged.

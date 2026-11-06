@@ -61,7 +61,7 @@ internal class ServeSpareSandboxes private constructor(private val pool: Sandbox
       val config = config(maxSpares, sandboxCount) ?: return null
       log(
         "keeping up to ${config.maxSpares} warm Android sandbox worker(s), " +
-          "${config.perSignature} per daemon classpath"
+          "${config.perSignature} per daemon classpath",
       )
       return ServeSpareSandboxes(SandboxSparePool(config, log = log))
     }

@@ -113,7 +113,7 @@ class ServeDesignPageStoreTest {
   fun `a page whose export is missing or not an SVG is never advertised`() {
     assertTrue(store(manifest(shape), exports = emptyMap()).pages.isEmpty())
     assertTrue(
-      store(manifest(shape), exports = mapOf("shape.svg" to "<html>nope</html>")).pages.isEmpty()
+      store(manifest(shape), exports = mapOf("shape.svg" to "<html>nope</html>")).pages.isEmpty(),
     )
   }
 

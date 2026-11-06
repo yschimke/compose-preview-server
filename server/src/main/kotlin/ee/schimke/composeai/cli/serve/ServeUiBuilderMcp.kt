@@ -417,7 +417,7 @@ class ServeUiBuilderMcp(
               UiBuilderServiceCall(
                 actor,
                 UiBuilderServiceRequest.PreviewCurrentCatalogUpgrade(args.requiredText("designId")),
-              )
+              ),
             ),
           )
         CREATE_DESIGN ->
@@ -461,7 +461,7 @@ class ServeUiBuilderMcp(
                   args.requiredDocument(),
                   args.exportFormat(),
                 ),
-              )
+              ),
             ),
           )
         EXPORT ->
@@ -597,7 +597,7 @@ class ServeUiBuilderMcp(
     if (catalogFilter != null && catalogFilter !in systemIds) {
       throw McpRequestException(
         "no catalog `$catalogFilter` on this server; it serves " +
-          systemIds.sorted().joinToString(", ") { "`$it`" }
+          systemIds.sorted().joinToString(", ") { "`$it`" },
       )
     }
     return SUMMARY_JSON.encodeToString(
@@ -641,7 +641,7 @@ class ServeUiBuilderMcp(
     val alias = text(CATALOG_SYSTEM_ID_ARGUMENT)
     if (documented != null && alias != null && documented != alias) {
       throw McpRequestException(
-        "`$CATALOG_ARGUMENT` and `$CATALOG_SYSTEM_ID_ARGUMENT` name different catalogs; pass one"
+        "`$CATALOG_ARGUMENT` and `$CATALOG_SYSTEM_ID_ARGUMENT` name different catalogs; pass one",
       )
     }
     return documented ?: alias
@@ -730,7 +730,7 @@ class ServeUiBuilderMcp(
             ServiceErrorCodeV1.INTERNAL,
             "UI-builder service failed",
             retryable = true,
-          )
+          ),
         )
       }
     return when (response) {
@@ -858,7 +858,7 @@ class ServeUiBuilderMcp(
           listOf(
             option("move", "Move the home; the old record stays as a copy pointing to it"),
             option("cancel", "Keep the current home"),
-          )
+          ),
         )
     } else {
       val document = args.requiredDocument()
@@ -867,7 +867,7 @@ class ServeUiBuilderMcp(
       fields["title"] = JsonPrimitive(document.title)
       fields["question"] =
         JsonPrimitive(
-          "This document's home is design `$designId` on this server. What should happen to it?"
+          "This document's home is design `$designId` on this server. What should happen to it?",
         )
       fields["options"] =
         JsonArray(
@@ -876,13 +876,13 @@ class ServeUiBuilderMcp(
             option("create-new", "Create a new design instead, with a new id"),
             option("discard", "Discard the copy; the original stays as it is"),
             option("keep", "Keep the copy for now and change nothing"),
-          )
+          ),
         )
     }
     fields["elicitation"] =
       JsonPrimitive(
         "No form: this endpoint is stateless. Ask the person to pick one option in chat. " +
-          "Repeat the call without dryRun only for `move` or `save-back`."
+          "Repeat the call without dryRun only for `move` or `save-back`.",
       )
     return JsonObject(fields)
   }
@@ -913,7 +913,7 @@ class ServeUiBuilderMcp(
         "question" to
           JsonPrimitive(
             "This document's home is design `$designId` on this server, which already exists. " +
-              "What should happen to it?"
+              "What should happen to it?",
           ),
         "options" to
           JsonArray(
@@ -924,7 +924,7 @@ class ServeUiBuilderMcp(
               ),
               option("create-new", "Create a new design instead, with a new id"),
               option("cancel", "Cancel; the original stays as it is"),
-            )
+            ),
           ),
         "elicitation" to
           JsonPrimitive(
@@ -932,9 +932,9 @@ class ServeUiBuilderMcp(
               "For `apply-operations`, read the original with $GET_DESIGN and send the " +
               "differences through $APPLY at baseRevision $revision. For `create-new`, repeat " +
               "$CREATE_DESIGN with a new designId and the document's `home` removed. For " +
-              "`cancel`, call nothing."
+              "`cancel`, call nothing.",
           ),
-      )
+      ),
     )
   }
 
@@ -977,7 +977,7 @@ class ServeUiBuilderMcp(
           "description" to JsonPrimitive(question),
           "enum" to JsonArray(ids.map(::JsonPrimitive)),
           "enumNames" to JsonArray(labels.map(::JsonPrimitive)),
-        )
+        ),
       )
     if (offersNewDesign && "create-new" in ids) {
       properties[DECISION_NEW_DESIGN_ID_FIELD] =
@@ -988,7 +988,7 @@ class ServeUiBuilderMcp(
             "description" to JsonPrimitive("Only for create-new: the id the new design gets."),
             "minLength" to JsonPrimitive(1),
             "maxLength" to JsonPrimitive(MAX_ELICITED_DESIGN_ID),
-          )
+          ),
         )
     }
     val schema =
@@ -997,7 +997,7 @@ class ServeUiBuilderMcp(
           "type" to JsonPrimitive("object"),
           "properties" to JsonObject(properties),
           "required" to JsonArray(listOf(JsonPrimitive(DECISION_CHOICE_FIELD))),
-        )
+        ),
       )
     val result =
       interaction.elicitForm(question, schema, DECISION_ELICITATION_TIMEOUT_MILLIS) ?: return null
@@ -1031,7 +1031,7 @@ class ServeUiBuilderMcp(
             "chosen" to JsonPrimitive(choice),
             "written" to JsonPrimitive(false),
             "elicitation" to JsonPrimitive(next),
-          )
+          ),
       )
       .toString()
   }
@@ -1057,7 +1057,7 @@ class ServeUiBuilderMcp(
           args["title"]?.let { put("title", it) }
           args["visibility"]?.let { put("visibility", it) }
           args[INCLUDE_CATALOG_ARGUMENT]?.let { put(INCLUDE_CATALOG_ARGUMENT, it) }
-        }
+        },
       )
     val plan =
       createDesign(createArgs, actor, ServeCatalogMcp.ClientInteraction.Unsupported)
@@ -1069,7 +1069,7 @@ class ServeUiBuilderMcp(
           UiBuilderDefaultVisibility.parseRequested(createArgs.text("visibility"))
         } catch (e: IllegalArgumentException) {
           throw McpRequestException(e.message.orEmpty())
-        }
+        },
       ) {
         execute(plan.request, actor)
       },
@@ -1092,7 +1092,7 @@ class ServeUiBuilderMcp(
       execute(GetDesignAccessRequestV1(designId), actor) as? UiBuilderServiceResponse.DesignAccess
         ?: throw McpRequestException(
           "no design `$designId` whose sharing this actor may manage; only its owner can, and " +
-            "$DESIGN_ACCESS says who that is"
+            "$DESIGN_ACCESS says who that is",
         )
     val mutation =
       if (args[REVOKE_ARGUMENT]?.jsonPrimitive?.booleanOrNull == true) {
@@ -1130,7 +1130,7 @@ class ServeUiBuilderMcp(
             reasons =
               listOf(
                 "this host has no native render lane; configure a UI-builder native catalog " +
-                  "and compiler to render this design with Compose"
+                  "and compiler to render this design with Compose",
               ),
           ),
         )
@@ -1203,7 +1203,7 @@ class ServeUiBuilderMcp(
     ) {
       throw McpRequestException(
         "`$RENDERER_ARGUMENT` must be `${ServeUiBuilderView.RENDERER_EXPORT}` or " +
-          "`${ServeUiBuilderView.RENDERER_NATIVE}`"
+          "`${ServeUiBuilderView.RENDERER_NATIVE}`",
       )
     }
     val snapshot =
@@ -1329,7 +1329,7 @@ class ServeUiBuilderMcp(
     val encoded =
       args.text(REFERENCE_BYTES_ARGUMENT)
         ?: throw McpRequestException(
-          "pass the picture in `$REFERENCE_BYTES_ARGUMENT`, or `clear: true` to remove it"
+          "pass the picture in `$REFERENCE_BYTES_ARGUMENT`, or `clear: true` to remove it",
         )
     val bytes =
       runCatching { java.util.Base64.getDecoder().decode(encoded.trim()) }.getOrNull()
@@ -1396,7 +1396,7 @@ class ServeUiBuilderMcp(
               add(
                 "this picture is measured under the `${fit.wireValue}` fit; the stored overlay " +
                   "does not record a fit yet, so the editor shows it contained until somebody " +
-                  "picks ${fit.label} in the panel"
+                  "picks ${fit.label} in the panel",
               )
             }
             if (attached.mediaType == "image/svg+xml") {
@@ -1418,7 +1418,7 @@ class ServeUiBuilderMcp(
     val reference =
       store.read(designId)?.takeIf { it.image != null }
         ?: throw McpRequestException(
-          "design `$designId` has no reference picture; attach one with $SET_REFERENCE"
+          "design `$designId` has no reference picture; attach one with $SET_REFERENCE",
         )
     val fit =
       args.text(FIT_ARGUMENT)?.let { wire ->
@@ -1432,7 +1432,7 @@ class ServeUiBuilderMcp(
     ) {
       throw McpRequestException(
         "`$RENDERER_ARGUMENT` must be `${ServeUiBuilderView.RENDERER_EXPORT}` or " +
-          "`${ServeUiBuilderView.RENDERER_NATIVE}`"
+          "`${ServeUiBuilderView.RENDERER_NATIVE}`",
       )
     }
     val frame =
@@ -1485,7 +1485,7 @@ class ServeUiBuilderMcp(
         "`$designId` has no PNG to view: " +
           (errors
             .joinToString("; ") { "${it.code}: ${it.message}" }
-            .ifEmpty { "the export produced no image" })
+            .ifEmpty { "the export produced no image" }),
       )
     }
     return ServeUiBuilderView.Frame(bytes, ServeUiBuilderView.RENDERER_EXPORT, bounds = null)
@@ -1500,7 +1500,7 @@ class ServeUiBuilderMcp(
       nativePreview
         ?: throw McpRequestException(
           "$NATIVE_RENDER_UNAVAILABLE: this host has no native render lane; view with " +
-            "`$RENDERER_ARGUMENT: \"${ServeUiBuilderView.RENDERER_EXPORT}\"` instead"
+            "`$RENDERER_ARGUMENT: \"${ServeUiBuilderView.RENDERER_EXPORT}\"` instead",
         )
     return when (val outcome = lane.render(document)) {
       is UiBuilderNativePreviewOutcome.Refused ->
@@ -1510,7 +1510,7 @@ class ServeUiBuilderMcp(
           outcome.response.image?.removePrefix("data:image/png;base64,")?.takeIf { it.isNotBlank() }
             ?: throw McpRequestException(
               "the native render of `$designId` produced no frame: " +
-                (outcome.failure ?: "no reason given")
+                (outcome.failure ?: "no reason given"),
             )
         val bytes =
           runCatching { java.util.Base64.getDecoder().decode(encoded) }.getOrNull()
@@ -1536,7 +1536,7 @@ class ServeUiBuilderMcp(
     if (unknown.isNotEmpty()) {
       throw McpRequestException(
         "`$INCLUDE_ARGUMENT` names ${unknown.sorted().joinToString(", ")}; this server draws " +
-          ServeUiBuilderView.INCLUDES.joinToString(", ")
+          ServeUiBuilderView.INCLUDES.joinToString(", "),
       )
     }
     return requested
@@ -1564,7 +1564,7 @@ class ServeUiBuilderMcp(
         ?.toInt()
         ?: throw McpRequestException(
           "`$VIEWPORT_ARGUMENT.$name` must be an integer from 1 to " +
-            "${ServeUiBuilderView.MAX_VIEWPORT_PX}"
+            "${ServeUiBuilderView.MAX_VIEWPORT_PX}",
         )
     return Pair(edge("width"), edge("height"))
   }
@@ -1583,7 +1583,7 @@ class ServeUiBuilderMcp(
     val afterSequence =
       args.number("afterSequence")
         ?: throw McpRequestException(
-          "`afterSequence` is required: it is the `lastSequence` you last saw"
+          "`afterSequence` is required: it is the `lastSequence` you last saw",
         )
     if (afterSequence < 0) throw McpRequestException("`afterSequence` must not be negative")
     val waitSeconds =
@@ -1600,7 +1600,7 @@ class ServeUiBuilderMcp(
             actor = actor,
             designId = designId,
             afterSequence = afterSequence,
-          )
+          ),
         ) { update ->
           // Presence isn't part of the document; waking an agent for a cursor move gives it nothing
           // to act on.
@@ -1795,7 +1795,7 @@ class ServeUiBuilderMcp(
       )
     if (links.isEmpty && keys.any { it !in LINKS_CALL_KEYS }) {
       throw McpRequestException(
-        "this call names no link this host knows; pass only `designId` to clear the record"
+        "this call names no link this host knows; pass only `designId` to clear the record",
       )
     }
     return links
@@ -1860,7 +1860,7 @@ class ServeUiBuilderMcp(
       } ?: return reply
     return JsonObject(
         parsed +
-          (LINKS_KEY to UI_BUILDER_JSON.encodeToJsonElement(StoredLinks.serializer(), stored))
+          (LINKS_KEY to UI_BUILDER_JSON.encodeToJsonElement(StoredLinks.serializer(), stored)),
       )
       .toString()
   }
@@ -1935,7 +1935,7 @@ class ServeUiBuilderMcp(
               UI_BUILDER_JSON.encodeToJsonElement(CommentNoticeV1.serializer(), notice),
             )
           }
-        }
+        },
       )
       .toString()
   }
@@ -2012,7 +2012,7 @@ class ServeUiBuilderMcp(
                 JsonObject(
                   args +
                     mapOf("designId" to JsonPrimitive(newDesignId)) +
-                    mapOf("document" to JsonObject(document - "home"))
+                    mapOf("document" to JsonObject(document - "home")),
                 ),
                 actor,
                 ServeCatalogMcp.ClientInteraction.Unsupported,
@@ -2058,7 +2058,7 @@ class ServeUiBuilderMcp(
           designId = args.requiredText("designId"),
           assetKey = args.requiredText("assetKey"),
           bytes = bytes,
-        )
+        ),
       )
     } catch (cancelled: CancellationException) {
       throw cancelled
@@ -2068,7 +2068,7 @@ class ServeUiBuilderMcp(
           ServiceErrorCodeV1.INTERNAL,
           "UI-builder asset store failed",
           retryable = true,
-        )
+        ),
       )
     }
   }
@@ -2082,7 +2082,7 @@ class ServeUiBuilderMcp(
         operations.map { UI_BUILDER_JSON.decodeFromJsonElement(DesignMutationV1.serializer(), it) }
       } catch (e: SerializationException) {
         throw McpRequestException(
-          "`operations` holds something that is not a mutation: ${e.message}"
+          "`operations` holds something that is not a mutation: ${e.message}",
         )
       }
     return ApplyOperationRequestV1(
@@ -2096,10 +2096,10 @@ class ServeUiBuilderMcp(
         baseRevision =
           args.number("baseRevision")
             ?: throw McpRequestException(
-              "`baseRevision` is required: it is how a concurrent edit is detected"
+              "`baseRevision` is required: it is how a concurrent edit is detected",
             ),
         operations = mutations,
-      )
+      ),
     )
   }
 
@@ -2116,13 +2116,13 @@ class ServeUiBuilderMcp(
     if ((explicit == null) == (designId == null)) {
       throw McpRequestException(
         "pass exactly one of `document` (a whole design to check) or `designId` (a stored " +
-          "design, optionally with `operations` to check against it)"
+          "design, optionally with `operations` to check against it)",
       )
     }
     if (explicit != null && rawOperations != null) {
       throw McpRequestException(
         "`operations` are checked against a stored design: pass `designId` with them, or check " +
-          "the whole edited `document` instead"
+          "the whole edited `document` instead",
       )
     }
     fun reply(
@@ -2154,7 +2154,7 @@ class ServeUiBuilderMcp(
           // SerializationException is an IllegalArgumentException, and so is a `require` in a
           // protocol constructor; both mean the same thing to the caller.
           return reply(
-            listOf(shape("invalidDocument", "`document` is not a DesignDocumentV1: ${e.message}"))
+            listOf(shape("invalidDocument", "`document` is not a DesignDocumentV1: ${e.message}")),
           )
         }
       return reply(lane.validate(actor, document, operations = null))
@@ -2179,7 +2179,7 @@ class ServeUiBuilderMcp(
                     "invalidMutation",
                     "`operations[$index]` is not a DesignMutationV1: ${e.message}",
                     operationIndex = index,
-                  )
+                  ),
                 ),
                 document.revision,
               )
@@ -2205,7 +2205,7 @@ class ServeUiBuilderMcp(
               "checked against the current revision ${document.revision}, not baseRevision " +
                 "$baseRevision; an apply quoting $baseRevision is also checked for conflicts " +
                 "with the edits in between",
-          )
+          ),
         )
       else emptyList()
     return reply(notes + lane.validate(actor, document, operations), document.revision)
@@ -2226,18 +2226,18 @@ class ServeUiBuilderMcp(
     if ((explicit == null) == (designId == null)) {
       throw McpRequestException(
         "pass exactly one of `document` (a whole design to check) or `designId` (a stored " +
-          "design, optionally with `revision`, or with `operations` to check unsaved)"
+          "design, optionally with `revision`, or with `operations` to check unsaved)",
       )
     }
     if (explicit != null && (rawOperations != null || revision != null)) {
       throw McpRequestException(
-        "`operations` and `revision` are about a stored design: pass `designId` with them"
+        "`operations` and `revision` are about a stored design: pass `designId` with them",
       )
     }
     if (rawOperations != null && revision != null) {
       throw McpRequestException(
         "`operations` are checked against the current revision, as $APPLY lands them; omit " +
-          "`revision`, or quote the revision you read as `baseRevision`"
+          "`revision`, or quote the revision you read as `baseRevision`",
       )
     }
     val findings = mutableListOf<UiBuilderCheckFindingV1>()
@@ -2563,7 +2563,7 @@ class ServeUiBuilderMcp(
     if (unknown.isNotEmpty() || asked.isEmpty()) {
       throw McpRequestException(
         "`$CHECKS_ARGUMENT` takes one or more of ${ALL_DESIGN_CHECKS.joinToString(", ")}" +
-          (if (unknown.isEmpty()) "" else "; not ${unknown.joinToString(", ")}")
+          (if (unknown.isEmpty()) "" else "; not ${unknown.joinToString(", ")}"),
       )
     }
     return ALL_DESIGN_CHECKS.filter { it in asked }
@@ -2606,7 +2606,7 @@ class ServeUiBuilderMcp(
             UiBuilderServiceCall(
               actor,
               UiBuilderServiceRequest.ExportDocument(document, ExportFormatV1.COMPOSE),
-            )
+            ),
           )
         }
       } catch (cancelled: CancellationException) {
@@ -2701,7 +2701,7 @@ class ServeUiBuilderMcp(
               document.environment.widthDp,
               document.environment.heightDp,
               null,
-            )
+            ),
           ),
           source,
         )
@@ -3201,7 +3201,7 @@ class ServeUiBuilderMcp(
               mapOf(
                 "revision" to (args["revision"] ?: JsonPrimitive(-1)),
                 "rulesVersion" to (args["rulesVersion"] ?: JsonPrimitive(rules.version)),
-              )
+              ),
           ),
         )
       } catch (e: IllegalArgumentException) {
@@ -3342,7 +3342,7 @@ class ServeUiBuilderMcp(
       args.stringList(THEMES_ARGUMENT).ifEmpty {
         listOf(
           if (document.environment.theme == ThemeV1.DARK) UiBuilderDesignMatrix.THEME_DARK
-          else UiBuilderDesignMatrix.THEME_LIGHT
+          else UiBuilderDesignMatrix.THEME_LIGHT,
         )
       }
     themes
@@ -3362,7 +3362,7 @@ class ServeUiBuilderMcp(
               ?.toDoubleOrNull()
               ?.takeIf { scale -> scale in MIN_FONT_SCALE..MAX_FONT_SCALE }
               ?: throw McpRequestException(
-                "`$FONT_SCALES_ARGUMENT` takes numbers from $MIN_FONT_SCALE to $MAX_FONT_SCALE"
+                "`$FONT_SCALES_ARGUMENT` takes numbers from $MIN_FONT_SCALE to $MAX_FONT_SCALE",
               )
           }
         else -> throw McpRequestException("`$FONT_SCALES_ARGUMENT` must be an array of numbers")
@@ -3374,7 +3374,7 @@ class ServeUiBuilderMcp(
       throw McpRequestException(
         "${combinations.size} cells (${devices.size} devices × ${themes.distinct().size} themes × " +
           "${fontScales.distinct().size} font scales) is more than " +
-          "${UiBuilderDesignMatrix.MAX_CELLS}; ask for fewer"
+          "${UiBuilderDesignMatrix.MAX_CELLS}; ask for fewer",
       )
     }
     val variants = combinations.map { (device, theme, scale) ->
@@ -3386,7 +3386,7 @@ class ServeUiBuilderMcp(
             heightDp = device.heightDp,
             theme = if (theme == UiBuilderDesignMatrix.THEME_DARK) ThemeV1.DARK else ThemeV1.LIGHT,
             fontScale = scale,
-          )
+          ),
       )
     }
     // A widget host cell is drawn by the native lane, in that host, for a caller who may compile
@@ -3413,7 +3413,7 @@ class ServeUiBuilderMcp(
         (validator?.exportPngs(actor, exported.map { variants[it] })
             ?: throw McpRequestException(
               "this host cannot render a design under another environment without saving it; " +
-                "use $VIEW for the design as it is"
+                "use $VIEW for the design as it is",
             ))
           .withIndex()
           .associate { (position, picture) -> exported[position] to picture }
@@ -3506,7 +3506,7 @@ class ServeUiBuilderMcp(
       val ids =
         UiBuilderDesignMatrix.FORM_FACTOR_DEFAULTS[chosen]
           ?: throw McpRequestException(
-            "`$FORM_FACTOR_ARGUMENT` is one of ${UiBuilderDesignMatrix.FORM_FACTORS.joinToString(", ")}"
+            "`$FORM_FACTOR_ARGUMENT` is one of ${UiBuilderDesignMatrix.FORM_FACTORS.joinToString(", ")}",
           )
       return ids.mapNotNull(UiBuilderDesignMatrix::preset)
     }
@@ -3521,7 +3521,7 @@ class ServeUiBuilderMcp(
             ?: throw McpRequestException(
               "`${element.content}` is not a device preset; presets are " +
                 UiBuilderDesignMatrix.PRESETS.joinToString(", ") { it.id } +
-                ", or pass {\"widthDp\":…,\"heightDp\":…}"
+                ", or pass {\"widthDp\":…,\"heightDp\":…}",
             )
         element is JsonObject -> {
           fun edge(name: String): Int =
@@ -3532,7 +3532,7 @@ class ServeUiBuilderMcp(
               ?.toInt()
               ?: throw McpRequestException(
                 "`$DEVICES_ARGUMENT[$index].$name` must be an integer from 1 to " +
-                  "${UiBuilderDesignMatrix.MAX_DEVICE_DP}"
+                  "${UiBuilderDesignMatrix.MAX_DEVICE_DP}",
               )
           val width = edge("widthDp")
           val height = edge("heightDp")
@@ -3571,7 +3571,7 @@ class ServeUiBuilderMcp(
         val revision =
           args.number("revision")
             ?: throw McpRequestException(
-              "`revision` is required: a verdict is about the revision that was looked at"
+              "`revision` is required: a verdict is about the revision that was looked at",
             )
         val result =
           store.decide(
@@ -3609,7 +3609,7 @@ class ServeUiBuilderMcp(
             FROM_ANYONE -> null
             else ->
               throw McpRequestException(
-                "`$FROM_ARGUMENT` is `$FROM_HUMAN` or `$FROM_ANYONE`, not `$from`"
+                "`$FROM_ARGUMENT` is `$FROM_HUMAN` or `$FROM_ANYONE`, not `$from`",
               )
           }
         val wait =
@@ -3639,7 +3639,7 @@ class ServeUiBuilderMcp(
               UI_BUILDER_JSON.decodeFromJsonElement(StoredPreviewMatch.serializer(), it)
             } catch (e: IllegalArgumentException) {
               throw McpRequestException(
-                "`$PREVIEW_MATCH_ARGUMENT` is not {status, evidence?, note?}: ${e.message}"
+                "`$PREVIEW_MATCH_ARGUMENT` is not {status, evidence?, note?}: ${e.message}",
               )
             }
           }
@@ -3789,7 +3789,7 @@ class ServeUiBuilderMcp(
           ServeUiBuilderReviewStore.VERDICT_APPROVE -> ", approved by ${latest.decidedBy}"
           ServeUiBuilderReviewStore.VERDICT_REJECT -> ", rejected by ${latest.decidedBy}"
           else -> ", no decision on this revision"
-        }
+        },
       )
       if (pr == null) append("; no implementation PR recorded")
       else {
@@ -3801,7 +3801,7 @@ class ServeUiBuilderMcp(
             "match" -> "; previews match the design"
             "mismatch" -> "; previews do NOT match the design"
             else -> "; preview match unknown"
-          }
+          },
         )
       }
       export?.let {
@@ -3883,7 +3883,7 @@ class ServeUiBuilderMcp(
               ServiceErrorCodeV1.INTERNAL,
               "UI-builder service failed",
               retryable = true,
-            )
+            ),
           )
         }
       is ProtocolRequestMapping.Rejected -> UiBuilderServiceResponse.Error(mapping.error)
@@ -3961,7 +3961,7 @@ class ServeUiBuilderMcp(
     return ExportFormatV1.entries.firstOrNull { it.name.equals(requested, ignoreCase = true) }
       ?: throw McpRequestException(
         "unknown export format '$requested'; this server knows " +
-          ExportFormatV1.entries.joinToString(", ") { it.name.lowercase() }
+          ExportFormatV1.entries.joinToString(", ") { it.name.lowercase() },
       )
   }
 
@@ -3975,7 +3975,7 @@ class ServeUiBuilderMcp(
       // too — a grant naming the owner role is refused there rather than quietly downgraded.
       "owner" ->
         throw McpRequestException(
-          "a design has one owner and sharing does not change it; share as 'editor' or 'viewer'"
+          "a design has one owner and sharing does not change it; share as 'editor' or 'viewer'",
         )
       else -> throw McpRequestException("unknown role '$requested'; use 'editor' or 'viewer'")
     }
@@ -4083,7 +4083,7 @@ class ServeUiBuilderMcp(
             render(
               document.copy(
                 environment =
-                  document.environment.copy(widthDp = frame.widthDp, heightDp = frame.heightDp)
+                  document.environment.copy(widthDp = frame.widthDp, heightDp = frame.heightDp),
               ),
               shape,
             )
@@ -5296,7 +5296,7 @@ private fun JsonElement.withoutCatalog(): JsonElement =
       JsonObject(
         entries
           .filterNot { (key, _) -> isSnapshot && key == "catalog" }
-          .associate { (key, value) -> key to value.withoutCatalog() }
+          .associate { (key, value) -> key to value.withoutCatalog() },
       )
     }
     is JsonArray -> JsonArray(map { it.withoutCatalog() })

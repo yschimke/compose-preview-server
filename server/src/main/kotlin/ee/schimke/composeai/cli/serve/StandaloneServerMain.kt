@@ -51,11 +51,11 @@ private fun run(command: String, args: List<String>) {
     System.err.println(
       "ui: ${LocalUiBuilder.NO_PROJECT} cannot be combined with " +
         "${conflicting.joinToString(", ")} — ${if (conflicting.size == 1) "that option needs"
-        else "those options need"} a Gradle project."
+        else "those options need"} a Gradle project.",
     )
     System.err.println(
       "  Drop ${LocalUiBuilder.NO_PROJECT} to build the project, or drop " +
-        "${conflicting.joinToString(", ")} to open the packaged design systems."
+        "${conflicting.joinToString(", ")} to open the packaged design systems.",
     )
     exitProcess(1)
   }
@@ -82,7 +82,7 @@ private fun run(command: String, args: List<String>) {
         ProcessBuildHost.spawn(choice.binary, workingDirectory = null, module = requestedModule)
           ?.also {
             System.err.println(
-              "compose-preview build host: ${choice.binary} (from ${choice.source})"
+              "compose-preview build host: ${choice.binary} (from ${choice.source})",
             )
           }
       }
@@ -94,12 +94,12 @@ private fun run(command: String, args: List<String>) {
     // select.
     if (command == ServerCommands.UI && buildHost == null && !projectlessUi) {
       System.err.println(
-        "ui: no `compose-preview` build host found, so this project cannot be discovered or built."
+        "ui: no `compose-preview` build host found, so this project cannot be discovered or built.",
       )
       System.err.println(
         "  Install the compose-preview CLI, or pass --build-host <path> / set " +
           "${BuildHostDiscovery.ENV}. `ui --no-project` opens the builder against the packaged " +
-          "design systems instead, and `serve` hosts published catalogs and bundles without one."
+          "design systems instead, and `serve` hosts published catalogs and bundles without one.",
       )
       exitProcess(1)
     }
@@ -139,7 +139,7 @@ private fun commandLane(
   if (builderDir == null && !args.hasFlag("--ui-builder-dir")) {
     System.err.println(
       "ui: no packaged UI-builder distribution found beside this binary; " +
-        "pass --ui-builder-dir <dir>."
+        "pass --ui-builder-dir <dir>.",
     )
     exitProcess(1)
   }

@@ -192,7 +192,7 @@ class ServeViewerDisclosuresTest {
     )
     assertTrue(
       untagged.contains(
-        "<span class=\"cp-toggle-value\" id=\"cp-theme-toggle-value\">Light</span>"
+        "<span class=\"cp-toggle-value\" id=\"cp-theme-toggle-value\">Light</span>",
       ),
       "an untagged preview opens on Day; the toggle must not say Night: $untagged",
     )

@@ -28,7 +28,7 @@ val generateNativeCatalogVersion =
 
       internal const val NATIVE_CATALOG_VERSION = "$nativeVersion"
       """
-          .trimIndent() + "\n"
+          .trimIndent() + "\n",
       )
     }
   }

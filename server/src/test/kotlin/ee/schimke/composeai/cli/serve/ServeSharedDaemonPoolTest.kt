@@ -237,7 +237,7 @@ class ServeSharedDaemonPoolTest {
       assertTrue(
         executor
           .submit<RenderOutcome> { pool.render("p", PreviewOverrides()) }
-          .get(10, TimeUnit.SECONDS) is RenderOutcome.Ok
+          .get(10, TimeUnit.SECONDS) is RenderOutcome.Ok,
       )
 
       assertEquals(40_000L, pool.takeColdStartMillis(), "the replica's first render was a cold one")
@@ -299,7 +299,7 @@ class ServeSharedDaemonPoolTest {
       assertTrue(
         executor
           .submit<RenderOutcome> { pool.render("p", PreviewOverrides()) }
-          .get(10, TimeUnit.SECONDS) is RenderOutcome.Ok
+          .get(10, TimeUnit.SECONDS) is RenderOutcome.Ok,
       )
       assertEquals(
         40_000L,
@@ -390,7 +390,7 @@ class ServeSharedDaemonPoolTest {
       assertTrue(
         executor
           .submit<RenderOutcome> { pool.render("p", PreviewOverrides()) }
-          .get(10, TimeUnit.SECONDS) is RenderOutcome.Ok
+          .get(10, TimeUnit.SECONDS) is RenderOutcome.Ok,
       )
       release.countDown()
       assertTrue(held.get(5, TimeUnit.SECONDS) is RenderOutcome.Ok)
@@ -447,7 +447,7 @@ class ServeSharedDaemonPoolTest {
       assertTrue(
         executor
           .submit<RenderOutcome> { pool.render("p", PreviewOverrides(), background = true) }
-          .get(10, TimeUnit.SECONDS) is RenderOutcome.Ok
+          .get(10, TimeUnit.SECONDS) is RenderOutcome.Ok,
       )
 
       // With the general lane full, the slice is all that stands between a supplement-only preview

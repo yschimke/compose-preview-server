@@ -20,7 +20,7 @@ class ServeUiBuilderDestructiveGrantTest {
           AgentGrantCapability.UI_BUILDER_READ,
           AgentGrantCapability.UI_BUILDER_WRITE,
           AgentGrantCapability.UI_BUILDER_DESTRUCTIVE,
-        )
+        ),
     )
 
   private fun grant(capabilities: Set<AgentGrantCapability>): ServeAgentGrantStore.Grant {
@@ -32,7 +32,7 @@ class ServeUiBuilderDestructiveGrantTest {
           requestedScope = AgentGrantScope.PREVIEW,
           requestedTtlSeconds = 3600,
           requestedCapabilities = capabilities,
-        )
+        ),
       )
     return checkNotNull(
       grants.approve(
@@ -42,7 +42,7 @@ class ServeUiBuilderDestructiveGrantTest {
         ttlSeconds = 3600,
         capabilities = capabilities,
         approvedByActorId = OWNER,
-      )
+      ),
     )
   }
 
@@ -66,8 +66,8 @@ class ServeUiBuilderDestructiveGrantTest {
             AgentGrantCapability.UI_BUILDER_READ,
             AgentGrantCapability.UI_BUILDER_WRITE,
             AgentGrantCapability.UI_BUILDER_DESTRUCTIVE,
-          )
-        )
+          ),
+        ),
       )
     assertEquals(OWNER, actor.onBehalfOfActorId)
     assertTrue(actor.mayDeleteForPrincipal)
@@ -77,7 +77,7 @@ class ServeUiBuilderDestructiveGrantTest {
   fun `write alone never implies destructive`() {
     val actor =
       actorFor(
-        grant(setOf(AgentGrantCapability.UI_BUILDER_READ, AgentGrantCapability.UI_BUILDER_WRITE))
+        grant(setOf(AgentGrantCapability.UI_BUILDER_READ, AgentGrantCapability.UI_BUILDER_WRITE)),
       )
     assertEquals(OWNER, actor.onBehalfOfActorId)
     assertFalse(actor.mayDeleteForPrincipal)

@@ -38,7 +38,7 @@ fun main(args: Array<String>) {
   val renderer = ServeUiBuilderRenderPort.open(root.resolve("renderer"))
   val source =
     ComponentRecordSource(
-      mapOf("m3-catalog" to File("docs/design/fixtures/ui-builder/m3-catalog-components-v1.json"))
+      mapOf("m3-catalog" to File("docs/design/fixtures/ui-builder/m3-catalog-components-v1.json")),
     )
   val exporter =
     ProductionUiBuilderExportExecutor(
@@ -80,7 +80,7 @@ fun main(args: Array<String>) {
               id = "text",
               componentId = "m3/text",
               properties = mapOf("text" to StringValueV1("Local export load fixture")),
-            )
+            ),
         ),
     )
   runBlocking {
@@ -95,8 +95,8 @@ fun main(args: Array<String>) {
     .writeBytes(
       java.util.Base64.getDecoder()
         .decode(
-          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-        )
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        ),
     )
   registry.register(
     "load-fixture",
@@ -132,7 +132,7 @@ fun main(args: Array<String>) {
         Thread.getAllStackTraces().keys.count { it.name.startsWith("ui-builder-export-") }
       val children = ProcessHandle.current().descendants().use { it.count() }
       telemetry.appendText(
-        "{\"atMillis\":${System.currentTimeMillis()},\"heapUsed\":${heap.used},\"activeExports\":${stats.activeExports},\"peakExports\":${stats.peakExports},\"exportWorkers\":$workers,\"childProcesses\":$children}\n"
+        "{\"atMillis\":${System.currentTimeMillis()},\"heapUsed\":${heap.used},\"activeExports\":${stats.activeExports},\"peakExports\":${stats.peakExports},\"exportWorkers\":$workers,\"childProcesses\":$children}\n",
       )
     },
     0,
@@ -147,7 +147,7 @@ fun main(args: Array<String>) {
         server.stop()
         registry.close()
         renderer.close()
-      }
+      },
     )
   println("LOCAL_EXPORT_READY port=${server.port}")
   Thread.currentThread().join()

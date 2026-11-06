@@ -128,7 +128,7 @@ class ServeUiBuilderRequestAccessTest {
         uiBuilderService = service,
         uiBuilderAuthorization =
           ServeUiBuilderAuthorization.fromMachineAuthorization(
-            ServeMachineAuthorization("operator-token", auth, grants, isPublic = true)
+            ServeMachineAuthorization("operator-token", auth, grants, isPublic = true),
           ),
       )
       .also { it.start() }
@@ -154,7 +154,7 @@ class ServeUiBuilderRequestAccessTest {
         Request.Builder()
           .url("$base/auth/github/callback?code=ok&state=$state")
           .header("Cookie", stateCookie.substringBefore(";"))
-          .build()
+          .build(),
       )
       .execute()
       .use { response ->
@@ -184,7 +184,7 @@ class ServeUiBuilderRequestAccessTest {
           .url("$base${ServeHttpServer.UI_BUILDER_REQUEST_ACCESS_PATH}")
           .header("Cookie", cookie)
           .post(form.build())
-          .build()
+          .build(),
       )
       .execute()
       .use { it.code to it.body.string() }
@@ -203,7 +203,7 @@ class ServeUiBuilderRequestAccessTest {
         Request.Builder()
           .url("$base${ServeAgentGrants.approvalPath(requestId)}")
           .header("Cookie", cookie)
-          .build()
+          .build(),
       )
       .execute()
       .use {
@@ -223,7 +223,7 @@ class ServeUiBuilderRequestAccessTest {
           .url("$base$UI_BUILDER_REQUEST_PATH")
           .header("Cookie", cookie)
           .post(body.toRequestBody())
-          .build()
+          .build(),
       )
       .execute()
       .use { it.code }
@@ -280,7 +280,7 @@ class ServeUiBuilderRequestAccessTest {
           requestedScope = AgentGrantScope.PREVIEW,
           requestedTtlSeconds = 3600,
           requesterActorId = "github:someone-else",
-        )
+        ),
       )
     val landed = landing(signIn(), other.id)
     assertFalse(landed.contains(other.userCode))
@@ -292,7 +292,7 @@ class ServeUiBuilderRequestAccessTest {
         Request.Builder()
           .url("$base${ServeHttpServer.UI_BUILDER_REQUEST_ACCESS_PATH}?request=$requestId")
           .header("Cookie", cookie)
-          .build()
+          .build(),
       )
       .execute()
       .use {
@@ -326,7 +326,7 @@ class ServeUiBuilderRequestAccessTest {
         ttlSeconds = 3600,
         capabilities = pending.requestedCapabilities,
         approvedByActorId = "github:yschimke",
-      )
+      ),
     )
 
     assertEquals(200, post(cookie, "github:stranger", export))
@@ -395,7 +395,7 @@ class ServeUiBuilderRequestAccessTest {
           ttlSeconds = 3600,
           capabilities = pending.requestedCapabilities,
           approvedByActorId = "github:yschimke",
-        )
+        ),
       )
     grants.revoke(grant.id, by = "@yschimke")
 
@@ -415,7 +415,7 @@ class ServeUiBuilderRequestAccessTest {
           requestedTtlSeconds = 3600,
           requestedCapabilities = setOf(AgentGrantCapability.UI_BUILDER_EXPORT),
           requesterActorId = "github:stranger",
-        )
+        ),
       )
     val grant =
       checkNotNull(
@@ -426,7 +426,7 @@ class ServeUiBuilderRequestAccessTest {
           ttlSeconds = 600,
           capabilities = setOf(AgentGrantCapability.UI_BUILDER_EXPORT),
           approvedByActorId = "github:yschimke",
-        )
+        ),
       )
 
     val code =
@@ -445,9 +445,9 @@ class ServeUiBuilderRequestAccessTest {
                     request = ExportDesignRequestV1("design", format = ExportFormatV1.SVG),
                   ),
                 )
-                .toRequestBody()
+                .toRequestBody(),
             )
-            .build()
+            .build(),
         )
         .execute()
         .use { it.code }
@@ -551,9 +551,9 @@ class ServeUiBuilderRequestAccessTest {
                 .add("capability", AgentGrantCapability.UI_BUILDER_WRITE.wire)
                 .add("ttl", "3600")
                 .add("designScope", "all")
-                .build()
+                .build(),
             )
-            .build()
+            .build(),
         )
         .execute()
         .use { it.code }

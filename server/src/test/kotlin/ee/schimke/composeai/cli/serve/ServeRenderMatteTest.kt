@@ -16,12 +16,12 @@ class ServeRenderMatteTest {
 
   private val darkStage =
     ServeRenderMatte.Stage(
-      backdrop = PreviewBackdrop.Backdrop("#FF1C1B1F", PreviewBackdrop.Source.CATALOG_SURFACE)
+      backdrop = PreviewBackdrop.Backdrop("#FF1C1B1F", PreviewBackdrop.Source.CATALOG_SURFACE),
     )
 
   private val lightStage =
     ServeRenderMatte.Stage(
-      backdrop = PreviewBackdrop.Backdrop("#FFFFFFFF", PreviewBackdrop.Source.CATALOG_SURFACE)
+      backdrop = PreviewBackdrop.Backdrop("#FFFFFFFF", PreviewBackdrop.Source.CATALOG_SURFACE),
     )
 
   @Test
@@ -56,7 +56,7 @@ class ServeRenderMatteTest {
   fun `bytes that are not an image are handed back untouched`() {
     val junk = byteArrayOf(1, 2, 3, 4)
     assertTrue(
-      junk.contentEquals(ServeRenderMatte.apply(junk, ServeRenderMatte.Mode.AUTO, darkStage))
+      junk.contentEquals(ServeRenderMatte.apply(junk, ServeRenderMatte.Mode.AUTO, darkStage)),
     )
   }
 
@@ -78,7 +78,7 @@ class ServeRenderMatteTest {
     // plate under it would only poke corners out past what the render drew.
     val png = png(solid(0xFF101014.toInt(), inset = 10))
     assertTrue(
-      png.contentEquals(ServeRenderMatte.apply(png, ServeRenderMatte.Mode.AUTO, darkStage))
+      png.contentEquals(ServeRenderMatte.apply(png, ServeRenderMatte.Mode.AUTO, darkStage)),
     )
   }
 
@@ -101,7 +101,7 @@ class ServeRenderMatteTest {
   fun `auto does nothing on a light stage`() {
     val png = png(sticker())
     assertTrue(
-      png.contentEquals(ServeRenderMatte.apply(png, ServeRenderMatte.Mode.AUTO, lightStage))
+      png.contentEquals(ServeRenderMatte.apply(png, ServeRenderMatte.Mode.AUTO, lightStage)),
     )
   }
 
@@ -109,7 +109,7 @@ class ServeRenderMatteTest {
   fun `auto does nothing to an empty render`() {
     val png = png(blank())
     assertTrue(
-      png.contentEquals(ServeRenderMatte.apply(png, ServeRenderMatte.Mode.AUTO, darkStage))
+      png.contentEquals(ServeRenderMatte.apply(png, ServeRenderMatte.Mode.AUTO, darkStage)),
     )
   }
 
@@ -166,7 +166,7 @@ class ServeRenderMatteTest {
     for (y in 10 until 30) for (x in 10 until 4000) image.setRGB(x, y, WHITE)
     val png = png(image)
     assertTrue(
-      png.contentEquals(ServeRenderMatte.apply(png, ServeRenderMatte.Mode.AUTO, darkStage))
+      png.contentEquals(ServeRenderMatte.apply(png, ServeRenderMatte.Mode.AUTO, darkStage)),
     )
   }
 

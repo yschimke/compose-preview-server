@@ -34,7 +34,7 @@ class ServeMcpOAuthPersistenceTest {
             "challenge",
             "state",
             "https://server.example/mcp",
-          )
+          ),
         )
       val refresh = assertNotNull(first.issueRefresh("grant", client.clientId))
       val second = ServeMcpOAuth.Store(file) { 2000L }
@@ -137,11 +137,11 @@ class ServeMcpOAuthPersistenceTest {
       assertEquals(homeRoot.resolve("mcp-oauth/clients.json"), selected)
       val client =
         assertNotNull(
-          ServeMcpOAuth.Store(selected).register("host", listOf("https://host.example/cb"))
+          ServeMcpOAuth.Store(selected).register("host", listOf("https://host.example/cb")),
         )
       assertNotNull(
         ServeMcpOAuth.Store(ServeMcpOAuthClients.defaultFile(catalogsFile, homeRoot))
-          .client(client.clientId)
+          .client(client.clientId),
       )
       assertFalse(Files.exists(catalogRoot.resolve("mcp-oauth")))
     } finally {
@@ -164,7 +164,7 @@ class ServeMcpOAuthPersistenceTest {
       val selected = ServeMcpOAuthClients.defaultFile(catalogsFile, file.parent.resolve("home"))
       assertEquals(root.resolve("mcp-oauth/clients.json"), selected)
       assertNotNull(
-        ServeMcpOAuth.Store(selected).register("host", listOf("https://host.example/cb"))
+        ServeMcpOAuth.Store(selected).register("host", listOf("https://host.example/cb")),
       )
       assertTrue(Files.exists(selected))
     }

@@ -194,11 +194,11 @@ class ServeCatalogChangeFeedTest {
               "Button",
               "1".repeat(40),
               "2".repeat(40),
-            )
+            ),
           ),
         references =
           listOf(
-            CatalogReferenceChange("spec", "Button spec", "button__default", true, 80.0, 92.5)
+            CatalogReferenceChange("spec", "Button spec", "button__default", true, 80.0, 92.5),
           ),
       )
     val xml =
@@ -427,7 +427,7 @@ class ServeCatalogChangeFeedTest {
                 )
               },
               emptyList(),
-            )
+            ),
           ),
         ),
       )
@@ -545,8 +545,8 @@ class ServeCatalogChangeFeedTest {
     )
     assertTrue(
       xml.contains(
-        "/compare/checkboxbutton__ideal__disabled?reference=checkboxbutton-disabled-spec"
-      )
+        "/compare/checkboxbutton__ideal__disabled?reference=checkboxbutton-disabled-spec",
+      ),
     )
     assertTrue(xml.contains("(n/a → 70.00%)"), "each linked variant keeps its own score")
   }
@@ -721,7 +721,7 @@ class ServeCatalogChangeFeedTest {
     assertEquals(null, source.read(config(), head))
     assertTrue(commands.any { "--filter=blob:none" in it })
     assertFalse(
-      commands.any { it.first() == "log" || it.first() == "show" || it.first() == "ls-tree" }
+      commands.any { it.first() == "log" || it.first() == "show" || it.first() == "ls-tree" },
     )
   }
 
@@ -820,7 +820,7 @@ class ServeCatalogChangeFeedTest {
     val revision =
       GitCatalogFeedSource.parseRevision(
         "${"c".repeat(40)}\u001f2026-08-15T12:30:00Z\u001f" +
-          "chore(design-artifacts): regenerate demo catalog (2026-08-15, deadbee)"
+          "chore(design-artifacts): regenerate demo catalog (2026-08-15, deadbee)",
       )
     assertNotNull(revision)
     assertEquals("deadbee", revision.sourceSha)
@@ -872,7 +872,7 @@ class ServeCatalogChangeFeedRoutingTest {
             false,
             "example/catalog",
             "design-artifacts/demo",
-          )
+          ),
         )
       },
       cacheRoot = cache,
@@ -891,7 +891,7 @@ class ServeCatalogChangeFeedRoutingTest {
                 new,
                 listOf(CatalogPreviewChange(CatalogPreviewChangeKind.ADDED, "new", "New")),
                 emptyList(),
-              )
+              ),
             ),
           )
         },

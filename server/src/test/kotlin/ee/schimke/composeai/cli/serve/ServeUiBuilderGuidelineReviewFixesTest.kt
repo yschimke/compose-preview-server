@@ -59,7 +59,7 @@ class ServeUiBuilderGuidelineReviewFixesTest {
     assertIs<ServeUiBuilderGuidelineStore.GuidelineWriteResult.Refused>(future)
     assertTrue("does not exist yet" in future.reason, future.reason)
     assertIs<ServeUiBuilderGuidelineStore.GuidelineWriteResult.Stored>(
-      store.record("design", "github:a", record(revision = 4), currentRevision = 4)
+      store.record("design", "github:a", record(revision = 4), currentRevision = 4),
     )
   }
 
@@ -71,7 +71,7 @@ class ServeUiBuilderGuidelineReviewFixesTest {
     assertTrue(reply.stale)
     assertTrue("guidelines have changed" in reply.summary, reply.summary)
     assertFalse(
-      UiBuilderGuidelinesV1.of("design", 4, emptySet(), record(4), rulesVersion = current).stale
+      UiBuilderGuidelinesV1.of("design", 4, emptySet(), record(4), rulesVersion = current).stale,
     )
   }
 

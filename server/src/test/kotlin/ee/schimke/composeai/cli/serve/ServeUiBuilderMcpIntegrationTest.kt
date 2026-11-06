@@ -180,8 +180,8 @@ class ServeUiBuilderMcpIntegrationTest {
             server,
             ServeUiBuilderMcp.GET_DESIGN,
             """{"designId":"agent-screen","includeCatalog":true}""",
-          )
-        )
+          ),
+        ),
       )
     assertEquals("agent-screen", snapshot.snapshot.designId)
     assertEquals(
@@ -204,7 +204,7 @@ class ServeUiBuilderMcpIntegrationTest {
                 properties = mapOf("text" to StringValueV1("Two sessions today")),
               ),
             location = NodeLocationV1(parent = ParentSlotV1("column", "children")),
-          )
+          ),
         ),
       )
     val applied =
@@ -241,7 +241,7 @@ class ServeUiBuilderMcpIntegrationTest {
     assertTrue(
       artifact.content.contains(
         "// Canonical home: server $PUBLIC_ORIGIN design agent-screen.\n" +
-          "// Edit the original there at revision ${revision + 1} (quote it as baseRevision)."
+          "// Edit the original there at revision ${revision + 1} (quote it as baseRevision).",
       ),
       artifact.content,
     )
@@ -262,7 +262,7 @@ class ServeUiBuilderMcpIntegrationTest {
               // Equivalent to the configured origin once normalized.
               "HTTPS://Designs.Example:443/",
               "agent-screen",
-            )
+            ),
         )
     val reimport =
       """{"designId":"agent-screen","document":${json.encodeToString(DesignDocumentV1.serializer(), canonical)}}"""
@@ -302,8 +302,8 @@ class ServeUiBuilderMcpIntegrationTest {
             server,
             ServeUiBuilderMcp.GET_DESIGN,
             """{"designId":"agent-screen","includeCatalog":true}""",
-          )
-        )
+          ),
+        ),
       )
     assertEquals(0, snapshot.snapshot.state.document.revision)
 
@@ -315,8 +315,8 @@ class ServeUiBuilderMcpIntegrationTest {
           server,
           ServeUiBuilderMcp.CREATE_DESIGN,
           """{"designId":"agent-screen-2","includeCatalog":true,"document":${json.encodeToString(DesignDocumentV1.serializer(), copy)}}""",
-        )
-      )
+        ),
+      ),
     )
   }
 
@@ -343,7 +343,7 @@ class ServeUiBuilderMcpIntegrationTest {
           .jsonObject["text"]!!
           .jsonPrimitive
           .content
-          .contains("move it explicitly")
+          .contains("move it explicitly"),
       )
     }
   }
@@ -515,8 +515,8 @@ class ServeUiBuilderMcpIntegrationTest {
               server,
               ServeUiBuilderMcp.GET_DESIGN,
               """{"designId":"agent-screen","includeCatalog":true}""",
-            )
-          )
+            ),
+          ),
         )
         .snapshot
         .state
@@ -580,7 +580,7 @@ class ServeUiBuilderMcpIntegrationTest {
                   properties = mapOf("style" to StringValueV1("filled")),
                   slots = mapOf("content" to listOf("session")),
                 ),
-            )
+            ),
       )
     val created =
       envelope(
@@ -633,7 +633,7 @@ class ServeUiBuilderMcpIntegrationTest {
       json
         .decodeFromString<DesignDocumentV1>(
           File("../docs/design/evidence/ui-builder-live-document-preview/sample.document.json")
-            .readText()
+            .readText(),
         )
         .copy(
           id = "agent-screen",
@@ -658,7 +658,7 @@ class ServeUiBuilderMcpIntegrationTest {
     assertEquals(emptyList(), artifact.diagnostics, artifact.content)
     assertTrue(
       artifact.content.endsWith(
-        File("../docs/design/fixtures/ui-builder/clickable-state-layout.kt.txt").readText()
+        File("../docs/design/fixtures/ui-builder/clickable-state-layout.kt.txt").readText(),
       ),
       artifact.content,
     )
@@ -678,7 +678,7 @@ class ServeUiBuilderMcpIntegrationTest {
       json
         .decodeFromString<DesignDocumentV1>(
           File("../docs/design/evidence/ui-builder-live-document-preview/sample.document.json")
-            .readText()
+            .readText(),
         )
         .copy(revision = 19)
     val result =
@@ -687,7 +687,7 @@ class ServeUiBuilderMcpIntegrationTest {
           server,
           ServeUiBuilderMcp.EXPORT_DOCUMENT,
           """{"document":${json.encodeToString(DesignDocumentV1.serializer(), doc)},"format":"rc"}""",
-        )
+        ),
       )
     val artifact = assertIs<ExportResponseV1>(result).artifact
     assertTrue(
@@ -699,7 +699,7 @@ class ServeUiBuilderMcpIntegrationTest {
     assertTrue(
       assertIs<DesignsResponseV1>(response(envelope(server, ServeUiBuilderMcp.LIST_DESIGNS)))
         .designs
-        .isEmpty()
+        .isEmpty(),
     )
   }
 
@@ -713,7 +713,7 @@ class ServeUiBuilderMcpIntegrationTest {
     val doc =
       json.decodeFromString<DesignDocumentV1>(
         File("../docs/design/evidence/ui-builder-live-document-preview/sample.document.json")
-          .readText()
+          .readText(),
       )
     val created =
       envelope(
@@ -732,7 +732,7 @@ class ServeUiBuilderMcpIntegrationTest {
     assertEquals(emptyList(), artifact.diagnostics, artifact.content)
     assertTrue(
       artifact.content.endsWith(
-        File("../docs/design/fixtures/ui-builder/remote-root.kt.txt").readText()
+        File("../docs/design/fixtures/ui-builder/remote-root.kt.txt").readText(),
       ),
       artifact.content,
     )
@@ -750,8 +750,8 @@ class ServeUiBuilderMcpIntegrationTest {
               server,
               ServeUiBuilderMcp.EXPORT,
               """{"designId":"${doc.id}","revision":1,"format":"compose"}""",
-            )
-          )
+            ),
+          ),
         )
         .artifact
     assertEquals(emptyList(), next.diagnostics, next.content)
@@ -770,7 +770,7 @@ class ServeUiBuilderMcpIntegrationTest {
       original.copy(
         nodes =
           original.nodes +
-            ("column" to original.nodes.getValue("column").copy(componentId = "layout/box"))
+            ("column" to original.nodes.getValue("column").copy(componentId = "layout/box")),
       )
     val created =
       envelope(
@@ -806,20 +806,20 @@ class ServeUiBuilderMcpIntegrationTest {
               server,
               ServeUiBuilderMcp.GET_DESIGN,
               """{"designId":"agent-screen","includeCatalog":true}""",
-            )
-          )
+            ),
+          ),
         )
         .snapshot
         .state
         .document
     val selection =
       assertIs<ee.schimke.composeai.uibuilder.protocol.ObjectValueV1>(
-        snapshot.nodes.getValue("column").properties.getValue("showByState")
+        snapshot.nodes.getValue("column").properties.getValue("showByState"),
       )
     assertEquals(
       "page",
       assertIs<ee.schimke.composeai.uibuilder.protocol.StateValueV1>(
-          selection.fields.getValue("selector")
+          selection.fields.getValue("selector"),
         )
         .variable,
     )
@@ -850,8 +850,8 @@ class ServeUiBuilderMcpIntegrationTest {
     val before =
       assertIs<DesignAccessResponseV1>(
         response(
-          envelope(server, ServeUiBuilderMcp.DESIGN_ACCESS, """{"designId":"shared-screen"}""")
-        )
+          envelope(server, ServeUiBuilderMcp.DESIGN_ACCESS, """{"designId":"shared-screen"}"""),
+        ),
       )
     assertEquals("operator", before.access.ownerActorId)
     assertEquals(emptyList(), before.access.actorGrants)
@@ -865,8 +865,8 @@ class ServeUiBuilderMcpIntegrationTest {
             server,
             ServeUiBuilderMcp.SHARE_DESIGN,
             """{"designId":"shared-screen","actorId":"github:colleague","role":"editor"}""",
-          )
-        )
+          ),
+        ),
       )
     val grant = shared.access.actorGrants.single()
     assertEquals("github:colleague", grant.actorId)
@@ -884,8 +884,8 @@ class ServeUiBuilderMcpIntegrationTest {
             server,
             ServeUiBuilderMcp.SHARE_DESIGN,
             """{"designId":"shared-screen","actorId":"github:colleague","revoke":true}""",
-          )
-        )
+          ),
+        ),
       )
     assertEquals(emptyList(), revoked.access.actorGrants)
   }
@@ -1014,7 +1014,7 @@ class ServeUiBuilderMcpIntegrationTest {
 
     val hits =
       Json.parseToJsonElement(
-          envelope(server, ServeUiBuilderMcp.SEARCH_COMPONENTS, """{"query":"TEXT"}""")
+          envelope(server, ServeUiBuilderMcp.SEARCH_COMPONENTS, """{"query":"TEXT"}"""),
         )
         .jsonObject
     val components = hits.getValue("catalogs").jsonArray.single().jsonObject.getValue("components")
@@ -1024,7 +1024,7 @@ class ServeUiBuilderMcpIntegrationTest {
 
     val none =
       Json.parseToJsonElement(
-          envelope(server, ServeUiBuilderMcp.SEARCH_COMPONENTS, """{"query":"no-such-thing"}""")
+          envelope(server, ServeUiBuilderMcp.SEARCH_COMPONENTS, """{"query":"no-such-thing"}"""),
         )
         .jsonObject
     assertTrue(none.getValue("catalogs").jsonArray.isEmpty(), none.toString())
@@ -1106,7 +1106,7 @@ class ServeUiBuilderMcpIntegrationTest {
           server,
           ServeUiBuilderMcp.APPLY,
           """{"designId":"agent-screen","operationId":"$operationId","baseRevision":$baseRevision,"operations":${json.encodeToString(ListSerializer(DesignMutationV1.serializer()), listOf(mutation))}}""",
-        )
+        ),
       )
 
     // Try a property, then take it back — the shape of an edit an export diagnostic prompts.
@@ -1116,19 +1116,19 @@ class ServeUiBuilderMcpIntegrationTest {
             "try",
             0,
             SetPropertyMutationV1("column", "verticalArrangement", StringValueV1("center")),
-          )
+          ),
         )
-        .outcome
+        .outcome,
     )
     assertIs<AcceptedOutcomeV1>(
       assertIs<OperationOutcomeResponseV1>(
-          set("unset", 1, SetPropertyMutationV1("column", "verticalArrangement", NullValueV1))
+          set("unset", 1, SetPropertyMutationV1("column", "verticalArrangement", NullValueV1)),
         )
-        .outcome
+        .outcome,
     )
     val column =
       Json.parseToJsonElement(
-          envelope(server, ServeUiBuilderMcp.GET_DESIGN, """{"designId":"agent-screen"}""")
+          envelope(server, ServeUiBuilderMcp.GET_DESIGN, """{"designId":"agent-screen"}"""),
         )
         .jsonObject["response"]!!
         .jsonObject["snapshot"]!!
@@ -1147,9 +1147,9 @@ class ServeUiBuilderMcpIntegrationTest {
     val refused =
       assertIs<RejectedOutcomeV1>(
         assertIs<OperationOutcomeResponseV1>(
-            set("unset-text", 2, SetPropertyMutationV1("session", "text", NullValueV1))
+            set("unset-text", 2, SetPropertyMutationV1("session", "text", NullValueV1)),
           )
-          .outcome
+          .outcome,
       )
     assertEquals(RejectionCodeV1.INVALID_DOCUMENT, refused.code)
     assertEquals("required property text is missing", refused.message)
@@ -1172,8 +1172,8 @@ class ServeUiBuilderMcpIntegrationTest {
               server,
               ServeUiBuilderMcp.GET_DESIGN,
               """{"designId":"authoritative","includeCatalog":true}""",
-            )
-          )
+            ),
+          ),
         )
         .snapshot
 
@@ -1213,9 +1213,9 @@ class ServeUiBuilderMcpIntegrationTest {
     val replaced =
       assertIs<AcceptedOutcomeV1>(
         assertIs<OperationOutcomeResponseV1>(
-            response(envelope(server, ServeUiBuilderMcp.REPLACE_DESIGN_DOCUMENT, replaceArguments))
+            response(envelope(server, ServeUiBuilderMcp.REPLACE_DESIGN_DOCUMENT, replaceArguments)),
           )
-          .outcome
+          .outcome,
       )
     assertEquals(1, replaced.committedRevision)
     assertEquals("Saved from a temporary copy", snapshot().state.document.title)
@@ -1223,9 +1223,9 @@ class ServeUiBuilderMcpIntegrationTest {
     val replaceReplay =
       assertIs<AcceptedOutcomeV1>(
         assertIs<OperationOutcomeResponseV1>(
-            response(envelope(server, ServeUiBuilderMcp.REPLACE_DESIGN_DOCUMENT, replaceArguments))
+            response(envelope(server, ServeUiBuilderMcp.REPLACE_DESIGN_DOCUMENT, replaceArguments)),
           )
-          .outcome
+          .outcome,
       )
     assertEquals(replaced.copy(idempotentReplay = true), replaceReplay)
     assertEquals(1, snapshot().state.document.revision)
@@ -1237,18 +1237,18 @@ class ServeUiBuilderMcpIntegrationTest {
     val moved =
       assertIs<AcceptedOutcomeV1>(
         assertIs<OperationOutcomeResponseV1>(
-            response(envelope(server, ServeUiBuilderMcp.MOVE_DESIGN_HOME, moveArguments))
+            response(envelope(server, ServeUiBuilderMcp.MOVE_DESIGN_HOME, moveArguments)),
           )
-          .outcome
+          .outcome,
       )
     assertEquals(2, moved.committedRevision)
     assertEquals(targetHome, snapshot().state.document.home)
     val moveReplay =
       assertIs<AcceptedOutcomeV1>(
         assertIs<OperationOutcomeResponseV1>(
-            response(envelope(server, ServeUiBuilderMcp.MOVE_DESIGN_HOME, moveArguments))
+            response(envelope(server, ServeUiBuilderMcp.MOVE_DESIGN_HOME, moveArguments)),
           )
-          .outcome
+          .outcome,
       )
     assertEquals(moved.copy(idempotentReplay = true), moveReplay)
     assertEquals(2, snapshot().state.document.revision)
@@ -1261,10 +1261,10 @@ class ServeUiBuilderMcpIntegrationTest {
                 server,
                 ServeUiBuilderMcp.MOVE_DESIGN_HOME,
                 """{"designId":"authoritative","operationId":"stale-move","baseRevision":1,"sourceHome":${json.encodeToString(DesignHomeV1.serializer(), sourceHome)},"targetHome":${json.encodeToString(DesignHomeV1.serializer(), targetHome)}}""",
-              )
-            )
+              ),
+            ),
           )
-          .outcome
+          .outcome,
       )
     assertEquals(RejectionCodeV1.REVISION_MISMATCH, stale.code)
   }
@@ -1284,7 +1284,7 @@ class ServeUiBuilderMcpIntegrationTest {
             server,
             ServeUiBuilderMcp.RENAME_DESIGN,
             """{"designId":"probe","title":"Discord client"}""",
-          )
+          ),
         )
         .jsonObject
     assertEquals(
@@ -1298,13 +1298,13 @@ class ServeUiBuilderMcpIntegrationTest {
     assertEquals("0", entry["revision"]!!.jsonPrimitive.content)
     val listed =
       assertIs<DesignsResponseV1>(
-        response(envelope(server, ServeUiBuilderMcp.LIST_DESIGNS, """{"limit":10}"""))
+        response(envelope(server, ServeUiBuilderMcp.LIST_DESIGNS, """{"limit":10}""")),
       )
     assertEquals("Discord client", listed.designs.single { it.designId == "probe" }.title)
 
     val deleted =
       Json.parseToJsonElement(
-          envelope(server, ServeUiBuilderMcp.DELETE_DESIGN, """{"designId":"probe"}""")
+          envelope(server, ServeUiBuilderMcp.DELETE_DESIGN, """{"designId":"probe"}"""),
         )
         .jsonObject
     assertEquals(
@@ -1318,7 +1318,7 @@ class ServeUiBuilderMcpIntegrationTest {
     assertEquals(
       ServiceErrorCodeV1.NOT_FOUND,
       assertIs<ErrorResponseV1>(
-          response(envelope(server, ServeUiBuilderMcp.GET_DESIGN, """{"designId":"probe"}"""))
+          response(envelope(server, ServeUiBuilderMcp.GET_DESIGN, """{"designId":"probe"}""")),
         )
         .error
         .code,
@@ -1326,17 +1326,17 @@ class ServeUiBuilderMcpIntegrationTest {
     assertEquals(
       ServiceErrorCodeV1.NOT_FOUND,
       assertIs<ErrorResponseV1>(
-          response(envelope(server, ServeUiBuilderMcp.DELETE_DESIGN, """{"designId":"probe"}"""))
+          response(envelope(server, ServeUiBuilderMcp.DELETE_DESIGN, """{"designId":"probe"}""")),
         )
         .error
         .code,
     )
     assertTrue(
       assertIs<DesignsResponseV1>(
-          response(envelope(server, ServeUiBuilderMcp.LIST_DESIGNS, """{"limit":10}"""))
+          response(envelope(server, ServeUiBuilderMcp.LIST_DESIGNS, """{"limit":10}""")),
         )
         .designs
-        .none { it.designId == "probe" }
+        .none { it.designId == "probe" },
     )
 
     // But it is in the trash, and comes back whole, title and all.
@@ -1349,7 +1349,7 @@ class ServeUiBuilderMcpIntegrationTest {
     )
     val restored =
       Json.parseToJsonElement(
-          envelope(server, ServeUiBuilderMcp.RESTORE_DESIGN, """{"designId":"probe"}""")
+          envelope(server, ServeUiBuilderMcp.RESTORE_DESIGN, """{"designId":"probe"}"""),
         )
         .jsonObject
     assertEquals(
@@ -1362,7 +1362,7 @@ class ServeUiBuilderMcpIntegrationTest {
     )
     assertTrue(
       assertIs<DesignsResponseV1>(
-          response(envelope(server, ServeUiBuilderMcp.LIST_DESIGNS, """{"limit":10}"""))
+          response(envelope(server, ServeUiBuilderMcp.LIST_DESIGNS, """{"limit":10}""")),
         )
         .designs
         .any { it.designId == "probe" },
@@ -1421,7 +1421,7 @@ class ServeUiBuilderMcpIntegrationTest {
           server,
           ServeUiBuilderMcp.RENDER_NATIVE,
           """{"designId":"agent-screen"}""",
-        )
+        ),
       )
     assertEquals(ServeUiBuilderMcp.NATIVE_RENDER_UNAVAILABLE, refusal.code)
     assertTrue(refusal.reasons.single().contains("no native render lane"), refusal.toString())
@@ -1454,7 +1454,7 @@ class ServeUiBuilderMcpIntegrationTest {
           server,
           ServeUiBuilderMcp.PUT_ASSET,
           putAssetArguments(designId, "avatar-lain", PNG_HEADER),
-        )
+        ),
       )
     val accepted = assertIs<AcceptedOutcomeV1>(assertIs<OperationOutcomeResponseV1>(stored).outcome)
     assertEquals(1, accepted.committedRevision)
@@ -1466,8 +1466,8 @@ class ServeUiBuilderMcpIntegrationTest {
             server,
             ServeUiBuilderMcp.GET_DESIGN,
             "{\"designId\":\"$designId\",\"includeCatalog\":true}",
-          )
-        )
+          ),
+        ),
       )
     val binding = snapshot.snapshot.state.document.assets.getValue("avatar-lain")
     assertEquals("image/png", binding.mediaType)
@@ -1480,7 +1480,7 @@ class ServeUiBuilderMcpIntegrationTest {
           server,
           ServeUiBuilderMcp.PUT_ASSET,
           putAssetArguments(designId, "junk", "nope".encodeToByteArray()),
-        )
+        ),
       )
     assertEquals(ServiceErrorCodeV1.BAD_REQUEST, assertIs<ErrorResponseV1>(refused).error.code)
 
@@ -1497,16 +1497,16 @@ class ServeUiBuilderMcpIntegrationTest {
             "{\"type\":\"assetKey\",\"value\":\"$key\"}},\"modifiers\":[{\"type\":\"size\"," +
             "\"widthDp\":40,\"heightDp\":40}]},\"location\":{\"parent\":{\"nodeId\":" +
             "\"column\",\"slot\":\"children\"}}}]}",
-        )
+        ),
       )
     val committed =
       assertIs<OperationOutcomeResponseV1>(
-        insertPhoto("photo", accepted.committedRevision, "avatar-lain")
+        insertPhoto("photo", accepted.committedRevision, "avatar-lain"),
       )
     assertIs<AcceptedOutcomeV1>(committed.outcome, committed.toString())
     val guessed =
       assertIs<OperationOutcomeResponseV1>(
-        insertPhoto("guess", accepted.committedRevision + 1, "avatar-nobody")
+        insertPhoto("guess", accepted.committedRevision + 1, "avatar-nobody"),
       )
     val rejection = assertIs<RejectedOutcomeV1>(guessed.outcome)
     assertEquals(RejectionCodeV1.INVALID_PROPERTY, rejection.code)
@@ -1522,7 +1522,7 @@ class ServeUiBuilderMcpIntegrationTest {
   @Test
   fun `the reference tools exist only where references are kept, with typed replies`() {
     assertTrue(
-      ServeUiBuilderMcp.REFERENCE_TOOL_NAMES.none { it in tools(start(withPngExport = true)) }
+      ServeUiBuilderMcp.REFERENCE_TOOL_NAMES.none { it in tools(start(withPngExport = true)) },
     )
     running?.close()
     val server = start(withPngExport = true, withReferences = true)
@@ -1630,7 +1630,7 @@ class ServeUiBuilderMcpIntegrationTest {
     // Differences alone measure the PNG export, which reports no boxes: regions, unattributed.
     val differences =
       Json.parseToJsonElement(
-          envelope(server, ServeUiBuilderMcp.COMPARE_REFERENCE, """{"designId":"agent-screen"}""")
+          envelope(server, ServeUiBuilderMcp.COMPARE_REFERENCE, """{"designId":"agent-screen"}"""),
         )
         .jsonObject
     assertEquals("export", differences["renderer"]!!.jsonPrimitive.content)
@@ -1647,7 +1647,7 @@ class ServeUiBuilderMcpIntegrationTest {
             server,
             ServeUiBuilderMcp.COMPARE_REFERENCE,
             """{"designId":"agent-screen","nodeIds":["session"],"differences":false}""",
-          )
+          ),
         )
         .jsonObject
     assertEquals("native", matched["renderer"]!!.jsonPrimitive.content)
@@ -1817,7 +1817,7 @@ class ServeUiBuilderMcpIntegrationTest {
         .newCall(
           Request.Builder()
             .url(url.replace(PUBLIC_ORIGIN, "http://127.0.0.1:${server.server.port}"))
-            .build()
+            .build(),
         )
         .execute()
         .use {
@@ -1840,9 +1840,9 @@ class ServeUiBuilderMcpIntegrationTest {
           .url(
             url
               .replace(PUBLIC_ORIGIN, "http://127.0.0.1:${server.server.port}")
-              .replace("sig=", "sig=x")
+              .replace("sig=", "sig=x"),
           )
-          .build()
+          .build(),
       )
       .execute()
       .use { assertEquals(404, it.code) }
@@ -1881,7 +1881,7 @@ class ServeUiBuilderMcpIntegrationTest {
     val image = content.single { it["type"]!!.jsonPrimitive.content == "image" }
     val picture =
       javax.imageio.ImageIO.read(
-        java.util.Base64.getDecoder().decode(image["data"]!!.jsonPrimitive.content).inputStream()
+        java.util.Base64.getDecoder().decode(image["data"]!!.jsonPrimitive.content).inputStream(),
       )
     assertEquals(100, picture.width)
     assertEquals(200, picture.height)
@@ -1914,7 +1914,7 @@ class ServeUiBuilderMcpIntegrationTest {
                       y = selected.y,
                       width = selected.width,
                       height = selected.height,
-                    )
+                    ),
                 ),
             )
           },
@@ -1938,7 +1938,7 @@ class ServeUiBuilderMcpIntegrationTest {
     val image = content.single { it["type"]!!.jsonPrimitive.content == "image" }
     val picture =
       javax.imageio.ImageIO.read(
-        java.util.Base64.getDecoder().decode(image["data"]!!.jsonPrimitive.content).inputStream()
+        java.util.Base64.getDecoder().decode(image["data"]!!.jsonPrimitive.content).inputStream(),
       )
     val edge = java.awt.Color(picture.getRGB(selected.x, selected.y + selected.height / 2))
     assertTrue(edge.blue > 200 && edge.red < 100, "selection outline at the node's edge: $edge")
@@ -1947,7 +1947,7 @@ class ServeUiBuilderMcpIntegrationTest {
     val bare = call(server, ServeUiBuilderMcp.VIEW, """{"designId":"agent-screen"}""")
     val bareView =
       Json.parseToJsonElement(
-          bare["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
+          bare["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content,
         )
         .jsonObject
     assertEquals("export", bareView["renderer"]!!.jsonPrimitive.content, bareView.toString())
@@ -1978,7 +1978,7 @@ class ServeUiBuilderMcpIntegrationTest {
     assertEquals(null, result["isError"], result.toString())
     val view =
       Json.parseToJsonElement(
-          result["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content
+          result["content"]!!.jsonArray.first().jsonObject["text"]!!.jsonPrimitive.content,
         )
         .jsonObject
     assertEquals("export", view["renderer"]!!.jsonPrimitive.content)
@@ -2030,8 +2030,8 @@ class ServeUiBuilderMcpIntegrationTest {
             server,
             ServeUiBuilderMcp.CREATE_DESIGN,
             """{"designId":"visible-screen","document":$doc,"visibility":"public","includeCatalog":true}""",
-          )
-        )
+          ),
+        ),
       )
     assertTrue(ServeUiBuilderVisibility.isPublic(created.snapshot.access!!))
     fun visibility(authenticated: Boolean): Pair<Int, String> =
@@ -2039,10 +2039,10 @@ class ServeUiBuilderMcpIntegrationTest {
         .newCall(
           Request.Builder()
             .url(
-              "http://127.0.0.1:${server.server.port}/api/ui-builder/v1/designs/visible-screen/visibility"
+              "http://127.0.0.1:${server.server.port}/api/ui-builder/v1/designs/visible-screen/visibility",
             )
             .apply { if (authenticated) header(ServeHttpServer.TOKEN_HEADER, OPERATOR_TOKEN) }
-            .build()
+            .build(),
         )
         .execute()
         .use { it.code to it.body.string() }
@@ -2059,8 +2059,8 @@ class ServeUiBuilderMcpIntegrationTest {
             server,
             ServeUiBuilderMcp.SHARE_DESIGN,
             """{"designId":"visible-screen","actorId":"github:collaborator","role":"editor"}""",
-          )
-        )
+          ),
+        ),
       )
     val private =
       assertIs<DesignAccessResponseV1>(
@@ -2069,8 +2069,8 @@ class ServeUiBuilderMcpIntegrationTest {
             server,
             ServeUiBuilderMcp.SHARE_DESIGN,
             """{"designId":"visible-screen","visibility":"private"}""",
-          )
-        )
+          ),
+        ),
       )
     assertEquals(
       shared.access.actorGrants.filterNot { ServeUiBuilderVisibility.isReservedActor(it.actorId) },
@@ -2086,8 +2086,8 @@ class ServeUiBuilderMcpIntegrationTest {
             server,
             ServeUiBuilderMcp.SHARE_DESIGN,
             """{"designId":"visible-screen","visibility":"public"}""",
-          )
-        )
+          ),
+        ),
       )
     assertTrue(ServeUiBuilderVisibility.isPublic(publicAgain.access))
   }
@@ -2140,7 +2140,7 @@ class ServeUiBuilderMcpIntegrationTest {
           exporter =
             ScreenGeneratorComposeExportExecutor(
                 ComponentRecordSource(recordFile?.let { mapOf(catalogSystemId to it) }.orEmpty())::
-                  record
+                  record,
               )
               .let { if (withRemoteExports) RemoteDocumentExportExecutor(it) else it }
               .let { delegate ->
@@ -2284,7 +2284,7 @@ class ServeUiBuilderMcpIntegrationTest {
           .url("http://127.0.0.1:${server.server.port}/mcp")
           .header(ServeHttpServer.TOKEN_HEADER, OPERATOR_TOKEN)
           .post(body.toRequestBody(JSON_MEDIA_TYPE))
-          .build()
+          .build(),
       )
       .execute()
       .use {

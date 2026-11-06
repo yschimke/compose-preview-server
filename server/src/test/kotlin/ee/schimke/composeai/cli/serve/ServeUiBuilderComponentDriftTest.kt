@@ -191,7 +191,7 @@ class ServeUiBuilderComponentDriftTest {
       .writeText(
         """{"schema":"${ServeUiBuilderComponentLibrary.INDEX_SCHEMA}","components":[${
           ids.joinToString(",") { """{"id":"$it","title":"$it"}""" }
-        }]}"""
+        }]}""",
       )
     val body =
       if (reordered)
@@ -219,7 +219,7 @@ class ServeUiBuilderComponentDriftTest {
           "components": {"$id": {"name": "$label", "root": "$id"}}
         }
         """
-          .trimIndent()
+          .trimIndent(),
       )
   }
 }
