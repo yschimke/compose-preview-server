@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.158.0](https://github.com/yschimke/compose-preview-server/compare/v3.157.0...v3.158.0) (2026-11-07)
+
+
+### Features
+
+* check and simulate a design's host logic ([#1900](https://github.com/yschimke/compose-preview-server/issues/1900)) ([83048b0](https://github.com/yschimke/compose-preview-server/commit/83048b021bcbdfac92faeeb6a7d78764feb1d70f))
+
+
+### Bug Fixes
+
+* **deps:** update compose-ui-builder to 3.127.0 ([#1894](https://github.com/yschimke/compose-preview-server/issues/1894)) ([1330d75](https://github.com/yschimke/compose-preview-server/commit/1330d753a478f9a46ea94d8917c4037689223e57))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.88.0 ([#1896](https://github.com/yschimke/compose-preview-server/issues/1896)) ([9c76c71](https://github.com/yschimke/compose-preview-server/commit/9c76c715abcb86aae893e220e1cc4cca303caf40))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.89.0 ([#1898](https://github.com/yschimke/compose-preview-server/issues/1898)) ([a0139ec](https://github.com/yschimke/compose-preview-server/commit/a0139ec54f4007f378779e9b34da56913881bff2))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.27.3 ([#1895](https://github.com/yschimke/compose-preview-server/issues/1895)) ([9d39eb6](https://github.com/yschimke/compose-preview-server/commit/9d39eb6cb781ff615f47731827fbbeae9832b95f))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-ui-builder-bom to v3.128.0 ([#1899](https://github.com/yschimke/compose-preview-server/issues/1899)) ([e48dd5b](https://github.com/yschimke/compose-preview-server/commit/e48dd5bda9000739def9a891cf3d28deb8c8d86c))
+
 ## [3.157.0](https://github.com/yschimke/compose-preview-server/compare/v3.156.0...v3.157.0) (2026-11-07)
 
 
