@@ -2,6 +2,7 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.export.WearWidgetHostShape
 import ee.schimke.composeai.uibuilder.export.toUiBuilderDocument
+import ee.schimke.composeai.uibuilder.hostlogic.HostLogicSimulator
 import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
 import ee.schimke.composeai.uibuilder.protocol.BackgroundModifierV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
@@ -1024,16 +1025,29 @@ class ServeUiBuilderAgentErgonomicsTest {
         """{"designId":"agent-screen","actions":[{"name":"add","value":2},{"name":"boom"},{"name":"add"}]}""",
       )
 
+    // The run is the builder's: what it answers is compared with the library's own run of the
+    // same design, never restated here.
+    val actions =
+      Json.parseToJsonElement("""[{"name":"add","value":2},{"name":"boom"},{"name":"add"}]""")
+        .jsonArray
+        .map { it.jsonObject }
+    val expected =
+      HostLogicSimulator.simulate(withHostLogic(counter).toUiBuilderDocument(), actions)
+    val steps = reply["steps"]!!.jsonArray.map { it.jsonObject }
+    assertEquals(expected.steps.size, steps.size, reply.toString())
+    expected.steps.zip(steps).forEach { (library, served) ->
+      assertEquals(library.state, served["state"], served.toString())
+      assertEquals(library.error, served["error"]?.jsonPrimitive?.content, served.toString())
+      assertEquals(if (library.action == null) "init" else "onAction", served.text("call"))
+    }
+    // The server's own part: the shape, the verdict and the summary.
+    assertTrue(expected.steps.any { it.error != null }, "the scenario needs a failing step")
     assertEquals(false, reply["ok"]!!.jsonPrimitive.booleanOrNull, reply.toString())
     assertEquals("summary", reply.keys.elementAt(2))
-    val steps = reply["steps"]!!.jsonArray.map { it.jsonObject }
-    assertEquals(listOf("init", "onAction", "onAction", "onAction"), steps.map { it.text("call") })
     assertEquals(
-      listOf(0, 2, 2, 3),
-      steps.map { it["state"]!!.jsonObject["n"]!!.jsonPrimitive.int },
+      HostLogicSimulator.digest(withHostLogic(counter).toUiBuilderDocument().hostLogic!!),
+      reply.text("digest"),
     )
-    assertEquals("Error: boom", steps[2].text("error"))
-    assertTrue(reply.text("digest").startsWith("sha256:"), reply.toString())
     assertTrue(reply.text("summary").contains("1 step(s) failed"), reply.toString())
   }
 
@@ -1046,11 +1060,24 @@ class ServeUiBuilderAgentErgonomicsTest {
       ServeUiBuilderMcp(service(stateDirectory.resolve("unit")))
         .capabilityFor(ServeUiBuilderMcp.SIMULATE_ACTION),
     )
+    // The refusal is the builder's, said as it says it.
+    val flag = JsonObject(mapOf("name" to JsonPrimitive("flag"), "value" to JsonPrimitive(true)))
+    val refusal =
+      assertNotNull(
+        runCatching {
+          HostLogicSimulator.simulate(
+            withHostLogic(counter).toUiBuilderDocument(),
+            listOf(flag),
+          )
+        }
+          .exceptionOrNull()
+          ?.message,
+      )
     assertError(
       server,
       ServeUiBuilderMcp.SIMULATE_ACTION,
-      """{"designId":"agent-screen","actions":[{"name":"flag","value":true}]}""",
-      "no flag value",
+      """{"designId":"agent-screen","actions":[$flag]}""",
+      refusal,
     )
     assertError(
       server,
@@ -1080,10 +1107,20 @@ class ServeUiBuilderAgentErgonomicsTest {
     )
     val broken = check(server, """{"designId":"unexported","checks":["hostLogic"]}""")
     assertEquals(false, broken["ok"]!!.jsonPrimitive.booleanOrNull, broken.toString())
+    // The diagnostic is the builder's, forwarded as it says it; the finding's frame is the
+    // server's.
+    val diagnostic =
+      HostLogicSimulator.check(
+          withHostLogic("function init() { return {}; }\nfunction onAction() {}")
+            .toUiBuilderDocument(),
+        )
+        .diagnostics
+        .single()
     val finding = broken["findings"]!!.jsonArray.single().jsonObject
     assertEquals("hostLogic", finding.text("check"))
-    assertEquals("hostLogic", finding.text("field"))
-    assertTrue(finding.text("message").contains("export a function named init"), finding.toString())
+    assertEquals("error", finding.text("severity"))
+    assertEquals(diagnostic.field, finding.text("field"))
+    assertEquals(diagnostic.message, finding.text("message"))
   }
 
   @Test
