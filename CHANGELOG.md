@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.157.0](https://github.com/yschimke/compose-preview-server/compare/v3.156.0...v3.157.0) (2026-11-07)
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.86.0 ([#1884](https://github.com/yschimke/compose-preview-server/issues/1884)) ([f2b14ea](https://github.com/yschimke/compose-preview-server/commit/f2b14eac7c26924cf921983103f14bd0164d8d07))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.87.0 ([#1889](https://github.com/yschimke/compose-preview-server/issues/1889)) ([0703b26](https://github.com/yschimke/compose-preview-server/commit/0703b26ab4e8c0a523f4e982cf4d330a3c8b6ba9))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-ui-builder-bom to v3.126.0 ([#1876](https://github.com/yschimke/compose-preview-server/issues/1876)) ([7d30852](https://github.com/yschimke/compose-preview-server/commit/7d30852f251cdaf00cc1347eba640e4e2ad3d188))
+* **deps:** update dependency ee.schimke.composeai:rc-players-bom to v2.25.0 ([#1887](https://github.com/yschimke/compose-preview-server/issues/1887)) ([66e915b](https://github.com/yschimke/compose-preview-server/commit/66e915b22e1baca975d6e8684e0f7570d04721c1))
+* **deps:** update dependency ee.schimke.composeai:rc-players-bom to v2.26.0 ([#1888](https://github.com/yschimke/compose-preview-server/issues/1888)) ([e24f1d2](https://github.com/yschimke/compose-preview-server/commit/e24f1d27f59d642fd2d18afaf770a516becce969))
+* **deps:** update dependency ee.schimke.composeai:remote-compose-player-js-dist to v2.26.0 ([#1890](https://github.com/yschimke/compose-preview-server/issues/1890)) ([f759ee1](https://github.com/yschimke/compose-preview-server/commit/f759ee14d50657c2d1e47dfa05423117575d877d))
+* **deps:** update dependency io.github.classgraph:classgraph to v5.0.2 ([#1881](https://github.com/yschimke/compose-preview-server/issues/1881)) ([e819a61](https://github.com/yschimke/compose-preview-server/commit/e819a61e667fed641f22e3ab30c3208daafd64fb))
+* **deps:** update rc-players to v2.24.0 ([#1885](https://github.com/yschimke/compose-preview-server/issues/1885)) ([cc99fc7](https://github.com/yschimke/compose-preview-server/commit/cc99fc7ad2d80c1d38aeb6b217dfcd5646769fc7))
+
 ## [3.156.0](https://github.com/yschimke/compose-preview-server/compare/v3.155.0...v3.156.0) (2026-11-05)
 
 
