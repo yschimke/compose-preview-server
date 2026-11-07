@@ -2,6 +2,7 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.export.WearWidgetHostShape
 import ee.schimke.composeai.uibuilder.export.toUiBuilderDocument
+import ee.schimke.composeai.uibuilder.hostlogic.HostLogicSimulator
 import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
 import ee.schimke.composeai.uibuilder.protocol.BackgroundModifierV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
@@ -15,6 +16,8 @@ import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
 import ee.schimke.composeai.uibuilder.protocol.ExportEncodingV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
 import ee.schimke.composeai.uibuilder.protocol.HeightModifierV1
+import ee.schimke.composeai.uibuilder.protocol.HostLogicLanguageV1
+import ee.schimke.composeai.uibuilder.protocol.HostLogicV1
 import ee.schimke.composeai.uibuilder.protocol.InsertNodeMutationV1
 import ee.schimke.composeai.uibuilder.protocol.LayoutDirectionV1
 import ee.schimke.composeai.uibuilder.protocol.NodeLocationV1
@@ -22,6 +25,10 @@ import ee.schimke.composeai.uibuilder.protocol.NullValueV1
 import ee.schimke.composeai.uibuilder.protocol.ParentSlotV1
 import ee.schimke.composeai.uibuilder.protocol.SetPropertyMutationV1
 import ee.schimke.composeai.uibuilder.protocol.SizeModifierV1
+import ee.schimke.composeai.uibuilder.protocol.StatePersistenceV1
+import ee.schimke.composeai.uibuilder.protocol.StateValueTypeV1
+import ee.schimke.composeai.uibuilder.protocol.StateVariableTypeV1
+import ee.schimke.composeai.uibuilder.protocol.StateVariableV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
 import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
@@ -127,7 +134,7 @@ class ServeUiBuilderAgentErgonomicsTest {
     val reply = check(server, """{"designId":"agent-screen"}""")
 
     assertEquals(true, reply["ok"]!!.jsonPrimitive.booleanOrNull, reply.toString())
-    assertEquals(listOf("schema", "catalog", "a11y"), reply.strings("checks"))
+    assertEquals(listOf("schema", "catalog", "a11y", "hostLogic"), reply.strings("checks"))
     assertEquals(0, reply["errors"]!!.jsonPrimitive.int)
     assertTrue(reply["findings"]!!.jsonArray.isEmpty(), reply.toString())
     assertTrue(reply.text("summary").startsWith("No problems found"), reply.toString())
@@ -164,7 +171,7 @@ class ServeUiBuilderAgentErgonomicsTest {
     val server = start(directory = stateDirectory.resolve("guided"), guidelines = lane)
     create(server, cleanDocument())
     val defaults = check(server, """{"designId":"agent-screen"}""")
-    assertEquals(listOf("schema", "catalog", "a11y"), defaults.strings("checks"))
+    assertEquals(listOf("schema", "catalog", "a11y", "hostLogic"), defaults.strings("checks"))
     assertEquals(0, asked)
     val named = check(server, """{"designId":"agent-screen","checks":["a11y","guidelines"]}""")
     assertEquals(1, asked)
@@ -985,8 +992,190 @@ class ServeUiBuilderAgentErgonomicsTest {
     val reply = check(server, """{"document":{"id":"x"}}""")
     assertEquals(false, reply["ok"]!!.jsonPrimitive.booleanOrNull)
     assertEquals("schema", reply["findings"]!!.jsonArray.first().jsonObject.text("check"))
-    // With no document there is nothing for the accessibility pass to read, and it says so.
-    assertEquals("a11y", reply["skipped"]!!.jsonArray.single().jsonObject.text("check"))
+    // With no document there is nothing for the accessibility pass or the host-logic check to
+    // read, and each says so.
+    assertEquals(
+      listOf("a11y", "hostLogic"),
+      reply["skipped"]!!.jsonArray.map { it.jsonObject.text("check") },
+    )
+  }
+
+  // ---- host logic: ui_builder_check_design's hostLogic and ui_builder_simulate_action ----------
+
+  /** Counts presses in its private state: `add` adds the action's value, or 1. */
+  private val counter =
+    """
+    export function init(env) { return { state: { n: 0 } }; }
+    export function onAction(state, action) {
+      if (action.name === "boom") throw new Error("boom");
+      return { state: { n: state.n + (action.value ?? 1) } };
+    }
+    """
+      .trimIndent()
+
+  private fun withHostLogic(source: String): DesignDocumentV1 =
+    cleanDocument()
+      .copy(hostLogic = HostLogicV1.Builder(HostLogicLanguageV1.JAVASCRIPT, source).build())
+
+  @Test
+  fun `a design's host logic runs headless, step by step, and a failing step is reported`() {
+    val server = start()
+    create(server, withHostLogic(counter))
+
+    val reply =
+      typed(
+        server,
+        ServeUiBuilderMcp.SIMULATE_ACTION,
+        """{"designId":"agent-screen","actions":[{"name":"add","value":2},{"name":"boom"},{"name":"add"}]}""",
+      )
+
+    // The run is the builder's: what it answers is compared with the library's own run of the
+    // same design, never restated here.
+    val actions =
+      Json.parseToJsonElement("""[{"name":"add","value":2},{"name":"boom"},{"name":"add"}]""")
+        .jsonArray
+        .map { it.jsonObject }
+    val expected =
+      HostLogicSimulator.simulate(withHostLogic(counter).toUiBuilderDocument(), actions)
+    val steps = reply["steps"]!!.jsonArray.map { it.jsonObject }
+    assertEquals(expected.steps.size, steps.size, reply.toString())
+    expected.steps.zip(steps).forEach { (library, served) ->
+      assertEquals(library.state, served["state"], served.toString())
+      assertEquals(library.error, served["error"]?.jsonPrimitive?.content, served.toString())
+      assertEquals(if (library.action == null) "init" else "onAction", served.text("call"))
+    }
+    // The server's own part: the shape, the verdict and the summary.
+    assertTrue(expected.steps.any { it.error != null }, "the scenario needs a failing step")
+    assertEquals(false, reply["ok"]!!.jsonPrimitive.booleanOrNull, reply.toString())
+    assertEquals("summary", reply.keys.elementAt(2))
+    assertEquals(
+      HostLogicSimulator.digest(withHostLogic(counter).toUiBuilderDocument().hostLogic!!),
+      reply.text("digest"),
+    )
+    assertTrue(reply.text("summary").contains("1 step(s) failed"), reply.toString())
+  }
+
+  @Test
+  fun `host logic sets a stored design's host inputs, as the canvas would draw them`() {
+    val server = start()
+    val design =
+      withHostLogic(
+          """
+          export function init() { return { state: 0, values: { "count.display": "0" } }; }
+          export function onAction(state) {
+            return { state: state + 1, values: { "count.display": String(state + 1) } };
+          }
+          """
+            .trimIndent(),
+        )
+        .copy(
+          stateVariables =
+            mapOf(
+              "count.display" to
+                StateVariableV1(
+                  type = StateVariableTypeV1.TEXT,
+                  valueType = StateValueTypeV1.STRING,
+                  nullable = false,
+                  initialValue = JsonPrimitive("–"),
+                  persistence = StatePersistenceV1.HOST,
+                ),
+            ),
+        )
+    create(server, design)
+
+    val reply =
+      typed(
+        server,
+        ServeUiBuilderMcp.SIMULATE_ACTION,
+        """{"designId":"agent-screen","actions":[{"name":"add"},{"name":"add"}]}""",
+      )
+
+    // The values are the builder's run of the stored design, which kept its host input.
+    val actions = List(2) { JsonObject(mapOf("name" to JsonPrimitive("add"))) }
+    val expected = HostLogicSimulator.simulate(design.toUiBuilderDocument(), actions)
+    val steps = reply["steps"]!!.jsonArray.map { it.jsonObject }
+    assertEquals(
+      expected.steps.map { step ->
+        step.values.mapValues { (_, value) -> value?.let(::JsonPrimitive) }
+      },
+      steps.map { step ->
+        step["values"]!!.jsonObject.mapValues { (_, value) -> value as? JsonPrimitive }
+      },
+    )
+    assertTrue(expected.steps.last().values.isNotEmpty(), "the design declares a host input")
+    assertEquals(true, reply["ok"]!!.jsonPrimitive.booleanOrNull, reply.toString())
+  }
+
+  @Test
+  fun `simulating is a read, and refuses what a host action cannot carry`() {
+    val server = start()
+    create(server, withHostLogic(counter))
+    assertEquals(
+      UiBuilderRouteCapability.READ,
+      ServeUiBuilderMcp(service(stateDirectory.resolve("unit")))
+        .capabilityFor(ServeUiBuilderMcp.SIMULATE_ACTION),
+    )
+    // The refusal is the builder's, said as it says it.
+    val flag = JsonObject(mapOf("name" to JsonPrimitive("flag"), "value" to JsonPrimitive(true)))
+    val refusal =
+      assertNotNull(
+        runCatching {
+          HostLogicSimulator.simulate(
+            withHostLogic(counter).toUiBuilderDocument(),
+            listOf(flag),
+          )
+        }
+          .exceptionOrNull()
+          ?.message,
+      )
+    assertError(
+      server,
+      ServeUiBuilderMcp.SIMULATE_ACTION,
+      """{"designId":"agent-screen","actions":[$flag]}""",
+      refusal,
+    )
+    assertError(
+      server,
+      ServeUiBuilderMcp.SIMULATE_ACTION,
+      """{"designId":"nobody-made-this"}""",
+      "",
+    )
+
+    // A design without host logic runs nothing, and says why.
+    create(server, cleanDocument().copy(id = "plain"))
+    val plain = typed(server, ServeUiBuilderMcp.SIMULATE_ACTION, """{"designId":"plain"}""")
+    assertEquals("the design has no host logic", plain.text("stopped"))
+    assertTrue(plain["steps"]!!.jsonArray.isEmpty())
+  }
+
+  @Test
+  fun `check_design reports host logic an engine cannot run, and passes host logic that runs`() {
+    val server = start()
+    create(server, withHostLogic(counter))
+    val clean = check(server, """{"designId":"agent-screen","checks":["hostLogic"]}""")
+    assertEquals(true, clean["ok"]!!.jsonPrimitive.booleanOrNull, clean.toString())
+
+    create(
+      server,
+      withHostLogic("function init() { return {}; }\nfunction onAction() {}")
+        .copy(id = "unexported"),
+    )
+    val broken = check(server, """{"designId":"unexported","checks":["hostLogic"]}""")
+    assertEquals(false, broken["ok"]!!.jsonPrimitive.booleanOrNull, broken.toString())
+    // The diagnostic is the builder's, forwarded as it says it; the finding's frame is the
+    // server's.
+    val diagnostic =
+      HostLogicSimulator.check(
+          withHostLogic("function init() { return {}; }\nfunction onAction() {}")
+            .toUiBuilderDocument(),
+        )
+        .diagnostics
+        .single()
+    val finding = broken["findings"]!!.jsonArray.single().jsonObject
+    assertEquals("hostLogic", finding.text("check"))
+    assertEquals("error", finding.text("severity"))
+    assertEquals(diagnostic.field, finding.text("field"))
+    assertEquals(diagnostic.message, finding.text("message"))
   }
 
   @Test

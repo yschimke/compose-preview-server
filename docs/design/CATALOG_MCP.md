@@ -195,7 +195,8 @@ that protocol/SDK migration is deliberately not bundled into the compatibility t
 | `ui_builder_list_catalogs`, `ui_builder_search_components`, `ui_builder_list_designs`, `ui_builder_get_design` | `ui-builder-read` | The component catalogs a design can pin to (a summary by default, the whole capability with `full: true`), the designs on this box, and one design's whole document (without the catalog it pins unless `includeCatalog: true`) |
 | `ui_builder_create_design`, `ui_builder_apply` | `ui-builder-write` | Create a design, and apply `DesignMutationV1` operations to one — a `setProperty` whose value is `{"type":"null"}` unsets an optional property |
 | `ui_builder_validate` | `ui-builder-read` | Check a whole `document`, a stored design, or `operations` against a stored design **without saving** — `{valid, problems:[…]}`, the problems panel's list |
-| `ui_builder_check_design` | `ui-builder-read` (plus `ui-builder-export` for `rendered: true`) | Everything worth checking **before showing** a design: schema, catalog and accessibility (labels, content descriptions, touch targets, contrast, text clipping at 200%) on a design, a past revision, a `document`, or unsaved `operations` — a summary, then findings by node (#1255) |
+| `ui_builder_check_design` | `ui-builder-read` (plus `ui-builder-export` for `rendered: true`) | Everything worth checking **before showing** a design: schema, catalog, accessibility (labels, content descriptions, touch targets, contrast, text clipping at 200%) and whether its host logic would run on a design, a past revision, a `document`, or unsaved `operations` — a summary, then findings by node (#1255) |
+| `ui_builder_simulate_action` | `ui-builder-read` | Runs a stored design's host logic headless: `init`, then each `{name, value}` host action in order, with the program's private state, every host input's value, what each step set and its error. A failing step keeps the values before it; a program that overruns its budget stops the run. Nothing is saved. compose-ui-builder's `HostLogicSimulator` (`UI_BUILDER_HOST_LOGIC.md`) |
 | `ui_builder_guidelines_prompt` | `ui-builder-read` (plus `ui-builder-export` unless `rendered: false`) | The exact request a design-guidelines model is given — rules for the design's platform with their sources, system prompt, user message with the design tree and Compose source, response schema, and where each part comes from — with the native pictures as image blocks: a Wear screen on its device (and unrolled when it scrolls), a Wear widget in the Samsung and Pixel Watch containers, a phone or tablet design at phone and tablet size. Spends no key, so an agent can judge it with its own model |
 | `ui_builder_get_guidelines`, `ui_builder_record_guidelines` | `ui-builder-read`, `ui-builder-write` | A design's latest guidelines result, whoever ran it (`ranBy` from the credential), with its findings and `stale` once the design moves on; and recording an agent's own verdicts as that result. `ui_builder_check_design` with `guidelines` records its result there too, run by the caller. Present only where the host keeps guidelines results |
 | `ui_builder_render_design_matrix` | `ui-builder-read` | One design on several devices × themes × font scales as **one** contact-sheet PNG behind a signed link, with each cell's device and box; present where the host can render on a scratch copy (#1255) |
@@ -470,7 +471,7 @@ Agents working on a design for a person should not spend that person's attention
 could have caught (compose-agent-plugins `docs/agent-rules.md`, R1–R4). Two tools make that one call
 each (#1255).
 
-`ui_builder_check_design` runs `schema`, `catalog` and `a11y` — pick with `checks` — on a stored
+`ui_builder_check_design` runs `schema`, `catalog`, `a11y` and `hostLogic` — pick with `checks` — on a stored
 design (`designId`, optionally a past `revision`), a whole `document`, or `operations` applied to a
 scratch copy of `designId` exactly as `ui_builder_apply` would, with nothing saved. The schema and
 catalog halves are `ui_builder_validate`'s; the accessibility half reads the document through the
@@ -485,6 +486,7 @@ component and works for a Wear or pack catalog too:
 | `touchTargetTooSmall` | warning (declared) / error (rendered) | A control under 48×48dp — from its declared `size`/`width`/`height`/`sizeDp`, or measured on a native render with `rendered: true` |
 | `lowContrast` | error (literal colours) / warning (theme roles) | Text under 4.5:1 (large text and icons 3:1) against the nearest background. Theme roles are resolved against the Material 3 baseline scheme, which a custom or dynamic theme can change, so they only ever warn |
 | `textMayClip` | warning | Text inside a fixed dp height that one line at 200% font scale does not fit |
+| `hostLogicUnrunnable` | error | The design's host logic would not run (check `hostLogic`, field `hostLogic`): it is not JavaScript or is over 64 KiB, does not load, does not export `init` and `onAction`, or `init` answers what the design cannot hold. Run by compose-ui-builder's `HostLogicSimulator`, the engine `ui_builder_simulate_action` uses; a design without host logic is not checked |
 
 The reply leads with `summary` ("Fix before showing it: 1 error, 2 warnings — missingLabel on
 `play`; …"), then `ok`, the counts, and `findings` with the `nodeId` each is about — capped at 40,

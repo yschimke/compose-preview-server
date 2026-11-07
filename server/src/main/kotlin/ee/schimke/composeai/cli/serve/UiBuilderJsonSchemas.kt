@@ -102,6 +102,14 @@ internal object UiBuilderJsonSchemas {
     )
   }
 
+  /** `ui_builder_simulate_action`'s MCP `outputSchema`: [UiBuilderHostLogicSimulationV1]. */
+  val hostLogicSimulationOutput: JsonObject by lazy {
+    SerialDescriptorJsonSchema.output(
+      UiBuilderHostLogicSimulationV1.serializer().descriptor,
+      schemaId = UI_BUILDER_HOST_LOGIC_SIMULATION_SCHEMA,
+    )
+  }
+
   /** `ui_builder_render_design_matrix`'s MCP `outputSchema`: [UiBuilderDesignMatrixV1]. */
   val designMatrixOutput: JsonObject by lazy {
     SerialDescriptorJsonSchema.output(
