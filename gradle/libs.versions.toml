@@ -462,7 +462,7 @@ composeai-contracts = "3.41.0"
 # (compose-ui-builder#1134, #1136, #1140), and adds host actions (#1137, #1144). Built on
 # compose-ai-tools 2.87.0 and contracts 3.40.0, both of which this build already meets or exceeds;
 # `androidx-window` is unchanged.
-composeai-ui-builder = "3.127.0"
+composeai-ui-builder = "3.128.0"
 # The Android Remote Compose players the server's own player-only Android daemon replays documents
 # with, staged as `lib-rc-players-android/` (`stageRcPlayersAndroidLibs`). The Android daemon
 # sidecar deliberately ships none of this family (a consumer brings it, compose-preview-daemon's
