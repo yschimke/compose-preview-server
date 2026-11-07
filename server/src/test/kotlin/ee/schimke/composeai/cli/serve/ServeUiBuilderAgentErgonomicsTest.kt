@@ -25,11 +25,11 @@ import ee.schimke.composeai.uibuilder.protocol.NullValueV1
 import ee.schimke.composeai.uibuilder.protocol.ParentSlotV1
 import ee.schimke.composeai.uibuilder.protocol.SetPropertyMutationV1
 import ee.schimke.composeai.uibuilder.protocol.SizeModifierV1
-import ee.schimke.composeai.uibuilder.protocol.StringValueV1
-import ee.schimke.composeai.uibuilder.protocol.StateVariableV1
-import ee.schimke.composeai.uibuilder.protocol.StateVariableTypeV1
-import ee.schimke.composeai.uibuilder.protocol.StateValueTypeV1
 import ee.schimke.composeai.uibuilder.protocol.StatePersistenceV1
+import ee.schimke.composeai.uibuilder.protocol.StateValueTypeV1
+import ee.schimke.composeai.uibuilder.protocol.StateVariableTypeV1
+import ee.schimke.composeai.uibuilder.protocol.StateVariableV1
+import ee.schimke.composeai.uibuilder.protocol.StringValueV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
 import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
@@ -1095,7 +1095,9 @@ class ServeUiBuilderAgentErgonomicsTest {
     val expected = HostLogicSimulator.simulate(design.toUiBuilderDocument(), actions)
     val steps = reply["steps"]!!.jsonArray.map { it.jsonObject }
     assertEquals(
-      expected.steps.map { step -> step.values.mapValues { (_, value) -> value?.let(::JsonPrimitive) } },
+      expected.steps.map { step ->
+        step.values.mapValues { (_, value) -> value?.let(::JsonPrimitive) }
+      },
       steps.map { step ->
         step["values"]!!.jsonObject.mapValues { (_, value) -> value as? JsonPrimitive }
       },
