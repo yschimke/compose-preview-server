@@ -26,6 +26,10 @@ import ee.schimke.composeai.uibuilder.protocol.ParentSlotV1
 import ee.schimke.composeai.uibuilder.protocol.SetPropertyMutationV1
 import ee.schimke.composeai.uibuilder.protocol.SizeModifierV1
 import ee.schimke.composeai.uibuilder.protocol.StringValueV1
+import ee.schimke.composeai.uibuilder.protocol.StateVariableV1
+import ee.schimke.composeai.uibuilder.protocol.StateVariableTypeV1
+import ee.schimke.composeai.uibuilder.protocol.StateValueTypeV1
+import ee.schimke.composeai.uibuilder.protocol.StatePersistenceV1
 import ee.schimke.composeai.uibuilder.protocol.ThemeV1
 import ee.schimke.composeai.uibuilder.protocol.WindowPostureV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
@@ -1049,6 +1053,55 @@ class ServeUiBuilderAgentErgonomicsTest {
       reply.text("digest"),
     )
     assertTrue(reply.text("summary").contains("1 step(s) failed"), reply.toString())
+  }
+
+  @Test
+  fun `host logic sets a stored design's host inputs, as the canvas would draw them`() {
+    val server = start()
+    val design =
+      withHostLogic(
+          """
+          export function init() { return { state: 0, values: { "count.display": "0" } }; }
+          export function onAction(state) {
+            return { state: state + 1, values: { "count.display": String(state + 1) } };
+          }
+          """
+            .trimIndent(),
+        )
+        .copy(
+          stateVariables =
+            mapOf(
+              "count.display" to
+                StateVariableV1(
+                  type = StateVariableTypeV1.TEXT,
+                  valueType = StateValueTypeV1.STRING,
+                  nullable = false,
+                  initialValue = JsonPrimitive("–"),
+                  persistence = StatePersistenceV1.HOST,
+                ),
+            ),
+        )
+    create(server, design)
+
+    val reply =
+      typed(
+        server,
+        ServeUiBuilderMcp.SIMULATE_ACTION,
+        """{"designId":"agent-screen","actions":[{"name":"add"},{"name":"add"}]}""",
+      )
+
+    // The values are the builder's run of the stored design, which kept its host input.
+    val actions = List(2) { JsonObject(mapOf("name" to JsonPrimitive("add"))) }
+    val expected = HostLogicSimulator.simulate(design.toUiBuilderDocument(), actions)
+    val steps = reply["steps"]!!.jsonArray.map { it.jsonObject }
+    assertEquals(
+      expected.steps.map { step -> step.values.mapValues { (_, value) -> value?.let(::JsonPrimitive) } },
+      steps.map { step ->
+        step["values"]!!.jsonObject.mapValues { (_, value) -> value as? JsonPrimitive }
+      },
+    )
+    assertTrue(expected.steps.last().values.isNotEmpty(), "the design declares a host input")
+    assertEquals(true, reply["ok"]!!.jsonPrimitive.booleanOrNull, reply.toString())
   }
 
   @Test
