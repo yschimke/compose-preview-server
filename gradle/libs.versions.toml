@@ -458,7 +458,11 @@ composeai-contracts = "3.41.0"
 # (compose-ui-builder#991). This server already seeds only through the published overload.
 # 3.124.0 ships the render bundle and the export's variable fonts as release assets instead of on
 # Central (compose-ui-builder#1027); `-render-bundle` and `-export-fonts` below come from its release.
-composeai-ui-builder = "3.126.0"
+# 3.129.0 adds `HostLogicSimulator` (compose-ui-builder#1151, #1155): a design's host logic checked
+# and run headless on QuickJS compiled to JVM bytecode, behind `ui_builder_check_design`'s
+# `hostLogic` check and `ui_builder_simulate_action`. It brings quickjs4j, run.endive and
+# jackson-databind onto the server's classpath through the runtime.
+composeai-ui-builder = "3.129.0"
 # The Android Remote Compose players the server's own player-only Android daemon replays documents
 # with, staged as `lib-rc-players-android/` (`stageRcPlayersAndroidLibs`). The Android daemon
 # sidecar deliberately ships none of this family (a consumer brings it, compose-preview-daemon's

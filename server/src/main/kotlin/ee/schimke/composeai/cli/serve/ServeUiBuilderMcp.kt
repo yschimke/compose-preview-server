@@ -18,6 +18,7 @@ import ee.schimke.composeai.uibuilder.guidelines.GuidelineEvidenceOffer
 import ee.schimke.composeai.uibuilder.guidelines.JEV_DECISION_MODEL
 import ee.schimke.composeai.uibuilder.guidelines.plan
 import ee.schimke.composeai.uibuilder.guidelines.wanted
+import ee.schimke.composeai.uibuilder.hostlogic.HostLogicSimulator
 import ee.schimke.composeai.uibuilder.protocol.ApplyOperationRequestV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
 import ee.schimke.composeai.uibuilder.protocol.ComponentCapabilityV1
@@ -299,6 +300,8 @@ class ServeUiBuilderMcp(
       // Both read without writing; `rendered: true` compiles Kotlin, so [additionalCapabilityFor]
       // requires export then.
       CHECK_DESIGN -> UiBuilderRouteCapability.READ
+      // Runs the design's own host logic on a sandboxed interpreter and writes nothing.
+      SIMULATE_ACTION -> UiBuilderRouteCapability.READ
       RENDER_DESIGN_MATRIX -> if (validator == null) null else UiBuilderRouteCapability.READ
       // Recording a verdict or the implementing pull request is saying something about the design,
       // gated as the comment tools are: a write at the door, the design's own read inside.
@@ -484,6 +487,7 @@ class ServeUiBuilderMcp(
         SET_LINKS -> return linksTool(tool, args, actor)
         VALIDATE -> return validate(args, actor)
         CHECK_DESIGN -> return checkDesign(args, actor)
+        SIMULATE_ACTION -> return simulateAction(args, actor)
         RENDER_DESIGN_MATRIX -> return renderDesignMatrix(args, actor, mayExport)
         RECORD_DECISION,
         AWAIT_DECISION,
@@ -2406,6 +2410,19 @@ class ServeUiBuilderMcp(
       }
     }
 
+    if (CHECK_HOST_LOGIC in checks) {
+      val checked = document
+      if (checked == null) {
+        skipped +=
+          UiBuilderCheckSkippedV1(
+            CHECK_HOST_LOGIC,
+            "there is no document to check until the errors above are fixed",
+          )
+      } else {
+        findings += ServeUiBuilderHostLogic.findings(checked)
+      }
+    }
+
     var guidelinesRecord: DesignGuidelineRecord? = null
     if (CHECK_GUIDELINES in checks && skipped.none { it.check == CHECK_GUIDELINES }) {
       val checked = document
@@ -2518,6 +2535,46 @@ class ServeUiBuilderMcp(
         guidelines = guidelinesRecord,
       ),
     )
+  }
+
+  /**
+   * Runs a stored design's host logic headless (compose-ui-builder's `UI_BUILDER_HOST_LOGIC.md`):
+   * `init`, then each of `actions` in order, reporting the private state and every host input after
+   * each. Evidence that the logic behaves, without a browser; nothing is saved.
+   */
+  private suspend fun simulateAction(
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+  ): String {
+    val designId = args.text("designId") ?: throw McpRequestException("`designId` is required")
+    val actions =
+      when (val raw = args["actions"]) {
+        null,
+        is JsonNull -> emptyList()
+        is JsonArray ->
+          raw.mapIndexed { index, element ->
+            element as? JsonObject
+              ?: throw McpRequestException(
+                "`actions[$index]` must be an object, `{\"name\": …, \"value\": …}`",
+              )
+          }
+        else -> throw McpRequestException("`actions` must be an array of host actions")
+      }
+    val snapshot =
+      when (
+        val response = execute(GetSnapshotRequestV1(designId, args.number("revision")), actor)
+      ) {
+        is UiBuilderServiceResponse.Snapshot -> response.snapshot
+        is UiBuilderServiceResponse.Error -> throw McpRequestException(response.error.message)
+        else -> throw McpRequestException("no design `$designId` this actor can read")
+      }
+    val reply =
+      try {
+        ServeUiBuilderHostLogic.simulate(designId, snapshot.state.document, actions)
+      } catch (e: IllegalArgumentException) {
+        throw McpRequestException(e.message ?: "the actions cannot be simulated")
+      }
+    return UI_BUILDER_JSON.encodeToString(UiBuilderHostLogicSimulationV1.serializer(), reply)
   }
 
   private fun checkSummary(
@@ -4044,6 +4101,7 @@ class ServeUiBuilderMcp(
     const val VALIDATE = "ui_builder_validate"
 
     const val CHECK_DESIGN = "ui_builder_check_design"
+    const val SIMULATE_ACTION = "ui_builder_simulate_action"
     const val RENDER_DESIGN_MATRIX = "ui_builder_render_design_matrix"
     const val RECORD_DECISION = "ui_builder_record_decision"
     const val AWAIT_DECISION = "ui_builder_await_decision"
@@ -4205,6 +4263,7 @@ class ServeUiBuilderMcp(
         EXPORT_DOCUMENT.takeIf { RemoteDocumentExportSupport.formats.isNotEmpty() },
         VIEW,
         CHECK_DESIGN,
+        SIMULATE_ACTION,
         GUIDELINES_PROMPT,
         DESIGN_ACCESS,
         SHARE_DESIGN,
@@ -4887,7 +4946,9 @@ class ServeUiBuilderMcp(
             "ui-builder-export capability). Contrast against theme roles is resolved with the " +
             "Material 3 baseline scheme, in both the light and the dark theme when a colour " +
             "follows the theme (the finding names the theme that fails), and reported as a " +
-            "warning, never an error. " +
+            "warning, never an error. `$CHECK_HOST_LOGIC` checks a design's host logic would run " +
+            "(it loads, exports `init` and `onAction`, and `init` answers what the design can " +
+            "hold); a design without host logic passes it for free. " +
             "`$CHECK_GUIDELINES` runs only when named: a model judges the design against the " +
             "Android design guides (developer.android.com) for its platform and reports each " +
             "broken rule as a warning or note with its source. It uses this host's shared model " +
@@ -4904,6 +4965,28 @@ class ServeUiBuilderMcp(
             "$CHECKS_ARGUMENT":{"type":"array","items":{"type":"string","enum":[${ALL_DESIGN_CHECKS.joinToString(",") { "\"$it\"" }}]},"description":"Which checks to run. Defaults to ${DESIGN_CHECKS.joinToString(", ")}; `$CHECK_GUIDELINES` runs only when named."},
             "$RENDERED_ARGUMENT":{"type":"boolean","description":"Measure touch targets on a native render, and show it to the guidelines model. Exported Kotlin that fails to compile there is an error finding (check `native`). Defaults to false."}
           },"additionalProperties":false}
+          """,
+        ),
+        tool(
+          SIMULATE_ACTION,
+          "Run a stored design's host logic — the JavaScript in its `hostLogic` that stands in " +
+            "for the host feeding it, answering host actions by setting host inputs — headless, " +
+            "without a browser: `init`, then each of `actions` in order, as the editor's canvas " +
+            "runs it. Each action is `{\"name\": …, \"value\": …}`, exactly what a design's " +
+            "host action sends (a value is text, a whole number or a decimal; omit it for none). " +
+            "Returns `summary` first, then `ok` and `steps`: for `init` and each action, the " +
+            "program's private `state`, every host input's `values` as the canvas would draw " +
+            "them, which inputs the step `set`, and the `error` when its answer could not be " +
+            "used. A failing step keeps the values before it and the next action is still sent; " +
+            "a program that overruns its budget stops the run (`stopped`). Use it to show the " +
+            "logic works (a calculator shows 3 after `1 + 2 =`) and to find which key breaks it. " +
+            "Nothing is saved. At most ${HostLogicSimulator.MAX_ACTIONS} actions.",
+          """
+          {"type":"object","properties":{
+            "designId":{"type":"string"},
+            "revision":{"type":"integer","description":"A past revision. Omit for the current one."},
+            "actions":{"type":"array","maxItems":${HostLogicSimulator.MAX_ACTIONS},"items":{"type":"object","properties":{"name":{"type":"string","description":"The host action's name, as the design sends it."},"value":{"type":["string","number"],"description":"The action's one value: text, a whole number that fits an Int, or a finite decimal. Omit for none."}},"required":["name"],"additionalProperties":false},"description":"Host actions to answer, in order, after init. Omit to run init alone."}
+          },"required":["designId"],"additionalProperties":false}
           """,
         ),
         tool(

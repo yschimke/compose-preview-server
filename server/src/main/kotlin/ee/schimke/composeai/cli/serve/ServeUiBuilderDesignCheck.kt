@@ -731,7 +731,12 @@ internal object UiBuilderAccessibilityCheck {
 internal const val CHECK_SCHEMA = "schema"
 internal const val CHECK_CATALOG = "catalog"
 internal const val CHECK_A11Y = "a11y"
-internal val DESIGN_CHECKS = listOf(CHECK_SCHEMA, CHECK_CATALOG, CHECK_A11Y)
+/**
+ * Whether a design's host logic would run: stored as an engine takes it, loading, exporting `init`
+ * and `onAction`, and `init` answering what the design can hold
+ * ([ServeUiBuilderHostLogic.findings]). Free for a design without host logic.
+ */
+internal val DESIGN_CHECKS = listOf(CHECK_SCHEMA, CHECK_CATALOG, CHECK_A11Y, CHECK_HOST_LOGIC)
 
 /**
  * A model's reading of the design against the Android design guides ([ServeUiBuilderGuidelines]).

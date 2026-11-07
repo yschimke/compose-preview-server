@@ -15,6 +15,8 @@ import ee.schimke.composeai.uibuilder.protocol.ExportCapabilitiesV1
 import ee.schimke.composeai.uibuilder.protocol.ExportEncodingV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
 import ee.schimke.composeai.uibuilder.protocol.HeightModifierV1
+import ee.schimke.composeai.uibuilder.protocol.HostLogicLanguageV1
+import ee.schimke.composeai.uibuilder.protocol.HostLogicV1
 import ee.schimke.composeai.uibuilder.protocol.InsertNodeMutationV1
 import ee.schimke.composeai.uibuilder.protocol.LayoutDirectionV1
 import ee.schimke.composeai.uibuilder.protocol.NodeLocationV1
@@ -127,7 +129,7 @@ class ServeUiBuilderAgentErgonomicsTest {
     val reply = check(server, """{"designId":"agent-screen"}""")
 
     assertEquals(true, reply["ok"]!!.jsonPrimitive.booleanOrNull, reply.toString())
-    assertEquals(listOf("schema", "catalog", "a11y"), reply.strings("checks"))
+    assertEquals(listOf("schema", "catalog", "a11y", "hostLogic"), reply.strings("checks"))
     assertEquals(0, reply["errors"]!!.jsonPrimitive.int)
     assertTrue(reply["findings"]!!.jsonArray.isEmpty(), reply.toString())
     assertTrue(reply.text("summary").startsWith("No problems found"), reply.toString())
@@ -985,8 +987,103 @@ class ServeUiBuilderAgentErgonomicsTest {
     val reply = check(server, """{"document":{"id":"x"}}""")
     assertEquals(false, reply["ok"]!!.jsonPrimitive.booleanOrNull)
     assertEquals("schema", reply["findings"]!!.jsonArray.first().jsonObject.text("check"))
-    // With no document there is nothing for the accessibility pass to read, and it says so.
-    assertEquals("a11y", reply["skipped"]!!.jsonArray.single().jsonObject.text("check"))
+    // With no document there is nothing for the accessibility pass or the host-logic check to
+    // read, and each says so.
+    assertEquals(
+      listOf("a11y", "hostLogic"),
+      reply["skipped"]!!.jsonArray.map { it.jsonObject.text("check") },
+    )
+  }
+
+  // ---- host logic: ui_builder_check_design's hostLogic and ui_builder_simulate_action ----------
+
+  /** Counts presses in its private state: `add` adds the action's value, or 1. */
+  private val counter =
+    """
+    export function init(env) { return { state: { n: 0 } }; }
+    export function onAction(state, action) {
+      if (action.name === "boom") throw new Error("boom");
+      return { state: { n: state.n + (action.value ?? 1) } };
+    }
+    """
+      .trimIndent()
+
+  private fun withHostLogic(source: String): DesignDocumentV1 =
+    cleanDocument()
+      .copy(hostLogic = HostLogicV1.Builder(HostLogicLanguageV1.JAVASCRIPT, source).build())
+
+  @Test
+  fun `a design's host logic runs headless, step by step, and a failing step is reported`() {
+    val server = start()
+    create(server, withHostLogic(counter))
+
+    val reply =
+      typed(
+        server,
+        ServeUiBuilderMcp.SIMULATE_ACTION,
+        """{"designId":"agent-screen","actions":[{"name":"add","value":2},{"name":"boom"},{"name":"add"}]}""",
+      )
+
+    assertEquals(false, reply["ok"]!!.jsonPrimitive.booleanOrNull, reply.toString())
+    assertEquals("summary", reply.keys.elementAt(2))
+    val steps = reply["steps"]!!.jsonArray.map { it.jsonObject }
+    assertEquals(listOf("init", "onAction", "onAction", "onAction"), steps.map { it.text("call") })
+    assertEquals(
+      listOf(0, 2, 2, 3),
+      steps.map { it["state"]!!.jsonObject["n"]!!.jsonPrimitive.int },
+    )
+    assertEquals("Error: boom", steps[2].text("error"))
+    assertTrue(reply.text("digest").startsWith("sha256:"), reply.toString())
+    assertTrue(reply.text("summary").contains("1 step(s) failed"), reply.toString())
+  }
+
+  @Test
+  fun `simulating is a read, and refuses what a host action cannot carry`() {
+    val server = start()
+    create(server, withHostLogic(counter))
+    assertEquals(
+      UiBuilderRouteCapability.READ,
+      ServeUiBuilderMcp(service(stateDirectory.resolve("unit")))
+        .capabilityFor(ServeUiBuilderMcp.SIMULATE_ACTION),
+    )
+    assertError(
+      server,
+      ServeUiBuilderMcp.SIMULATE_ACTION,
+      """{"designId":"agent-screen","actions":[{"name":"flag","value":true}]}""",
+      "no flag value",
+    )
+    assertError(
+      server,
+      ServeUiBuilderMcp.SIMULATE_ACTION,
+      """{"designId":"nobody-made-this"}""",
+      "",
+    )
+
+    // A design without host logic runs nothing, and says why.
+    create(server, cleanDocument().copy(id = "plain"))
+    val plain = typed(server, ServeUiBuilderMcp.SIMULATE_ACTION, """{"designId":"plain"}""")
+    assertEquals("the design has no host logic", plain.text("stopped"))
+    assertTrue(plain["steps"]!!.jsonArray.isEmpty())
+  }
+
+  @Test
+  fun `check_design reports host logic an engine cannot run, and passes host logic that runs`() {
+    val server = start()
+    create(server, withHostLogic(counter))
+    val clean = check(server, """{"designId":"agent-screen","checks":["hostLogic"]}""")
+    assertEquals(true, clean["ok"]!!.jsonPrimitive.booleanOrNull, clean.toString())
+
+    create(
+      server,
+      withHostLogic("function init() { return {}; }\nfunction onAction() {}")
+        .copy(id = "unexported"),
+    )
+    val broken = check(server, """{"designId":"unexported","checks":["hostLogic"]}""")
+    assertEquals(false, broken["ok"]!!.jsonPrimitive.booleanOrNull, broken.toString())
+    val finding = broken["findings"]!!.jsonArray.single().jsonObject
+    assertEquals("hostLogic", finding.text("check"))
+    assertEquals("hostLogic", finding.text("field"))
+    assertTrue(finding.text("message").contains("export a function named init"), finding.toString())
   }
 
   @Test

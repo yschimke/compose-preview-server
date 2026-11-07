@@ -3113,6 +3113,7 @@ class ServeCatalogMcp(
       ServeUiBuilderMcp.VIEW -> UiBuilderJsonSchemas.viewOutput
       ServeUiBuilderMcp.VALIDATE -> UiBuilderJsonSchemas.validationOutput
       ServeUiBuilderMcp.CHECK_DESIGN -> UiBuilderJsonSchemas.designCheckOutput
+      ServeUiBuilderMcp.SIMULATE_ACTION -> UiBuilderJsonSchemas.hostLogicSimulationOutput
       ServeUiBuilderMcp.RENDER_DESIGN_MATRIX -> UiBuilderJsonSchemas.designMatrixOutput
       ServeUiBuilderMcp.RECORD_DECISION,
       ServeUiBuilderMcp.AWAIT_DECISION -> UiBuilderJsonSchemas.decisionOutput
