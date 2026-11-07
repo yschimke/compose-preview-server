@@ -166,7 +166,7 @@ class ServeUiBuilderAgentErgonomicsTest {
     val server = start(directory = stateDirectory.resolve("guided"), guidelines = lane)
     create(server, cleanDocument())
     val defaults = check(server, """{"designId":"agent-screen"}""")
-    assertEquals(listOf("schema", "catalog", "a11y"), defaults.strings("checks"))
+    assertEquals(listOf("schema", "catalog", "a11y", "hostLogic"), defaults.strings("checks"))
     assertEquals(0, asked)
     val named = check(server, """{"designId":"agent-screen","checks":["a11y","guidelines"]}""")
     assertEquals(1, asked)
