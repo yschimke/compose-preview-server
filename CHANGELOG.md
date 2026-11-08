@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.159.0](https://github.com/yschimke/compose-preview-server/compare/v3.158.0...v3.159.0) (2026-11-08)
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-preview-ui-builder-bom to v3.130.0 ([#1903](https://github.com/yschimke/compose-preview-server/issues/1903)) ([68ac919](https://github.com/yschimke/compose-preview-server/commit/68ac919ab2471bb4cc2570f6daf87a3a9ceb130b))
+* **deps:** update dependency ee.schimke.composeai:rc-players-bom to v2.28.0 ([#1902](https://github.com/yschimke/compose-preview-server/issues/1902)) ([a579076](https://github.com/yschimke/compose-preview-server/commit/a579076143ef35ca1972afbbbdeead31f1b690b4))
+
 ## [3.158.0](https://github.com/yschimke/compose-preview-server/compare/v3.157.0...v3.158.0) (2026-11-07)
 
 
