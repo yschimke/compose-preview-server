@@ -47,7 +47,9 @@ class ServeRcPlayersStagingTest {
         "ee/schimke/composeai/rcplayer/protocol/",
         "ee/schimke/composeai/rcplayer/trace/",
         "coil3/network/ktor3/",
-        "io/ktor/client/engine/cio/",
+        // rc-players 2.28.0 moved the player's Ktor engine from CIO to OkHttp (rc-players#825).
+        "io/ktor/client/engine/okhttp/",
+        "okhttp3/",
         "kotlinx/datetime/",
       )) {
       assertTrue(entries.any { it.startsWith(marker) }, "$marker is staged")
