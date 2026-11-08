@@ -468,7 +468,7 @@ composeai-contracts = "3.42.0"
 # and run headless on QuickJS compiled to JVM bytecode, behind `ui_builder_check_design`'s
 # `hostLogic` check and `ui_builder_simulate_action`. It brings quickjs4j, run.endive and
 # jackson-databind onto the server's classpath through the runtime.
-composeai-ui-builder = "3.129.0"
+composeai-ui-builder = "3.130.0"
 # The Android Remote Compose players the server's own player-only Android daemon replays documents
 # with, staged as `lib-rc-players-android/` (`stageRcPlayersAndroidLibs`). The Android daemon
 # sidecar deliberately ships none of this family (a consumer brings it, compose-preview-daemon's
