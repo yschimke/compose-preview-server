@@ -142,6 +142,11 @@ already running finishes first. The loading page retries automatically until the
 
 ## Agent plugins
 
+Experimental public Remote Compose component previews can be hosted from operator-installed immutable
+bundles, with anonymous HTML/unfurls, descriptor discovery and an optional Livery viewer. See
+[component publication hosting](docs/development/COMPONENT_PUBLICATIONS.md) for installation,
+configuration, cache/withdrawal behavior and the separate private-editor boundary.
+
 Start at <https://preview.coo.ee/start/> (or <https://ui.coo.ee/start> to design a
 new screen). A coding agent installs one plugin, `compose-preview` from
 [yschimke/compose-agent-plugins](https://github.com/yschimke/compose-agent-plugins); it carries the

@@ -152,6 +152,10 @@ public class ServeRunner(
     ServeStartupBundles.parse(bundleFlags)
   }
 
+  private val componentPublications: ServeComponentPublications? by lazy {
+    ServeComponentPublications.fromEnvironment()
+  }
+
   private val catalogsFile: ServeCatalogsConfigFile? = catalogsFilePath?.let {
     ServeCatalogsConfigFile(it.toPath())
   }
@@ -1265,6 +1269,7 @@ public class ServeRunner(
         !acceptDocs &&
         !imageLaneConfigured &&
         !uiBuilderLaneConfigured &&
+        componentPublications == null &&
         adminToken == null
     ) {
       // Name the missing `--image-upload-repo` first; the generic line below would otherwise read
@@ -1273,7 +1278,7 @@ public class ServeRunner(
       System.err.println(
         "serve: nothing to serve — no --bundle / --bundles / --catalogs registered a session, and " +
           "none of --accept-bundles / --accept-docs / --accept-images / --ui-builder-dir / " +
-          "--admin-token is set.",
+          "--admin-token / SERVE_COMPONENT_PUBLICATIONS_DIR is set.",
       )
       // Guide the common "ran serve in my project expecting a build" case: Gradle discovery is now
       // opt-in, so point at --discover / --module rather than leaving them staring at a bare error.
@@ -3502,6 +3507,7 @@ public class ServeRunner(
     val server =
       ServeHttpServer(
         host = host,
+        componentPublications = componentPublications,
         requestedPort = requestedPort,
         // Only an origin the operator stated is an identity a copy can point back at. An unusable
         // callback base URL only costs the home stamp here; OAuth reports it on its own.

@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -36,6 +37,9 @@ class ServePagePolicyTest {
       "/reference/phone.html",
       "/app/reference/phone.html",
       "/app/reference/phone.png",
+      "/p/quantity/r/one/",
+      "/p/quantity/r/one/embed/",
+      "/p/quantity/r/one/catalog/embed/",
     )
 
   @Test
@@ -64,6 +68,8 @@ class ServePagePolicyTest {
         "/rc-player-wasm/",
         "/reference/phone.html",
         "/app/reference/phone.html",
+        "/p/quantity/r/one/",
+        "/p/quantity/r/one/embed/",
       )
     for (path in pages) {
       val scripts = directives(path).getValue("script-src")
@@ -74,15 +80,26 @@ class ServePagePolicyTest {
 
   @Test
   fun `the framable pages match the proxy's X-Frame-Options exemption`() {
-    // deploy/image/Caddyfile: `not path /iframe.html /*/iframe.html /wasm/* /ui-builder/runtime/*`.
+    val repoRoot =
+      generateSequence(File(".").absoluteFile) { it.parentFile }
+        .first { File(it, "deploy/image/Caddyfile").isFile }
+    val caddy = File(repoRoot, "deploy/image/Caddyfile").readText()
+    val pattern =
+      Regex("not path_regexp framedPages `([^`]+)`").find(caddy)!!.groupValues[1].toRegex()
     val framable =
       setOf(
         "/iframe.html",
         "/m3-catalog/iframe.html",
         "/wasm/m3-catalog/",
         "/ui-builder/runtime/m3-2026.09/index.html",
+        "/p/quantity/r/one/embed/",
       )
     for (path in pages) {
+      assertEquals(
+        ServePagePolicy.isFramable(path),
+        pattern.matches(path),
+        "proxy exemption: $path",
+      )
       val ancestors = directives(path)["frame-ancestors"]
       if (path in framable) assertNull(ancestors, path) else assertEquals("'self'", ancestors, path)
     }

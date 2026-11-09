@@ -141,12 +141,14 @@ internal object ServePagePolicy {
    * and the Wasm apps the viewer and UI builder mount in sandboxed frames.
    */
   fun isFramable(path: String): Boolean =
-    path.endsWith("/iframe.html") ||
+    Regex("/p/[a-z0-9][a-z0-9-]{0,63}/r/[a-z0-9][a-z0-9-]{0,63}/embed/?").matches(path) ||
+      path.endsWith("/iframe.html") ||
       path.startsWith("/wasm/") ||
       path.startsWith("/ui-builder/runtime/")
 
   fun hostsWasmApp(path: String): Boolean =
-    WASM_APP_PREFIXES.any { path.startsWith(it) } ||
+    Regex("/p/[a-z0-9][a-z0-9-]{0,63}/r/[a-z0-9][a-z0-9-]{0,63}/(?:embed/?)?").matches(path) ||
+      WASM_APP_PREFIXES.any { path.startsWith(it) } ||
       path == "/ui-builder" ||
       // The reference snapshot embeds the released editor in srcdoc, which inherits this CSP.
       Regex("/(?:[^/]+/)?reference/[^/]+\\.html").matches(path)

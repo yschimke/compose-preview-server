@@ -8,6 +8,10 @@ Non-secret settings live in a deployment's `settings.json` (see [`deploy/example
 
 | Setting | Variable | Applies | Read by | Description |
 |---|---|---|---|---|
+| `componentPublications.directory` | `SERVE_COMPONENT_PUBLICATIONS_DIR` | restart | preview | Directory of explicitly installed public component publication bundles. Disabled when absent; never point this at private editor state. |
+| `componentPublications.origin` | `SERVE_COMPONENT_PUBLICATIONS_ORIGIN` | restart | preview | Canonical HTTPS origin for public component preview links and unfurls. HTTP is allowed only for loopback development. |
+| `componentPublications.viewerDirectory` | `SERVE_COMPONENT_VIEWER_DIR` | restart | preview | Optional operator-installed Livery viewer distribution mounted at /assets/livery-preview/. Without it, previews retain their static fallback. |
+| `componentPublications.viewerConfig` | `SERVE_COMPONENT_VIEWER_CONFIG` | restart | preview | JSON object string configuring the viewer's trusted public signing keys and capabilities. Defaults to {}; unsigned catalogs require explicit development opt-in. Never put secrets here. |
 | `uiBuilder.adminActors` | `SERVE_UI_BUILDER_ADMIN_ACTORS` | restart | preview | GitHub actors who administer every shared UI-builder design and its folder placement. They gain no catalog, trust or site authority. No actors are granted by default; an empty list disables cross-owner administration. |
 | `uiBuilder.startUrl` | `SERVE_UI_BUILDER_START_URL` | restart | preview, playground | Where the UI builder's start page sends a visitor. |
 | `uiBuilder.importOrigins` | `SERVE_UI_BUILDER_IMPORT_ORIGINS` | restart | preview | Sites whose seed documents a signed-in person may start a UI-builder design from, at `/ui-builder/designs/import?url=<seed URL on that origin>`. The design is created as that person, private to them; the site holds no credential on this server. Off when empty. |
