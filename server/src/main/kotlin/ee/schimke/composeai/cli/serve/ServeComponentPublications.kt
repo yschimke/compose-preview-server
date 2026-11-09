@@ -140,7 +140,12 @@ class ServeComponentPublications(
         (digest as? JsonPrimitive)?.takeIf { it.isString }?.content ?: error("digest missing")
       require(SHA.matches(expected))
       val file = safeFile(root, "$directory/$name") ?: error("missing artifact")
-      val limit = if (name.endsWith(".json")) 1024 * 1024 else 16 * 1024 * 1024
+      val limit =
+        when {
+          name == "preview.json" -> 64 * 1024
+          name.endsWith(".json") -> 1024 * 1024
+          else -> 16 * 1024 * 1024
+        }
       val bytes = boundedRead(file, minOf(limit, MAX_BUNDLE_BYTES - total))
       total += bytes.size
       require(sha256(bytes) == expected) { "artifact digest mismatch" }

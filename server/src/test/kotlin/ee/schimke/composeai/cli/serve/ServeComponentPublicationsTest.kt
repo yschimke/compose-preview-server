@@ -239,6 +239,42 @@ class ServeComponentPublicationsTest {
   }
 
   @Test
+  fun `descriptor limit counts UTF-8 bytes while other JSON keeps its larger limit`() {
+    val path = bundle()
+    val file = path.resolve("preview.json")
+    val descriptor = Json.parseToJsonElement(Files.readString(file)).jsonObject
+    val data = descriptor.getValue("data").jsonObject + ("notes" to JsonPrimitive("é".repeat(100)))
+    val json = JsonObject(descriptor + ("data" to JsonObject(data))).toString()
+    val exact = json + " ".repeat(64 * 1024 - json.toByteArray(Charsets.UTF_8).size)
+    Files.writeString(file, exact)
+    assertEquals(64L * 1024, Files.size(file))
+    assertTrue(exact.length < 64 * 1024)
+
+    val manifestFile = path.resolve("catalog/manifest.json")
+    val manifest = Files.readString(manifestFile)
+    Files.writeString(
+      manifestFile,
+      manifest + " ".repeat(1024 * 1024 - manifest.toByteArray(Charsets.UTF_8).size),
+    )
+    seal(path)
+    start()
+    for (suffix in listOf("", "preview.json", "catalog/manifest.json")) {
+      request("/p/quantity/r/one/$suffix").use { assertEquals(200, it.code) }
+    }
+
+    Files.writeString(file, exact + " ")
+    assertEquals(64L * 1024 + 1, Files.size(file))
+    assertTrue((exact + " ").length < 64 * 1024)
+    seal(path)
+    for (suffix in listOf("", "preview.json", "thumbnail.png")) {
+      request("/p/quantity/r/one/$suffix").use {
+        assertEquals(404, it.code)
+        assertEquals("no-store", it.header("Cache-Control"))
+      }
+    }
+  }
+
+  @Test
   fun `maximum relative asset path fits beneath maximum publication identifiers`() {
     val id = "a".repeat(64)
     val revision = "b".repeat(64)

@@ -108,8 +108,9 @@ keeps `frame-ancestors 'self'`. Only publication page/embed paths gain Wasm comp
 
 The descriptor must use `canonicalUrl: "./"` and `catalog.manifestUrl: "./catalog/manifest.json"`,
 and its publication ID/revision must match the installed directory. Identifiers match
-`[a-z0-9][a-z0-9-]{0,63}`. At most 128 files, 16 MiB per file, 32 MiB total, 1 MiB per JSON file and
-64 KiB for the inventory are accepted. Relative file paths are at most 240 characters with ASCII
+`[a-z0-9][a-z0-9-]{0,63}`. At most 128 files, 16 MiB per file, 32 MiB total, 64 KiB of UTF-8 bytes
+for `preview.json`, 1 MiB for other JSON files and 64 KiB for the inventory are accepted.
+Relative file paths are at most 240 characters with ASCII
 segments of at most 100 characters, starting with an alphanumeric character. Dot/hidden segments,
 traversal and symlinks are refused. `thumbnail.png` must have the PNG signature. The server verifies
 the complete bounded inventory on each request; this initial implementation favors straightforward
