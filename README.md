@@ -143,7 +143,9 @@ already running finishes first. The loading page retries automatically until the
 ## Agent plugins
 
 Experimental public Remote Compose component previews can be hosted from operator-installed immutable
-bundles, with anonymous HTML/unfurls, descriptor discovery and an optional Livery viewer. See
+bundles, with anonymous HTML/unfurls, descriptor discovery and an optional Livery viewer. Livery's
+`livery-server` library owns these routes; this host supplies configuration and policy. This consumer
+requires the pending Livery 0.8.0 publication. See
 [component publication hosting](docs/development/COMPONENT_PUBLICATIONS.md) for installation,
 configuration, cache/withdrawal behavior and the separate private-editor boundary.
 

@@ -10,10 +10,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.jsonObject
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.junit.jupiter.api.io.TempDir
@@ -48,11 +46,16 @@ class ServeComponentPublicationsTest {
           componentPublications =
             if (!enabled) null
             else
-              ServeComponentPublications(
-                publicationRoot,
-                viewerRoot.takeIf { viewer },
-                "https://preview.example",
-                """{"keys":[{"keyId":"publisher","publicKey":"public-test-key"}]}""",
+              ServeComponentPublications.fromEnvironment(
+                buildMap {
+                  put("SERVE_COMPONENT_PUBLICATIONS_DIR", publicationRoot.toString())
+                  put("SERVE_COMPONENT_PUBLICATIONS_ORIGIN", "https://preview.example")
+                  if (viewer) put("SERVE_COMPONENT_VIEWER_DIR", viewerRoot.toString())
+                  put(
+                    "SERVE_COMPONENT_VIEWER_CONFIG",
+                    """{"keys":[{"keyId":"publisher","publicKey":"public-test-key"}]}""",
+                  )
+                },
               ),
         )
         .also(ServeHttpServer::start)
@@ -189,7 +192,7 @@ class ServeComponentPublicationsTest {
   }
 
   @Test
-  fun `incomplete modified unlisted and private neighboring content is never published`() {
+  fun `unlisted and private neighboring content is never published`() {
     val path = bundle()
     start()
     Files.writeString(path.resolve("private-editor-history.json"), "secret")
@@ -202,27 +205,6 @@ class ServeComponentPublicationsTest {
       )) {
       request("/p/quantity/r/one/$file").use { assertTrue(it.code != 200, file) }
     }
-    Files.writeString(path.resolve("preview.json"), "changed without marker")
-    request("/p/quantity/r/one/").use { assertEquals(404, it.code) }
-    bundle()
-    Files.delete(path.resolve("publication-files.json"))
-    request("/p/quantity/r/one/thumbnail.png").use { assertEquals(404, it.code) }
-  }
-
-  @Test
-  fun `symlinks and script files are refused even when inventoried`() {
-    val path = bundle()
-    start()
-    val template = Files.list(path.resolve("catalog/templates")).use { it.findFirst().get() }
-    val outside = directory.resolve("external.rc")
-    Files.move(template, outside)
-    Files.createSymbolicLink(template, outside)
-    request("/p/quantity/r/one/").use { assertEquals(404, it.code) }
-    Files.delete(template)
-    Files.move(outside, template)
-    Files.writeString(path.resolve("catalog/action.js"), "alert(1)")
-    seal(path)
-    request("/p/quantity/r/one/").use { assertEquals(404, it.code) }
   }
 
   @Test
@@ -239,64 +221,11 @@ class ServeComponentPublicationsTest {
   }
 
   @Test
-  fun `descriptor limit counts UTF-8 bytes while other JSON keeps its larger limit`() {
-    val path = bundle()
-    val file = path.resolve("preview.json")
-    val descriptor = Json.parseToJsonElement(Files.readString(file)).jsonObject
-    val data = descriptor.getValue("data").jsonObject + ("notes" to JsonPrimitive("é".repeat(100)))
-    val json = JsonObject(descriptor + ("data" to JsonObject(data))).toString()
-    val exact = json + " ".repeat(64 * 1024 - json.toByteArray(Charsets.UTF_8).size)
-    Files.writeString(file, exact)
-    assertEquals(64L * 1024, Files.size(file))
-    assertTrue(exact.length < 64 * 1024)
-
-    val manifestFile = path.resolve("catalog/manifest.json")
-    val manifest = Files.readString(manifestFile)
-    Files.writeString(
-      manifestFile,
-      manifest + " ".repeat(1024 * 1024 - manifest.toByteArray(Charsets.UTF_8).size),
-    )
-    seal(path)
-    start()
-    for (suffix in listOf("", "preview.json", "catalog/manifest.json")) {
-      request("/p/quantity/r/one/$suffix").use { assertEquals(200, it.code) }
-    }
-
-    Files.writeString(file, exact + " ")
-    assertEquals(64L * 1024 + 1, Files.size(file))
-    assertTrue((exact + " ").length < 64 * 1024)
-    seal(path)
-    for (suffix in listOf("", "preview.json", "thumbnail.png")) {
-      request("/p/quantity/r/one/$suffix").use {
-        assertEquals(404, it.code)
-        assertEquals("no-store", it.header("Cache-Control"))
-      }
-    }
-  }
-
-  @Test
-  fun `maximum relative asset path fits beneath maximum publication identifiers`() {
-    val id = "a".repeat(64)
-    val revision = "b".repeat(64)
-    bundle(revision)
-    Files.move(publicationRoot.resolve("quantity"), publicationRoot.resolve(id))
-    val path = publicationRoot.resolve("$id/r/$revision")
-    val descriptor =
-      Json.parseToJsonElement(Files.readString(path.resolve("preview.json"))).jsonObject
-    Files.writeString(
-      path.resolve("preview.json"),
-      JsonObject(descriptor + ("publicationId" to JsonPrimitive(id))).toString(),
-    )
-    val relative =
-      "catalog/" + "a".repeat(99) + "/" + "b".repeat(99) + "/" + "c".repeat(28) + ".bin"
-    assertEquals(240, relative.length)
-    Files.createDirectories(path.resolve(relative).parent)
-    Files.writeString(path.resolve(relative), "long path asset")
-    seal(path)
-    start()
-    request("/p/$id/r/$revision/$relative").use {
-      assertEquals(200, it.code)
-      assertEquals("long path asset", it.body.string())
+  fun `disabled publication setting leaves public routes unavailable`() {
+    bundle()
+    start(enabled = false)
+    for (path in listOf("/p/quantity/r/one/", "/assets/livery-preview/viewer.js")) {
+      request(path).use { assertEquals(404, it.code) }
     }
   }
 

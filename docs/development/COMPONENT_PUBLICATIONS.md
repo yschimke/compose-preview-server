@@ -2,8 +2,20 @@
 
 This experimental host serves **explicitly copied public artifacts**, independently of private UI
 Builder designs. It does not enable the default-off RC exporter, change source-design access,
-publish editor history, accept HTTP uploads or introduce an AT Protocol record. A release of the
-Livery viewer is not required: the operator can install a reviewed local viewer distribution.
+publish editor history, accept HTTP uploads or introduce an AT Protocol record.
+
+The publication reader, format validation, discovery, fallback HTML and reusable Ktor routes belong
+to Livery's [`livery-server` module](https://github.com/yschimke/livery/blob/main/livery-server/README.md).
+`ServeComponentPublications` only translates host configuration into that library. This server owns
+its deployment settings, startup, authentication boundaries and CSP/Caddy policy. It does not keep a
+second descriptor parser or installation-format implementation.
+
+**Release prerequisite:** the default graph requires `ee.schimke.composeai:livery-server:0.8.0` from
+Maven Central. The consumer change remains draft/release-gated until the Livery 0.8.0 release
+([livery#49](https://github.com/yschimke/livery/pull/49)) includes and publishes that artifact. Local
+verification uses the existing [staged-publication workflow](LOCAL_DEPENDENCIES.md); it does not
+change default resolution or add a source checkout dependency. The optional browser viewer remains
+an operator-installed, reviewed distribution.
 
 ## Install and configure
 
@@ -106,15 +118,12 @@ the same canonical page URL and an absolute descriptor path. Only the precise em
 from framing restrictions in both the server CSP and image Caddy configuration; the ordinary page
 keeps `frame-ancestors 'self'`. Only publication page/embed paths gain Wasm compilation permission.
 
-The descriptor must use `canonicalUrl: "./"` and `catalog.manifestUrl: "./catalog/manifest.json"`,
-and its publication ID/revision must match the installed directory. Identifiers match
-`[a-z0-9][a-z0-9-]{0,63}`. At most 128 files, 16 MiB per file, 32 MiB total, 64 KiB of UTF-8 bytes
-for `preview.json`, 1 MiB for other JSON files and 64 KiB for the inventory are accepted.
-Relative file paths are at most 240 characters with ASCII
-segments of at most 100 characters, starting with an alphanumeric character. Dot/hidden segments,
-traversal and symlinks are refused. `thumbnail.png` must have the PNG signature. The server verifies
-the complete bounded inventory on each request; this initial implementation favors straightforward
-integrity checks over a persistent cache and should be measured before high-volume hosting.
+Livery owns the descriptor, inventory, path rules and size limits; consult its
+[`livery-server` documentation](https://github.com/yschimke/livery/blob/main/livery-server/README.md) and
+[component-preview sample](https://github.com/yschimke/livery/tree/main/samples/component-preview)
+for the current experimental installation contract. The library verifies the complete bounded
+inventory on each request; this initial implementation favors straightforward integrity checks over
+a persistent cache and should be measured before high-volume hosting.
 
 ## Retention and withdrawal
 
@@ -141,7 +150,8 @@ UPDATE_SERVE_SETTINGS_REFERENCE=true scripts/agent-gradle.sh :server:test \
 ```
 
 HTTP tests run the real server with an operator token and make anonymous requests. They cover SSR
-escaping/discovery, GET/HEAD and validators, revision isolation, withdrawal, partial/mutated bundles,
-unlisted/private neighboring files, symlinks, executable-content refusal and the narrow embed policy.
-Livery's separate viewer browser tests exercise rendering, local actions and sharing. Deployment and
+discovery, GET/HEAD and validators, revision isolation, withdrawal, unlisted/private neighboring
+files, environment configuration, disabled hosting and the narrow embed policy. Livery's store and
+route tests own format validation, integrity, path containment and byte-limit cases; its separate
+viewer browser tests exercise rendering, local actions and sharing. Deployment and
 the authenticated selected-revision UI Builder publication flow remain subsequent steps.

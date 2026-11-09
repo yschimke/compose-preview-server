@@ -16,6 +16,33 @@ spec.loader.exec_module(stage_local)
 
 
 class StageTest(unittest.TestCase):
+    def test_explicit_version_property_matches_the_staged_publication(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "gradlew").touch()
+
+            def publish(command, **kwargs):
+                if command[0] == "git":
+                    return subprocess.CompletedProcess(command, 0, stdout="fixture\n")
+                version = kwargs["env"]["PLUGIN_VERSION"]
+                self.assertIn(f"-Plivery.version={version}", command)
+                repository = root / "staging/repository/ee/schimke/composeai/livery-server" / version
+                repository.mkdir(parents=True)
+                (repository / "livery-server.pom").write_text(
+                    '<project xmlns="http://maven.apache.org/POM/4.0.0">'
+                    '<groupId>ee.schimke.composeai</groupId><artifactId>livery-server</artifactId>'
+                    f"<version>{version}</version></project>"
+                )
+                return subprocess.CompletedProcess(command, 0)
+
+            with patch.object(stage_local.subprocess, "run", side_effect=publish):
+                manifest = stage_local.stage(root, [":livery-server"], root / "staging", "livery.version")
+            self.assertIn("ee.schimke.composeai:livery-server:0.0.0-local-", manifest.read_text())
+            for invalid in ("-Pversion", "version=release", "version value"):
+                with self.assertRaisesRegex(ValueError, "version property"):
+                    stage_local.stage(root, [":livery-server"], root / "invalid", invalid)
+            self.assertFalse((root / "invalid").exists())
+
     def test_stages_actual_publications_and_preserves_previous_selection_on_failure(self):
         with tempfile.TemporaryDirectory(prefix="local dependencies ") as directory:
             root = Path(directory)

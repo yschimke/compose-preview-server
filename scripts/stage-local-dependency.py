@@ -15,12 +15,14 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def stage(checkout: Path, modules: list[str], output: Path) -> Path:
+def stage(checkout: Path, modules: list[str], output: Path, version_property: str | None = None) -> Path:
     checkout = checkout.resolve(strict=True)
     if not (checkout / "gradlew").is_file():
         raise ValueError(f"No Gradle wrapper in {checkout}")
     if not modules or any(not re.fullmatch(r"(:[A-Za-z0-9_-]+)+", m) for m in modules):
         raise ValueError("Name one or more Gradle project paths, such as :ui-builder-protocol")
+    if version_property is not None and not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]*", version_property):
+        raise ValueError("Name a Gradle version property, without a value or command-line prefix")
     # These two upstream publications compile the same generator sources. The server carries
     # both, so replacing only screen-model would let classpath order pick an older generator.
     generator_projects = {":screen-model", ":gradle-plugin:preview-discovery"}
@@ -38,6 +40,7 @@ def stage(checkout: Path, modules: list[str], output: Path) -> Path:
         str(checkout / "gradlew"), "--no-daemon", "--no-configuration-cache",
         "--init-script", str(ROOT / "scripts/local-dependencies/publish.init.gradle"),
         f"-PuiBuilderLocalRepository={repository}",
+        *([f"-P{version_property}={version}"] if version_property else []),
         *[f"{module}:publishAllPublicationsToUiBuilderLocalRepository" for module in modules],
     ]
     subprocess.run(command, cwd=checkout, env=env, check=True)
@@ -74,6 +77,7 @@ def stage(checkout: Path, modules: list[str], output: Path) -> Path:
     provenance.write_text(json.dumps({
         "checkout": str(checkout), "head": git_head.stdout.strip(),
         "status": git_status.stdout, "modules": modules, "coordinates": sorted(coordinates),
+        "versionProperty": version_property,
     }, indent=2) + "\n")
 
     # The repository is relative to the manifest, so spaces and non-ASCII checkout paths need no
@@ -93,11 +97,11 @@ def main() -> None:
     parser.add_argument("--checkout", type=Path, required=True)
     parser.add_argument("--module", action="append", required=True, help="Repeat for dependent projects")
     parser.add_argument("--output", type=Path, default=ROOT / "build/local-dependencies")
+    parser.add_argument("--version-property", help="Upstream Gradle property that selects its version, e.g. livery.version")
     args = parser.parse_args()
-    manifest = stage(args.checkout, args.module, args.output)
+    manifest = stage(args.checkout, args.module, args.output, args.version_property)
     print(f"\nLocal dependencies staged. Build the existing application with:\n"
-          f"./gradlew {shlex.quote('-PlocalDependencies=' + str(manifest))} "
-          "-PcomposeUiBuilderDir=../compose-ui-builder :server:test")
+          f"./gradlew {shlex.quote('-PlocalDependencies=' + str(manifest))} :server:test")
 
 
 if __name__ == "__main__":

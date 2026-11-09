@@ -55,3 +55,22 @@ This development path uses Gradle's
 [exclusive repository filtering](https://docs.gradle.org/current/userguide/filtering_repository_content.html)
 and [dependency resolution rules](https://docs.gradle.org/current/userguide/resolution_rules.html).
 It does not change the published module boundaries or introduce a global `mavenLocal()` repository.
+
+## Livery publication hosting
+
+For an unpublished change to Livery's optional JVM server library, stage its normal Maven
+publication with the property that Livery uses for version selection:
+
+```shell
+python3 scripts/stage-local-dependency.py \
+  --checkout ../livery --module :livery-server --version-property livery.version
+scripts/agent-gradle.sh \
+  -PlocalDependencies=build/local-dependencies/local-dependencies.properties \
+  :server:test --tests '*ServeComponentPublicationsTest*'
+```
+
+`--version-property` passes the generated unique snapshot version as that Gradle project
+property; the existing environment-based version selectors remain available. This changes
+neither source files nor release tags. It is an explicit local integration check, not proof
+that the default released dependency is available. Publish the Livery release and confirm the
+catalog pin before merging the host adapter; normal builds use no staging override.
