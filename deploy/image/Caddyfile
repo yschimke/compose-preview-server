@@ -96,7 +96,8 @@
 	# policy for them belongs in the app next to the markup it describes. The app sets one
 	# on every HTML response (ServePagePolicy.kt), omitting frame-ancestors on these same
 	# framable paths.
-	@sameOriginFramesOnly not path /iframe.html /*/iframe.html /wasm/* /ui-builder/runtime/*
+	# Component previews permit external framing only at the exact revision's embed URL.
+	@sameOriginFramesOnly not path_regexp framedPages `^(?:/iframe\.html|/.*/iframe\.html|/wasm/.*|/ui-builder/runtime/.*|/p/[a-z0-9][a-z0-9-]{0,63}/r/[a-z0-9][a-z0-9-]{0,63}/embed/?)$`
 	header @sameOriginFramesOnly ?X-Frame-Options SAMEORIGIN
 }
 

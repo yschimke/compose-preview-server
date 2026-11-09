@@ -667,6 +667,8 @@ dependencies {
   // The build-host protocol, `implementation`: only `ServeBuildHost` is programmed against
   // elsewhere.
   implementation(libs.composeai.build.host.protocol)
+  // Reusable publication reader and Ktor routes; host auth, CSP and settings stay here.
+  implementation(libs.livery.server)
   // Authoritative persistence, validation, collaboration and export orchestration. The server
   // supplies Ktor/auth and the narrow render-host adapter; the runtime has neither dependency.
   api(libs.composeai.ui.builder.runtime)
@@ -1042,6 +1044,8 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
       "ee.schimke.composeai:data-theme-core",
       "ee.schimke.composeai:parity-issues-protocol",
       "ee.schimke.composeai:preview-data-api",
+      // Only the publication hosting seam; no Livery player, authoring or binder dependencies.
+      "ee.schimke.composeai:livery-server",
       // The render host, published from compose-ai-tools.
       "ee.schimke.composeai:build-host-protocol",
       "ee.schimke.composeai:render-host",

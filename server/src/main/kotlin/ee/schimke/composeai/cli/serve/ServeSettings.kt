@@ -236,6 +236,34 @@ object ServeSettings {
   val ALL: List<Setting> =
     listOf(
       Setting(
+        "componentPublications.directory",
+        "SERVE_COMPONENT_PUBLICATIONS_DIR",
+        Type.Text(),
+        Apply.RESTART,
+        "Directory of explicitly installed public component publication bundles. Disabled when absent; never point this at private editor state.",
+      ),
+      Setting(
+        "componentPublications.origin",
+        "SERVE_COMPONENT_PUBLICATIONS_ORIGIN",
+        Type.Text(),
+        Apply.RESTART,
+        "Canonical HTTPS origin for public component preview links and unfurls. HTTP is allowed only for loopback development.",
+      ),
+      Setting(
+        "componentPublications.viewerDirectory",
+        "SERVE_COMPONENT_VIEWER_DIR",
+        Type.Text(),
+        Apply.RESTART,
+        "Optional operator-installed Livery viewer distribution mounted at /assets/livery-preview/. Without it, previews retain their static fallback.",
+      ),
+      Setting(
+        "componentPublications.viewerConfig",
+        "SERVE_COMPONENT_VIEWER_CONFIG",
+        Type.Text(),
+        Apply.RESTART,
+        "JSON object string configuring the viewer's trusted public signing keys and capabilities. Defaults to {}; unsigned catalogs require explicit development opt-in. Never put secrets here.",
+      ),
+      Setting(
         "uiBuilder.adminActors",
         "SERVE_UI_BUILDER_ADMIN_ACTORS",
         Type.Names(

@@ -410,6 +410,9 @@ class ServeHttpServer(
    * setting, with each value's source. Gated by [adminToken]; null ⇒ not registered.
    */
   private val settingsAdmin: ServeSettingsAdmin? = null,
+  /** Explicit operator-installed public artifacts; never reads private editor state. */
+  private val componentPublications: ServeComponentPublications? =
+    ServeComponentPublications.fromEnvironment(),
   /**
    * Runtime UI-builder administration ([ServeUiBuilderAdmin]): list every design and delete any.
    * Gated by [adminToken], [adminReadToken], or a configured [uiBuilderAdministrators] identity;
@@ -1318,6 +1321,7 @@ class ServeHttpServer(
         }
       }
       routing {
+        componentPublications?.install(this)
         if (uiBuilderCapabilities != null) {
           // Public catalog definitions. An MCP App iframe has an opaque origin and reads these
           // without a design credential; the same capabilities are already in the editor archive.

@@ -9,6 +9,52 @@
     "$schema": {
       "type": "string"
     },
+    "componentPublications": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "directory": {
+          "description": "Directory of explicitly installed public component publication bundles. Disabled when absent; never point this at private editor state.",
+          "type": "string",
+          "minLength": 1,
+          "x-env": "SERVE_COMPONENT_PUBLICATIONS_DIR",
+          "x-apply": "restart",
+          "x-roles": [
+            "preview"
+          ]
+        },
+        "origin": {
+          "description": "Canonical HTTPS origin for public component preview links and unfurls. HTTP is allowed only for loopback development.",
+          "type": "string",
+          "minLength": 1,
+          "x-env": "SERVE_COMPONENT_PUBLICATIONS_ORIGIN",
+          "x-apply": "restart",
+          "x-roles": [
+            "preview"
+          ]
+        },
+        "viewerDirectory": {
+          "description": "Optional operator-installed Livery viewer distribution mounted at /assets/livery-preview/. Without it, previews retain their static fallback.",
+          "type": "string",
+          "minLength": 1,
+          "x-env": "SERVE_COMPONENT_VIEWER_DIR",
+          "x-apply": "restart",
+          "x-roles": [
+            "preview"
+          ]
+        },
+        "viewerConfig": {
+          "description": "JSON object string configuring the viewer's trusted public signing keys and capabilities. Defaults to {}; unsigned catalogs require explicit development opt-in. Never put secrets here.",
+          "type": "string",
+          "minLength": 1,
+          "x-env": "SERVE_COMPONENT_VIEWER_CONFIG",
+          "x-apply": "restart",
+          "x-roles": [
+            "preview"
+          ]
+        }
+      }
+    },
     "uiBuilder": {
       "type": "object",
       "additionalProperties": false,
