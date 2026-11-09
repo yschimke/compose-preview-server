@@ -10,12 +10,12 @@ to Livery's [`livery-server` module](https://github.com/yschimke/livery/blob/mai
 its deployment settings, startup, authentication boundaries and CSP/Caddy policy. It does not keep a
 second descriptor parser or installation-format implementation.
 
-**Release prerequisite:** the default graph requires `ee.schimke.composeai:livery-server:0.8.0` from
-Maven Central. The consumer change remains draft/release-gated until the Livery 0.8.0 release
-([livery#49](https://github.com/yschimke/livery/pull/49)) includes and publishes that artifact. Local
-verification uses the existing [staged-publication workflow](LOCAL_DEPENDENCIES.md); it does not
-change default resolution or add a source checkout dependency. The optional browser viewer remains
-an operator-installed, reviewed distribution.
+The default graph resolves `ee.schimke.composeai:livery-server:0.8.0` from Maven Central,
+where the library was published by [livery#49](https://github.com/yschimke/livery/pull/49).
+Normal builds require no local checkout or staging override. For development against an
+unpublished library change, use the opt-in [staged-publication workflow](LOCAL_DEPENDENCIES.md).
+The optional browser viewer remains a separate operator-installed, reviewed distribution;
+the Maven library does not contain or download it.
 
 ## Install and configure
 

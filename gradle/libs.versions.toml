@@ -469,8 +469,7 @@ composeai-contracts = "3.42.0"
 # `hostLogic` check and `ui_builder_simulate_action`. It brings quickjs4j, run.endive and
 # jackson-databind onto the server's classpath through the runtime.
 composeai-ui-builder = "3.130.0"
-# Release prerequisite: livery#49 must publish 0.8.0 including livery-server before this
-# consumer can merge. Local verification uses the opt-in staged-publication workflow.
+# First published version of the optional publication server library (Maven Central).
 livery = "0.8.0"
 # The Android Remote Compose players the server's own player-only Android daemon replays documents
 # with, staged as `lib-rc-players-android/` (`stageRcPlayersAndroidLibs`). The Android daemon
@@ -526,8 +525,8 @@ composeai-remotecompose-json = { module = "ee.schimke.composeai:remotecompose-js
 # what lets `checkServeModuleBoundary` keep holding while the server gains the capability
 # yschimke/compose-preview-server#9 asked for.
 composeai-build-host-protocol = { module = "ee.schimke.composeai:build-host-protocol" }
-# Livery owns the experimental publication reader and reusable Ktor routes. It has no BOM and
-# this is the only Livery module allowed on the server's resolved classpath.
+# Livery owns the experimental publication reader and reusable Ktor routes. Pin this one
+# module directly; it is the only Livery module allowed on the server's resolved classpath.
 livery-server = { module = "ee.schimke.composeai:livery-server", version.ref = "livery" }
 # The upstream BOMs pin the Compose Preview modules below. Livery above and the three
 # UI-builder release assets (`-web`, `-render-bundle`, `-export-fonts`) carry explicit versions;
