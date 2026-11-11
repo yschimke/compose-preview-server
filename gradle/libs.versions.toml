@@ -482,7 +482,7 @@ livery = "0.9.0"
 # daemon (`stageRcPlayerDesktopLibs`); compose-preview-daemon's desktop binding is compiled against
 # this release's `rc-player-compose`. The CMP/Wasm player's browser bundle (`rc-player-wasm` below)
 # comes from the same release, so it moves with this ref too.
-rc-players-android = "2.32.1"
+rc-players-android = "2.33.0"
 compose-remote = "1.0.0-alpha23"
 # The TypeScript player's browser bundle (`remote-compose-player-js-dist`, a zip with the `dist`
 # classifier). Its own ref because rc-players publishes only the modules a release changed: the
