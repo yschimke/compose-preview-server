@@ -297,7 +297,7 @@ composeai-preview-daemon = "3.27.5"
 # 3.36.0 shares the versioned published template-document envelope (contracts #191).
 # 3.42.0 names a host input's persistence (`"persistence": "host"`, contracts #220), so a stored
 # design can declare the host inputs its host logic sets.
-composeai-contracts = "3.42.0"
+composeai-contracts = "3.43.0"
 
 # The extracted UI builder (yschimke/compose-ui-builder), resolved from its RELEASES. Three jars
 # and a BOM on Maven Central, and the editor archive as a GitHub release asset reached through the
