@@ -194,7 +194,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           # CI's `serve-web` job's Node, so the rebuild is byte-for-byte what its check rebuilds.
-          node-version: 26.13.0
+          node-version: 26.13.1
           cache: npm
           cache-dependency-path: serve-web/package-lock.json
       # Before the goldens: the page fixtures are rendered by a server that serves these bundles.
