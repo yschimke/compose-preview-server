@@ -107,8 +107,14 @@ internal object CatalogLiveRouting {
     add("themeProvider", dropped.themeProvider)
     add("focus", dropped.focus)
     add("gestures", dropped.gestures)
+    add("ambient", dropped.ambient)
+    add("clockEpochMillis", dropped.clockEpochMillis)
     add("clearBackground", dropped.clearBackground)
-    dropped.namedOverrides?.keys?.sorted()?.forEach { names += "${ServeOverrides.KNOB_PREFIX}$it" }
+    dropped.namedOverrides?.keys?.sorted()?.forEach { key ->
+      names +=
+        if (key.startsWith(WatchFaceOverrides.WF_PREFIX)) key
+        else "${ServeOverrides.KNOB_PREFIX}$key"
+    }
     dropped.remoteCompose?.let { rc ->
       add("rcProfile", rc.profile)
       // `?rcPlayer=` reaches the override as the built-in `player` or, for any other player, as
@@ -152,11 +158,16 @@ internal object CatalogLiveRouting {
     val names = mutableListOf<String>()
     if (dropped.localeTag != null) names += "localeTag"
     if (dropped.themeProvider != null) names += "themeProvider"
-    dropped.namedOverrides?.keys?.sorted()?.forEach { names += "${ServeOverrides.KNOB_PREFIX}$it" }
+    dropped.namedOverrides
+      ?.keys
+      ?.filterNot { it.startsWith(WatchFaceOverrides.WF_PREFIX) }
+      ?.sorted()
+      ?.forEach { names += "${ServeOverrides.KNOB_PREFIX}$it" }
     dropped.remoteCompose
       ?.namedValues
       ?.filterValues { it is RemoteNamedValue.StringValue }
       ?.keys
+      ?.filterNot { it.startsWith("dwf.") || it.startsWith("metrics.") }
       ?.sorted()
       ?.forEach { names += "${ServeOverrides.RC_NAMED_PREFIX}$it" }
     return names

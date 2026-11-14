@@ -14401,6 +14401,12 @@ ${scriptTag("known-differences.js")}
      * [ServeRcPlayerIds.defaultPlayer].
      */
     preferredRcPlayer: String? = null,
+    /**
+     * Registered watch-face render backends ([WatchFaceRendererRegistry.renderersFor]) for a
+     * watch-face preview. Non-empty replaces the generic Remote Compose player options in
+     * `#cp-lane-select` with `wf:<id>` options (`wfRenderer=<id>`).
+     */
+    watchFaceRenderers: List<WatchFaceRendererInfo> = emptyList(),
     wasmSrc: String? = null,
     /**
      * Whether the Wasm iframe may use `allow-same-origin` rather than the opaque-origin
@@ -14694,6 +14700,8 @@ ${scriptTag("known-differences.js")}
       if (pinned == null) enabledRcPlayers.map(ServeRcPlayerIds::normalizeRequest).distinct()
       else emptyList()
     @Suppress("NAME_SHADOWING")
+    val watchFaceRenderers = if (pinned == null) watchFaceRenderers else emptyList()
+    @Suppress("NAME_SHADOWING")
     val bakedRcPlayer = ServeRcPlayerIds.fromCaptureRecord(bakedRcPlayer).orEmpty()
     @Suppress("NAME_SHADOWING")
     val hasA11yOverlay = hasA11yOverlay && pinned == null && !componentBrowser
@@ -14982,12 +14990,24 @@ ${scriptTag("known-differences.js")}
     // enabled, else `androidx-embedded`, else `androidx-view`, else the client `camaelon-js`
     // canvas. The rationale lives at [ServeRcPlayerIds.defaultPlayer].
     val defaultRcBackend = ServeRcPlayerIds.defaultPlayer(enabledRcPlayers, preferredRcPlayer)
-    // Every lane this preview can be drawn by, in display order: RC players (or the plain
-    // snapshot), the Wasm app, and the design spec. Players the host doesn't offer are listed
-    // disabled.
-    data class ViewerLane(val value: String, val label: String, val enabled: Boolean)
+    val defaultWfBackend =
+      watchFaceRenderers.firstOrNull { it.isDefault }?.id
+        ?: watchFaceRenderers.firstOrNull()?.id.orEmpty()
+    // Every lane this preview can be drawn by, in display order: watch-face renderers, RC players
+    // (or the plain snapshot), the Wasm app, and the design spec. Players/renderers the host
+    // doesn't offer are listed disabled.
+    data class ViewerLane(
+      val value: String,
+      val label: String,
+      val enabled: Boolean,
+      val badge: String? = null,
+    )
     val lanes = buildList {
-      if (enabledRcPlayers.isEmpty()) add(ViewerLane("png", "Snapshot", true))
+      if (watchFaceRenderers.isNotEmpty()) {
+        watchFaceRenderers.forEach { wf ->
+          add(ViewerLane("wf:${wf.id}", wf.label, wf.available, badge = wf.badgeLabel))
+        }
+      } else if (enabledRcPlayers.isEmpty()) add(ViewerLane("png", "Snapshot", true))
       else
         ServeRcPlayerIds.UNIVERSE.forEach { player ->
           add(ViewerLane("rc:${player.id}", player.label, player.id in rcEnabled))
@@ -15223,14 +15243,19 @@ ${scriptTag("known-differences.js")}
       else
         "<input type=\"radio\" name=\"cp-mode\" value=\"motion\" id=\"cp-motion-toggle\" " +
           "tabindex=\"-1\">"
-    val defaultLane = if (enabledRcPlayers.isEmpty()) "png" else "rc:$defaultRcBackend"
+    val defaultLane =
+      if (watchFaceRenderers.isNotEmpty()) "wf:$defaultWfBackend"
+      else if (enabledRcPlayers.isEmpty()) "png" else "rc:$defaultRcBackend"
     // Rendered only when there is another lane to switch to. A command menu: the placeholder shows
     // at rest and `syncLaneSelect` returns to it after each pick, since the chip beside it names
     // the current renderer.
     //
-    // In Catalog mode the switcher holds only Remote Compose players (Wasm has its own chip;
-    // "Snapshot" alone isn't a destination).
-    val selectLanes = if (componentBrowser) lanes.filter { it.value.startsWith("rc:") } else lanes
+    // In Catalog mode the switcher holds only Remote Compose players and watch-face renderers (Wasm
+    // has its own chip; "Snapshot" alone isn't a destination).
+    val selectLanes =
+      if (componentBrowser)
+        lanes.filter { it.value.startsWith("rc:") || it.value.startsWith("wf:") }
+      else lanes
     val laneSelectHtml =
       if (selectLanes.size < 2) ""
       else
@@ -15241,6 +15266,9 @@ ${scriptTag("known-differences.js")}
               "aria-label=\"Switch renderer\" " +
               "title=\"Draw this preview with a different renderer\" " +
               "data-default=\"$defaultLane\" data-rc-default=\"$defaultRcBackend\"" +
+              (if (defaultWfBackend.isNotEmpty())
+                " data-wf-default=\"${WebEscaping.htmlEscape(defaultWfBackend)}\""
+              else "") +
               (if (bakedRcPlayer.isNotEmpty()) " data-rc-baked-player=\"$bakedRcPlayer\"" else "") +
               // Catalog mode has no renderer chip, so the menu must hold its selection to show
               // which renderer is drawing.
@@ -15250,10 +15278,12 @@ ${scriptTag("known-differences.js")}
           postfix = "</select>",
         ) { lane ->
           val disabledAttr = if (lane.enabled) "" else " disabled"
+          val badgeAttr =
+            lane.badge?.let { " data-badge=\"${WebEscaping.htmlEscape(it)}\"" }.orEmpty()
           // `<option>` carries no tooltip anywhere reliable, so an unavailable lane says so in the
           // label itself rather than in a `title` nobody sees.
           val text = if (lane.enabled) lane.label else "${lane.label} (unavailable)"
-          "<option value=\"${lane.value}\"$disabledAttr>" +
+          "<option value=\"${lane.value}\"$badgeAttr$disabledAttr>" +
             "${WebEscaping.htmlEscape(text)}</option>"
         }
     // A subtle link to the format-comparison page focused on this preview's Remote Compose lane; it
@@ -16380,6 +16410,7 @@ ${scriptTag("known-differences.js")}
           </details>
           $overlaysHtml
           $featureControlsHtml
+          ${watchFaceControlsHtml(preview, overridesLive, requestOverrides)}
           ${overrideKnobsHtml(preview, canApplyOverrides || canRenderOverrides, wasmSrc != null, requestOverrides)}
           ${if (componentBrowser) "" else remoteComposeKnobsHtml(preview, canApplyOverrides || canRenderOverrides || hasRcWasm, requestOverrides)}
           <div class="cp-status" id="cp-status"></div>
@@ -17531,6 +17562,219 @@ ${(if (brand == null) ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compo
       is ee.schimke.composeai.daemon.protocol.RemoteNamedValue.BooleanValue -> v.value.toString()
       is ee.schimke.composeai.daemon.protocol.RemoteNamedValue.ColorValue -> v.argb
     }
+
+  private fun wfNumberText(v: Float): String {
+    val asInt = v.toInt()
+    return if (v == asInt.toFloat()) asInt.toString() else v.toString()
+  }
+
+  /**
+   * Renders Declarative Watch Face (`<WatchFace>`) controls: ambient mode, preview time, sensor
+   * overrides, declared user configurations, and per-slot complication type + data overrides.
+   *
+   * Every control carries `.cp-wf-field`, `data-wf-key` (the renderer-neutral query/WebSocket key
+   * accepted by [WatchFaceOverrides] across both DWF RemoteCompose and DWF Renderer APK backends),
+   * and `data-wf-initial` (the baked value omitted on plain browse).
+   */
+  private fun watchFaceControlsHtml(
+    preview: ServePreview,
+    canApplyOverrides: Boolean,
+    requestOverrides: Map<String, String> = emptyMap(),
+  ): String {
+    if (!preview.isWatchFace) return ""
+    val wf = preview.watchFace
+    val dis = if (canApplyOverrides) "" else " disabled"
+    val initialAmbient = boolText((wf?.isAmbient ?: false).toString())
+    val shownAmbient = requestOverrides["ambient"]?.let(::boolText) ?: initialAmbient
+    val ambientChecked = if (shownAmbient == "true") " checked" else ""
+
+    val bakedTime = wf?.previewTime?.takeIf { it.isNotBlank() } ?: "10:10:30"
+    val shownClock = requestOverrides["clockEpochMillis"].orEmpty()
+    val shownHr = requestOverrides["wf.heartRate"].orEmpty()
+    val shownSteps = requestOverrides["wf.stepCount"].orEmpty()
+    val shownBat = requestOverrides["wf.batteryPercent"].orEmpty()
+
+    val configRows =
+      wf?.userConfigurations.orEmpty().joinToString("\n") { cfg ->
+        val key = "wf.config.${cfg.id}"
+        val label = WebEscaping.htmlEscape(cfg.displayName.takeIf { it.isNotBlank() } ?: cfg.id)
+        val initial = cfg.activeValue.ifEmpty { cfg.defaultValue }
+        val shown = requestOverrides[key] ?: initial
+        val keyAttr = WebEscaping.htmlEscape(key)
+        if (cfg.kind.equals("BOOLEAN", ignoreCase = true)) {
+          val initBool = boolText(initial)
+          val checked = if (boolText(shown) == "true") " checked" else ""
+          "<label class=\"cp-live-row\"><input type=\"checkbox\" class=\"cp-wf-field\" " +
+            "data-wf-key=\"$keyAttr\" data-wf-initial=\"$initBool\"$checked$dis> $label</label>"
+        } else if (cfg.options.isNotEmpty()) {
+          val options =
+            (cfg.options + listOf(shown))
+              .filter { it.isNotEmpty() }
+              .distinct()
+              .map { PreviewOverrideOption(value = it, label = it) }
+          """
+          <label>$label
+            <select class="cp-wf-field" data-wf-key="$keyAttr" data-wf-initial="${WebEscaping.htmlEscape(initial)}"$dis>
+          ${selectOptionsHtml(options, shown)}
+            </select>
+          </label>
+          """
+            .trimIndent()
+        } else {
+          """
+          <label>$label
+            <input type="text" class="cp-wf-field" data-wf-key="$keyAttr" data-wf-initial="${WebEscaping.htmlEscape(initial)}" value="${WebEscaping.htmlEscape(shown)}"$dis>
+          </label>
+          """
+            .trimIndent()
+        }
+      }
+
+    val slotRows =
+      wf?.slots.orEmpty().joinToString("\n") { slot ->
+        val sid = slot.slotId
+        val active = slot.activeState
+        val typeKey = "wf.slot.$sid.type"
+        val initialType = active.type.ifBlank { "EMPTY" }
+        val shownType = (requestOverrides[typeKey] ?: initialType).uppercase(Locale.ROOT)
+        val typeChoices =
+          (listOf("EMPTY") +
+              slot.supportedTypes +
+              WatchFaceOverrides.KNOWN_COMPLICATION_TYPES +
+              listOf(shownType))
+            .map { it.trim().uppercase(Locale.ROOT) }
+            .filter { it.isNotEmpty() }
+            .distinct()
+        val supportedSet = slot.supportedTypes.mapTo(HashSet()) { it.uppercase(Locale.ROOT) }
+        val typeOptions = typeChoices.map { t ->
+          val tag =
+            if (t != "EMPTY" && supportedSet.isNotEmpty() && t in supportedSet) "$t ★" else t
+          PreviewOverrideOption(value = t, label = tag)
+        }
+
+        val textKey = "wf.slot.$sid.text"
+        val initText = active.text
+        val shownText = requestOverrides[textKey] ?: initText
+
+        val titleKey = "wf.slot.$sid.title"
+        val initTitle = active.title
+        val shownTitle = requestOverrides[titleKey] ?: initTitle
+
+        val valKey = "wf.slot.$sid.value"
+        val initVal = wfNumberText(active.value)
+        val shownVal = requestOverrides[valKey] ?: initVal
+
+        val minKey = "wf.slot.$sid.min"
+        val initMin = wfNumberText(active.min)
+        val shownMin = requestOverrides[minKey] ?: initMin
+
+        val maxKey = "wf.slot.$sid.max"
+        val initMax = wfNumberText(active.max)
+        val shownMax = requestOverrides[maxKey] ?: initMax
+
+        val colorsKey = "wf.slot.$sid.colors"
+        val initColors = active.colors.joinToString(",")
+        val shownColors = requestOverrides[colorsKey] ?: initColors
+
+        val weightsKey = "wf.slot.$sid.weights"
+        val initWeights = active.weights.joinToString(",") { wfNumberText(it) }
+        val shownWeights = requestOverrides[weightsKey] ?: initWeights
+
+        val providerHint =
+          slot.defaultSystemProvider
+            ?.takeIf { it.isNotBlank() }
+            ?.let { " · ${WebEscaping.htmlEscape(it)}" }
+            .orEmpty()
+
+        """
+        <div class="cp-wf-slot" data-slot-id="$sid">
+          <div class="cp-wf-slot-head">Slot #$sid$providerHint</div>
+          <label>Complication type
+            <select class="cp-wf-field" data-wf-key="$typeKey" data-wf-initial="${WebEscaping.htmlEscape(initialType)}"$dis>
+          ${selectOptionsHtml(typeOptions, shownType)}
+            </select>
+          </label>
+          <div class="cp-size-row">
+            <label>Text
+              <input type="text" class="cp-wf-field" data-wf-key="$textKey" data-wf-initial="${WebEscaping.htmlEscape(initText)}" value="${WebEscaping.htmlEscape(shownText)}" placeholder="e.g. 72"$dis>
+            </label>
+            <label>Title
+              <input type="text" class="cp-wf-field" data-wf-key="$titleKey" data-wf-initial="${WebEscaping.htmlEscape(initTitle)}" value="${WebEscaping.htmlEscape(shownTitle)}" placeholder="e.g. BPM"$dis>
+            </label>
+          </div>
+          <div class="cp-size-row">
+            <label>Value
+              <input type="number" step="any" class="cp-wf-field" data-wf-key="$valKey" data-wf-initial="${WebEscaping.htmlEscape(initVal)}" value="${WebEscaping.htmlEscape(shownVal)}"$dis>
+            </label>
+            <label>Min
+              <input type="number" step="any" class="cp-wf-field" data-wf-key="$minKey" data-wf-initial="${WebEscaping.htmlEscape(initMin)}" value="${WebEscaping.htmlEscape(shownMin)}"$dis>
+            </label>
+            <label>Max
+              <input type="number" step="any" class="cp-wf-field" data-wf-key="$maxKey" data-wf-initial="${WebEscaping.htmlEscape(initMax)}" value="${WebEscaping.htmlEscape(shownMax)}"$dis>
+            </label>
+          </div>
+          <div class="cp-size-row">
+            <label>Colors
+              <input type="text" class="cp-wf-field" data-wf-key="$colorsKey" data-wf-initial="${WebEscaping.htmlEscape(initColors)}" value="${WebEscaping.htmlEscape(shownColors)}" placeholder="#FF00FF,#00FFFF"$dis>
+            </label>
+            <label>Weights
+              <input type="text" class="cp-wf-field" data-wf-key="$weightsKey" data-wf-initial="${WebEscaping.htmlEscape(initWeights)}" value="${WebEscaping.htmlEscape(shownWeights)}" placeholder="1,2,1"$dis>
+            </label>
+          </div>
+        </div>
+        """
+          .trimIndent()
+      }
+
+    val note =
+      if (canApplyOverrides)
+        "Watch face state &amp; complications — edit ambient, time, sensors or slot data to re-render."
+      else "Watch face state &amp; complications — static snapshot, values are baked in."
+    return buildString {
+      appendLine("<details class=\"cp-group\" data-cp-group=\"watchface\" open>")
+      appendLine("  <summary>Watch face &amp; complications</summary>")
+      appendLine("  <div class=\"cp-group-body\">")
+      appendLine("    <div class=\"cp-knobs\">")
+      appendLine("      <div class=\"cp-knobs-head\">$note</div>")
+      appendLine(
+        "      <label class=\"cp-live-row\"><input id=\"cp-ambient\" type=\"checkbox\" " +
+          "class=\"cp-wf-field\" data-wf-key=\"ambient\" data-wf-initial=\"$initialAmbient\"$ambientChecked$dis> Ambient mode (AOD)</label>",
+      )
+      appendLine(
+        "      <label>Preview time\n" +
+          "        <input id=\"cp-clockEpochMillis\" type=\"text\" class=\"cp-wf-field\" " +
+          "data-wf-key=\"clockEpochMillis\" data-wf-initial=\"\" " +
+          "value=\"${WebEscaping.htmlEscape(shownClock)}\" " +
+          "placeholder=\"${WebEscaping.htmlEscape("$bakedTime (HH:mm:ss or epoch ms)")}\"$dis>\n" +
+          "      </label>",
+      )
+      appendLine("      <div class=\"cp-size-row\">")
+      appendLine(
+        "        <label>HR\n" +
+          "          <input type=\"number\" class=\"cp-wf-field\" data-wf-key=\"wf.heartRate\" " +
+          "data-wf-initial=\"\" value=\"${WebEscaping.htmlEscape(shownHr)}\" placeholder=\"72\"$dis>\n" +
+          "        </label>",
+      )
+      appendLine(
+        "        <label>Steps\n" +
+          "          <input type=\"number\" class=\"cp-wf-field\" data-wf-key=\"wf.stepCount\" " +
+          "data-wf-initial=\"\" value=\"${WebEscaping.htmlEscape(shownSteps)}\" placeholder=\"6500\"$dis>\n" +
+          "        </label>",
+      )
+      appendLine(
+        "        <label>Bat %\n" +
+          "          <input type=\"number\" class=\"cp-wf-field\" data-wf-key=\"wf.batteryPercent\" " +
+          "data-wf-initial=\"\" value=\"${WebEscaping.htmlEscape(shownBat)}\" placeholder=\"85\"$dis>\n" +
+          "        </label>",
+      )
+      appendLine("      </div>")
+      if (configRows.isNotBlank()) appendLine(configRows)
+      if (slotRows.isNotBlank()) appendLine(slotRows)
+      appendLine("    </div>")
+      appendLine("  </div>")
+      append("</details>")
+    }
+  }
 
   /**
    * A small built-in device menu: `device-token` → display name, using the `@Preview(device=…)`

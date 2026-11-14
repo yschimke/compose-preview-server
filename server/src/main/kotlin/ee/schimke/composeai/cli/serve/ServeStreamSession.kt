@@ -167,9 +167,42 @@ class ServeStreamSession(
     // (RenderOutcome.Busy from the serve host's bounded lock), retry a few times as it frees, then
     // surface an error rather than hang. (A catalog host serves baked instead of returning Busy, so
     // Busy only reaches here for a bare daemon-backed stream.)
+    val preview = renderHost.previews.firstOrNull { it.id == previewId }
+    val wfRendererId =
+      this.overrides[WatchFaceOverrides.WF_RENDERER_PARAM]?.takeIf { it.isNotBlank() }
+    val wfBackend =
+      if (preview?.isWatchFace == true || wfRendererId != null) {
+        val resolved = WatchFaceRendererRegistry.resolve(wfRendererId)
+        if (resolved == null) {
+          send(ServeStreamProtocol.errorMessage("unknown watch face renderer: $wfRendererId"))
+          return
+        }
+        if (preview == null) {
+          send(ServeStreamProtocol.errorMessage("no such preview"))
+          return
+        }
+        val info = resolved.infoFor(renderHost, preview)
+        if (!info.available) {
+          send(
+            ServeStreamProtocol.errorMessage(
+              info.unavailableReason ?: "${resolved.label} is not available",
+            ),
+          )
+          return
+        }
+        resolved
+      } else {
+        null
+      }
     var busyAttempts = 0
     while (true) {
-      when (val outcome = renderHost.render(previewId, overrides)) {
+      val outcome =
+        if (wfBackend != null && preview != null) {
+          wfBackend.render(renderHost, preview, overrides)
+        } else {
+          renderHost.render(previewId, overrides)
+        }
+      when (outcome) {
         is RenderOutcome.Ok -> {
           val (w, h) = WebEscaping.pngDimensions(outcome.png)
           send(ServeStreamProtocol.frameMessage(seq.getAndIncrement(), w, h, outcome.png))

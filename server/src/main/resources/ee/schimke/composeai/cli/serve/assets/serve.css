@@ -2814,6 +2814,8 @@ cp-history-menu { display: contents; }
 .cp-knobs textarea { width: 100%; box-sizing: border-box; min-height: 6em; resize: vertical;
   font-family: var(--md-sys-typescale-mono-font); font-size: 12px; }
 .cp-knobs textarea:disabled { opacity: 0.7; }
+.cp-wf-slot { border-top: 1px dashed var(--cp-border); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.cp-wf-slot-head { font-size: 0.74rem; font-weight: 600; color: var(--cp-fg); }
 /* The Exploded 3D group's camera axes. A range + a live readout on one row: the drawer column is
    240px, and the stacked `label { flex-direction: column }` default would give each of four
    sliders three lines. `font-variant-numeric: tabular-nums` on the readout stops the row twitching

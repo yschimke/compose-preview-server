@@ -160,6 +160,7 @@ class ServeBundleStore(
         val isRenderError = underPreviews && name.endsWith(RENDER_ERROR_SUFFIX)
         val isOverrides = underPreviews && name.endsWith(OVERRIDES_SUFFIX)
         val isRemoteCompose = underPreviews && name.endsWith(REMOTECOMPOSE_SUFFIX)
+        val isWatchFace = underPreviews && name.endsWith(WATCHFACE_SUFFIX)
         // Spatial previews: a scene document plus image textures under `previews/<id>.spatial/`.
         // The allowlist stays closed; nothing executable is needed.
         val spatialLeaf = segments.lastOrNull().orEmpty()
@@ -188,6 +189,7 @@ class ServeBundleStore(
               isRenderError ||
               isOverrides ||
               isRemoteCompose ||
+              isWatchFace ||
               isSpatial ||
               isRc ||
               isReferenceData ||
@@ -242,6 +244,7 @@ class ServeBundleStore(
     private const val RENDER_ERROR_SUFFIX = ".error.json"
     private const val OVERRIDES_SUFFIX = ".overrides.json"
     private const val REMOTECOMPOSE_SUFFIX = ".remotecompose.json"
+    private const val WATCHFACE_SUFFIX = ".watchface.json"
     private const val SPATIAL_SUFFIX = ".spatial"
     private const val SPATIAL_SCENE_FILE = "scene.json"
     private val SPATIAL_IMAGE_SUFFIXES = listOf(".png", ".jpg", ".jpeg", ".webp")

@@ -73,10 +73,16 @@ describe("ownsUrlParam", () => {
     });
 
     it("claims the open-ended families, which the preview names", () => {
-        // Author knobs and Remote Compose seeds cannot be enumerated — the preview decides them.
+        // Author knobs, Remote Compose seeds and watch-face slot/config keys cannot be enumerated.
         assert.equal(ownsUrlParam("knob.label"), true);
         assert.equal(ownsUrlParam("knob.count"), true);
         assert.equal(ownsUrlParam("rc.tint"), true);
+        assert.equal(ownsUrlParam("wf.slot.1.type"), true);
+        assert.equal(ownsUrlParam("wf.config.color_style_setting"), true);
+        assert.equal(ownsUrlParam("wf.heartRate"), true);
+        assert.equal(ownsUrlParam("ambient"), true);
+        assert.equal(ownsUrlParam("clockEpochMillis"), true);
+        assert.equal(ownsUrlParam("wfRenderer"), true);
     });
 
     it("leaves ALONE the parameters that are not the viewer's", () => {
@@ -99,6 +105,7 @@ describe("ownsUrlParam", () => {
         // `myknob.x` is not an author knob, and treating it as one would delete it.
         assert.equal(ownsUrlParam("myknob.label"), false);
         assert.equal(ownsUrlParam("src.rc.tint"), false);
+        assert.equal(ownsUrlParam("dwf.slot.1.type"), false);
     });
 
     it("is exact about names, not a substring test", () => {

@@ -363,6 +363,33 @@ describe("currentLaneValue", () => {
     it("is the plain snapshot when there is no Remote Compose at all", () => {
         assert.equal(currentLaneValue(lanes(), pick), "png");
     });
+
+    it("names the active watch-face renderer backend on watch-face previews", () => {
+        assert.equal(
+            currentLaneValue(lanes(), pick, {
+                defaultBackend: "dwf-rc",
+                pickedBackend: "dwf-rc",
+                picked: false,
+            }),
+            "wf:dwf-rc",
+        );
+        assert.equal(
+            currentLaneValue(lanes(), pick, {
+                defaultBackend: "dwf-rc",
+                pickedBackend: "dwf-apk",
+                picked: true,
+            }),
+            "wf:dwf-apk",
+        );
+        assert.equal(
+            currentLaneValue(lanes({ live: true }), pick, {
+                defaultBackend: "dwf-rc",
+                pickedBackend: "dwf-apk",
+                picked: true,
+            }),
+            "wf:dwf-apk",
+        );
+    });
 });
 
 describe("laneLabelText", () => {

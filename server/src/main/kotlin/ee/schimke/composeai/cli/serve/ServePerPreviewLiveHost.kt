@@ -198,6 +198,31 @@ class ServePerPreviewLiveHost(
     return live.renderA11y(daemonId, overrides)
   }
 
+  override fun renderWatchFaceComplications(
+    previewId: String,
+    overrides: PreviewOverrides,
+  ): WatchFaceComplicationsOutcome {
+    val wantsLive =
+      CatalogLiveRouting.daemonIdForRender(
+        previewId,
+        overrides,
+        alias,
+        liveOnlyPreviewIds,
+        bakedTheme(previewId),
+        bakedRcPlayer(previewId),
+      ) != null || baked.previews.firstOrNull { it.id == previewId }?.watchFace == null
+    if (wantsLive) {
+      val daemonId = alias[previewId]
+      if (daemonId != null) {
+        val liveOutcome = resolveLive(daemonId)?.renderWatchFaceComplications(daemonId, overrides)
+        if (liveOutcome != null && liveOutcome !is WatchFaceComplicationsOutcome.NotFound) {
+          return liveOutcome
+        }
+      }
+    }
+    return super.renderWatchFaceComplications(previewId, overrides)
+  }
+
   /**
    * Typography and theme inspection follow [renderA11y] to the daemon, falling back to published
    * annotations when the live lane can't answer, but only when the request would be served baked

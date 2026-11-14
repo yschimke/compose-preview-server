@@ -453,12 +453,14 @@ function themeTwinHref(b: HTMLButtonElement): string | null {
 }
 // Whether the frame is the preview as published, apart from the theme axis. Uses the same
 // predicates as `query()` so the two agree on what counts as an edit.
+var wfRendererPicked = false;
 function frameIsUnedited(): boolean {
     const o = overrides();
     for (const key of Object.keys(o)) {
         if (key !== "uiMode") return false;
     }
     if (chosenThemeProvider()) return false;
+    if (wfRendererPicked) return false;
     let edited = false;
     controls(".cp-knob").forEach(function (el) {
         if (edited || el.disabled || !el.getAttribute("data-knob-key")) return;
@@ -474,6 +476,11 @@ function frameIsUnedited(): boolean {
             controlValue(el),
             el.getAttribute("data-rc-initial") || "",
         );
+    });
+    controls(".cp-wf-field").forEach(function (el) {
+        if (edited || el.disabled || !el.getAttribute("data-wf-key")) return;
+        edited =
+            controlValue(el) !== (el.getAttribute("data-wf-initial") || "");
     });
     if (edited) return false;
     const focus = may<HTMLInputElement>("cp-focus");
@@ -595,6 +602,15 @@ function liveOverrides() {
         if (val === "") return;
         o["rc." + name] = kind + ":" + val;
     });
+    // Watch-face state, user configuration and complication slot overrides. Omitted at each field's
+    // baked default because `setOverrides` rebuilds `WatchFaceOverrides` from scratch on every map.
+    controls(".cp-wf-field").forEach(function (el) {
+        if (el.disabled) return;
+        var key = el.getAttribute("data-wf-key");
+        if (!key) return;
+        var val = controlValue(el);
+        if (val !== (el.getAttribute("data-wf-initial") || "")) o[key] = val;
+    });
     // App-declared theme (themeProvider = provider FQN), only when picked and the control is live.
     var tp = chosenThemeProvider();
     if (tp) o["themeProvider"] = tp;
@@ -615,6 +631,8 @@ function liveOverrides() {
     // player.
     var livePlayer = rules.serverPlayerParam(rcPlayerBackend, !!rcPlayerPicked);
     if (livePlayer) o.rcPlayer = livePlayer;
+    if (wfDefaultBackend && wfRendererPicked && wfRendererBackend)
+        o.wfRenderer = wfRendererBackend;
     return o;
 }
 // Renderer-picker state (#cp-lane-select). `rcPlayerPicked` gates whether `rcPlayerBackend` rides
@@ -643,6 +661,27 @@ var rcPlayerPicked = rules.backendRequiresRenderParam(
     rcDefaultBackend,
     rcBakedPlayer,
 );
+var wfDefaultBackend = laneSelect
+    ? laneSelect.getAttribute("data-wf-default") || ""
+    : "";
+var wfRendererBackend = wfDefaultBackend;
+var initialSnapshotBackend =
+    root.getAttribute("data-snapshot-backend") || "Snapshot";
+function syncWfBadge() {
+    if (!wfDefaultBackend || !laneSelect) return;
+    var active = wfRendererBackend || wfDefaultBackend;
+    var wanted = "wf:" + active;
+    var badge = initialSnapshotBackend;
+    Array.prototype.forEach.call(
+        laneSelect.options,
+        function (o: HTMLOptionElement) {
+            if (o.value === wanted) {
+                badge = o.getAttribute("data-badge") || badge;
+            }
+        },
+    );
+    root.setAttribute("data-snapshot-backend", badge);
+}
 // Reconcile the picker (combo value and chip label) with the active lane. Hoisted so enterMode can
 // call it whenever the viewer leaves a lane through any control. A no-op for a single-lane preview.
 var syncLaneSelect = function () {};
@@ -682,6 +721,16 @@ function renderOverrides(): Overrides {
             return;
         o["rc." + name] = rules.rcKnobValue(kind, val);
     });
+    // Watch-face state, user configuration and complication slot overrides. Omitted at each field's
+    // baked default so the URL stays on the baked snapshot.
+    controls(".cp-wf-field").forEach(function (el) {
+        if (el.disabled) return;
+        var key = el.getAttribute("data-wf-key");
+        if (!key) return;
+        var val = controlValue(el);
+        if (val === (el.getAttribute("data-wf-initial") || "")) return;
+        o[key] = val;
+    });
     // App-declared theme (themeProvider = provider FQN). Omitted at "(default)" so the URL stays on
     // the baked snapshot.
     var tp = chosenThemeProvider();
@@ -706,6 +755,8 @@ function renderOverrides(): Overrides {
         !!rcPlayerPicked,
     );
     if (serverPlayer) o.rcPlayer = serverPlayer;
+    if (wfDefaultBackend && wfRendererPicked && wfRendererBackend)
+        o.wfRenderer = wfRendererBackend;
     return o;
 }
 function query() {
@@ -3889,6 +3940,9 @@ function syncServerControls() {
             el.getAttribute("data-base-disabled") === "1" || onFixedFrame;
         gateForIrReplay(el, irReplay && !onWasm, IR_WHY_RECOMPOSE);
     });
+    controls(".cp-wf-field").forEach(function (el) {
+        el.disabled = !canServerRender;
+    });
 }
 // Programmatic switch: tick the hidden mode radio, then run the transition.
 function setMode(m: string) {
@@ -3974,11 +4028,19 @@ function anyInteractive() {
 // The lane the picker is (or would be) on, in the combo's value space. The daemon stream is the
 // live form of the picked renderer, so it falls through to the static player lane.
 function currentLaneValue() {
-    return rules.currentLaneValue(laneFlags(), {
-        defaultBackend: rcDefaultBackend || "",
-        pickedBackend: rcPlayerBackend || "",
-        picked: !!rcPlayerPicked,
-    });
+    return rules.currentLaneValue(
+        laneFlags(),
+        {
+            defaultBackend: rcDefaultBackend || "",
+            pickedBackend: rcPlayerBackend || "",
+            picked: !!rcPlayerPicked,
+        },
+        {
+            defaultBackend: wfDefaultBackend || "",
+            pickedBackend: wfRendererBackend || "",
+            picked: !!wfRendererPicked,
+        },
+    );
 }
 // What the chip calls the current lane: "Live" while the daemon stream is up, otherwise the
 // matching option's label so chip and combo agree. With no combo it names the stage's state
@@ -4355,7 +4417,14 @@ if (laneSelect) {
     };
     function pickLane(value: string) {
         if (!value) return; // the placeholder; nothing was chosen
-        if (value.indexOf("rc:") === 0) {
+        if (value.indexOf("wf:") === 0) {
+            var wfWire = value.substring(3).trim().toLowerCase();
+            wfRendererBackend = wfWire || wfDefaultBackend;
+            wfRendererPicked = wfRendererBackend !== wfDefaultBackend;
+            syncWfBadge();
+            urlPush = true;
+            setMode("png");
+        } else if (value.indexOf("rc:") === 0) {
             var wire = rules.normalizeRcPlayer(value.substring(3));
             if (wire === rules.RC_PLAYER.camaelonJs) {
                 // The client canvas lane. Leave the server pick untouched so returning to a
@@ -4665,6 +4734,26 @@ controls(".cp-rc-knob").forEach(function (el) {
         onRcKnobChanged,
     );
 });
+const scheduleWfKnobChanged = debounced(
+    onKnobChanged,
+    CONTINUOUS_EDIT_DEBOUNCE_MS,
+);
+controls(".cp-wf-field").forEach(function (el) {
+    if (
+        (el instanceof HTMLInputElement && el.type === "checkbox") ||
+        el.tagName === "SELECT"
+    ) {
+        el.addEventListener("change", function () {
+            if (el.tagName === "SELECT") urlPush = true;
+            onKnobChanged();
+        });
+    } else {
+        el.addEventListener("input", function () {
+            refreshLinks();
+            scheduleWfKnobChanged();
+        });
+    }
+});
 // Address-bar state. The page URL mirrors the controls using the /render override names, so the
 // viewer URL and the copyable render URL describe the same state. Only owned params are touched
 // (never `token` / `session`), and a control at its default removes its param.
@@ -4919,6 +5008,21 @@ function hydrateFromUrl(popped: boolean) {
             el.checked = isChecked(value);
         else el.value = value;
     });
+    controls(".cp-wf-field").forEach(function (el) {
+        var key = el.getAttribute("data-wf-key");
+        if (!key) return;
+        var rawWf = q.get(key);
+        var value =
+            rawWf === null || unseeded.has(key)
+                ? el.getAttribute("data-wf-initial") || ""
+                : rawWf;
+        if (el instanceof HTMLInputElement && el.type === "checkbox")
+            el.checked = isChecked(value);
+        else {
+            adoptChoiceValue(el, value);
+            el.value = value;
+        }
+    });
     // The sticky script seeds the theme select before this file runs, so the initial pass leaves it
     // alone. Back/Forward owns it: the entry's theme, or the page's opening one.
     if (popped && themeChoice) {
@@ -4969,6 +5073,23 @@ function hydrateFromUrl(popped: boolean) {
             rules.backendRequiresRenderParam(rcDefaultBackend, rcBakedPlayer);
         rcPlayerBackend =
             (playerOffered ? wantedPlayer : rcDefaultBackend) || "";
+    }
+    if (wfDefaultBackend) {
+        var rawWantedWf = q.get("wfRenderer");
+        var wantedWf = rawWantedWf ? rawWantedWf.trim().toLowerCase() : null;
+        var wfOffered = false;
+        if (wantedWf && laneSelect) {
+            Array.prototype.forEach.call(
+                laneSelect.options,
+                function (o: HTMLOptionElement) {
+                    if (o.value === "wf:" + wantedWf && !o.disabled)
+                        wfOffered = true;
+                },
+            );
+        }
+        wfRendererBackend = wfOffered && wantedWf ? wantedWf : wfDefaultBackend;
+        wfRendererPicked = wfRendererBackend !== wfDefaultBackend;
+        syncWfBadge();
     }
     // Restore the picked source before entering the lane (as the peer chips do), so
     // `?mode=spec&specSource=parallel` opens directly on that pair. On Back/Forward with the lane

@@ -42,10 +42,15 @@ export const URL_STATE_PARAMS: readonly string[] = [
     "explodeSpin",
     "explodeGap",
     "explodeDepth",
+    "ambient",
+    "ambientBurnIn",
+    "ambientLowBit",
+    "clockEpochMillis",
+    "wfRenderer",
 ];
 
 /** Prefixes whose members are named by the preview rather than by this list. */
-export const URL_STATE_PREFIXES: readonly string[] = ["knob.", "rc."];
+export const URL_STATE_PREFIXES: readonly string[] = ["knob.", "rc.", "wf."];
 
 export function ownsUrlParam(name: string): boolean {
     return (
