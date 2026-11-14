@@ -95,6 +95,9 @@ describe("<cp-backend-badge>", () => {
         assert.equal(badge.textContent?.trim(), "▶ JVM");
         await setMode(root, "snapshot");
         assert.equal(badge.textContent?.trim(), "▪ Android");
+        root.setAttribute("data-snapshot-backend", "DWF APK");
+        await flush();
+        assert.equal(badge.textContent?.trim(), "▪ DWF APK");
     });
 
     it("falls back to generic labels when the server set none", async () => {

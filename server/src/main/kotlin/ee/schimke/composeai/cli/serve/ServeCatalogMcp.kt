@@ -1,6 +1,10 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.bundle.WatchFaceComplicationsPayload
+import ee.schimke.composeai.bundle.WatchFaceComplicationsProduct
 import ee.schimke.composeai.daemon.devices.DeviceDimensions
+import ee.schimke.composeai.daemon.protocol.AmbientStateOverride
+import ee.schimke.composeai.daemon.protocol.PreviewOverrideValue
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.web.WebEscaping
 import java.net.URI
@@ -688,21 +692,24 @@ class ServeCatalogMcp(
         "Render one preview. Like local compose-ai-tools, the default semantics observation is " +
           "token-frugal; request observe=png for pixels, observe=svg for the compose/figma-svg " +
           "vector export as SVG source, or observe=scroll-png / observe=scroll-svg for the " +
-          "full-page capture of a scrollable screen rather than the viewport crop. Overrides, " +
-          "other observations and fresh renders require live grant scope; without it, a call " +
-          "with no overrides returns the published snapshot (as resources/read does).",
-        """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"observe":{"type":"string","enum":["png","svg","scroll-png","scroll-svg","semantics","hash"]},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}},"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
+          "full-page capture of a scrollable screen rather than the viewport crop. Watch face " +
+          "previews also accept structured 'complications', 'watchFace', 'ambient', " +
+          "'previewTime' / 'clockEpochMillis', and 'wfRenderer' ('dwf-rc' or 'dwf-apk'). " +
+          "Overrides, other observations and fresh renders require live grant scope; without it, " +
+          "a call with no overrides returns the published snapshot (as resources/read does).",
+        """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"observe":{"type":"string","enum":["png","svg","scroll-png","scroll-svg","semantics","hash"]},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}},"complications":{"type":"array","items":{"type":"object"}},"watchFace":{"type":"object"},"ambient":{"type":"boolean"},"ambientBurnIn":{"type":"boolean"},"ambientLowBit":{"type":"boolean"},"clockEpochMillis":{"type":"integer"},"previewTime":{"type":"string"},"wfRenderer":{"type":"string"}},"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
       ),
     )
     add(
       tool(
         "render_matrix",
-        "Render one preview across the cross-product of the given override axes in a single " +
-          "call, returning a hash/size observation per cell (observe=png adds the pixels). " +
-          "Prefer this over a catalog_render_preview per combination: the cells share one catalog lease " +
-          "and are reported together, so comparing axes costs one round trip instead of N. " +
-          "Capped at $MAX_MATRIX_CELLS cells. Requires live grant scope.",
-        """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"observe":{"type":"string","enum":["png","hash"]},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}},"axes":{"type":"object","additionalProperties":{"type":"array","items":{"type":["string","number","boolean"]},"minItems":1}}},"required":["axes"],"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
+        "Render one preview across the cross-product of the given override 'axes' (or an explicit " +
+          "list of watch-face 'scenarios') in a single call, returning a hash/size observation per " +
+          "cell (observe=png adds the pixels). Prefer this over a catalog_render_preview per " +
+          "combination: the cells share one catalog lease and are reported together, so comparing " +
+          "axes or scenarios costs one round trip instead of N. Capped at $MAX_MATRIX_CELLS cells. " +
+          "Requires live grant scope.",
+        """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"observe":{"type":"string","enum":["png","hash"]},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}},"axes":{"type":"object","additionalProperties":{"type":"array","items":{"type":["string","number","boolean"]},"minItems":1}},"scenarios":{"type":"array","items":{"type":"object"},"minItems":1},"wfRenderer":{"type":"string"}},"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
       ),
     )
     add(
@@ -783,9 +790,9 @@ class ServeCatalogMcp(
     add(
       tool(
         "get_preview_data",
-        "Fetch the merged accessibility or annotation product for a preview. This lane " +
-          "requires live grant scope.",
-        """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"kind":{"type":"string"},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}}},"required":["kind"],"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
+        "Fetch the merged accessibility, annotation, or watchface/complications product for a " +
+          "preview. This lane requires live grant scope.",
+        """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"kind":{"type":"string"},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}},"complications":{"type":"array","items":{"type":"object"}},"watchFace":{"type":"object"},"ambient":{"type":"boolean"},"ambientBurnIn":{"type":"boolean"},"ambientLowBit":{"type":"boolean"},"clockEpochMillis":{"type":"integer"},"previewTime":{"type":"string"},"wfRenderer":{"type":"string"}},"required":["kind"],"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
       ),
     )
     add(
@@ -915,15 +922,23 @@ class ServeCatalogMcp(
         withCatalog(target.catalog) { host ->
           val preview = resolvePreview(host, target.previewId)
           val rawOverrides = args["overrides"] as? JsonObject
-          val overrides = parseOverrides(preview, rawOverrides)
+          val baseOverrides = parseOverrides(preview, rawOverrides)
+          val overrides = mergeWatchFaceArgs(baseOverrides, args)
+          val wfRenderer =
+            args.optionalString("wfRenderer")
+              ?: rawOverrides?.optionalString(WatchFaceOverrides.WF_RENDERER_PARAM)
+          val linkOverrides = effectiveLinkOverrides(rawOverrides, overrides, wfRenderer)
+          val requestedKeys =
+            (rawOverrides?.keys.orEmpty() + presentWatchFaceArgKeys(args)).distinct()
           renderResult(
             host,
             preview.id,
             resourceUri(target.catalog, preview.id),
             overrides,
             args["observe"]?.jsonPrimitive?.contentOrNull?.lowercase() ?: "semantics",
-            rawOverrides?.keys.orEmpty().toList(),
-            rawOverrides,
+            requestedKeys,
+            linkOverrides,
+            wfRenderer = wfRenderer,
           )
         }
       }
@@ -967,15 +982,23 @@ class ServeCatalogMcp(
             withCatalog(target.catalog) { host ->
               val preview = resolvePreview(host, target.previewId)
               val rawOverrides = args["overrides"] as? JsonObject
-              val overrides = parseOverrides(preview, rawOverrides)
+              val baseOverrides = parseOverrides(preview, rawOverrides)
+              val overrides = mergeWatchFaceArgs(baseOverrides, args)
+              val wfRenderer =
+                args.optionalString("wfRenderer")
+                  ?: rawOverrides?.optionalString(WatchFaceOverrides.WF_RENDERER_PARAM)
+              val linkOverrides = effectiveLinkOverrides(rawOverrides, overrides, wfRenderer)
+              val requestedKeys =
+                (rawOverrides?.keys.orEmpty() + presentWatchFaceArgKeys(args)).distinct()
               renderContent(
                   host,
                   preview.id,
                   resourceUri(target.catalog, preview.id),
                   overrides,
                   observe,
-                  rawOverrides?.keys.orEmpty().toList(),
-                  rawOverrides,
+                  requestedKeys,
+                  linkOverrides,
+                  wfRenderer = wfRenderer,
                 )
                 .forEach(::add)
             }
@@ -989,8 +1012,12 @@ class ServeCatalogMcp(
         requireLive(liveAuthorization)
         withCatalog(target.catalog) { host ->
           val preview = resolvePreview(host, target.previewId)
-          val overrides = parseOverrides(preview, args["overrides"] as? JsonObject)
-          dataProductResult(host, preview.id, kind, overrides)
+          val rawOverrides = args["overrides"] as? JsonObject
+          val overrides = mergeWatchFaceArgs(parseOverrides(preview, rawOverrides), args)
+          val wfRenderer =
+            args.optionalString("wfRenderer")
+              ?: rawOverrides?.optionalString(WatchFaceOverrides.WF_RENDERER_PARAM)
+          dataProductResult(host, preview.id, kind, overrides, wfRenderer = wfRenderer)
         }
       }
       else -> toolError("unknown tool: $name")
@@ -1091,12 +1118,14 @@ class ServeCatalogMcp(
     }
     return withCatalog(target.catalog) { host ->
       val preview = resolvePreview(host, target.previewId)
+      val wfRenderer = rawOverrides?.optionalString(WatchFaceOverrides.WF_RENDERER_PARAM)
       val png =
         renderPng(
             host,
             preview.id,
             parseOverrides(preview, rawOverrides),
             preferPublished = rawOverrides == null,
+            wfRenderer = wfRenderer,
           )
           .png
       buildJsonObject {
@@ -1132,9 +1161,16 @@ class ServeCatalogMcp(
     if (observe !in MATRIX_OBSERVATION_MODES) {
       throw McpRequestException("catalog_render_matrix 'observe' must be one of png or hash")
     }
+    val topWfRenderer = args.optionalString("wfRenderer")
+    val rawScenarios = args["scenarios"]
+    if (rawScenarios != null && rawScenarios !is JsonNull) {
+      return scenariosMatrixResult(host, preview, catalog, args, observe, topWfRenderer)
+    }
     val rawAxes =
       args["axes"] as? JsonObject
-        ?: throw McpRequestException("catalog_render_matrix requires an 'axes' object")
+        ?: throw McpRequestException(
+          "catalog_render_matrix requires an 'axes' object or a 'scenarios' array",
+        )
     if (rawAxes.isEmpty())
       throw McpRequestException("catalog_render_matrix requires at least one axis")
     val base =
@@ -1187,7 +1223,9 @@ class ServeCatalogMcp(
             is OverrideParse.Ok -> parsed.overrides
             is OverrideParse.Invalid -> throw McpRequestException(parsed.message)
           }
-        val cell = renderPng(host, preview.id, overrides)
+        val cellWfRenderer =
+          params[WatchFaceOverrides.WF_RENDERER_PARAM]?.takeIf { it.isNotBlank() } ?: topWfRenderer
+        val cell = renderPng(host, preview.id, overrides, wfRenderer = cellWfRenderer)
         add(
           buildJsonObject {
             put(
@@ -1203,7 +1241,12 @@ class ServeCatalogMcp(
             put("generation", cell.generation.wire)
             if (linked) {
               put("index", index + 1)
-              val cellOverrides = JsonObject(params.mapValues { (_, v) -> JsonPrimitive(v) })
+              val cellOverrides =
+                effectiveLinkOverrides(
+                  JsonObject(params.mapValues { (_, v) -> JsonPrimitive(v) }),
+                  overrides,
+                  cellWfRenderer,
+                )
               signedImageUrl(resourceUriWithOverrides(uri, cellOverrides))?.let {
                 put("imageUrl", it)
               }
@@ -1241,6 +1284,125 @@ class ServeCatalogMcp(
               "person pick in chat, " +
               "post this with the numbered options and take their reply as the choice.",
           )
+        }
+      }
+      put("cells", rendered)
+    }
+    if (!linked) return textResult(body.toString())
+    return buildJsonObject {
+      put(
+        "content",
+        buildJsonArray {
+          add(textContent(body.toString()))
+          sheet?.let { (url, expiry) ->
+            add(imageUrlLinkContent(url))
+            add(chatImageText(url, expiry))
+          }
+        },
+      )
+      putJsonObject("_meta") {
+        putJsonArray(CELL_PNGS_META_KEY) {
+          cellPngs.forEach { add(Base64.getEncoder().encodeToString(it)) }
+        }
+      }
+    }
+  }
+
+  private data class ParsedScenarioCell(
+    val label: String,
+    val overrides: PreviewOverrides,
+    val wfRenderer: String?,
+    val linkOverrides: JsonObject?,
+  )
+
+  private suspend fun scenariosMatrixResult(
+    host: ServeHost,
+    preview: ServePreview,
+    catalog: String,
+    args: JsonObject,
+    observe: String,
+    topWfRenderer: String?,
+  ): JsonObject {
+    val scenarios =
+      args["scenarios"] as? JsonArray
+        ?: throw McpRequestException("catalog_render_matrix 'scenarios' must be an array")
+    if (scenarios.isEmpty()) {
+      throw McpRequestException("catalog_render_matrix 'scenarios' must list at least one scenario")
+    }
+    if (scenarios.size > MAX_MATRIX_CELLS) {
+      throw McpRequestException(
+        "catalog_render_matrix would produce ${scenarios.size} cells; the cap is $MAX_MATRIX_CELLS",
+      )
+    }
+    val baseRawOverrides = args["overrides"] as? JsonObject ?: JsonObject(emptyMap())
+    val uri = resourceUri(catalog, preview.id)
+    val linked = observe == "png" && publicOrigin() != null
+    val cellPngs = mutableListOf<ByteArray>()
+    val cellLabels = mutableListOf<String>()
+    val parsedCells = scenarios.mapIndexed { index, element ->
+      val obj =
+        element as? JsonObject ?: throw McpRequestException("scenario[${index}] must be an object")
+      val label = obj.optionalString("label") ?: "scenario-${index + 1}"
+      val scenarioOverridesObj = obj["overrides"] as? JsonObject ?: JsonObject(emptyMap())
+      val mergedRaw = JsonObject(baseRawOverrides + scenarioOverridesObj).takeIf { it.isNotEmpty() }
+      val baseParsed = parseOverrides(preview, mergedRaw)
+      val cellOverrides = mergeWatchFaceArgs(baseParsed, obj)
+      val cellWfRenderer =
+        obj.optionalString("wfRenderer")
+          ?: mergedRaw?.optionalString(WatchFaceOverrides.WF_RENDERER_PARAM)
+          ?: topWfRenderer
+      ParsedScenarioCell(
+        label = label,
+        overrides = cellOverrides,
+        wfRenderer = cellWfRenderer,
+        linkOverrides = effectiveLinkOverrides(mergedRaw, cellOverrides, cellWfRenderer),
+      )
+    }
+    val rendered = buildJsonArray {
+      parsedCells.forEachIndexed { index, cellSpec ->
+        val cell = renderPng(host, preview.id, cellSpec.overrides, wfRenderer = cellSpec.wfRenderer)
+        add(
+          buildJsonObject {
+            put("label", cellSpec.label)
+            cellSpec.wfRenderer?.let { put("wfRenderer", it) }
+            put("sha256", sha256Hex(cell.png))
+            put("sizeBytes", cell.png.size)
+            pngDimensions(cell.png)?.let { (width, height) ->
+              put("widthPx", width)
+              put("heightPx", height)
+            }
+            put("generation", cell.generation.wire)
+            if (linked) {
+              put("index", index + 1)
+              signedImageUrl(resourceUriWithOverrides(uri, cellSpec.linkOverrides))?.let {
+                put("imageUrl", it)
+              }
+              cellPngs += cell.png
+              cellLabels += cellSpec.label
+            } else if (observe == "png") {
+              put("png", Base64.getEncoder().encodeToString(cell.png))
+            }
+          },
+        )
+      }
+    }
+    val distinct =
+      rendered.mapNotNull { it.jsonObject["sha256"]?.jsonPrimitive?.contentOrNull }.toSet().size
+    val sheet =
+      if (linked) ServeContactSheet.render(cellPngs, cellLabels)?.let { signedViewUrl(it) }
+      else null
+    val body = buildJsonObject {
+      put("schema", "compose-preview/catalog-mcp-matrix/v1")
+      put("catalog", catalog)
+      put("previewId", preview.id)
+      put("uri", uri)
+      put("observe", observe)
+      put("cellCount", rendered.size)
+      put("distinctRenders", distinct)
+      sheet?.let { (url, expiry) ->
+        putJsonObject("contactSheet") {
+          put("url", url)
+          put("expiresAtEpochSeconds", expiry)
         }
       }
       put("cells", rendered)
@@ -1791,9 +1953,19 @@ class ServeCatalogMcp(
     observe: String,
     requestedKeys: List<String> = emptyList(),
     rawOverrides: JsonObject? = null,
+    wfRenderer: String? = null,
   ): JsonObject = buildJsonObject {
     val content =
-      renderContent(host, previewId, uri, overrides, observe, requestedKeys, rawOverrides)
+      renderContent(
+        host,
+        previewId,
+        uri,
+        overrides,
+        observe,
+        requestedKeys,
+        rawOverrides,
+        wfRenderer = wfRenderer,
+      )
     put("content", JsonArray(content))
     // Also as `structuredContent.imageUrl`, for hosts that read the structure not the blocks.
     content
@@ -1810,6 +1982,7 @@ class ServeCatalogMcp(
     observe: String,
     requestedKeys: List<String> = emptyList(),
     rawOverrides: JsonObject? = null,
+    wfRenderer: String? = null,
   ): List<JsonObject> {
     if (observe !in OBSERVATION_MODES) {
       throw McpRequestException("'observe' must be one of ${OBSERVATION_MODES.orList()}")
@@ -1826,7 +1999,7 @@ class ServeCatalogMcp(
       val png = renderScrollPng(host, previewId, overrides)
       return listOf(imageContent(png)) + keptImageFallback(png)
     }
-    val rendered = renderPng(host, previewId, overrides)
+    val rendered = renderPng(host, previewId, overrides, wfRenderer = wfRenderer)
     val png = rendered.png
     if (observe == "png") {
       // Override-bearing renders get a provenance block, since identical pixels can mean the
@@ -1885,11 +2058,33 @@ class ServeCatalogMcp(
     previewId: String,
     kind: String,
     overrides: PreviewOverrides,
+    wfRenderer: String? = null,
   ): JsonObject {
     // A stored result, not a render: no permit, and an answer either way.
     if (kind == GUIDELINES_RESULT_KIND) return textResult(guidelinesResultJson(host, previewId))
     val bytes = withRenderPermit {
       when {
+        kind == WatchFaceComplicationsProduct.KIND || kind == "complications" -> {
+          val preview =
+            host.previews.firstOrNull { it.id == previewId }
+              ?: throw McpRequestException("no such preview '$previewId'")
+          val backend =
+            WatchFaceRendererRegistry.resolve(wfRenderer)
+              ?: throw McpRequestException(
+                "unknown watch face renderer '$wfRenderer'; expected one of " +
+                  WatchFaceRendererRegistry.all().joinToString { it.id },
+              )
+          when (val outcome = backend.complications(host, preview, overrides)) {
+            is WatchFaceComplicationsOutcome.Ok ->
+              Json.encodeToString(WatchFaceComplicationsPayload.serializer(), outcome.payload)
+                .encodeToByteArray()
+            WatchFaceComplicationsOutcome.NotFound ->
+              throw McpRequestException("data product '$kind' unavailable")
+            is WatchFaceComplicationsOutcome.Unavailable ->
+              throw McpRequestException(outcome.reason)
+            is WatchFaceComplicationsOutcome.Failed -> throw McpRequestException(outcome.reason)
+          }
+        }
         kind.startsWith("a11y/") ->
           when (val outcome = host.renderA11y(previewId, overrides)) {
             is A11yOutcome.Ok -> outcome.json
@@ -1945,6 +2140,7 @@ class ServeCatalogMcp(
     previewId: String,
     overrides: PreviewOverrides,
     preferPublished: Boolean = false,
+    wfRenderer: String? = null,
   ): Rendered {
     if (preferPublished) {
       val baked =
@@ -1953,6 +2149,31 @@ class ServeCatalogMcp(
             "published preview '$previewId' is unavailable; use catalog_render_preview with live scope",
           )
       return Rendered(baked.png, RenderOutcome.Generation.BAKED)
+    }
+    val preview = host.previews.firstOrNull { it.id == previewId }
+    if (preview?.isWatchFace == true || wfRenderer != null) {
+      val backend =
+        WatchFaceRendererRegistry.resolve(wfRenderer)
+          ?: throw McpRequestException(
+            "unknown watch face renderer '$wfRenderer'; expected one of " +
+              WatchFaceRendererRegistry.all().joinToString { it.id },
+          )
+      if (preview == null) throw McpRequestException("no such preview '$previewId'")
+      if (!preview.isWatchFace) {
+        throw McpRequestException("preview '$previewId' is not a watch face")
+      }
+      val info = backend.infoFor(host, preview)
+      if (!info.available) {
+        throw McpRequestException(info.unavailableReason ?: "${backend.label} is not available")
+      }
+      return withRenderPermit {
+        when (val outcome = backend.render(host, preview, overrides)) {
+          is RenderOutcome.Ok -> Rendered(outcome.png, outcome.generation)
+          RenderOutcome.NotFound -> throw McpRequestException("no such preview '$previewId'")
+          RenderOutcome.Busy -> throw ExportOverloadedException("render busy; retry shortly")
+          is RenderOutcome.Failed -> throw McpRequestException(outcome.reason)
+        }
+      }
     }
     return withRenderPermit {
       when (val outcome = host.render(previewId, overrides)) {
@@ -2069,6 +2290,104 @@ class ServeCatalogMcp(
     }
   }
 
+  private fun presentWatchFaceArgKeys(args: JsonObject): List<String> =
+    WATCHFACE_RENDER_ARGS.filter { key ->
+      val v = args[key]
+      v != null && v !is JsonNull
+    }
+
+  private fun mergeWatchFaceArgs(base: PreviewOverrides, args: JsonObject): PreviewOverrides {
+    fun optionalBoolean(name: String): Boolean? {
+      val el = args[name]?.takeUnless { it is JsonNull } ?: return null
+      return (el as? JsonPrimitive)?.booleanOrNull
+        ?: throw McpRequestException("'$name' must be a boolean")
+    }
+    fun optionalLong(name: String): Long? {
+      val el = args[name]?.takeUnless { it is JsonNull } ?: return null
+      return (el as? JsonPrimitive)?.longOrNull
+        ?: throw McpRequestException("'$name' must be an integer")
+    }
+    val complications = args["complications"]?.takeUnless { it is JsonNull }
+    val watchFace =
+      args["watchFace"]
+        ?.takeUnless { it is JsonNull }
+        ?.let { raw ->
+          val obj = raw as? JsonObject ?: throw McpRequestException("'watchFace' must be an object")
+          if ("configurations" !in obj) {
+            val alias = (obj["config"] ?: obj["userConfigurations"]) as? JsonObject
+            if (alias != null) JsonObject(obj + ("configurations" to alias)) else obj
+          } else {
+            obj
+          }
+        }
+    val ambient = optionalBoolean("ambient")
+    val ambientBurnIn = optionalBoolean("ambientBurnIn")
+    val ambientLowBit = optionalBoolean("ambientLowBit")
+    val clockEpochMillis = optionalLong("clockEpochMillis")
+    val previewTime = args.optionalString("previewTime")
+    if (
+      complications == null &&
+        watchFace == null &&
+        ambient == null &&
+        ambientBurnIn == null &&
+        ambientLowBit == null &&
+        clockEpochMillis == null &&
+        previewTime == null
+    ) {
+      return base
+    }
+    return try {
+      WatchFaceOverrides.mergeStructuredOverrides(
+        base = base,
+        complications = complications,
+        watchFace = watchFace,
+        ambient = ambient,
+        ambientBurnIn = ambientBurnIn,
+        ambientLowBit = ambientLowBit,
+        clockEpochMillis = clockEpochMillis,
+        previewTime = previewTime,
+      )
+    } catch (e: IllegalArgumentException) {
+      throw McpRequestException(e.message ?: "invalid watch face override")
+    }
+  }
+
+  /**
+   * Encodes structured watch-face arguments (`ambient`, `clockEpochMillis`, `previewTime`,
+   * `watchFace`, `complications`) and `wfRenderer` into the flat `ServeOverrides` JSON map carried
+   * by `?overrides=` so returned `resource_link` URIs and `signedImageUrl` links replay the exact
+   * watch-face state and renderer selection.
+   */
+  private fun effectiveLinkOverrides(
+    rawOverrides: JsonObject?,
+    overrides: PreviewOverrides,
+    wfRenderer: String?,
+  ): JsonObject? {
+    val entries = LinkedHashMap<String, JsonElement>()
+    rawOverrides?.forEach { (k, v) -> entries[k] = v }
+    overrides.ambient?.let { amb ->
+      entries["ambient"] = JsonPrimitive(amb.state == AmbientStateOverride.AMBIENT)
+      amb.burnInProtectionRequired?.let { entries["ambientBurnIn"] = JsonPrimitive(it) }
+      amb.deviceHasLowBitAmbient?.let { entries["ambientLowBit"] = JsonPrimitive(it) }
+    }
+    overrides.clockEpochMillis?.let { entries["clockEpochMillis"] = JsonPrimitive(it) }
+    overrides.namedOverrides?.forEach { (k, v) ->
+      if (!k.startsWith(WatchFaceOverrides.WF_PREFIX)) return@forEach
+      entries[k] =
+        when (v) {
+          is PreviewOverrideValue.StringValue -> JsonPrimitive(v.value)
+          is PreviewOverrideValue.IntValue -> JsonPrimitive(v.value)
+          is PreviewOverrideValue.FloatValue -> JsonPrimitive(v.value)
+          is PreviewOverrideValue.BooleanValue -> JsonPrimitive(v.value)
+          is PreviewOverrideValue.ColorValue -> JsonPrimitive(v.argb)
+        }
+    }
+    wfRenderer
+      ?.takeIf { it.isNotBlank() }
+      ?.let { entries[WatchFaceOverrides.WF_RENDERER_PARAM] = JsonPrimitive(it) }
+    return entries.takeIf { it.isNotEmpty() }?.let(::JsonObject)
+  }
+
   /**
    * The same refusal applied to knobs (#1277): the renderer silently drops undeclared knobs and
    * unparseable values, so each is checked against [ServeOverrides.declaredKnobKinds] and a
@@ -2167,6 +2486,7 @@ class ServeCatalogMcp(
             .forEach { preview ->
               val kinds = buildSet {
                 addAll(preview.dataProductKinds)
+                if (preview.isWatchFace) add(WatchFaceComplicationsProduct.KIND)
                 if (host.hasA11yOverlayFor(preview.id)) add("a11y/hierarchy")
                 if (host.guidelineResultFor(preview.id) != null) add(GUIDELINES_RESULT_KIND)
                 if (
@@ -2370,6 +2690,33 @@ class ServeCatalogMcp(
     put("scrollAvailable", host.hasScrollExportFor(preview.id))
     preview.state?.let { put("state", it) }
     preview.theme?.let { put("theme", it) }
+    if (preview.isWatchFace) {
+      put("watchFace", true)
+      preview.watchFace?.let { wf ->
+        put("complicationSlotCount", wf.slots.size)
+        put("userConfigurationCount", wf.userConfigurations.size)
+      }
+      val wfRenderers = WatchFaceRendererRegistry.renderersFor(host, preview)
+      if (wfRenderers.isNotEmpty()) {
+        put(
+          "watchFaceRenderers",
+          buildJsonArray {
+            wfRenderers.forEach { info ->
+              add(
+                buildJsonObject {
+                  put("id", info.id)
+                  put("label", info.label)
+                  put("available", info.available)
+                  put("supportsLiveOverrides", info.supportsLiveOverrides)
+                  put("isDefault", info.isDefault)
+                  info.unavailableReason?.let { put("unavailableReason", it) }
+                },
+              )
+            }
+          },
+        )
+      }
+    }
     // Declared `previewOverride*` knobs by their `knob.<key>` wire key, so a client can find e.g.
     // the preview with a `document` knob without extra calls. Omitted when none.
     if (preview.overrides.isNotEmpty()) {
@@ -2585,6 +2932,7 @@ class ServeCatalogMcp(
     }
     val target = runCatching { targetFromUri(unsigned) }.getOrNull() ?: return null
     val rawOverrides = resourceOverrides(unsigned)
+    val wfRenderer = rawOverrides?.optionalString(WatchFaceOverrides.WF_RENDERER_PARAM)
     return withCatalog(target.catalog) { host ->
       val preview = resolvePreview(host, target.previewId)
       renderPng(
@@ -2594,6 +2942,7 @@ class ServeCatalogMcp(
           // The link is minted after a live render, so it serves that lane's pixels, not the
           // published snapshot `resources/read` prefers for an override-free uri.
           preferPublished = false,
+          wfRenderer = wfRenderer,
         )
         .png
     }
@@ -2745,6 +3094,7 @@ class ServeCatalogMcp(
   ): Boolean {
     val overrides = args["overrides"] as? JsonObject
     if (!overrides.isNullOrEmpty()) return false
+    if (presentWatchFaceArgKeys(args).isNotEmpty()) return false
     val observe = args["observe"]?.jsonPrimitive?.contentOrNull?.lowercase()
     if (observe != null && observe != "png") return false
     return liveAuthorization() == ServeMachineAuthorization.Decision.Missing
@@ -3477,6 +3827,17 @@ class ServeCatalogMcp(
     private const val MAX_CATALOGS_IN_ERROR = 50
     private val ANNOTATION_KINDS =
       setOf("compose/annotations", "compose/semantics", "compose/typography", "compose/tags")
+    private val WATCHFACE_RENDER_ARGS =
+      setOf(
+        "complications",
+        "watchFace",
+        "ambient",
+        "ambientBurnIn",
+        "ambientLowBit",
+        "clockEpochMillis",
+        "previewTime",
+        "wfRenderer",
+      )
     private val JSON = Json { ignoreUnknownKeys = false }
 
     private const val ACCESS_DISABLED =

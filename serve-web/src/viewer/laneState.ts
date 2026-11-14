@@ -171,16 +171,30 @@ export function restoreStaticPlayer(
     };
 }
 
+export interface WatchFaceLanePick {
+    /** The watch-face renderer backend the server uses with no pick. */
+    defaultBackend: string;
+    /** The watch-face renderer backend the visitor picked, if any. */
+    pickedBackend: string;
+    picked: boolean;
+}
+
 /**
  * The lane the picker is (or would be) on, in the combo's value space. The daemon stream is the
  * live form of the picked renderer, so it falls through to the static player lane, keeping the
  * chip's label across Live.
  */
-export function currentLaneValue(lanes: LaneFlags, pick: LanePick): string {
+export function currentLaneValue(
+    lanes: LaneFlags,
+    pick: LanePick,
+    wfPick?: WatchFaceLanePick,
+): string {
     if (lanes.rcWasm) return `rc:${RC_PLAYER.cmpWasm}`;
     if (lanes.rc) return `rc:${RC_PLAYER.camaelonJs}`;
     if (lanes.wasm) return "wasm";
     if (lanes.spec) return "spec";
+    if (wfPick?.defaultBackend)
+        return `wf:${wfPick.picked ? wfPick.pickedBackend : wfPick.defaultBackend}`;
     if (pick.defaultBackend)
         return `rc:${pick.picked ? pick.pickedBackend : pick.defaultBackend}`;
     return "png";

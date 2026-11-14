@@ -1,6 +1,8 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.bundle.BundleVerifier
+import ee.schimke.composeai.bundle.WatchFaceComplicationsPayload
+import ee.schimke.composeai.bundle.WatchFaceComplicationsProduct
 import ee.schimke.composeai.daemon.devices.DeviceDimensions
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.daemon.protocol.RemoteComposePlayerKind
@@ -499,6 +501,7 @@ class ServeBundleHost(
       .map { id ->
         val meta = variantMeta[id]
         val previewParams = previewParamsById[id]?.asPreviewParamsMeta() ?: meta?.previewParams
+        val watchFace = readWatchFace(id)
         ServePreview(
           id = id,
           label = id,
@@ -526,6 +529,10 @@ class ServeBundleHost(
           overrides = readOverrides(id).ifEmpty { meta?.overrides.orEmpty() },
           remoteComposeKnobs =
             readRemoteComposeKnobs(id).ifEmpty { meta?.remoteComposeKnobs.orEmpty() },
+          watchFace = watchFace,
+          dwfAssetPath = watchFace?.dwfAssetPath,
+          dataProductKinds =
+            if (watchFace != null) setOf(WatchFaceComplicationsProduct.KIND) else emptySet(),
           supportsFocus = meta?.supportsFocus == true,
           supportsGestures = meta?.supportsGestures == true,
           fixedTheme = meta?.fixedTheme == true,
@@ -775,6 +782,26 @@ class ServeBundleHost(
     } catch (e: Exception) {
       emptyList()
     }
+  }
+
+  /**
+   * Declarative Watch Face complication slots and user configurations from
+   * `previews/<id>.watchface.json`; absent → null.
+   */
+  private fun readWatchFace(id: String): WatchFaceComplicationsPayload? {
+    val sidecar = previewFile(id, WATCHFACE_SUFFIX)?.toOkioPath() ?: return null
+    if (!fileSystem.exists(sidecar)) return null
+    return try {
+      val json = fileSystem.read(sidecar) { readUtf8() }
+      OVERRIDES_JSON.decodeFromString(WatchFaceComplicationsPayload.serializer(), json)
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  override fun enabledRcPlayersFor(previewId: String): List<RcPlayerBackend> {
+    if (previews.any { it.id == previewId && it.isWatchFace }) return emptyList()
+    return super.enabledRcPlayersFor(previewId)
   }
 
   private val previewIds: Set<String> = previews.map { it.id }.toHashSet()
@@ -1616,6 +1643,7 @@ class ServeBundleHost(
 
     private const val OVERRIDES_SUFFIX = ".overrides.json"
     private const val REMOTECOMPOSE_SUFFIX = ".remotecompose.json"
+    private const val WATCHFACE_SUFFIX = ".watchface.json"
     /** Sibling of `previews/` holding the captured Remote Compose docs (`ir/<id>.rc`). */
     private const val IR_SUBDIR = "ir"
     private const val RC_SUFFIX = ".rc"

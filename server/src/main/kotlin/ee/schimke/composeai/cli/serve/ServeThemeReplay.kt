@@ -73,7 +73,8 @@ internal object ServeThemeReplay {
    * turns on.
    */
   fun isReplayed(renderHost: ServeHost, previewId: String): Boolean =
-    renderHost.hasRemoteComposeDoc(previewId)
+    renderHost.hasRemoteComposeDoc(previewId) &&
+      renderHost.previews.none { it.id == previewId && it.isWatchFace }
 
   /**
    * [params] with a `themeProvider` **expanded into the named-value seeds that apply it to a

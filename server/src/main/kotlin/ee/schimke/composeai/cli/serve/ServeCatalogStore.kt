@@ -1033,6 +1033,7 @@ class ServeCatalogStore(
             }
           val localAlias = moduleAlias.mapValues { (_, id) -> localPreviewIds.getValue(id) }
           extractCatalogRcDocs(bundleFile, localAlias, dir)
+          extractCatalogWatchFaceSidecars(bundleFile, localAlias, dir)
           extractComponentRecord(bundleFile, dir)
           extractGuidelineResults(bundleFile, dir)
           val resources =
@@ -1124,6 +1125,7 @@ class ServeCatalogStore(
         // Extract captured `.rc` documents re-keyed to catalog ids for the in-browser canvas lane.
         // Done regardless of daemon outcome, since that lane needs no daemon.
         extractCatalogRcDocs(bundleFile, alias, dir)
+        extractCatalogWatchFaceSidecars(bundleFile, alias, dir)
         extractComponentRecord(bundleFile, dir)
         extractGuidelineResults(bundleFile, dir)
         // IR-backed previews have no class in app.jar; the daemon replays them from `ir/`, so they
@@ -1914,6 +1916,75 @@ class ServeCatalogStore(
       val target = File(irDir, "$catalogId$RC_DOC_SUFFIX")
       // Containment: a crafted catalog id must not let the write escape the ir/ dir.
       if (!target.canonicalFile.toPath().startsWith(irRoot)) continue
+      target.parentFile?.mkdirs()
+      target.writeBytes(bytes)
+    }
+  }
+
+  /**
+   * Extract `previews/<daemon-id>.watchface.json` sidecars from [bundleFile], re-key them through
+   * [alias], and write `<dir>/previews/<catalog-id>.watchface.json` for [ServeBundleHost] so static
+   * and degraded catalog opens still advertise watch-face complication slots and user
+   * configurations.
+   */
+  private fun extractCatalogWatchFaceSidecars(
+    bundleFile: File,
+    alias: Map<String, String>,
+    dir: File,
+  ) {
+    val wantedDaemonIds = alias.values.toHashSet()
+    if (wantedDaemonIds.isEmpty()) return
+    val maxDocBytes = 4L * 1024 * 1024
+    val maxTotalBytes = 32L * 1024 * 1024
+    val sidecarsByDaemonId =
+      try {
+        val zipBytes = BundleReader.extractZipBytes(bundleFile)
+        val out = HashMap<String, ByteArray>()
+        var total = 0L
+        ZipInputStream(ByteArrayInputStream(zipBytes)).use { zin ->
+          var entry = zin.nextEntry
+          while (entry != null) {
+            val name = entry.name.replace('\\', '/')
+            if (
+              !entry.isDirectory &&
+                name.startsWith("$PER_PREVIEW_DIR/") &&
+                name.endsWith(WATCHFACE_SIDECAR_SUFFIX) &&
+                ".." !in name.split("/")
+            ) {
+              val daemonId =
+                name.removePrefix("$PER_PREVIEW_DIR/").removeSuffix(WATCHFACE_SIDECAR_SUFFIX)
+              if (daemonId in wantedDaemonIds && daemonId !in out) {
+                val buf = ByteArrayOutputStream()
+                val chunk = ByteArray(64 * 1024)
+                var docBytes = 0L
+                while (true) {
+                  val n = zin.read(chunk)
+                  if (n < 0) break
+                  docBytes += n
+                  total += n
+                  check(docBytes <= maxDocBytes && total <= maxTotalBytes) {
+                    "watchface sidecars exceed the decompression cap"
+                  }
+                  buf.write(chunk, 0, n)
+                }
+                out[daemonId] = buf.toByteArray()
+              }
+            }
+            zin.closeEntry()
+            entry = zin.nextEntry
+          }
+        }
+        out
+      } catch (_: Exception) {
+        return
+      }
+    if (sidecarsByDaemonId.isEmpty()) return
+    val previewsDir = File(dir, PER_PREVIEW_DIR)
+    val previewsRoot = previewsDir.canonicalFile.toPath()
+    for ((catalogId, daemonId) in alias) {
+      val bytes = sidecarsByDaemonId[daemonId] ?: continue
+      val target = File(previewsDir, "$catalogId$WATCHFACE_SIDECAR_SUFFIX")
+      if (!target.canonicalFile.toPath().startsWith(previewsRoot)) continue
       target.parentFile?.mkdirs()
       target.writeBytes(bytes)
     }
@@ -3433,6 +3504,7 @@ class ServeCatalogStore(
      */
     const val IR_DOC_DIR = "ir"
     const val RC_DOC_SUFFIX = ".rc"
+    const val WATCHFACE_SIDECAR_SUFFIX = ".watchface.json"
 
     /**
      * Subdir (under `liveBundle.path` / [LIVE_BUNDLE_DIR]) of per-preview split bundles, fetched by

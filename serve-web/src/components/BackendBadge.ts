@@ -50,7 +50,12 @@ export class BackendBadge extends VueElement {
         this.observer = new MutationObserver(() => this.readRoot());
         this.observer.observe(this.root, {
             attributes: true,
-            attributeFilter: ["data-mode", "data-pending"],
+            attributeFilter: [
+                "data-mode",
+                "data-pending",
+                "data-snapshot-backend",
+                "data-live-backend",
+            ],
         });
         this.readRoot();
         // The server can place lane metadata after the stage. Read it once more

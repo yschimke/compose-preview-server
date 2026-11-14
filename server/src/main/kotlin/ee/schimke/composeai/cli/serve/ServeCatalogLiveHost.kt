@@ -1379,6 +1379,7 @@ class ServeCatalogLiveHost(
    * ([supportsSwiftAppKit]). No `.rc` doc means no selector.
    */
   override fun enabledRcPlayersFor(previewId: String): List<RcPlayerBackend> {
+    if (previews.any { it.id == previewId && it.isWatchFace }) return emptyList()
     if (!hasRemoteComposeDoc(previewId)) return emptyList()
     return buildList {
       add(RcPlayerBackend.CAMAELON_JS)
@@ -1487,6 +1488,23 @@ class ServeCatalogLiveHost(
   override fun renderA11y(previewId: String, overrides: PreviewOverrides): A11yOutcome {
     val daemonId = alias[previewId] ?: return A11yOutcome.NotFound
     return liveHostFor(daemonId).renderA11y(daemonId, overrides)
+  }
+
+  override fun renderWatchFaceComplications(
+    previewId: String,
+    overrides: PreviewOverrides,
+  ): WatchFaceComplicationsOutcome {
+    val wantsLive =
+      daemonIdForOverrideRender(previewId, overrides) != null ||
+        baked.previews.firstOrNull { it.id == previewId }?.watchFace == null
+    if (wantsLive) {
+      val daemonId = alias[previewId]
+      if (daemonId != null) {
+        val liveOutcome = liveHostFor(daemonId).renderWatchFaceComplications(daemonId, overrides)
+        if (liveOutcome !is WatchFaceComplicationsOutcome.NotFound) return liveOutcome
+      }
+    }
+    return super.renderWatchFaceComplications(previewId, overrides)
   }
 
   /**
@@ -1610,6 +1628,9 @@ class ServeCatalogLiveHost(
       p.copy(
         overrides = twin.overrides,
         remoteComposeKnobs = twin.remoteComposeKnobs,
+        watchFace = twin.watchFace ?: p.watchFace,
+        dwfAssetPath = twin.dwfAssetPath ?: p.dwfAssetPath,
+        dataProductKinds = p.dataProductKinds + twin.dataProductKinds,
         supportsFocus = twin.supportsFocus,
         supportsGestures = twin.supportsGestures,
         // OR rather than overwrite, so an older daemon bundle without `fixedTheme` can't clear what

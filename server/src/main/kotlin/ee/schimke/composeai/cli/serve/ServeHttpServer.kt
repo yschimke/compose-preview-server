@@ -4,6 +4,7 @@ import ee.schimke.composeai.agentgrants.AgentGrantCapability
 import ee.schimke.composeai.agentgrants.AgentGrantProtocol
 import ee.schimke.composeai.agentgrants.AgentGrantScope
 import ee.schimke.composeai.bundle.BundleVerifier
+import ee.schimke.composeai.bundle.WatchFaceComplicationsPayload
 import ee.schimke.composeai.cli.serve.icons.IconNamesResponse
 import ee.schimke.composeai.cli.serve.icons.IconOutlinesResponse
 import ee.schimke.composeai.cli.serve.icons.IconRequestFailure
@@ -7513,6 +7514,7 @@ class ServeHttpServer(
       ServeOverrides.isOverrideParam(key) ||
         key == "scroll" ||
         key == "rcPlayer" ||
+        key == WatchFaceOverrides.WF_RENDERER_PARAM ||
         key == "mode" ||
         // A `?bg=` stage changes the bytes, and the thumbnail URL is the hash of un-matted pixels,
         // so take the ordinary render path.
@@ -7997,9 +7999,15 @@ class ServeHttpServer(
     fun seeds(seeded: Map<String, String>) = OverrideSeeds.of(params, seeded)
     if (pinnedRevision != null) return seeds(emptyMap())
     if (params.isEmpty() || !acceptsBakedFallback()) return seeds(params)
+    val wfOverridesLive =
+      preview.isWatchFace &&
+        WatchFaceRendererRegistry.renderersFor(renderHost, preview).any {
+          it.available && it.supportsLiveOverrides
+        }
     val overrideCanReachThePixels =
       renderHost.canApplyOverrides ||
         renderHost.canRenderOverridesFor(preview.id) ||
+        wfOverridesLive ||
         wasmSrc != null
     if (!overrideCanReachThePixels) return seeds(emptyMap())
     if (!isReplayedPreview(renderHost, preview.id)) return seeds(params)
@@ -8039,7 +8047,12 @@ class ServeHttpServer(
               .filter { it !in seeded }
               .filter {
                 it.startsWith(ServeOverrides.KNOB_PREFIX) ||
-                  it.startsWith(ServeOverrides.RC_NAMED_PREFIX)
+                  it.startsWith(ServeOverrides.RC_NAMED_PREFIX) ||
+                  it.startsWith(WatchFaceOverrides.WF_PREFIX) ||
+                  it == "ambient" ||
+                  it == "ambientBurnIn" ||
+                  it == "ambientLowBit" ||
+                  it == "clockEpochMillis"
               }
               .toSet(),
         )
@@ -9835,6 +9848,10 @@ class ServeHttpServer(
                 modes = p.modes.map { it.wire },
                 overrides = p.overrides,
                 remoteComposeKnobs = p.remoteComposeKnobs,
+                watchFace = p.watchFace,
+                watchFaceRenderers =
+                  if (p.isWatchFace) WatchFaceRendererRegistry.renderersFor(renderHost, p)
+                  else emptyList(),
                 spatial = p.spatial,
                 liveOnly = p.id in renderHost.liveOnlyPreviewIds,
                 views = previewEngagement.getValue(p.id).views,
@@ -11023,13 +11040,22 @@ class ServeHttpServer(
       // The publication-aware HEAD probe is network I/O; keep it off Ktor's request dispatcher.
       val executableBundleAvailable =
         withContext(Dispatchers.IO) { renderHost.canDownloadExecutableBundle(preview.id) }
+      // Watch faces use WatchFaceRendererRegistry lanes (DWF RemoteCompose, DWF Renderer APK)
+      // rather than generic RemoteCompose player lanes.
+      val wfRenderers = WatchFaceRendererRegistry.renderersFor(renderHost, preview)
+      val wfOverridesLive =
+        preview.isWatchFace && wfRenderers.any { it.available && it.supportsLiveOverrides }
       // Per-preview Remote Compose backend lanes: the host's server/client lanes plus the opt-in
       // CMP/Wasm browser lane when the preview has an RC document. Empty ⇒ no selector.
       val ownRcPlayers = buildList {
         // In this server's player vocabulary ([ServeRcPlayerIds]), not compose-ai-tools' wire
         // spelling: the pinned release still spells the embedded player `cmp-android`.
         addAll(renderHost.enabledRcPlayersFor(preview.id).map(ServeRcPlayerIds::of))
-        if (rcPlayerWasmDir != null && renderHost.hasRemoteComposeDoc(preview.id)) {
+        if (
+          !preview.isWatchFace &&
+            rcPlayerWasmDir != null &&
+            renderHost.hasRemoteComposeDoc(preview.id)
+        ) {
           add(ServeRcPlayerIds.CMP_WASM)
         }
       }
@@ -11056,8 +11082,9 @@ class ServeHttpServer(
           webSessionId,
           canApplyOverrides = renderHost.canApplyOverrides,
           // Per-preview: a catalog-live host can only re-render overrides on daemon-twinned
-          // previews, so others get disabled controls.
-          canRenderOverrides = renderHost.canRenderOverridesFor(preview.id),
+          // previews, so others get disabled controls; watch faces also re-render through
+          // WatchFaceRendererRegistry when a live-capable watch-face backend is available.
+          canRenderOverrides = renderHost.canRenderOverridesFor(preview.id) || wfOverridesLive,
           // Per-preview: dp size overrides are converted against this density.
           renderDensity = catalogBundleHost(renderHost)?.renderDensityFor(preview.id),
           // Per-preview: the density the browser RC lanes use for an undeclared document.
@@ -11092,8 +11119,8 @@ class ServeHttpServer(
           liveTakesInput = !carriedRcLive || carriedRcTakesInput,
           trust = catalogBundleHost(renderHost)?.let { BundleVerifier.summary(it.trust) },
           // Per-preview: the Remote Compose canvas lane needs a captured `.rc` (fetched from
-          // `/render/<id>.rc`).
-          hasRemoteComposeDoc = renderHost.hasRemoteComposeDoc(preview.id),
+          // `/render/<id>.rc`). Watch faces expose dedicated watch-face renderers instead.
+          hasRemoteComposeDoc = !preview.isWatchFace && renderHost.hasRemoteComposeDoc(preview.id),
           // Per-preview: a replayed document can't recompose, so the viewer greys controls
           // [droppedOverridesFor] would 409. Read from the same host question to avoid drift.
           irReplay = isReplayedPreview(renderHost, preview.id),
@@ -11110,6 +11137,7 @@ class ServeHttpServer(
           preferredRcPlayer =
             if (donorRcPlayers.isEmpty()) preferredRcPlayer
             else ServeRcPlayerIds.defaultPlayer(ownRcPlayers, preferredRcPlayer).ifEmpty { null },
+          watchFaceRenderers = if (revisions.pinned != null) emptyList() else wfRenderers,
           wasmSrc = wasmSrc,
           wasmSameOrigin = wasmSameOrigin,
           basePath = basePath,
@@ -11119,6 +11147,9 @@ class ServeHttpServer(
             else null,
           changelogHref = changelogHref(sessionId, basePath, webSessionId),
           isPublic = isPublic,
+          snapshotBackend =
+            wfRenderers.firstOrNull { it.isDefault }?.badgeLabel
+              ?: wfRenderers.firstOrNull()?.badgeLabel,
           componentBrowser = componentBrowserMode(),
           declaredThemes = applicableThemes(renderHost, preview.id),
           // Android-daemon-only: gates the "Show gesture hints" row so a `@GestureHintPreview`
@@ -11459,6 +11490,7 @@ class ServeHttpServer(
       val wantSlots = rawName.endsWith(".slots")
       val wantA11y = rawName.endsWith(".a11y")
       val wantAnnotations = rawName.endsWith(".annotations")
+      val wantComplications = rawName.endsWith(".complications")
       val wantRcDoc = rawName.endsWith(".rc")
       // `.rc.json` is `.rc` projected to text for people and tools. Its suffix must be stripped
       // before `.rc`.
@@ -11470,6 +11502,7 @@ class ServeHttpServer(
           .removeSuffix(".slots")
           .removeSuffix(".a11y")
           .removeSuffix(".annotations")
+          .removeSuffix(".complications")
           .removeSuffix(".rc.json")
           .removeSuffix(".rc")
       // `?bg=`: composite the preview's resolved stage into the PNG ([ServeRenderMatte]).
@@ -11517,6 +11550,7 @@ class ServeHttpServer(
           !wantSlots &&
           !wantA11y &&
           !wantAnnotations &&
+          !wantComplications &&
           !wantRcDoc &&
           !wantRcJson &&
           plainThumbRequest() &&
@@ -11572,7 +11606,13 @@ class ServeHttpServer(
       // be described.
       if (
         staleGeneration != null &&
-          (wantSvg || wantSlots || wantA11y || wantAnnotations || wantRcDoc || wantRcJson)
+          (wantSvg ||
+            wantSlots ||
+            wantA11y ||
+            wantAnnotations ||
+            wantComplications ||
+            wantRcDoc ||
+            wantRcJson)
       ) {
         call.respondText(
           "only the baked render is published per generation; this catalog has moved on from " +
@@ -11586,7 +11626,15 @@ class ServeHttpServer(
       if (pinnedCommit != null) {
         // Non-raster products are made on demand and never published per revision, so a pin on them
         // refuses rather than serving today's export under an old publish's URL.
-        if (wantSvg || wantSlots || wantA11y || wantAnnotations || wantRcDoc || wantRcJson) {
+        if (
+          wantSvg ||
+            wantSlots ||
+            wantA11y ||
+            wantAnnotations ||
+            wantComplications ||
+            wantRcDoc ||
+            wantRcJson
+        ) {
           call.respondText(
             "only the baked render is published per revision; drop " +
               "'${ServeCatalogRevision.PARAM}' to ask the daemon for this product",
@@ -11658,7 +11706,14 @@ class ServeHttpServer(
       // ~4.3s one-shot JVM) is considered. Caught here because the short-circuit below returns
       // before the override parse the `cached` chain reads. "Bare" is read off the raw query: no
       // override besides `rcPlayer`. `.svg` is excluded (the staged artifact is a raster).
-      if (!wantSvg && !wantSlots && !wantA11y && !wantAnnotations && bareRcPlayerRequest()) {
+      if (
+        !wantSvg &&
+          !wantSlots &&
+          !wantA11y &&
+          !wantAnnotations &&
+          !wantComplications &&
+          bareRcPlayerRequest()
+      ) {
         val stagedRaster =
           renderHost.publishedRcPlayerRender(previewId, RcPlayerBackend.CMP_JVM).takeIf {
             ServeRcPlayerIds.isCmpJvm(renderParams()["rcPlayer"])
@@ -11679,7 +11734,9 @@ class ServeHttpServer(
       val subprocessLane =
         ServeRcPlayerIds.subprocessLaneOf(renderParams()["rcPlayer"])
           ?: themeReplayLane(renderHost, previewId)
-      if (!wantSlots && !wantA11y && !wantAnnotations && subprocessLane != null) {
+      if (
+        !wantSlots && !wantA11y && !wantAnnotations && !wantComplications && subprocessLane != null
+      ) {
         if (wantSvg && subprocessLane == RcPlayerBackend.SWIFT_APPKIT) {
           call.respondText(
             "swift-appkit renders PNG only; AppKit has no vector export",
@@ -11715,6 +11772,8 @@ class ServeHttpServer(
         )
         return@withLeasedSession
       }
+      val wfRendererParam =
+        renderParams()[WatchFaceOverrides.WF_RENDERER_PARAM]?.trim()?.takeIf { it.isNotEmpty() }
       // Forward the fixed render axes plus dynamic params (`knob.<key>=…`, `rc.<name>=…`, not in
       // SUPPORTED_KEYS) so live edits reach ServeOverrides.parse.
       val overrideParams =
@@ -11775,6 +11834,23 @@ class ServeHttpServer(
           }
           if (wantAnnotations) {
             renderAnnotationsResponse(renderHost, previewId, overrides, requestedInspectLayers())
+            return@withLeasedSession
+          }
+          if (wantComplications) {
+            renderComplicationsResponse(renderHost, previewId, overrides, wfRendererParam)
+            return@withLeasedSession
+          }
+          val wfPreview = renderHost.previews.firstOrNull { it.id == previewId }
+          if (!scroll && (wfPreview?.isWatchFace == true || wfRendererParam != null)) {
+            renderWatchFacePngResponse(
+              renderHost = renderHost,
+              preview = wfPreview,
+              previewId = previewId,
+              overrides = overrides,
+              overrideParams = overrideParams,
+              wfRendererParam = wfRendererParam,
+              staged = staged,
+            )
             return@withLeasedSession
           }
           // The render blocks (renderNow + await), so keep it off the request dispatcher and cap
@@ -12123,7 +12199,7 @@ class ServeHttpServer(
         renderHost.bakedTheme(previewId),
         renderHost.bakedRcPlayer(previewId),
       )
-    } else if (renderHost.hasRemoteComposeDoc(previewId)) {
+    } else if (isReplayedPreview(renderHost, previewId)) {
       // A real render happened but still couldn't apply everything, because this preview is
       // replayed rather than recomposed; see [CatalogLiveRouting.irReplayDroppedOverrideNames].
       CatalogLiveRouting.irReplayDroppedOverrideNames(
@@ -12265,7 +12341,9 @@ class ServeHttpServer(
    */
   private fun RoutingContext.bareRcPlayerRequest(): Boolean =
     renderParams().entries().none { (key, _) ->
-      (ServeOverrides.isOverrideParam(key) && key != "rcPlayer") || key == "scroll"
+      (ServeOverrides.isOverrideParam(key) && key != "rcPlayer") ||
+        key == WatchFaceOverrides.WF_RENDERER_PARAM ||
+        key == "scroll"
     }
 
   /** Whether the caller passed `?fallback=baked` — an explicit "serve the snapshot anyway". */
@@ -12672,6 +12750,7 @@ class ServeHttpServer(
    * viewer offer it" and "does `/render` route it to a donor".
    */
   private fun donorBackedRcPlayers(host: ServeHost, previewId: String): List<RcPlayerBackend> {
+    if (host.previews.any { it.id == previewId && it.isWatchFace }) return emptyList()
     if (host.canRenderOverridesFor(previewId)) return emptyList()
     if (!host.hasRemoteComposeDoc(previewId)) return emptyList()
     if (host.remoteComposeRenderSpec(previewId) == null) return emptyList()
@@ -12685,6 +12764,7 @@ class ServeHttpServer(
    * cmp-jvm render keeps its one-shot subprocess, and only the live lane holds a session.
    */
   private fun carriedLivePlayers(host: ServeHost, previewId: String): List<RcPlayerBackend> {
+    if (host.previews.any { it.id == previewId && it.isWatchFace }) return emptyList()
     val android = donorBackedRcPlayers(host, previewId)
     if (rcDesktopPlayerDaemon == null) return android
     if (host.canRenderOverridesFor(previewId)) return android
@@ -13220,7 +13300,10 @@ class ServeHttpServer(
    * safe on over-reporting.
    */
   private fun RoutingContext.requestCarriesOverrides(): Boolean =
-    renderParams().entries().any { (key, _) -> ServeOverrides.isOverrideParam(key) }
+    renderParams().entries().any { (key, values) ->
+      ServeOverrides.isOverrideParam(key) ||
+        (key == WatchFaceOverrides.WF_RENDERER_PARAM && values.any { it.isNotBlank() })
+    }
 
   /**
    * Whether this page request names nothing that could move the frame the viewer asks for first,
@@ -13259,7 +13342,7 @@ class ServeHttpServer(
 
   private val DAEMON_ONLY_RENDER_SUFFIXES =
     // `.rc.json` doesn't end with `.rc`, so it must be listed explicitly.
-    listOf(".svg", ".slots", ".a11y", ".annotations", ".rc", ".rc.json")
+    listOf(".svg", ".slots", ".a11y", ".annotations", ".complications", ".rc", ".rc.json")
 
   /**
    * Whether `/render/{name}` names one of [DAEMON_ONLY_RENDER_SUFFIXES], a product this route must
@@ -13671,6 +13754,191 @@ class ServeHttpServer(
       AnnotationsOutcome.NotFound ->
         call.respondText("no such preview", status = HttpStatusCode.NotFound)
       is AnnotationsOutcome.Failed ->
+        call.respondText(outcome.reason, status = HttpStatusCode.InternalServerError)
+    }
+  }
+
+  /**
+   * Watch-face complication metadata lane (`GET /render/<id>.complications`): dispatches through
+   * [WatchFaceRendererRegistry] so both DWF RemoteCompose and DWF Renderer APK (Launch) backends
+   * share one route.
+   */
+  private suspend fun RoutingContext.renderComplicationsResponse(
+    renderHost: ServeHost,
+    previewId: String,
+    overrides: PreviewOverrides,
+    wfRendererParam: String?,
+  ) {
+    val backend = WatchFaceRendererRegistry.resolve(wfRendererParam)
+    if (backend == null) {
+      call.respondText(
+        "unknown '${WatchFaceOverrides.WF_RENDERER_PARAM}' value '$wfRendererParam'; expected one of " +
+          WatchFaceRendererRegistry.all().joinToString(", ") { it.id },
+        status = HttpStatusCode.BadRequest,
+      )
+      return
+    }
+    val preview = renderHost.previews.firstOrNull { it.id == previewId }
+    if (preview == null) {
+      call.respondText("no such preview", status = HttpStatusCode.NotFound)
+      return
+    }
+    if (!preview.isWatchFace && wfRendererParam != null) {
+      call.respondText(
+        "'${WatchFaceOverrides.WF_RENDERER_PARAM}' is only supported on watch-face previews",
+        status = HttpStatusCode.BadRequest,
+      )
+      return
+    }
+    val outcome =
+      withContext(Dispatchers.IO) {
+        if (!renderSemaphore.tryAcquire(RENDER_QUEUE_WAIT_SECONDS, TimeUnit.SECONDS)) {
+          null
+        } else {
+          try {
+            backend.complications(renderHost, preview, overrides)
+          } finally {
+            renderSemaphore.release()
+          }
+        }
+      }
+    when (outcome) {
+      null -> {
+        call.response.headers.append(HttpHeaders.RetryAfter, "2")
+        call.respondText(
+          "render queue saturated; retry shortly",
+          status = HttpStatusCode.ServiceUnavailable,
+        )
+      }
+      is WatchFaceComplicationsOutcome.Ok -> respondInspectionJson(renderHost, outcome.json)
+      WatchFaceComplicationsOutcome.NotFound ->
+        call.respondText(
+          "no watch-face complications for that preview",
+          status = HttpStatusCode.NotFound,
+        )
+      is WatchFaceComplicationsOutcome.Unavailable ->
+        call.respondText(outcome.reason, status = HttpStatusCode.ServiceUnavailable)
+      is WatchFaceComplicationsOutcome.Failed ->
+        call.respondText(outcome.reason, status = HttpStatusCode.InternalServerError)
+    }
+  }
+
+  /**
+   * Watch-face raster lane (`GET /render/<id>.png`): routes through [WatchFaceRendererRegistry] so
+   * default renders, complication/state overrides, and explicit `?wfRenderer=` selections share one
+   * pluggable seam.
+   */
+  private suspend fun RoutingContext.renderWatchFacePngResponse(
+    renderHost: ServeHost,
+    preview: ServePreview?,
+    previewId: String,
+    overrides: PreviewOverrides,
+    overrideParams: Map<String, String>,
+    wfRendererParam: String?,
+    staged: suspend (ByteArray, Map<String, String>) -> ByteArray,
+  ) {
+    val backend = WatchFaceRendererRegistry.resolve(wfRendererParam)
+    if (backend == null) {
+      call.respondText(
+        "unknown '${WatchFaceOverrides.WF_RENDERER_PARAM}' value '$wfRendererParam'; expected one of " +
+          WatchFaceRendererRegistry.all().joinToString(", ") { it.id },
+        status = HttpStatusCode.BadRequest,
+      )
+      return
+    }
+    if (preview == null) {
+      call.respondText("no such preview", status = HttpStatusCode.NotFound)
+      return
+    }
+    if (!preview.isWatchFace) {
+      call.respondText(
+        "'${WatchFaceOverrides.WF_RENDERER_PARAM}' is only supported on watch-face previews",
+        status = HttpStatusCode.BadRequest,
+      )
+      return
+    }
+    val defaultBackend = wfRendererParam == null || backend.id == WatchFaceRendererIds.DWF_RC
+    val cached =
+      if (
+        defaultBackend &&
+          !CatalogLiveRouting.overridesAffectRender(
+            previewId,
+            overrides,
+            renderHost.bakedTheme(previewId),
+            renderHost.bakedRcPlayer(previewId),
+          )
+      ) {
+        renderHost.cachedRender(previewId, overrides)
+          ?: renderHost.bakedRender(previewId, overrides)
+      } else {
+        null
+      }
+    if (cached == null) {
+      val info = backend.infoFor(renderHost, preview)
+      if (!info.available) {
+        call.respondText(
+          info.unavailableReason ?: "${backend.label} is not available for this watch face",
+          status = HttpStatusCode.ServiceUnavailable,
+        )
+        return
+      }
+    }
+    val outcome =
+      cached
+        ?: withContext(Dispatchers.IO) {
+          if (!renderSemaphore.tryAcquire(RENDER_QUEUE_WAIT_SECONDS, TimeUnit.SECONDS)) {
+            null
+          } else {
+            try {
+              backend.render(renderHost, preview, overrides)
+            } finally {
+              renderSemaphore.release()
+            }
+          }
+        }
+    when (outcome) {
+      null -> {
+        call.response.headers.append(HttpHeaders.RetryAfter, "2")
+        call.respondText(
+          "render queue saturated; retry shortly",
+          status = HttpStatusCode.ServiceUnavailable,
+        )
+      }
+      RenderOutcome.Busy -> {
+        call.response.headers.append(HttpHeaders.RetryAfter, "2")
+        call.respondText("render busy; retry shortly", status = HttpStatusCode.ServiceUnavailable)
+      }
+      is RenderOutcome.Ok -> {
+        val dropped = droppedOverridesFor(renderHost, outcome.generation, previewId, overrides)
+        if (dropped.isNotEmpty()) {
+          respondDroppedOverrides(
+            renderHost,
+            previewId,
+            dropped,
+            overrides,
+            outcome.png,
+            ContentType.Image.PNG,
+            outcome.generation,
+          )
+        } else {
+          val bakedBrowse =
+            outcome.generation == RenderOutcome.Generation.BAKED &&
+              overrideParams.isEmpty() &&
+              wfRendererParam == null
+          markGeneration(
+            outcome.generation.wire,
+            if (!isPublic) DYNAMIC_RESOURCE_CACHE_CONTROL
+            else if (bakedBrowse) {
+              if (carriesCurrentGeneration(renderHost)) prebakedImageCacheControl(isPublic)
+              else STATIC_RESOURCE_CACHE_CONTROL
+            } else DYNAMIC_RESOURCE_CACHE_CONTROL,
+          )
+          call.respondBytes(staged(outcome.png, overrideParams), ContentType.Image.PNG)
+        }
+      }
+      RenderOutcome.NotFound ->
+        call.respondText("no such preview", status = HttpStatusCode.NotFound)
+      is RenderOutcome.Failed ->
         call.respondText(outcome.reason, status = HttpStatusCode.InternalServerError)
     }
   }
@@ -18945,6 +19213,16 @@ private data class PreviewDto(
    * preview. Additive since `compose-preview-serve/v3`; false for a daemon-only host.
    */
   val remoteCompose: Boolean = false,
+  /**
+   * Declarative Watch Face (`<WatchFace>`) complication slots, user configurations, and initial
+   * state when this preview is a watch face (`previews/<id>.watchface.json`).
+   */
+  val watchFace: WatchFaceComplicationsPayload? = null,
+  /**
+   * Registered watch-face renderer backends (`dwf-rc`, `dwf-apk`, …) and their availability on this
+   * host. Empty for non-watch-face previews.
+   */
+  val watchFaceRenderers: List<WatchFaceRendererInfo> = emptyList(),
 )
 
 /**
