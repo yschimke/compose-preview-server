@@ -454,6 +454,8 @@ function themeTwinHref(b: HTMLButtonElement): string | null {
 // Whether the frame is the preview as published, apart from the theme axis. Uses the same
 // predicates as `query()` so the two agree on what counts as an edit.
 var wfRendererPicked = false;
+var wfExtraOverrides: Overrides = {};
+var wfControlsEnabled = !staticSnapshot || canRenderOverrides;
 function frameIsUnedited(): boolean {
     const o = overrides();
     for (const key of Object.keys(o)) {
@@ -461,6 +463,8 @@ function frameIsUnedited(): boolean {
     }
     if (chosenThemeProvider()) return false;
     if (wfRendererPicked) return false;
+    if (wfControlsEnabled && Object.keys(wfExtraOverrides).length > 0)
+        return false;
     let edited = false;
     controls(".cp-knob").forEach(function (el) {
         if (edited || el.disabled || !el.getAttribute("data-knob-key")) return;
@@ -604,6 +608,9 @@ function liveOverrides() {
     });
     // Watch-face state, user configuration and complication slot overrides. Omitted at each field's
     // baked default because `setOverrides` rebuilds `WatchFaceOverrides` from scratch on every map.
+    if (wfControlsEnabled) {
+        for (const [k, v] of Object.entries(wfExtraOverrides)) o[k] = v;
+    }
     controls(".cp-wf-field").forEach(function (el) {
         if (el.disabled) return;
         var key = el.getAttribute("data-wf-key");
@@ -723,6 +730,9 @@ function renderOverrides(): Overrides {
     });
     // Watch-face state, user configuration and complication slot overrides. Omitted at each field's
     // baked default so the URL stays on the baked snapshot.
+    if (wfControlsEnabled) {
+        for (const [k, v] of Object.entries(wfExtraOverrides)) o[k] = v;
+    }
     controls(".cp-wf-field").forEach(function (el) {
         if (el.disabled) return;
         var key = el.getAttribute("data-wf-key");
@@ -3940,6 +3950,7 @@ function syncServerControls() {
             el.getAttribute("data-base-disabled") === "1" || onFixedFrame;
         gateForIrReplay(el, irReplay && !onWasm, IR_WHY_RECOMPOSE);
     });
+    wfControlsEnabled = canServerRender;
     controls(".cp-wf-field").forEach(function (el) {
         el.disabled = !canServerRender;
     });
@@ -5008,14 +5019,18 @@ function hydrateFromUrl(popped: boolean) {
             el.checked = isChecked(value);
         else el.value = value;
     });
+    var wfControlledKeys = new Set<string>();
     controls(".cp-wf-field").forEach(function (el) {
         var key = el.getAttribute("data-wf-key");
         if (!key) return;
+        wfControlledKeys.add(key);
         var rawWf = q.get(key);
         var value =
             rawWf === null || unseeded.has(key)
                 ? el.getAttribute("data-wf-initial") || ""
-                : rawWf;
+                : key === "ambientBurnIn" || key === "ambientLowBit"
+                  ? rules.triStateBoolParam(rawWf)
+                  : rawWf;
         if (el instanceof HTMLInputElement && el.type === "checkbox")
             el.checked = isChecked(value);
         else {
@@ -5023,6 +5038,11 @@ function hydrateFromUrl(popped: boolean) {
             el.value = value;
         }
     });
+    wfExtraOverrides = rules.uncontrolledWatchFaceParams(
+        q,
+        wfControlledKeys,
+        unseeded,
+    );
     // The sticky script seeds the theme select before this file runs, so the initial pass leaves it
     // alone. Back/Forward owns it: the entry's theme, or the page's opening one.
     if (popped && themeChoice) {

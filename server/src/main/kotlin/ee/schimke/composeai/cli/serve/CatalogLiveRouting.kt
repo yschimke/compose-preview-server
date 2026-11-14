@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.daemon.protocol.AmbientStateOverride
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.daemon.protocol.RemoteComposePlayerKind
 import ee.schimke.composeai.daemon.protocol.RemoteNamedValue
@@ -107,7 +108,16 @@ internal object CatalogLiveRouting {
     add("themeProvider", dropped.themeProvider)
     add("focus", dropped.focus)
     add("gestures", dropped.gestures)
-    add("ambient", dropped.ambient)
+    dropped.ambient?.let { amb ->
+      if (
+        amb.state == AmbientStateOverride.AMBIENT ||
+          (amb.burnInProtectionRequired == null && amb.deviceHasLowBitAmbient == null)
+      ) {
+        names += "ambient"
+      }
+      add("ambientBurnIn", amb.burnInProtectionRequired)
+      add("ambientLowBit", amb.deviceHasLowBitAmbient)
+    }
     add("clockEpochMillis", dropped.clockEpochMillis)
     add("clearBackground", dropped.clearBackground)
     dropped.namedOverrides?.keys?.sorted()?.forEach { key ->

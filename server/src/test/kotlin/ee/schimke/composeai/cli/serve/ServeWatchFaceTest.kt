@@ -395,19 +395,30 @@ class ServeWatchFaceTest {
 
     // 5. Viewer HTML renders watch-face lane options and complication controls, without generic
     // rc:*
-    // player lanes.
-    client.newCall(Request.Builder().url("$base/p/$wfPreviewId").build()).execute().use { resp ->
-      assertEquals(200, resp.code)
-      val html = resp.body.string()
-      assertTrue(html.contains("""data-wf-default="dwf-rc""""))
-      assertTrue(html.contains("""value="wf:dwf-rc""""))
-      assertTrue(html.contains("""value="wf:dwf-apk""""))
-      assertTrue(html.contains("""data-cp-group="watchface""""))
-      assertTrue(html.contains("""data-wf-key="ambient""""))
-      assertTrue(html.contains("""data-wf-key="wf.slot.1.type""""))
-      assertTrue(html.contains("""data-wf-key="wf.config.color_style_setting""""))
-      assertFalse(html.contains("""value="rc:camaelon-js""""))
-    }
+    // player lanes, and hydrates ambientBurnIn / ambientLowBit URL flags.
+    client
+      .newCall(
+        Request.Builder()
+          .url("$base/p/$wfPreviewId?ambientBurnIn=true&ambientLowBit=false")
+          .build(),
+      )
+      .execute()
+      .use { resp ->
+        assertEquals(200, resp.code)
+        val html = resp.body.string()
+        assertTrue(html.contains("""data-wf-default="dwf-rc""""))
+        assertTrue(html.contains("""value="wf:dwf-rc""""))
+        assertTrue(html.contains("""value="wf:dwf-apk""""))
+        assertTrue(html.contains("""data-cp-group="watchface""""))
+        assertTrue(html.contains("""data-wf-key="ambient""""))
+        assertTrue(html.contains("""data-wf-key="ambientBurnIn""""))
+        assertTrue(html.contains("""data-wf-key="ambientLowBit""""))
+        assertTrue(html.contains("""<option value="true" selected>true</option>"""))
+        assertTrue(html.contains("""<option value="false" selected>false</option>"""))
+        assertTrue(html.contains("""data-wf-key="wf.slot.1.type""""))
+        assertTrue(html.contains("""data-wf-key="wf.config.color_style_setting""""))
+        assertFalse(html.contains("""value="rc:camaelon-js""""))
+      }
   }
 
   @Test

@@ -6,7 +6,13 @@
 // the control that set it, so the address bar describes a page that is not on screen.
 
 import assert from "node:assert/strict";
-import { URL_STATE_PARAMS, ownsUrlParam } from "../src/viewer/ownedParams.js";
+import {
+    URL_STATE_PARAMS,
+    isWatchFaceStateParam,
+    ownsUrlParam,
+    triStateBoolParam,
+    uncontrolledWatchFaceParams,
+} from "../src/viewer/ownedParams.js";
 
 describe("ownsUrlParam", () => {
     it("claims every parameter the viewer writes by name", () => {
@@ -81,6 +87,8 @@ describe("ownsUrlParam", () => {
         assert.equal(ownsUrlParam("wf.config.color_style_setting"), true);
         assert.equal(ownsUrlParam("wf.heartRate"), true);
         assert.equal(ownsUrlParam("ambient"), true);
+        assert.equal(ownsUrlParam("ambientBurnIn"), true);
+        assert.equal(ownsUrlParam("ambientLowBit"), true);
         assert.equal(ownsUrlParam("clockEpochMillis"), true);
         assert.equal(ownsUrlParam("wfRenderer"), true);
     });
@@ -119,5 +127,63 @@ describe("ownsUrlParam", () => {
 
     it("lists no duplicates, so the set is what it appears to be", () => {
         assert.equal(new Set(URL_STATE_PARAMS).size, URL_STATE_PARAMS.length);
+    });
+});
+
+describe("uncontrolledWatchFaceParams", () => {
+    it("preserves ambientBurnIn, ambientLowBit and uncontrolled wf.* params when no control owns them", () => {
+        const params = new URLSearchParams(
+            "ambient=true&ambientBurnIn=true&ambientLowBit=false&wf.is24Hour=true&wf.slot.1.type=SHORT_TEXT&token=secret",
+        );
+        const controlled = new Set(["ambient", "wf.slot.1.type"]);
+        const unseeded = new Set<string>();
+        assert.deepEqual(
+            uncontrolledWatchFaceParams(params, controlled, unseeded),
+            {
+                ambientBurnIn: "true",
+                ambientLowBit: "false",
+                "wf.is24Hour": "true",
+            },
+        );
+    });
+
+    it("preserves ambient and clockEpochMillis on non-watch-face pages without .cp-wf-field controls", () => {
+        const params = new URLSearchParams(
+            "ambient=true&ambientBurnIn=true&clockEpochMillis=1700000000000&wfRenderer=dwf-rc",
+        );
+        assert.deepEqual(
+            uncontrolledWatchFaceParams(params, new Set(), new Set()),
+            {
+                ambient: "true",
+                ambientBurnIn: "true",
+                clockEpochMillis: "1700000000000",
+            },
+        );
+        assert.equal(isWatchFaceStateParam("wfRenderer"), false);
+    });
+
+    it("withholds unseeded parameters and ignores empty values", () => {
+        const params = new URLSearchParams(
+            "ambientBurnIn=true&ambientLowBit=&wf.is24Hour=true",
+        );
+        assert.deepEqual(
+            uncontrolledWatchFaceParams(
+                params,
+                new Set(),
+                new Set(["ambientBurnIn"]),
+            ),
+            {
+                "wf.is24Hour": "true",
+            },
+        );
+    });
+
+    it("normalises tri-state boolean URL values cleanly", () => {
+        assert.equal(triStateBoolParam(null), "");
+        assert.equal(triStateBoolParam(""), "");
+        assert.equal(triStateBoolParam("1"), "true");
+        assert.equal(triStateBoolParam("TRUE"), "true");
+        assert.equal(triStateBoolParam("0"), "false");
+        assert.equal(triStateBoolParam("FALSE"), "false");
     });
 });

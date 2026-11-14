@@ -8048,7 +8048,11 @@ class ServeHttpServer(
               .filter {
                 it.startsWith(ServeOverrides.KNOB_PREFIX) ||
                   it.startsWith(ServeOverrides.RC_NAMED_PREFIX) ||
-                  it.startsWith(WatchFaceOverrides.WF_PREFIX)
+                  it.startsWith(WatchFaceOverrides.WF_PREFIX) ||
+                  it == "ambient" ||
+                  it == "ambientBurnIn" ||
+                  it == "ambientLowBit" ||
+                  it == "clockEpochMillis"
               }
               .toSet(),
         )

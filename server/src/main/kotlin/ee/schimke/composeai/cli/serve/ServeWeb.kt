@@ -17587,6 +17587,21 @@ ${(if (brand == null) ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compo
     val initialAmbient = boolText((wf?.isAmbient ?: false).toString())
     val shownAmbient = requestOverrides["ambient"]?.let(::boolText) ?: initialAmbient
     val ambientChecked = if (shownAmbient == "true") " checked" else ""
+    fun triStateBoolText(raw: String?): String =
+      when {
+        raw.isNullOrBlank() -> ""
+        raw == "1" || raw.equals("true", ignoreCase = true) -> "true"
+        raw == "0" || raw.equals("false", ignoreCase = true) -> "false"
+        else -> raw.trim()
+      }
+    val shownBurnIn = triStateBoolText(requestOverrides["ambientBurnIn"])
+    val shownLowBit = triStateBoolText(requestOverrides["ambientLowBit"])
+    val triStateBoolOptions =
+      listOf(
+        PreviewOverrideOption(value = "", label = "(default)"),
+        PreviewOverrideOption(value = "true", label = "true"),
+        PreviewOverrideOption(value = "false", label = "false"),
+      )
 
     val bakedTime = wf?.previewTime?.takeIf { it.isNotBlank() } ?: "10:10:30"
     val shownClock = requestOverrides["clockEpochMillis"].orEmpty()
@@ -17740,6 +17755,22 @@ ${(if (brand == null) ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compo
         "      <label class=\"cp-live-row\"><input id=\"cp-ambient\" type=\"checkbox\" " +
           "class=\"cp-wf-field\" data-wf-key=\"ambient\" data-wf-initial=\"$initialAmbient\"$ambientChecked$dis> Ambient mode (AOD)</label>",
       )
+      appendLine("      <div class=\"cp-size-row\">")
+      appendLine(
+        "        <label>Burn-in protection\n" +
+          "          <select class=\"cp-wf-field\" data-wf-key=\"ambientBurnIn\" data-wf-initial=\"\"$dis>\n" +
+          "        ${selectOptionsHtml(triStateBoolOptions, shownBurnIn)}\n" +
+          "          </select>\n" +
+          "        </label>",
+      )
+      appendLine(
+        "        <label>Low-bit ambient\n" +
+          "          <select class=\"cp-wf-field\" data-wf-key=\"ambientLowBit\" data-wf-initial=\"\"$dis>\n" +
+          "        ${selectOptionsHtml(triStateBoolOptions, shownLowBit)}\n" +
+          "          </select>\n" +
+          "        </label>",
+      )
+      appendLine("      </div>")
       appendLine(
         "      <label>Preview time\n" +
           "        <input id=\"cp-clockEpochMillis\" type=\"text\" class=\"cp-wf-field\" " +
