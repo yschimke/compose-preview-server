@@ -472,7 +472,7 @@ composeai-contracts = "3.43.0"
 # jackson-databind onto the server's classpath through the runtime.
 composeai-ui-builder = "3.130.0"
 # First published version of the optional publication server library (Maven Central).
-livery = "0.10.0"
+livery = "0.12.0"
 # The Android Remote Compose players the server's own player-only Android daemon replays documents
 # with, staged as `lib-rc-players-android/` (`stageRcPlayersAndroidLibs`). The Android daemon
 # sidecar deliberately ships none of this family (a consumer brings it, compose-preview-daemon's
