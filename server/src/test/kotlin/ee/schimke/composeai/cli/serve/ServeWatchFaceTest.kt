@@ -12,6 +12,9 @@ import ee.schimke.composeai.daemon.protocol.StreamFrameParams
 import java.awt.Color
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
+import java.net.URI
+import java.net.URLDecoder
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.util.Base64
 import java.util.concurrent.CopyOnWriteArrayList
@@ -464,7 +467,12 @@ class ServeWatchFaceTest {
     val host = LiveWatchFaceHost(wfPreview, ServePreview(plainPreviewId, "Plain"), bakedPngBytes)
     val registry = ServeSessionRegistry(open = { null })
     registry.register("wear-wf", host = host, pinned = true)
-    val mcp = ServeCatalogMcp(registry, Semaphore(2))
+    val mcp =
+      ServeCatalogMcp(
+        registry,
+        Semaphore(2),
+        publicOrigin = { "https://preview.example.test" },
+      )
 
     fun callMcp(tool: String, argsJson: String): JsonObject {
       val req =
@@ -612,5 +620,130 @@ class ServeWatchFaceTest {
     val h1 = cells[1].jsonObject.getValue("sha256").jsonPrimitive.content
     assertNotNull(h0)
     assertNotEquals(h0, h1)
+
+    // 5. Returned signed image URLs and resource_link URIs preserve structured watch-face
+    // arguments and renderer selection (dwf-apk) when replayed.
+    WatchFaceRendererRegistry.register(
+      object : WatchFaceRendererBackend {
+        override val id: String = WatchFaceRendererIds.DWF_APK
+        override val label: String = "DWF Renderer APK (Launch)"
+        override val badgeLabel: String = "dwf · apk"
+
+        override fun infoFor(host: ServeHost, preview: ServePreview): WatchFaceRendererInfo =
+          WatchFaceRendererInfo(
+            id = id,
+            label = label,
+            badgeLabel = badgeLabel,
+            available = true,
+            supportsLiveOverrides = true,
+            isDefault = false,
+          )
+
+        override fun render(
+          host: ServeHost,
+          preview: ServePreview,
+          overrides: PreviewOverrides,
+        ): RenderOutcome {
+          val keyHash = ServeOverrides.cacheKey(preview.id, overrides).take(6).toInt(16)
+          return RenderOutcome.Ok(
+            solidPng((0xFF220000.toInt()) or keyHash),
+            RenderOutcome.Generation.DAEMON,
+          )
+        }
+
+        override fun complications(
+          host: ServeHost,
+          preview: ServePreview,
+          overrides: PreviewOverrides,
+        ): WatchFaceComplicationsOutcome =
+          WatchFaceOverrides.projectComplicationsOutcome(preview.watchFace!!, overrides, id)
+      },
+    )
+
+    val pngResult =
+      callMcp(
+          "catalog_render_preview",
+          """{
+          "token":"test-token",
+          "catalog":"wear-wf",
+          "previewId":"$wfPreviewId",
+          "observe":"png",
+          "wfRenderer":"dwf-apk",
+          "ambient":true,
+          "complications":[{"slotId":1,"type":"SHORT_TEXT","text":"84"}]
+        }""",
+        )["result"]!!
+        .jsonObject
+    val pngContent = pngResult.getValue("content").jsonArray.map { it.jsonObject }
+    val inlinePng =
+      Base64.getDecoder().decode(pngContent.first().getValue("data").jsonPrimitive.content)
+    assertFalse(inlinePng.contentEquals(bakedPngBytes))
+
+    val signedImageUrl =
+      pngResult.getValue("structuredContent").jsonObject.getValue("imageUrl").jsonPrimitive.content
+    val queryParams =
+      URI(signedImageUrl).rawQuery.split('&').associate {
+        val idx = it.indexOf('=')
+        it.substring(0, idx) to URLDecoder.decode(it.substring(idx + 1), StandardCharsets.UTF_8)
+      }
+    val signedBytes = runBlocking {
+      mcp.signedImagePng(
+        queryParams.getValue("uri"),
+        queryParams.getValue("exp").toLong(),
+        queryParams.getValue("sig"),
+      )
+    }
+    assertNotNull(signedBytes)
+    assertContentEquals(inlinePng, signedBytes)
+
+    val resourceLinkUri =
+      pngContent
+        .first {
+          it["type"]?.jsonPrimitive?.content == "resource_link" &&
+            it.getValue("uri").jsonPrimitive.content.startsWith("compose-preview://")
+        }
+        .getValue("uri")
+        .jsonPrimitive
+        .content
+    val readReq =
+      Json.parseToJsonElement(
+          """{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"$resourceLinkUri"}}""",
+        )
+        .jsonObject
+    val readBody =
+      requireNotNull(
+        runBlocking { mcp.handle(readReq) { ServeMachineAuthorization.Decision.Missing } }.body,
+      )
+    val resourceBytes =
+      Base64.getDecoder()
+        .decode(
+          readBody
+            .getValue("result")
+            .jsonObject
+            .getValue("contents")
+            .jsonArray
+            .single()
+            .jsonObject
+            .getValue("blob")
+            .jsonPrimitive
+            .content,
+        )
+    assertContentEquals(inlinePng, resourceBytes)
+
+    val replayedData =
+      callMcp(
+          "catalog_get_preview_data",
+          """{"uri":"$resourceLinkUri","kind":"watchface/complications"}""",
+        )["result"]!!
+        .jsonObject["content"]!!
+        .jsonArray
+        .first()
+        .jsonObject["text"]!!
+        .jsonPrimitive
+        .content
+    val replayedPayload =
+      Json.decodeFromString(WatchFaceComplicationsPayload.serializer(), replayedData)
+    assertTrue(replayedPayload.isAmbient)
+    assertEquals("84", replayedPayload.slots.single().activeState.text)
   }
 }

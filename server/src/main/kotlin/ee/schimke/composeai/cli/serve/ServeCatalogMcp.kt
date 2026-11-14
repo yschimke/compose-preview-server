@@ -3,6 +3,8 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.bundle.WatchFaceComplicationsPayload
 import ee.schimke.composeai.bundle.WatchFaceComplicationsProduct
 import ee.schimke.composeai.daemon.devices.DeviceDimensions
+import ee.schimke.composeai.daemon.protocol.AmbientStateOverride
+import ee.schimke.composeai.daemon.protocol.PreviewOverrideValue
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.web.WebEscaping
 import java.net.URI
@@ -922,7 +924,10 @@ class ServeCatalogMcp(
           val rawOverrides = args["overrides"] as? JsonObject
           val baseOverrides = parseOverrides(preview, rawOverrides)
           val overrides = mergeWatchFaceArgs(baseOverrides, args)
-          val wfRenderer = args.optionalString("wfRenderer")
+          val wfRenderer =
+            args.optionalString("wfRenderer")
+              ?: rawOverrides?.optionalString(WatchFaceOverrides.WF_RENDERER_PARAM)
+          val linkOverrides = effectiveLinkOverrides(rawOverrides, overrides, wfRenderer)
           val requestedKeys =
             (rawOverrides?.keys.orEmpty() + presentWatchFaceArgKeys(args)).distinct()
           renderResult(
@@ -932,7 +937,7 @@ class ServeCatalogMcp(
             overrides,
             args["observe"]?.jsonPrimitive?.contentOrNull?.lowercase() ?: "semantics",
             requestedKeys,
-            rawOverrides,
+            linkOverrides,
             wfRenderer = wfRenderer,
           )
         }
@@ -977,15 +982,23 @@ class ServeCatalogMcp(
             withCatalog(target.catalog) { host ->
               val preview = resolvePreview(host, target.previewId)
               val rawOverrides = args["overrides"] as? JsonObject
-              val overrides = parseOverrides(preview, rawOverrides)
+              val baseOverrides = parseOverrides(preview, rawOverrides)
+              val overrides = mergeWatchFaceArgs(baseOverrides, args)
+              val wfRenderer =
+                args.optionalString("wfRenderer")
+                  ?: rawOverrides?.optionalString(WatchFaceOverrides.WF_RENDERER_PARAM)
+              val linkOverrides = effectiveLinkOverrides(rawOverrides, overrides, wfRenderer)
+              val requestedKeys =
+                (rawOverrides?.keys.orEmpty() + presentWatchFaceArgKeys(args)).distinct()
               renderContent(
                   host,
                   preview.id,
                   resourceUri(target.catalog, preview.id),
                   overrides,
                   observe,
-                  rawOverrides?.keys.orEmpty().toList(),
-                  rawOverrides,
+                  requestedKeys,
+                  linkOverrides,
+                  wfRenderer = wfRenderer,
                 )
                 .forEach(::add)
             }
@@ -999,9 +1012,11 @@ class ServeCatalogMcp(
         requireLive(liveAuthorization)
         withCatalog(target.catalog) { host ->
           val preview = resolvePreview(host, target.previewId)
-          val overrides =
-            mergeWatchFaceArgs(parseOverrides(preview, args["overrides"] as? JsonObject), args)
-          val wfRenderer = args.optionalString("wfRenderer")
+          val rawOverrides = args["overrides"] as? JsonObject
+          val overrides = mergeWatchFaceArgs(parseOverrides(preview, rawOverrides), args)
+          val wfRenderer =
+            args.optionalString("wfRenderer")
+              ?: rawOverrides?.optionalString(WatchFaceOverrides.WF_RENDERER_PARAM)
           dataProductResult(host, preview.id, kind, overrides, wfRenderer = wfRenderer)
         }
       }
@@ -1103,12 +1118,14 @@ class ServeCatalogMcp(
     }
     return withCatalog(target.catalog) { host ->
       val preview = resolvePreview(host, target.previewId)
+      val wfRenderer = rawOverrides?.optionalString(WatchFaceOverrides.WF_RENDERER_PARAM)
       val png =
         renderPng(
             host,
             preview.id,
             parseOverrides(preview, rawOverrides),
             preferPublished = rawOverrides == null,
+            wfRenderer = wfRenderer,
           )
           .png
       buildJsonObject {
@@ -1206,7 +1223,9 @@ class ServeCatalogMcp(
             is OverrideParse.Ok -> parsed.overrides
             is OverrideParse.Invalid -> throw McpRequestException(parsed.message)
           }
-        val cell = renderPng(host, preview.id, overrides, wfRenderer = topWfRenderer)
+        val cellWfRenderer =
+          params[WatchFaceOverrides.WF_RENDERER_PARAM]?.takeIf { it.isNotBlank() } ?: topWfRenderer
+        val cell = renderPng(host, preview.id, overrides, wfRenderer = cellWfRenderer)
         add(
           buildJsonObject {
             put(
@@ -1222,7 +1241,12 @@ class ServeCatalogMcp(
             put("generation", cell.generation.wire)
             if (linked) {
               put("index", index + 1)
-              val cellOverrides = JsonObject(params.mapValues { (_, v) -> JsonPrimitive(v) })
+              val cellOverrides =
+                effectiveLinkOverrides(
+                  JsonObject(params.mapValues { (_, v) -> JsonPrimitive(v) }),
+                  overrides,
+                  cellWfRenderer,
+                )
               signedImageUrl(resourceUriWithOverrides(uri, cellOverrides))?.let {
                 put("imageUrl", it)
               }
@@ -1284,6 +1308,13 @@ class ServeCatalogMcp(
     }
   }
 
+  private data class ParsedScenarioCell(
+    val label: String,
+    val overrides: PreviewOverrides,
+    val wfRenderer: String?,
+    val linkOverrides: JsonObject?,
+  )
+
   private suspend fun scenariosMatrixResult(
     host: ServeHost,
     preview: ServePreview,
@@ -1313,19 +1344,27 @@ class ServeCatalogMcp(
         element as? JsonObject ?: throw McpRequestException("scenario[${index}] must be an object")
       val label = obj.optionalString("label") ?: "scenario-${index + 1}"
       val scenarioOverridesObj = obj["overrides"] as? JsonObject ?: JsonObject(emptyMap())
-      val mergedRaw = JsonObject(baseRawOverrides + scenarioOverridesObj)
-      val baseParsed = parseOverrides(preview, mergedRaw.takeIf { it.isNotEmpty() })
+      val mergedRaw = JsonObject(baseRawOverrides + scenarioOverridesObj).takeIf { it.isNotEmpty() }
+      val baseParsed = parseOverrides(preview, mergedRaw)
       val cellOverrides = mergeWatchFaceArgs(baseParsed, obj)
-      val cellWfRenderer = obj.optionalString("wfRenderer") ?: topWfRenderer
-      Triple(label, cellOverrides, cellWfRenderer)
+      val cellWfRenderer =
+        obj.optionalString("wfRenderer")
+          ?: mergedRaw?.optionalString(WatchFaceOverrides.WF_RENDERER_PARAM)
+          ?: topWfRenderer
+      ParsedScenarioCell(
+        label = label,
+        overrides = cellOverrides,
+        wfRenderer = cellWfRenderer,
+        linkOverrides = effectiveLinkOverrides(mergedRaw, cellOverrides, cellWfRenderer),
+      )
     }
     val rendered = buildJsonArray {
-      parsedCells.forEachIndexed { index, (label, cellOverrides, cellWfRenderer) ->
-        val cell = renderPng(host, preview.id, cellOverrides, wfRenderer = cellWfRenderer)
+      parsedCells.forEachIndexed { index, cellSpec ->
+        val cell = renderPng(host, preview.id, cellSpec.overrides, wfRenderer = cellSpec.wfRenderer)
         add(
           buildJsonObject {
-            put("label", label)
-            cellWfRenderer?.let { put("wfRenderer", it) }
+            put("label", cellSpec.label)
+            cellSpec.wfRenderer?.let { put("wfRenderer", it) }
             put("sha256", sha256Hex(cell.png))
             put("sizeBytes", cell.png.size)
             pngDimensions(cell.png)?.let { (width, height) ->
@@ -1335,8 +1374,11 @@ class ServeCatalogMcp(
             put("generation", cell.generation.wire)
             if (linked) {
               put("index", index + 1)
+              signedImageUrl(resourceUriWithOverrides(uri, cellSpec.linkOverrides))?.let {
+                put("imageUrl", it)
+              }
               cellPngs += cell.png
-              cellLabels += label
+              cellLabels += cellSpec.label
             } else if (observe == "png") {
               put("png", Base64.getEncoder().encodeToString(cell.png))
             }
@@ -2311,6 +2353,42 @@ class ServeCatalogMcp(
   }
 
   /**
+   * Encodes structured watch-face arguments (`ambient`, `clockEpochMillis`, `previewTime`,
+   * `watchFace`, `complications`) and `wfRenderer` into the flat `ServeOverrides` JSON map carried
+   * by `?overrides=` so returned `resource_link` URIs and `signedImageUrl` links replay the exact
+   * watch-face state and renderer selection.
+   */
+  private fun effectiveLinkOverrides(
+    rawOverrides: JsonObject?,
+    overrides: PreviewOverrides,
+    wfRenderer: String?,
+  ): JsonObject? {
+    val entries = LinkedHashMap<String, JsonElement>()
+    rawOverrides?.forEach { (k, v) -> entries[k] = v }
+    overrides.ambient?.let { amb ->
+      entries["ambient"] = JsonPrimitive(amb.state == AmbientStateOverride.AMBIENT)
+      amb.burnInProtectionRequired?.let { entries["ambientBurnIn"] = JsonPrimitive(it) }
+      amb.deviceHasLowBitAmbient?.let { entries["ambientLowBit"] = JsonPrimitive(it) }
+    }
+    overrides.clockEpochMillis?.let { entries["clockEpochMillis"] = JsonPrimitive(it) }
+    overrides.namedOverrides?.forEach { (k, v) ->
+      if (!k.startsWith(WatchFaceOverrides.WF_PREFIX)) return@forEach
+      entries[k] =
+        when (v) {
+          is PreviewOverrideValue.StringValue -> JsonPrimitive(v.value)
+          is PreviewOverrideValue.IntValue -> JsonPrimitive(v.value)
+          is PreviewOverrideValue.FloatValue -> JsonPrimitive(v.value)
+          is PreviewOverrideValue.BooleanValue -> JsonPrimitive(v.value)
+          is PreviewOverrideValue.ColorValue -> JsonPrimitive(v.argb)
+        }
+    }
+    wfRenderer
+      ?.takeIf { it.isNotBlank() }
+      ?.let { entries[WatchFaceOverrides.WF_RENDERER_PARAM] = JsonPrimitive(it) }
+    return entries.takeIf { it.isNotEmpty() }?.let(::JsonObject)
+  }
+
+  /**
    * The same refusal applied to knobs (#1277): the renderer silently drops undeclared knobs and
    * unparseable values, so each is checked against [ServeOverrides.declaredKnobKinds] and a
    * mismatch names what the preview declares. Unknown kinds pass through to the renderer.
@@ -2854,6 +2932,7 @@ class ServeCatalogMcp(
     }
     val target = runCatching { targetFromUri(unsigned) }.getOrNull() ?: return null
     val rawOverrides = resourceOverrides(unsigned)
+    val wfRenderer = rawOverrides?.optionalString(WatchFaceOverrides.WF_RENDERER_PARAM)
     return withCatalog(target.catalog) { host ->
       val preview = resolvePreview(host, target.previewId)
       renderPng(
@@ -2863,6 +2942,7 @@ class ServeCatalogMcp(
           // The link is minted after a live render, so it serves that lane's pixels, not the
           // published snapshot `resources/read` prefers for an override-free uri.
           preferPublished = false,
+          wfRenderer = wfRenderer,
         )
         .png
     }
