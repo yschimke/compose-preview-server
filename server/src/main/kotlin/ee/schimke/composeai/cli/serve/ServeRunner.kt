@@ -486,18 +486,33 @@ public class ServeRunner(
    * fill its volume. A ticker rather than a write-path check, since enforcement is a directory
    * census; [sweepCatalogBlobs]'s rate limit makes redundant ticks free.
    */
+  @Volatile private var catalogSweepExecutor: java.util.concurrent.ScheduledExecutorService? = null
+
+  private val postPublishSweeper =
+    CatalogPostPublishSweeper(
+      sweep = { forceBlobSweep ->
+        sweepThemeCache()
+        sweepCatalogBlobs(force = forceBlobSweep)
+      },
+      executorProvider = { catalogSweepExecutor?.takeUnless { it.isShutdown } },
+    )
+
   private fun startCatalogBlobSweeper(): AutoCloseable {
     val exec =
       java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "serve-catalog-blob-sweep").apply { isDaemon = true }
       }
+    catalogSweepExecutor = exec
     exec.scheduleWithFixedDelay(
       { runCatching { sweepCatalogBlobs() } },
       ServeDefaults.CATALOG_BLOB_SWEEP_INTERVAL_MILLIS,
       ServeDefaults.CATALOG_BLOB_SWEEP_INTERVAL_MILLIS,
       java.util.concurrent.TimeUnit.MILLISECONDS,
     )
-    return AutoCloseable { exec.shutdownNow() }
+    return AutoCloseable {
+      catalogSweepExecutor = null
+      exec.shutdownNow()
+    }
   }
 
   /** Rate limiter for [sweepCatalogBlobs]. */
@@ -4219,6 +4234,7 @@ public class ServeRunner(
       // Claimed at construction rather than at [start], so the window between the listener binding
       // and the first catalog load isn't a gap the theme optimizer can start in.
       backgroundWork.expectInitialCatalogLoad()
+      postPublishSweeper.beginInitialLoad()
     }
 
     fun start(onComplete: (Set<String>) -> Unit = {}) {
@@ -4267,15 +4283,18 @@ public class ServeRunner(
           // However the pass ended — loaded, failed, or shut down mid-pass — background catalog
           // work is free to start; leaving it claimed would park the optimizer forever.
           backgroundWork.initialCatalogLoadFinished()
-          sweepThemeCache()
-          sweepCatalogBlobs(force = true)
-          if (!closed.get()) onComplete(loaded)
+          if (closed.get()) {
+            postPublishSweeper.cancelInitialLoad()
+          } else {
+            postPublishSweeper.finishInitialLoad { onComplete(loaded) }
+          }
         }
       }
     }
 
     override fun close() {
       closed.set(true)
+      postPublishSweeper.cancelInitialLoad()
       backgroundWork.initialCatalogLoadFinished()
       executor.shutdownNow()
     }
@@ -4733,8 +4752,7 @@ public class ServeRunner(
     }
     previousResources?.let { runCatching { it.close() } }
     // Only after successful publication is the superseded generation safe to reclaim.
-    sweepThemeCache()
-    sweepCatalogBlobs()
+    postPublishSweeper.onCatalogPublished()
     return true
   }
 
@@ -5012,8 +5030,7 @@ public class ServeRunner(
     registry.register(system, state, host = host)
     // Registers directly rather than via `publishCatalogRuntime`, so it needs its own
     // post-publication sweep.
-    sweepThemeCache()
-    sweepCatalogBlobs()
+    postPublishSweeper.onCatalogPublished()
     System.err.println(
       "serve: catalog $system → LIVE server-render from ${source.module}@${source.ref} " +
         "(?session=$system)",

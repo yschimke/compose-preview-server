@@ -3089,6 +3089,13 @@ class ServeHttpServer(
   ) {
     val lease = withContext(Dispatchers.IO) { sessions.lease(sessionId) }
     if (lease == null) {
+      if (loadingHomeSystem(sessionId) != null) {
+        catalogLoads?.prioritize(sessionId)
+        call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+        call.response.headers.append(HttpHeaders.RetryAfter, "3")
+        call.respondText("catalog loading", status = HttpStatusCode.ServiceUnavailable)
+        return
+      }
       if (onMissing != null) onMissing()
       else call.respondText("not found", status = HttpStatusCode.NotFound)
       return
