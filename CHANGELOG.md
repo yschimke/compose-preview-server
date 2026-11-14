@@ -1,5 +1,36 @@
 # Changelog
 
+## [3.160.0](https://github.com/yschimke/compose-preview-server/compare/v3.159.0...v3.160.0) (2026-11-14)
+
+
+### Features
+
+* add watch face complication overrides and renderer selection ([#1932](https://github.com/yschimke/compose-preview-server/issues/1932)) ([b0ea9e7](https://github.com/yschimke/compose-preview-server/commit/b0ea9e7f2ca21e0e5b4ecebc18263f916ff5ae2f))
+* host immutable public component previews ([#1905](https://github.com/yschimke/compose-preview-server/issues/1905)) ([daa2ff9](https://github.com/yschimke/compose-preview-server/commit/daa2ff9b527a95e8f7eda2e9c5559ebc62a77d9d))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.90.0 ([#1921](https://github.com/yschimke/compose-preview-server/issues/1921)) ([8edbc9e](https://github.com/yschimke/compose-preview-server/commit/8edbc9e8b4a91a2eb0fc5a55345bf61e92f5ea5c))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.90.1 ([#1925](https://github.com/yschimke/compose-preview-server/issues/1925)) ([32a4857](https://github.com/yschimke/compose-preview-server/commit/32a4857447ee08faf6b24a125ffffc0a127e0c60))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.91.0 ([#1928](https://github.com/yschimke/compose-preview-server/issues/1928)) ([f720965](https://github.com/yschimke/compose-preview-server/commit/f72096512906dd8b2e9f5c532c3858382f0470b5))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.92.0 ([#1933](https://github.com/yschimke/compose-preview-server/issues/1933)) ([275cd07](https://github.com/yschimke/compose-preview-server/commit/275cd07b1b04caf0a56e7214515823459fc75b72))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-contracts-bom to v3.43.0 ([#1927](https://github.com/yschimke/compose-preview-server/issues/1927)) ([0f6dcf1](https://github.com/yschimke/compose-preview-server/commit/0f6dcf138626739664ab7862caefba0c8d256b4d))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.27.4 ([#1909](https://github.com/yschimke/compose-preview-server/issues/1909)) ([e64b652](https://github.com/yschimke/compose-preview-server/commit/e64b6522530a88a22c948157c7b0fafbba1b7140))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.27.5 ([#1918](https://github.com/yschimke/compose-preview-server/issues/1918)) ([f1c71b0](https://github.com/yschimke/compose-preview-server/commit/f1c71b0909c00bf0205bb484d303158151e85ae8))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.27.7 ([#1926](https://github.com/yschimke/compose-preview-server/issues/1926)) ([d544b9a](https://github.com/yschimke/compose-preview-server/commit/d544b9a91bc96cb351ae57a2da595fed268b084b))
+* **deps:** update dependency ee.schimke.composeai:livery-server to v0.10.0 ([#1922](https://github.com/yschimke/compose-preview-server/issues/1922)) ([96c61b2](https://github.com/yschimke/compose-preview-server/commit/96c61b2a2b944e9cb20a15d83977f860ca942255))
+* **deps:** update dependency ee.schimke.composeai:livery-server to v0.12.0 ([#1934](https://github.com/yschimke/compose-preview-server/issues/1934)) ([a9596c6](https://github.com/yschimke/compose-preview-server/commit/a9596c6febd9b457e5a774c4d41b7786fdc42368))
+* **deps:** update dependency ee.schimke.composeai:livery-server to v0.9.0 ([#1910](https://github.com/yschimke/compose-preview-server/issues/1910)) ([a002d3b](https://github.com/yschimke/compose-preview-server/commit/a002d3b6bb7346d96708adf6f062bc7632188576))
+* **deps:** update dependency ee.schimke.composeai:rc-players-bom to v2.31.0 ([#1908](https://github.com/yschimke/compose-preview-server/issues/1908)) ([8ff74e4](https://github.com/yschimke/compose-preview-server/commit/8ff74e447a818203d2829782a4506c1148fa9b86))
+* **deps:** update dependency ee.schimke.composeai:rc-players-bom to v2.32.0 ([#1911](https://github.com/yschimke/compose-preview-server/issues/1911)) ([7806818](https://github.com/yschimke/compose-preview-server/commit/780681887811bc0d8b946c76879151b3e5292090))
+* **deps:** update dependency ee.schimke.composeai:rc-players-bom to v2.32.1 ([#1913](https://github.com/yschimke/compose-preview-server/issues/1913)) ([59b0630](https://github.com/yschimke/compose-preview-server/commit/59b0630d5deeb5217a85fe2a44cd690bc935b15e))
+* **deps:** update dependency ee.schimke.composeai:rc-players-bom to v2.33.0 ([#1914](https://github.com/yschimke/compose-preview-server/issues/1914)) ([90c4d30](https://github.com/yschimke/compose-preview-server/commit/90c4d3068225b3c32d62df46121532d1b20583d7))
+* **deps:** update dependency ee.schimke.composeai:remote-compose-player-js-dist to v2.33.0 ([#1923](https://github.com/yschimke/compose-preview-server/issues/1923)) ([84cd897](https://github.com/yschimke/compose-preview-server/commit/84cd8971a7074501a4de2398e81213ca1844c598))
+* **deps:** update dependency org.jetbrains.kotlinx:kotlinx-serialization-json to v1.13.0 ([#1917](https://github.com/yschimke/compose-preview-server/issues/1917)) ([3a2804b](https://github.com/yschimke/compose-preview-server/commit/3a2804b94cd42beb5b4d7acc76991ff1b3837c5d))
+* **deps:** update dependency org.robolectric:robolectric to v4.18 ([#1929](https://github.com/yschimke/compose-preview-server/issues/1929)) ([89da34e](https://github.com/yschimke/compose-preview-server/commit/89da34e2930585a1b2e0b457920807552008d425))
+* **deps:** update rc-players to v2.30.0 ([#1906](https://github.com/yschimke/compose-preview-server/issues/1906)) ([73ef49f](https://github.com/yschimke/compose-preview-server/commit/73ef49ff26a27011b561374b492bf87f866f968e))
+
 ## [3.159.0](https://github.com/yschimke/compose-preview-server/compare/v3.158.0...v3.159.0) (2026-11-08)
 
 
