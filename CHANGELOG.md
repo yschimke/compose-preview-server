@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.162.0](https://github.com/yschimke/compose-preview-server/compare/v3.161.0...v3.162.0) (2026-11-15)
+
+
+### Features
+
+* **watchface:** add dwf-apk daemon backend and structured DWF overrides ([#1937](https://github.com/yschimke/compose-preview-server/issues/1937)) ([8fb67dd](https://github.com/yschimke/compose-preview-server/commit/8fb67dd0fdecd3c8839693dc410d94246c032ae6))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.93.0 ([#1938](https://github.com/yschimke/compose-preview-server/issues/1938)) ([7b5d26e](https://github.com/yschimke/compose-preview-server/commit/7b5d26e67f3d23ab8b1b1fb2e7c39226e7abbb25))
+
 ## [3.161.0](https://github.com/yschimke/compose-preview-server/compare/v3.160.0...v3.161.0) (2026-11-14)
 
 
