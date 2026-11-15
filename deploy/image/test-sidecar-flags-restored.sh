@@ -31,19 +31,22 @@ fixtures="$(mktemp -d)"
 trap 'rm -rf "${fixtures}"' EXIT
 mkdir -p "${fixtures}/lib-daemon-android" "${fixtures}/lib-daemon-desktop" \
   "${fixtures}/lib-renderer" "${fixtures}/lib-bta" "${fixtures}/lib-rcjvm" \
-  "${fixtures}/lib-skiko"
+  "${fixtures}/lib-simulator" "${fixtures}/lib-dex2jar" "${fixtures}/lib-skiko"
 
 # `present` lets a case declare a sidecar dir that does NOT exist, by pointing at a missing path.
 run_stanza() {
   local incoming="$1" android="${2:-${fixtures}/lib-daemon-android}" \
     bta="${3:-${fixtures}/lib-bta}" rcjvm="${4:-${fixtures}/lib-rcjvm}" \
-    skiko="${5:-${fixtures}/lib-skiko}"
+    skiko="${5:-${fixtures}/lib-skiko}" simulator="${6:-${fixtures}/lib-simulator}" \
+    dex2jar="${7:-${fixtures}/lib-dex2jar}"
   JAVA_TOOL_OPTIONS="${incoming}" \
   LIB_DAEMON_ANDROID_DIR="${android}" \
   LIB_DAEMON_DESKTOP_DIR="${fixtures}/lib-daemon-desktop" \
   LIB_RENDERER_DIR="${fixtures}/lib-renderer" \
   LIB_BTA_DIR="${bta}" \
   LIB_RCJVM_DIR="${rcjvm}" \
+  LIB_SIMULATOR_DIR="${simulator}" \
+  LIB_DEX2JAR_DIR="${dex2jar}" \
   LIB_SKIKO_DIR="${skiko}" \
     bash -c "
       set -euo pipefail
@@ -55,7 +58,7 @@ run_stanza() {
 # 1. The reported failure: an inherited string carrying the Android flag and nothing else. The two
 #    desktop flags come back, and the operator's own content is untouched.
 result="$(run_stanza '-XX:MaxRAMPercentage=70 -Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android')"
-for want in libDaemonDesktopDir libRendererDir libBtaDir libRcjvmDir skikoDir; do
+for want in libDaemonDesktopDir libRendererDir libBtaDir libRcjvmDir libSimulatorDir libDex2jarDir skikoDir; do
   [[ "${result}" == *"${want}="* ]] || {
     echo "FAIL: ${want} was not restored: ${result}" >&2
     exit 1
@@ -96,7 +99,7 @@ echo "PASS: no flag is invented for a sidecar the image does not carry"
 
 # 4. The ordinary case — nothing replaced anything, every flag already present — must be a no-op,
 #    not a string that lists each flag twice.
-baked='-Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android -Dcomposeai.cli.libDaemonDesktopDir=/opt/lib-daemon-desktop -Dcomposeai.cli.libRendererDir=/opt/lib-renderer -Dcomposeai.cli.libBtaDir=/opt/lib-bta -Dcomposeai.cli.libRcjvmDir=/opt/lib-rcjvm -Dcomposeai.cli.skikoDir=/opt/lib-skiko'
+baked='-Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android -Dcomposeai.cli.libDaemonDesktopDir=/opt/lib-daemon-desktop -Dcomposeai.cli.libRendererDir=/opt/lib-renderer -Dcomposeai.cli.libBtaDir=/opt/lib-bta -Dcomposeai.cli.libRcjvmDir=/opt/lib-rcjvm -Dcomposeai.cli.libSimulatorDir=/opt/lib-simulator -Dcomposeai.cli.libDex2jarDir=/opt/lib-dex2jar -Dcomposeai.cli.skikoDir=/opt/lib-skiko'
 result="$(run_stanza "${baked}")"
 [[ "${result}" == "${baked}" ]] || {
   echo "FAIL: an intact JAVA_TOOL_OPTIONS was modified: ${result}" >&2

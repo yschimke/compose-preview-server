@@ -249,16 +249,20 @@ RUN set -eu; \
         "https://github.com/yschimke/compose-ai-tools/releases/download/v${TOOLS_VERSION}/compose-preview-${TOOLS_VERSION}.tar.gz"; \
     fi; \
     tar -xzf /tmp/cli.tgz -C /opt --strip-components=1 --wildcards \
-      "*/lib-rcjvm" "*/lib-bta"; \
+      "*/lib-rcjvm" "*/lib-bta" "*/lib-simulator" "*/lib-dex2jar"; \
     rm /tmp/cli.tgz; \
     test -d /opt/lib-daemon-desktop; \
     test -d /opt/lib-renderer; \
     test -d /opt/lib-rcjvm; \
     test -d /opt/lib-bta; \
+    test -d /opt/lib-simulator; \
+    test -d /opt/lib-dex2jar; \
     ls /opt/lib-daemon-desktop/*.jar >/dev/null; \
     ls /opt/lib-renderer/*.jar >/dev/null; \
     ls /opt/lib-rcjvm/*.jar >/dev/null; \
     ls /opt/lib-bta/*.jar >/dev/null; \
+    ls /opt/lib-simulator/*.jar >/dev/null; \
+    ls /opt/lib-dex2jar/*.jar >/dev/null; \
     ls /opt/lib-bta/kotlin-compose-compiler-plugin-embeddable*.jar >/dev/null; \
     test "$(ls /opt/lib-bta/*.jar | grep -cv kotlin-compose-compiler-plugin-embeddable)" -gt 0
 
@@ -399,6 +403,10 @@ RUN set -eu; \
 # disabled at the last step, which is how a production host ran with a playground nobody could
 # open. See the desktop-daemon stage for why it is lifted here.
 COPY --from=desktop-daemon /opt/lib-bta /opt/lib-bta
+# …and the simulator host + dex2jar sidecars (`LaunchMain`) that back the `dwf-apk` watch-face
+# renderer daemon (`DwfApkDaemonBridge`).
+COPY --from=desktop-daemon /opt/lib-simulator /opt/lib-simulator
+COPY --from=desktop-daemon /opt/lib-dex2jar /opt/lib-dex2jar
 # JAVA_TOOL_OPTIONS (inherited by the spawned daemon JVM too) points the CLI at the
 # unpacked Android AND desktop daemon sidecars, warms catalog daemons in the background so the
 # HTTP listener can come up before every live catalog finishes, and lifts BOTH cold-start budgets so a cold
@@ -450,7 +458,7 @@ ENV PATH="/opt/compose-preview-server/bin:${PATH}" \
     SERVE_TIMEOUT=1800 \
     ANDROID_HOME=/opt/android-sdk \
     ANDROID_SDK_ROOT=/opt/android-sdk \
-    JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=70 -Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android -Dcomposeai.cli.libDaemonDesktopDir=/opt/lib-daemon-desktop -Dcomposeai.cli.libRendererDir=/opt/lib-renderer -Dcomposeai.cli.libRcjvmDir=/opt/lib-rcjvm -Dcomposeai.cli.skikoDir=/opt/lib-skiko -Dcomposeai.cli.libBtaDir=/opt/lib-bta -Dcomposeai.serve.warmInBackground=true -Dcomposeai.serve.renderTimeoutSeconds=900 -Dcomposeai.serve.frameRenderTimeoutSeconds=120 -Dcomposeai.daemon.sandboxCount=3 -Dcomposeai.daemon.sandboxBootTimeoutMs=1800000 -Dcomposeai.daemon.backgroundSandboxBoot=true -Dcomposeai.daemon.lazyInProcessSandbox=true -Dcomposeai.serve.spareSandboxes=2"
+    JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=70 -Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android -Dcomposeai.cli.libDaemonDesktopDir=/opt/lib-daemon-desktop -Dcomposeai.cli.libRendererDir=/opt/lib-renderer -Dcomposeai.cli.libRcjvmDir=/opt/lib-rcjvm -Dcomposeai.cli.libSimulatorDir=/opt/lib-simulator -Dcomposeai.cli.libDex2jarDir=/opt/lib-dex2jar -Dcomposeai.cli.skikoDir=/opt/lib-skiko -Dcomposeai.cli.libBtaDir=/opt/lib-bta -Dcomposeai.serve.warmInBackground=true -Dcomposeai.serve.renderTimeoutSeconds=900 -Dcomposeai.serve.frameRenderTimeoutSeconds=120 -Dcomposeai.daemon.sandboxCount=3 -Dcomposeai.daemon.sandboxBootTimeoutMs=1800000 -Dcomposeai.daemon.backgroundSandboxBoot=true -Dcomposeai.daemon.lazyInProcessSandbox=true -Dcomposeai.serve.spareSandboxes=2"
 
 WORKDIR /project
 # `/project` intentionally stays empty: entrypoint.sh starts module-less serve and hosts

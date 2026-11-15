@@ -58,6 +58,8 @@ sidecars=(
   # missing `.so`, reported as `ExceptionInInitializerError: null` with the cause stripped.
   "skiko|lib-skiko|composeai.cli.skikoDir|every Skiko-backed lane dies in a static initialiser and ?rcPlayer=cmp-jvm answers 500 for every document"
   "playground|lib-bta|composeai.cli.libBtaDir|/playground is admitted and then disabled, so the box serves no playground at all"
+  "dwf-apk|lib-simulator|composeai.cli.libSimulatorDir|DwfApkDaemonBridge cannot find LaunchMain and watch-face catalogs fall back off dwf-apk"
+  "dwf-apk|lib-dex2jar|composeai.cli.libDex2jarDir|DwfApkDaemonBridge cannot translate APK DEX classes and watch-face catalogs fail to boot dwf-apk"
 )
 
 # The line that puts the directory into the RUNTIME stage. Anchored to `COPY --from=`, so a stage

@@ -8008,7 +8008,7 @@ class ServeHttpServer(
     if (params.isEmpty() || !acceptsBakedFallback()) return seeds(params)
     val wfOverridesLive =
       preview.isWatchFace &&
-        WatchFaceRendererRegistry.renderersFor(renderHost, preview).any {
+        WatchFaceRendererSelection.renderersFor(renderHost, preview).any {
           it.available && it.supportsLiveOverrides
         }
     val overrideCanReachThePixels =
@@ -9857,7 +9857,7 @@ class ServeHttpServer(
                 remoteComposeKnobs = p.remoteComposeKnobs,
                 watchFace = p.watchFace,
                 watchFaceRenderers =
-                  if (p.isWatchFace) WatchFaceRendererRegistry.renderersFor(renderHost, p)
+                  if (p.isWatchFace) WatchFaceRendererSelection.renderersFor(renderHost, p)
                   else emptyList(),
                 spatial = p.spatial,
                 liveOnly = p.id in renderHost.liveOnlyPreviewIds,
@@ -11049,7 +11049,7 @@ class ServeHttpServer(
         withContext(Dispatchers.IO) { renderHost.canDownloadExecutableBundle(preview.id) }
       // Watch faces use WatchFaceRendererRegistry lanes (DWF RemoteCompose, DWF Renderer APK)
       // rather than generic RemoteCompose player lanes.
-      val wfRenderers = WatchFaceRendererRegistry.renderersFor(renderHost, preview)
+      val wfRenderers = WatchFaceRendererSelection.renderersFor(renderHost, preview)
       val wfOverridesLive =
         preview.isWatchFace && wfRenderers.any { it.available && it.supportsLiveOverrides }
       // Per-preview Remote Compose backend lanes: the host's server/client lanes plus the opt-in
@@ -11058,11 +11058,7 @@ class ServeHttpServer(
         // In this server's player vocabulary ([ServeRcPlayerIds]), not compose-ai-tools' wire
         // spelling: the pinned release still spells the embedded player `cmp-android`.
         addAll(renderHost.enabledRcPlayersFor(preview.id).map(ServeRcPlayerIds::of))
-        if (
-          !preview.isWatchFace &&
-            rcPlayerWasmDir != null &&
-            renderHost.hasRemoteComposeDoc(preview.id)
-        ) {
+        if (rcPlayerWasmDir != null && renderHost.hasRemoteComposeDoc(preview.id)) {
           add(ServeRcPlayerIds.CMP_WASM)
         }
       }
@@ -11125,9 +11121,9 @@ class ServeHttpServer(
           // composition, so the page must not invite input it would drop.
           liveTakesInput = !carriedRcLive || carriedRcTakesInput,
           trust = catalogBundleHost(renderHost)?.let { BundleVerifier.summary(it.trust) },
-          // Per-preview: the Remote Compose canvas lane needs a captured `.rc` (fetched from
-          // `/render/<id>.rc`). Watch faces expose dedicated watch-face renderers instead.
-          hasRemoteComposeDoc = !preview.isWatchFace && renderHost.hasRemoteComposeDoc(preview.id),
+          // Per-preview: the Remote Compose canvas / Wasm lane needs a captured `.rc` (fetched from
+          // `/render/<id>.rc`).
+          hasRemoteComposeDoc = renderHost.hasRemoteComposeDoc(preview.id),
           // Per-preview: a replayed document can't recompose, so the viewer greys controls
           // [droppedOverridesFor] would 409. Read from the same host question to avoid drift.
           irReplay = isReplayedPreview(renderHost, preview.id),
@@ -11471,9 +11467,10 @@ class ServeHttpServer(
     // bare player selection. `bakedRender` is local-only, so a cold catalog's ordinary browse
     // returns null from `cached` and must still be served. Not re-asked after the lease, since an
     // expired grant would then read as "no grant" and be admitted.
+    val belowLiveGrant = grantBelowScope(AgentGrantScope.LIVE)
     val bareRcPlayerBelowLive =
       if (requestCarriesOverrides() && bareRcPlayerRequest()) {
-        grantBelowScope(AgentGrantScope.LIVE)
+        belowLiveGrant
       } else {
         null
       }
@@ -11848,7 +11845,11 @@ class ServeHttpServer(
             return@withLeasedSession
           }
           val wfPreview = renderHost.previews.firstOrNull { it.id == previewId }
-          if (!scroll && (wfPreview?.isWatchFace == true || wfRendererParam != null)) {
+          if (
+            !scroll &&
+              (wfPreview?.isWatchFace == true && overrides.remoteCompose?.player == null ||
+                wfRendererParam != null)
+          ) {
             renderWatchFacePngResponse(
               renderHost = renderHost,
               preview = wfPreview,
@@ -11856,6 +11857,7 @@ class ServeHttpServer(
               overrides = overrides,
               overrideParams = overrideParams,
               wfRendererParam = wfRendererParam,
+              belowLiveGrant = belowLiveGrant,
               staged = staged,
             )
             return@withLeasedSession
@@ -13776,7 +13778,8 @@ class ServeHttpServer(
     overrides: PreviewOverrides,
     wfRendererParam: String?,
   ) {
-    val backend = WatchFaceRendererRegistry.resolve(wfRendererParam)
+    val preview = renderHost.previews.firstOrNull { it.id == previewId }
+    val backend = WatchFaceRendererSelection.resolveFor(renderHost, preview, wfRendererParam)
     if (backend == null) {
       call.respondText(
         "unknown '${WatchFaceOverrides.WF_RENDERER_PARAM}' value '$wfRendererParam'; expected one of " +
@@ -13785,7 +13788,6 @@ class ServeHttpServer(
       )
       return
     }
-    val preview = renderHost.previews.firstOrNull { it.id == previewId }
     if (preview == null) {
       call.respondText("no such preview", status = HttpStatusCode.NotFound)
       return
@@ -13842,9 +13844,10 @@ class ServeHttpServer(
     overrides: PreviewOverrides,
     overrideParams: Map<String, String>,
     wfRendererParam: String?,
+    belowLiveGrant: ServeAgentGrantStore.Grant?,
     staged: suspend (ByteArray, Map<String, String>) -> ByteArray,
   ) {
-    val backend = WatchFaceRendererRegistry.resolve(wfRendererParam)
+    val backend = WatchFaceRendererSelection.resolveFor(renderHost, preview, wfRendererParam)
     if (backend == null) {
       call.respondText(
         "unknown '${WatchFaceOverrides.WF_RENDERER_PARAM}' value '$wfRendererParam'; expected one of " +
@@ -13864,10 +13867,10 @@ class ServeHttpServer(
       )
       return
     }
-    val defaultBackend = wfRendererParam == null || backend.id == WatchFaceRendererIds.DWF_RC
+    val useHostBaked = backend.id == WatchFaceRendererIds.DWF_RC || belowLiveGrant != null
     val cached =
       if (
-        defaultBackend &&
+        useHostBaked &&
           !CatalogLiveRouting.overridesAffectRender(
             previewId,
             overrides,
@@ -13881,6 +13884,10 @@ class ServeHttpServer(
         null
       }
     if (cached == null) {
+      if (belowLiveGrant != null && backend.id == WatchFaceRendererIds.DWF_APK) {
+        respondBelowScope(belowLiveGrant, AgentGrantScope.LIVE, api = true)
+        return
+      }
       val info = backend.infoFor(renderHost, preview)
       if (!info.available) {
         call.respondText(

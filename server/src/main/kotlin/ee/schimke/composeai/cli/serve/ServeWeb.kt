@@ -14989,7 +14989,9 @@ ${scriptTag("known-differences.js")}
     // The lane a Remote Compose preview opens on: the operator's `serve --rc-default-player` when
     // enabled, else `androidx-embedded`, else `androidx-view`, else the client `camaelon-js`
     // canvas. The rationale lives at [ServeRcPlayerIds.defaultPlayer].
-    val defaultRcBackend = ServeRcPlayerIds.defaultPlayer(enabledRcPlayers, preferredRcPlayer)
+    val defaultRcBackend =
+      if (watchFaceRenderers.isNotEmpty()) ""
+      else ServeRcPlayerIds.defaultPlayer(enabledRcPlayers, preferredRcPlayer)
     val defaultWfBackend =
       watchFaceRenderers.firstOrNull { it.isDefault }?.id
         ?: watchFaceRenderers.firstOrNull()?.id.orEmpty()
@@ -15006,6 +15008,18 @@ ${scriptTag("known-differences.js")}
       if (watchFaceRenderers.isNotEmpty()) {
         watchFaceRenderers.forEach { wf ->
           add(ViewerLane("wf:${wf.id}", wf.label, wf.available, badge = wf.badgeLabel))
+        }
+        if (ServeRcPlayerIds.CMP_WASM in rcEnabled) {
+          add(ViewerLane("rc:${ServeRcPlayerIds.CMP_WASM}", "CMP Wasm (browser)", true))
+        }
+        if (ServeRcPlayerIds.CMP_JVM in rcEnabled || hasRemoteComposeDoc) {
+          add(
+            ViewerLane(
+              "rc:${ServeRcPlayerIds.CMP_JVM}",
+              "CMP JVM (stateless)",
+              ServeRcPlayerIds.CMP_JVM in rcEnabled,
+            ),
+          )
         }
       } else if (enabledRcPlayers.isEmpty()) add(ViewerLane("png", "Snapshot", true))
       else
@@ -15243,9 +15257,13 @@ ${scriptTag("known-differences.js")}
       else
         "<input type=\"radio\" name=\"cp-mode\" value=\"motion\" id=\"cp-motion-toggle\" " +
           "tabindex=\"-1\">"
+    val defaultWfAvailable = watchFaceRenderers.any { it.id == defaultWfBackend && it.available }
     val defaultLane =
-      if (watchFaceRenderers.isNotEmpty()) "wf:$defaultWfBackend"
-      else if (enabledRcPlayers.isEmpty()) "png" else "rc:$defaultRcBackend"
+      if (watchFaceRenderers.isNotEmpty()) {
+        if (defaultWfAvailable) "wf:$defaultWfBackend"
+        else if (ServeRcPlayerIds.CMP_WASM in rcEnabled) "rc:${ServeRcPlayerIds.CMP_WASM}"
+        else "wf:$defaultWfBackend"
+      } else if (enabledRcPlayers.isEmpty()) "png" else "rc:$defaultRcBackend"
     // Rendered only when there is another lane to switch to. A command menu: the placeholder shows
     // at rest and `syncLaneSelect` returns to it after each pick, since the chip beside it names
     // the current renderer.
@@ -16387,8 +16405,9 @@ ${scriptTag("known-differences.js")}
                the DOM. The visible Theme control is the chip row on the viewer bar. -->
           $stageViewGroupHtml
           $themeSelectorHtml
-          $sizeControlsHtml
-          ${if (componentBrowser) "" else exportShapeGroupsHtml(hasScrollExport, hasSvgExport)}
+          ${if (preview.isWatchFace) "" else sizeControlsHtml}
+          ${if (componentBrowser || preview.isWatchFace) "" else exportShapeGroupsHtml(hasScrollExport, hasSvgExport)}
+          ${if (preview.isWatchFace) "" else """
           <details class="cp-group" data-cp-group="locale">
             <summary>Locale &amp; text</summary>
             <div class="cp-group-body">
@@ -16407,12 +16426,12 @@ ${scriptTag("known-differences.js")}
                 <input id="cp-fontScale" type="range" min="0.5" max="2.0" step="0.1" value="1.0"$wasmDis>
               </label>
             </div>
-          </details>
-          $overlaysHtml
-          $featureControlsHtml
+          </details>"""}
+          ${if (preview.isWatchFace) "" else overlaysHtml}
+          ${if (preview.isWatchFace) "" else featureControlsHtml}
           ${watchFaceControlsHtml(preview, overridesLive, requestOverrides)}
-          ${overrideKnobsHtml(preview, canApplyOverrides || canRenderOverrides, wasmSrc != null, requestOverrides)}
-          ${if (componentBrowser) "" else remoteComposeKnobsHtml(preview, canApplyOverrides || canRenderOverrides || hasRcWasm, requestOverrides)}
+          ${if (preview.isWatchFace) "" else overrideKnobsHtml(preview, canApplyOverrides || canRenderOverrides, wasmSrc != null, requestOverrides)}
+          ${if (componentBrowser || preview.isWatchFace) "" else remoteComposeKnobsHtml(preview, canApplyOverrides || canRenderOverrides || hasRcWasm, requestOverrides)}
           <div class="cp-status" id="cp-status"></div>
         </div>
       </div>$comparisonStrip
@@ -17645,105 +17664,136 @@ ${(if (brand == null) ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compo
         }
       }
 
+    val slots = wf?.slots.orEmpty()
     val slotRows =
-      wf?.slots.orEmpty().joinToString("\n") { slot ->
-        val sid = slot.slotId
-        val active = slot.activeState
-        val typeKey = "wf.slot.$sid.type"
-        val initialType = active.type.ifBlank { "EMPTY" }
-        val shownType = (requestOverrides[typeKey] ?: initialType).uppercase(Locale.ROOT)
-        val typeChoices =
-          (listOf("EMPTY") +
-              slot.supportedTypes +
-              WatchFaceOverrides.KNOWN_COMPLICATION_TYPES +
-              listOf(shownType))
-            .map { it.trim().uppercase(Locale.ROOT) }
-            .filter { it.isNotEmpty() }
-            .distinct()
-        val supportedSet = slot.supportedTypes.mapTo(HashSet()) { it.uppercase(Locale.ROOT) }
-        val typeOptions = typeChoices.map { t ->
-          val tag =
-            if (t != "EMPTY" && supportedSet.isNotEmpty() && t in supportedSet) "$t ★" else t
-          PreviewOverrideOption(value = t, label = tag)
+      slots
+        .mapIndexed { index, slot ->
+          val sid = slot.slotId
+          val active = slot.activeState
+          val typeKey = "wf.slot.$sid.type"
+          val initialType = active.type.ifBlank { "EMPTY" }
+          val shownType = (requestOverrides[typeKey] ?: initialType).uppercase(Locale.ROOT)
+          val typeChoices =
+            (listOf("EMPTY") +
+                slot.supportedTypes +
+                WatchFaceOverrides.KNOWN_COMPLICATION_TYPES +
+                listOf(shownType))
+              .map { it.trim().uppercase(Locale.ROOT) }
+              .filter { it.isNotEmpty() }
+              .distinct()
+          val supportedSet = slot.supportedTypes.mapTo(HashSet()) { it.uppercase(Locale.ROOT) }
+          val typeOptions = typeChoices.map { t ->
+            val tag =
+              if (t != "EMPTY" && supportedSet.isNotEmpty() && t in supportedSet) "$t ★" else t
+            PreviewOverrideOption(value = t, label = tag)
+          }
+
+          val textKey = "wf.slot.$sid.text"
+          val initText = active.text
+          val shownText = requestOverrides[textKey] ?: initText
+
+          val titleKey = "wf.slot.$sid.title"
+          val initTitle = active.title
+          val shownTitle = requestOverrides[titleKey] ?: initTitle
+
+          val valKey = "wf.slot.$sid.value"
+          val initVal = wfNumberText(active.value)
+          val shownVal = requestOverrides[valKey] ?: initVal
+
+          val minKey = "wf.slot.$sid.min"
+          val initMin = wfNumberText(active.min)
+          val shownMin = requestOverrides[minKey] ?: initMin
+
+          val maxKey = "wf.slot.$sid.max"
+          val initMax = wfNumberText(active.max)
+          val shownMax = requestOverrides[maxKey] ?: initMax
+
+          val colorsKey = "wf.slot.$sid.colors"
+          val initColors = active.colors.joinToString(",")
+          val shownColors = requestOverrides[colorsKey] ?: initColors
+
+          val weightsKey = "wf.slot.$sid.weights"
+          val initWeights = active.weights.joinToString(",") { wfNumberText(it) }
+          val shownWeights = requestOverrides[weightsKey] ?: initWeights
+
+          val slotPrefix = "wf.slot.$sid."
+          val hasSlotOverride = requestOverrides.keys.any { it.startsWith(slotPrefix) }
+          val slotOpenAttr = if (index == 0 || hasSlotOverride) " open" else ""
+          val showText =
+            shownType !in setOf("EMPTY", "MONOCHROMATIC_IMAGE", "SMALL_IMAGE", "PHOTO_IMAGE")
+          val showRanged = shownType == "RANGED_VALUE" || shownType == "GOAL_PROGRESS"
+          val showColors =
+            shownType == "RANGED_VALUE" ||
+              shownType == "GOAL_PROGRESS" ||
+              shownType == "WEIGHTED_ELEMENTS"
+          val textHiddenAttr = if (showText) "" else " hidden"
+          val rangedHiddenAttr = if (showRanged) "" else " hidden"
+          val colorsHiddenAttr = if (showColors) "" else " hidden"
+          val advOpenAttr =
+            if (colorsKey in requestOverrides || weightsKey in requestOverrides) " open" else ""
+
+          val providerHint =
+            slot.defaultSystemProvider
+              ?.takeIf { it.isNotBlank() }
+              ?.let { " · ${WebEscaping.htmlEscape(it)}" }
+              .orEmpty()
+
+          """
+        <details class="cp-wf-slot" data-slot-id="$sid"$slotOpenAttr>
+          <summary class="cp-wf-slot-head">Slot #$sid · <span class="cp-wf-slot-badge">${WebEscaping.htmlEscape(shownType)}</span>$providerHint</summary>
+          <div class="cp-wf-slot-body">
+            <label>Complication type
+              <select class="cp-wf-field cp-wf-slot-type" data-wf-key="$typeKey" data-wf-initial="${WebEscaping.htmlEscape(initialType)}"$dis>
+            ${selectOptionsHtml(typeOptions, shownType)}
+              </select>
+            </label>
+            <div class="cp-size-row" data-wf-slot-fields="text"$textHiddenAttr>
+              <label>Text
+                <input type="text" class="cp-wf-field" data-wf-key="$textKey" data-wf-initial="${WebEscaping.htmlEscape(initText)}" value="${WebEscaping.htmlEscape(shownText)}" placeholder="e.g. 72"$dis>
+              </label>
+              <label>Title
+                <input type="text" class="cp-wf-field" data-wf-key="$titleKey" data-wf-initial="${WebEscaping.htmlEscape(initTitle)}" value="${WebEscaping.htmlEscape(shownTitle)}" placeholder="e.g. BPM"$dis>
+              </label>
+            </div>
+            <div class="cp-size-row" data-wf-slot-fields="ranged"$rangedHiddenAttr>
+              <label>Value
+                <input type="number" step="any" class="cp-wf-field" data-wf-key="$valKey" data-wf-initial="${WebEscaping.htmlEscape(initVal)}" value="${WebEscaping.htmlEscape(shownVal)}"$dis>
+              </label>
+              <label>Min
+                <input type="number" step="any" class="cp-wf-field" data-wf-key="$minKey" data-wf-initial="${WebEscaping.htmlEscape(initMin)}" value="${WebEscaping.htmlEscape(shownMin)}"$dis>
+              </label>
+              <label>Max
+                <input type="number" step="any" class="cp-wf-field" data-wf-key="$maxKey" data-wf-initial="${WebEscaping.htmlEscape(initMax)}" value="${WebEscaping.htmlEscape(shownMax)}"$dis>
+              </label>
+            </div>
+            <details class="cp-wf-sub cp-wf-slot-advanced" data-wf-slot-fields="colors"$colorsHiddenAttr$advOpenAttr>
+              <summary>Colors &amp; weights</summary>
+              <div class="cp-wf-sub-body">
+                <div class="cp-size-row">
+                  <label>Colors
+                    <input type="text" class="cp-wf-field" data-wf-key="$colorsKey" data-wf-initial="${WebEscaping.htmlEscape(initColors)}" value="${WebEscaping.htmlEscape(shownColors)}" placeholder="#FF00FF,#00FFFF"$dis>
+                  </label>
+                  <label>Weights
+                    <input type="text" class="cp-wf-field" data-wf-key="$weightsKey" data-wf-initial="${WebEscaping.htmlEscape(initWeights)}" value="${WebEscaping.htmlEscape(shownWeights)}" placeholder="1,2,1"$dis>
+                  </label>
+                </div>
+              </div>
+            </details>
+          </div>
+        </details>
+        """
+            .trimIndent()
         }
+        .joinToString("\n")
 
-        val textKey = "wf.slot.$sid.text"
-        val initText = active.text
-        val shownText = requestOverrides[textKey] ?: initText
-
-        val titleKey = "wf.slot.$sid.title"
-        val initTitle = active.title
-        val shownTitle = requestOverrides[titleKey] ?: initTitle
-
-        val valKey = "wf.slot.$sid.value"
-        val initVal = wfNumberText(active.value)
-        val shownVal = requestOverrides[valKey] ?: initVal
-
-        val minKey = "wf.slot.$sid.min"
-        val initMin = wfNumberText(active.min)
-        val shownMin = requestOverrides[minKey] ?: initMin
-
-        val maxKey = "wf.slot.$sid.max"
-        val initMax = wfNumberText(active.max)
-        val shownMax = requestOverrides[maxKey] ?: initMax
-
-        val colorsKey = "wf.slot.$sid.colors"
-        val initColors = active.colors.joinToString(",")
-        val shownColors = requestOverrides[colorsKey] ?: initColors
-
-        val weightsKey = "wf.slot.$sid.weights"
-        val initWeights = active.weights.joinToString(",") { wfNumberText(it) }
-        val shownWeights = requestOverrides[weightsKey] ?: initWeights
-
-        val providerHint =
-          slot.defaultSystemProvider
-            ?.takeIf { it.isNotBlank() }
-            ?.let { " · ${WebEscaping.htmlEscape(it)}" }
-            .orEmpty()
-
-        """
-        <div class="cp-wf-slot" data-slot-id="$sid">
-          <div class="cp-wf-slot-head">Slot #$sid$providerHint</div>
-          <label>Complication type
-            <select class="cp-wf-field" data-wf-key="$typeKey" data-wf-initial="${WebEscaping.htmlEscape(initialType)}"$dis>
-          ${selectOptionsHtml(typeOptions, shownType)}
-            </select>
-          </label>
-          <div class="cp-size-row">
-            <label>Text
-              <input type="text" class="cp-wf-field" data-wf-key="$textKey" data-wf-initial="${WebEscaping.htmlEscape(initText)}" value="${WebEscaping.htmlEscape(shownText)}" placeholder="e.g. 72"$dis>
-            </label>
-            <label>Title
-              <input type="text" class="cp-wf-field" data-wf-key="$titleKey" data-wf-initial="${WebEscaping.htmlEscape(initTitle)}" value="${WebEscaping.htmlEscape(shownTitle)}" placeholder="e.g. BPM"$dis>
-            </label>
-          </div>
-          <div class="cp-size-row">
-            <label>Value
-              <input type="number" step="any" class="cp-wf-field" data-wf-key="$valKey" data-wf-initial="${WebEscaping.htmlEscape(initVal)}" value="${WebEscaping.htmlEscape(shownVal)}"$dis>
-            </label>
-            <label>Min
-              <input type="number" step="any" class="cp-wf-field" data-wf-key="$minKey" data-wf-initial="${WebEscaping.htmlEscape(initMin)}" value="${WebEscaping.htmlEscape(shownMin)}"$dis>
-            </label>
-            <label>Max
-              <input type="number" step="any" class="cp-wf-field" data-wf-key="$maxKey" data-wf-initial="${WebEscaping.htmlEscape(initMax)}" value="${WebEscaping.htmlEscape(shownMax)}"$dis>
-            </label>
-          </div>
-          <div class="cp-size-row">
-            <label>Colors
-              <input type="text" class="cp-wf-field" data-wf-key="$colorsKey" data-wf-initial="${WebEscaping.htmlEscape(initColors)}" value="${WebEscaping.htmlEscape(shownColors)}" placeholder="#FF00FF,#00FFFF"$dis>
-            </label>
-            <label>Weights
-              <input type="text" class="cp-wf-field" data-wf-key="$weightsKey" data-wf-initial="${WebEscaping.htmlEscape(initWeights)}" value="${WebEscaping.htmlEscape(shownWeights)}" placeholder="1,2,1"$dis>
-            </label>
-          </div>
-        </div>
-        """
-          .trimIndent()
-      }
+    val ambientFlagsOpenAttr =
+      if (shownBurnIn.isNotEmpty() || shownLowBit.isNotEmpty()) " open" else ""
+    val sensorsOpenAttr =
+      if (shownHr.isNotEmpty() || shownSteps.isNotEmpty() || shownBat.isNotEmpty()) " open" else ""
 
     val note =
       if (canApplyOverrides)
-        "Watch face state &amp; complications — edit ambient, time, sensors or slot data to re-render."
+        "Shared watch face &amp; complication overrides across DWF RemoteCompose and DWF Renderer APK."
       else "Watch face state &amp; complications — static snapshot, values are baked in."
     return buildString {
       appendLine("<details class=\"cp-group\" data-cp-group=\"watchface\" open>")
@@ -17751,56 +17801,88 @@ ${(if (brand == null) ServeSiteIcon.linkTags(themeCss, siteName.ifBlank { "Compo
       appendLine("  <div class=\"cp-group-body\">")
       appendLine("    <div class=\"cp-knobs\">")
       appendLine("      <div class=\"cp-knobs-head\">$note</div>")
+      appendLine("      <details class=\"cp-wf-sub\" data-wf-sub=\"display\" open>")
+      appendLine("        <summary>Display &amp; ambient</summary>")
+      appendLine("        <div class=\"cp-wf-sub-body\">")
       appendLine(
-        "      <label class=\"cp-live-row\"><input id=\"cp-ambient\" type=\"checkbox\" " +
+        "          <label class=\"cp-live-row\"><input id=\"cp-ambient\" type=\"checkbox\" " +
           "class=\"cp-wf-field\" data-wf-key=\"ambient\" data-wf-initial=\"$initialAmbient\"$ambientChecked$dis> Ambient mode (AOD)</label>",
       )
-      appendLine("      <div class=\"cp-size-row\">")
       appendLine(
-        "        <label>Burn-in protection\n" +
-          "          <select class=\"cp-wf-field\" data-wf-key=\"ambientBurnIn\" data-wf-initial=\"\"$dis>\n" +
-          "        ${selectOptionsHtml(triStateBoolOptions, shownBurnIn)}\n" +
-          "          </select>\n" +
-          "        </label>",
-      )
-      appendLine(
-        "        <label>Low-bit ambient\n" +
-          "          <select class=\"cp-wf-field\" data-wf-key=\"ambientLowBit\" data-wf-initial=\"\"$dis>\n" +
-          "        ${selectOptionsHtml(triStateBoolOptions, shownLowBit)}\n" +
-          "          </select>\n" +
-          "        </label>",
-      )
-      appendLine("      </div>")
-      appendLine(
-        "      <label>Preview time\n" +
-          "        <input id=\"cp-clockEpochMillis\" type=\"text\" class=\"cp-wf-field\" " +
+        "          <label>Preview time\n" +
+          "            <input id=\"cp-clockEpochMillis\" type=\"text\" class=\"cp-wf-field\" " +
           "data-wf-key=\"clockEpochMillis\" data-wf-initial=\"\" " +
           "value=\"${WebEscaping.htmlEscape(shownClock)}\" " +
           "placeholder=\"${WebEscaping.htmlEscape("$bakedTime (HH:mm:ss or epoch ms)")}\"$dis>\n" +
-          "      </label>",
+          "          </label>",
       )
-      appendLine("      <div class=\"cp-size-row\">")
       appendLine(
-        "        <label>HR\n" +
-          "          <input type=\"number\" class=\"cp-wf-field\" data-wf-key=\"wf.heartRate\" " +
+        "          <details class=\"cp-wf-sub\" data-wf-sub=\"ambient-flags\"$ambientFlagsOpenAttr>",
+      )
+      appendLine("            <summary>Ambient hardware flags</summary>")
+      appendLine("            <div class=\"cp-wf-sub-body\">")
+      appendLine("              <div class=\"cp-size-row\">")
+      appendLine(
+        "                <label>Burn-in protection\n" +
+          "                  <select class=\"cp-wf-field\" data-wf-key=\"ambientBurnIn\" data-wf-initial=\"\"$dis>\n" +
+          "                ${selectOptionsHtml(triStateBoolOptions, shownBurnIn)}\n" +
+          "                  </select>\n" +
+          "                </label>",
+      )
+      appendLine(
+        "                <label>Low-bit ambient\n" +
+          "                  <select class=\"cp-wf-field\" data-wf-key=\"ambientLowBit\" data-wf-initial=\"\"$dis>\n" +
+          "                ${selectOptionsHtml(triStateBoolOptions, shownLowBit)}\n" +
+          "                  </select>\n" +
+          "                </label>",
+      )
+      appendLine("              </div>")
+      appendLine("            </div>")
+      appendLine("          </details>")
+      appendLine("        </div>")
+      appendLine("      </details>")
+      if (configRows.isNotBlank()) {
+        val configCount = wf?.userConfigurations.orEmpty().size
+        appendLine("      <details class=\"cp-wf-sub\" data-wf-sub=\"styles\" open>")
+        appendLine("        <summary>Styles &amp; configurations ($configCount)</summary>")
+        appendLine("        <div class=\"cp-wf-sub-body\">")
+        appendLine(configRows)
+        appendLine("        </div>")
+        appendLine("      </details>")
+      }
+      if (slotRows.isNotBlank()) {
+        appendLine("      <details class=\"cp-wf-sub\" data-wf-sub=\"complications\" open>")
+        appendLine("        <summary>Complications (${slots.size})</summary>")
+        appendLine("        <div class=\"cp-wf-sub-body\">")
+        appendLine(slotRows)
+        appendLine("        </div>")
+        appendLine("      </details>")
+      }
+      appendLine("      <details class=\"cp-wf-sub\" data-wf-sub=\"sensors\"$sensorsOpenAttr>")
+      appendLine("        <summary>Sensors &amp; health</summary>")
+      appendLine("        <div class=\"cp-wf-sub-body\">")
+      appendLine("          <div class=\"cp-size-row\">")
+      appendLine(
+        "            <label>HR\n" +
+          "              <input type=\"number\" class=\"cp-wf-field\" data-wf-key=\"wf.heartRate\" " +
           "data-wf-initial=\"\" value=\"${WebEscaping.htmlEscape(shownHr)}\" placeholder=\"72\"$dis>\n" +
-          "        </label>",
+          "            </label>",
       )
       appendLine(
-        "        <label>Steps\n" +
-          "          <input type=\"number\" class=\"cp-wf-field\" data-wf-key=\"wf.stepCount\" " +
+        "            <label>Steps\n" +
+          "              <input type=\"number\" class=\"cp-wf-field\" data-wf-key=\"wf.stepCount\" " +
           "data-wf-initial=\"\" value=\"${WebEscaping.htmlEscape(shownSteps)}\" placeholder=\"6500\"$dis>\n" +
-          "        </label>",
+          "            </label>",
       )
       appendLine(
-        "        <label>Bat %\n" +
-          "          <input type=\"number\" class=\"cp-wf-field\" data-wf-key=\"wf.batteryPercent\" " +
+        "            <label>Bat %\n" +
+          "              <input type=\"number\" class=\"cp-wf-field\" data-wf-key=\"wf.batteryPercent\" " +
           "data-wf-initial=\"\" value=\"${WebEscaping.htmlEscape(shownBat)}\" placeholder=\"85\"$dis>\n" +
-          "        </label>",
+          "            </label>",
       )
-      appendLine("      </div>")
-      if (configRows.isNotBlank()) appendLine(configRows)
-      if (slotRows.isNotBlank()) appendLine(slotRows)
+      appendLine("          </div>")
+      appendLine("        </div>")
+      appendLine("      </details>")
       appendLine("    </div>")
       appendLine("  </div>")
       append("</details>")

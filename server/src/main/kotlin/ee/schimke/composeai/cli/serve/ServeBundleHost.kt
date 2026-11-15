@@ -800,7 +800,6 @@ class ServeBundleHost(
   }
 
   override fun enabledRcPlayersFor(previewId: String): List<RcPlayerBackend> {
-    if (previews.any { it.id == previewId && it.isWatchFace }) return emptyList()
     return super.enabledRcPlayersFor(previewId)
   }
 

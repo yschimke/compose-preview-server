@@ -4430,6 +4430,8 @@ if (laneSelect) {
         if (!value) return; // the placeholder; nothing was chosen
         if (value.indexOf("wf:") === 0) {
             var wfWire = value.substring(3).trim().toLowerCase();
+            rcPlayerPicked = false;
+            rcPlayerBackend = rcDefaultBackend;
             wfRendererBackend = wfWire || wfDefaultBackend;
             wfRendererPicked = wfRendererBackend !== wfDefaultBackend;
             syncWfBadge();
@@ -4451,6 +4453,7 @@ if (laneSelect) {
                 // A server-side player. Record the pick first so the single static-lane render
                 // carries rcPlayer=<wire>, then setMode("png") closes any other lane and renders
                 // once.
+                wfRendererPicked = false;
                 rcPlayerBackend = wire;
                 rcPlayerPicked = true;
                 setMode("png");
@@ -4745,6 +4748,40 @@ controls(".cp-rc-knob").forEach(function (el) {
         onRcKnobChanged,
     );
 });
+function syncWfSlotVisibility(slotEl: Element) {
+    var typeSel = slotEl.querySelector<HTMLSelectElement>(".cp-wf-slot-type");
+    if (!typeSel) return;
+    var t = (typeSel.value || "EMPTY").trim().toUpperCase();
+    var badge = slotEl.querySelector<HTMLElement>(".cp-wf-slot-badge");
+    if (badge) badge.textContent = t;
+    var showText =
+        t !== "EMPTY" &&
+        t !== "MONOCHROMATIC_IMAGE" &&
+        t !== "SMALL_IMAGE" &&
+        t !== "PHOTO_IMAGE";
+    var showRanged = t === "RANGED_VALUE" || t === "GOAL_PROGRESS";
+    var showColors =
+        t === "RANGED_VALUE" ||
+        t === "GOAL_PROGRESS" ||
+        t === "WEIGHTED_ELEMENTS";
+    var textEl = slotEl.querySelector<HTMLElement>(
+        '[data-wf-slot-fields="text"]',
+    );
+    if (textEl) textEl.hidden = !showText;
+    var rangedEl = slotEl.querySelector<HTMLElement>(
+        '[data-wf-slot-fields="ranged"]',
+    );
+    if (rangedEl) rangedEl.hidden = !showRanged;
+    var colorsEl = slotEl.querySelector<HTMLElement>(
+        '[data-wf-slot-fields="colors"]',
+    );
+    if (colorsEl) colorsEl.hidden = !showColors;
+}
+function syncAllWfSlots() {
+    document.querySelectorAll(".cp-wf-slot").forEach(function (slotEl) {
+        syncWfSlotVisibility(slotEl);
+    });
+}
 const scheduleWfKnobChanged = debounced(
     onKnobChanged,
     CONTINUOUS_EDIT_DEBOUNCE_MS,
@@ -4756,6 +4793,10 @@ controls(".cp-wf-field").forEach(function (el) {
     ) {
         el.addEventListener("change", function () {
             if (el.tagName === "SELECT") urlPush = true;
+            if (el.classList.contains("cp-wf-slot-type")) {
+                var slotEl = el.closest(".cp-wf-slot");
+                if (slotEl) syncWfSlotVisibility(slotEl);
+            }
             onKnobChanged();
         });
     } else {
@@ -5043,6 +5084,7 @@ function hydrateFromUrl(popped: boolean) {
         wfControlledKeys,
         unseeded,
     );
+    syncAllWfSlots();
     // The sticky script seeds the theme select before this file runs, so the initial pass leaves it
     // alone. Back/Forward owns it: the entry's theme, or the page's opening one.
     if (popped && themeChoice) {
@@ -5077,7 +5119,7 @@ function hydrateFromUrl(popped: boolean) {
     // Restore `rcPlayer=<id>` from the offered options only, so an unknown id falls back to the
     // default. Legacy spellings (`java`, `embedded`, `js`, `rcplayer-*`) restore the player they
     // named.
-    if (rcDefaultBackend) {
+    if (rcDefaultBackend || wfDefaultBackend) {
         var wantedPlayer = q.get("rcPlayer")
             ? rules.normalizeRcPlayer(q.get("rcPlayer"))
             : null;
@@ -5138,6 +5180,27 @@ syncSpecStrip();
 // Read the bookmarked lane now, before the first sync clears a param no control holds yet. Applied
 // at the bottom of this file, after the fallback snapshot has been requested.
 var initialUrlMode = new URLSearchParams(location.search).get("mode") || "";
+if (
+    !initialUrlMode &&
+    laneSelect &&
+    laneSelect.getAttribute("data-default") === "rc:cmp-wasm"
+) {
+    var initSearchParams = new URLSearchParams(location.search);
+    if (
+        !initSearchParams.get("wfRenderer") &&
+        !initSearchParams.get("rcPlayer") &&
+        Object.keys(renderOverrides()).length === 0 &&
+        Object.keys(
+            rules.uncontrolledWatchFaceParams(
+                initSearchParams,
+                new Set(),
+                new Set(),
+            ),
+        ).length === 0
+    ) {
+        initialUrlMode = "rc-wasm";
+    }
+}
 if (window.cpUrlState) {
     window.cpUrlState.onPop(function () {
         // The vector lane is a snapshot format, not an override, so the paths below can't see it
