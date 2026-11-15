@@ -4745,6 +4745,42 @@ controls(".cp-rc-knob").forEach(function (el) {
         onRcKnobChanged,
     );
 });
+function syncWfSlotVisibility(slotEl: Element) {
+    var typeSel = slotEl.querySelector<HTMLSelectElement>(".cp-wf-slot-type");
+    if (!typeSel) return;
+    var t = (typeSel.value || "EMPTY").trim().toUpperCase();
+    var badge = slotEl.querySelector<HTMLElement>(".cp-wf-slot-badge");
+    if (badge) badge.textContent = t;
+    var showText =
+        t !== "EMPTY" &&
+        t !== "MONOCHROMATIC_IMAGE" &&
+        t !== "SMALL_IMAGE" &&
+        t !== "PHOTO_IMAGE";
+    var showRanged = t === "RANGED_VALUE" || t === "GOAL_PROGRESS";
+    var showColors =
+        t === "RANGED_VALUE" ||
+        t === "GOAL_PROGRESS" ||
+        t === "WEIGHTED_ELEMENTS";
+    var textEl = slotEl.querySelector<HTMLElement>(
+        '[data-wf-slot-fields="text"]',
+    );
+    if (textEl) textEl.hidden = !showText;
+    var rangedEl = slotEl.querySelector<HTMLElement>(
+        '[data-wf-slot-fields="ranged"]',
+    );
+    if (rangedEl) rangedEl.hidden = !showRanged;
+    var colorsEl = slotEl.querySelector<HTMLElement>(
+        '[data-wf-slot-fields="colors"]',
+    );
+    if (colorsEl) colorsEl.hidden = !showColors;
+}
+function syncAllWfSlots() {
+    document
+        .querySelectorAll(".cp-wf-slot")
+        .forEach(function (slotEl) {
+            syncWfSlotVisibility(slotEl);
+        });
+}
 const scheduleWfKnobChanged = debounced(
     onKnobChanged,
     CONTINUOUS_EDIT_DEBOUNCE_MS,
@@ -4756,6 +4792,10 @@ controls(".cp-wf-field").forEach(function (el) {
     ) {
         el.addEventListener("change", function () {
             if (el.tagName === "SELECT") urlPush = true;
+            if (el.classList.contains("cp-wf-slot-type")) {
+                var slotEl = el.closest(".cp-wf-slot");
+                if (slotEl) syncWfSlotVisibility(slotEl);
+            }
             onKnobChanged();
         });
     } else {
@@ -5043,6 +5083,7 @@ function hydrateFromUrl(popped: boolean) {
         wfControlledKeys,
         unseeded,
     );
+    syncAllWfSlots();
     // The sticky script seeds the theme select before this file runs, so the initial pass leaves it
     // alone. Back/Forward owns it: the entry's theme, or the page's opening one.
     if (popped && themeChoice) {

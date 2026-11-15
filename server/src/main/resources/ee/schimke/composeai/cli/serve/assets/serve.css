@@ -2814,8 +2814,20 @@ cp-history-menu { display: contents; }
 .cp-knobs textarea { width: 100%; box-sizing: border-box; min-height: 6em; resize: vertical;
   font-family: var(--md-sys-typescale-mono-font); font-size: 12px; }
 .cp-knobs textarea:disabled { opacity: 0.7; }
-.cp-wf-slot { border-top: 1px dashed var(--cp-border); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
-.cp-wf-slot-head { font-size: 0.74rem; font-weight: 600; color: var(--cp-fg); }
+.cp-wf-sub { border: 1px solid var(--cp-border); border-radius: var(--md-sys-shape-corner-small); background: var(--cp-surface-2, rgba(127,127,127,0.04)); }
+.cp-wf-sub > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; padding: 6px 8px; font-size: 0.74rem; font-weight: 600; color: var(--cp-fg); }
+.cp-wf-sub > summary::-webkit-details-marker { display: none; }
+.cp-wf-sub > summary::before { content: "\25B8"; font-size: 0.68rem; color: var(--cp-fg-faint); transition: transform 120ms ease; }
+.cp-wf-sub[open] > summary::before { transform: rotate(90deg); }
+.cp-wf-sub-body { display: flex; flex-direction: column; gap: 8px; padding: 2px 8px 8px; }
+.cp-wf-slot { border: 1px dashed var(--cp-border); border-radius: var(--md-sys-shape-corner-small); background: var(--cp-surface, transparent); }
+.cp-wf-slot-head { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; padding: 6px 8px; font-size: 0.73rem; font-weight: 600; color: var(--cp-fg); }
+.cp-wf-slot-head::-webkit-details-marker { display: none; }
+.cp-wf-slot-head::before { content: "\25B8"; font-size: 0.66rem; color: var(--cp-fg-faint); transition: transform 120ms ease; }
+.cp-wf-slot[open] > .cp-wf-slot-head::before { transform: rotate(90deg); }
+.cp-wf-slot-badge { font-family: var(--md-sys-typescale-mono-font); font-size: 0.68rem; font-weight: 500; color: var(--cp-fg-muted); }
+.cp-wf-slot-body { display: flex; flex-direction: column; gap: 6px; padding: 2px 8px 8px; }
+.cp-wf-slot-advanced { margin-top: 2px; }
 /* The Exploded 3D group's camera axes. A range + a live readout on one row: the drawer column is
    240px, and the stacked `label { flex-direction: column }` default would give each of four
    sliders three lines. `font-variant-numeric: tabular-nums` on the readout stops the row twitching

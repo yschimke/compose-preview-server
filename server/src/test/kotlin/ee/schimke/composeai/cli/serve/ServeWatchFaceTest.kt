@@ -417,6 +417,15 @@ class ServeWatchFaceTest {
         assertTrue(html.contains("""<option value="false" selected>false</option>"""))
         assertTrue(html.contains("""data-wf-key="wf.slot.1.type""""))
         assertTrue(html.contains("""data-wf-key="wf.config.color_style_setting""""))
+        assertTrue(html.contains("""class="cp-wf-sub""""))
+        assertTrue(html.contains("""class="cp-wf-slot""""))
+        assertTrue(html.contains("""class="cp-wf-slot-badge""""))
+        assertTrue(html.contains("""data-wf-slot-fields="text""""))
+        assertTrue(html.contains("""data-wf-slot-fields="ranged""""))
+        assertTrue(html.contains("""data-wf-slot-fields="colors""""))
+        assertFalse(html.contains("""data-cp-group="size""""))
+        assertFalse(html.contains("""data-cp-group="locale""""))
+        assertFalse(html.contains("""data-cp-group="overlays""""))
         assertFalse(html.contains("""value="rc:camaelon-js""""))
       }
   }
