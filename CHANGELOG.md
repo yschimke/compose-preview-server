@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.163.0](https://github.com/yschimke/compose-preview-server/compare/v3.162.0...v3.163.0) (2026-11-15)
+
+
+### Features
+
+* **serve:** add GET/PUT/DELETE /admin/dwf-runtime and entrypoint auto-wiring ([#1945](https://github.com/yschimke/compose-preview-server/issues/1945)) ([c8b71ba](https://github.com/yschimke/compose-preview-server/commit/c8b71baddb1c7ce9381539b3a746c055d3886a65))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.94.0 ([#1944](https://github.com/yschimke/compose-preview-server/issues/1944)) ([ad4d360](https://github.com/yschimke/compose-preview-server/commit/ad4d360a75bf49de48ff06f877dcbf7cb35bb295))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.28.0 ([#1941](https://github.com/yschimke/compose-preview-server/issues/1941)) ([c9ed536](https://github.com/yschimke/compose-preview-server/commit/c9ed5366140ade000d681863846014810605102b))
+* **deps:** update dependency ee.schimke.composeai:livery-server to v0.15.0 ([#1942](https://github.com/yschimke/compose-preview-server/issues/1942)) ([c011e23](https://github.com/yschimke/compose-preview-server/commit/c011e231fdd665855c8a846806f20b8416218756))
+* **serve:** reject HEAD probes and guard cold replay on default dwf-apk renders ([#1940](https://github.com/yschimke/compose-preview-server/issues/1940)) ([f6c15dc](https://github.com/yschimke/compose-preview-server/commit/f6c15dc18a7af0661ca533d0ee3883bcfd471847))
+
 ## [3.162.0](https://github.com/yschimke/compose-preview-server/compare/v3.161.0...v3.162.0) (2026-11-15)
 
 
