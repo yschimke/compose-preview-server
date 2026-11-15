@@ -1734,6 +1734,28 @@ class ServeHttpRoutingTest {
       assertTrue(card.containsMatchIn(body), "the pending catalog keeps a loading card: $body")
       assertTrue(body.contains("href=\"/jetnews/"), "a pending catalog can be opened: $body")
       client
+        .newCall(
+          Request.Builder()
+            .url("http://127.0.0.1:${homeServer.port}/jetnews/render/sample.png")
+            .build(),
+        )
+        .execute()
+        .use {
+          assertEquals(503, it.code)
+          assertEquals("3", it.header("Retry-After"))
+          assertEquals("no-store", it.header("Cache-Control"))
+          assertEquals("catalog loading", it.body.string())
+        }
+      client
+        .newCall(
+          Request.Builder()
+            .url("http://127.0.0.1:${homeServer.port}/reply/render/sample.png")
+            .build(),
+        )
+        .execute()
+        .use { assertEquals(404, it.code) }
+      assertEquals("jetnews", loads.nextInitialLoad()?.system)
+      client
         .newCall(Request.Builder().url("http://127.0.0.1:${homeServer.port}/jetnews/").build())
         .execute()
         .use {
@@ -1741,7 +1763,6 @@ class ServeHttpRoutingTest {
           assertEquals("3", it.header("Refresh"))
           assertTrue(it.body.string().contains("Loading catalog…"))
         }
-      assertEquals("jetnews", loads.nextInitialLoad()?.system)
       catalogRegistry.register("jetnews", host = bundle("jetnews"), pinned = true)
       loads.recordSuccess("jetnews")
       client

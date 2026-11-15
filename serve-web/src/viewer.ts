@@ -5189,7 +5189,14 @@ if (
     if (
         !initSearchParams.get("wfRenderer") &&
         !initSearchParams.get("rcPlayer") &&
-        Object.keys(renderOverrides()).length === 0
+        Object.keys(renderOverrides()).length === 0 &&
+        Object.keys(
+            rules.uncontrolledWatchFaceParams(
+                initSearchParams,
+                new Set(),
+                new Set(),
+            ),
+        ).length === 0
     ) {
         initialUrlMode = "rc-wasm";
     }

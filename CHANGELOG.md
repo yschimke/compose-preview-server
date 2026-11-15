@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.161.0](https://github.com/yschimke/compose-preview-server/compare/v3.160.0...v3.161.0) (2026-11-14)
+
+
+### Bug Fixes
+
+* defer startup cache sweeps until initial catalog load completes ([#1935](https://github.com/yschimke/compose-preview-server/issues/1935)) ([70e5729](https://github.com/yschimke/compose-preview-server/commit/70e572913839eee0ae4f9c0653e6b71a122e2825))
+
 ## [3.160.0](https://github.com/yschimke/compose-preview-server/compare/v3.159.0...v3.160.0) (2026-11-14)
 
 

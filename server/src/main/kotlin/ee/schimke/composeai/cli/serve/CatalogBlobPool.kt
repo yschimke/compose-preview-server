@@ -312,20 +312,49 @@ class CatalogBlobPool(
    */
   fun sweep(): CatalogBlobPoolSnapshot {
     val now = clock()
-    val blobs =
-      contentDir.listFiles()?.filter { it.isFile }.orEmpty().sortedBy { it.lastModified() }
-    var total = blobs.sumOf { it.length() }
+    data class BlobEntry(val file: File, val size: Long, val lastModified: Long)
+    val blobs = ArrayList<BlobEntry>()
+    if (contentDir.isDirectory) {
+      runCatching {
+        java.nio.file.Files.newDirectoryStream(contentDir.toPath()).use { stream ->
+          for (entry in stream) {
+            val attrs =
+              runCatching {
+                java.nio.file.Files.readAttributes(
+                  entry,
+                  java.nio.file.attribute.BasicFileAttributes::class.java,
+                )
+              }
+                .getOrNull() ?: continue
+            if (attrs.isRegularFile) {
+              blobs += BlobEntry(entry.toFile(), attrs.size(), attrs.lastModifiedTime().toMillis())
+            }
+          }
+        }
+      }
+    }
+    blobs.sortBy { it.lastModified }
+    var total = blobs.sumOf { it.size }
+    val evictedNames = HashSet<String>()
     for (blob in blobs) {
       if (total <= maxBytes) break
-      if (now - blob.lastModified() < graceMillis) continue
-      val size = blob.length()
-      if (runCatching { blob.delete() }.getOrDefault(false)) {
-        total -= size
+      if (now - blob.lastModified < graceMillis) continue
+      if (runCatching { blob.file.delete() }.getOrDefault(false)) {
+        total -= blob.size
+        evictedNames += blob.file.name
         evicted.increment()
       }
     }
+    val survivingNames = HashSet<String>(blobs.size)
+    for (blob in blobs) {
+      val name = blob.file.name
+      if (name !in evictedNames) survivingNames += name
+    }
     for (pointer in keysDir.listFiles()?.filter { it.isFile }.orEmpty()) {
-      if (resolve(pointer, verify = false) == null) runCatching { pointer.delete() }
+      val sha = runCatching { pointer.readText().trim() }.getOrNull()?.takeIf(::isSha)
+      if (sha == null || (sha !in survivingNames && !File(contentDir, sha).isFile)) {
+        runCatching { pointer.delete() }
+      }
     }
     // Expired misses. Empty files, so they cost no bytes against [maxBytes], only directory
     // entries — and an expired one is never trusted again anyway.
@@ -344,9 +373,30 @@ class CatalogBlobPool(
    * ([knownBlobs]).
    */
   private fun census(): CatalogBlobPoolSnapshot {
-    val blobs = contentDir.listFiles()?.filter { it.isFile }.orEmpty()
-    knownBlobs.set(blobs.size)
-    knownBytes.set(blobs.sumOf { it.length() })
+    var count = 0
+    var bytes = 0L
+    if (contentDir.isDirectory) {
+      runCatching {
+        java.nio.file.Files.newDirectoryStream(contentDir.toPath()).use { stream ->
+          for (entry in stream) {
+            val attrs =
+              runCatching {
+                java.nio.file.Files.readAttributes(
+                  entry,
+                  java.nio.file.attribute.BasicFileAttributes::class.java,
+                )
+              }
+                .getOrNull() ?: continue
+            if (attrs.isRegularFile) {
+              count++
+              bytes += attrs.size()
+            }
+          }
+        }
+      }
+    }
+    knownBlobs.set(count)
+    knownBytes.set(bytes)
     return snapshot()
   }
 

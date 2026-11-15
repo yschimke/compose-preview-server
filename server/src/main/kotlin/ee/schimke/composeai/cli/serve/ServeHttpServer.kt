@@ -3089,6 +3089,13 @@ class ServeHttpServer(
   ) {
     val lease = withContext(Dispatchers.IO) { sessions.lease(sessionId) }
     if (lease == null) {
+      if (loadingHomeSystem(sessionId) != null) {
+        catalogLoads?.prioritize(sessionId)
+        call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+        call.response.headers.append(HttpHeaders.RetryAfter, "3")
+        call.respondText("catalog loading", status = HttpStatusCode.ServiceUnavailable)
+        return
+      }
       if (onMissing != null) onMissing()
       else call.respondText("not found", status = HttpStatusCode.NotFound)
       return
@@ -11460,9 +11467,10 @@ class ServeHttpServer(
     // bare player selection. `bakedRender` is local-only, so a cold catalog's ordinary browse
     // returns null from `cached` and must still be served. Not re-asked after the lease, since an
     // expired grant would then read as "no grant" and be admitted.
+    val belowLiveGrant = grantBelowScope(AgentGrantScope.LIVE)
     val bareRcPlayerBelowLive =
       if (requestCarriesOverrides() && bareRcPlayerRequest()) {
-        grantBelowScope(AgentGrantScope.LIVE)
+        belowLiveGrant
       } else {
         null
       }
@@ -11849,6 +11857,7 @@ class ServeHttpServer(
               overrides = overrides,
               overrideParams = overrideParams,
               wfRendererParam = wfRendererParam,
+              belowLiveGrant = belowLiveGrant,
               staged = staged,
             )
             return@withLeasedSession
@@ -13835,6 +13844,7 @@ class ServeHttpServer(
     overrides: PreviewOverrides,
     overrideParams: Map<String, String>,
     wfRendererParam: String?,
+    belowLiveGrant: ServeAgentGrantStore.Grant?,
     staged: suspend (ByteArray, Map<String, String>) -> ByteArray,
   ) {
     val backend = WatchFaceRendererSelection.resolveFor(renderHost, preview, wfRendererParam)
@@ -13857,7 +13867,7 @@ class ServeHttpServer(
       )
       return
     }
-    val useHostBaked = backend.id == WatchFaceRendererIds.DWF_RC
+    val useHostBaked = backend.id == WatchFaceRendererIds.DWF_RC || belowLiveGrant != null
     val cached =
       if (
         useHostBaked &&
@@ -13874,6 +13884,10 @@ class ServeHttpServer(
         null
       }
     if (cached == null) {
+      if (belowLiveGrant != null && backend.id == WatchFaceRendererIds.DWF_APK) {
+        respondBelowScope(belowLiveGrant, AgentGrantScope.LIVE, api = true)
+        return
+      }
       val info = backend.infoFor(renderHost, preview)
       if (!info.available) {
         call.respondText(
