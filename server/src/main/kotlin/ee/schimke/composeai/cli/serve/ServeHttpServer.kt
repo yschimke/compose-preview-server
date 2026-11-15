@@ -11480,7 +11480,7 @@ class ServeHttpServer(
     if (
       (requestCarriesOverrides() ||
         wantsDaemonOnlyRenderProduct() ||
-        !renderWouldReplayBakedBytes(sessionInPath)) && rejectHeadProbe()
+        !renderWouldReplayBakedBytes(sessionInPath, belowLiveGrant)) && rejectHeadProbe()
     )
       return
     val sessionId = selectedSessionId(sessionInPath)
@@ -13371,7 +13371,10 @@ class ServeHttpServer(
    * a resident session ([ServeSessionRegistry.peekHost]). Refusals are safe: unfurlers fetch images
    * with GET.
    */
-  private fun RoutingContext.renderWouldReplayBakedBytes(sessionInPath: Boolean): Boolean {
+  private fun RoutingContext.renderWouldReplayBakedBytes(
+    sessionInPath: Boolean,
+    belowLiveGrant: ServeAgentGrantStore.Grant? = grantBelowScope(AgentGrantScope.LIVE),
+  ): Boolean {
     // Only a HEAD pays for this lookup; a GET is going to do the work regardless.
     if (call.request.local.method != HttpMethod.Head) return true
     // A pinned render answers HEAD: the lane is admission-bounded, so a probe costs at most one
@@ -13381,6 +13384,16 @@ class ServeHttpServer(
     if (call.request.queryParameters[ServeCatalogRevision.PARAM] != null) return true
     val name = call.parameters["name"]?.removeSuffix(".png") ?: return false
     val host = sessions.peekHost(selectedSessionId(sessionInPath)) ?: return false
+    if (belowLiveGrant == null) {
+      val wfPreview = host.previews.firstOrNull { it.id == name }
+      if (
+        wfPreview?.isWatchFace == true &&
+          WatchFaceRendererSelection.resolveFor(host, wfPreview, null)?.id !=
+            WatchFaceRendererIds.DWF_RC
+      ) {
+        return false
+      }
+    }
     return host.bakedRenderSize(name) != null
   }
 
@@ -13867,24 +13880,30 @@ class ServeHttpServer(
       )
       return
     }
+    val overrideFree =
+      !CatalogLiveRouting.overridesAffectRender(
+        previewId,
+        overrides,
+        renderHost.bakedTheme(previewId),
+        renderHost.bakedRcPlayer(previewId),
+      )
     val useHostBaked = backend.id == WatchFaceRendererIds.DWF_RC || belowLiveGrant != null
     val cached =
-      if (
-        useHostBaked &&
-          !CatalogLiveRouting.overridesAffectRender(
-            previewId,
-            overrides,
-            renderHost.bakedTheme(previewId),
-            renderHost.bakedRcPlayer(previewId),
-          )
-      ) {
+      if (useHostBaked && overrideFree) {
         renderHost.cachedRender(previewId, overrides)
           ?: renderHost.bakedRender(previewId, overrides)
+          ?: if (belowLiveGrant != null) {
+            catalogBundleHost(renderHost)
+              ?.let { withContext(Dispatchers.IO) { it.render(previewId, overrides) } }
+              ?.takeUnless { it is RenderOutcome.NotFound }
+          } else {
+            null
+          }
       } else {
         null
       }
     if (cached == null) {
-      if (belowLiveGrant != null && backend.id == WatchFaceRendererIds.DWF_APK) {
+      if (belowLiveGrant != null && backend.id != WatchFaceRendererIds.DWF_RC) {
         respondBelowScope(belowLiveGrant, AgentGrantScope.LIVE, api = true)
         return
       }

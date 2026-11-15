@@ -129,6 +129,7 @@ class ServeWatchFaceTest {
     private val plainPreview: ServePreview,
     private val bakedPng: ByteArray,
     private val hasRcDoc: Boolean = false,
+    private val bakedOnlyForFirst: Boolean = false,
   ) : ServeHost {
     override val label: String = "wf-live"
     override val canRenderOverrides: Boolean = true
@@ -140,10 +141,17 @@ class ServeWatchFaceTest {
     override fun enabledRcPlayersFor(previewId: String): List<RcPlayerBackend> =
       if (hasRcDoc && previewId == wfPreview.id) listOf(RcPlayerBackend.CMP_JVM) else emptyList()
 
+    override fun bakedRenderSize(previewId: String): Pair<Int, Int>? =
+      if (previewId == wfPreview.id || (!bakedOnlyForFirst && previewId == plainPreview.id)) {
+        4 to 4
+      } else {
+        null
+      }
+
     override fun bakedRender(previewId: String, overrides: PreviewOverrides): RenderOutcome.Ok? =
       if (
         overrides == PreviewOverrides() &&
-          (previewId == wfPreview.id || previewId == plainPreview.id)
+          (previewId == wfPreview.id || (!bakedOnlyForFirst && previewId == plainPreview.id))
       ) {
         RenderOutcome.Ok(bakedPng, RenderOutcome.Generation.BAKED)
       } else {
@@ -899,5 +907,204 @@ class ServeWatchFaceTest {
           Json.parseToJsonElement(sent[0]).jsonObject.getValue("dataBase64").jsonPrimitive.content,
         )
     assertContentEquals(apkPngBytes, openFrame)
+  }
+
+  @Test
+  fun `preview grant and HEAD probes never commission dwf-apk on default watch-face renders`() {
+    val wfWithBaked =
+      ServePreview(
+        id = wfPreviewId,
+        label = "watchface",
+        watchFace = watchFacePayload,
+        dwfAssetPath = watchFacePayload.dwfAssetPath,
+        dataProductKinds = setOf(WatchFaceComplicationsProduct.KIND),
+      )
+    val wfLiveOnly =
+      ServePreview(
+        id = "dwf__live_only",
+        label = "live_only",
+        watchFace = watchFacePayload.copy(previewId = "dwf__live_only"),
+        dwfAssetPath = watchFacePayload.dwfAssetPath,
+        dataProductKinds = setOf(WatchFaceComplicationsProduct.KIND),
+      )
+    val host = LiveWatchFaceHost(wfWithBaked, wfLiveOnly, bakedPngBytes, bakedOnlyForFirst = true)
+
+    var apkCommissions = 0
+    WatchFaceRendererRegistry.register(
+      object : WatchFaceRendererBackend {
+        override val id: String = WatchFaceRendererIds.DWF_APK
+        override val label: String = "DWF Renderer APK (Launch)"
+        override val badgeLabel: String = "dwf · apk"
+
+        override fun infoFor(host: ServeHost, preview: ServePreview): WatchFaceRendererInfo =
+          WatchFaceRendererInfo(
+            id = id,
+            label = label,
+            badgeLabel = badgeLabel,
+            available = true,
+            supportsLiveOverrides = true,
+            isDefault = true,
+          )
+
+        override fun render(
+          host: ServeHost,
+          preview: ServePreview,
+          overrides: PreviewOverrides,
+        ): RenderOutcome {
+          apkCommissions++
+          return RenderOutcome.Ok(apkPngBytes, RenderOutcome.Generation.DAEMON)
+        }
+
+        override fun complications(
+          host: ServeHost,
+          preview: ServePreview,
+          overrides: PreviewOverrides,
+        ): WatchFaceComplicationsOutcome =
+          WatchFaceOverrides.projectComplicationsOutcome(preview.watchFace!!, overrides, id)
+      },
+    )
+
+    val operatorToken = "operator-secret-token"
+    val grants =
+      ServeAgentGrantStore(
+        maxScope = ee.schimke.composeai.agentgrants.AgentGrantScope.PLAYGROUND,
+        maxGrantTtlSeconds = 3600,
+      )
+    val previewReq =
+      grants.openRequest(
+        "preview-check",
+        "127.0.0.1",
+        ee.schimke.composeai.agentgrants.AgentGrantScope.PREVIEW,
+        1800,
+      )!!
+    val previewToken =
+      grants
+        .approve(
+          previewReq.id,
+          "operator",
+          ee.schimke.composeai.agentgrants.AgentGrantScope.PREVIEW,
+          1800,
+        )!!
+        .token
+    val liveReq =
+      grants.openRequest(
+        "live-check",
+        "127.0.0.1",
+        ee.schimke.composeai.agentgrants.AgentGrantScope.LIVE,
+        1800,
+      )!!
+    val liveToken =
+      grants
+        .approve(
+          liveReq.id,
+          "operator",
+          ee.schimke.composeai.agentgrants.AgentGrantScope.LIVE,
+          1800,
+        )!!
+        .token
+
+    val registry = ServeSessionRegistry(open = { null })
+    registry.register("wear-wf", host = host, pinned = true)
+    val machineAuthorization =
+      ServeMachineAuthorization(operatorToken, githubAuth = null, agentGrants = grants)
+    val server =
+      ServeHttpServer(
+        host = "127.0.0.1",
+        requestedPort = 0,
+        token = operatorToken,
+        sessions = registry,
+        defaultSessionId = "wear-wf",
+        isPublic = false,
+        agentGrants = grants,
+        machineAuthorization = machineAuthorization,
+      )
+    server.start()
+    try {
+      val base = "http://127.0.0.1:${server.port}"
+      val client = OkHttpClient()
+
+      // 1. HEAD probes from operator/live callers are rejected (405, Allow: GET) rather than
+      // commissioning dwf-apk, while a preview-scoped HEAD replays the baked PNG header cleanly.
+      client
+        .newCall(
+          Request.Builder()
+            .head()
+            .url("$base/render/$wfPreviewId.png")
+            .header(ServeHttpServer.TOKEN_HEADER, liveToken)
+            .build(),
+        )
+        .execute()
+        .use { resp ->
+          assertEquals(405, resp.code)
+          assertEquals("GET", resp.header("Allow"))
+        }
+      client
+        .newCall(
+          Request.Builder()
+            .head()
+            .url("$base/render/$wfPreviewId.png")
+            .header(ServeHttpServer.TOKEN_HEADER, previewToken)
+            .build(),
+        )
+        .execute()
+        .use { resp -> assertEquals(200, resp.code) }
+      assertEquals(0, apkCommissions)
+
+      // 2. Preview-scoped GET on a watch face with baked bytes replays baked bytes without
+      // commissioning dwf-apk.
+      client
+        .newCall(
+          Request.Builder()
+            .url("$base/render/$wfPreviewId.png")
+            .header(ServeHttpServer.TOKEN_HEADER, previewToken)
+            .build(),
+        )
+        .execute()
+        .use { resp ->
+          assertEquals(200, resp.code)
+          assertContentEquals(bakedPngBytes, resp.body.bytes())
+        }
+      assertEquals(0, apkCommissions)
+
+      // 3. Preview-scoped GET on a watch face with no baked bytes gets 403 before dwf-apk is
+      // commissioned, as does an explicit ?wfRenderer=dwf-apk selection.
+      client
+        .newCall(
+          Request.Builder()
+            .url("$base/render/dwf__live_only.png")
+            .header(ServeHttpServer.TOKEN_HEADER, previewToken)
+            .build(),
+        )
+        .execute()
+        .use { resp -> assertEquals(403, resp.code) }
+      client
+        .newCall(
+          Request.Builder()
+            .url("$base/render/$wfPreviewId.png?wfRenderer=dwf-apk")
+            .header(ServeHttpServer.TOKEN_HEADER, previewToken)
+            .build(),
+        )
+        .execute()
+        .use { resp -> assertEquals(403, resp.code) }
+      assertEquals(0, apkCommissions)
+
+      // 4. Live-scoped GET commissions dwf-apk.
+      client
+        .newCall(
+          Request.Builder()
+            .url("$base/render/$wfPreviewId.png")
+            .header(ServeHttpServer.TOKEN_HEADER, liveToken)
+            .build(),
+        )
+        .execute()
+        .use { resp ->
+          assertEquals(200, resp.code)
+          assertContentEquals(apkPngBytes, resp.body.bytes())
+        }
+      assertEquals(1, apkCommissions)
+    } finally {
+      server.stop()
+      registry.close()
+    }
   }
 }
