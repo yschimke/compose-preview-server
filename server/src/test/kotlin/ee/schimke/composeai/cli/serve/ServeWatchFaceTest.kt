@@ -40,6 +40,9 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okio.FileSystem
+import okio.Path
+import okio.Path.Companion.toOkioPath
 
 class ServeWatchFaceTest {
 
@@ -125,10 +128,17 @@ class ServeWatchFaceTest {
     private val wfPreview: ServePreview,
     private val plainPreview: ServePreview,
     private val bakedPng: ByteArray,
+    private val hasRcDoc: Boolean = false,
   ) : ServeHost {
     override val label: String = "wf-live"
     override val canRenderOverrides: Boolean = true
     override val previews: List<ServePreview> = listOf(wfPreview, plainPreview)
+
+    override fun hasRemoteComposeDoc(previewId: String): Boolean =
+      hasRcDoc && previewId == wfPreview.id
+
+    override fun enabledRcPlayersFor(previewId: String): List<RcPlayerBackend> =
+      if (hasRcDoc && previewId == wfPreview.id) listOf(RcPlayerBackend.CMP_JVM) else emptyList()
 
     override fun bakedRender(previewId: String, overrides: PreviewOverrides): RenderOutcome.Ok? =
       if (
@@ -177,7 +187,10 @@ class ServeWatchFaceTest {
     activeServer = null
   }
 
-  private fun startServer(): Pair<ServeHttpServer, LiveWatchFaceHost> {
+  private fun startServer(
+    rcPlayerWasmDir: Path? = null,
+    hasRcDoc: Boolean = false,
+  ): Pair<ServeHttpServer, LiveWatchFaceHost> {
     val wfPreview =
       ServePreview(
         id = wfPreviewId,
@@ -187,7 +200,7 @@ class ServeWatchFaceTest {
         dataProductKinds = setOf(WatchFaceComplicationsProduct.KIND),
       )
     val plainPreview = ServePreview(id = plainPreviewId, label = "PlainCard")
-    val host = LiveWatchFaceHost(wfPreview, plainPreview, bakedPngBytes)
+    val host = LiveWatchFaceHost(wfPreview, plainPreview, bakedPngBytes, hasRcDoc = hasRcDoc)
     val registry = ServeSessionRegistry(open = { null })
     registry.register("wear-wf", host = host, pinned = true)
     val server =
@@ -198,6 +211,7 @@ class ServeWatchFaceTest {
           sessions = registry,
           defaultSessionId = "wear-wf",
           isPublic = true,
+          rcPlayerWasmDir = rcPlayerWasmDir?.toFile(),
           catalogSessions = listOf("wear-wf"),
         )
         .also { it.start() }
@@ -206,7 +220,7 @@ class ServeWatchFaceTest {
   }
 
   @Test
-  fun `bundle store extracts watchface sidecars and bundle host withholds generic rc players`() {
+  fun `bundle store extracts watchface sidecars and exposes rc players when rc doc exists`() {
     val storeRoot = Files.createTempDirectory("wf-bundle-store").toFile().also { it.deleteOnExit() }
     var registeredHost: ServeBundleHost? = null
     val store = ServeBundleStore(storeRoot, register = { _, host -> registeredHost = host })
@@ -237,10 +251,8 @@ class ServeWatchFaceTest {
     assertTrue(preview.isWatchFace)
     assertEquals(watchFacePayload, preview.watchFace)
     assertTrue(WatchFaceComplicationsProduct.KIND in preview.dataProductKinds)
-    assertTrue(
-      bundleHost.enabledRcPlayersFor(wfPreviewId).isEmpty(),
-      "watch-face previews route through WatchFaceRendererRegistry instead of generic RC players",
-    )
+    assertTrue(bundleHost.hasRemoteComposeDoc(wfPreviewId))
+    assertEquals(listOf(RcPlayerBackend.CAMAELON_JS), bundleHost.enabledRcPlayersFor(wfPreviewId))
   }
 
   @Test
@@ -765,5 +777,29 @@ class ServeWatchFaceTest {
       Json.decodeFromString(WatchFaceComplicationsPayload.serializer(), replayedData)
     assertTrue(replayedPayload.isAmbient)
     assertEquals("84", replayedPayload.slots.single().activeState.text)
+  }
+
+  @Test
+  fun `viewer defaults watchface lane to cmp-wasm and exposes both cmp-java options plus dwf-apk`() {
+    val wasmDir =
+      Files.createTempDirectory("wf-rc-wasm").also { it.toFile().deleteOnExit() }.toOkioPath()
+    FileSystem.SYSTEM.write(wasmDir / "index.html") {
+      writeUtf8("<!doctype html><html><body>wasm</body></html>")
+    }
+    val (server, _) = startServer(rcPlayerWasmDir = wasmDir, hasRcDoc = true)
+    val base = "http://127.0.0.1:${server.port}/wear-wf"
+
+    client.newCall(Request.Builder().url("$base/p/$wfPreviewId").build()).execute().use { resp ->
+      assertEquals(200, resp.code)
+      val html = resp.body.string()
+      assertTrue(
+        html.contains("data-default=\"rc:cmp-wasm\""),
+        "expected data-default=\"rc:cmp-wasm\" in viewer HTML",
+      )
+      assertTrue(html.contains("value=\"rc:cmp-wasm\""), "expected rc:cmp-wasm lane option")
+      assertTrue(html.contains("value=\"wf:dwf-rc\""), "expected wf:dwf-rc lane option")
+      assertTrue(html.contains("value=\"rc:cmp-jvm\""), "expected rc:cmp-jvm lane option")
+      assertTrue(html.contains("value=\"wf:dwf-apk\""), "expected wf:dwf-apk lane option")
+    }
   }
 }

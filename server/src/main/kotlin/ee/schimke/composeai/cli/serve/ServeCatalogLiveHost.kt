@@ -1379,7 +1379,6 @@ class ServeCatalogLiveHost(
    * ([supportsSwiftAppKit]). No `.rc` doc means no selector.
    */
   override fun enabledRcPlayersFor(previewId: String): List<RcPlayerBackend> {
-    if (previews.any { it.id == previewId && it.isWatchFace }) return emptyList()
     if (!hasRemoteComposeDoc(previewId)) return emptyList()
     return buildList {
       add(RcPlayerBackend.CAMAELON_JS)

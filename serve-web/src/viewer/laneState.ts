@@ -193,10 +193,11 @@ export function currentLaneValue(
     if (lanes.rc) return `rc:${RC_PLAYER.camaelonJs}`;
     if (lanes.wasm) return "wasm";
     if (lanes.spec) return "spec";
-    if (wfPick?.defaultBackend)
-        return `wf:${wfPick.picked ? wfPick.pickedBackend : wfPick.defaultBackend}`;
-    if (pick.defaultBackend)
-        return `rc:${pick.picked ? pick.pickedBackend : pick.defaultBackend}`;
+    if (wfPick?.picked && wfPick.pickedBackend)
+        return `wf:${wfPick.pickedBackend}`;
+    if (pick.picked && pick.pickedBackend) return `rc:${pick.pickedBackend}`;
+    if (wfPick?.defaultBackend) return `wf:${wfPick.defaultBackend}`;
+    if (pick.defaultBackend) return `rc:${pick.defaultBackend}`;
     return "png";
 }
 

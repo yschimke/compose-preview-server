@@ -4430,6 +4430,7 @@ if (laneSelect) {
         if (!value) return; // the placeholder; nothing was chosen
         if (value.indexOf("wf:") === 0) {
             var wfWire = value.substring(3).trim().toLowerCase();
+            rcPlayerPicked = false;
             wfRendererBackend = wfWire || wfDefaultBackend;
             wfRendererPicked = wfRendererBackend !== wfDefaultBackend;
             syncWfBadge();
@@ -4451,6 +4452,7 @@ if (laneSelect) {
                 // A server-side player. Record the pick first so the single static-lane render
                 // carries rcPlayer=<wire>, then setMode("png") closes any other lane and renders
                 // once.
+                wfRendererPicked = false;
                 rcPlayerBackend = wire;
                 rcPlayerPicked = true;
                 setMode("png");
@@ -4775,11 +4777,9 @@ function syncWfSlotVisibility(slotEl: Element) {
     if (colorsEl) colorsEl.hidden = !showColors;
 }
 function syncAllWfSlots() {
-    document
-        .querySelectorAll(".cp-wf-slot")
-        .forEach(function (slotEl) {
-            syncWfSlotVisibility(slotEl);
-        });
+    document.querySelectorAll(".cp-wf-slot").forEach(function (slotEl) {
+        syncWfSlotVisibility(slotEl);
+    });
 }
 const scheduleWfKnobChanged = debounced(
     onKnobChanged,
@@ -5179,6 +5179,19 @@ syncSpecStrip();
 // Read the bookmarked lane now, before the first sync clears a param no control holds yet. Applied
 // at the bottom of this file, after the fallback snapshot has been requested.
 var initialUrlMode = new URLSearchParams(location.search).get("mode") || "";
+if (
+    !initialUrlMode &&
+    laneSelect &&
+    laneSelect.getAttribute("data-default") === "rc:cmp-wasm"
+) {
+    var initSearchParams = new URLSearchParams(location.search);
+    if (
+        !initSearchParams.get("wfRenderer") &&
+        !initSearchParams.get("rcPlayer")
+    ) {
+        initialUrlMode = "rc-wasm";
+    }
+}
 if (window.cpUrlState) {
     window.cpUrlState.onPop(function () {
         // The vector lane is a snapshot format, not an override, so the paths below can't see it

@@ -11051,11 +11051,7 @@ class ServeHttpServer(
         // In this server's player vocabulary ([ServeRcPlayerIds]), not compose-ai-tools' wire
         // spelling: the pinned release still spells the embedded player `cmp-android`.
         addAll(renderHost.enabledRcPlayersFor(preview.id).map(ServeRcPlayerIds::of))
-        if (
-          !preview.isWatchFace &&
-            rcPlayerWasmDir != null &&
-            renderHost.hasRemoteComposeDoc(preview.id)
-        ) {
+        if (rcPlayerWasmDir != null && renderHost.hasRemoteComposeDoc(preview.id)) {
           add(ServeRcPlayerIds.CMP_WASM)
         }
       }
@@ -11118,9 +11114,9 @@ class ServeHttpServer(
           // composition, so the page must not invite input it would drop.
           liveTakesInput = !carriedRcLive || carriedRcTakesInput,
           trust = catalogBundleHost(renderHost)?.let { BundleVerifier.summary(it.trust) },
-          // Per-preview: the Remote Compose canvas lane needs a captured `.rc` (fetched from
-          // `/render/<id>.rc`). Watch faces expose dedicated watch-face renderers instead.
-          hasRemoteComposeDoc = !preview.isWatchFace && renderHost.hasRemoteComposeDoc(preview.id),
+          // Per-preview: the Remote Compose canvas / Wasm lane needs a captured `.rc` (fetched from
+          // `/render/<id>.rc`).
+          hasRemoteComposeDoc = renderHost.hasRemoteComposeDoc(preview.id),
           // Per-preview: a replayed document can't recompose, so the viewer greys controls
           // [droppedOverridesFor] would 409. Read from the same host question to avoid drift.
           irReplay = isReplayedPreview(renderHost, preview.id),

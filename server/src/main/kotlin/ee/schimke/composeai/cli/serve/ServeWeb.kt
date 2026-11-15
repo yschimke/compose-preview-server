@@ -15004,8 +15004,20 @@ ${scriptTag("known-differences.js")}
     )
     val lanes = buildList {
       if (watchFaceRenderers.isNotEmpty()) {
+        if (ServeRcPlayerIds.CMP_WASM in rcEnabled) {
+          add(ViewerLane("rc:${ServeRcPlayerIds.CMP_WASM}", "CMP Wasm (browser)", true))
+        }
         watchFaceRenderers.forEach { wf ->
           add(ViewerLane("wf:${wf.id}", wf.label, wf.available, badge = wf.badgeLabel))
+        }
+        if (ServeRcPlayerIds.CMP_JVM in rcEnabled || hasRemoteComposeDoc) {
+          add(
+            ViewerLane(
+              "rc:${ServeRcPlayerIds.CMP_JVM}",
+              "CMP JVM (stateless)",
+              ServeRcPlayerIds.CMP_JVM in rcEnabled,
+            ),
+          )
         }
       } else if (enabledRcPlayers.isEmpty()) add(ViewerLane("png", "Snapshot", true))
       else
@@ -15244,8 +15256,10 @@ ${scriptTag("known-differences.js")}
         "<input type=\"radio\" name=\"cp-mode\" value=\"motion\" id=\"cp-motion-toggle\" " +
           "tabindex=\"-1\">"
     val defaultLane =
-      if (watchFaceRenderers.isNotEmpty()) "wf:$defaultWfBackend"
-      else if (enabledRcPlayers.isEmpty()) "png" else "rc:$defaultRcBackend"
+      if (watchFaceRenderers.isNotEmpty()) {
+        if (ServeRcPlayerIds.CMP_WASM in rcEnabled) "rc:${ServeRcPlayerIds.CMP_WASM}"
+        else "wf:$defaultWfBackend"
+      } else if (enabledRcPlayers.isEmpty()) "png" else "rc:$defaultRcBackend"
     // Rendered only when there is another lane to switch to. A command menu: the placeholder shows
     // at rest and `syncLaneSelect` returns to it after each pick, since the chip beside it names
     // the current renderer.
