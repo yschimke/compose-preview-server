@@ -4431,6 +4431,7 @@ if (laneSelect) {
         if (value.indexOf("wf:") === 0) {
             var wfWire = value.substring(3).trim().toLowerCase();
             rcPlayerPicked = false;
+            rcPlayerBackend = rcDefaultBackend;
             wfRendererBackend = wfWire || wfDefaultBackend;
             wfRendererPicked = wfRendererBackend !== wfDefaultBackend;
             syncWfBadge();
@@ -5118,7 +5119,7 @@ function hydrateFromUrl(popped: boolean) {
     // Restore `rcPlayer=<id>` from the offered options only, so an unknown id falls back to the
     // default. Legacy spellings (`java`, `embedded`, `js`, `rcplayer-*`) restore the player they
     // named.
-    if (rcDefaultBackend) {
+    if (rcDefaultBackend || wfDefaultBackend) {
         var wantedPlayer = q.get("rcPlayer")
             ? rules.normalizeRcPlayer(q.get("rcPlayer"))
             : null;
@@ -5187,7 +5188,8 @@ if (
     var initSearchParams = new URLSearchParams(location.search);
     if (
         !initSearchParams.get("wfRenderer") &&
-        !initSearchParams.get("rcPlayer")
+        !initSearchParams.get("rcPlayer") &&
+        Object.keys(renderOverrides()).length === 0
     ) {
         initialUrlMode = "rc-wasm";
     }

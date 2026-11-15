@@ -403,6 +403,10 @@ RUN set -eu; \
 # disabled at the last step, which is how a production host ran with a playground nobody could
 # open. See the desktop-daemon stage for why it is lifted here.
 COPY --from=desktop-daemon /opt/lib-bta /opt/lib-bta
+# …and the simulator host + dex2jar sidecars (`LaunchMain`) that back the `dwf-apk` watch-face
+# renderer daemon (`DwfApkDaemonBridge`).
+COPY --from=desktop-daemon /opt/lib-simulator /opt/lib-simulator
+COPY --from=desktop-daemon /opt/lib-dex2jar /opt/lib-dex2jar
 # JAVA_TOOL_OPTIONS (inherited by the spawned daemon JVM too) points the CLI at the
 # unpacked Android AND desktop daemon sidecars, warms catalog daemons in the background so the
 # HTTP listener can come up before every live catalog finishes, and lifts BOTH cold-start budgets so a cold

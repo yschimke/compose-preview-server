@@ -8001,7 +8001,7 @@ class ServeHttpServer(
     if (params.isEmpty() || !acceptsBakedFallback()) return seeds(params)
     val wfOverridesLive =
       preview.isWatchFace &&
-        WatchFaceRendererRegistry.renderersFor(renderHost, preview).any {
+        WatchFaceRendererSelection.renderersFor(renderHost, preview).any {
           it.available && it.supportsLiveOverrides
         }
     val overrideCanReachThePixels =
@@ -9850,7 +9850,7 @@ class ServeHttpServer(
                 remoteComposeKnobs = p.remoteComposeKnobs,
                 watchFace = p.watchFace,
                 watchFaceRenderers =
-                  if (p.isWatchFace) WatchFaceRendererRegistry.renderersFor(renderHost, p)
+                  if (p.isWatchFace) WatchFaceRendererSelection.renderersFor(renderHost, p)
                   else emptyList(),
                 spatial = p.spatial,
                 liveOnly = p.id in renderHost.liveOnlyPreviewIds,
@@ -11042,7 +11042,7 @@ class ServeHttpServer(
         withContext(Dispatchers.IO) { renderHost.canDownloadExecutableBundle(preview.id) }
       // Watch faces use WatchFaceRendererRegistry lanes (DWF RemoteCompose, DWF Renderer APK)
       // rather than generic RemoteCompose player lanes.
-      val wfRenderers = WatchFaceRendererRegistry.renderersFor(renderHost, preview)
+      val wfRenderers = WatchFaceRendererSelection.renderersFor(renderHost, preview)
       val wfOverridesLive =
         preview.isWatchFace && wfRenderers.any { it.available && it.supportsLiveOverrides }
       // Per-preview Remote Compose backend lanes: the host's server/client lanes plus the opt-in
@@ -11837,7 +11837,11 @@ class ServeHttpServer(
             return@withLeasedSession
           }
           val wfPreview = renderHost.previews.firstOrNull { it.id == previewId }
-          if (!scroll && (wfPreview?.isWatchFace == true || wfRendererParam != null)) {
+          if (
+            !scroll &&
+              (wfPreview?.isWatchFace == true && overrides.remoteCompose?.player == null ||
+                wfRendererParam != null)
+          ) {
             renderWatchFacePngResponse(
               renderHost = renderHost,
               preview = wfPreview,
@@ -13765,7 +13769,8 @@ class ServeHttpServer(
     overrides: PreviewOverrides,
     wfRendererParam: String?,
   ) {
-    val backend = WatchFaceRendererRegistry.resolve(wfRendererParam)
+    val preview = renderHost.previews.firstOrNull { it.id == previewId }
+    val backend = WatchFaceRendererSelection.resolveFor(renderHost, preview, wfRendererParam)
     if (backend == null) {
       call.respondText(
         "unknown '${WatchFaceOverrides.WF_RENDERER_PARAM}' value '$wfRendererParam'; expected one of " +
@@ -13774,7 +13779,6 @@ class ServeHttpServer(
       )
       return
     }
-    val preview = renderHost.previews.firstOrNull { it.id == previewId }
     if (preview == null) {
       call.respondText("no such preview", status = HttpStatusCode.NotFound)
       return
@@ -13833,7 +13837,7 @@ class ServeHttpServer(
     wfRendererParam: String?,
     staged: suspend (ByteArray, Map<String, String>) -> ByteArray,
   ) {
-    val backend = WatchFaceRendererRegistry.resolve(wfRendererParam)
+    val backend = WatchFaceRendererSelection.resolveFor(renderHost, preview, wfRendererParam)
     if (backend == null) {
       call.respondText(
         "unknown '${WatchFaceOverrides.WF_RENDERER_PARAM}' value '$wfRendererParam'; expected one of " +
@@ -13853,10 +13857,10 @@ class ServeHttpServer(
       )
       return
     }
-    val defaultBackend = wfRendererParam == null || backend.id == WatchFaceRendererIds.DWF_RC
+    val useHostBaked = backend.id == WatchFaceRendererIds.DWF_RC
     val cached =
       if (
-        defaultBackend &&
+        useHostBaked &&
           !CatalogLiveRouting.overridesAffectRender(
             previewId,
             overrides,

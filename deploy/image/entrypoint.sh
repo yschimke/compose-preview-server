@@ -1162,6 +1162,8 @@ fi
 : "${LIB_RENDERER_DIR:=/opt/lib-renderer}"
 : "${LIB_BTA_DIR:=/opt/lib-bta}"
 : "${LIB_RCJVM_DIR:=/opt/lib-rcjvm}"
+: "${LIB_SIMULATOR_DIR:=/opt/lib-simulator}"
+: "${LIB_DEX2JAR_DIR:=/opt/lib-dex2jar}"
 : "${LIB_SKIKO_DIR:=/opt/lib-skiko}"
 sidecar_restored=()
 restore_sidecar_flag() {
@@ -1179,6 +1181,8 @@ restore_sidecar_flag composeai.cli.libDaemonDesktopDir "${LIB_DAEMON_DESKTOP_DIR
 restore_sidecar_flag composeai.cli.libRendererDir "${LIB_RENDERER_DIR}"
 restore_sidecar_flag composeai.cli.libBtaDir "${LIB_BTA_DIR}"
 restore_sidecar_flag composeai.cli.libRcjvmDir "${LIB_RCJVM_DIR}"
+restore_sidecar_flag composeai.cli.libSimulatorDir "${LIB_SIMULATOR_DIR}"
+restore_sidecar_flag composeai.cli.libDex2jarDir "${LIB_DEX2JAR_DIR}"
 restore_sidecar_flag composeai.cli.skikoDir "${LIB_SKIKO_DIR}"
 if ((${#sidecar_restored[@]})); then
   echo "entrypoint: JAVA_TOOL_OPTIONS was missing ${sidecar_restored[*]} — restored from the" \

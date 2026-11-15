@@ -2069,7 +2069,7 @@ class ServeCatalogMcp(
             host.previews.firstOrNull { it.id == previewId }
               ?: throw McpRequestException("no such preview '$previewId'")
           val backend =
-            WatchFaceRendererRegistry.resolve(wfRenderer)
+            WatchFaceRendererSelection.resolveFor(host, preview, wfRenderer)
               ?: throw McpRequestException(
                 "unknown watch face renderer '$wfRenderer'; expected one of " +
                   WatchFaceRendererRegistry.all().joinToString { it.id },
@@ -2153,7 +2153,7 @@ class ServeCatalogMcp(
     val preview = host.previews.firstOrNull { it.id == previewId }
     if (preview?.isWatchFace == true || wfRenderer != null) {
       val backend =
-        WatchFaceRendererRegistry.resolve(wfRenderer)
+        WatchFaceRendererSelection.resolveFor(host, preview, wfRenderer)
           ?: throw McpRequestException(
             "unknown watch face renderer '$wfRenderer'; expected one of " +
               WatchFaceRendererRegistry.all().joinToString { it.id },
@@ -2696,7 +2696,7 @@ class ServeCatalogMcp(
         put("complicationSlotCount", wf.slots.size)
         put("userConfigurationCount", wf.userConfigurations.size)
       }
-      val wfRenderers = WatchFaceRendererRegistry.renderersFor(host, preview)
+      val wfRenderers = WatchFaceRendererSelection.renderersFor(host, preview)
       if (wfRenderers.isNotEmpty()) {
         put(
           "watchFaceRenderers",

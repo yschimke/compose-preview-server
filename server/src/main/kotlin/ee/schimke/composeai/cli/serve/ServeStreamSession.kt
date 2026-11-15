@@ -171,8 +171,11 @@ class ServeStreamSession(
     val wfRendererId =
       this.overrides[WatchFaceOverrides.WF_RENDERER_PARAM]?.takeIf { it.isNotBlank() }
     val wfBackend =
-      if (preview?.isWatchFace == true || wfRendererId != null) {
-        val resolved = WatchFaceRendererRegistry.resolve(wfRendererId)
+      if (
+        preview?.isWatchFace == true && overrides.remoteCompose?.player == null ||
+          wfRendererId != null
+      ) {
+        val resolved = WatchFaceRendererSelection.resolveFor(renderHost, preview, wfRendererId)
         if (resolved == null) {
           send(ServeStreamProtocol.errorMessage("unknown watch face renderer: $wfRendererId"))
           return

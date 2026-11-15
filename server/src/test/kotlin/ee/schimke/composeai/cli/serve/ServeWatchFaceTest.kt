@@ -260,8 +260,8 @@ class ServeWatchFaceTest {
     val (server, _) = startServer()
     val base = "http://127.0.0.1:${server.port}/wear-wf"
 
-    // 1. /api/previews advertises watchFace metadata and both renderer backends (dwf-rc default,
-    // dwf-apk unavailable until a launch bridge registers).
+    // 1. /api/previews advertises watchFace metadata and both renderer backends (dwf-apk listed
+    // first; dwf-rc active default until a launch bridge makes dwf-apk available).
     client.newCall(Request.Builder().url("$base/api/previews").build()).execute().use { resp ->
       assertEquals(200, resp.code)
       val arr =
@@ -274,12 +274,13 @@ class ServeWatchFaceTest {
       )
       val renderers = wfJson.getValue("watchFaceRenderers").jsonArray.map { it.jsonObject }
       assertEquals(
-        listOf("dwf-rc", "dwf-apk"),
+        listOf("dwf-apk", "dwf-rc"),
         renderers.map { it.getValue("id").jsonPrimitive.content },
       )
-      assertTrue(renderers[0].getValue("available").jsonPrimitive.boolean)
-      assertTrue(renderers[0].getValue("isDefault").jsonPrimitive.boolean)
-      assertFalse(renderers[1].getValue("available").jsonPrimitive.boolean)
+      assertFalse(renderers[0].getValue("available").jsonPrimitive.boolean)
+      assertFalse(renderers[0].getValue("isDefault").jsonPrimitive.boolean)
+      assertTrue(renderers[1].getValue("available").jsonPrimitive.boolean)
+      assertTrue(renderers[1].getValue("isDefault").jsonPrimitive.boolean)
     }
 
     // 2. Default baked render vs ambient & complication slot override renders.
@@ -405,9 +406,44 @@ class ServeWatchFaceTest {
         }
     assertContentEquals(apkPngBytes, apkRendered)
 
-    // 5. Viewer HTML renders watch-face lane options and complication controls, without generic
-    // rc:*
-    // player lanes, and hydrates ambientBurnIn / ambientLowBit URL flags.
+    // Bare /render/<id>.png now defaults to dwf-apk whenever dwf-apk is available, while explicit
+    // ?wfRenderer=dwf-rc keeps serving the dwf-rc lane.
+    val defaultAfterApkRegistered =
+      client.newCall(Request.Builder().url("$base/render/$wfPreviewId.png").build()).execute().use {
+        assertEquals(200, it.code)
+        it.body.bytes()
+      }
+    assertContentEquals(apkPngBytes, defaultAfterApkRegistered)
+
+    val explicitRcRendered =
+      client
+        .newCall(Request.Builder().url("$base/render/$wfPreviewId.png?wfRenderer=dwf-rc").build())
+        .execute()
+        .use {
+          assertEquals(200, it.code)
+          it.body.bytes()
+        }
+    assertContentEquals(bakedPngBytes, explicitRcRendered)
+
+    client.newCall(Request.Builder().url("$base/api/previews").build()).execute().use { resp ->
+      assertEquals(200, resp.code)
+      val arr =
+        Json.parseToJsonElement(resp.body.string()).jsonObject.getValue("previews").jsonArray
+      val wfJson =
+        arr.map { it.jsonObject }.first { it.getValue("id").jsonPrimitive.content == wfPreviewId }
+      val renderers = wfJson.getValue("watchFaceRenderers").jsonArray.map { it.jsonObject }
+      assertEquals(
+        listOf("dwf-apk", "dwf-rc"),
+        renderers.map { it.getValue("id").jsonPrimitive.content },
+      )
+      assertTrue(renderers[0].getValue("available").jsonPrimitive.boolean)
+      assertTrue(renderers[0].getValue("isDefault").jsonPrimitive.boolean)
+      assertTrue(renderers[1].getValue("available").jsonPrimitive.boolean)
+      assertFalse(renderers[1].getValue("isDefault").jsonPrimitive.boolean)
+    }
+
+    // 5. Viewer HTML renders watch-face lane options and complication controls, defaulting to
+    // dwf-apk when available, and hydrates ambientBurnIn / ambientLowBit URL flags.
     client
       .newCall(
         Request.Builder()
@@ -418,9 +454,10 @@ class ServeWatchFaceTest {
       .use { resp ->
         assertEquals(200, resp.code)
         val html = resp.body.string()
-        assertTrue(html.contains("""data-wf-default="dwf-rc""""))
-        assertTrue(html.contains("""value="wf:dwf-rc""""))
+        assertTrue(html.contains("""data-default="wf:dwf-apk""""))
+        assertTrue(html.contains("""data-wf-default="dwf-apk""""))
         assertTrue(html.contains("""value="wf:dwf-apk""""))
+        assertTrue(html.contains("""value="wf:dwf-rc""""))
         assertTrue(html.contains("""data-cp-group="watchface""""))
         assertTrue(html.contains("""data-wf-key="ambient""""))
         assertTrue(html.contains("""data-wf-key="ambientBurnIn""""))
@@ -780,26 +817,87 @@ class ServeWatchFaceTest {
   }
 
   @Test
-  fun `viewer defaults watchface lane to cmp-wasm and exposes both cmp-java options plus dwf-apk`() {
+  fun `viewer and stream default watchface lane to dwf-apk when available and fall back to dwf-rc`() {
     val wasmDir =
       Files.createTempDirectory("wf-rc-wasm").also { it.toFile().deleteOnExit() }.toOkioPath()
     FileSystem.SYSTEM.write(wasmDir / "index.html") {
       writeUtf8("<!doctype html><html><body>wasm</body></html>")
     }
-    val (server, _) = startServer(rcPlayerWasmDir = wasmDir, hasRcDoc = true)
+    val (server, host) = startServer(rcPlayerWasmDir = wasmDir, hasRcDoc = true)
     val base = "http://127.0.0.1:${server.port}/wear-wf"
+
+    // Before dwf-apk is available, viewer falls back to wf:dwf-rc rather than forcing rc:cmp-wasm.
+    client.newCall(Request.Builder().url("$base/p/$wfPreviewId").build()).execute().use { resp ->
+      assertEquals(200, resp.code)
+      val html = resp.body.string()
+      assertTrue(
+        html.contains("data-default=\"wf:dwf-rc\""),
+        "expected data-default=\"wf:dwf-rc\" in viewer HTML when dwf-apk is unavailable",
+      )
+      assertTrue(html.contains("data-wf-default=\"dwf-rc\""))
+      assertTrue(html.contains("data-rc-default=\"\""))
+      assertTrue(html.contains("value=\"wf:dwf-apk\""), "expected wf:dwf-apk lane option")
+      assertTrue(html.contains("value=\"wf:dwf-rc\""), "expected wf:dwf-rc lane option")
+      assertTrue(html.contains("value=\"rc:cmp-wasm\""), "expected rc:cmp-wasm lane option")
+      assertTrue(html.contains("value=\"rc:cmp-jvm\""), "expected rc:cmp-jvm lane option")
+    }
+
+    // Once dwf-apk is available, viewer and WebSocket stream both default to dwf-apk.
+    WatchFaceRendererRegistry.register(
+      object : WatchFaceRendererBackend {
+        override val id: String = WatchFaceRendererIds.DWF_APK
+        override val label: String = "DWF Renderer APK (Launch)"
+        override val badgeLabel: String = "dwf · apk"
+
+        override fun infoFor(host: ServeHost, preview: ServePreview): WatchFaceRendererInfo =
+          WatchFaceRendererInfo(
+            id = id,
+            label = label,
+            badgeLabel = badgeLabel,
+            available = true,
+            supportsLiveOverrides = true,
+            isDefault = true,
+          )
+
+        override fun render(
+          host: ServeHost,
+          preview: ServePreview,
+          overrides: PreviewOverrides,
+        ): RenderOutcome = RenderOutcome.Ok(apkPngBytes, RenderOutcome.Generation.DAEMON)
+
+        override fun complications(
+          host: ServeHost,
+          preview: ServePreview,
+          overrides: PreviewOverrides,
+        ): WatchFaceComplicationsOutcome =
+          WatchFaceOverrides.projectComplicationsOutcome(preview.watchFace!!, overrides, id)
+      },
+    )
 
     client.newCall(Request.Builder().url("$base/p/$wfPreviewId").build()).execute().use { resp ->
       assertEquals(200, resp.code)
       val html = resp.body.string()
       assertTrue(
-        html.contains("data-default=\"rc:cmp-wasm\""),
-        "expected data-default=\"rc:cmp-wasm\" in viewer HTML",
+        html.contains("data-default=\"wf:dwf-apk\""),
+        "expected data-default=\"wf:dwf-apk\" in viewer HTML when dwf-apk is available",
       )
-      assertTrue(html.contains("value=\"rc:cmp-wasm\""), "expected rc:cmp-wasm lane option")
-      assertTrue(html.contains("value=\"wf:dwf-rc\""), "expected wf:dwf-rc lane option")
-      assertTrue(html.contains("value=\"rc:cmp-jvm\""), "expected rc:cmp-jvm lane option")
+      assertTrue(html.contains("data-wf-default=\"dwf-apk\""))
+      assertTrue(html.contains("data-snapshot-backend=\"dwf · apk\""))
       assertTrue(html.contains("value=\"wf:dwf-apk\""), "expected wf:dwf-apk lane option")
+      assertTrue(html.contains("value=\"wf:dwf-rc\""), "expected wf:dwf-rc lane option")
+      assertTrue(html.contains("value=\"rc:cmp-wasm\""), "expected rc:cmp-wasm lane option")
+      assertTrue(html.contains("value=\"rc:cmp-jvm\""), "expected rc:cmp-jvm lane option")
     }
+
+    val sent = CopyOnWriteArrayList<String>()
+    val session = ServeStreamSession(host, wfPreviewId, emptyMap(), sent::add, system = "wear-wf")
+    session.onOpen()
+    assertEquals(1, sent.size)
+    val openFrame =
+      Base64.getDecoder()
+        .decode(
+          Json.parseToJsonElement(sent[0]).jsonObject.getValue("dataBase64").jsonPrimitive.content,
+        )
+    assertContentEquals(apkPngBytes, openFrame)
   }
 }

@@ -14989,7 +14989,9 @@ ${scriptTag("known-differences.js")}
     // The lane a Remote Compose preview opens on: the operator's `serve --rc-default-player` when
     // enabled, else `androidx-embedded`, else `androidx-view`, else the client `camaelon-js`
     // canvas. The rationale lives at [ServeRcPlayerIds.defaultPlayer].
-    val defaultRcBackend = ServeRcPlayerIds.defaultPlayer(enabledRcPlayers, preferredRcPlayer)
+    val defaultRcBackend =
+      if (watchFaceRenderers.isNotEmpty()) ""
+      else ServeRcPlayerIds.defaultPlayer(enabledRcPlayers, preferredRcPlayer)
     val defaultWfBackend =
       watchFaceRenderers.firstOrNull { it.isDefault }?.id
         ?: watchFaceRenderers.firstOrNull()?.id.orEmpty()
@@ -15004,11 +15006,11 @@ ${scriptTag("known-differences.js")}
     )
     val lanes = buildList {
       if (watchFaceRenderers.isNotEmpty()) {
-        if (ServeRcPlayerIds.CMP_WASM in rcEnabled) {
-          add(ViewerLane("rc:${ServeRcPlayerIds.CMP_WASM}", "CMP Wasm (browser)", true))
-        }
         watchFaceRenderers.forEach { wf ->
           add(ViewerLane("wf:${wf.id}", wf.label, wf.available, badge = wf.badgeLabel))
+        }
+        if (ServeRcPlayerIds.CMP_WASM in rcEnabled) {
+          add(ViewerLane("rc:${ServeRcPlayerIds.CMP_WASM}", "CMP Wasm (browser)", true))
         }
         if (ServeRcPlayerIds.CMP_JVM in rcEnabled || hasRemoteComposeDoc) {
           add(
@@ -15255,9 +15257,11 @@ ${scriptTag("known-differences.js")}
       else
         "<input type=\"radio\" name=\"cp-mode\" value=\"motion\" id=\"cp-motion-toggle\" " +
           "tabindex=\"-1\">"
+    val defaultWfAvailable = watchFaceRenderers.any { it.id == defaultWfBackend && it.available }
     val defaultLane =
       if (watchFaceRenderers.isNotEmpty()) {
-        if (ServeRcPlayerIds.CMP_WASM in rcEnabled) "rc:${ServeRcPlayerIds.CMP_WASM}"
+        if (defaultWfAvailable) "wf:$defaultWfBackend"
+        else if (ServeRcPlayerIds.CMP_WASM in rcEnabled) "rc:${ServeRcPlayerIds.CMP_WASM}"
         else "wf:$defaultWfBackend"
       } else if (enabledRcPlayers.isEmpty()) "png" else "rc:$defaultRcBackend"
     // Rendered only when there is another lane to switch to. A command menu: the placeholder shows
