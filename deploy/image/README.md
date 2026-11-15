@@ -466,6 +466,28 @@ no longer declares. The runtime, export and render-bundle jars stay part of
 the server release. The editor↔server API version is what keeps a pinned editor compatible with
 them.
 
+### Provisioning the Wear OS DWF runtime APK (`dwf-apk`)
+
+Watch-face previews render with the built-in `dwf-rc` compiler by default. To enable the `dwf-apk`
+renderer (`DeclarativeWatchFaceRuntime.apk` running in the simulator daemon), either mount the APK at
+`/config/DeclarativeWatchFaceRuntime.apk` (the entrypoint auto-wires
+`COMPOSE_PREVIEW_DWF_RENDERER_APK=/config/DeclarativeWatchFaceRuntime.apk` when no override is set)
+or upload it at runtime through the admin API into `composeAiCacheDir("dwf-runtime")`:
+
+```bash
+curl -H "X-Compose-Preview-Admin-Token: $SERVE_ADMIN_READ_TOKEN" https://<box>/admin/dwf-runtime
+curl -X PUT -H "X-Compose-Preview-Admin-Token: $ADMIN_TOKEN" \
+  --data-binary @DeclarativeWatchFaceRuntime.apk https://<box>/admin/dwf-runtime
+curl -X DELETE -H "X-Compose-Preview-Admin-Token: $ADMIN_TOKEN" https://<box>/admin/dwf-runtime
+```
+
+`PUT` validates the APK (valid zip containing `classes*.dex` and `AndroidManifest.xml` declaring
+`com.google.android.wearable.action.WATCH_FACE_CONTROL` or a known runtime package), atomically
+writes `DeclarativeWatchFaceRuntime.apk` + `metadata.json`, and returns `409 Conflict` when the same
+SHA-256 is already cached. `restartRequired` is `true` only when a previously cached runtime APK
+was active at startup and the cached SHA-256 no longer matches it (or `false` when an environment
+override is active).
+
 ### Serving a catalog on its own hostname
 
 A published catalog can additionally be served on a hostname of its own, where it presents as the

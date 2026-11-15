@@ -4,7 +4,11 @@ import ee.schimke.composeai.bundle.BundleSigning
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.nio.file.Files
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import javax.imageio.ImageIO
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -27,6 +31,11 @@ import okio.fakefilesystem.FakeFileSystem
 class ServeAdminRoutingTest {
 
   private val adminToken = "admin-secret"
+  private val adminReadToken = "admin-read-secret"
+  private val dwfCacheDir =
+    Files.createTempDirectory("admin-dwf-runtime").toFile().also { it.deleteOnExit() }
+  private val dwfRuntimeAdmin =
+    ServeDwfRuntimeAdmin(cacheRoot = dwfCacheDir, env = { null }, sysProp = { null }, onLog = {})
 
   private val refreshes = mutableListOf<String>()
 
@@ -246,6 +255,7 @@ class ServeAdminRoutingTest {
         siteAdmin = siteAdmin,
         uiBuilderSettingsAdmin = uiBuilderSettingsAdmin,
         settingsAdmin = settingsAdmin,
+        dwfRuntimeAdmin = dwfRuntimeAdmin,
         themeOptimizerAdmin = optimizerWork,
         catalogCacheStats = { blobPool.snapshot() },
         catalogCacheClear = { blobPool.clear() },
@@ -254,6 +264,7 @@ class ServeAdminRoutingTest {
           CatalogRefreshResult.CURRENT
         },
         adminToken = adminToken,
+        adminReadToken = adminReadToken,
         wasmCatalogs = wasmCatalogs,
       )
       .also { it.start() }
@@ -288,6 +299,28 @@ class ServeAdminRoutingTest {
     val http = if (followRedirects) client else client.newBuilder().followRedirects(false).build()
     http.newCall(req).execute().use { r ->
       return r.code to (r.headers["Location"] ?: r.body.string())
+    }
+  }
+
+  private fun sendBytes(
+    path: String,
+    method: String = "PUT",
+    body: ByteArray,
+    token: String? = adminToken,
+  ): Pair<Int, String> {
+    val req =
+      Request.Builder()
+        .url(url(path))
+        .apply {
+          if (token != null) header(ServeHttpServer.ADMIN_TOKEN_HEADER, token)
+          method(
+            method,
+            body.toRequestBody("application/vnd.android.package-archive".toMediaType()),
+          )
+        }
+        .build()
+    client.newCall(req).execute().use { r ->
+      return r.code to r.body.string()
     }
   }
 
@@ -1037,5 +1070,232 @@ class ServeAdminRoutingTest {
       send("/compose-m3/", host = "m3.example.com", followRedirects = false).first,
     )
     assertEquals(emptyList(), configFile.load().sites)
+  }
+
+  private fun fakeDwfRuntimeApk(
+    packageName: String = "com.google.wear.watchface.runtime",
+    dexPayload: ByteArray = "dex-bytes".toByteArray(),
+    includeDex: Boolean = true,
+    includeAction: Boolean = true,
+  ): ByteArray {
+    val actionXml =
+      if (includeAction) {
+        """<action android:name="com.google.android.wearable.action.WATCH_FACE_CONTROL"/>"""
+      } else {
+        ""
+      }
+    val manifest =
+      """<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="$packageName"><application><service>$actionXml</service></application></manifest>"""
+    return ByteArrayOutputStream()
+      .also { out ->
+        ZipOutputStream(out).use { zip ->
+          zip.putNextEntry(ZipEntry("AndroidManifest.xml"))
+          zip.write(manifest.toByteArray(Charsets.UTF_8))
+          zip.closeEntry()
+          if (includeDex) {
+            zip.putNextEntry(ZipEntry("classes.dex"))
+            zip.write(dexPayload)
+            zip.closeEntry()
+          }
+        }
+      }
+      .toByteArray()
+  }
+
+  private fun minimalBinaryManifest(packageName: String, action: String): ByteArray {
+    val strings = listOf("manifest", "package", packageName, action)
+    val encodedStrings = strings.map { s ->
+      val utf8 = s.toByteArray(Charsets.UTF_8)
+      byteArrayOf(s.length.toByte(), utf8.size.toByte()) + utf8 + byteArrayOf(0)
+    }
+    val headerSize = 28
+    val offsetsSize = strings.size * 4
+    var stringDataSize = 0
+    val offsets = IntArray(strings.size)
+    for (i in encodedStrings.indices) {
+      offsets[i] = stringDataSize
+      stringDataSize += encodedStrings[i].size
+    }
+    val paddedStringDataSize = (stringDataSize + 3) and 3.inv()
+    val stringPoolSize = headerSize + offsetsSize + paddedStringDataSize
+
+    val startElemHeaderSize = 16
+    val startElemBodySize = 20 + 20 // 20 bytes fixed + 1 attribute (20 bytes)
+    val startElemSize = startElemHeaderSize + startElemBodySize
+    val totalSize = 8 + stringPoolSize + startElemSize
+
+    val buf = ByteBuffer.allocate(totalSize).order(ByteOrder.LITTLE_ENDIAN)
+    // RES_XML_TYPE header
+    buf.putShort(0x0003)
+    buf.putShort(8)
+    buf.putInt(totalSize)
+    // RES_STRING_POOL_TYPE
+    buf.putShort(0x0001)
+    buf.putShort(headerSize.toShort())
+    buf.putInt(stringPoolSize)
+    buf.putInt(strings.size)
+    buf.putInt(0) // styleCount
+    buf.putInt(0x100) // UTF8_FLAG
+    buf.putInt(headerSize + offsetsSize) // stringsStart
+    buf.putInt(0) // stylesStart
+    offsets.forEach { buf.putInt(it) }
+    encodedStrings.forEach { buf.put(it) }
+    repeat(paddedStringDataSize - stringDataSize) { buf.put(0) }
+    // RES_XML_START_ELEMENT_TYPE
+    buf.putShort(0x0102)
+    buf.putShort(startElemHeaderSize.toShort())
+    buf.putInt(startElemSize)
+    buf.putInt(1) // lineNumber
+    buf.putInt(-1) // comment
+    buf.putInt(-1) // ns
+    buf.putInt(0) // name = "manifest"
+    buf.putShort(20) // attributeStart
+    buf.putShort(20) // attributeSize
+    buf.putShort(1) // attributeCount
+    buf.putShort(0) // idIndex
+    buf.putShort(0) // classIndex
+    buf.putShort(0) // styleIndex
+    // attribute: package = packageName
+    buf.putInt(-1) // ns
+    buf.putInt(1) // name = "package"
+    buf.putInt(2) // rawValue = packageName
+    buf.putShort(8) // typedValue size
+    buf.put(0) // res0
+    buf.put(0x03) // TYPE_STRING
+    buf.putInt(2) // data = packageName
+    return buf.array()
+  }
+
+  @Test
+  fun `dwf runtime admin routes enforce token gating and support GET PUT DELETE`() {
+    assertEquals(404, send("/admin/dwf-runtime", token = null).first)
+    assertEquals(404, send("/admin/dwf-runtime", token = "wrong").first)
+    assertEquals(404, sendBytes("/admin/dwf-runtime", "PUT", byteArrayOf(1), token = null).first)
+    assertEquals(
+      404,
+      sendBytes("/admin/dwf-runtime", "PUT", byteArrayOf(1), token = adminReadToken).first,
+    )
+    assertEquals(404, send("/admin/dwf-runtime", "DELETE", token = adminReadToken).first)
+
+    // GET accepts read token and reports uncached state.
+    val (initialCode, initialBody) = send("/admin/dwf-runtime", token = adminReadToken)
+    assertEquals(200, initialCode, initialBody)
+    assertTrue(""""cached":false""" in initialBody, initialBody)
+    assertTrue(""""activeSource":"none"""" in initialBody, initialBody)
+    assertTrue(""""restartRequired":false""" in initialBody, initialBody)
+
+    // Invalid APK payloads are rejected with 400.
+    assertEquals(400, sendBytes("/admin/dwf-runtime", "PUT", byteArrayOf()).first)
+    assertEquals(
+      400,
+      sendBytes("/admin/dwf-runtime", "PUT", "not-a-zip".toByteArray()).first,
+    )
+    assertEquals(
+      400,
+      sendBytes("/admin/dwf-runtime", "PUT", fakeDwfRuntimeApk(includeDex = false)).first,
+    )
+    assertEquals(
+      400,
+      sendBytes(
+          "/admin/dwf-runtime",
+          "PUT",
+          fakeDwfRuntimeApk(packageName = "com.example.other", includeAction = false),
+        )
+        .first,
+    )
+
+    // Valid APK installs DeclarativeWatchFaceRuntime.apk + metadata.json atomically.
+    val apkBytes = fakeDwfRuntimeApk(dexPayload = "dex-v1".toByteArray())
+    val (putCode, putBody) = sendBytes("/admin/dwf-runtime", "PUT", apkBytes)
+    assertEquals(200, putCode, putBody)
+    assertTrue(""""status":"installed"""" in putBody, putBody)
+    assertTrue(""""cached":true""" in putBody, putBody)
+    assertTrue(""""restartRequired":false""" in putBody, putBody)
+    assertTrue(File(dwfCacheDir, ServeDwfRuntimeAdmin.APK_FILE_NAME).isFile)
+    val metaFile = File(dwfCacheDir, ServeDwfRuntimeAdmin.METADATA_FILE_NAME)
+    assertTrue(metaFile.isFile)
+    assertTrue("com.google.wear.watchface.runtime" in metaFile.readText())
+
+    // Same SHA-256 returns 409 Conflict.
+    assertEquals(409, sendBytes("/admin/dwf-runtime", "PUT", apkBytes).first)
+
+    // GET reports cached state and metadata.
+    val (cachedCode, cachedBody) = send("/admin/dwf-runtime", token = adminReadToken)
+    assertEquals(200, cachedCode, cachedBody)
+    assertTrue(""""cached":true""" in cachedBody, cachedBody)
+    assertTrue(""""activeSource":"cache"""" in cachedBody, cachedBody)
+    assertTrue(""""source":"admin-api"""" in cachedBody, cachedBody)
+
+    // DELETE removes both files; second DELETE returns 409.
+    val (delCode, delBody) = send("/admin/dwf-runtime", "DELETE")
+    assertEquals(200, delCode, delBody)
+    assertTrue(""""status":"deleted"""" in delBody, delBody)
+    assertTrue(""""cached":false""" in delBody, delBody)
+    assertFalse(File(dwfCacheDir, ServeDwfRuntimeAdmin.APK_FILE_NAME).exists())
+    assertFalse(metaFile.exists())
+    assertEquals(409, send("/admin/dwf-runtime", "DELETE").first)
+  }
+
+  @Test
+  fun `dwf runtime restartRequired tracks startup serving SHA and env overrides`() {
+    val cacheDir = Files.createTempDirectory("dwf-restart-test").toFile().also { it.deleteOnExit() }
+    val apkA = fakeDwfRuntimeApk(dexPayload = "dex-a".toByteArray())
+    val apkB = fakeDwfRuntimeApk(dexPayload = "dex-b".toByteArray())
+
+    // Seed cache before creating admin (simulates server starting with A cached).
+    ServeDwfRuntimeAdmin(cacheRoot = cacheDir, env = { null }, sysProp = { null }).install(apkA)
+
+    val admin = ServeDwfRuntimeAdmin(cacheRoot = cacheDir, env = { null }, sysProp = { null })
+    assertFalse(admin.status().restartRequired)
+
+    // Replacing A with B requires restart; rolling back to A clears restartRequired.
+    val replaceRes = admin.install(apkB) as ServeDwfRuntimeAdmin.Result.Ok
+    assertTrue(replaceRes.restartRequired)
+    assertTrue(admin.status().restartRequired)
+
+    val rollbackRes = admin.install(apkA) as ServeDwfRuntimeAdmin.Result.Ok
+    assertFalse(rollbackRes.restartRequired)
+    assertFalse(admin.status().restartRequired)
+
+    val deleteRes = admin.delete() as ServeDwfRuntimeAdmin.Result.Ok
+    assertTrue(deleteRes.restartRequired)
+
+    // When an env override is active, cache mutations never require a restart.
+    val envApkFile = File(cacheDir.parentFile, "env-runtime.apk").apply { writeBytes(apkA) }
+    val envAdmin =
+      ServeDwfRuntimeAdmin(
+        cacheRoot = Files.createTempDirectory("dwf-env-cache").toFile().also { it.deleteOnExit() },
+        env = { if (it == ServeDwfRuntimeAdmin.APK_PATH_ENV) envApkFile.absolutePath else null },
+        sysProp = { null },
+      )
+    assertEquals("env", envAdmin.status().activeSource)
+    assertFalse((envAdmin.install(apkB) as ServeDwfRuntimeAdmin.Result.Ok).restartRequired)
+    assertFalse((envAdmin.delete() as ServeDwfRuntimeAdmin.Result.Ok).restartRequired)
+  }
+
+  @Test
+  fun `dwf runtime accepts binary AXML AndroidManifest`() {
+    val binaryApk =
+      ByteArrayOutputStream()
+        .also { out ->
+          ZipOutputStream(out).use { zip ->
+            zip.putNextEntry(ZipEntry("AndroidManifest.xml"))
+            zip.write(
+              minimalBinaryManifest(
+                "com.google.android.wearable.watchface.rwf",
+                ServeDwfRuntimeAdmin.WATCH_FACE_CONTROL_ACTION,
+              ),
+            )
+            zip.closeEntry()
+            zip.putNextEntry(ZipEntry("classes.dex"))
+            zip.write("dex-bin".toByteArray())
+            zip.closeEntry()
+          }
+        }
+        .toByteArray()
+    val cacheDir = Files.createTempDirectory("dwf-bin-manifest").toFile().also { it.deleteOnExit() }
+    val admin = ServeDwfRuntimeAdmin(cacheRoot = cacheDir, env = { null }, sysProp = { null })
+    val res = admin.install(binaryApk) as ServeDwfRuntimeAdmin.Result.Ok
+    assertEquals("com.google.android.wearable.watchface.rwf", res.metadata?.packageName)
   }
 }

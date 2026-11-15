@@ -3265,6 +3265,8 @@ public class ServeRunner(
       java.util.concurrent.atomic.AtomicLong(uiBuilderGuidelinesPictureBudgetSeconds)
     val settingsAdmin = buildSettingsAdmin(uiBuilderGuidelines, guidelinesPictureBudget)
     settingsAdmin.describe().forEach(System.err::println)
+    val dwfRuntimeAdmin =
+      if (adminToken != null || adminReadToken != null) ServeDwfRuntimeAdmin() else null
     val agentGrantStore = buildAgentGrantStore(githubAuth)
     if (catalogMcp && agentGrantStore == null) {
       System.err.println(
@@ -3584,6 +3586,7 @@ public class ServeRunner(
         editorAdmin = editorAdmin,
         uiBuilderSettingsAdmin = uiBuilderSettingsAdmin,
         settingsAdmin = settingsAdmin.takeIf { adminToken != null },
+        dwfRuntimeAdmin = dwfRuntimeAdmin,
         uiBuilderAdmin = uiBuilderAdmin,
         uiBuilderDesignLibrary = uiBuilderDesignLibrary,
         uiBuilderDesignCatalogs = {
@@ -3789,6 +3792,9 @@ public class ServeRunner(
     }
     if (editorAdmin != null) {
       System.err.println("serve: editor pin admin API enabled at /admin/editor")
+    }
+    if (dwfRuntimeAdmin != null) {
+      System.err.println("serve: DWF runtime admin API enabled at /admin/dwf-runtime")
     }
     if (siteAdmin != null) {
       System.err.println(

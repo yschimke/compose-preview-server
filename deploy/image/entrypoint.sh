@@ -1194,5 +1194,17 @@ if ((${#sidecar_restored[@]})); then
 fi
 # <<< sidecar-restore
 
+# Auto-wire a Wear OS DeclarativeWatchFaceRuntime.apk mounted into /config when no explicit
+# override is set. A runtime uploaded via PUT /admin/dwf-runtime lives in ~/.cache/composeai/dwf-runtime
+# and is discovered automatically when COMPOSE_PREVIEW_DWF_RENDERER_APK is unset.
+if [[ -f /config/DeclarativeWatchFaceRuntime.apk ]] &&
+  [[ -z "${COMPOSE_PREVIEW_DWF_RENDERER_APK:-}" ]] &&
+  [[ -z "${COMPOSE_PREVIEW_DWF_RUNTIME_APK:-}" ]] &&
+  [[ -z "${DWF_RUNTIME_APK:-}" ]] &&
+  [[ "${JAVA_TOOL_OPTIONS:-}" != *"-Dcomposeai.watchface.apkRenderer="* ]]; then
+  export COMPOSE_PREVIEW_DWF_RENDERER_APK=/config/DeclarativeWatchFaceRuntime.apk
+  echo "entrypoint: DWF runtime APK → /config/DeclarativeWatchFaceRuntime.apk" >&2
+fi
+
 echo "entrypoint: compose-preview-server on 0.0.0.0:${PORT}" >&2
 exec compose-preview-server "${args[@]}"

@@ -415,6 +415,12 @@ class ServeHttpServer(
   private val componentPublications: ServeComponentPublications? =
     ServeComponentPublications.fromEnvironment(),
   /**
+   * Cached Wear OS DWF runtime APK ([ServeDwfRuntimeAdmin]): `DeclarativeWatchFaceRuntime.apk` +
+   * `metadata.json` in `composeAiCacheDir("dwf-runtime")`. Gated by [adminToken] ([adminReadToken]
+   * on GET); null ⇒ `/admin/dwf-runtime` not registered.
+   */
+  private val dwfRuntimeAdmin: ServeDwfRuntimeAdmin? = null,
+  /**
    * Runtime UI-builder administration ([ServeUiBuilderAdmin]): list every design and delete any.
    * Gated by [adminToken], [adminReadToken], or a configured [uiBuilderAdministrators] identity;
    * null ⇒ not registered. The actor allowlist is deliberately narrower than the admin token.
@@ -989,6 +995,10 @@ class ServeHttpServer(
 
   /** As [adminEnabled], for the `/admin/settings` routes. */
   private val settingsAdminEnabled: Boolean = settingsAdmin != null && !adminToken.isNullOrBlank()
+
+  /** As [adminEnabled], for the `/admin/dwf-runtime` routes. */
+  private val dwfRuntimeAdminEnabled: Boolean =
+    dwfRuntimeAdmin != null && (!adminToken.isNullOrBlank() || !adminReadToken.isNullOrBlank())
 
   /** As [adminEnabled], for `/admin/ui-builder`, with the additional UI-builder-only actor gate. */
   private val uiBuilderAdminEnabled: Boolean =
@@ -2153,6 +2163,24 @@ class ServeHttpServer(
           delete("/admin/settings") {
             if (rejectBadAdminToken()) return@delete
             respondAdminSettingsResult(withContext(Dispatchers.IO) { admin.clear() })
+          }
+        }
+
+        // Cached Wear OS DWF runtime APK (`DeclarativeWatchFaceRuntime.apk` + `metadata.json`).
+        // Operator token to install/delete, read token also accepted on GET.
+        if (dwfRuntimeAdminEnabled) {
+          val admin = dwfRuntimeAdmin!!
+          get("/admin/dwf-runtime") {
+            if (rejectBadAdminToken(allowReadToken = true)) return@get
+            respondAdminDwfRuntime(admin)
+          }
+          put("/admin/dwf-runtime") {
+            if (rejectBadAdminToken()) return@put
+            handleAdminDwfRuntimeInstall(admin)
+          }
+          delete("/admin/dwf-runtime") {
+            if (rejectBadAdminToken()) return@delete
+            respondAdminDwfRuntimeResult(withContext(Dispatchers.IO) { admin.delete() })
           }
         }
 
@@ -5879,6 +5907,57 @@ class ServeHttpServer(
         )
       is ServeSettingsAdmin.Result.Unavailable ->
         call.respondText(result.reason, status = HttpStatusCode.ServiceUnavailable)
+    }
+  }
+
+  /** `GET /admin/dwf-runtime`: cached `DeclarativeWatchFaceRuntime.apk` and active source. */
+  private suspend fun RoutingContext.respondAdminDwfRuntime(admin: ServeDwfRuntimeAdmin) {
+    val status = withContext(Dispatchers.IO) { admin.status() }
+    call.respondText(
+      JSON.encodeToString(ServeDwfRuntimeAdmin.Status.serializer(), status),
+      ContentType.Application.Json,
+    )
+  }
+
+  /**
+   * `PUT /admin/dwf-runtime`: validate and atomically install `DeclarativeWatchFaceRuntime.apk`.
+   */
+  private suspend fun RoutingContext.handleAdminDwfRuntimeInstall(admin: ServeDwfRuntimeAdmin) {
+    val body =
+      withContext(Dispatchers.IO) {
+        call.receiveStream().use { readCapped(it, ServeDwfRuntimeAdmin.MAX_APK_BYTES) }
+      }
+    if (body == null) {
+      call.respondText(
+        "DWF runtime APK exceeds ${ServeDwfRuntimeAdmin.MAX_APK_BYTES / (1024 * 1024)}MB",
+        status = HttpStatusCode.PayloadTooLarge,
+      )
+      return
+    }
+    respondAdminDwfRuntimeResult(withContext(Dispatchers.IO) { admin.install(body) })
+  }
+
+  private suspend fun RoutingContext.respondAdminDwfRuntimeResult(
+    result: ServeDwfRuntimeAdmin.Result,
+  ) {
+    when (result) {
+      is ServeDwfRuntimeAdmin.Result.Ok ->
+        call.respondText(
+          JSON.encodeToString(
+            AdminDwfRuntimeResult.serializer(),
+            AdminDwfRuntimeResult(
+              status = result.status,
+              cached = result.cached,
+              metadata = result.metadata,
+              restartRequired = result.restartRequired,
+            ),
+          ),
+          ContentType.Application.Json,
+        )
+      is ServeDwfRuntimeAdmin.Result.Invalid ->
+        call.respondText(result.reason, status = HttpStatusCode.BadRequest)
+      is ServeDwfRuntimeAdmin.Result.Conflict ->
+        call.respondText(result.reason, status = HttpStatusCode.Conflict)
     }
   }
 
@@ -19599,6 +19678,15 @@ private data class AdminSettingsResult(
   val overridden: List<String>,
   val restartRequired: Boolean,
   val problems: List<String>,
+)
+
+@Serializable
+private data class AdminDwfRuntimeResult(
+  val schema: String = "compose-preview-serve/admin-dwf-runtime-result/v1",
+  val status: String,
+  val cached: Boolean,
+  val metadata: ServeDwfRuntimeAdmin.Metadata? = null,
+  val restartRequired: Boolean,
 )
 
 @Serializable
