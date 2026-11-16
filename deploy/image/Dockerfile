@@ -85,7 +85,7 @@ ENV PATH="/opt/compose-preview-server/bin:${PATH}"
 # which case ServeBundleDaemon.materialize picks up the sidecar + android.jar here.
 FROM base AS android-daemon
 ARG DAEMON_VERSION
-ARG ANDROID_SDK_PLATFORM=android-35
+ARG ANDROID_SDK_PLATFORM=android-36
 ARG ANDROID_BUILD_TOOLS=35.0.0
 COPY release-assets/ /tmp/release-assets/
 # Minimal Android SDK: cmdline-tools + one platform's android.jar + build-tools (aapt2 for
