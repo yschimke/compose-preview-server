@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.164.0](https://github.com/yschimke/compose-preview-server/compare/v3.163.0...v3.164.0) (2026-11-16)
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.94.1 ([#1947](https://github.com/yschimke/compose-preview-server/issues/1947)) ([443fabe](https://github.com/yschimke/compose-preview-server/commit/443fabecc1b31bcd0d76d50c7a51c38b7e3ec44e))
+
 ## [3.163.0](https://github.com/yschimke/compose-preview-server/compare/v3.162.0...v3.163.0) (2026-11-15)
 
 
