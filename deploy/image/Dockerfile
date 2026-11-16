@@ -86,9 +86,10 @@ ENV PATH="/opt/compose-preview-server/bin:${PATH}"
 FROM base AS android-daemon
 ARG DAEMON_VERSION
 ARG ANDROID_SDK_PLATFORM=android-35
+ARG ANDROID_BUILD_TOOLS=35.0.0
 COPY release-assets/ /tmp/release-assets/
-# Minimal Android SDK: just the cmdline-tools + one platform's android.jar (no
-# emulator/build-tools — Robolectric renders host-side).
+# Minimal Android SDK: cmdline-tools + one platform's android.jar + build-tools (aapt2 for
+# packaging dwf-apk watch-face bundle resources; no emulator).
 ENV ANDROID_HOME=/opt/android-sdk ANDROID_SDK_ROOT=/opt/android-sdk
 RUN set -eu; \
     apt-get update && apt-get install -y --no-install-recommends unzip; \
@@ -100,7 +101,9 @@ RUN set -eu; \
     mv "${ANDROID_HOME}/cmdline-tools/cmdline-tools" "${ANDROID_HOME}/cmdline-tools/latest"; \
     rm /tmp/cmdtools.zip; \
     yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null; \
-    "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" "platforms;${ANDROID_SDK_PLATFORM}" >/dev/null
+    "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" \
+      "platforms;${ANDROID_SDK_PLATFORM}" \
+      "build-tools;${ANDROID_BUILD_TOOLS}" >/dev/null
 # Unpack the released Android daemon sidecar → /opt/lib-daemon-android. Automatic
 # releases use the locally staged archive; manual builds retain the public fallback.
 RUN set -eu; \
