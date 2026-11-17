@@ -481,4 +481,104 @@ class ServeLocalRebuildTest {
       server.stop()
     }
   }
+
+  /**
+   * A watch-face session whose module descriptor names [res] as a resource directory, with fake DWF
+   * sidecars so [ServeBundleDaemon.dwfModuleDescriptor] can build its launch.
+   */
+  private fun registerWatchFaces(res: File, previewIds: List<String>): FakeHost {
+    val sidecars = Files.createTempDirectory("dwf-sidecars").toFile().also { it.deleteOnExit() }
+    for (name in listOf("lib-rcjvm", "lib-daemon-desktop")) {
+      File(sidecars, "$name/$name.jar").apply { parentFile.mkdirs() }.writeText("")
+    }
+    System.setProperty("composeai.cli.libRcjvmDir", File(sidecars, "lib-rcjvm").path)
+    System.setProperty(
+      "composeai.cli.libDaemonDesktopDir",
+      File(sidecars, "lib-daemon-desktop").path,
+    )
+    val previewsJson = File(output, "previews.json")
+    File(output, "daemon-launch.json")
+      .writeText(
+        """
+        {"schemaVersion":2,"modulePath":":app","variant":"debug","enabled":true,
+         "mainClass":"ee.schimke.composeai.daemon.DaemonMain","classpath":["a.jar"],"jvmArgs":[],
+         "systemProperties":{"composeai.daemon.previewsJsonPath":"${previewsJson.path}"},
+         "workingDirectory":"${projectDir.path}","manifestPath":"${previewsJson.path}",
+         "sourceWatch":{"sourceDirs":[],"resourceDirs":["${res.path}"],"buildFiles":[]}}
+        """
+          .trimIndent(),
+      )
+    previewsJson.writeText(
+      """{"module":"app","variant":"debug","previews":[""" +
+        previewIds.joinToString(",") { id ->
+          """{"id":"$id","functionName":"$id","className":"",""" +
+            """"params":{"name":"$id","dwfAssetPath":"raw/$id.xml"},"captures":[]}"""
+        } +
+        "]}",
+    )
+    val previews = previewIds.map { ServePreview(it, it, dwfAssetPath = "raw/$it.xml") }
+    val host = FakeHost(previews)
+    registry.register(
+      "app",
+      ServeSessionState(
+        descriptor = File(output, "daemon-launch.json"),
+        workspaceRoot = projectDir,
+        workspaceName = "app",
+        previews = previews,
+        label = "app",
+      ),
+      host = host,
+    )
+    return host
+  }
+
+  @Test
+  fun `a watch face resource edit reloads without a build`() {
+    val res = File(projectDir, "src/main/res").apply { mkdirs() }
+    val face = File(res, "raw/face.xml").apply { parentFile.mkdirs() }
+    face.writeText("<WatchFace/>")
+    val strings = File(res, "values/strings.xml").apply { parentFile.mkdirs() }
+    strings.writeText("<resources/>")
+    try {
+      val host = registerWatchFaces(res, listOf("face"))
+      val result = rebuild {
+        error("a resource edit must not build")
+      }
+        .rebuild("app", listOf(face, strings))
+      assertIs<LocalRebuildResult.Reloaded>(result)
+      assertEquals(listOf(listOf(face.absolutePath, strings.absolutePath)), host.sourcesChanges)
+    } finally {
+      System.clearProperty("composeai.cli.libRcjvmDir")
+      System.clearProperty("composeai.cli.libDaemonDesktopDir")
+    }
+  }
+
+  @Test
+  fun `a watch face module still builds for a source edit, a new watch face or a removed one`() {
+    val res = File(projectDir, "src/main/res").apply { mkdirs() }
+    File(res, "raw/face.xml").apply { parentFile.mkdirs() }.writeText("<WatchFace/>")
+    val kotlin = File(projectDir, "src/main/kotlin/Face.kt").apply { parentFile.mkdirs() }
+    kotlin.writeText("class Face")
+    val added = File(res, "raw/second.xml").apply { writeText("<WatchFace width=\"450\"/>") }
+    try {
+      registerWatchFaces(res, listOf("face"))
+      var builds = 0
+      val rebuild = rebuild {
+        builds++
+        true
+      }
+      rebuild.rebuild("app", listOf(kotlin))
+      rebuild.rebuild("app", listOf(added))
+      // Deleting a watch face the manifest names, or the directory holding it, needs discovery.
+      val face = File(res, "raw/face.xml")
+      face.delete()
+      rebuild.rebuild("app", listOf(face))
+      File(res, "raw").deleteRecursively()
+      rebuild.rebuild("app", listOf(File(res, "raw")))
+      assertEquals(4, builds)
+    } finally {
+      System.clearProperty("composeai.cli.libRcjvmDir")
+      System.clearProperty("composeai.cli.libDaemonDesktopDir")
+    }
+  }
 }

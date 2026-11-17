@@ -178,4 +178,30 @@ class ServeSourceWatcherTest {
       ServeSourceWatcher.rootsFor(PreviewModule("app", outputBase)),
     )
   }
+
+  @Test
+  fun `the rebuild is told which files changed`() {
+    val res = File(root, "src/main/res/raw").apply { mkdirs() }
+    val seen = CopyOnWriteArrayList<Set<File>>()
+    ServeSourceWatcher(
+        mapOf("app" to listOf(WatchRoot(root, recursive = true))),
+        rebuild = { LocalRebuildResult.Reloaded(1) },
+        debounceMillis = 200,
+        retryMillis = 100,
+        onLog = {},
+        rebuildChanged = { _, changed ->
+          seen += changed
+          LocalRebuildResult.Reloaded(1)
+        },
+      )
+      .also { watchers += it }
+
+    File(res, "watchface.xml").writeText("<WatchFace/>")
+
+    eventually { seen.isNotEmpty() }
+    assertEquals(
+      setOf(File(res, "watchface.xml").absoluteFile),
+      seen.first().map { it.absoluteFile }.toSet(),
+    )
+  }
 }

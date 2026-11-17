@@ -1210,11 +1210,16 @@ public class ServeRunner(
     if (!watchSources) return null
     val roots = rebuild.modules().mapValues { (_, module) -> ServeSourceWatcher.rootsFor(module) }
     if (roots.values.all { it.isEmpty() }) return null
-    return ServeSourceWatcher(roots, rebuild = rebuild::rebuild).also {
-      System.err.println(
-        "watch: rebuilding on edits under ${it.watchedDirectories} director(ies); --no-watch to stop",
+    return ServeSourceWatcher(
+        roots,
+        rebuild = { rebuild.rebuild(it) },
+        rebuildChanged = rebuild::rebuild,
       )
-    }
+      .also {
+        System.err.println(
+          "watch: rebuilding on edits under ${it.watchedDirectories} director(ies); --no-watch to stop",
+        )
+      }
   }
 
   /**
@@ -5160,6 +5165,11 @@ public class ServeRunner(
     manifest: PreviewManifest,
   ): List<ServePreview> {
     val claimedOutputs = ServeParameterRows.claimedOutputs(manifest.previews)
+    // Watch faces are recognised by their asset path, which the shared manifest model omits.
+    val dwfAssetPaths =
+      ServeBundleDaemon.dwfAssetPaths(
+        File(module.projectDir, "build/compose-previews/previews.json"),
+      )
     return manifest.previews.flatMap { info ->
       val (focus, gestures) = detectedFeaturesOf(info)
       fun serve(id: String, label: String) =
@@ -5184,6 +5194,7 @@ public class ServeRunner(
           sourceFile = info.sourceFile,
           bodyLine = info.bodyLine,
           componentId = info.catalog?.componentId,
+          dwfAssetPath = dwfAssetPaths[info.id],
         )
       val baseLabel = info.functionName.ifBlank { info.id }
       val rows = ServeParameterRows.rowsFor(info, module.projectDir, claimedOutputs)

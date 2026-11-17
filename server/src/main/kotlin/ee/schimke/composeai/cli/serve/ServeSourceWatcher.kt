@@ -44,6 +44,13 @@ class ServeSourceWatcher(
   private val retryMillis: Long = 500,
   private val onLog: (String) -> Unit = { System.err.println(it) },
   private val nowMillis: () -> Long = System::currentTimeMillis,
+  /**
+   * The rebuild, told which files changed since the last one. A session that can show an edit
+   * without a build (a watch-face module's resources) uses them; the default ignores them.
+   */
+  private val rebuildChanged: (String, Set<File>) -> LocalRebuildResult = { session, _ ->
+    rebuild(session)
+  },
 ) : AutoCloseable {
 
   private val service: WatchService = FileSystems.getDefault().newWatchService()
@@ -55,6 +62,15 @@ class ServeSourceWatcher(
 
   /** Session id → when it is next due to rebuild; present while a change is pending. */
   private val due = LinkedHashMap<String, Long>()
+
+  /**
+   * Session id → the files changed since its last rebuild. Empty after an overflow, when what
+   * changed is unknown, which a rebuild treats as "anything may have".
+   */
+  private val changed = HashMap<String, MutableSet<File>>()
+
+  /** Sessions whose pending change set is incomplete (an overflow dropped events). */
+  private val overflowed = HashSet<String>()
 
   private val thread: Thread
 
@@ -130,6 +146,7 @@ class ServeSourceWatcher(
       if (watched != null) {
         for (event in key.pollEvents()) {
           if (event.kind() == OVERFLOW) {
+            overflowed += watched.sessions
             touch(watched.sessions)
             continue
           }
@@ -145,6 +162,7 @@ class ServeSourceWatcher(
             watched.sessions.toList().forEach { register(path, recursive = true, it) }
           }
           if (isIgnoredFile(name.toString())) continue
+          watched.sessions.forEach { changed.getOrPut(it) { LinkedHashSet() } += path.toFile() }
           touch(watched.sessions)
         }
       }
@@ -163,15 +181,22 @@ class ServeSourceWatcher(
     val ready = due.filterValues { it <= now }.keys.toList()
     for (session in ready) {
       due.remove(session)
+      val paths = changed.remove(session).orEmpty()
+      val unknown = overflowed.remove(session)
       val result = runCatching {
-        rebuild(session)
+        // An overflow lost events: hand over no paths, which every rebuild reads as a full one.
+        rebuildChanged(session, if (unknown) emptySet() else paths)
       }
         .onFailure { onLog("watch: rebuilding $session failed: ${it.message}") }
         .getOrNull()
       when (result) {
         null -> Unit
         // Someone pressed rebuild; it may have started before this edit was saved.
-        LocalRebuildResult.Busy -> due.putIfAbsent(session, nowMillis() + retryMillis)
+        LocalRebuildResult.Busy -> {
+          due.putIfAbsent(session, nowMillis() + retryMillis)
+          changed.getOrPut(session) { LinkedHashSet() } += paths
+          if (unknown) overflowed += session
+        }
         is LocalRebuildResult.Reloaded ->
           onLog("watch: $session reloaded in ${result.durationMs} ms")
         is LocalRebuildResult.Restarted ->

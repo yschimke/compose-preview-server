@@ -46,6 +46,8 @@ class GradleRevisionBuilder(
       return null
     }
     val manifest = PreviewResultBuilder.readManifest(PreviewModule(module.gradlePath, moduleDir))
+    val dwfAssetPaths =
+      ServeBundleDaemon.dwfAssetPaths(File(moduleDir, "build/compose-previews/previews.json"))
     val previews =
       manifest?.previews?.map {
         val (focus, gestures) = detectedFeaturesOf(it)
@@ -61,6 +63,7 @@ class GradleRevisionBuilder(
           supportsFocus = focus,
           supportsGestures = gestures,
           fixedTheme = it.fixedTheme,
+          dwfAssetPath = dwfAssetPaths[it.id],
         )
       } ?: emptyList()
     if (previews.isEmpty()) {
