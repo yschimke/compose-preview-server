@@ -130,14 +130,24 @@ class ServeLocalRebuild(
       states.computeIfAbsent(sessionId) { MutableStateFlow(LocalReloadState()) }
     else null
 
-  fun rebuild(sessionId: String): LocalRebuildResult {
+  /**
+   * As [rebuild], told which files changed. When every one is a resource of a watch-face module
+   * (see [watchFaceResourceEdit]) there is nothing to compile: the DWF daemon reads those files in
+   * place, so the host only drops its renders and the daemon its compiled watch faces.
+   */
+  fun rebuild(sessionId: String, changed: Set<File>): LocalRebuildResult =
+    rebuild(sessionId, changed.toList())
+
+  fun rebuild(sessionId: String, changed: List<File> = emptyList()): LocalRebuildResult {
     val module = modules[sessionId] ?: return LocalRebuildResult.NotFound
     if (!building.compareAndSet(false, true)) return LocalRebuildResult.Busy
     val state = stateOf(sessionId)!!
     state.update { it.copy(version = it.version + 1, building = true) }
     var result: LocalRebuildResult = LocalRebuildResult.NotFound
     try {
-      result = rebuildLocked(sessionId, module)
+      result =
+        watchFaceResourceEdit(sessionId, module, changed)?.let { reloadResources(sessionId, it) }
+          ?: rebuildLocked(sessionId, module)
       return result
     } finally {
       state.update {
@@ -208,6 +218,65 @@ class ServeLocalRebuild(
       return LocalRebuildResult.Restarted(durationMs, "the host cannot reload classes in place")
     }
     return LocalRebuildResult.Reloaded(durationMs)
+  }
+
+  /**
+   * The edits, when every file in [changed] lies in a resource directory of a session whose watch
+   * faces render from source ([ServeBundleDaemon.dwfModuleDescriptor]), or null when they need a
+   * build. A new watch-face XML (one the manifest does not name) needs discovery, so it builds.
+   */
+  private fun watchFaceResourceEdit(
+    sessionId: String,
+    module: PreviewModule,
+    changed: List<File>,
+  ): List<File>? {
+    if (changed.isEmpty()) return null
+    val previews = registry.peekState(sessionId)?.previews.orEmpty()
+    val output = File(module.projectDir, OUTPUT_DIR)
+    val dwf =
+      ServeBundleDaemon.dwfModuleDescriptor(
+          File(output, "daemon-launch.json"),
+          watchFacesOnly = previews.isNotEmpty() && previews.all { it.isWatchFace },
+        )
+        ?.let(ServeBundleDaemon::readLaunchDescriptor) ?: return null
+    val resourceDirs =
+      dwf.sourceWatch?.resourceDirs.orEmpty().map { File(it).absoluteFile.normalize() }
+    if (resourceDirs.isEmpty()) return null
+    val known =
+      File(output, "previews.json")
+        .readTextOrNull()
+        ?.let { Regex(""""dwfAssetPath"\s*:\s*"([^"]+)"""").findAll(it) }
+        ?.map { it.groupValues[1] }
+        ?.toSet()
+        .orEmpty()
+    val files = changed.map { it.absoluteFile.normalize() }
+    for (file in files) {
+      val dir = resourceDirs.firstOrNull { file.startsWith(it) } ?: return null
+      val relative = file.relativeTo(dir).invariantSeparatorsPath
+      val isNewWatchFace =
+        relative.startsWith("raw/") &&
+          relative.endsWith(".xml") &&
+          relative !in known &&
+          file.readTextOrNull()?.contains("<WatchFace") == true
+      if (isNewWatchFace) return null
+    }
+    return files
+  }
+
+  /** Shows a watch-face resource edit: no compile, only the host's caches and the daemon's. */
+  private fun reloadResources(sessionId: String, files: List<File>): LocalRebuildResult {
+    val started = nanoTime()
+    val host = registry.peekHost(sessionId)
+    // A suspended session has no daemon; its next resume reads the edited files from disk.
+    if (host != null && !host.sourcesChanged(files.map { it.path })) {
+      val state = registry.peekState(sessionId) ?: return LocalRebuildResult.NotFound
+      registry.register(sessionId, state)
+      return LocalRebuildResult.Restarted(
+        TimeUnit.NANOSECONDS.toMillis(nanoTime() - started),
+        "the host cannot reload resources in place",
+      )
+    }
+    return LocalRebuildResult.Reloaded(TimeUnit.NANOSECONDS.toMillis(nanoTime() - started))
   }
 
   private fun File.readTextOrNull(): String? = takeIf {
