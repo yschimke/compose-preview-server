@@ -3725,6 +3725,9 @@ public class ServeRunner(
                     ?.reason
                 },
                 packs = uiBuilderPacks.keys,
+                isDwfCatalog = { builderCatalog ->
+                  lane.nativeBackends[builderCatalog] == DwfPreviewSurface.BACKEND
+                },
                 widgetPlayer = options.uiBuilderWidgetPlayer,
                 // The CMP player is compiled into the widget entry, so it is chosen only for a
                 // bundle whose manifest carries it — positive evidence, as the live lane asks.
@@ -3742,6 +3745,23 @@ public class ServeRunner(
                 captureNodeBounds = playground.captureNodeBounds,
               )
             }
+          },
+        // The real-runtime watch-face tab. Needs only the builder lane: it compiles nothing, so a
+        // host without the playground (and without the runtime) still answers the status route
+        // with the reason, which is what the tab shows.
+        uiBuilderDwfPreview =
+          uiBuilderLane?.let { lane ->
+            UiBuilderDwfPreview(
+              sessions =
+                DwfPreviewSessions(
+                  RenderHostDwfApkRuntime(
+                    runtimeInstalled = { dwfRuntimeAdmin?.status()?.activeSource != "none" },
+                  ),
+                ),
+              isDwfCatalog = { catalog ->
+                lane.nativeBackends[catalog] == DwfPreviewSurface.BACKEND
+              },
+            )
           },
         // Needs the generator and the playground, but no catalog mapping: an inline body compiles
         // against whichever catalog offers `remote-compose`.
