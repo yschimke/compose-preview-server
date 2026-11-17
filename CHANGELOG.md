@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.166.0](https://github.com/yschimke/compose-preview-server/compare/v3.165.0...v3.166.0) (2026-11-17)
+
+
+### Features
+
+* **serve:** hot-reload a watch-face module's resources without a build ([#1958](https://github.com/yschimke/compose-preview-server/issues/1958)) ([e002dfc](https://github.com/yschimke/compose-preview-server/commit/e002dfc548878f554dcc669ed144389bf39a7866))
+
+
+### Bug Fixes
+
+* **deps:** update composeai-tools to 2.95.3 ([#1954](https://github.com/yschimke/compose-preview-server/issues/1954)) ([3408dfa](https://github.com/yschimke/compose-preview-server/commit/3408dfaddd7729f0042592e3b4d3bea22835e520))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.95.3 ([#1956](https://github.com/yschimke/compose-preview-server/issues/1956)) ([bcf05fc](https://github.com/yschimke/compose-preview-server/commit/bcf05fcb0c1f42e3a845de03124ad24ac58ceb84))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.96.0 ([#1960](https://github.com/yschimke/compose-preview-server/issues/1960)) ([2225315](https://github.com/yschimke/compose-preview-server/commit/2225315278593133f0507f4bc127212b1f817692))
+
 ## [3.165.0](https://github.com/yschimke/compose-preview-server/compare/v3.164.0...v3.165.0) (2026-11-17)
 
 
