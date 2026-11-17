@@ -1,5 +1,15 @@
 # Changelog
 
+## [3.165.0](https://github.com/yschimke/compose-preview-server/compare/v3.164.0...v3.165.0) (2026-11-17)
+
+
+### Bug Fixes
+
+* **deploy:** use Android SDK platform android-36 for Robolectric 4.17 simulator ([#1949](https://github.com/yschimke/compose-preview-server/issues/1949)) ([56f66ab](https://github.com/yschimke/compose-preview-server/commit/56f66ab5b1d93666386846a5828a5520aea0fd12))
+* **deps:** update composeai-tools to 2.95.1 ([#1952](https://github.com/yschimke/compose-preview-server/issues/1952)) ([7b4103d](https://github.com/yschimke/compose-preview-server/commit/7b4103dbc52329dcb19a4fbaaaab202604d4fa1f))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.95.0 ([#1950](https://github.com/yschimke/compose-preview-server/issues/1950)) ([df03032](https://github.com/yschimke/compose-preview-server/commit/df03032d4ba198d98a8cb2b685d245b093acf3d5))
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.95.2 ([#1953](https://github.com/yschimke/compose-preview-server/issues/1953)) ([53a0f27](https://github.com/yschimke/compose-preview-server/commit/53a0f272ae34827d10ad8be17fc4195cd891bc63))
+
 ## [3.164.0](https://github.com/yschimke/compose-preview-server/compare/v3.163.0...v3.164.0) (2026-11-16)
 
 
