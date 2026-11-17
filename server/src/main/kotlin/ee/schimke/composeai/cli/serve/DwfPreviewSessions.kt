@@ -13,10 +13,12 @@ import kotlinx.serialization.json.intOrNull
 /**
  * The seam to compose-ai-tools' `DwfApkDaemonBridge`, which is `internal` there and keyed on a
  * served bundle's `ServeHost` + `ServePreview`. A design revision is neither, so this server cannot
- * call it; the three things it would call are named here instead, and what compose-ai-tools must
- * export for the real adapter is listed in the design doc ("What compose-ai-tools needs to
- * export"). Until then [RenderHostDwfApkRuntime] answers [Availability.Unavailable] and a fake
- * stands in for it in tests — which is also why nothing below knows about processes.
+ * call it; the three things it would call are named here instead. Packaging is `:wff-packager`
+ * (yschimke/watchface-tools; consumed once published), the daemon launcher and optionally the
+ * override builder are still owed by compose-ai-tools, as the design doc's "Packaging, the
+ * launcher, and what is still owed" sets out. Until then [RenderHostDwfApkRuntime] answers
+ * [Availability.Unavailable] and a fake stands in for it in tests — which is also why nothing below
+ * knows about processes.
  */
 internal interface DwfApkRuntime {
   /** Whether this host can draw a watch face with the real runtime, and if not, why not. */
@@ -25,7 +27,8 @@ internal interface DwfApkRuntime {
   /**
    * Package [source] as the resource-only APK the runtime loads (res/ + `watchface.xml` + a
    * synthesized manifest and `watch_face_info.xml`, via aapt2), cached by [DwfSource.digest].
-   * compose-ai-tools' `ensureWffApk` does this for a bundle today; it is the part not to fork.
+   * `:wff-packager` does this (it mirrors compose-ai-tools' `ensureWffApk`); it is the part not to
+   * reimplement here.
    *
    * @throws DwfRuntimeException when packaging fails (aapt2 missing, a malformed resource).
    */
@@ -63,11 +66,11 @@ internal class DwfRuntimeException(message: String, cause: Throwable? = null) :
   RuntimeException(message, cause)
 
 /**
- * The production [DwfApkRuntime] until compose-ai-tools exports packaging and the daemon launcher.
- * It can still tell the tab the one thing that is true today and decides whether anything would
- * work: whether the proprietary `DeclarativeWatchFaceRuntime.apk` is installed here (same lookup as
- * `GET /admin/dwf-runtime`), so a host that lacks it says "runtime missing" rather than something
- * about packaging.
+ * The production [DwfApkRuntime] until `:wff-packager` is published and compose-ai-tools exports
+ * the daemon launcher. It can still tell the tab the one thing that is true today and decides
+ * whether anything would work: whether the proprietary `DeclarativeWatchFaceRuntime.apk` is
+ * installed here (same lookup as `GET /admin/dwf-runtime`), so a host that lacks it says "runtime
+ * missing" rather than something about packaging.
  */
 internal class RenderHostDwfApkRuntime(
   private val runtimeInstalled: () -> Boolean,
