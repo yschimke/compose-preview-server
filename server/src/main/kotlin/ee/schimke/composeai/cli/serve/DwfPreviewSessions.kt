@@ -229,6 +229,13 @@ internal class DwfPreviewSessions(
       val wanted = session.effective(now())
       return try {
         val apk = session.apk ?: runtime.packageApk(session.source).also { session.apk = it }
+        if (
+          session.applied?.let { DwfDaemonCommands.clearsDaemonState(it, wanted) } == true &&
+            holder?.first == session.id
+        ) {
+          // A cleared clock/health/battery has no restore command; a fresh daemon is the default.
+          dropConnection()
+        }
         val daemon = liveConnection(apk)
         val owner = session.id to session.source.digest()
         val before = session.applied

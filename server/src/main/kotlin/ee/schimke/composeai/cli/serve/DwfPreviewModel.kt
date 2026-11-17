@@ -456,6 +456,17 @@ internal object DwfDaemonCommands {
     return out
   }
 
+  /**
+   * Whether going from [before] to [after] clears a value the daemon was given (clock, health,
+   * battery). The daemon has no "restore the default" command for those, so the only way back to
+   * the simulator's own value is a fresh daemon; the session restarts it and replays [full].
+   */
+  fun clearsDaemonState(before: DwfControls, after: DwfControls): Boolean =
+    (before.timeMillis != null && after.timeMillis == null) ||
+      (before.heartRate != null && after.heartRate == null) ||
+      (before.steps != null && after.steps == null) ||
+      (before.batteryPercent != null && after.batteryPercent == null)
+
   fun screenshot(path: String): DwfCommand =
     DwfCommand(
       "screenshot",

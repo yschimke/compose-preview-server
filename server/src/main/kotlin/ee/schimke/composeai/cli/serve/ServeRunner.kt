@@ -3755,7 +3755,11 @@ public class ServeRunner(
               sessions =
                 DwfPreviewSessions(
                   RenderHostDwfApkRuntime(
-                    runtimeInstalled = { dwfRuntimeAdmin?.status()?.activeSource != "none" },
+                    // Independent of whether the admin endpoints are enabled: same lookup, own
+                    // instance.
+                    runtimeInstalled = {
+                      (dwfRuntimeAdmin ?: ServeDwfRuntimeAdmin()).status().activeSource != "none"
+                    },
                   ),
                 ),
               isDwfCatalog = { catalog ->

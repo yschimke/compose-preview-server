@@ -240,3 +240,20 @@ class DwfPreviewSessionsTest {
     assertEquals(null to null, DwfPreviewSessions.pngSize(byteArrayOf(1, 2, 3)))
   }
 }
+
+class DwfPreviewClearedControlsTest {
+  @Test
+  fun `clearing an override restarts the daemon and replays without it`() {
+    val runtime = FakeDwfRuntime()
+    val sessions = DwfPreviewSessions(runtime)
+    val s = (sessions.start("d", 1, "a", source()) as DwfPreviewSessions.Started.Ok).session
+    fun patch(text: String) = sessions.patch(s.id, Json.parseToJsonElement(text).jsonObject)
+    patch("""{"batteryPercent":20}""")
+    assertIs<DwfPreviewSessions.Frame.Ok>(sessions.frame(s.id))
+    patch("""{"batteryPercent":null}""")
+    assertIs<DwfPreviewSessions.Frame.Ok>(sessions.frame(s.id))
+    assertEquals(2, runtime.connections.size)
+    assertTrue(runtime.connections[0].closed)
+    assertTrue(runtime.connections[1].log.none { it.cmd == "battery" })
+  }
+}
