@@ -569,13 +569,15 @@ class ServeLocalRebuildTest {
       }
       rebuild.rebuild("app", listOf(kotlin))
       rebuild.rebuild("app", listOf(added))
+      // A directory reported as changed may hold a new watch face, so it builds too.
+      rebuild.rebuild("app", listOf(File(res, "raw")))
       // Deleting a watch face the manifest names, or the directory holding it, needs discovery.
       val face = File(res, "raw/face.xml")
       face.delete()
       rebuild.rebuild("app", listOf(face))
       File(res, "raw").deleteRecursively()
       rebuild.rebuild("app", listOf(File(res, "raw")))
-      assertEquals(4, builds)
+      assertEquals(5, builds)
     } finally {
       System.clearProperty("composeai.cli.libRcjvmDir")
       System.clearProperty("composeai.cli.libDaemonDesktopDir")

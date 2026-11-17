@@ -252,6 +252,9 @@ class ServeLocalRebuild(
     val files = changed.map { it.absoluteFile.normalize() }
     for (file in files) {
       val dir = resourceDirs.firstOrNull { file.startsWith(it) } ?: return null
+      // A directory that arrives already populated (a checkout, a move) is reported as the
+      // directory alone, so what it holds is unknown: a new watch face could be in it.
+      if (file.isDirectory) return null
       val relative = file.relativeTo(dir).invariantSeparatorsPath
       val isNewWatchFace =
         relative.startsWith("raw/") &&
