@@ -554,7 +554,7 @@ class ServeLocalRebuildTest {
   }
 
   @Test
-  fun `a watch face module still builds for a source edit or a new watch face`() {
+  fun `a watch face module still builds for a source edit, a new watch face or a removed one`() {
     val res = File(projectDir, "src/main/res").apply { mkdirs() }
     File(res, "raw/face.xml").apply { parentFile.mkdirs() }.writeText("<WatchFace/>")
     val kotlin = File(projectDir, "src/main/kotlin/Face.kt").apply { parentFile.mkdirs() }
@@ -569,7 +569,13 @@ class ServeLocalRebuildTest {
       }
       rebuild.rebuild("app", listOf(kotlin))
       rebuild.rebuild("app", listOf(added))
-      assertEquals(2, builds)
+      // Deleting a watch face the manifest names, or the directory holding it, needs discovery.
+      val face = File(res, "raw/face.xml")
+      face.delete()
+      rebuild.rebuild("app", listOf(face))
+      File(res, "raw").deleteRecursively()
+      rebuild.rebuild("app", listOf(File(res, "raw")))
+      assertEquals(4, builds)
     } finally {
       System.clearProperty("composeai.cli.libRcjvmDir")
       System.clearProperty("composeai.cli.libDaemonDesktopDir")

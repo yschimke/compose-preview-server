@@ -259,6 +259,13 @@ class ServeLocalRebuild(
           relative !in known &&
           file.readTextOrNull()?.contains("<WatchFace") == true
       if (isNewWatchFace) return null
+      // A watch face the manifest names that is gone (deleted, renamed, or its directory removed)
+      // must leave the preview set too, which only discovery does.
+      val removesKnownWatchFace = known.any { asset ->
+        val assetFile = File(dir, asset)
+        (assetFile == file || assetFile.startsWith(file)) && !assetFile.isFile
+      }
+      if (removesKnownWatchFace) return null
     }
     return files
   }
