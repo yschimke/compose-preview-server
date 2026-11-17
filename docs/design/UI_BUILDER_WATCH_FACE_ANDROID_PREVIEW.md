@@ -1,0 +1,224 @@
+# Watch faces on the real Android runtime: the `android-dwf` native surface
+
+## Decision
+
+A UI Builder catalog for Wear OS Watch Face Format (WFF) declares
+`statusSemantics.previewSurfaces.native.backend = "android-dwf"`. For such a design the server's
+**native preview is not a Compose compile**: the faithful renderer is Google's
+`DeclarativeWatchFaceRuntime.apk`, run in compose-ai-tools' simulator daemon, and its pictures are
+shown in **its own tab**, beside the editor and not inside it.
+
+The editor's fast preview (the WFF → Remote Compose translation, several devices side by side)
+stays in the editor tab and does not depend on anything here. This is the slow, authoritative
+second rung of the fidelity ladder in [UI_BUILDER_PREVIEW_FIDELITY.md](UI_BUILDER_PREVIEW_FIDELITY.md),
+and like the Wear screen's native lane it is allowed to be absent: a host without the runtime says
+so, and the fast preview keeps working.
+
+The product is **agent-first, with humans collaborating**. WFF XML has two producers: the editor
+(KMP, in the browser) and an agent submitting it directly; the server imports either into the UI
+Builder design model, where incremental edits continue. The real preview does not care which: it
+takes the XML of one revision. Only the import (below, "Direction") is not built yet.
+
+Implementation: `DwfPreviewModel.kt` (pure: source gate, controls, control → command mapping),
+`DwfPreviewSessions.kt` (lifecycle, the seam to compose-ai-tools), `ServeUiBuilderDwfRoutes.kt`
+(HTTP + socket), `ServeUiBuilderDwfPage.kt` (the tab).
+
+## How this server reaches compose-ai-tools today
+
+Measured on `composeai-tools` 2.95–2.96, not assumed.
+
+- **Pins.** `render-host` is one released coordinate (`composeai-render-host`, version
+  `composeai-tools` in `gradle/libs.versions.toml`); the daemons come from `composeai-preview-daemon`
+  and the wire shapes from `composeai-contracts`. There is no composite include and no launch
+  descriptor: the server links the library and the library finds its own sidecar jars
+  (`lib-simulator/`, `lib-daemon-android/`, `lib-dex2jar/`) next to the bundle it was given.
+- **The Compose android lane** (`remote-m3`, `wear-m3`) is the playground compile path:
+  `ServeUiBuilderNativePreview` → `UiBuilderGeneratedPreviewAdapter` → `PlaygroundCompileService`,
+  which submits generated Kotlin with `confType = COMPOSE_ANDROID` to the Robolectric daemon of a
+  served *bundle*, and returns a token that `PlaygroundRedeemService` turns into a live session on
+  `/{session}/ws/{preview}`. `UiBuilderNativeTargets` decides the daemon from the catalog's declared
+  backend and the served bundle's.
+- **The watch-face renderer already exists, but as bundle plumbing.** `render-host` ships
+  `WatchFaceRendererRegistry` (`dwf-rc`, `dwf-apk`), `DwfApkWatchFaceRendererBackend`, and
+  `DwfApkDaemonBridge`, which starts one `:simulator-host` `LaunchMain` process and speaks stdio JSON
+  lines to it (`watchface {op: push|status|config|complication|uncomplication}`, `ambient`, `clock`,
+  `health`, `battery`, `screenshot`). `ServeStreamSession` already routes a served watch-face
+  preview through it (`?wfRenderer=dwf-apk`), and `GET/PUT/DELETE /admin/dwf-runtime`
+  (`ServeDwfRuntimeAdmin`) installs the runtime APK. All of that is keyed on a served bundle's
+  `ServeHost` + `ServePreview`.
+- **A design revision is neither**, and the bridge is `internal object DwfApkDaemonBridge`. Only the
+  `DwfApkSessionBridge` interface (`render(host, preview, overrides)`) is public. So this server
+  cannot hand it "WFF XML + assets for revision N".
+
+## Packaging, the launcher, and what is still owed
+
+Nothing is forked here. Packaging has a home now; two smaller asks remain.
+
+1. **Packaging — `:wff-packager`** (yschimke/watchface-tools, `main`; **not published yet**). It takes
+   a WFF source bundle (`WffBundleLayout.sourceFiles()`: `AndroidManifest.xml`, `res/raw/watchface.xml`,
+   `res/xml/watch_face_info.xml`, drawables, fonts, strings) and returns a signed, validated APK:
+   `WatchFacePackager().pack(files, PackagerOptions(target, versionCode, signing))`. It runs
+   `aapt2 compile/link` (mirroring compose-ai-tools' `ensureWffApk`), `zipalign`, in-process
+   `apksig` signing, and Google's validators, including the Watch Face Push validation token. This
+   supersedes the earlier ask that compose-ai-tools export `ensureWffApk` generalised; do not
+   reimplement either. The WFF version travels in the bundle's manifest
+   (`com.google.wear.watchface.format.version`) and the packager checks the face against it, which
+   also removes the hard-coded `android:value="2"` in `ensureWffApk`.
+   The binding is `DwfApkRuntime.packageApk(DwfSource)`: lay the source out as a bundle
+   (`xml` → `res/raw/watchface.xml`, `assets` under `res/`, version → the manifest property), call
+   `pack` with `PackageTarget.Sideload` and the default debug key (the runtime does not need a
+   publishable signature), and cache by `DwfSource.digest()`. A `PackagingException`'s diagnostics are
+   a refusal the tab can show, in the packager's words.
+   **Gate on consuming it:** default builds here resolve released Maven Central coordinates only
+   (`AGENTS.md`, boundary rules), so this waits for a published `wff-packager`. Prototyping against a
+   checkout is the staged-publication workflow in
+   [LOCAL_DEPENDENCIES.md](../development/LOCAL_DEPENDENCIES.md), and only when the user authorizes it.
+   The packager needs the Android SDK (`aapt2`, `zipalign`, `android.jar`), the same requirement the
+   daemon has today.
+2. **The daemon launcher** (compose-ai-tools `render-host`) — start/attach the shared
+   `SimulatorDaemonProcess` and expose its command channel:
+   `connect(initialApk): { command(cmd, payload): JsonElement?, alive, close() }`. Still owed.
+3. **The override builder** (optional, compose-ai-tools) — `buildOverrideCommands` is `internal` and
+   keyed on a bundle's `ServePreview`.
+   [`DwfDaemonCommands`](../../server/src/main/kotlin/ee/schimke/composeai/cli/serve/DwfPreviewModel.kt)
+   restates the vocabulary, small and under test; once exported it becomes a call and the restatement
+   goes.
+
+Until then `RenderHostDwfApkRuntime` is the production binding and answers *unavailable* with the
+precise reason (`DWF_RUNTIME_MISSING` when the proprietary APK is not installed — the common hosted
+case — else `DWF_PACKAGING_UNAVAILABLE`). The route, socket, lifecycle and command mapping are
+complete and tested against a fake daemon; swapping the binding for `:wff-packager` plus the
+launcher is the only change when they land.
+
+The runtime APK is Google's, never redistributed: it is found through the `dwf-runtime pull` cache,
+`$COMPOSE_PREVIEW_DWF_RUNTIME_APK`, or `PUT /admin/dwf-runtime`, and the preview deployment
+(`preview.coo.ee`) will normally lack it.
+
+## Flow
+
+```
+editor (KMP) or agent                server                                   daemon (shared)
+  produces WFF XML + assets
+  POST …/dwf-preview?revision=N ───▶ source gate → DwfPreviewSessions.start
+        ◀── 201 {sessionId, socketPath, pagePath}
+  window.open(pagePath)
+tab ── GET …/dwf-preview/status ───▶ available? else banner with the reason
+tab ══ WS …/{sessionId}/ws ═════════▶ first frame:
+                                       packageApk (cached) ── connect/boot ──▶ push apk
+                                       full(controls) ───────────────────────▶ ambient/clock/…
+                                       screenshot + watchface status ────────▶ PNG, kind=app
+        ◀═ {"type":"frame",…}
+tab ══ {"type":"controls",…} ═══════▶ diff(applied, wanted) ────────────────▶ only what changed
+        ◀═ {"type":"frame",…}
+```
+
+### Input
+
+`POST /api/ui-builder/v1/designs/{designId}/dwf-preview[?revision=N]`, gated on
+`ui-builder-export` (it feeds a design's content to `aapt2` and a sandboxed runtime, the same trust
+as exporting it). Body, all optional:
+
+```json
+{ "wffXml": "<WatchFace …>", "wffVersion": 2, "assets": { "drawable/bg.png": "<base64>" }, "label": "My face" }
+```
+
+- The design must be readable by the actor (same snapshot read as the native render) and its catalog
+  must declare `android-dwf`, or the answer is 422.
+- `wffXml` comes from the caller: the editor, which turns the design into WFF in the browser, or an
+  agent that authored WFF directly. The request does not import it into the design (see
+  "Direction"); it only previews it against a revision the actor can read. If the server later
+  derives WFF from the revision itself (`UiBuilderDwfPreview.sourceFor`, for a design that has an
+  exporter) the body becomes `{}`. Today `{}` answers `DWF_SOURCE_UNAVAILABLE` rather than guessing.
+- `wffVersion` is the design's target, 1–4, default 2.
+- The source is gated (`DwfSource.problem`) before anything is packaged: size limits; **no
+  `DOCTYPE`/`ENTITY`**; asset paths are plain relative paths under `res/` (no `..`, no absolute, no
+  empty segment); a digest of the whole package keys the packaged-APK cache, so re-opening an
+  unchanged revision is free.
+- Refusals: `DWF_SOURCE_INVALID` / `DWF_SOURCE_UNAVAILABLE` (422), `DWF_RUNTIME_MISSING` /
+  `DWF_PACKAGING_UNAVAILABLE` (503), `DWF_TOO_MANY_SESSIONS` (429).
+
+The existing `…/native-preview` route answers a `android-dwf` design with `422 NATIVE_BACKEND_DWF`
+naming this route, instead of compiling it on Skiko. `UiBuilderNativeTargets.resolve` returns
+`Resolution.WatchFace` for the backend whatever bundle is served.
+
+### Session lifecycle
+
+One session per tab. A session owns its revision's `DwfSource`, its `DwfControls`, and lazily its
+packaged APK; it belongs to the actor that started it (another actor gets 404/closed socket).
+
+**One daemon, many sessions.** The runtime holds exactly one face and the host has one daemon
+(compose-ai-tools keeps a single `activeDaemon`). Sessions therefore *borrow* it under a lock: when
+the daemon last served another session — or another revision — the next frame pushes this session's
+APK and replays its whole state; when it last served this session, only the diff is sent. A failing
+command drops the daemon (its state is unknown) and the next frame starts a fresh one and replays.
+Sessions are bounded (4) and expire after 15 idle minutes, checked on use — no thread. The last
+session out stops the daemon. `DELETE …/dwf-preview/{sessionId}` closes explicitly.
+
+### The tab and its socket
+
+The page is `/ui-builder/{designId}/watch-face[?session=…]`: a static shell served like the editor's,
+whose every data call is separately authorized. The editor opens it with `?session=` after its own
+`POST`; opened bare, it starts a session itself (and so reports `DWF_SOURCE_UNAVAILABLE` until the
+exporter exists).
+
+The socket is `…/dwf-preview/{sessionId}/ws`. Server → client is the **server half of
+`composeai-stream/1`** (`lane`, `frame` with `codec`/`widthPx`/`heightPx`/`dataBase64`/`seq`,
+`error`; see [SESSION-VIEWER-PROTOCOL.md](../serve/SESSION-VIEWER-PROTOCOL.md)), so a frame handler
+written for the viewer works. It is a sibling route rather than the viewer's `/{session}/ws/{preview}`
+because that socket leases a `ServeHost` from the session registry and streams a *served preview*;
+making a design revision look like one would mean faking `ServeHost`, and the viewer's
+`setOverrides` is a flat string map where these controls are typed. Client → server:
+
+| Message | Effect |
+| --- | --- |
+| `{"type":"controls","controls":{…}}` | partial update, then a frame |
+| `{"type":"requestFrame"}` | redraw |
+| `{"type":"visibility","visible":false}` | a hidden tab stops ticking |
+
+`controls` keys (absent = unchanged, `null` = clear; the whole patch is refused if any key is bad):
+
+| Control | Key | Daemon command |
+| --- | --- | --- |
+| Time | `timeMillis` | `clock {timeMillis}` |
+| Live ticking | `ticking` | none — the server redraws each second and sends the advanced `clock`; counts from the last set time |
+| Ambient | `ambient`, `burnInProtection`, `lowBitAmbient` | `ambient {state: AMBIENT\|INTERACTIVE, burnIn, lowBit}` |
+| Heart rate, steps | `heartRate` (0–300), `steps` | `health {heartRate, steps}` |
+| Battery | `batteryPercent` (0–100) | `battery {level}` |
+| Flavor, user configuration | `flavor`, `config {id: value}` | `watchface {op: config, reset: true, flavor, values}` (absolute, so it resets first) |
+| Complication slot data | `complications {slot: {type, text, title, value, min, max, colors, weights, …Image}}`, `null` clears | `watchface {op: complication, slot, type, …}` / `{op: uncomplication, slot}` (`EMPTY` also clears) |
+
+Complication images are accepted **only as inline `data:image/…`**. The daemon would also take
+`file:` (read a file on this host) and `http(s):` (fetch for the client); this server does not pass
+either on.
+
+Each frame is `screenshot` followed by `watchface status`: the simulator draws its own built-in demo
+face whenever the app's face failed to load, and a screenshot alone cannot tell the two, so
+`kind: "built-in"`, an `error`, or zero frames is an `error` message, never a picture.
+
+### When the runtime is missing
+
+`GET …/dwf-preview/status` (read-gated, design-scoped) answers `{available, code, reason}`. The tab
+asks first and, if the runtime is not available, shows the reason in a banner — "The real watch-face
+runtime is not available on this server", the sentence naming how to install it, and that the fast
+preview is unaffected — and offers no controls. The same reason is the body of a start request's 503.
+
+## What this does not do
+
+- It does not implement the fast Remote Compose path or the WFF → RC translator (compose-ai-tools),
+  the WFF exporter (compose-ui-builder) or `ExportFormatV1` (compose-preview-contracts).
+- It does not add a Gradle driver or any dependency: the Tooling API floor in `AGENTS.md` is
+  untouched, and `checkServeModuleBoundary` is unaffected — the surface compiles nothing.
+- Export of the WFF XML / DWF bundle / resource-only APK is a later phase; `DwfApkRuntime.packageApk`
+  (and so `:wff-packager`) is the seam it would reuse, including the Watch Face Push token.
+
+## Direction (not built)
+
+- **Import of agent-submitted WFF.** An agent posts WFF XML; the server parses it with `wff-core`
+  into the UI Builder design model (a new revision), after which humans and agents continue with
+  incremental edits and the preview is just `POST …/dwf-preview` on that revision with `{}`.
+  Parsing, the catalog mapping and the lossiness of the import (what WFF the model cannot hold, and
+  whether such a face round-trips) belong to the exporter/importer work in compose-ui-builder and
+  `wff-core`; this server would host the route and the revision write. Until it exists the preview
+  trusts the XML it is sent and does not reconcile it with the design.
+- **Consuming `:wff-packager`** when published: replace `RenderHostDwfApkRuntime.packageApk` and delete
+  `DWF_PACKAGING_UNAVAILABLE`'s packaging half; surface packager diagnostics in the 422.

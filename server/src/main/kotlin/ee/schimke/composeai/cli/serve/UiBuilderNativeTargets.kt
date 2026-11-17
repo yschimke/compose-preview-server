@@ -11,6 +11,10 @@ import ee.schimke.composeai.uibuilder.export.UiBuilderPreviewSurfaces
  * catalog declares one in `statusSemantics.previewSurfaces.native.backend`
  * ([UiBuilderPreviewSurfaces]); the served bundle it maps to reports the one it was built for.
  *
+ * - **The catalog says `android-dwf`** ([DwfPreviewSurface.BACKEND]): no Compose target at all. A
+ *   Watch Face Format design is drawn by Google's watch-face runtime, not by generated Kotlin, so
+ *   it is [Resolution.WatchFace] whatever bundle is served, and the Compose lane refuses it by name
+ *   ([DwfPreviewSurface.SEPARATE_SURFACE]) rather than compiling it on Skiko.
  * - **Both say `android`**, or the host reports no served backend (pinned hosts): the Android
  *   (Robolectric) daemon, as before.
  * - **The catalog says `android`, the bundle `desktop`, and the catalog authors
@@ -35,6 +39,9 @@ internal object UiBuilderNativeTargets {
     data class Target(val target: UiBuilderNativeTarget) : Resolution
 
     data class Refused(val reason: String) : Resolution
+
+    /** The design's real preview is the separate watch-face tab ([UiBuilderDwfPreview]). */
+    data object WatchFace : Resolution
   }
 
   /**
@@ -55,6 +62,7 @@ internal object UiBuilderNativeTargets {
   ): Resolution {
     val android = UiBuilderPreviewSurfaces.BACKEND_ANDROID
     return when {
+      declaredBackend == DwfPreviewSurface.BACKEND -> Resolution.WatchFace
       declaredBackend != android ->
         Resolution.Target(UiBuilderNativeTarget(served, UiBuilderGeneratedCompose.COMPOSE_CMP))
       servedBackend == null || servedBackend == android ->
