@@ -50,6 +50,9 @@ The product spec and its RFC come first; everything after them is one surface or
   canvas, the frame and the variants.
 - [design/UI_BUILDER_WEAR_SCREEN.md](design/UI_BUILDER_WEAR_SCREEN.md) — the Wear screen: one
   frame spec shared by the canvas and the native lane, and why a borrowed component may not be faked.
+- [design/UI_BUILDER_WATCH_FACE_ANDROID_PREVIEW.md](design/UI_BUILDER_WATCH_FACE_ANDROID_PREVIEW.md) —
+  the `android-dwf` native surface: a Watch Face Format design drawn by Google's runtime in its own
+  tab, the session lifecycle, the control → daemon mapping, and what compose-ai-tools must export.
 - [design/UI_BUILDER_REMOTE_COMPOSE.md](design/UI_BUILDER_REMOTE_COMPOSE.md) — Remote Compose
   composition inside a design.
 - [design/UI_BUILDER_EDITOR_OPERATIONS.md](design/UI_BUILDER_EDITOR_OPERATIONS.md) — editor

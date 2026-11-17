@@ -93,12 +93,32 @@ internal class ServeUiBuilderNativePreview(
    * widgets use [UiBuilderWidgetPlayer.ANDROIDX]. Defaults to yes.
    */
   private val carriesCmpWidgetPlayer: (catalog: String) -> Boolean = { true },
+  /**
+   * Whether a builder catalog's real preview is the Watch Face Format runtime
+   * ([DwfPreviewSurface.BACKEND]) rather than a Compose compile. Such a design is refused here, by
+   * name, and drawn by `POST .../dwf-preview` instead.
+   */
+  private val isDwfCatalog: (catalog: String) -> Boolean = { false },
 ) : UiBuilderNativePreviewLane {
 
   override fun render(
     document: DesignDocumentV1,
     widgetHostShape: WearWidgetHostShape,
   ): UiBuilderNativePreviewOutcome {
+    // Before everything: a WFF design has no Compose to generate, so any generator answer would
+    // describe the wrong renderer.
+    if (isDwfCatalog(document.catalogPin.systemId)) {
+      return UiBuilderNativePreviewOutcome.Refused(
+        DwfPreviewSurface.SEPARATE_SURFACE,
+        listOf(
+          "catalog `${document.catalogPin.systemId}` is a Watch Face Format catalog " +
+            "(`previewSurfaces.native.backend = \"${DwfPreviewSurface.BACKEND}\"`): its real " +
+            "preview is the Wear OS watch-face runtime, started with " +
+            "`POST /api/ui-builder/v1/designs/{designId}/dwf-preview` and shown in its own tab, " +
+            "not a Compose compile",
+        ),
+      )
+    }
     // Checked before generation: two packs have no bundle regardless of the Kotlin, and that
     // design-level sentence shouldn't be pre-empted by a missing record.
     val usedPacks = ScreenGeneratorComposeExportExecutor.packsUsedBy(document, packs)

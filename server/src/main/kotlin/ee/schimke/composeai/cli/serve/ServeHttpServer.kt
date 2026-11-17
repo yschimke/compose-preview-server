@@ -581,6 +581,11 @@ class ServeHttpServer(
    */
   private val uiBuilderInlineCapture: UiBuilderInlineCaptureLane? = null,
   /**
+   * The real-runtime watch-face tab for `android-dwf` designs ([UiBuilderDwfPreview]). Non-null
+   * wherever the builder is; whether the runtime exists is answered per request.
+   */
+  private val uiBuilderDwfPreview: UiBuilderDwfPreview? = null,
+  /**
    * Per-design reference overlays. Null leaves the routes unregistered on hosts without durable
    * UI-builder state.
    */
@@ -1364,6 +1369,9 @@ class ServeHttpServer(
             uiBuilderAuthorization.acceptingSessionWritesFromSameOrigin {
               browserHosts
             }
+          uiBuilderDwfPreview?.let {
+            installUiBuilderDwfRoutes(designService, sameOriginUiBuilderAuthorization, it)
+          }
           installUiBuilderRoutes(
             designService,
             sameOriginUiBuilderAuthorization,
@@ -6514,6 +6522,17 @@ class ServeHttpServer(
     // A design's history: its retained revisions as pictures, each one openable, restorable
     // (forward, as a new revision) and forkable into a design of its own.
     get("${base}/{designId}/history") { handleUiBuilderHistory() }
+    // The real-runtime watch-face tab: a static shell like the editor's, whose data calls are
+    // authenticated separately. Outranks `{path...}` as a literal segment.
+    if (uiBuilderDwfPreview != null) {
+      get("${base}/{designId}/watch-face") {
+        call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+        call.respondText(
+          UiBuilderDwfPage.html(call.parameters["designId"].orEmpty()),
+          ContentType.Text.Html,
+        )
+      }
+    }
     post("${base}/{designId}/history/{revision}/restore") { handleUiBuilderRestore() }
     post("${base}/{designId}/history/{revision}/fork") { handleUiBuilderFork() }
     // Delete one's own design. Owner-only, enforced by the service.
