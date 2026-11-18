@@ -185,7 +185,7 @@ class RecordFreeComposeExportTest {
     val artifact = export(document, capabilities)
     assertTrue(artifact.diagnostics.isEmpty(), artifact.diagnostics.toString())
     assertTrue("RemoteStateLayout" in artifact.content, artifact.content)
-    assertTrue(".clickable(valueChange(page, 20.ri))" in artifact.content, artifact.content)
+    assertTrue(".clickable(valueChangeAction(page, 20.ri))" in artifact.content, artifact.content)
     assertFalse("WearWidget" in artifact.content, artifact.content)
   }
 
