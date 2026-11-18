@@ -272,6 +272,22 @@ class RenderHostDwfApkRuntimeTest {
   }
 
   @Test
+  fun `a packager that hangs with its output open is killed at the timeout`() {
+    // A child keeps the output open; draining a pipe would wait for it forever.
+    val java = fakeJava("echo started; sleep 60 & sleep 60")
+    val packager =
+      DwfSubprocessPackager(libDir, sdk, File(dir, "sign"), java = java.path, timeoutSeconds = 1)
+    val started = System.nanoTime()
+    val e =
+      assertFailsWith<DwfRuntimeException> {
+        packager.pack(DwfPackaging.bundleFiles(source()), "p.q", File(dir, "o.apk"))
+      }
+    val seconds = (System.nanoTime() - started) / 1_000_000_000.0
+    assertTrue(seconds < 20, "returned after ${seconds}s")
+    assertTrue("did not finish in 1s" in e.message.orEmpty(), e.message)
+  }
+
+  @Test
   fun `the sdk is found only where build-tools and a platform jar both are`() {
     val root = File(dir, "sdk").also { it.mkdirs() }
     assertNull(DwfAndroidSdk.locate(listOf(root)))

@@ -175,7 +175,13 @@ internal class DwfSubprocessPackager(
           "--package",
           packageName,
         )
-      val builder = ProcessBuilder(command).redirectErrorStream(true)
+      // Output goes to a file, not a pipe: draining a pipe blocks until EOF, so a hung packager (or
+      // an aapt2 child holding stdout open) would never reach the timed wait below.
+      val log = File(work, "packager.log")
+      val builder =
+        ProcessBuilder(command)
+          .redirectErrorStream(true)
+          .redirectOutput(ProcessBuilder.Redirect.to(log))
       builder.environment().apply {
         put("ANDROID_HOME", sdk.root.path)
         put("ANDROID_SDK_ROOT", sdk.root.path)
@@ -184,11 +190,13 @@ internal class DwfSubprocessPackager(
         remove("WFF_SIGNING_KEYSTORE_B64")
       }
       val process = builder.start()
-      val output = process.inputStream.bufferedReader().readText()
       if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
+        process.descendants().forEach { it.destroyForcibly() }
         process.destroyForcibly()
+        process.waitFor(10, TimeUnit.SECONDS)
         throw DwfRuntimeException("wff-packager did not finish in ${timeoutSeconds}s")
       }
+      val output = if (log.isFile) log.readText() else ""
       if (process.exitValue() != 0) throw DwfPackagingFailed(diagnostics(output))
     } finally {
       work.deleteRecursively()
