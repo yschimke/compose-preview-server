@@ -507,12 +507,17 @@ composeai-ui-builder = "3.135.0"
 # First published version of the optional publication server library (Maven Central).
 livery = "0.15.0"
 # Packages a design revision's WFF source into the signed APK the real watch-face runtime loads
-# (`DwfPackaging`), from yschimke/watchface-tools; published to Maven Central since 0.3.0. 0.3.2 is the first that targets Java 17
-# (watchface-tools#28), which this build's floor needs. It is on the line the builder's `wff-core`
-# is on, and carries that same wff-core as an `api` dependency, so the two cannot skew. Needs the Android SDK's aapt2 and zipalign plus a platform
-# android.jar at run time, never at build time; its Google validators arrive through its POM
-# (`validator-push`, and `com.github.xgouchet:AXML` from JitPack, fenced in settings.gradle.kts).
+# (`DwfPackaging`), from yschimke/watchface-tools; published to Maven Central since 0.3.0. 0.3.2 is
+# the first that targets Java 17 (watchface-tools#28), which this build's floor needs. `wff-core`
+# (the bundle layout, compiled against here) is released only when it changes, so it has its own
+# pin: 0.3.1 is what the packager 0.3.2 requires and what the builder is on. The packager is deliberately NOT on any classpath of the server:
+# Google's `validator-push` brings `xercesImpl` (the XSD 1.1 build, which the WFF schema needs), and
+# a second JAXP implementation on the server's classpath replaces the JDK's for every DOM user in
+# the process (it made `ExplodedSvg` return its input unexploded). It ships as `lib-wff-packager/`
+# and runs in its own JVM. Needs the Android SDK's aapt2 and zipalign plus a platform android.jar at
+# run time, never at build time.
 wff-packager = "0.3.2"
+wff-core = "0.3.1"
 # The Android Remote Compose players the server's own player-only Android daemon replays documents
 # with, staged as `lib-rc-players-android/` (`stageRcPlayersAndroidLibs`). The Android daemon
 # sidecar deliberately ships none of this family (a consumer brings it, compose-preview-daemon's
@@ -550,6 +555,7 @@ jmdns = "3.6.5"
 composeai-common-web-escaping = { module = "ee.schimke.composeai:common-web-escaping" }
 # The WFF source bundle -> signed, validated APK packager (see the `wff-packager` pin above).
 wff-packager = { module = "ee.schimke.watchface:wff-packager", version.ref = "wff-packager" }
+wff-core = { module = "ee.schimke.watchface:wff-core", version.ref = "wff-core" }
 # The render host, the bundle daemon and the git-backed preview history. Was this repository's own
 # `:render-host` module, published as `compose-preview-render-host`, until yschimke/compose-preview-server#180
 # moved it to the repository that owns everything it depends on. It has no web server and never did;

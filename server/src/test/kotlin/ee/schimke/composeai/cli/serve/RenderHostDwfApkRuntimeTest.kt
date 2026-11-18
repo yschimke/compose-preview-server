@@ -1,13 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
-import ee.schimke.watchface.packager.AndroidSdk
-import ee.schimke.watchface.packager.DiagnosticSeverity
-import ee.schimke.watchface.packager.PackagedWatchFace
-import ee.schimke.watchface.packager.PackagerOptions
-import ee.schimke.watchface.packager.PackagingDiagnostic
-import ee.schimke.watchface.packager.PackagingException
 import ee.schimke.watchface.wff.WffBundleLayout
-import ee.schimke.watchface.wff.WffVersion
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.Test
@@ -24,13 +17,15 @@ import kotlinx.serialization.json.JsonPrimitive
 
 class RenderHostDwfApkRuntimeTest {
   private val dir = Files.createTempDirectory("dwf-runtime-test").toFile()
-  private val sdk = AndroidSdk(dir, File("aapt2"), File("zipalign"), File("android.jar"))
+  private val sdk = DwfAndroidSdk(dir)
+  private val libDir = File(dir, "lib-wff-packager")
 
   private var installed = true
   private var haveSdk = true
   private var simulatorReason: String? = null
-  private val packs = mutableListOf<Pair<Map<String, ByteArray>, PackagerOptions>>()
-  private var refuse: PackagingException? = null
+  private var haveLib = true
+  private val packs = mutableListOf<Pair<Map<String, ByteArray>, String>>()
+  private var refuse: List<String>? = null
   private val connections = mutableListOf<FakeSim>()
 
   private class FakeSim : DwfSimulatorConnection {
@@ -59,20 +54,12 @@ class RenderHostDwfApkRuntimeTest {
           connect = { FakeSim().also { connections += it } },
         ),
       cacheDir = File(dir, "cache"),
-      packagerFor = {
-        { files, options ->
-          packs += files to options
-          refuse?.let { throw it }
-          PackagedWatchFace(
-            apk = byteArrayOf(1, 2, 3),
-            packageName = "p",
-            versionCode = 1,
-            wffVersion = WffVersion.V2,
-            memoryFootprint = null,
-            validationToken = null,
-            diagnostics = emptyList(),
-            signerCertificateSha256 = "00",
-          )
+      packagerLibDir = { libDir.takeIf { haveLib } },
+      packagerFor = { _, _, _ ->
+        DwfWffPackager { files, packageName, out ->
+          packs += files to packageName
+          refuse?.let { throw DwfPackagingFailed(it) }
+          out.writeBytes(byteArrayOf(1, 2, 3))
         }
       },
     )
@@ -92,6 +79,9 @@ class RenderHostDwfApkRuntimeTest {
     assertEquals(DwfPreviewSurface.ANDROID_SDK_MISSING, noSdk.code)
     assertTrue("aapt2" in noSdk.reason && "ANDROID_HOME" in noSdk.reason, noSdk.reason)
     haveSdk = true
+    haveLib = false
+    assertEquals(DwfPreviewSurface.PACKAGING_UNAVAILABLE, unavailable(r).code)
+    haveLib = true
     val sim = unavailable(r)
     assertEquals(DwfPreviewSurface.SIMULATOR_UNAVAILABLE, sim.code)
     assertEquals("no sidecar", sim.reason)
@@ -114,7 +104,7 @@ class RenderHostDwfApkRuntimeTest {
     assertSame(apk, r.packageApk(src).takeIf { it == apk } ?: apk)
     assertEquals(1, packs.size)
 
-    val (files, options) = packs.single()
+    val (files, packageName) = packs.single()
     assertEquals(src.wffXml, files[WffBundleLayout.WATCH_FACE_PATH]!!.decodeToString())
     assertEquals(listOf<Byte>(9), files["res/drawable/hand.png"]!!.toList())
     assertTrue(WffBundleLayout.WATCH_FACE_INFO_PATH in files)
@@ -127,9 +117,8 @@ class RenderHostDwfApkRuntimeTest {
     assertFalse("\"face\"" in manifest, "the label is not an injection point")
     assertEquals(
       "ee.schimke.composeai.dwfpreview.f${src.digest().take(16)}",
-      options.target.packageName,
+      packageName,
     )
-    assertEquals(1, options.versionCode)
 
     // A different face is a different APK; the same digest in a new runtime (a restart) reuses
     // disk.
@@ -150,19 +139,31 @@ class RenderHostDwfApkRuntimeTest {
 
   @Test
   fun `packager diagnostics become one failure carrying every finding`() {
-    refuse =
-      PackagingException(
-        listOf(
-          PackagingDiagnostic(DiagnosticSeverity.ERROR, "wff-validator", "cvc-bad"),
-          PackagingDiagnostic(DiagnosticSeverity.ERROR, "aapt2", "no such resource"),
-        ),
-      )
+    refuse = listOf("error[wff-validator]: cvc-bad", "error[aapt2]: no such resource")
     val e = assertFailsWith<DwfPackagingFailed> { runtime().packageApk(source()) }
     assertEquals(
       listOf("error[wff-validator]: cvc-bad", "error[aapt2]: no such resource"),
       e.diagnostics,
     )
     assertEquals(0, File(dir, "cache").listFiles { f -> f.name.endsWith(".apk") }.orEmpty().size)
+  }
+
+  @Test
+  fun `the subprocess packager's output becomes diagnostics`() {
+    assertEquals(
+      listOf("error[aapt2]: bad", "error[wff-validator]: worse"),
+      DwfSubprocessPackager.diagnostics(
+        "warning[signing]: debug key\nerror[aapt2]: bad\nerror[wff-validator]: worse\n",
+      ),
+    )
+    assertEquals(
+      listOf("--version-code must be an integer"),
+      DwfSubprocessPackager.diagnostics("usage...\n--version-code must be an integer\n"),
+    )
+    assertEquals(
+      listOf("wff-packager failed with no output"),
+      DwfSubprocessPackager.diagnostics(""),
+    )
   }
 
   @Test
@@ -210,11 +211,14 @@ class RenderHostDwfApkRuntimeTest {
         "AndroidManifest.xml",
       )) {
       val problem = DwfSource("<WatchFace/>", assets = mapOf(path to byteArrayOf(1))).problem()
-      // Some spellings (`raw//watchface.xml`) are stopped earlier by the plain-path rule, so only the
+      // Some spellings (`raw//watchface.xml`) are stopped earlier by the plain-path rule, so only
+      // the
       // refusal is asserted, not which rule gave it.
       assertTrue(problem != null, "$path was accepted")
     }
-    assertNull(DwfSource("<WatchFace/>", assets = mapOf("raw/other.xml" to byteArrayOf(1))).problem())
+    assertNull(
+      DwfSource("<WatchFace/>", assets = mapOf("raw/other.xml" to byteArrayOf(1))).problem(),
+    )
   }
 
   @Test
@@ -224,5 +228,63 @@ class RenderHostDwfApkRuntimeTest {
       DwfSource(src.wffXml, assets = mapOf("raw/watchface.xml" to "<!DOCTYPE x>".toByteArray()))
     val files = DwfPackaging.bundleFiles(sneaky)
     assertEquals(src.wffXml, files[WffBundleLayout.WATCH_FACE_PATH]!!.decodeToString())
+  }
+
+  private fun fakeJava(body: String): File =
+    File(dir, "fake-java-${System.nanoTime()}.sh").apply {
+      writeText("#!/bin/sh\n$body\n")
+      setExecutable(true)
+    }
+
+  @Test
+  fun `the subprocess packager passes the bundle and environment and returns the apk`() {
+    val seen = File(dir, "seen.txt")
+    // Args: -D.. -cp <lib>/* Main pack --bundle <dir> --out <apk> --version-code 1 --package <p>
+    val java =
+      fakeJava(
+        """
+        out=""; bundle=""
+        while [ "${'$'}#" -gt 0 ]; do
+          case "${'$'}1" in --out) out="${'$'}2";; --bundle) bundle="${'$'}2";; esac
+          shift
+        done
+        echo "${'$'}ANDROID_HOME ${'$'}WFF_PACKAGER_HOME ${'$'}(ls ${'$'}bundle/res/raw)" > ${seen.path}
+        printf 'apk' > "${'$'}out"
+        """
+          .trimIndent(),
+      )
+    val packager = DwfSubprocessPackager(libDir, sdk, File(dir, "sign"), java = java.path)
+    val out = File(dir, "out.apk")
+    packager.pack(DwfPackaging.bundleFiles(source()), "p.q", out)
+    assertEquals("apk", out.readText())
+    assertEquals("${dir.path} ${File(dir, "sign").path} watchface.xml", seen.readText().trim())
+  }
+
+  @Test
+  fun `a failing subprocess packager is a refusal with its diagnostics`() {
+    val java = fakeJava("echo 'error[manifest]: bad package' >&2; exit 1")
+    val packager = DwfSubprocessPackager(libDir, sdk, File(dir, "sign"), java = java.path)
+    val e =
+      assertFailsWith<DwfPackagingFailed> {
+        packager.pack(DwfPackaging.bundleFiles(source()), "p.q", File(dir, "o.apk"))
+      }
+    assertEquals(listOf("error[manifest]: bad package"), e.diagnostics)
+  }
+
+  @Test
+  fun `the sdk is found only where build-tools and a platform jar both are`() {
+    val root = File(dir, "sdk").also { it.mkdirs() }
+    assertNull(DwfAndroidSdk.locate(listOf(root)))
+    File(root, "build-tools/36.0.0").mkdirs()
+    for (tool in listOf("aapt2", "zipalign")) {
+      File(root, "build-tools/36.0.0/$tool").apply {
+        writeText("")
+        setExecutable(true)
+      }
+    }
+    assertNull(DwfAndroidSdk.locate(listOf(root)), "no platform yet")
+    File(root, "platforms/android-36").mkdirs()
+    File(root, "platforms/android-36/android.jar").writeText("")
+    assertEquals(root, DwfAndroidSdk.locate(listOf(File(dir, "none"), root))?.root)
   }
 }

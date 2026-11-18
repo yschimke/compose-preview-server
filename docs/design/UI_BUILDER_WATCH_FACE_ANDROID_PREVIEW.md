@@ -63,9 +63,16 @@ published pieces:
    `com.google.wear.watchface.format.version`, `minSdk` from `WffBundleLayout.minSdkFor`),
    `xml` -> `res/raw/watchface.xml`, `assets` under `res/`, a default `res/xml/watch_face_info.xml`,
    and a 64x64 transparent `drawable/preview.png` unless the design supplies a `drawable*/preview.*`
-   (the resource link fails on a face info that names a missing preview). It calls `pack` with
-   `PackageTarget.Sideload` and the generated debug key, kept under the cache directory (the runtime
-   does not need a publishable signature). The APK is cached by `DwfSource.digest()` in memory and on
+   (the resource link fails on a face info that names a missing preview). It runs the packager's CLI
+   (`pack --bundle ... --package ...`, sideload target, the generated debug key kept under the cache
+   directory because the runtime does not need a publishable signature) **in its own JVM**, from
+   `lib-wff-packager/` in the distribution (`DwfSubprocessPackager`). Not in-process, and not on any
+   classpath of the server: Google's `validator-push` carries `xercesImpl` (the XSD 1.1 build, which
+   the WFF schema needs), and a second JAXP implementation on the server's classpath replaces the
+   JDK's for every DOM user in the process; it made `ExplodedSvg` return its input unexploded. The
+   server compiles only against `wff-core` for the bundle layout. `design assets` named
+   `raw/watchface.xml`, `xml/watch_face_info.xml` or `AndroidManifest.xml` are refused
+   (`DwfSource.problem()`), so the validated document is the one packaged. The APK is cached by `DwfSource.digest()` in memory and on
    disk (`composeAiCacheDir("dwf-preview-apks")`), so a re-push, a second session on the revision and
    a restart all reuse it.
    Packaging runs in `DwfPreviewSessions.start`, off the event loop, not on the first frame: a

@@ -1,9 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.bundle.locateBundleSidecarJars
 import ee.schimke.composeai.io.composeAiCacheDir
-import ee.schimke.watchface.packager.AndroidSdk
-import ee.schimke.watchface.packager.PackagedWatchFace
-import ee.schimke.watchface.packager.PackagerOptions
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.json.JsonElement
@@ -42,12 +40,15 @@ internal class DwfSimulatorLaunch(
  */
 internal class RenderHostDwfApkRuntime(
   private val runtimeInstalled: () -> Boolean,
-  private val sdk: () -> AndroidSdk? = { AndroidSdk.locate() },
+  private val sdk: () -> DwfAndroidSdk? = { DwfAndroidSdk.locate() },
+  /** The `lib-wff-packager/` directory, or null when this install does not carry it. */
+  private val packagerLibDir: () -> File? = { locateWffPackagerDir() },
   private val launcher: DwfSimulatorLaunch = DwfSimulatorLaunch.Production,
   private val cacheDir: File = composeAiCacheDir("dwf-preview-apks"),
-  private val packagerFor:
-    (AndroidSdk) -> (Map<String, ByteArray>, PackagerOptions) -> PackagedWatchFace =
-    DwfPackaging::packagerFor,
+  private val packagerFor: (File, DwfAndroidSdk, File) -> DwfWffPackager =
+    { lib, located, signing ->
+      DwfSubprocessPackager(lib, located, signing)
+    },
 ) : DwfApkRuntime {
   private val packLock = Any()
   private val packaged = ConcurrentHashMap<String, File>()
@@ -67,8 +68,16 @@ internal class RenderHostDwfApkRuntime(
         DwfPreviewSurface.ANDROID_SDK_MISSING,
         "Drawing a watch face with the real runtime needs an Android SDK on this server: " +
           "build-tools (aapt2 and zipalign) and a platform android.jar, found through " +
-          "ANDROID_HOME or ANDROID_SDK_ROOT. Install with: ${AndroidSdk.INSTALL_HINT}. " +
+          "ANDROID_HOME or ANDROID_SDK_ROOT. Install with: ${DwfAndroidSdk.INSTALL_HINT}. " +
           "The fast Remote Compose preview in the editor is unaffected.",
+      )
+    }
+    if (packagerLibDir() == null) {
+      return DwfApkRuntime.Availability.Unavailable(
+        DwfPreviewSurface.PACKAGING_UNAVAILABLE,
+        "This install has no lib-wff-packager/ (the watch-face packager and its validator). It " +
+          "ships in the server distribution; set -D$PACKAGER_DIR_PROPERTY to its directory if " +
+          "the server was started some other way.",
       )
     }
     launcher.unavailableReason()?.let {
@@ -93,9 +102,10 @@ internal class RenderHostDwfApkRuntime(
       val out = File(cacheDir, "wff-$digest.apk")
       if (!out.isFile || out.length() == 0L) {
         val located =
-          sdk() ?: throw DwfRuntimeException("no Android SDK: ${AndroidSdk.INSTALL_HINT}")
+          sdk() ?: throw DwfRuntimeException("no Android SDK: ${DwfAndroidSdk.INSTALL_HINT}")
+        val lib = packagerLibDir() ?: throw DwfRuntimeException("no lib-wff-packager/ installed")
         try {
-          DwfPackaging.pack(source, out, File(cacheDir, "signing"), packagerFor(located))
+          DwfPackaging.pack(source, out, packagerFor(lib, located, File(cacheDir, "signing")))
         } catch (e: DwfRuntimeException) {
           throw e
         } catch (e: Exception) {
@@ -132,3 +142,13 @@ internal class RenderHostDwfApkRuntime(
     }
   }
 }
+
+private const val PACKAGER_DIR_PROPERTY = "composeai.cli.lib.wff.packagerDir"
+
+/**
+ * The `lib-wff-packager/` directory, found like every other sidecar ([locateBundleSidecarJars]:
+ * `-D$PACKAGER_DIR_PROPERTY`, `$APP_HOME/lib-wff-packager`, or next to the server's own jars); null
+ * unless it holds jars.
+ */
+internal fun locateWffPackagerDir(): File? =
+  locateBundleSidecarJars("lib-wff-packager").firstOrNull()?.parentFile
