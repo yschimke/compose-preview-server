@@ -1,6 +1,9 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.export.RecordFreeExport
 import ee.schimke.composeai.uibuilder.export.UiBuilderBuildFeatures
+import ee.schimke.composeai.uibuilder.export.UiBuilderCatalogPlatform
+import ee.schimke.composeai.uibuilder.export.toUiBuilderDocument
 import ee.schimke.composeai.uibuilder.protocol.AcceptedOutcomeV1
 import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
@@ -730,12 +733,9 @@ class ServeUiBuilderMcpIntegrationTest {
       )
     val artifact = assertIs<ExportResponseV1>(response(exported)).artifact
     assertEquals(emptyList(), artifact.diagnostics, artifact.content)
-    assertTrue(
-      artifact.content.endsWith(
-        File("../docs/design/fixtures/ui-builder/remote-root.kt.txt").readText(),
-      ),
-      artifact.content,
-    )
+    // What the export emits is compose-ui-builder's: the server must hand back the library's own
+    // record-free output for the stored revision, not a restated copy of today's spelling.
+    assertTrue(artifact.content.endsWith(libraryRemoteSource(server, doc.id)), artifact.content)
     val changed =
       envelope(
         server,
@@ -755,7 +755,34 @@ class ServeUiBuilderMcpIntegrationTest {
         )
         .artifact
     assertEquals(emptyList(), next.diagnostics, next.content)
-    assertTrue("val page = remember { MutableRemoteInt(20) }" in next.content, next.content)
+    // The server exports the revision it was asked for: revision 1 carries the applied change.
+    assertTrue(next.content.endsWith(libraryRemoteSource(server, doc.id)), next.content)
+    assertTrue(next.content != artifact.content, "revision 1 must export the changed state")
+  }
+
+  /** The library's record-free Remote Compose source for the design's current stored revision. */
+  private fun libraryRemoteSource(server: RunningServer, designId: String): String {
+    val stored =
+      assertIs<SnapshotResponseV1>(
+          response(
+            envelope(
+              server,
+              ServeUiBuilderMcp.GET_DESIGN,
+              """{"designId":"$designId","includeCatalog":true}""",
+            ),
+          ),
+        )
+        .snapshot
+        .state
+        .document
+    return assertIs<RecordFreeExport.Generated.Emitted>(
+        RecordFreeExport.generate(
+          stored.toUiBuilderDocument(),
+          UiBuilderCatalogPlatform.REMOTE_COMPOSE,
+          "generated.uibuilder",
+        ),
+      )
+      .source
   }
 
   @Test
