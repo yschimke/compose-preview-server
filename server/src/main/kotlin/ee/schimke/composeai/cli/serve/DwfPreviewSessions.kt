@@ -152,7 +152,8 @@ internal class DwfPreviewSessions(
       )
     }
     // Packaged here rather than on the first frame, so a face the packager refuses is a refusal of
-    // the start request (with the packager's diagnostics) instead of an error on a socket. Cached by
+    // the start request (with the packager's diagnostics) instead of an error on a socket. Cached
+    // by
     // digest, so the first frame and every later session on this revision reuse it.
     val apk =
       try {

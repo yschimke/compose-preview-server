@@ -34,8 +34,8 @@ internal class DwfSimulatorLaunch(
  * [availability] answers the first thing that is missing, in the order an operator fixes them:
  * Google's proprietary `DeclarativeWatchFaceRuntime.apk` ([DwfPreviewSurface.RUNTIME_MISSING], the
  * common hosted case), then the Android SDK the packager needs
- * ([DwfPreviewSurface.ANDROID_SDK_MISSING]: `aapt2`, `zipalign`, a platform `android.jar`), then the
- * simulator's own prerequisites ([DwfPreviewSurface.SIMULATOR_UNAVAILABLE]).
+ * ([DwfPreviewSurface.ANDROID_SDK_MISSING]: `aapt2`, `zipalign`, a platform `android.jar`), then
+ * the simulator's own prerequisites ([DwfPreviewSurface.SIMULATOR_UNAVAILABLE]).
  *
  * Packaged APKs are cached by [DwfSource.digest] under [cacheDir], so a re-push of an unchanged
  * revision, a second session on it, and a server restart all reuse the same file.
@@ -79,9 +79,17 @@ internal class RenderHostDwfApkRuntime(
 
   override fun packageApk(source: DwfSource): File {
     val digest = source.digest()
-    packaged[digest]?.takeIf { it.isFile }?.let { return it }
+    packaged[digest]
+      ?.takeIf { it.isFile }
+      ?.let {
+        return it
+      }
     synchronized(packLock) {
-      packaged[digest]?.takeIf { it.isFile }?.let { return it }
+      packaged[digest]
+        ?.takeIf { it.isFile }
+        ?.let {
+          return it
+        }
       val out = File(cacheDir, "wff-$digest.apk")
       if (!out.isFile || out.length() == 0L) {
         val located =

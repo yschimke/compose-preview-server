@@ -11,6 +11,7 @@ import ee.schimke.watchface.wff.WffBundleLayout
 import ee.schimke.watchface.wff.WffManifest
 import ee.schimke.watchface.wff.WffVersion
 import ee.schimke.watchface.wff.WffWatchFaceInfo
+import ee.schimke.watchface.wff.toXml
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -24,8 +25,8 @@ internal class DwfPackagingFailed(val diagnostics: List<String>) :
 
 /**
  * A [DwfSource] as a WFF source bundle, and the call into `:wff-packager` that turns it into the
- * signed APK the runtime loads. Pure aside from the packager call, which is a function so tests
- * can stand in for it (the real one needs an Android SDK).
+ * signed APK the runtime loads. Pure aside from the packager call, which is a function so tests can
+ * stand in for it (the real one needs an Android SDK).
  *
  * The layout is the design doc's: `xml` → `res/raw/watchface.xml`, `assets` under `res/`, and the
  * WFF version in the manifest's `com.google.wear.watchface.format.version`, which is where the
@@ -45,7 +46,9 @@ internal object DwfPackaging {
   fun bundleFiles(source: DwfSource): Map<String, ByteArray> {
     val version =
       WffVersion.fromNumber(source.wffVersion)
-        ?: throw DwfPackagingFailed(listOf("error[bundle]: no such WFF version ${source.wffVersion}"))
+        ?: throw DwfPackagingFailed(
+          listOf("error[bundle]: no such WFF version ${source.wffVersion}"),
+        )
     val manifest =
       WffManifest(
         packageName = packageName(source),

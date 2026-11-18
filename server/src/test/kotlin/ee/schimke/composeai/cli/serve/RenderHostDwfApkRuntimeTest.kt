@@ -118,7 +118,10 @@ class RenderHostDwfApkRuntimeTest {
     assertEquals(src.wffXml, files[WffBundleLayout.WATCH_FACE_PATH]!!.decodeToString())
     assertEquals(listOf<Byte>(9), files["res/drawable/hand.png"]!!.toList())
     assertTrue(WffBundleLayout.WATCH_FACE_INFO_PATH in files)
-    assertTrue("res/drawable/preview.png" in files, "a preview is supplied when the design has none")
+    assertTrue(
+      "res/drawable/preview.png" in files,
+      "a preview is supplied when the design has none",
+    )
     val manifest = files[WffBundleLayout.MANIFEST_PATH]!!.decodeToString()
     assertTrue("""android:value="3"""" in manifest, manifest)
     assertFalse("\"face\"" in manifest, "the label is not an injection point")
@@ -128,7 +131,8 @@ class RenderHostDwfApkRuntimeTest {
     )
     assertEquals(1, options.versionCode)
 
-    // A different face is a different APK; the same digest in a new runtime (a restart) reuses disk.
+    // A different face is a different APK; the same digest in a new runtime (a restart) reuses
+    // disk.
     r.packageApk(DwfSource(wffXml = "<WatchFace/>", label = "other"))
     assertEquals(2, packs.size)
     runtime().packageApk(src)
