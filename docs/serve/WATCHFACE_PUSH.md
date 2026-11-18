@@ -74,7 +74,9 @@ none yet).
 - **No token:** every *public* published watch face on the server, from every account. Public is
   the builder's own visibility (the editor's Private / public switch, `ui_builder_share_design`).
 - **A device token:** those, plus the linked account's own published faces, private ones included.
-- A private design is never listed to, or downloadable by, anyone without its owner's token: `404`.
+- A private design is never listed to, or downloadable by, anyone without its owner's token. Its
+  APK asked for with no token is `401` (so the app offers to link); with another account's live
+  token it is `404`, so that watch does not discard a token that is fine.
 - A design that is not published for watches (a draft) is never listed, public or not.
 
 Each entry also carries `"visibility": "public" | "private"`, which the app ignores. When the server

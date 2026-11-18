@@ -553,7 +553,10 @@ class WatchFacePushRoutesTest {
 
     // A private design is never downloadable without its owner's token.
     val secretPath = "$api/designs/secret/apk"
-    assertEquals(404, send("GET", secretPath).code)
+    // No token: 401, so the app shows linking. Another account's live token: 404, not 401.
+    val anonymous = send("GET", secretPath)
+    assertEquals(401, anonymous.code)
+    assertEquals("Bearer", anonymous.headers["WWW-Authenticate"])
     assertEquals(404, send("GET", secretPath, bearer = bobToken).code)
     val secret = send("GET", secretPath, bearer = aliceToken)
     assertEquals(200, secret.code)

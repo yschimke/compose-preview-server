@@ -532,6 +532,24 @@ internal fun Route.installWatchFacePushRoutes(
     val designId = call.parameters["designId"].orEmpty()
     val publication = push.store.publication(designId)
     val requested = call.request.queryParameters["v"]?.toLongOrNull()
+    // A published private face asked for with no token is 401, so the app offers to link (the
+    // contract, watchface-tools#46). With somebody else's live token it stays 404: a 401 there
+    // would make that watch discard a token that is fine.
+    if (
+      publication != null &&
+        publication.published &&
+        caller.account == null &&
+        push.reach(service, publication, null) == null
+    ) {
+      call.noStore()
+      call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
+      call.respondError(
+        HttpStatusCode.Unauthorized,
+        "unauthorized",
+        "link a watch to download this",
+      )
+      return@get
+    }
     if (
       publication == null ||
         push.reach(service, publication, caller.account) == null ||
