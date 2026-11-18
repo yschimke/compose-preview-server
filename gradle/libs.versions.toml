@@ -503,7 +503,11 @@ composeai-contracts = "3.43.0"
 # (#1251). Built on compose-ai-tools 2.99.0, met here.
 # 3.135.0 offers the real watch-face runtime in the Native pane of a `wff-watchface` design: it
 # starts a dwf-preview session and opens its tab, or shows the server's refusal (compose-ui-builder#1258).
-composeai-ui-builder = "3.135.0"
+# 3.136.0 draws the real watch-face runtime inline in the Native pane (compose-ui-builder#1268),
+# exports leftover shape properties and fractional geometry without refusing (#1265) and draws a
+# palette thumbnail for every watch face component (#1267). Built on compose-ai-tools 2.99.3,
+# contracts 3.43.0 and watchface-tools 0.4.0, all met here.
+composeai-ui-builder = "3.136.0"
 # First published version of the optional publication server library (Maven Central).
 livery = "0.15.0"
 # Packages a design revision's WFF source into the signed APK the real watch-face runtime loads
