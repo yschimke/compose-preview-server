@@ -153,7 +153,10 @@ graphics-shapes = "1.1.0"
 # 2.99.1 makes `dwf-rc` documents self-contained: custom fonts travel as `FontData` and the
 # complication/photo placeholders as inline named bitmaps, so the "CMP Wasm (browser)" lane plays
 # watch faces instead of refusing them for want of an image or font host (compose-ai-tools#6632).
-composeai-tools = "2.99.1"
+# 2.99.2 gives a pushed face live frames too: the bridge's push path now waits for the runtime's
+# wallpaper engine instead of falling back to the screenshot path's forced 28th for good, and the
+# converted runtime's cache key moves to v4 (compose-ai-tools#6635).
+composeai-tools = "2.99.2"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
 # in that repository's `docs/design/REPOSITORY_LAYERS.md`: between the contracts and
