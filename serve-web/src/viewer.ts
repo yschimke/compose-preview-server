@@ -32,6 +32,8 @@ import {
     rcWasmDensity,
     snapshotKeepsCapturedLayout,
     type RcDocumentHeader,
+    fallbackOverlayBox,
+    type PixelSize,
     whenImageSized,
 } from "./viewer/rcCanvasSize.js";
 import {
@@ -1830,7 +1832,7 @@ function snapshotPainted(): boolean {
 // Pixel parity: lay an absolute overlay ([el], the Wasm iframe or live canvas) exactly over the
 // snapshot's rendered box so switching transports moves nothing. Falls back to the stage's content
 // box when there is no painted snapshot.
-function positionOverlay(el: HTMLElement) {
+function positionOverlay(el: HTMLElement, aspect?: PixelSize | null) {
     var sr = stage.getBoundingClientRect();
     var r = img.getBoundingClientRect();
     if (snapshotPainted() && r.width > 0 && r.height > 0) {
@@ -1839,6 +1841,17 @@ function positionOverlay(el: HTMLElement) {
         el.style.top = r.top - sr.top - stage.clientTop + "px";
         el.style.width = r.width + "px";
         el.style.height = r.height + "px";
+    } else if (aspect) {
+        // No snapshot box to mirror, but the document's own size is known: keep its shape.
+        var box = fallbackOverlayBox(
+            { width: stage.clientWidth, height: stage.clientHeight },
+            12,
+            aspect,
+        );
+        el.style.left = box.left + "px";
+        el.style.top = box.top + "px";
+        el.style.width = box.width + "px";
+        el.style.height = box.height + "px";
     } else {
         // No snapshot box to mirror (e.g. its render 404'd): fill the stage's content box.
         el.style.left = "12px";
@@ -3312,7 +3325,10 @@ function closeRc() {
 // announces its first rendered frame.
 function positionRcWasmFrame() {
     if (!rcWasmFrame) return;
-    positionOverlay(rcWasmFrame);
+    positionOverlay(
+        rcWasmFrame,
+        rcWasmLoadedHeader ? rcWasmLoadedHeader.size : null,
+    );
     refreshRcWasmDensity();
 }
 // The `density` the iframe was loaded with, and the header it came from; null until a URL is
@@ -3429,8 +3445,11 @@ function openRcWasm() {
     // page) before the iframe URL is built.
     rcDocHeader().then(function (header) {
         if (seq !== rcWasmOpenSeq || !rcWasmFrame) return; // closed or reopened meanwhile
-        var density = rcWasmDensityNow(header);
         rcWasmLoadedHeader = header;
+        // The header's size shapes the frame when there is no snapshot box to mirror; place it
+        // before reading the density, which scales with the frame's width.
+        positionOverlay(rcWasmFrame, header ? header.size : null);
+        var density = rcWasmDensityNow(header);
         rcWasmLoadedDensity = density;
         rcWasmFrame.src = rcWasmSrc(density);
     });
