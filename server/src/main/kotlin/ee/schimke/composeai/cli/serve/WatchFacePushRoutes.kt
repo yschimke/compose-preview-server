@@ -1,0 +1,1004 @@
+package ee.schimke.composeai.cli.serve
+
+import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
+import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
+import ee.schimke.composeai.uibuilder.protocol.GetSnapshotRequestV1
+import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
+import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
+import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
+import ee.schimke.composeai.web.WebEscaping
+import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
+import io.ktor.server.application.ApplicationCall
+import io.ktor.server.plugins.origin
+import io.ktor.server.request.receiveParameters
+import io.ktor.server.request.receiveStream
+import io.ktor.server.response.respondBytes
+import io.ktor.server.response.respondText
+import io.ktor.server.routing.Route
+import io.ktor.server.routing.delete
+import io.ktor.server.routing.get
+import io.ktor.server.routing.post
+import io.ktor.server.routing.put
+import java.nio.charset.StandardCharsets
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.future.await
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
+
+/**
+ * Everything the push routes need from the host. Null on a host without the UI builder's durable
+ * state: there is then nothing to publish and nowhere to keep a device.
+ */
+class WatchFacePush
+internal constructor(
+  internal val store: WatchFacePushStore,
+  internal val packaging: () -> WatchFacePushPackaging,
+  /** The WFF a design exports ([deriveDwfSource] in production); null when it does not. */
+  internal val sourceFor: (DesignDocumentV1) -> DwfSource?,
+  /** Whether a builder catalog draws watch faces (its native backend is `android-dwf`). */
+  internal val isWatchFaceCatalog: (catalogId: String) -> Boolean,
+  /** A picture of a design at a revision, drawn as [AuthenticatedUiBuilderActor]; null if none. */
+  internal val preview:
+    suspend (actor: AuthenticatedUiBuilderActor, designId: String, revision: Long) -> ByteArray? =
+    { _, _, _ ->
+      null
+    },
+  /** Where a signed-out person signs in and comes back to the given path; null: no sign-in. */
+  internal val signInPath: ((returnTo: String) -> String)? = null,
+  internal val clock: () -> Long = System::currentTimeMillis,
+) {
+  internal val codes = WatchFacePushDeviceCodes(store, clock)
+  internal val builds = WatchFacePushBuilds(store, packaging)
+  internal val csrf = ServeAgentGrants.Csrf()
+
+  /** Starting a link: a person does it once per watch, so ten a minute per address is plenty. */
+  internal val codeLimiter =
+    ServeRateLimiter(permitsPerWindow = 10, windowSeconds = 60, maxConcurrent = 4, clock = clock)
+
+  /** Polls, per address; each code is paced on its own by [WatchFacePushDeviceCodes]. */
+  internal val pollLimiter =
+    ServeRateLimiter(permitsPerWindow = 120, windowSeconds = 60, maxConcurrent = 8, clock = clock)
+
+  /** Anonymous reads (listing, APKs, pictures), per address. */
+  internal val anonymousLimiter =
+    ServeRateLimiter(permitsPerWindow = 60, windowSeconds = 60, maxConcurrent = 4, clock = clock)
+
+  /** Anonymous APK downloads, per address, on top of [anonymousLimiter]: they are the big ones. */
+  internal val anonymousApkLimiter =
+    ServeRateLimiter(permitsPerWindow = 20, windowSeconds = 60, maxConcurrent = 2, clock = clock)
+
+  /** Reads with a device token, per device. */
+  internal val deviceLimiter =
+    ServeRateLimiter(permitsPerWindow = 240, windowSeconds = 60, maxConcurrent = 4, clock = clock)
+
+  // ---------------------------------------------------------------- publishing
+
+  sealed interface Outcome {
+    data class Ok(val status: WatchFacePushPublicationV1) : Outcome
+
+    data class Refused(val status: HttpStatusCode, val code: String, val reason: String) : Outcome
+  }
+
+  /**
+   * Publish [designId]'s current revision to watches, as its owner. Builds the APK straight away
+   * when this host can, so a face the packager refuses is refused here, to the person who can fix
+   * it, with the packager's own diagnostics — not silently left out of every watch's list.
+   */
+  internal suspend fun publish(
+    service: UiBuilderServicePort,
+    actor: AuthenticatedUiBuilderActor,
+    designId: String,
+  ): Outcome {
+    val (document, owner) =
+      when (val owned = ownedDocument(service, actor, designId)) {
+        is Owned.Refused -> return owned.outcome
+        is Owned.Document -> owned.document to owned.ownerActorId
+      }
+    val source =
+      sourceFor(document)
+        ?: return Outcome.Refused(
+          HttpStatusCode.UnprocessableEntity,
+          "not_exportable",
+          "this design does not export to Watch Face Format; the editor's code pane lists why",
+        )
+    source.problem()?.let {
+      return Outcome.Refused(HttpStatusCode.UnprocessableEntity, "not_exportable", it)
+    }
+    // The owner's account, not the caller's: an agent publishing for its approver publishes to
+    // the approver's watches.
+    val candidate =
+      withContext(Dispatchers.IO) {
+        store.publish(designId, owner, document.revision, document.title, source)
+      }
+    val build = withContext(Dispatchers.IO) { builds.build(candidate) }
+    if (build is WatchFacePushBuilds.Result.Failed) {
+      return Outcome.Refused(
+        HttpStatusCode.UnprocessableEntity,
+        "packaging_failed",
+        build.diagnostics.joinToString("\n"),
+      )
+    }
+    return Outcome.Ok(status(candidate, build))
+  }
+
+  internal suspend fun unpublish(
+    service: UiBuilderServicePort,
+    actor: AuthenticatedUiBuilderActor,
+    designId: String,
+  ): Outcome {
+    when (val owned = ownedDocument(service, actor, designId)) {
+      is Owned.Refused -> return owned.outcome
+      is Owned.Document -> Unit
+    }
+    val updated = withContext(Dispatchers.IO) { store.unpublish(designId) }
+    return Outcome.Ok(
+      updated?.let { status(it, null) }
+        ?: WatchFacePushPublicationV1(designId = designId, published = false),
+    )
+  }
+
+  internal suspend fun publicationStatus(
+    service: UiBuilderServicePort,
+    actor: AuthenticatedUiBuilderActor,
+    designId: String,
+  ): Outcome {
+    if (!service.canRead(actor, designId)) {
+      return Outcome.Refused(HttpStatusCode.NotFound, "not_found", "no such design")
+    }
+    val publication =
+      store.publication(designId)
+        ?: return Outcome.Ok(WatchFacePushPublicationV1(designId = designId, published = false))
+    return Outcome.Ok(status(publication, builds.cached(publication)))
+  }
+
+  private sealed interface Owned {
+    data class Document(val document: DesignDocumentV1, val ownerActorId: String) : Owned
+
+    data class Refused(val outcome: Outcome.Refused) : Owned
+  }
+
+  /**
+   * The design as its owner reads it. Publishing to watches is the owner's decision, like making a
+   * design public: the runtime only tells the owner who the owner is, so a design whose access list
+   * comes back is one this actor owns (or acts for the owner of).
+   */
+  private suspend fun ownedDocument(
+    service: UiBuilderServicePort,
+    actor: AuthenticatedUiBuilderActor,
+    designId: String,
+  ): Owned {
+    val notFound =
+      Owned.Refused(Outcome.Refused(HttpStatusCode.NotFound, "not_found", "no such design"))
+    if (designId.isBlank()) return notFound
+    val actions = service.designActions(actor, designId) ?: return notFound
+    val snapshot =
+      service.executeMapped(GetSnapshotRequestV1(designId = designId), actor)
+        as? UiBuilderServiceResponse.Snapshot ?: return notFound
+    val owner = snapshot.snapshot.access?.ownerActorId
+    if (
+      DesignAccessActionV1.WRITE !in actions || owner == null || owner !in actor.accessIdentities
+    ) {
+      return Owned.Refused(
+        Outcome.Refused(
+          HttpStatusCode.Forbidden,
+          "owner_required",
+          "only the design's owner can publish it to watches",
+        ),
+      )
+    }
+    val document = snapshot.snapshot.state.document
+    if (!isWatchFaceCatalog(document.catalogPin.systemId)) {
+      return Owned.Refused(
+        Outcome.Refused(
+          HttpStatusCode.UnprocessableEntity,
+          "not_a_watch_face",
+          "catalog `${document.catalogPin.systemId}` does not draw watch faces, so this design " +
+            "cannot be installed on a watch",
+        ),
+      )
+    }
+    return Owned.Document(document, owner)
+  }
+
+  internal fun status(
+    publication: WatchFacePushStore.Publication,
+    build: WatchFacePushBuilds.Result?,
+  ): WatchFacePushPublicationV1 =
+    WatchFacePushPublicationV1(
+      designId = publication.designId,
+      published = publication.published,
+      version = publication.version,
+      revision = publication.revision,
+      title = publication.title,
+      faceName = publication.faceName,
+      packageName = WatchFacePushNaming.packageName(publication.faceName),
+      wffVersion = publication.wffVersion,
+      publishedAtEpochMillis = publication.publishedAtEpochMillis,
+      apk =
+        when (build) {
+          is WatchFacePushBuilds.Result.Built ->
+            WatchFacePushApkStatusV1(
+              status = "ready",
+              sha256 = build.apk.sha256,
+              sizeBytes = build.apk.sizeBytes,
+            )
+          is WatchFacePushBuilds.Result.Unavailable ->
+            WatchFacePushApkStatusV1(
+              status = "unavailable",
+              code = build.code,
+              reason = build.reason,
+            )
+          is WatchFacePushBuilds.Result.Failed ->
+            WatchFacePushApkStatusV1(
+              status = "failed",
+              code = "packaging_failed",
+              reason = build.diagnostics.joinToString("\n"),
+            )
+          null -> if (publication.published) WatchFacePushApkStatusV1(status = "pending") else null
+        },
+    )
+
+  // ------------------------------------------------------------------- reading
+
+  /**
+   * How a caller reaches [publication], or null when they may not: `public` for a design whose
+   * owner made it public (anyone, no token), `private` for one only the linked account reads.
+   */
+  internal suspend fun reach(
+    service: UiBuilderServicePort,
+    publication: WatchFacePushStore.Publication,
+    accountActorId: String?,
+  ): String? {
+    if (!publication.published) return null
+    if (service.canRead(ANONYMOUS, publication.designId)) return VISIBILITY_PUBLIC
+    if (
+      accountActorId != null &&
+        publication.accountActorId == accountActorId &&
+        service.canRead(AuthenticatedUiBuilderActor(accountActorId), publication.designId)
+    ) {
+      return VISIBILITY_PRIVATE
+    }
+    return null
+  }
+
+  companion object {
+    const val BASE_PATH = "/api/watchface-push/v1"
+    const val LINK_PATH = "/link"
+    const val PUBLICATION_PATH = "/api/ui-builder/v1/designs/{designId}/watch-push"
+    const val VISIBILITY_PUBLIC = "public"
+    const val VISIBILITY_PRIVATE = "private"
+    internal val ANONYMOUS =
+      AuthenticatedUiBuilderActor(ServeUiBuilderVisibility.ANONYMOUS_ACTOR_ID)
+  }
+}
+
+// ---------------------------------------------------------------------- wire
+
+@Serializable
+internal data class WatchFacePushDeviceCodeRequestV1(
+  val deviceName: String? = null,
+  val wearOsApi: Int? = null,
+)
+
+@Serializable
+internal data class WatchFacePushDeviceCodeV1(
+  val code: String,
+  val pollSecret: String,
+  val verificationUrl: String,
+  val expiresInSeconds: Int,
+  val pollIntervalSeconds: Int,
+)
+
+@Serializable internal data class WatchFacePushPollRequestV1(val pollSecret: String? = null)
+
+@Serializable
+internal data class WatchFacePushPollResponseV1(
+  val status: String,
+  val deviceToken: String? = null,
+  val accountName: String? = null,
+)
+
+@Serializable
+internal data class WatchFacePushDesignV1(
+  val id: String,
+  val title: String,
+  val description: String? = null,
+  val previewUrl: String,
+  val version: Long,
+  val versionName: String? = null,
+  val wffVersion: Int,
+  val packageName: String,
+  val apkUrl: String,
+  val sha256: String,
+  val sizeBytes: Long? = null,
+  val validationToken: String,
+  /** Not in the app's model (it ignores unknown keys): `public` or `private`. */
+  val visibility: String? = null,
+)
+
+@Serializable
+internal data class WatchFacePushDesignListV1(
+  val designs: List<WatchFacePushDesignV1>,
+  /** Present only when this host cannot build APKs, saying why; the list is then empty. */
+  val packaging: WatchFacePushStatusV1? = null,
+)
+
+@Serializable
+internal data class WatchFacePushInstallEventV1(
+  val designId: String,
+  val version: Long,
+  val result: String,
+  val errorKind: String? = null,
+  val wearOsApi: Int? = null,
+)
+
+@Serializable
+internal data class WatchFacePushStatusV1(
+  val available: Boolean,
+  val code: String? = null,
+  val reason: String? = null,
+  val marketplacePackage: String = WatchFacePushNaming.MARKETPLACE_PACKAGE,
+  val signerCertificateSha256: String? = null,
+)
+
+@Serializable internal data class WatchFacePushErrorV1(val error: String, val message: String)
+
+@Serializable
+internal data class WatchFacePushLinkedDeviceV1(
+  val id: String,
+  val deviceName: String,
+  val wearOsApi: Int? = null,
+  val createdAtEpochMillis: Long,
+  val lastUsedEpochMillis: Long? = null,
+)
+
+@Serializable
+internal data class WatchFacePushDevicesV1(val devices: List<WatchFacePushLinkedDeviceV1>)
+
+@Serializable
+data class WatchFacePushApkStatusV1(
+  /** `ready`, `pending` (built on first listing), `unavailable` (this host), `failed`. */
+  val status: String,
+  val sha256: String? = null,
+  val sizeBytes: Long? = null,
+  val code: String? = null,
+  val reason: String? = null,
+)
+
+@Serializable
+data class WatchFacePushPublicationV1(
+  val schema: String = "compose-preview/watchface-push-publication/v1",
+  val designId: String,
+  val published: Boolean,
+  val version: Long? = null,
+  val revision: Long? = null,
+  val title: String? = null,
+  val faceName: String? = null,
+  val packageName: String? = null,
+  val wffVersion: Int? = null,
+  val publishedAtEpochMillis: Long? = null,
+  val apk: WatchFacePushApkStatusV1? = null,
+)
+
+internal val WATCHFACE_PUSH_JSON = Json {
+  ignoreUnknownKeys = true
+  explicitNulls = false
+  encodeDefaults = true
+}
+
+private const val MAX_BODY_BYTES = 16 * 1024
+private const val APK_CONTENT_TYPE = "application/vnd.android.package-archive"
+
+/**
+ * The design's picture at [revision] for a watch's list, from the listing cards' cache, drawn on
+ * demand (as [actor], the design's owner) when it is not there yet; null when it cannot be drawn.
+ */
+internal suspend fun ServeUiBuilderThumbnails.watchFacePreview(
+  actor: AuthenticatedUiBuilderActor,
+  designId: String,
+  revision: Long,
+): ByteArray? {
+  cachedRevision(designId, revision)?.let {
+    return it.png
+  }
+  return withTimeoutOrNull(PREVIEW_DRAW_TIMEOUT_MILLIS) {
+      runCatching { submit(designId, actor, urgent = false, revision = revision).await() }
+        .getOrNull()
+    }
+    ?.png
+}
+
+private const val PREVIEW_DRAW_TIMEOUT_MILLIS = 30_000L
+
+// -------------------------------------------------------------------- routes
+
+/**
+ * `/api/watchface-push/v1/…`, `/link`, and the publish flag under a design.
+ *
+ * The watch's own calls authenticate with nothing or with `Authorization: Bearer <deviceToken>`,
+ * read here and never handed to [authorization]: a device token is not a UI-builder credential and
+ * grants nothing outside this API. The person's calls (`/link`, the device list, publishing) go
+ * through [authorization] like every other UI-builder route.
+ */
+internal fun Route.installWatchFacePushRoutes(
+  service: UiBuilderServicePort,
+  authorization: ServeUiBuilderAuthorization,
+  push: WatchFacePush,
+  /** The origin the caller addressed, for the absolute URLs the watch is handed. */
+  origin: (ApplicationCall) -> String,
+  /** Who to charge for rate limiting: the client address under the forwarding policy. */
+  clientAddress: (ApplicationCall) -> String,
+  /** A server-styled HTML page around [body]. */
+  page: (call: ApplicationCall, title: String, body: String) -> String,
+) {
+  post("${WatchFacePush.BASE_PATH}/device-codes") {
+    call.noStore()
+    if (!call.admit(push.codeLimiter, "ip:" + clientAddress(call))) return@post
+    val request =
+      call.receiveJson(WatchFacePushDeviceCodeRequestV1.serializer(), allowEmpty = true)
+        ?: return@post
+    val name =
+      request.deviceName
+        ?.filter { !it.isISOControl() }
+        ?.trim()
+        ?.take(64)
+        ?.takeIf { it.isNotEmpty() } ?: "Wear OS watch"
+    val issued = push.codes.issue(name, request.wearOsApi?.takeIf { it in 1..1000 })
+    if (issued == null) {
+      call.response.headers.append(HttpHeaders.RetryAfter, "60")
+      call.respondError(HttpStatusCode.TooManyRequests, "busy", "too many links are in progress")
+      return@post
+    }
+    val (pending, secret) = issued
+    call.respondJson(
+      WatchFacePushDeviceCodeV1.serializer(),
+      WatchFacePushDeviceCodeV1(
+        code = pending.code,
+        pollSecret = secret,
+        verificationUrl = origin(call) + WatchFacePush.LINK_PATH + "?code=" + pending.code,
+        expiresInSeconds = push.codes.lifetimeSeconds,
+        pollIntervalSeconds = push.codes.pollIntervalSeconds,
+      ),
+    )
+  }
+
+  post("${WatchFacePush.BASE_PATH}/device-codes/{code}/poll") {
+    call.noStore()
+    if (!call.admit(push.pollLimiter, "ip:" + clientAddress(call))) return@post
+    val request = call.receiveJson(WatchFacePushPollRequestV1.serializer()) ?: return@post
+    when (val poll = push.codes.poll(call.parameters["code"].orEmpty(), request.pollSecret)) {
+      WatchFacePushDeviceCodes.Poll.NotFound ->
+        call.respondError(HttpStatusCode.NotFound, "not_found", "unknown or consumed code")
+      is WatchFacePushDeviceCodes.Poll.TooFast -> {
+        call.response.headers.append(HttpHeaders.RetryAfter, poll.retryAfterSeconds.toString())
+        call.respondError(HttpStatusCode.TooManyRequests, "slow_down", "poll less often")
+      }
+      WatchFacePushDeviceCodes.Poll.Pending ->
+        call.respondPoll(WatchFacePushPollResponseV1("pending"))
+      WatchFacePushDeviceCodes.Poll.Denied ->
+        call.respondPoll(WatchFacePushPollResponseV1("denied"))
+      WatchFacePushDeviceCodes.Poll.Expired ->
+        call.respondPoll(WatchFacePushPollResponseV1("expired"))
+      is WatchFacePushDeviceCodes.Poll.Approved ->
+        call.respondPoll(
+          WatchFacePushPollResponseV1("approved", poll.deviceToken, poll.accountName),
+        )
+    }
+  }
+
+  get("${WatchFacePush.BASE_PATH}/status") {
+    call.noStore()
+    call.respondJson(WatchFacePushStatusV1.serializer(), push.packagingStatus())
+  }
+
+  get("${WatchFacePush.BASE_PATH}/designs") {
+    call.noStore()
+    val caller = call.watchCaller(push, clientAddress) ?: return@get
+    if (!call.admit(caller.limiter, caller.key)) return@get
+    val packaging = push.packagingStatus()
+    val designs = mutableListOf<WatchFacePushDesignV1>()
+    for (publication in push.store.published()) {
+      val visibility = push.reach(service, publication, caller.account) ?: continue
+      val built =
+        when (val build = withContext(Dispatchers.IO) { push.builds.build(publication) }) {
+          is WatchFacePushBuilds.Result.Built -> build.apk
+          is WatchFacePushBuilds.Result.Unavailable -> continue
+          is WatchFacePushBuilds.Result.Failed -> {
+            System.err.println(
+              "serve: watchface-push: ${publication.designId} v${publication.version} is not " +
+                "listed; the packager refused it: ${build.diagnostics.firstOrNull()}",
+            )
+            continue
+          }
+        }
+      designs += push.listing(origin(call), publication, built, visibility)
+    }
+    call.respondJson(
+      WatchFacePushDesignListV1.serializer(),
+      WatchFacePushDesignListV1(designs, packaging.takeIf { !it.available }),
+    )
+  }
+
+  get("${WatchFacePush.BASE_PATH}/designs/{designId}/apk") {
+    val caller = call.watchCaller(push, clientAddress) ?: return@get
+    if (!call.admit(caller.limiter, caller.key)) return@get
+    if (caller.account == null && !call.admit(push.anonymousApkLimiter, caller.key)) return@get
+    val designId = call.parameters["designId"].orEmpty()
+    val publication = push.store.publication(designId)
+    val requested = call.request.queryParameters["v"]?.toLongOrNull()
+    if (
+      publication == null ||
+        push.reach(service, publication, caller.account) == null ||
+        (requested != null && requested != publication.version)
+    ) {
+      call.noStore()
+      call.respondError(HttpStatusCode.NotFound, "not_found", "no such published design")
+      return@get
+    }
+    when (val build = withContext(Dispatchers.IO) { push.builds.build(publication) }) {
+      is WatchFacePushBuilds.Result.Unavailable -> {
+        call.noStore()
+        call.respondError(HttpStatusCode.ServiceUnavailable, build.code, build.reason)
+      }
+      is WatchFacePushBuilds.Result.Failed -> {
+        call.noStore()
+        call.respondError(HttpStatusCode.NotFound, "not_found", "this design has no APK")
+      }
+      is WatchFacePushBuilds.Result.Built -> {
+        val etag = "\"${build.apk.sha256}\""
+        call.response.headers.append(HttpHeaders.ETag, etag)
+        // Private: it was served behind the reader's token (or to one address, for a public
+        // face), and the URL is the same for every version.
+        call.response.headers.append(HttpHeaders.CacheControl, "private, no-cache")
+        call.response.headers.append("X-Watchface-Version", publication.version.toString())
+        if (
+          call.request.headers[HttpHeaders.IfNoneMatch]?.split(',')?.any { it.trim() == etag } ==
+            true
+        ) {
+          call.respondText("", status = HttpStatusCode.NotModified)
+          return@get
+        }
+        call.response.headers.append(
+          HttpHeaders.ContentDisposition,
+          "attachment; filename=\"${build.apk.packageName}-${publication.version}.apk\"",
+        )
+        val bytes = withContext(Dispatchers.IO) { build.file.readBytes() }
+        call.respondBytes(bytes, ContentType.parse(APK_CONTENT_TYPE))
+      }
+    }
+  }
+
+  get("${WatchFacePush.BASE_PATH}/designs/{designId}/preview.png") {
+    if (!call.admit(push.anonymousLimiter, "ip:" + clientAddress(call))) return@get
+    val designId = call.parameters["designId"].orEmpty()
+    val publication = push.store.publication(designId)
+    val version = call.request.queryParameters["v"]?.toLongOrNull()
+    val signature = call.request.queryParameters["sig"]
+    if (
+      publication == null ||
+        !publication.published ||
+        version != publication.version ||
+        !ServeUrls.tokensMatch(push.store.previewSignature(designId, version), signature)
+    ) {
+      call.noStore()
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return@get
+    }
+    val png =
+      push.preview(
+        AuthenticatedUiBuilderActor(publication.accountActorId),
+        designId,
+        publication.revision,
+      )
+    if (png == null) {
+      call.noStore()
+      call.respondText("no preview", status = HttpStatusCode.NotFound)
+      return@get
+    }
+    // Keyed by version and signature in the URL, so the picture behind one never changes.
+    call.response.headers.append(HttpHeaders.CacheControl, "private, max-age=86400")
+    call.respondBytes(png, ContentType.Image.PNG)
+  }
+
+  post("${WatchFacePush.BASE_PATH}/installs") {
+    call.noStore()
+    val caller = call.watchCaller(push, clientAddress, required = true) ?: return@post
+    if (!call.admit(caller.limiter, caller.key)) return@post
+    call.receiveJson(WatchFacePushInstallEventV1.serializer()) ?: return@post
+    // Accepted and not kept: the app reports fire-and-forget, and nothing here reads it yet.
+    call.respondText("", status = HttpStatusCode.NoContent)
+  }
+
+  // The person's own linked watches, for a page or a script; `/link` is the page.
+  get("${WatchFacePush.BASE_PATH}/devices") {
+    call.noStore()
+    val account =
+      call.signedInAccount(authorization)
+        ?: run {
+          call.respondError(HttpStatusCode.Unauthorized, "sign_in_required", "sign in first")
+          return@get
+        }
+    call.respondJson(
+      WatchFacePushDevicesV1.serializer(),
+      WatchFacePushDevicesV1(push.store.devices(account).map { it.wire() }),
+    )
+  }
+
+  delete("${WatchFacePush.BASE_PATH}/devices/{deviceId}") {
+    call.noStore()
+    val account =
+      call.signedInAccount(authorization)
+        ?: run {
+          call.respondError(HttpStatusCode.Unauthorized, "sign_in_required", "sign in first")
+          return@delete
+        }
+    val removed =
+      withContext(Dispatchers.IO) {
+        push.store.revoke(call.parameters["deviceId"].orEmpty(), account)
+      }
+    if (removed) call.respondText("", status = HttpStatusCode.NoContent)
+    else call.respondError(HttpStatusCode.NotFound, "not_found", "no such linked watch")
+  }
+
+  get(WatchFacePush.LINK_PATH) {
+    call.noStore()
+    call.response.headers.append("Referrer-Policy", "no-referrer")
+    val account = call.signedInAccount(authorization)
+    val code = call.request.queryParameters["code"]
+    call.respondText(
+      page(call, "Link a watch", push.linkPage(account, code, call.request.origin.uri)),
+      ContentType.Text.Html,
+    )
+  }
+
+  post(WatchFacePush.LINK_PATH) {
+    call.noStore()
+    call.response.headers.append("Referrer-Policy", "no-referrer")
+    val account = call.signedInAccount(authorization)
+    if (account == null) {
+      call.respondText(
+        page(call, "Link a watch", push.linkPage(null, null, WatchFacePush.LINK_PATH)),
+        ContentType.Text.Html,
+        HttpStatusCode.Forbidden,
+      )
+      return@post
+    }
+    val form = call.receiveParameters()
+    val action = form["action"].orEmpty()
+    val subject = form["subject"].orEmpty()
+    if (!push.csrf.verify(subject, account, action, form["seal"])) {
+      call.respondText(
+        page(call, "Link a watch", push.linkMessage("This form has expired. Open the link again.")),
+        ContentType.Text.Html,
+        HttpStatusCode.Forbidden,
+      )
+      return@post
+    }
+    val message =
+      withContext(Dispatchers.IO) {
+        when (action) {
+          LINK_APPROVE ->
+            if (push.codes.approve(subject, account)) {
+              "Linked. Your watch will show your watch faces in a few seconds."
+            } else "This code has expired or was already used. Start again on the watch."
+          LINK_DENY -> {
+            push.codes.deny(subject)
+            "Not linked. The watch has been told."
+          }
+          LINK_REVOKE ->
+            if (push.store.revoke(subject, account))
+              "Unlinked. That watch can no longer read your designs."
+            else "That watch was already unlinked."
+          else -> "Nothing to do."
+        }
+      }
+    call.respondText(page(call, "Link a watch", push.linkMessage(message)), ContentType.Text.Html)
+  }
+
+  get(WatchFacePush.PUBLICATION_PATH) {
+    call.noStore()
+    val actor =
+      call.authorizedActorOrRespond(authorization, UiBuilderRouteCapability.READ) ?: return@get
+    call.respondOutcome(
+      push.publicationStatus(service, actor, call.parameters["designId"].orEmpty()),
+    )
+  }
+
+  put(WatchFacePush.PUBLICATION_PATH) {
+    call.noStore()
+    val actor =
+      call.authorizedActorOrRespond(authorization, UiBuilderRouteCapability.WRITE) ?: return@put
+    call.respondOutcome(push.publish(service, actor, call.parameters["designId"].orEmpty()))
+  }
+
+  delete(WatchFacePush.PUBLICATION_PATH) {
+    call.noStore()
+    val actor =
+      call.authorizedActorOrRespond(authorization, UiBuilderRouteCapability.WRITE) ?: return@delete
+    call.respondOutcome(push.unpublish(service, actor, call.parameters["designId"].orEmpty()))
+  }
+}
+
+internal const val LINK_APPROVE = "approve"
+internal const val LINK_DENY = "deny"
+internal const val LINK_REVOKE = "revoke"
+
+internal fun WatchFacePush.packagingStatus(): WatchFacePushStatusV1 =
+  when (val packaging = packaging()) {
+    is WatchFacePushPackaging.Ready ->
+      WatchFacePushStatusV1(
+        available = true,
+        signerCertificateSha256 = packaging.signerCertificateSha256,
+      )
+    is WatchFacePushPackaging.Unavailable ->
+      WatchFacePushStatusV1(available = false, code = packaging.code, reason = packaging.reason)
+  }
+
+internal fun WatchFacePush.listing(
+  origin: String,
+  publication: WatchFacePushStore.Publication,
+  apk: WatchFacePushStore.Apk,
+  visibility: String,
+): WatchFacePushDesignV1 {
+  val id = WebEscaping.urlEncodeSegment(publication.designId)
+  val designPath = "$origin${WatchFacePush.BASE_PATH}/designs/$id"
+  return WatchFacePushDesignV1(
+    id = publication.designId,
+    title = publication.title.ifBlank { publication.designId },
+    previewUrl =
+      "$designPath/preview.png?v=${publication.version}&sig=" +
+        store.previewSignature(publication.designId, publication.version),
+    version = publication.version,
+    versionName = "${publication.version} (revision ${publication.revision})",
+    wffVersion = publication.wffVersion,
+    packageName = apk.packageName,
+    apkUrl = "$designPath/apk?v=${publication.version}",
+    sha256 = apk.sha256,
+    sizeBytes = apk.sizeBytes,
+    validationToken = apk.validationToken,
+    visibility = visibility,
+  )
+}
+
+private fun WatchFacePushStore.Device.wire() =
+  WatchFacePushLinkedDeviceV1(id, deviceName, wearOsApi, createdAtEpochMillis, lastUsedEpochMillis)
+
+/** Who is asking on a watch route: anonymous by address, or a linked device by its id. */
+private class WatchCaller(
+  val account: String?,
+  val limiter: ServeRateLimiter,
+  val key: String,
+)
+
+/**
+ * The caller of a watch route, or null once a 401 has been written. No `Authorization` header is an
+ * anonymous caller (unless [required]); any `Authorization` that is not a live device token is 401,
+ * so a watch whose token was revoked unlinks rather than silently browsing anonymously.
+ */
+private suspend fun ApplicationCall.watchCaller(
+  push: WatchFacePush,
+  clientAddress: (ApplicationCall) -> String,
+  required: Boolean = false,
+): WatchCaller? {
+  val header = request.headers[HttpHeaders.Authorization]
+  if (header == null && !required) {
+    return WatchCaller(null, push.anonymousLimiter, "ip:" + clientAddress(this))
+  }
+  val token =
+    header?.trim()?.takeIf { it.startsWith("Bearer ", ignoreCase = true) }?.substring(7)?.trim()
+  val device = token?.takeIf { it.isNotEmpty() }?.let(push.store::deviceForToken)
+  if (device == null) {
+    noStore()
+    response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
+    respondError(HttpStatusCode.Unauthorized, "unauthorized", "link this watch again")
+    return null
+  }
+  withContext(Dispatchers.IO) { push.store.touch(device) }
+  return WatchCaller(device.accountActorId, push.deviceLimiter, "device:" + device.id)
+}
+
+/** The signed-in person's account, or null for a signed-out visitor (or an anonymous reader). */
+private fun ApplicationCall.signedInAccount(authorization: ServeUiBuilderAuthorization): String? {
+  val decision =
+    authorization.authorize(this, UiBuilderRouteCapability.READ, null)
+      as? UiBuilderAuthorizationDecision.Authorized ?: return null
+  val actor = decision.actor
+  val account = actor.onBehalfOfActorId?.takeIf { it.isNotBlank() } ?: actor.actorId
+  if (account == ServeUiBuilderVisibility.ANONYMOUS_ACTOR_ID || account.startsWith("anonymous:")) {
+    return null
+  }
+  return account
+}
+
+private suspend fun ApplicationCall.authorizedActorOrRespond(
+  authorization: ServeUiBuilderAuthorization,
+  capability: UiBuilderRouteCapability,
+): AuthenticatedUiBuilderActor? =
+  when (val decision = authorization.authorize(this, capability, null)) {
+    is UiBuilderAuthorizationDecision.Authorized -> decision.actor
+    UiBuilderAuthorizationDecision.Missing -> {
+      response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
+      respondError(HttpStatusCode.Unauthorized, "unauthorized", "authentication is required")
+      null
+    }
+    UiBuilderAuthorizationDecision.Forbidden -> {
+      respondError(HttpStatusCode.Forbidden, "forbidden", "UI-builder access is required")
+      null
+    }
+  }
+
+private suspend fun ApplicationCall.respondOutcome(outcome: WatchFacePush.Outcome) {
+  when (outcome) {
+    is WatchFacePush.Outcome.Ok ->
+      respondJson(WatchFacePushPublicationV1.serializer(), outcome.status)
+    is WatchFacePush.Outcome.Refused -> respondError(outcome.status, outcome.code, outcome.reason)
+  }
+}
+
+/** False (with a 429 and `Retry-After` written) when [key] is over [limiter]'s budget. */
+private suspend fun ApplicationCall.admit(limiter: ServeRateLimiter, key: String): Boolean =
+  when (val decision = limiter.tryAcquire(key)) {
+    is ServeRateLimiter.Decision.Admitted -> {
+      // Charged per request; the permit only bounds concurrency while this handler runs, and the
+      // handlers here are short, so it is released at once.
+      decision.release()
+      true
+    }
+    is ServeRateLimiter.Decision.Throttled -> {
+      noStore()
+      response.headers.append(HttpHeaders.RetryAfter, decision.retryAfterSeconds.toString())
+      respondError(HttpStatusCode.TooManyRequests, "rate_limited", decision.reason)
+      false
+    }
+  }
+
+private fun ApplicationCall.noStore() {
+  if (response.headers[HttpHeaders.CacheControl] == null) {
+    response.headers.append(HttpHeaders.CacheControl, "no-store")
+  }
+}
+
+private suspend fun <T> ApplicationCall.receiveJson(
+  serializer: KSerializer<T>,
+  allowEmpty: Boolean = false,
+): T? {
+  val bytes =
+    withContext(Dispatchers.IO) { receiveStream().use { it.readNBytes(MAX_BODY_BYTES + 1) } }
+  if (bytes.size > MAX_BODY_BYTES) {
+    respondError(HttpStatusCode.PayloadTooLarge, "too_large", "request body too large")
+    return null
+  }
+  val text = bytes.toString(StandardCharsets.UTF_8).ifBlank { if (allowEmpty) "{}" else "" }
+  return try {
+    WATCHFACE_PUSH_JSON.decodeFromString(serializer, text)
+  } catch (_: SerializationException) {
+    respondError(
+      HttpStatusCode.BadRequest,
+      "bad_request",
+      "the body is not the JSON this route reads",
+    )
+    null
+  } catch (_: IllegalArgumentException) {
+    respondError(
+      HttpStatusCode.BadRequest,
+      "bad_request",
+      "the body is not the JSON this route reads",
+    )
+    null
+  }
+}
+
+private suspend fun <T> ApplicationCall.respondJson(
+  serializer: KSerializer<T>,
+  value: T,
+  status: HttpStatusCode = HttpStatusCode.OK,
+) {
+  respondText(
+    WATCHFACE_PUSH_JSON.encodeToString(serializer, value),
+    ContentType.Application.Json,
+    status,
+  )
+}
+
+private suspend fun ApplicationCall.respondPoll(response: WatchFacePushPollResponseV1) =
+  respondJson(WatchFacePushPollResponseV1.serializer(), response)
+
+private suspend fun ApplicationCall.respondError(
+  status: HttpStatusCode,
+  code: String,
+  message: String,
+) = respondJson(WatchFacePushErrorV1.serializer(), WatchFacePushErrorV1(code, message), status)
+
+// ---------------------------------------------------------------------- page
+
+private fun esc(value: String): String = WebEscaping.htmlEscape(value)
+
+internal fun WatchFacePush.linkMessage(message: String): String =
+  """
+  <h1 class="cp-head">Link a watch</h1>
+  <p class="cp-sub">${esc(message)}</p>
+  <p><a href="${WatchFacePush.LINK_PATH}">Your linked watches</a></p>
+  """
+    .trimIndent()
+
+/**
+ * `/link`: confirm a watch's code, or list the person's linked watches with a way to unlink each.
+ * Every form carries a seal over (subject, account, action), so a page elsewhere cannot submit one
+ * — on top of the same-origin check the authorization already makes on a session-cookie write.
+ */
+internal fun WatchFacePush.linkPage(account: String?, rawCode: String?, returnTo: String): String {
+  if (account == null) {
+    val signIn =
+      signInPath?.let { """<p><a class="cp-button" href="${esc(it(returnTo))}">Sign in</a></p>""" }
+        ?: "<p>Sign in to this server first, then open this link again.</p>"
+    return """
+      <h1 class="cp-head">Link a watch</h1>
+      <p class="cp-sub">Sign in to link a watch to your account. It will be able to list and
+        install the watch faces you publish, and nothing else.</p>
+      $signIn
+      """
+      .trimIndent()
+  }
+  val code = rawCode?.let { WatchFacePushDeviceCodes.normalize(it) }
+  if (rawCode != null) {
+    val pending = code?.let { codes.pending(it) }
+    if (pending == null || pending.state != WatchFacePushDeviceCodes.State.PENDING) {
+      return linkMessage("This code has expired or was already used. Start again on the watch.")
+    }
+    fun form(action: String, label: String) =
+      """
+      <form method="post" action="${WatchFacePush.LINK_PATH}" style="display:inline">
+        <input type="hidden" name="subject" value="${esc(pending.code)}">
+        <input type="hidden" name="action" value="$action">
+        <input type="hidden" name="seal" value="${esc(csrf.seal(pending.code, account, action))}">
+        <button type="submit">${esc(label)}</button>
+      </form>
+      """
+        .trimIndent()
+    return """
+      <h1 class="cp-head">Link ${esc(pending.deviceName)}?</h1>
+      <p class="cp-sub">Check that the watch shows <strong><code>${esc(pending.code)}</code></strong>.
+        Linking lets it list and install the watch faces
+        <strong>${esc(WatchFacePushDeviceCodes.accountName(account))}</strong> publishes, including
+        private ones, until you unlink it here. It cannot edit or read anything else.</p>
+      ${form(LINK_APPROVE, "Link")}
+      ${form(LINK_DENY, "Don't link")}
+      """
+      .trimIndent()
+  }
+  val devices = store.devices(account)
+  val rows =
+    if (devices.isEmpty()) "<p>No watches are linked to your account.</p>"
+    else
+      devices.joinToString("\n", "<ul>", "</ul>") { device ->
+        """
+        <li>${esc(device.deviceName)}
+          <form method="post" action="${WatchFacePush.LINK_PATH}" style="display:inline">
+            <input type="hidden" name="subject" value="${esc(device.id)}">
+            <input type="hidden" name="action" value="$LINK_REVOKE">
+            <input type="hidden" name="seal" value="${esc(csrf.seal(device.id, account, LINK_REVOKE))}">
+            <button type="submit">Unlink</button>
+          </form>
+        </li>
+        """
+          .trimIndent()
+      }
+  return """
+    <h1 class="cp-head">Link a watch</h1>
+    <p class="cp-sub">Open the push app on your watch and choose to link it; it shows a code and a
+      QR code for this page. Or type the code here:</p>
+    <form method="get" action="${WatchFacePush.LINK_PATH}">
+      <input name="code" placeholder="ABCD-2345" autocomplete="off" autocapitalize="characters">
+      <button type="submit">Continue</button>
+    </form>
+    <h2>Linked watches</h2>
+    $rows
+    """
+    .trimIndent()
+}

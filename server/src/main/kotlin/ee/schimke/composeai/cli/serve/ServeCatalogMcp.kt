@@ -776,6 +776,7 @@ class ServeCatalogMcp(
           it.supportsBranches,
           it.supportsReferences,
           it.supportsGuidelineRecords,
+          it.supportsWatchFacePush,
         ),
       )
     }

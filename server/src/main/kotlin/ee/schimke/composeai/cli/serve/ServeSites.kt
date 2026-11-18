@@ -188,6 +188,9 @@ data class ServeSites(private val byHost: Map<String, String>) {
         "push-sw.js",
         "assets",
         "ui-builder",
+        // The Watch Face Push device-link page (`WatchFacePush.LINK_PATH`), where a watch's QR code
+        // points; it lives at the root of whichever host the watch is linked to.
+        "link",
         // Every local module's previews on one page (`ServeWeb.ALL_MODULES_PATH`).
         "modules",
         // Optional guide redirect (the builder's on its host, the CLI's elsewhere). Reserve it even

@@ -87,16 +87,26 @@ class ServeSitesReservedRoutesTest {
       "ServeMcpOAuth.AUTHORIZATION_SERVER_METADATA_MCP_PATH" to
         ServeMcpOAuth.AUTHORIZATION_SERVER_METADATA_MCP_PATH,
       "ServeMcpOAuth.OPENID_CONFIGURATION_PATH" to ServeMcpOAuth.OPENID_CONFIGURATION_PATH,
+      "WatchFacePush.BASE_PATH" to WatchFacePush.BASE_PATH,
+      "WatchFacePush.LINK_PATH" to WatchFacePush.LINK_PATH,
+      "WatchFacePush.PUBLICATION_PATH" to WatchFacePush.PUBLICATION_PATH,
     )
 
+  /**
+   * The routing block, and the route files it installs whose paths are top-level (rather than under
+   * a segment the block already reserves).
+   */
   private val source: String
     get() =
-      File(
-          repoRoot(),
+      listOf(
           "server/src/main/kotlin/ee/schimke/composeai/cli/serve/ServeHttpServer.kt",
+          "server/src/main/kotlin/ee/schimke/composeai/cli/serve/WatchFacePushRoutes.kt",
         )
-        .also { assertTrue(it.isFile, "routing block not found at $it") }
-        .readText()
+        .joinToString("\n") { path ->
+          File(repoRoot(), path)
+            .also { assertTrue(it.isFile, "routing block not found at $it") }
+            .readText()
+        }
 
   /**
    * `get(…)` / `post(…)` / `webSocket(…)` and its single path argument.

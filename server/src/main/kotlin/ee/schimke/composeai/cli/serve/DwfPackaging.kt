@@ -36,9 +36,13 @@ internal object DwfPackaging {
    * The bundle's files keyed by bundle-relative path. `res/xml/watch_face_info.xml` is always the
    * server's default, and a `drawable/preview.png` is supplied unless the design's
    * [DwfSource.assets] carry their own, because the runtime's resource link fails on a face info
-   * that names a missing preview.
+   * that names a missing preview. [packageName] is the manifest's package: the preview's own by
+   * default, the Watch Face Push name for a push build.
    */
-  fun bundleFiles(source: DwfSource): Map<String, ByteArray> {
+  fun bundleFiles(
+    source: DwfSource,
+    packageName: String = packageName(source),
+  ): Map<String, ByteArray> {
     val version =
       WffVersion.fromNumber(source.wffVersion)
         ?: throw DwfPackagingFailed(
@@ -46,7 +50,7 @@ internal object DwfPackaging {
         )
     val manifest =
       WffManifest(
-        packageName = packageName(source),
+        packageName = packageName,
         label = source.label.replace(Regex("[\"<>&]"), ""),
         wffVersion = version,
       )
@@ -136,6 +140,10 @@ internal class DwfAndroidSdk(val root: File) {
  * `xercesImpl` and a second JAXP implementation on this server's classpath replaces the JDK's for
  * every DOM user in the process. The CLI is the packager's public entry point; its stderr
  * diagnostics (`error[source]: message`) become [DwfPackagingFailed.diagnostics].
+ *
+ * This is the debug-signed sideload build the preview runtime loads. The Watch Face Push build,
+ * signed with the marketplace key, is [WatchFacePushSubprocessPackager]; both run through
+ * [WffPackagerProcess].
  */
 internal class DwfSubprocessPackager(
   private val libDir: File,
@@ -146,6 +154,50 @@ internal class DwfSubprocessPackager(
   private val timeoutSeconds: Long = 180,
 ) : DwfWffPackager {
   override fun pack(files: Map<String, ByteArray>, packageName: String, out: File) {
+    WffPackagerProcess(libDir, sdk, signingDir, java, timeoutSeconds).pack(
+      files,
+      arguments = { listOf("--out", out.path, "--version-code", "1", "--package", packageName) },
+      // A stale signing secret in this server's environment must not leak into a debug build.
+      environment = emptyMap(),
+    ) {}
+  }
+
+  companion object {
+    /** The packager's error lines, else whatever it said (a usage error has no diagnostic form). */
+    internal fun diagnostics(output: String): List<String> = WffPackagerProcess.diagnostics(output)
+  }
+}
+
+/**
+ * One `wff-packager pack` in its own JVM: the bundle written to a scratch directory, the CLI run
+ * with `--bundle <dir>` and [pack]'s arguments, its output kept in a file, and a timeout that kills
+ * the whole process tree.
+ *
+ * The child's environment is this server's minus every `WFF_SIGNING_*` variable, plus exactly the
+ * `environment` the caller passes: a debug build passes none, so a marketplace secret in the
+ * server's environment can never sign one, and a push build passes the configured key.
+ */
+internal class WffPackagerProcess(
+  private val libDir: File,
+  private val sdk: DwfAndroidSdk,
+  /** `WFF_PACKAGER_HOME`: where the packager keeps a generated debug key. */
+  private val home: File,
+  private val java: String = File(System.getProperty("java.home"), "bin/java").path,
+  private val timeoutSeconds: Long = 180,
+) {
+  /**
+   * Run the packager on [files]. [arguments] gets the scratch directory (for a `--token-out` file,
+   * say) and returns everything after `pack --bundle <dir>`; [after] reads what the run left there
+   * before it is deleted.
+   *
+   * @throws DwfPackagingFailed when the packager exits non-zero, with its diagnostics.
+   */
+  fun <T> pack(
+    files: Map<String, ByteArray>,
+    arguments: (work: File) -> List<String>,
+    environment: Map<String, String>,
+    after: (work: File) -> T,
+  ): T {
     val work = Files.createTempDirectory("dwf-pack").toFile()
     try {
       val bundle = File(work, "bundle")
@@ -157,7 +209,7 @@ internal class DwfSubprocessPackager(
         target.parentFile.mkdirs()
         target.writeBytes(bytes)
       }
-      signingDir.mkdirs()
+      home.mkdirs()
       val command =
         listOf(
           java,
@@ -168,13 +220,7 @@ internal class DwfSubprocessPackager(
           "pack",
           "--bundle",
           bundle.path,
-          "--out",
-          out.path,
-          "--version-code",
-          "1",
-          "--package",
-          packageName,
-        )
+        ) + arguments(work)
       // Output goes to a file, not a pipe: draining a pipe blocks until EOF, so a hung packager (or
       // an aapt2 child holding stdout open) would never reach the timed wait below.
       val log = File(work, "packager.log")
@@ -183,11 +229,11 @@ internal class DwfSubprocessPackager(
           .redirectErrorStream(true)
           .redirectOutput(ProcessBuilder.Redirect.to(log))
       builder.environment().apply {
+        keys.removeAll { it.startsWith(SIGNING_ENV_PREFIX) }
         put("ANDROID_HOME", sdk.root.path)
         put("ANDROID_SDK_ROOT", sdk.root.path)
-        put("WFF_PACKAGER_HOME", signingDir.path)
-        // A stale signing secret in this server's environment must not leak into a debug build.
-        remove("WFF_SIGNING_KEYSTORE_B64")
+        put("WFF_PACKAGER_HOME", home.path)
+        putAll(environment)
       }
       val process = builder.start()
       if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
@@ -198,12 +244,16 @@ internal class DwfSubprocessPackager(
       }
       val output = if (log.isFile) log.readText() else ""
       if (process.exitValue() != 0) throw DwfPackagingFailed(diagnostics(output))
+      return after(work)
     } finally {
       work.deleteRecursively()
     }
   }
 
   companion object {
+    /** Every variable the packager's `--keystore-from-env` reads starts with this. */
+    const val SIGNING_ENV_PREFIX = "WFF_SIGNING_"
+
     private val DIAGNOSTIC = Regex("^(error|warning|info)\\[[^\\]]+\\]: .*")
 
     /** The packager's error lines, else whatever it said (a usage error has no diagnostic form). */

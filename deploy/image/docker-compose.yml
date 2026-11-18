@@ -161,6 +161,17 @@ services:
       SERVE_UI_BUILDER_GUIDELINES_PICTURE_BUDGET: "${SERVE_UI_BUILDER_GUIDELINES_PICTURE_BUDGET:-}"
       SERVE_UI_BUILDER_GUIDELINES_TRIAGE: "${SERVE_UI_BUILDER_GUIDELINES_TRIAGE:-}"
       SERVE_UI_BUILDER_GUIDELINES_GITHUB_TOKEN: "${SERVE_UI_BUILDER_GUIDELINES_GITHUB_TOKEN:-}"
+      # The Watch Face Push marketplace signing key (docs/serve/WATCHFACE_PUSH.md): every watch-face
+      # APK the push API serves is signed with it, so it must never change. Secrets, so .env only.
+      # Unset, the push API lists nothing and says why; no key is ever generated in its place.
+      # Render daemons and builds never see these (their environment is an allowlist), and the
+      # debug-signed preview packager strips them.
+      WFF_SIGNING_KEYSTORE_B64: "${WFF_SIGNING_KEYSTORE_B64:-}"
+      WFF_SIGNING_KEYSTORE_PATH: "${WFF_SIGNING_KEYSTORE_PATH:-}"
+      WFF_SIGNING_KEYSTORE_PASSWORD: "${WFF_SIGNING_KEYSTORE_PASSWORD:-}"
+      WFF_SIGNING_KEY_ALIAS: "${WFF_SIGNING_KEY_ALIAS:-}"
+      WFF_SIGNING_KEY_PASSWORD: "${WFF_SIGNING_KEY_PASSWORD:-}"
+      WFF_SIGNING_CERT_SHA256: "${WFF_SIGNING_CERT_SHA256:-}"
       # Optional ADDITIONS to that file, for one extra catalog without editing config:
       # <system>@<owner>/<repo>, comma-separated. Empty (the default) = the file decides.
       SERVE_CATALOGS: "${SERVE_CATALOGS:-}"

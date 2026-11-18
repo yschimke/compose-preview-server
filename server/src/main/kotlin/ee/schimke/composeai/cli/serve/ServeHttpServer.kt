@@ -586,6 +586,11 @@ class ServeHttpServer(
    */
   private val uiBuilderDwfPreview: UiBuilderDwfPreview? = null,
   /**
+   * The Watch Face Push site API (`/api/watchface-push/v1`, `/link`) and the publish flag on a
+   * watch-face design ([WatchFacePush]). Null without durable UI-builder state.
+   */
+  private val watchFacePush: WatchFacePush? = null,
+  /**
    * Per-design reference overlays. Null leaves the routes unregistered on hosts without durable
    * UI-builder state.
    */
@@ -876,6 +881,7 @@ class ServeHttpServer(
         uiBuilderCommentStore,
         references = uiBuilderReferenceStore,
         links = uiBuilderLinksStore,
+        watchFacePush = watchFacePush,
         assets = designAssets,
         validator = uiBuilderValidator,
         reviews = uiBuilderReviewStore,
@@ -1371,6 +1377,25 @@ class ServeHttpServer(
             }
           uiBuilderDwfPreview?.let {
             installUiBuilderDwfRoutes(designService, sameOriginUiBuilderAuthorization, it)
+          }
+          watchFacePush?.let { push ->
+            installWatchFacePushRoutes(
+              designService,
+              sameOriginUiBuilderAuthorization,
+              push,
+              origin = { it.externalOrigin() },
+              clientAddress = { it.clientAddress() },
+              page = { call, title, body ->
+                val skin = call.siteSkin()
+                ServeWeb.plainPage(
+                  title = title,
+                  body = body,
+                  version = SERVE_VERSION,
+                  siteName = skin.first,
+                  themeCss = skin.second,
+                )
+              },
+            )
           }
           installUiBuilderRoutes(
             designService,
@@ -2900,7 +2925,11 @@ class ServeHttpServer(
    * and `X-Forwarded-Proto` supplied; direct requests use the connection scheme and `Host`. Only
    * the first proxy value matters. `X-Forwarded-*` is read only with [trustForwardedFor].
    */
-  private fun RoutingContext.externalOrigin(): String {
+  private fun RoutingContext.externalOrigin(): String = call.externalOrigin()
+
+  /** As [externalOrigin], from the call alone (the watch-face push routes are a `Route` file). */
+  private fun ApplicationCall.externalOrigin(): String {
+    val call = this
     val forwardedScheme = forwardedHeader(call, "X-Forwarded-Proto", trustForwardedFor)
     val scheme =
       forwardedScheme?.takeIf { it.equals("http", true) || it.equals("https", true) }
@@ -3418,7 +3447,10 @@ class ServeHttpServer(
    * `--trust-forwarded-for`, else the socket peer. Shared by the rate limiter and any display of
    * the address.
    */
-  private fun RoutingContext.clientAddress(): String {
+  private fun RoutingContext.clientAddress(): String = call.clientAddress()
+
+  private fun ApplicationCall.clientAddress(): String {
+    val call = this
     val forwarded =
       if (!trustForwardedFor) null
       else
