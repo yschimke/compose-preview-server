@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.177.0](https://github.com/yschimke/compose-preview-server/compare/v3.176.0...v3.177.0) (2026-11-18)
+
+
+### Bug Fixes
+
+* **deps:** update composeai-ui-builder to 3.135.0 ([#1993](https://github.com/yschimke/compose-preview-server/issues/1993)) ([f2c9f8c](https://github.com/yschimke/compose-preview-server/commit/f2c9f8cf3dd347dc692acdc00ee85aeb4e495814))
+
 ## [3.176.0](https://github.com/yschimke/compose-preview-server/compare/v3.175.0...v3.176.0) (2026-11-18)
 
 
