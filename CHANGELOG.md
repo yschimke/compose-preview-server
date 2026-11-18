@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.170.0](https://github.com/yschimke/compose-preview-server/compare/v3.169.0...v3.170.0) (2026-11-18)
+
+
+### Bug Fixes
+
+* **deps:** update compose-ai-tools to 2.98.3 ([#1972](https://github.com/yschimke/compose-preview-server/issues/1972)) ([edf1516](https://github.com/yschimke/compose-preview-server/commit/edf15161285239374dc91c2835a48f05f944c0e7))
+
 ## [3.169.0](https://github.com/yschimke/compose-preview-server/compare/v3.168.0...v3.169.0) (2026-11-18)
 
 
