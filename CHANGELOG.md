@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.173.0](https://github.com/yschimke/compose-preview-server/compare/v3.172.0...v3.173.0) (2026-11-18)
+
+
+### Bug Fixes
+
+* play watch faces in the CMP Wasm lane (composeai-tools 2.99.1) ([#1980](https://github.com/yschimke/compose-preview-server/issues/1980)) ([fcfc563](https://github.com/yschimke/compose-preview-server/commit/fcfc56338b0ce847a5ff8145ab03f1fa35b8216b))
+
 ## [3.172.0](https://github.com/yschimke/compose-preview-server/compare/v3.171.0...v3.172.0) (2026-11-18)
 
 
