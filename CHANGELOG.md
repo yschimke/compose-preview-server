@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.172.0](https://github.com/yschimke/compose-preview-server/compare/v3.171.0...v3.172.0) (2026-11-18)
+
+
+### Bug Fixes
+
+* **deps:** update compose-ai-tools to 2.99.0 and compose-ui-builder to 3.133.0 ([#1978](https://github.com/yschimke/compose-preview-server/issues/1978)) ([8378225](https://github.com/yschimke/compose-preview-server/commit/837822534cc359d8011b0720e66bf4e4c0b02258))
+
 ## [3.171.0](https://github.com/yschimke/compose-preview-server/compare/v3.170.0...v3.171.0) (2026-11-18)
 
 
