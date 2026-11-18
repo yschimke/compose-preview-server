@@ -93,6 +93,14 @@ internal class ServeAgentGrantRequestFile(
      * a 256-bit random token: it checks a presented bearer and cannot produce one.
      */
     val grantTokenSha256: String? = null,
+    /**
+     * That grant as issued, after collection clamped the decision to the ceilings then in force:
+     * [ee.schimke.composeai.agentgrants.AgentGrantScope.wire], capability wire names and expiry. A
+     * restore never serves more than this, whatever the ceilings are later raised to.
+     */
+    val grantScope: String? = null,
+    val grantCapabilities: List<String>? = null,
+    val grantExpiresAtMillis: Long? = null,
     /** Why the server refused an approval at collection, for a [DENIED] row it refused. */
     val refusal: String? = null,
     /** A refusal's own lifetime, when it outlives the request's deadline. */

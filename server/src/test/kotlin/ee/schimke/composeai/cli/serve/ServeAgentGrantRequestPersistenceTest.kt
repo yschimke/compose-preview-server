@@ -246,6 +246,38 @@ class ServeAgentGrantRequestPersistenceTest {
   }
 
   @Test
+  fun `a restore never serves more than the grant as issued, though the ceilings were raised`() {
+    // Approved for 1800 s at live, collected while this server capped grants at 60 s and preview.
+    val strict = store(maxGrantTtlSeconds = 60, maxScope = AgentGrantScope.PREVIEW)
+    val request = strict.ask()
+    val approvedAt = now
+    strict.approveOk(
+      request.id,
+      "@yuri",
+      AgentGrantScope.LIVE,
+      1800,
+      setOf(AgentGrantCapability.IMAGES),
+      "github:yuri",
+    )
+    val issued =
+      assertIs<ServeAgentGrantStore.Poll.Approved>(strict.poll(request.id, request.deviceSecret))
+        .grant
+    assertEquals(approvedAt + 60_000, issued.expiresAtMillis)
+    assertEquals(AgentGrantScope.PREVIEW, issued.scope)
+
+    // Restarted with the ceilings raised: the bearer is the grant it was issued as, not the
+    // approval.
+    now += 10_000
+    val relaxed = store(maxGrantTtlSeconds = 3600, maxScope = AgentGrantScope.PLAYGROUND)
+    val restored = assertNotNull(relaxed.grantForToken(issued.token))
+    assertEquals(approvedAt + 60_000, restored.expiresAtMillis, "still the 60 s it was issued for")
+    assertEquals(AgentGrantScope.PREVIEW, restored.scope, "no rung it was not issued")
+    assertTrue(restored.capabilities.all { it in issued.capabilities }, "no capability added")
+    now = approvedAt + 61_000
+    assertNull(store(maxGrantTtlSeconds = 3600).grantForToken(issued.token), "and it ends there")
+  }
+
+  @Test
   fun `a restored grant whose capability was withdrawn is not served bare`() {
     val grant = collectedOn(store())
     assertNull(store(maxCapabilities = emptySet()).grantForToken(grant.token))

@@ -739,6 +739,9 @@ class ServeAgentGrantStore(
             grantId = grant.id,
             grantFingerprint = grant.fingerprint,
             grantTokenSha256 = secretHash(grant.token),
+            grantScope = grant.scope.wire,
+            grantCapabilities = AgentGrantCapability.wireNames(grant.capabilities).toList(),
+            grantExpiresAtMillis = grant.expiresAtMillis,
           )
         }
     ) {
@@ -823,19 +826,25 @@ class ServeAgentGrantStore(
         } ?: return null
       val grantId = row.grantId ?: return null
       if (grantId in disk.revokedGrantIds()) return null
+      // The grant as issued: collection clamped the decision to the ceilings of its day, and a
+      // restore may only narrow that further, never widen it back toward the decision.
+      val issuedScope = row.grantScope?.let(AgentGrantScope::parse) ?: return null
+      val issuedCapabilities =
+        row.grantCapabilities?.mapNotNull(AgentGrantCapability::parse)?.toSet() ?: return null
+      val issuedExpiry = row.grantExpiresAtMillis ?: return null
       val request = adopt(row) ?: return null
       val decided = request.approval ?: return null
-      val expiresAt = effectiveExpiry(decided)
+      val expiresAt = minOf(issuedExpiry, effectiveExpiry(decided))
       if (expiresAt <= clock()) return null
-      val capabilities = decided.capabilities intersect maxCapabilities
-      // As at collection: an approval for a capability this server has since withdrawn is not
+      val capabilities = issuedCapabilities intersect decided.capabilities intersect maxCapabilities
+      // As at collection: a grant issued with a capability this server has since withdrawn is not
       // quietly served without it.
-      if (decided.capabilities.isNotEmpty() && capabilities.isEmpty()) return null
+      if (issuedCapabilities.isNotEmpty() && capabilities.isEmpty()) return null
       val grant =
         Grant(
           id = grantId,
           token = token,
-          scope = minOf(decided.scope, maxScope),
+          scope = minOf(issuedScope, decided.scope, maxScope),
           capabilities = capabilities,
           label = request.label,
           approvedBy = decided.approvedBy,
