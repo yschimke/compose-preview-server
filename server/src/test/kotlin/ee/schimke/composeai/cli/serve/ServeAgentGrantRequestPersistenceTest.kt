@@ -855,6 +855,76 @@ class ServeAgentGrantRequestPersistenceTest {
   }
 
   @Test
+  fun `the outgoing release rewriting the shared file in its own shape loses no restore data`() {
+    val grant = collectedOn(store())
+
+    // During the rollout the old release rewrites the v2 file it shares with this one, keeping
+    // only the row fields it knows: what this release adds must not live in those rows.
+    val known =
+      setOf(
+        "id",
+        "deviceSecretSha256",
+        "userCode",
+        "label",
+        "client",
+        "requestedScope",
+        "requestedTtlSeconds",
+        "requestedCapabilities",
+        "requesterActorId",
+        "designIds",
+        "createdAtMillis",
+        "expiresAtMillis",
+        "state",
+        "resolvedBy",
+        "approval",
+        "grantId",
+        "grantFingerprint",
+        "refusal",
+        "retainUntilMillis",
+      )
+    val parsed = kotlinx.serialization.json.Json.parseToJsonElement(file.readText())
+    val obj = parsed as kotlinx.serialization.json.JsonObject
+    val rows =
+      (obj["requests"] as kotlinx.serialization.json.JsonArray).map { row ->
+        kotlinx.serialization.json.JsonObject(
+          (row as kotlinx.serialization.json.JsonObject).filterKeys { it in known },
+        )
+      }
+    val rewritten =
+      kotlinx.serialization.json.JsonObject(
+        obj + ("requests" to kotlinx.serialization.json.JsonArray(rows)),
+      )
+    file.writeText(rewritten.toString())
+    assertEquals(
+      parsed,
+      rewritten,
+      "this release keeps nothing in the shared rows the old one would drop",
+    )
+
+    now += 60_000
+    val restored =
+      assertNotNull(store().grantForToken(grant.token), "still restorable after the rewrite")
+    assertEquals(grant.id, restored.id)
+    val bearers = file.resolveSibling(ServeAgentGrantRequestFile.BEARERS_NAME)
+    assertTrue(bearers.exists(), "the restore data lives in a file the old release never opens")
+    assertFalse(bearers.readText().contains(grant.token), "a digest, never the bearer")
+    // And a revocation the old release writes into the shared row still ends it.
+    val revokedRows = rows.map { row ->
+      if ((row["grantId"] as? kotlinx.serialization.json.JsonPrimitive)?.content == grant.id)
+        kotlinx.serialization.json.JsonObject(
+          row + ("state" to kotlinx.serialization.json.JsonPrimitive("revoked")),
+        )
+      else row
+    }
+    file.writeText(
+      kotlinx.serialization.json
+        .JsonObject(obj + ("requests" to kotlinx.serialization.json.JsonArray(revokedRows)))
+        .toString(),
+    )
+    assertNull(store().grantForToken(grant.token), "revoked by the old release")
+  }
+
+  @Test
   fun `an old-format writer on the previous file leaves this store's rows alone`() {
     val store = store()
     val request = store.ask()

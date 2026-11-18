@@ -285,13 +285,16 @@ internet mint itself credentials.
   modification time or size changes, so a check stays a stat. (A person's own request, carried by
   their session and never polled, is the exception: approving it is the claim, `pending` →
   `collected`, and mints there.)
-- **A collected bearer is recognised by any process, after a restart too.** The `collected` row
-  also records the bearer's **SHA-256** (`grantTokenSha256`) — a digest of 256 random bits, which
-  checks a presented bearer and cannot produce one. A process that does not hold the grant (the new
-  one during a deploy's overlap, or any process after a restart) looks a well-formed bearer it does
-  not know up by that digest, constant-time, and rebuilds the grant under the same id from the
-  stored decision, clamped to the ceilings it runs with now exactly as a collection is: no extra
-  lifetime, no capability it has withdrawn (a grant whose every capability was withdrawn is not
+- **A collected bearer is recognised by any process, after a restart too.** The collecting process
+  also records the grant **as issued** — scope, capabilities and expiry after collection's clamp —
+  with the bearer's **SHA-256**, a digest of 256 random bits, which checks a presented bearer and
+  cannot produce one. That goes in `mcp-oauth/agent-grant-bearers.v1.json`, not in the request rows,
+  because the outgoing release rewrites the shared v2 file in its own row shape during a rollout and
+  would drop anything it does not know. A process that does not hold the grant (the new one during a
+  deploy's overlap, or any process after a restart) looks a well-formed bearer it does not know up by
+  that digest, constant-time, and rebuilds the grant under the same id while its request row is
+  still `collected`, never wider than it was issued and clamped again to the ceilings it runs
+  with now: no extra lifetime, no capability it has withdrawn (a grant whose every capability was withdrawn is not
   served at all), and nothing a revocation already reached. The browser and Wasm credentials derive
   from the presented bearer, so they work again once the agent has presented it. What still ends
   with a process: a person's own session-carried grant, which has no bearer to present, and the

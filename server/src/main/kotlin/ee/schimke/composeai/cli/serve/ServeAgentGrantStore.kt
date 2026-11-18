@@ -24,8 +24,9 @@ import javax.crypto.spec.SecretKeySpec
  * Without a [requestsFile] grants live in memory only, and a restart drops every grant and its
  * bearer. With one, a request's whole lifecycle lives there — a person slow to approve should not
  * have to start over because the server was redeployed, and nor should the agent they approved — so
- * a collected row also keeps the bearer's SHA-256, and a process that does not hold the grant
- * rebuilds it when that bearer is presented ([restoreFromDisk]). The lifecycle lives in that file
+ * the grant as issued, with its bearer's SHA-256, is kept beside it
+ * ([ServeAgentGrantRequestFile.Bearer]), and a process that does not hold the grant rebuilds it
+ * when that bearer is presented ([restoreFromDisk]). The lifecycle lives in that file
  * ([ServeAgentGrantRequestFile]), and that file, not this process's memory, is authoritative: a
  * deploy runs the old and new processes side by side, and every state change (decide, deny,
  * collect, revoke) is a compare-and-set on the shared row. The row holds the device secret hashed
@@ -738,16 +739,23 @@ class ServeAgentGrantStore(
             state = ServeAgentGrantRequestFile.COLLECTED,
             grantId = grant.id,
             grantFingerprint = grant.fingerprint,
-            grantTokenSha256 = secretHash(grant.token),
-            grantScope = grant.scope.wire,
-            grantCapabilities = AgentGrantCapability.wireNames(grant.capabilities).toList(),
-            grantExpiresAtMillis = grant.expiresAtMillis,
           )
         }
     ) {
       is ServeAgentGrantRequestFile.Outcome.Done -> {
         register(grant)
         adopt(outcome.record)
+        // After the claim, so only the winner records it. A failure costs only the restore: this
+        // process still serves the grant, and nothing else can (fail closed).
+        disk.recordBearer(
+          ServeAgentGrantRequestFile.Bearer(
+            grantId = grant.id,
+            tokenSha256 = secretHash(grant.token),
+            scope = grant.scope.wire,
+            capabilities = AgentGrantCapability.wireNames(grant.capabilities).toList(),
+            expiresAtMillis = grant.expiresAtMillis,
+          ),
+        )
         audit(
           "agent-grant: minted ${grant.fingerprint} scope=${grant.scope.wire} " +
             capabilityAuditField(grant.capabilities) +
@@ -802,13 +810,12 @@ class ServeAgentGrantStore(
   /**
    * The grant a well-formed [token] was collected as, in a process that does not hold it: this one
    * after a restart, or the new one while a deploy overlaps the old. With a [requestsFile] the
-   * collected row records the bearer's SHA-256
-   * ([ServeAgentGrantRequestFile.Record.grantTokenSha256]) beside the stored decision, so the grant
-   * is rebuilt from that decision, clamped to the ceilings this process runs with exactly as
-   * [collect] does, under the same id — a revocation of it, from any process, still reaches it.
-   * Null without a file, for an unknown, revoked or expired grant, or while the file cannot be
-   * vouched for. Grants used to end with their process; they now last the lifetime their approver
-   * gave them (yschimke/watchface-tools#45).
+   * grant as issued is kept with its bearer's SHA-256 ([ServeAgentGrantRequestFile.Bearer]), so it
+   * is rebuilt from that, never wider than it was issued and clamped to the ceilings this process
+   * runs with exactly as [collect] does, under the same id — a revocation of it, from any process,
+   * still reaches it. Null without a file, for an unknown, revoked or expired grant, or while the
+   * file cannot be vouched for. Grants used to end with their process; they now last the lifetime
+   * their approver gave them (yschimke/watchface-tools#45).
    */
   private fun restoreFromDisk(token: String): Grant? =
     synchronized(this) {
@@ -817,21 +824,20 @@ class ServeAgentGrantStore(
         return liveGrant(it)
       }
       if (!disk.isCurrent()) return null
-      val hash = secretHash(token)
+      val bearer = disk.bearerFor(secretHash(token)) ?: return null
+      val grantId = bearer.grantId
+      // The request row stays the authority: a grant is served only while its row is collected,
+      // so a revocation by any process, of either release, ends it.
       val row =
         disk.all().values.firstOrNull { row ->
-          row.state == ServeAgentGrantRequestFile.COLLECTED &&
-            row.grantTokenSha256 != null &&
-            ServeUrls.tokensMatch(row.grantTokenSha256, hash)
+          row.state == ServeAgentGrantRequestFile.COLLECTED && row.grantId == grantId
         } ?: return null
-      val grantId = row.grantId ?: return null
       if (grantId in disk.revokedGrantIds()) return null
       // The grant as issued: collection clamped the decision to the ceilings of its day, and a
       // restore may only narrow that further, never widen it back toward the decision.
-      val issuedScope = row.grantScope?.let(AgentGrantScope::parse) ?: return null
-      val issuedCapabilities =
-        row.grantCapabilities?.mapNotNull(AgentGrantCapability::parse)?.toSet() ?: return null
-      val issuedExpiry = row.grantExpiresAtMillis ?: return null
+      val issuedScope = AgentGrantScope.parse(bearer.scope) ?: return null
+      val issuedCapabilities = bearer.capabilities.mapNotNull(AgentGrantCapability::parse).toSet()
+      val issuedExpiry = bearer.expiresAtMillis
       val request = adopt(row) ?: return null
       val decided = request.approval ?: return null
       val expiresAt = minOf(issuedExpiry, effectiveExpiry(decided))
