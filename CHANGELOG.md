@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.176.0](https://github.com/yschimke/compose-preview-server/compare/v3.175.0...v3.176.0) (2026-11-18)
+
+
+### Bug Fixes
+
+* **catalogs:** link an imported catalog's regenerate to the workflow its registration declares ([#1989](https://github.com/yschimke/compose-preview-server/issues/1989)) ([1633c58](https://github.com/yschimke/compose-preview-server/commit/1633c5820b83f1fc5a861e9159e72f6940dc35ef))
+* derive the watch-face source on the server so the tab starts without editor XML ([#1990](https://github.com/yschimke/compose-preview-server/issues/1990)) ([2209b5a](https://github.com/yschimke/compose-preview-server/commit/2209b5a6214e5bdc4093a4140512647af0a535f3))
+
 ## [3.175.0](https://github.com/yschimke/compose-preview-server/compare/v3.174.0...v3.175.0) (2026-11-18)
 
 
