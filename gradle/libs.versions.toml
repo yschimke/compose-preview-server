@@ -516,8 +516,8 @@ livery = "0.15.0"
 # the process (it made `ExplodedSvg` return its input unexploded). It ships as `lib-wff-packager/`
 # and runs in its own JVM. Needs the Android SDK's aapt2 and zipalign plus a platform android.jar at
 # run time, never at build time.
-wff-packager = "0.3.2"
-wff-core = "0.3.1"
+wff-packager = "0.4.0"
+wff-core = "0.4.0"
 # The Android Remote Compose players the server's own player-only Android daemon replays documents
 # with, staged as `lib-rc-players-android/` (`stageRcPlayersAndroidLibs`). The Android daemon
 # sidecar deliberately ships none of this family (a consumer brings it, compose-preview-daemon's
