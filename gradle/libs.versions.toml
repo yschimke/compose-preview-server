@@ -146,7 +146,11 @@ graphics-shapes = "1.1.0"
 # pluggable `WatchFaceRendererRegistry` (`dwf-rc` + `dwf-apk`) in `render-host`.
 # 2.93.0 adds `DwfApkSessionBridge` and `DwfApkDaemonBridge` in `render-host` to back `dwf-apk`
 # with a persistent `:simulator-host` (`LaunchMain`) daemon hosting `DeclarativeWatchFaceRuntime.apk`.
-composeai-tools = "2.98.3"
+# 2.99.0 takes `dwf-apk` frames from the runtime's live engine draw, so the date is the real (or
+# pinned) one instead of the screenshot path's forced 28th (compose-ai-tools#6628, #6631), and
+# composites WFF group alpha as one layer with v4 `<Reference>` and a real moon phase in `dwf-rc`
+# (compose-ai-tools#6627).
+composeai-tools = "2.99.0"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
 # in that repository's `docs/design/REPOSITORY_LAYERS.md`: between the contracts and
@@ -477,7 +481,10 @@ composeai-contracts = "3.43.0"
 # 3.132.0 adds the Watch Face Format target, create-from-XML and edit-time validation of WFF edits
 # (compose-ui-builder#1234, #1235, #1241). Built on compose-ai-tools 2.97.0 and contracts 3.43.0,
 # both met here; `androidx-window` is unchanged.
-composeai-ui-builder = "3.132.0"
+# 3.133.0 imports PartDraw shapes, themes and flavors as builtins and refuses deleting a node the
+# schema requires (compose-ui-builder#1247), and strips a BOM from imported XML and draws each shape
+# in its own box (#1249). Built on compose-ai-tools 2.98.3, met here; `androidx-window` unchanged.
+composeai-ui-builder = "3.133.0"
 # First published version of the optional publication server library (Maven Central).
 livery = "0.15.0"
 # The Android Remote Compose players the server's own player-only Android daemon replays documents
