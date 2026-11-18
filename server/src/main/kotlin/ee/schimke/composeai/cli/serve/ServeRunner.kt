@@ -2916,9 +2916,13 @@ public class ServeRunner(
     val annotatedExporter = RootSurfaceGroundAnnotatedExporter(exporter)
     val service =
       PersistentUiBuilderService(
-        designStore = UiBuilderDesignStateStore.open(directory.toPath()),
+        // Retention and the store budget are chosen together; the released defaults let a large
+        // design outgrow its own budget (yschimke/watchface-tools#45).
+        designStore =
+          UiBuilderDesignStateStore.open(directory.toPath(), ServeUiBuilderStorageLimits.store),
         catalogs = catalogs,
         exporter = annotatedExporter,
+        limits = ServeUiBuilderStorageLimits.service,
         assets = assetStore,
       )
     // A deploy can change a catalog's runtime too, so the same pass runs once at startup.

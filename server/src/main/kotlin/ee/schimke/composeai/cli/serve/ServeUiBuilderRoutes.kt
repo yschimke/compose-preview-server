@@ -244,14 +244,7 @@ internal fun Route.installUiBuilderRoutes(
           } catch (cancelled: CancellationException) {
             throw cancelled
           } catch (failure: Exception) {
-            logUiBuilderServiceFailure(failure)
-            UiBuilderServiceResponse.Error(
-              ee.schimke.composeai.uibuilder.service.UiBuilderServiceError(
-                ServiceErrorCodeV1.INTERNAL,
-                "UI-builder service failed",
-                retryable = true,
-              ),
-            )
+            uiBuilderServiceFailure(failure)
           }
         is ProtocolRequestMapping.Rejected -> UiBuilderServiceResponse.Error(mapping.error)
       }
@@ -509,14 +502,7 @@ internal fun Route.installUiBuilderRoutes(
       } catch (cancelled: CancellationException) {
         throw cancelled
       } catch (failure: Exception) {
-        logUiBuilderServiceFailure(failure)
-        UiBuilderServiceResponse.Error(
-          ee.schimke.composeai.uibuilder.service.UiBuilderServiceError(
-            ServiceErrorCodeV1.INTERNAL,
-            "UI-builder service failed",
-            retryable = true,
-          ),
-        )
+        uiBuilderServiceFailure(failure)
       }
     when (response) {
       is UiBuilderServiceResponse.DesignRenamed ->
@@ -1149,6 +1135,44 @@ internal fun logUiBuilderServiceFailure(failure: Exception) {
   )
   failure.printStackTrace()
 }
+
+/**
+ * The answer for a UI-builder service call that threw, after logging the cause.
+ *
+ * A design over its per-design storage budget is not a transient fault: the store refuses every
+ * write to it until something shrinks, so "internal, retryable" sent agents into retry loops that
+ * could never succeed (yschimke/watchface-tools#45). It answers `badRequest`, not retryable, with
+ * the sizes. Everything else stays the generic retryable `internal`, because its message may carry
+ * a state path or another design's content.
+ */
+internal fun uiBuilderServiceFailure(failure: Exception): UiBuilderServiceResponse.Error {
+  logUiBuilderServiceFailure(failure)
+  val budget =
+    (failure as? ee.schimke.composeai.uibuilder.service.UiBuilderPersistenceException)
+      ?.message
+      ?.let(DESIGN_BUDGET_FAILURE::find)
+  return UiBuilderServiceResponse.Error(
+    if (budget != null) {
+      val (bytes, limit) = budget.destructured
+      ee.schimke.composeai.uibuilder.service.UiBuilderServiceError(
+        ServiceErrorCodeV1.BAD_REQUEST,
+        "design storage budget exceeded: this write would store $bytes bytes for the design, " +
+          "its history included, and the limit is $limit; retrying cannot succeed — tell the " +
+          "server operator",
+        retryable = false,
+      )
+    } else {
+      ee.schimke.composeai.uibuilder.service.UiBuilderServiceError(
+        ServiceErrorCodeV1.INTERNAL,
+        "UI-builder service failed",
+        retryable = true,
+      )
+    },
+  )
+}
+
+/** `FileUiBuilderDesignStore`'s refusal of a write past `maximumDesignBytes`. */
+private val DESIGN_BUDGET_FAILURE = Regex("""is (\d+) bytes; limit is (\d+)""")
 
 /**
  * This response as a host offering only [catalogs] gives it: catalog and design lists narrowed to
