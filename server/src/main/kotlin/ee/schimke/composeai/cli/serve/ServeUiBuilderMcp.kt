@@ -728,14 +728,7 @@ class ServeUiBuilderMcp(
       } catch (cancelled: CancellationException) {
         throw cancelled
       } catch (failure: Exception) {
-        logUiBuilderServiceFailure(failure)
-        UiBuilderServiceResponse.Error(
-          ee.schimke.composeai.uibuilder.service.UiBuilderServiceError(
-            ServiceErrorCodeV1.INTERNAL,
-            "UI-builder service failed",
-            retryable = true,
-          ),
-        )
+        uiBuilderServiceFailure(failure)
       }
     return when (response) {
       is UiBuilderServiceResponse.DesignRenamed ->
@@ -3934,14 +3927,7 @@ class ServeUiBuilderMcp(
         } catch (cancelled: CancellationException) {
           throw cancelled
         } catch (failure: Exception) {
-          logUiBuilderServiceFailure(failure)
-          UiBuilderServiceResponse.Error(
-            ee.schimke.composeai.uibuilder.service.UiBuilderServiceError(
-              ServiceErrorCodeV1.INTERNAL,
-              "UI-builder service failed",
-              retryable = true,
-            ),
-          )
+          uiBuilderServiceFailure(failure)
         }
       is ProtocolRequestMapping.Rejected -> UiBuilderServiceResponse.Error(mapping.error)
     }

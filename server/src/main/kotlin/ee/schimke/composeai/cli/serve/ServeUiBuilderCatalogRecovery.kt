@@ -55,12 +55,14 @@ internal class ServeUiBuilderCatalogRecovery(
       val preview =
         when (
           val response =
-            service.execute(
-              UiBuilderServiceCall(
-                actor,
-                UiBuilderServiceRequest.PreviewCurrentCatalogUpgrade(design.designId),
-              ),
-            )
+            guarded(design.designId, failed) {
+              service.execute(
+                UiBuilderServiceCall(
+                  actor,
+                  UiBuilderServiceRequest.PreviewCurrentCatalogUpgrade(design.designId),
+                ),
+              )
+            } ?: continue
         ) {
           is UiBuilderServiceResponse.CatalogUpgradePreview -> response.preview
           is UiBuilderServiceResponse.Error -> {
@@ -77,7 +79,11 @@ internal class ServeUiBuilderCatalogRecovery(
         blocked += design.designId
         continue
       }
-      when (val applied = service.executeMapped(ApplyOperationRequestV1(command), actor)) {
+      val applied =
+        guarded(design.designId, failed) {
+          service.executeMapped(ApplyOperationRequestV1(command), actor)
+        } ?: continue
+      when (applied) {
         is UiBuilderServiceResponse.OperationOutcome ->
           if (applied.outcome is AcceptedOutcomeV1) upgraded += design.designId
           else failed[design.designId] = applied.outcome.toString()
@@ -102,6 +108,25 @@ internal class ServeUiBuilderCatalogRecovery(
     }
     return result
   }
+
+  /**
+   * [block], or null with the failure recorded against [designId]. One design whose write throws —
+   * yschimke/watchface-tools#45's was over its storage budget — must not end the pass for every
+   * design after it.
+   */
+  private suspend fun guarded(
+    designId: String,
+    failed: MutableMap<String, String>,
+    block: suspend () -> UiBuilderServiceResponse,
+  ): UiBuilderServiceResponse? =
+    try {
+      block()
+    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+      throw cancelled
+    } catch (failure: Exception) {
+      failed[designId] = uiBuilderServiceFailure(failure).error.message
+      null
+    }
 
   internal companion object {
     /** The identity every automatic recovery is recorded under. */
