@@ -664,6 +664,11 @@ dependencies {
   // sources keep the `ee.schimke.composeai.cli.serve` package.
   api(libs.composeai.render.host)
 
+  // Packages a watch-face design revision as the APK the real DeclarativeWatchFaceRuntime loads
+  // (`DwfPackaging`, behind `RenderHostDwfApkRuntime`). `implementation`: no signature here exposes
+  // its types.
+  implementation(libs.wff.packager)
+
   // The build-host protocol, `implementation`: only `ServeBuildHost` is programmed against
   // elsewhere.
   implementation(libs.composeai.build.host.protocol)

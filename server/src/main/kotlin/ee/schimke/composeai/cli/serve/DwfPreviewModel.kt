@@ -38,8 +38,17 @@ internal object DwfPreviewSurface {
   /** The runtime APK is not installed on this host. Host configuration, not a design problem. */
   const val RUNTIME_MISSING = "DWF_RUNTIME_MISSING"
 
-  /** The runtime is installed but compose-ai-tools does not export what packaging needs. */
+  /** Packaging could not run on this host (a tool failed to start, the disk). Not the design. */
   const val PACKAGING_UNAVAILABLE = "DWF_PACKAGING_UNAVAILABLE"
+
+  /** The packager refused this face; the reason carries its diagnostics. A design problem. */
+  const val PACKAGING_FAILED = "DWF_PACKAGING_FAILED"
+
+  /** No usable Android SDK (build-tools aapt2/zipalign, a platform android.jar) on this host. */
+  const val ANDROID_SDK_MISSING = "DWF_ANDROID_SDK_MISSING"
+
+  /** The simulator's own prerequisites are missing (its sidecar jars, an android.jar). */
+  const val SIMULATOR_UNAVAILABLE = "DWF_SIMULATOR_UNAVAILABLE"
 
   const val SOURCE_INVALID = "DWF_SOURCE_INVALID"
   const val SOURCE_UNAVAILABLE = "DWF_SOURCE_UNAVAILABLE"
