@@ -83,6 +83,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.encodeToJsonElement
@@ -90,6 +91,7 @@ import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.put
 
 /**
  * The UI builder, reachable by an agent as well as a browser.
@@ -413,16 +415,7 @@ class ServeUiBuilderMcp(
             designId = args.requiredText("designId"),
             revision = args.number("revision"),
           )
-        PREVIEW_CATALOG_RECOVERY ->
-          return envelope(
-            callId,
-            service.execute(
-              UiBuilderServiceCall(
-                actor,
-                UiBuilderServiceRequest.PreviewCurrentCatalogUpgrade(args.requiredText("designId")),
-              ),
-            ),
-          )
+        PREVIEW_CATALOG_RECOVERY -> return previewCatalogRecovery(args, actor, callId)
         CREATE_DESIGN ->
           when (val plan = createDesign(args, actor, clientInteraction)) {
             is CreatePlan.Create -> plan.request
@@ -3947,6 +3940,39 @@ class ServeUiBuilderMcp(
     }
 
   /**
+   * [PREVIEW_CATALOG_RECOVERY]: the released [CatalogUpgradePreviewV1] envelope plus, when the
+   * preview is READY, an `apply` object that is exactly the arguments [APPLY] takes to make the
+   * move — so an agent never assembles the `upgradeCatalog` mutation, or confuses
+   * `candidateDocumentHash` with `targetDocumentHash`, by hand (yschimke/watchface-tools#45).
+   *
+   * The candidate document is left out unless `includeCandidate` is true: it is the whole design
+   * again, 1.8 MB for a large watch face, which is past what an MCP client accepts as one result,
+   * and `changes` already says what differs from the stored one.
+   */
+  private suspend fun previewCatalogRecovery(
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+    callId: String,
+  ): String {
+    val designId = args.requiredText("designId")
+    val response =
+      service.execute(
+        UiBuilderServiceCall(actor, UiBuilderServiceRequest.PreviewCurrentCatalogUpgrade(designId)),
+      )
+    val reply = Json.parseToJsonElement(envelope(callId, response)).jsonObject
+    val preview = (response as? UiBuilderServiceResponse.CatalogUpgradePreview)?.preview
+    if (preview == null) return reply.toString()
+    val includeCandidate = args[INCLUDE_CANDIDATE_ARGUMENT]?.jsonPrimitive?.booleanOrNull == true
+    val shaped = buildJsonObject {
+      reply.forEach { (key, value) ->
+        put(key, if (key == "response" && !includeCandidate) value.withoutCandidate() else value)
+      }
+      catalogRecoveryApplyArguments(preview)?.let { put(APPLY_ARGUMENT, it) }
+    }
+    return shaped.toString()
+  }
+
+  /**
    * The released reply envelope, by default without the catalog a snapshot embeds: the full
    * capability suits a browser but cost an agent 60 KB per call. The `catalogPin` and
    * [LIST_CATALOGS] cover it; the field is dropped, not blanked. `includeCatalog: true` restores
@@ -4203,6 +4229,8 @@ class ServeUiBuilderMcp(
 
     private const val REVOKE_ARGUMENT = "revoke"
     private const val INCLUDE_CATALOG_ARGUMENT = "includeCatalog"
+    private const val INCLUDE_CANDIDATE_ARGUMENT = "includeCandidate"
+    private const val APPLY_ARGUMENT = "apply"
     private const val FULL_ARGUMENT = "full"
     private const val QUERY_ARGUMENT = "query"
     private const val CATALOG_ARGUMENT = "catalog"
@@ -4445,13 +4473,24 @@ class ServeUiBuilderMcp(
         ),
         tool(
           PREVIEW_CATALOG_RECOVERY,
-          "Dry-run recovery of a design whose stored catalog pin no longer resolves. The server " +
-            "selects the exact currently served pin for the same catalog system and returns a " +
-            "CatalogUpgradePreviewV1 with changes, issues and the hashes required by a later " +
-            "`upgradeCatalog` mutation through $APPLY. This call never writes.",
+          "Dry-run recovery of a design whose stored catalog pin no longer resolves " +
+            "(`catalogUnavailable` from $GET_DESIGN). The server selects the exact currently " +
+            "served pin for the same catalog system and returns a CatalogUpgradePreviewV1: " +
+            "`status` (`ready` or `blocked`), `changes`, `issues`, and the hashes the move is " +
+            "checked against. This call never writes. When `status` is `ready` the reply also " +
+            "carries `apply`: the complete arguments for $APPLY — send that object as they are " +
+            "and the design moves onto the served pin, recorded as a new revision. Assembled by " +
+            "hand it is `operations: [{\"type\":\"upgradeCatalog\", sourceCatalogPin, " +
+            "targetCatalogPin, sourceDocumentHash, targetDocumentHash, previewDigest}]` with " +
+            "`baseRevision` set to the preview's `baseRevision`, where `targetDocumentHash` is " +
+            "the preview's `candidateDocumentHash` and the other four are copied by name. A " +
+            "`blocked` preview has no `apply`: its error-severity `issues` say what the served " +
+            "catalog no longer accepts. The candidate document itself is omitted, since it is " +
+            "the whole design again; `includeCandidate: true` returns it.",
           """
           {"type":"object","properties":{
-            "designId":{"type":"string"}
+            "designId":{"type":"string"},
+            "$INCLUDE_CANDIDATE_ARGUMENT":{"type":"boolean","description":"Return `preview.candidateDocument`, the whole design as it would be on the served pin. Defaults to false."}
           },"required":["designId"],"additionalProperties":false}
           """,
         ),
@@ -4515,7 +4554,10 @@ class ServeUiBuilderMcp(
             "node and the field, when the catalog requires it. When somebody has commented on " +
             "the design and you have not acknowledged it, the outcome carries a `comments` " +
             "block naming the threads waiting on you; read it, because it is somebody talking " +
-            "about what you are editing.",
+            "about what you are editing. To recover a design whose catalog pin stopped " +
+            "resolving, send the `apply` object $PREVIEW_CATALOG_RECOVERY returns: one " +
+            "`upgradeCatalog` mutation, alone in its batch, at the preview's `baseRevision`, " +
+            "with the preview's `candidateDocumentHash` as its `targetDocumentHash`.",
           """
           {"type":"object","properties":{
             "designId":{"type":"string"},
@@ -5495,5 +5537,44 @@ internal class GuidelinesCheckCoalescer<T> {
     } finally {
       inFlight.remove(key, mine)
     }
+  }
+}
+
+/**
+ * A preview envelope's `response` without `preview.candidateDocument`; see
+ * `previewCatalogRecovery`.
+ */
+private fun JsonElement.withoutCandidate(): JsonElement {
+  val response = this as? JsonObject ?: return this
+  val preview = response["preview"] as? JsonObject ?: return this
+  return JsonObject(response + ("preview" to JsonObject(preview - "candidateDocument")))
+}
+
+/**
+ * The [ServeUiBuilderMcp.APPLY] arguments that make a READY recovery [preview]'s move, or null for
+ * any other preview. The same command the automatic recovery pass sends
+ * ([ServeUiBuilderCatalogRecovery.recoveryCommand]) under its own operation id, so an agent's retry
+ * is idempotent and never collides with the pass. The actor is filled from the grant, as
+ * [ServeUiBuilderMcp.APPLY] always does.
+ */
+internal fun catalogRecoveryApplyArguments(
+  preview: ee.schimke.composeai.uibuilder.protocol.CatalogUpgradePreviewV1,
+): JsonObject? {
+  val command =
+    with(ServeUiBuilderCatalogRecovery.Companion) {
+      preview.recoveryCommand(ServeUiBuilderCatalogRecovery.ACTOR_ID)
+    } ?: return null
+  return buildJsonObject {
+    put("designId", command.designId)
+    put("operationId", "catalog-upgrade:${preview.previewDigest}")
+    put("baseRevision", command.baseRevision)
+    put(
+      "operations",
+      JsonArray(
+        command.operations.map {
+          UI_BUILDER_JSON.encodeToJsonElement(DesignMutationV1.serializer(), it)
+        },
+      ),
+    )
   }
 }

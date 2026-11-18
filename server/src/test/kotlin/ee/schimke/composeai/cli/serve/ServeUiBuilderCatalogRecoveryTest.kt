@@ -1,13 +1,16 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.cli.serve.ServeUiBuilderCatalogRecovery.Companion.recoveryCommand
+import ee.schimke.composeai.uibuilder.protocol.AcceptedOutcomeV1
 import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
+import ee.schimke.composeai.uibuilder.protocol.ApplyOperationRequestV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogUpgradePreviewStatusV1
 import ee.schimke.composeai.uibuilder.protocol.CreateDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.DesignCommandV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DesignEnvironmentV1
+import ee.schimke.composeai.uibuilder.protocol.DesignMutationV1
 import ee.schimke.composeai.uibuilder.protocol.DesignNodeV1
 import ee.schimke.composeai.uibuilder.protocol.LayoutDirectionV1
 import ee.schimke.composeai.uibuilder.protocol.OpenDesignRequestV1
@@ -28,9 +31,14 @@ import java.nio.file.Path
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import org.junit.jupiter.api.io.TempDir
 
 /**
@@ -114,6 +122,58 @@ class ServeUiBuilderCatalogRecoveryTest {
     assertTrue(
       again.upgraded.isEmpty() && again.failed.isEmpty(),
       "a second pass has nothing to do",
+    )
+  }
+
+  @Test
+  fun `a ready preview's apply arguments are what ui_builder_apply takes to make the move`() {
+    assertIs<UiBuilderServiceResponse.Snapshot>(
+      runBlocking { service.executeMapped(CreateDesignRequestV1(document(servedPin())), owner) },
+    )
+    catalogs.swap(executor("rt-new"))
+    val preview =
+      assertIs<UiBuilderServiceResponse.CatalogUpgradePreview>(
+          runBlocking {
+            service.execute(
+              UiBuilderServiceCall(
+                owner,
+                UiBuilderServiceRequest.PreviewCurrentCatalogUpgrade(DESIGN),
+              ),
+            )
+          },
+        )
+        .preview
+
+    val arguments = assertNotNull(catalogRecoveryApplyArguments(preview))
+
+    val mutation = arguments["operations"]!!.jsonArray.single().jsonObject
+    assertEquals("upgradeCatalog", mutation["type"]!!.jsonPrimitive.content)
+    assertEquals(
+      preview.candidateDocumentHash,
+      mutation["targetDocumentHash"]!!.jsonPrimitive.content,
+      "the preview's candidateDocumentHash is the mutation's targetDocumentHash",
+    )
+    // Decoded exactly as `ui_builder_apply` decodes its arguments, with the grant's actor.
+    val command =
+      DesignCommandV1(
+        designId = arguments["designId"]!!.jsonPrimitive.content,
+        operationId = arguments["operationId"]!!.jsonPrimitive.content,
+        actorId = OWNER,
+        clientId = "mcp",
+        baseRevision = arguments["baseRevision"]!!.jsonPrimitive.long,
+        operations =
+          arguments["operations"]!!.jsonArray.map {
+            UI_BUILDER_JSON.decodeFromJsonElement(DesignMutationV1.serializer(), it)
+          },
+      )
+    val applied = runBlocking { service.executeMapped(ApplyOperationRequestV1(command), owner) }
+    assertIs<AcceptedOutcomeV1>(
+      assertIs<UiBuilderServiceResponse.OperationOutcome>(applied, applied.toString()).outcome,
+    )
+    assertIs<UiBuilderServiceResponse.Snapshot>(open(), "opens on the served pin")
+    assertNull(
+      catalogRecoveryApplyArguments(preview.copy(status = CatalogUpgradePreviewStatusV1.BLOCKED)),
+      "a blocked preview offers nothing to apply",
     )
   }
 
