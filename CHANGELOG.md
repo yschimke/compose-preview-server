@@ -1,5 +1,23 @@
 # Changelog
 
+## [3.178.0](https://github.com/yschimke/compose-preview-server/compare/v3.177.0...v3.178.0) (2026-11-18)
+
+
+### Features
+
+* **agent-grants:** keep collected grants across a restart ([#2002](https://github.com/yschimke/compose-preview-server/issues/2002)) ([041952f](https://github.com/yschimke/compose-preview-server/commit/041952fc916561ea99b99e9c77deb395a3dc63e8))
+* draw watch-face previews with the real runtime through wff-packager and the exported launcher ([#1992](https://github.com/yschimke/compose-preview-server/issues/1992)) ([1b9e1d9](https://github.com/yschimke/compose-preview-server/commit/1b9e1d94b9f943437cefb136e4ccbf95167b833f))
+* **ui-builder:** hand agents a ready-to-apply catalog recovery ([#2000](https://github.com/yschimke/compose-preview-server/issues/2000)) ([e1f3d2d](https://github.com/yschimke/compose-preview-server/commit/e1f3d2de601b731eb0ba1c76ff27267764de7871))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.100.0 ([#1985](https://github.com/yschimke/compose-preview-server/issues/1985)) ([6e5ca66](https://github.com/yschimke/compose-preview-server/commit/6e5ca665ec09b1c714acfb940a7f4575f0206dce))
+* **deps:** update the UI Builder to 3.136.0 ([#1997](https://github.com/yschimke/compose-preview-server/issues/1997)) ([1ec70a6](https://github.com/yschimke/compose-preview-server/commit/1ec70a68ff62dd36e60e4d2ab91c1d6e52ee95de))
+* **deps:** update watchface-tools to v0.4.0 ([#1995](https://github.com/yschimke/compose-preview-server/issues/1995)) ([7d8550d](https://github.com/yschimke/compose-preview-server/commit/7d8550da83a29378e967fb09c1421a8b42458e9e))
+* **ui-builder:** keep large designs inside their storage budget ([#1999](https://github.com/yschimke/compose-preview-server/issues/1999)) ([44abea9](https://github.com/yschimke/compose-preview-server/commit/44abea993567fe59f870650910965594aad1233e))
+* **ui-builder:** render a watch face's design matrix on Wear screens by default ([#2001](https://github.com/yschimke/compose-preview-server/issues/2001)) ([5dd9198](https://github.com/yschimke/compose-preview-server/commit/5dd9198f1660c8172d33705536f4d0d95b7cd83f))
+
 ## [3.177.0](https://github.com/yschimke/compose-preview-server/compare/v3.176.0...v3.177.0) (2026-11-18)
 
 
