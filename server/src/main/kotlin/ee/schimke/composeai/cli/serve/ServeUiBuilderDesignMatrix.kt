@@ -129,7 +129,9 @@ internal object UiBuilderDesignMatrix {
     when (platform?.lowercase()) {
       "wear",
       "wearos",
-      "wear-os" -> FORM_WEAR
+      "wear-os",
+      // A watch face (the `wff-watchface` catalog) is drawn on a watch screen, never a phone.
+      "watchface" -> FORM_WEAR
       "tv" -> FORM_TV
       else -> FORM_ADAPTIVE
     }
