@@ -499,7 +499,9 @@ composeai-contracts = "3.43.0"
 # fills complication slots with a tidy sample, and makes both `wff-watchface` templates
 # self-contained shapes (compose-ui-builder#1255); it also depends on the published wff-core 0.3.1
 # (#1251). Built on compose-ai-tools 2.99.0, met here.
-composeai-ui-builder = "3.134.0"
+# 3.135.0 offers the real watch-face runtime in the Native pane of a `wff-watchface` design: it
+# starts a dwf-preview session and opens its tab, or shows the server's refusal (compose-ui-builder#1258).
+composeai-ui-builder = "3.135.0"
 # First published version of the optional publication server library (Maven Central).
 livery = "0.15.0"
 # The Android Remote Compose players the server's own player-only Android daemon replays documents
