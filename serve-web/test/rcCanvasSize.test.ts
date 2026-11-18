@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import {
     RC_FALLBACK_DP,
     rcCanvasSize,
+    fallbackOverlayBox,
     formatRcDensity,
     parseRcDensityAttr,
     rcDocumentHeader,
@@ -350,5 +351,42 @@ describe("snapshotKeepsCapturedLayout", () => {
                 q,
             );
         }
+    });
+});
+
+describe("fallbackOverlayBox", () => {
+    it("keeps a square document square in a wide stage, centred", () => {
+        // The stage the QA sweep saw: 1080×220 CSS px, a 450×450 watch face, no snapshot.
+        assert.deepEqual(
+            fallbackOverlayBox({ width: 1080, height: 220 }, 12, {
+                width: 450,
+                height: 450,
+            }),
+            { left: 442, top: 12, width: 196, height: 196 },
+        );
+    });
+
+    it("letterboxes a wide document in a tall stage", () => {
+        assert.deepEqual(
+            fallbackOverlayBox({ width: 424, height: 824 }, 12, {
+                width: 800,
+                height: 400,
+            }),
+            { left: 12, top: 312, width: 400, height: 200 },
+        );
+    });
+
+    it("fills the content box when the document declares no size", () => {
+        assert.deepEqual(
+            fallbackOverlayBox({ width: 500, height: 300 }, 12, null),
+            { left: 12, top: 12, width: 476, height: 276 },
+        );
+        assert.deepEqual(
+            fallbackOverlayBox({ width: 500, height: 300 }, 12, {
+                width: 0,
+                height: 10,
+            }),
+            { left: 12, top: 12, width: 476, height: 276 },
+        );
     });
 });

@@ -255,3 +255,47 @@ export function snapshotKeepsCapturedLayout(
         return key === "device" || key === "orientation" || /Px$/.test(key);
     });
 }
+
+/** A box in CSS px, relative to the stage's padding box. */
+export interface OverlayBox {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+}
+
+/**
+ * Where an RC overlay goes when there is no snapshot box to mirror (its render failed or never
+ * decoded): inside the stage's content box, inset by [inset] on every side.
+ *
+ * With a known [aspect] (the document header's declared size) the box is that shape, contain-fitted
+ * and centred, so a player that draws to its frame's size keeps the face's proportions: filling the
+ * stage instead stretched a round 450×450 watch face into a wide ellipse. Without one the box fills
+ * the content area, as before.
+ */
+export function fallbackOverlayBox(
+    stage: PixelSize,
+    inset: number,
+    aspect: PixelSize | null,
+): OverlayBox {
+    const w = Math.max(0, stage.width - 2 * inset);
+    const h = Math.max(0, stage.height - 2 * inset);
+    if (
+        !aspect ||
+        !positive(aspect.width) ||
+        !positive(aspect.height) ||
+        w <= 0 ||
+        h <= 0
+    ) {
+        return { left: inset, top: inset, width: w, height: h };
+    }
+    const scale = Math.min(w / aspect.width, h / aspect.height);
+    const bw = aspect.width * scale;
+    const bh = aspect.height * scale;
+    return {
+        left: inset + (w - bw) / 2,
+        top: inset + (h - bh) / 2,
+        width: bw,
+        height: bh,
+    };
+}
