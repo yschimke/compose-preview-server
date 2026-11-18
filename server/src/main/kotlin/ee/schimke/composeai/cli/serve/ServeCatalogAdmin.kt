@@ -125,6 +125,7 @@ class ServeCatalogAdmin(
           current.listed == entry.listed &&
           current.loadPriority == entry.loadPriority &&
           current.importedFrom == entry.importedFrom &&
+          current.regenerateUrl == entry.regenerateUrl &&
           current.designSystem == entry.isDesignSystem
       ) {
         continue
@@ -218,7 +219,9 @@ class ServeCatalogAdmin(
           current.loadPriority == entry.loadPriority &&
           // Attribution converges like placement, so an import can move off the staging owner's
           // section without a restart.
-          current.importedFrom == entry.importedFrom
+          current.importedFrom == entry.importedFrom &&
+          // ...and so does where it is rebuilt, which only changes its regenerate link.
+          current.regenerateUrl == entry.regenerateUrl
       ) {
         // Everything tracked matches, but the file may not: a swap whose persist failed transiently
         // leaves `catalogs.json` stale, and answering 409 here would stop the reconcile ever
