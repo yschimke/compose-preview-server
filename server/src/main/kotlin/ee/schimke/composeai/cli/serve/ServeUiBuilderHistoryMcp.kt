@@ -513,8 +513,8 @@ internal class ServeUiBuilderHistoryTools(
     /** How `ui-builder-runtime` marks a restore's upgrade mutation; see its `RestoreRevision`. */
     private const val RESTORE_DIGEST_PREFIX = "restore-revision:"
 
-    /** The retention policy the service runs with here: the runtime's defaults. */
-    private val DEFAULT_LIMITS = UiBuilderServiceLimits()
+    /** The retention policy the service runs with here; see [ServeUiBuilderStorageLimits]. */
+    private val DEFAULT_LIMITS: UiBuilderServiceLimits = ServeUiBuilderStorageLimits.service
 
     /** What each tool's `structuredContent` is, generated from the classes the replies encode. */
     fun outputSchema(name: String): JsonObject? =
