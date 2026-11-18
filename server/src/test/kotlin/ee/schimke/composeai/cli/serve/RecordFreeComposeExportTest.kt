@@ -7,6 +7,7 @@ import ee.schimke.composeai.uibuilder.export.UiBuilderBuildFeatures
 import ee.schimke.composeai.uibuilder.export.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.export.UiBuilderDocument
 import ee.schimke.composeai.uibuilder.export.toDesignDocumentV1
+import ee.schimke.composeai.uibuilder.export.toUiBuilderDocument
 import ee.schimke.composeai.uibuilder.protocol.AnimationStateV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogBenchmarkV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
@@ -184,8 +185,18 @@ class RecordFreeComposeExportTest {
         .build()
     val artifact = export(document, capabilities)
     assertTrue(artifact.diagnostics.isEmpty(), artifact.diagnostics.toString())
-    assertTrue("RemoteStateLayout" in artifact.content, artifact.content)
-    assertTrue(".clickable(valueChangeAction(page, 20.ri))" in artifact.content, artifact.content)
+    // The platform the catalog declares picks the Remote Compose emitter: the server's export is
+    // the library's own record-free Remote output, whatever its current spelling.
+    val expected =
+      assertIs<RecordFreeExport.Generated.Emitted>(
+          RecordFreeExport.generate(
+            document.toUiBuilderDocument(),
+            UiBuilderCatalogPlatform.REMOTE_COMPOSE,
+            PACKAGE_NAME,
+          ),
+        )
+        .source
+    assertTrue(artifact.content.endsWith(expected), artifact.content)
     assertFalse("WearWidget" in artifact.content, artifact.content)
   }
 
