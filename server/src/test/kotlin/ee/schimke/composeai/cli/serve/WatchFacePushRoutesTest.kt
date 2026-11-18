@@ -1021,6 +1021,53 @@ class WatchFacePushUnitTest {
   }
 
   @Test
+  fun `racing commits never lower or reuse a version`() {
+    val store = WatchFacePushStore(dir.resolve("race"))
+    val a = DwfSource("<WatchFace a=\"1\"/>")
+    val b = DwfSource("<WatchFace b=\"1\"/>")
+    val c = DwfSource("<WatchFace c=\"1\"/>")
+    assertEquals(1, store.publish("f", "github:alice", 1, "F", a).version)
+    // Codex's interleaving: three candidates taken at v1, committed C, B, B.
+    val cAt2 = store.candidate("f", "github:alice", 2, "F", c)
+    val bAt2 = store.candidate("f", "github:alice", 3, "F", b)
+    val bAgain = store.candidate("f", "github:alice", 3, "F", b)
+    assertEquals(2, store.commit(cAt2).version)
+    assertEquals(3, store.commit(bAt2).version)
+    assertEquals(3, store.commit(bAgain).version, "a late duplicate must not roll v3 back to v2")
+    // The build-then-commit path refuses a candidate whose version moved, so it is rebuilt.
+    assertNull(
+      store.commitIfBuiltVersion(store.candidate("f", "github:alice", 4, "F", a).copy(version = 2)),
+    )
+    assertEquals(3, store.publication("f")!!.version)
+
+    // Many threads, alternating faces: every version anyone observes only ever grows.
+    val faces = listOf(a, b, c)
+    val errors = java.util.concurrent.ConcurrentLinkedQueue<String>()
+    val threads =
+      (0 until 8).map { t ->
+        Thread {
+          var seen = 0L
+          repeat(100) { i ->
+            val candidate =
+              store.candidate("f", "github:alice", i.toLong(), "F", faces[(t + i) % 3])
+            val committed = store.commit(candidate).version
+            val stored = store.publication("f")!!.version
+            if (committed < seen || stored < seen)
+              errors += "thread $t saw $committed/$stored after $seen"
+            seen = maxOf(seen, committed, stored)
+          }
+        }
+      }
+    threads.forEach(Thread::start)
+    threads.forEach(Thread::join)
+    assertTrue(errors.isEmpty(), errors.take(5).joinToString())
+    assertEquals(
+      store.publication("f")!!.version,
+      WatchFacePushStore(dir.resolve("race")).publication("f")!!.version,
+    )
+  }
+
+  @Test
   fun `versions only grow, across unpublish, republish and a restart`() {
     val root = dir.resolve("push")
     val store = WatchFacePushStore(root)

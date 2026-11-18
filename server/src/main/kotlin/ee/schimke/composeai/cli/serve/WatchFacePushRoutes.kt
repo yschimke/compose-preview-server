@@ -114,25 +114,37 @@ internal constructor(
     // the approver's watches.
     // Staged: the candidate is built before it replaces anything, so a face the packager refuses
     // leaves the release already on watches exactly as it was.
-    val candidate =
-      store.candidate(
-        designId,
-        owner,
-        document.revision,
-        document.title,
-        source,
-        document.createdAtEpochMillis,
-      )
-    val build = withContext(Dispatchers.IO) { builds.build(candidate) }
-    if (build is WatchFacePushBuilds.Result.Failed) {
-      return Outcome.Refused(
-        HttpStatusCode.UnprocessableEntity,
-        "packaging_failed",
-        build.diagnostics.joinToString("\n"),
-      )
+    // Build, then commit only at the version that was built. A concurrent publish of the same
+    // design that moves the stored version sends this one round again, so the APK on disk always
+    // carries the versionCode its listing says, and no version is ever stored twice or lowered.
+    repeat(PUBLISH_ATTEMPTS) {
+      val candidate =
+        store.candidate(
+          designId,
+          owner,
+          document.revision,
+          document.title,
+          source,
+          document.createdAtEpochMillis,
+        )
+      val build = withContext(Dispatchers.IO) { builds.build(candidate) }
+      if (build is WatchFacePushBuilds.Result.Failed) {
+        return Outcome.Refused(
+          HttpStatusCode.UnprocessableEntity,
+          "packaging_failed",
+          build.diagnostics.joinToString("\n"),
+        )
+      }
+      withContext(Dispatchers.IO) { store.commitIfBuiltVersion(candidate) }
+        ?.let {
+          return Outcome.Ok(status(it, build))
+        }
     }
-    val published = withContext(Dispatchers.IO) { store.commit(candidate) }
-    return Outcome.Ok(status(published, build))
+    return Outcome.Refused(
+      HttpStatusCode.Conflict,
+      "publish_conflict",
+      "this design is being published concurrently; try again",
+    )
   }
 
   internal suspend fun unpublish(
@@ -298,6 +310,7 @@ internal constructor(
 
   companion object {
     const val BASE_PATH = "/api/watchface-push/v1"
+    private const val PUBLISH_ATTEMPTS = 5
     const val LINK_PATH = "/link"
     const val PUBLICATION_PATH = "/api/ui-builder/v1/designs/{designId}/watch-push"
     const val VISIBILITY_PUBLIC = "public"

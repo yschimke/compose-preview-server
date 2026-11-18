@@ -659,16 +659,30 @@ internal class WatchFacePushStore(
   fun commit(candidate: Publication): Publication =
     synchronized(lock) {
       val current = publications[candidate.designId]
-      val publication =
-        if (
-          current != null &&
-            current.digest != candidate.digest &&
-            current.version >= candidate.version
-        ) {
-          candidate.copy(version = current.version + 1)
-        } else candidate
-      store(publication)
-      publication
+      store(candidate.copy(version = committedVersion(current, candidate)))
+    }
+
+  /**
+   * The version [candidate] gets when committed over [current]: never lower than what is stored.
+   * The same face keeps the stored version (a late duplicate cannot roll it back); a different face
+   * is above it. Equal to `candidate.version` whenever nothing raced it.
+   */
+  private fun committedVersion(current: Publication?, candidate: Publication): Long =
+    when {
+      current == null -> candidate.version
+      current.digest == candidate.digest -> maxOf(current.version, candidate.version)
+      else -> maxOf(candidate.version, current.version + 1)
+    }
+
+  /**
+   * [commit] [candidate] only if it lands at exactly the version it was built for; null (nothing
+   * stored) when a concurrent publish moved the stored version, so the caller rebuilds first.
+   */
+  fun commitIfBuiltVersion(candidate: Publication): Publication? =
+    synchronized(lock) {
+      val current = publications[candidate.designId]
+      if (committedVersion(current, candidate) != candidate.version) return null
+      store(candidate)
     }
 
   /**
@@ -700,12 +714,13 @@ internal class WatchFacePushStore(
       updated
     }
 
-  private fun store(publication: Publication) {
+  private fun store(publication: Publication): Publication {
     writeAtomically(
       publicationsDir.resolve(publicationFileName(publication.designId)),
       json.encodeToString(Publication.serializer(), publication).toByteArray(),
     )
     publications[publication.designId] = publication
+    return publication
   }
 
   // --------------------------------------------------------------------- APKs
