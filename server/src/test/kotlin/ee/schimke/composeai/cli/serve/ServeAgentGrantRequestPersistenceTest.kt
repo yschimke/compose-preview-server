@@ -172,6 +172,117 @@ class ServeAgentGrantRequestPersistenceTest {
     assertNotPollable(reloaded.poll(request.id, request.deviceSecret))
   }
 
+  /** Approve and collect on [store], returning the bearer the agent now holds. */
+  private fun collectedOn(
+    store: ServeAgentGrantStore,
+    ttlSeconds: Long = 600,
+  ): ServeAgentGrantStore.Grant {
+    val request = store.ask()
+    store.approveOk(
+      request.id,
+      "@yuri",
+      AgentGrantScope.LIVE,
+      ttlSeconds,
+      setOf(AgentGrantCapability.IMAGES),
+      "github:yuri",
+    )
+    return assertIs<ServeAgentGrantStore.Poll.Approved>(
+        store.poll(request.id, request.deviceSecret),
+      )
+      .grant
+  }
+
+  @Test
+  fun `a collected bearer keeps working after a restart, as the same grant`() {
+    val grant = collectedOn(store())
+
+    now += 5 * 60_000
+    val audit = mutableListOf<String>()
+    val reloaded = store(audit = { audit += it })
+
+    val restored = assertNotNull(reloaded.grantForToken(grant.token), "the redeploy kept it")
+    assertEquals(grant.id, restored.id, "the same grant, so revoking it still reaches it")
+    assertEquals(AgentGrantScope.LIVE, restored.scope)
+    assertEquals(setOf(AgentGrantCapability.IMAGES), restored.capabilities)
+    assertEquals("github:yuri", restored.approvedByActorId)
+    assertEquals(grant.expiresAtMillis, restored.expiresAtMillis, "no extra lifetime")
+    assertEquals(grant.fingerprint, restored.fingerprint)
+    assertEquals(ServeAgentGrantStore.TokenState.LIVE, reloaded.describeToken(grant.token))
+    assertEquals(listOf(grant.id), reloaded.activeGrants().map { it.id })
+    assertTrue(reloaded.grantsHeldElsewhere().isEmpty(), "held here now, not listed twice")
+    assertTrue(audit.single().contains("restored ${grant.fingerprint}"), audit.toString())
+    // Its derived credentials work again too, since they come from the presented bearer.
+    val browser = assertNotNull(reloaded.browserCredentialFor(restored))
+    assertEquals(grant.id, reloaded.grantForBrowserCredential(browser.value)?.id)
+
+    // Revoked on the restarted process: gone there and on any later one.
+    assertTrue(reloaded.revoke(grant.id, "@yuri"))
+    assertNull(reloaded.grantForToken(grant.token))
+    assertNull(store().grantForToken(grant.token))
+  }
+
+  @Test
+  fun `a bearer is not restored once revoked, expired, unknown or past a lowered ceiling`() {
+    val revoked = collectedOn(store())
+    assertTrue(store().revoke(revoked.id, "@yuri"))
+    assertNull(store().grantForToken(revoked.token), "revoked before the restart")
+
+    val short = collectedOn(store(), ttlSeconds = 60)
+    now += 61_000
+    assertNull(store().grantForToken(short.token), "expired")
+    assertEquals(ServeAgentGrantStore.TokenState.UNKNOWN, store().describeToken(short.token))
+
+    val long = collectedOn(store())
+    val stranger = ServeAgentGrantStore.TOKEN_PREFIX + "A".repeat(long.token.length - 5)
+    assertNull(store().grantForToken(stranger), "a well-formed token nobody was given")
+
+    // The ceiling was lowered across the restart: the grant is served only as long as it now
+    // allows.
+    val lowered = assertNotNull(store(maxGrantTtlSeconds = 120).grantForToken(long.token))
+    assertTrue(lowered.expiresAtMillis < long.expiresAtMillis, "clamped like a fresh collection")
+
+    // Without a file there is nothing to restore from, as before.
+    assertNull(store(file = null).grantForToken(long.token))
+  }
+
+  @Test
+  fun `a restore never serves more than the grant as issued, though the ceilings were raised`() {
+    // Approved for 1800 s at live, collected while this server capped grants at 60 s and preview.
+    val strict = store(maxGrantTtlSeconds = 60, maxScope = AgentGrantScope.PREVIEW)
+    val request = strict.ask()
+    val approvedAt = now
+    strict.approveOk(
+      request.id,
+      "@yuri",
+      AgentGrantScope.LIVE,
+      1800,
+      setOf(AgentGrantCapability.IMAGES),
+      "github:yuri",
+    )
+    val issued =
+      assertIs<ServeAgentGrantStore.Poll.Approved>(strict.poll(request.id, request.deviceSecret))
+        .grant
+    assertEquals(approvedAt + 60_000, issued.expiresAtMillis)
+    assertEquals(AgentGrantScope.PREVIEW, issued.scope)
+
+    // Restarted with the ceilings raised: the bearer is the grant it was issued as, not the
+    // approval.
+    now += 10_000
+    val relaxed = store(maxGrantTtlSeconds = 3600, maxScope = AgentGrantScope.PLAYGROUND)
+    val restored = assertNotNull(relaxed.grantForToken(issued.token))
+    assertEquals(approvedAt + 60_000, restored.expiresAtMillis, "still the 60 s it was issued for")
+    assertEquals(AgentGrantScope.PREVIEW, restored.scope, "no rung it was not issued")
+    assertTrue(restored.capabilities.all { it in issued.capabilities }, "no capability added")
+    now = approvedAt + 61_000
+    assertNull(store(maxGrantTtlSeconds = 3600).grantForToken(issued.token), "and it ends there")
+  }
+
+  @Test
+  fun `a restored grant whose capability was withdrawn is not served bare`() {
+    val grant = collectedOn(store())
+    assertNull(store(maxCapabilities = emptySet()).grantForToken(grant.token))
+  }
+
   @Test
   fun `a revoked grant is not minted again by a restart`() {
     val first = store()
@@ -741,6 +852,76 @@ class ServeAgentGrantRequestPersistenceTest {
     store.ask()
     assertTrue(path.readText().contains("\"format\""), path.readText())
     assertFalse(legacy.exists(), "the old file is never written")
+  }
+
+  @Test
+  fun `the outgoing release rewriting the shared file in its own shape loses no restore data`() {
+    val grant = collectedOn(store())
+
+    // During the rollout the old release rewrites the v2 file it shares with this one, keeping
+    // only the row fields it knows: what this release adds must not live in those rows.
+    val known =
+      setOf(
+        "id",
+        "deviceSecretSha256",
+        "userCode",
+        "label",
+        "client",
+        "requestedScope",
+        "requestedTtlSeconds",
+        "requestedCapabilities",
+        "requesterActorId",
+        "designIds",
+        "createdAtMillis",
+        "expiresAtMillis",
+        "state",
+        "resolvedBy",
+        "approval",
+        "grantId",
+        "grantFingerprint",
+        "refusal",
+        "retainUntilMillis",
+      )
+    val parsed = kotlinx.serialization.json.Json.parseToJsonElement(file.readText())
+    val obj = parsed as kotlinx.serialization.json.JsonObject
+    val rows =
+      (obj["requests"] as kotlinx.serialization.json.JsonArray).map { row ->
+        kotlinx.serialization.json.JsonObject(
+          (row as kotlinx.serialization.json.JsonObject).filterKeys { it in known },
+        )
+      }
+    val rewritten =
+      kotlinx.serialization.json.JsonObject(
+        obj + ("requests" to kotlinx.serialization.json.JsonArray(rows)),
+      )
+    file.writeText(rewritten.toString())
+    assertEquals(
+      parsed,
+      rewritten,
+      "this release keeps nothing in the shared rows the old one would drop",
+    )
+
+    now += 60_000
+    val restored =
+      assertNotNull(store().grantForToken(grant.token), "still restorable after the rewrite")
+    assertEquals(grant.id, restored.id)
+    val bearers = file.resolveSibling(ServeAgentGrantRequestFile.BEARERS_NAME)
+    assertTrue(bearers.exists(), "the restore data lives in a file the old release never opens")
+    assertFalse(bearers.readText().contains(grant.token), "a digest, never the bearer")
+    // And a revocation the old release writes into the shared row still ends it.
+    val revokedRows = rows.map { row ->
+      if ((row["grantId"] as? kotlinx.serialization.json.JsonPrimitive)?.content == grant.id)
+        kotlinx.serialization.json.JsonObject(
+          row + ("state" to kotlinx.serialization.json.JsonPrimitive("revoked")),
+        )
+      else row
+    }
+    file.writeText(
+      kotlinx.serialization.json
+        .JsonObject(obj + ("requests" to kotlinx.serialization.json.JsonArray(revokedRows)))
+        .toString(),
+    )
+    assertNull(store().grantForToken(grant.token), "revoked by the old release")
   }
 
   @Test

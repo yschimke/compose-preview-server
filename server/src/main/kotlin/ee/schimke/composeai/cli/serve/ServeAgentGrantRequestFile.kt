@@ -248,6 +248,106 @@ internal class ServeAgentGrantRequestFile(
     }
 
   /**
+   * A collected grant as issued, kept so a process that does not hold it can serve it again when
+   * its bearer is presented. Only a digest of the bearer — 256 random bits, so the digest checks a
+   * presented bearer and cannot produce one — and the scope, capabilities and expiry collection
+   * clamped it to.
+   */
+  @Serializable
+  internal data class Bearer(
+    val grantId: String,
+    /** Base64url SHA-256 of the bearer. */
+    val tokenSha256: String,
+    /** [ee.schimke.composeai.agentgrants.AgentGrantScope.wire] as issued. */
+    val scope: String,
+    val capabilities: List<String> = emptyList(),
+    val expiresAtMillis: Long,
+  )
+
+  @Serializable
+  private data class BearerSnapshot(val format: String, val version: Int, val bearers: List<Bearer>)
+
+  /**
+   * Where [Bearer]s live: a file of their own beside this one, [BEARERS_NAME], that no previous
+   * release opens. Not fields on the [Record], because during a rollout the old release rewrites
+   * this file in its own row shape and would drop them, leaving grants collected by the new one
+   * unrestorable on exactly the deploy that ships restoring. The [Record] stays the authority on
+   * whether a grant still stands: a bearer is served only while its row is [COLLECTED].
+   */
+  private val bearersFile: Path = this.file.resolveSibling(BEARERS_NAME)
+
+  /** Record [bearer] for its grant, under the shared lock. False, reported, when it cannot be. */
+  fun recordBearer(bearer: Bearer): Boolean =
+    try {
+      locked {
+        val now = clock()
+        val kept = readBearers().filter { it.expiresAtMillis > now && it.grantId != bearer.grantId }
+        writeBearers(kept + bearer)
+      }
+      true
+    } catch (e: IOException) {
+      System.err.println(
+        "serve: agent-grant: could not record a collected grant in $bearersFile: $e",
+      )
+      false
+    }
+
+  /** The live [Bearer] whose digest is [tokenSha256], compared constant-time, or null. */
+  fun bearerFor(tokenSha256: String): Bearer? =
+    try {
+      val now = clock()
+      readBearers().firstOrNull {
+        it.expiresAtMillis > now && ServeUrls.tokensMatch(it.tokenSha256, tokenSha256)
+      }
+    } catch (e: IOException) {
+      System.err.println("serve: agent-grant: could not read collected grants in $bearersFile: $e")
+      null
+    }
+
+  private fun readBearers(): List<Bearer> {
+    if (!Files.exists(bearersFile)) return emptyList()
+    if (Files.size(bearersFile) > MAX_BYTES) throw IOException("collected grants file is too large")
+    val snapshot =
+      try {
+        JSON.decodeFromString<BearerSnapshot>(Files.readString(bearersFile))
+      } catch (e: SerializationException) {
+        throw IOException("malformed collected grants file", e)
+      } catch (e: IllegalArgumentException) {
+        throw IOException("malformed collected grants file", e)
+      }
+    if (snapshot.format != BEARERS_FORMAT || snapshot.version != BEARERS_VERSION) {
+      throw IOException("not a collected grants file of this format")
+    }
+    return snapshot.bearers
+  }
+
+  private fun writeBearers(bearers: List<Bearer>) {
+    val json =
+      JSON.encodeToString(
+        BearerSnapshot(format = BEARERS_FORMAT, version = BEARERS_VERSION, bearers = bearers),
+      )
+    if (json.toByteArray(Charsets.UTF_8).size > MAX_BYTES) {
+      throw IOException("collected grants too large")
+    }
+    val temporary = ownerOnlyTempFile(bearersFile.parent)
+    try {
+      Files.writeString(temporary, json)
+      try {
+        Files.move(
+          temporary,
+          bearersFile,
+          StandardCopyOption.ATOMIC_MOVE,
+          StandardCopyOption.REPLACE_EXISTING,
+        )
+      } catch (_: AtomicMoveNotSupportedException) {
+        Files.move(temporary, bearersFile, StandardCopyOption.REPLACE_EXISTING)
+      }
+    } finally {
+      Files.deleteIfExists(temporary)
+    }
+  }
+
+  /**
    * The key every process sharing this file seals its approval and revoke forms with, so a form
    * drawn by one is accepted by the other: 32 random bytes in [FORM_KEY_NAME] beside the file,
    * owner-only, made once under the file lock and read by everyone after. Null, reported, when it
@@ -436,6 +536,11 @@ internal class ServeAgentGrantRequestFile(
     const val LEGACY_NAME = "agent-access-requests.json"
     const val FORMAT = "compose-preview/agent-access-requests"
     const val VERSION = 2
+
+    /** Collected grants as issued ([Bearer]); a file no previous release opens or rewrites. */
+    const val BEARERS_NAME = "agent-grant-bearers.v1.json"
+    const val BEARERS_FORMAT = "compose-preview/agent-grant-bearers"
+    const val BEARERS_VERSION = 1
 
     const val FORM_KEY_NAME = "agent-grant-csrf.key"
     private const val FORM_KEY_BYTES = 32
