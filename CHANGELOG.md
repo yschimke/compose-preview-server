@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.167.0](https://github.com/yschimke/compose-preview-server/compare/v3.166.0...v3.167.0) (2026-11-18)
+
+
+### Features
+
+* **server:** android-dwf native surface streamed from the DWF runtime daemon ([#1961](https://github.com/yschimke/compose-preview-server/issues/1961)) ([d24a0c6](https://github.com/yschimke/compose-preview-server/commit/d24a0c6f1a0c676d6c2b052c8cc8dcb967632e81))
+
+
+### Bug Fixes
+
+* **deps:** update compose-ai-tools to 2.98.0 ([#1966](https://github.com/yschimke/compose-preview-server/issues/1966)) ([692d759](https://github.com/yschimke/compose-preview-server/commit/692d7599911ca017059c4920e435cd3579e15e92))
+* **serve:** build when a watch-face module's changed path is a directory ([#1962](https://github.com/yschimke/compose-preview-server/issues/1962)) ([50006ab](https://github.com/yschimke/compose-preview-server/commit/50006ab5a070f44b1fc551d47427a489bc8c63c2))
+
 ## [3.166.0](https://github.com/yschimke/compose-preview-server/compare/v3.165.0...v3.166.0) (2026-11-17)
 
 
