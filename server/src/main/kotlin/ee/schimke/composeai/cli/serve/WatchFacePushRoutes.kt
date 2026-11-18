@@ -114,7 +114,15 @@ internal constructor(
     // the approver's watches.
     // Staged: the candidate is built before it replaces anything, so a face the packager refuses
     // leaves the release already on watches exactly as it was.
-    val candidate = store.candidate(designId, owner, document.revision, document.title, source)
+    val candidate =
+      store.candidate(
+        designId,
+        owner,
+        document.revision,
+        document.title,
+        source,
+        document.createdAtEpochMillis,
+      )
     val build = withContext(Dispatchers.IO) { builds.build(candidate) }
     if (build is WatchFacePushBuilds.Result.Failed) {
       return Outcome.Refused(
@@ -255,7 +263,7 @@ internal constructor(
     publication: WatchFacePushStore.Publication,
     accountActorId: String?,
   ): String? {
-    if (!publication.published) return null
+    if (!publication.published || !isSameDesign(service, publication)) return null
     if (service.canRead(ANONYMOUS, publication.designId)) return VISIBILITY_PUBLIC
     if (
       accountActorId != null &&
@@ -265,6 +273,27 @@ internal constructor(
       return VISIBILITY_PRIVATE
     }
     return null
+  }
+
+  /**
+   * Whether the design now at [publication]'s id is the one that was published: still owned by the
+   * account that published it, and created when it was. Asked as that owner, since the runtime
+   * names a design's owner only to its owner. A design deleted and recreated under the same id — by
+   * another account, or made public — is a different design and gets nothing of this one.
+   */
+  internal suspend fun isSameDesign(
+    service: UiBuilderServicePort,
+    publication: WatchFacePushStore.Publication,
+  ): Boolean {
+    if (publication.accountActorId.isBlank()) return false
+    val snapshot =
+      service.executeMapped(
+        GetSnapshotRequestV1(designId = publication.designId),
+        AuthenticatedUiBuilderActor(publication.accountActorId),
+      ) as? UiBuilderServiceResponse.Snapshot ?: return false
+    if (snapshot.snapshot.access?.ownerActorId != publication.accountActorId) return false
+    val created = publication.designCreatedAtEpochMillis ?: return true
+    return snapshot.snapshot.state.document.createdAtEpochMillis == created
   }
 
   companion object {
@@ -547,7 +576,9 @@ internal fun Route.installWatchFacePushRoutes(
         publication != null &&
           publication.published &&
           caller.account == null &&
-          push.reach(service, publication, null) == null
+          push.reach(service, publication, null) == null &&
+          // Still the design that was published; a recreated id is unknown, so 404.
+          push.isSameDesign(service, publication)
       ) {
         call.noStore()
         call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
@@ -612,7 +643,8 @@ internal fun Route.installWatchFacePushRoutes(
         publication == null ||
           !publication.published ||
           version != publication.version ||
-          !ServeUrls.tokensMatch(push.store.previewSignature(designId, version), signature)
+          !ServeUrls.tokensMatch(push.store.previewSignature(designId, version), signature) ||
+          !push.isSameDesign(service, publication)
       ) {
         call.noStore()
         call.respondText("not found", status = HttpStatusCode.NotFound)

@@ -44,6 +44,11 @@ class ServeUiBuilderAdmin(
   private val onLog: (String) -> Unit = { System.err.println(it) },
   /** The design's latest guidelines result, forgotten with the design. */
   private val guidelineRecords: ServeUiBuilderGuidelineStore? = null,
+  /**
+   * Retire the design's watch publication with it ([WatchFacePushStore.retire]); a function so this
+   * public class does not name the internal store.
+   */
+  private val retireWatchPublication: (designId: String) -> Unit = {},
 ) {
   private val sidecars =
     ServeUiBuilderSidecars(
@@ -53,6 +58,7 @@ class ServeUiBuilderAdmin(
       reviews = reviews,
       thumbnails = thumbnails,
       guidelineRecords = guidelineRecords,
+      retireWatchPublication = retireWatchPublication,
       onLog = onLog,
     )
 

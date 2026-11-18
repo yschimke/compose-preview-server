@@ -456,6 +456,11 @@ internal class WatchFacePushStore(
     val label: String,
     val digest: String,
     val publishedAtEpochMillis: Long,
+    /**
+     * The design's `createdAtEpochMillis` when it was published: with [accountActorId], which
+     * design this is. A design deleted and recreated under the same id (by anyone) is not it.
+     */
+    val designCreatedAtEpochMillis: Long? = null,
   ) {
     fun source(): DwfSource = DwfSource(wffXml = wffXml, wffVersion = wffVersion, label = label)
   }
@@ -590,7 +595,9 @@ internal class WatchFacePushStore(
     revision: Long,
     title: String,
     source: DwfSource,
-  ): Publication = commit(candidate(designId, accountActorId, revision, title, source))
+    designCreatedAtEpochMillis: Long? = null,
+  ): Publication =
+    commit(candidate(designId, accountActorId, revision, title, source, designCreatedAtEpochMillis))
 
   /**
    * What [publish] would store, without storing it: the caller builds it first and [commit]s it
@@ -602,6 +609,7 @@ internal class WatchFacePushStore(
     revision: Long,
     title: String,
     source: DwfSource,
+    designCreatedAtEpochMillis: Long? = null,
   ): Publication =
     synchronized(lock) {
       val previous = publications[designId]
@@ -629,6 +637,7 @@ internal class WatchFacePushStore(
             if (previous?.published == true && previous.digest == digest) {
               previous.publishedAtEpochMillis
             } else clock(),
+          designCreatedAtEpochMillis = designCreatedAtEpochMillis,
         )
       publication
     }
@@ -650,6 +659,26 @@ internal class WatchFacePushStore(
         } else candidate
       store(publication)
       publication
+    }
+
+  /**
+   * The design is gone for good (purged from the trash, or deleted by an administrator): take it
+   * off watches and forget whose it was, keeping only its version counter, so whoever creates the
+   * id next starts above every version already installed and never inherits this publication.
+   */
+  fun retire(designId: String): Publication? =
+    synchronized(lock) {
+      val previous = publications[designId] ?: return null
+      val retired =
+        previous.copy(
+          published = false,
+          accountActorId = "",
+          title = "",
+          wffXml = "",
+          designCreatedAtEpochMillis = null,
+        )
+      store(retired)
+      retired
     }
 
   /** Take [designId] off watches; its version counter is kept. Null when it was never published. */

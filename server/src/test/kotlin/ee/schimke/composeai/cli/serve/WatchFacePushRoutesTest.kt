@@ -837,6 +837,43 @@ class WatchFacePushRoutesTest {
     assertEquals(0, slow.anonymousLimiter.activeCallers())
   }
 
+  @Test
+  fun `a purged design's publication is never served for a design recreated under its id`() {
+    start()
+    createDesign(alice, "secret", "Secret")
+    publish(alice, "secret")
+    val aliceToken = link(alice)
+    val old = designs(aliceToken).single()
+    val oldApk = send("GET", pathOf(old.apkUrl), bearer = aliceToken)
+    assertEquals("fake-apk:secret:1", oldApk.body)
+
+    // Permanently deleted, without the sweep: the binding alone keeps it from the next owner.
+    assertTrue(service.adminDeleteDesign("secret"))
+    createDesign(bob, "secret", "Bob's", public = true)
+    assertEquals(emptyList(), designs())
+    assertEquals(emptyList(), designs(aliceToken))
+    assertEquals(404, send("GET", pathOf(old.apkUrl)).code)
+    assertEquals(404, send("GET", pathOf(old.apkUrl), bearer = aliceToken).code)
+    assertEquals(404, send("GET", pathOf(old.previewUrl)).code)
+
+    // The admin delete (and the trash purge) sweeps it: retired, keeping only the version.
+    val admin =
+      ServeUiBuilderAdmin(service = service, retireWatchPublication = { push.store.retire(it) })
+    assertIs<ServeUiBuilderAdmin.Result.Deleted>(admin.delete("secret"))
+    val retired = push.store.publication("secret")!!
+    assertFalse(retired.published)
+    assertEquals("", retired.accountActorId)
+    assertEquals("", retired.wffXml)
+    assertEquals(1, retired.version)
+    // Whoever publishes the id next starts above the version already installed.
+    createDesign(bob, "secret", "Bob's", public = true)
+    faces["secret"] = "<WatchFace id=\"bobs\"/>"
+    assertEquals(200, publish(bob, "secret").code)
+    val bobs = designs().single()
+    assertEquals(2, bobs.version)
+    assertEquals("fake-apk:secret:2", send("GET", pathOf(bobs.apkUrl)).body)
+  }
+
   private fun document(id: String, title: String) =
     DesignDocumentV1(
       schema = "compose-ui-builder-document/v1-candidate",

@@ -2379,15 +2379,7 @@ public class ServeRunner(
     githubAuth: ServeGithubAuth?,
   ): WatchFacePush? {
     val directory = lane.stateDirectory?.resolve("watchface-push") ?: return null
-    val store =
-      runCatching { WatchFacePushStore(directory.toPath()) }
-        .onFailure {
-          System.err.println(
-            "serve: watch-face push unavailable (${it.message}); the builder works, and no " +
-              "design can be installed on a watch from here",
-          )
-        }
-        .getOrNull() ?: return null
+    val store = lane.watchFacePush ?: return null
     val signing = WatchFacePushSigning.fromEnvironment()
     when (signing) {
       is WatchFacePushSigning.Configured ->
@@ -2481,6 +2473,8 @@ public class ServeRunner(
     val validator: UiBuilderDraftValidator,
     /** The state directory itself, for the stores that live beside the builder's (Web Push). */
     val stateDirectory: File? = null,
+    /** Watch publications and linked watches ([WatchFacePush]); shared with the trash sweep. */
+    val watchFacePush: WatchFacePushStore? = null,
   ) : AutoCloseable {
     override fun close() {
       thumbnails?.close()
@@ -3117,6 +3111,15 @@ public class ServeRunner(
       nativePlatforms = catalogPlatforms,
       validator = ScratchUiBuilderDraftValidator(catalogs, annotatedExporter),
       stateDirectory = directory,
+      watchFacePush =
+        runCatching { WatchFacePushStore(directory.resolve("watchface-push").toPath()) }
+          .onFailure {
+            System.err.println(
+              "serve: watch-face push unavailable (${it.message}); the builder works, and no " +
+                "design can be installed on a watch from here",
+            )
+          }
+          .getOrNull(),
     )
   }
 
@@ -3397,6 +3400,7 @@ public class ServeRunner(
               thumbnails = lane.thumbnails,
               guidelineRecords = lane.guidelineRecords,
               folders = lane.folders,
+              retireWatchPublication = { lane.watchFacePush?.retire(it) },
             ),
         )
         .start()
@@ -3455,6 +3459,7 @@ public class ServeRunner(
           thumbnails = uiBuilderLane.thumbnails,
           designs = uiBuilderLane.service,
           guidelineRecords = uiBuilderLane.guidelineRecords,
+          retireWatchPublication = { uiBuilderLane.watchFacePush?.retire(it) },
         )
       } else {
         null
