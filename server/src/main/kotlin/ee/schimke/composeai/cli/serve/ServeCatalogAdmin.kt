@@ -125,6 +125,7 @@ class ServeCatalogAdmin(
           current.listed == entry.listed &&
           current.loadPriority == entry.loadPriority &&
           current.importedFrom == entry.importedFrom &&
+          current.regenerateUrl == entry.regenerateUrl &&
           current.designSystem == entry.isDesignSystem
       ) {
         continue
@@ -136,6 +137,7 @@ class ServeCatalogAdmin(
           group = resolved,
           loadPriority = entry.loadPriority,
           importedFrom = entry.importedFrom,
+          regenerateUrl = entry.regenerateUrl,
           designSystem = entry.isDesignSystem,
         )
       ) {
@@ -190,6 +192,7 @@ class ServeCatalogAdmin(
                 group = resolved,
                 loadPriority = entry.loadPriority,
                 importedFrom = entry.importedFrom,
+                regenerateUrl = entry.regenerateUrl,
                 designSystem = entry.isDesignSystem,
               )
             }
@@ -216,7 +219,9 @@ class ServeCatalogAdmin(
           current.loadPriority == entry.loadPriority &&
           // Attribution converges like placement, so an import can move off the staging owner's
           // section without a restart.
-          current.importedFrom == entry.importedFrom
+          current.importedFrom == entry.importedFrom &&
+          // ...and so does where it is rebuilt, which only changes its regenerate link.
+          current.regenerateUrl == entry.regenerateUrl
       ) {
         // Everything tracked matches, but the file may not: a swap whose persist failed transiently
         // leaves `catalogs.json` stale, and answering 409 here would stop the reconcile ever
@@ -237,6 +242,7 @@ class ServeCatalogAdmin(
         group = resolved,
         loadPriority = entry.loadPriority,
         importedFrom = entry.importedFrom,
+        regenerateUrl = entry.regenerateUrl,
         designSystem = entry.isDesignSystem,
       )
       onLog("serve: catalog ${entry.system} listing updated via admin API")
@@ -289,6 +295,7 @@ class ServeCatalogAdmin(
       // Carried, not dropped, so an admin-published import is attributed correctly on the front
       // page before a restart.
       importedFrom = entry.importedFrom,
+      regenerateUrl = entry.regenerateUrl,
       loadPriority = entry.loadPriority,
       designSystem = entry.isDesignSystem,
     )

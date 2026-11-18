@@ -32,6 +32,8 @@ class CatalogLoadTracker(
      * ([ServeCatalogsConfig.Entry.importedFrom]).
      */
     val importedFrom: String? = null,
+    /** Where the catalog is rebuilt ([ServeCatalogsConfig.Entry.regenerateUrl]). */
+    val regenerateUrl: String? = null,
     /**
      * Startup fetch order, highest first ([ServeCatalogsConfig.Entry.loadPriority]); read by
      * [loadOrder].
@@ -104,6 +106,8 @@ class CatalogLoadTracker(
     // Front-page attribution, and undefaulted for the same reason: a caller that forgot it would
     // silently strip an import's origin, which is the failure this parameter was added to close.
     importedFrom: String?,
+    // Undefaulted for the same reason: a re-publish must not drop where the catalog is rebuilt.
+    regenerateUrl: String?,
     // Undefaulted: a re-publish may move an entry into or out of the design-systems group, which
     // changes fetch band and readiness gating.
     designSystem: Boolean,
@@ -116,6 +120,7 @@ class CatalogLoadTracker(
           group = group,
           loadPriority = loadPriority,
           importedFrom = importedFrom,
+          regenerateUrl = regenerateUrl,
           designSystem = designSystem,
         )
       states[system] = existing.copy(config = updated)

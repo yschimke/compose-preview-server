@@ -163,6 +163,47 @@ class ServeCatalogAdminTest {
   }
 
   @Test
+  fun `re-posting an entry that only gained a regenerate url converges it instead of conflicting`() {
+    val url = "https://github.com/yschimke/compose-preview-imports/actions/workflows/import.yml"
+    seedConfig(
+      ServeCatalogsConfig(
+        catalogs =
+          listOf(
+            ServeCatalogsConfig.Entry(
+              system = "joreilly-bikeshare",
+              repo = "yschimke/compose-preview-imports",
+            ),
+          ),
+      ),
+    )
+    val tracker =
+      tracker(
+        CatalogLoadTracker.Config(
+          "joreilly-bikeshare",
+          true,
+          "yschimke/compose-preview-imports",
+          "b",
+        ),
+      )
+    tracker.recordSuccess("joreilly-bikeshare")
+
+    val result =
+      admin(tracker)
+        .register(
+          ServeCatalogsConfig.Entry(
+            system = "joreilly-bikeshare",
+            repo = "yschimke/compose-preview-imports",
+            regenerateUrl = url,
+          ),
+        )
+
+    assertTrue(result is ServeCatalogAdmin.Result.Ok, "$result")
+    assertEquals(emptyList(), loaded, "the running catalog is never re-fetched behind its back")
+    assertEquals(url, tracker.configFor("joreilly-bikeshare")?.regenerateUrl)
+    assertEquals(url, file.load().catalogs.single().regenerateUrl)
+  }
+
+  @Test
   fun `an unknown group, a bad id, and a bad repo are all rejected before any fetch`() {
     val tracker = tracker()
     val a = admin(tracker)

@@ -181,6 +181,7 @@ class CatalogLoadTrackerTest {
         group = null,
         loadPriority = 5,
         importedFrom = null,
+        regenerateUrl = null,
         designSystem = false,
       ),
     )
@@ -267,6 +268,7 @@ class CatalogLoadTrackerTest {
         group = null,
         loadPriority = 0,
         importedFrom = null,
+        regenerateUrl = null,
         designSystem = true,
       ),
     )
@@ -280,6 +282,7 @@ class CatalogLoadTrackerTest {
         group = null,
         loadPriority = 0,
         importedFrom = null,
+        regenerateUrl = null,
         designSystem = false,
       ),
     )
