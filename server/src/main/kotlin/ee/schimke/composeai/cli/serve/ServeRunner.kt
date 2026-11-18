@@ -3774,6 +3774,8 @@ public class ServeRunner(
               isDwfCatalog = { catalog ->
                 lane.nativeBackends[catalog] == DwfPreviewSurface.BACKEND
               },
+              // The tab starts with an empty body, so the server writes the WFF itself.
+              sourceFor = ::deriveDwfSource,
             )
           },
         // Needs the generator and the playground, but no catalog mapping: an inline body compiles

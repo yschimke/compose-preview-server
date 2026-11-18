@@ -410,8 +410,8 @@ private fun resolveDwfSource(
       dwf.sourceFor(document)
         ?: return ResolvedSource.Refused(
           DwfPreviewSurface.SOURCE_UNAVAILABLE,
-          "this server cannot yet derive WFF for a revision; send the editor's `wffXml` " +
-            "(and `assets`) in the request body",
+          "this design does not export to Watch Face Format (the code pane lists why), or this " +
+            "server cannot derive it; send the editor's `wffXml` (and `assets`) in the request body",
         )
     return ResolvedSource.Ok(derived)
   }

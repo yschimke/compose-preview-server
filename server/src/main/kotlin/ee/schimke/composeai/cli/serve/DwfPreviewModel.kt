@@ -523,3 +523,18 @@ internal object DwfDaemonCommands {
     )
   }
 }
+
+/**
+ * The WFF a design revision exports, as a [DwfSource], so the watch-face tab can start a session
+ * with an empty body. Null when the design does not export to Watch Face Format (the exporter's
+ * reasons are the code pane's). Bitmap assets are not carried: a face that names `res/` drawables
+ * needs the editor to send them in the start request.
+ */
+internal fun deriveDwfSource(
+  document: ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1,
+): DwfSource? =
+  when (val result = ee.schimke.composeai.uibuilder.export.WatchFaceXmlExporter.export(document)) {
+    is ee.schimke.composeai.uibuilder.export.WatchFaceXmlExporter.Result.Emitted ->
+      DwfSource(wffXml = result.xml, wffVersion = result.wffVersion, label = document.id)
+    is ee.schimke.composeai.uibuilder.export.WatchFaceXmlExporter.Result.Refused -> null
+  }
