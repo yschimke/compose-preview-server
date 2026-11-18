@@ -21,18 +21,20 @@ import javax.crypto.spec.SecretKeySpec
  * only the requesting agent holds. The token goes to whoever presents the secret, never whoever
  * opens the link, so the link is safe to paste in chat.
  *
- * Grants live in memory only: a restart drops every grant and its bearer, which suits a
- * short-lived, revocable credential. Requests are different — a person slow to approve should not
- * have to start over because the server was redeployed — so with a [requestsFile] a request's whole
- * lifecycle lives there ([ServeAgentGrantRequestFile]), and that file, not this process's memory,
- * is authoritative: a deploy runs the old and new processes side by side, and every state change
- * (decide, deny, collect, revoke) is a compare-and-set on the shared row. The row holds the device
- * secret hashed and an approval as the *decision*, never a token. An agent's grant is minted only
- * by the process that wins the row from approved to collected ([poll]), from the stored decision
- * clamped to current ceilings, with its lifetime counted from the approval; the collected row names
- * the grant, so a revocation in any process reaches it. A file that cannot be read or written never
- * falls back to memory. Without a file (tests, a local server) nothing touches disk and a grant is
- * minted at approval, as before.
+ * Without a [requestsFile] grants live in memory only, and a restart drops every grant and its
+ * bearer. With one, a request's whole lifecycle lives there — a person slow to approve should not
+ * have to start over because the server was redeployed, and nor should the agent they approved — so
+ * a collected row also keeps the bearer's SHA-256, and a process that does not hold the grant
+ * rebuilds it when that bearer is presented ([restoreFromDisk]). The lifecycle lives in that file
+ * ([ServeAgentGrantRequestFile]), and that file, not this process's memory, is authoritative: a
+ * deploy runs the old and new processes side by side, and every state change (decide, deny,
+ * collect, revoke) is a compare-and-set on the shared row. The row holds the device secret hashed
+ * and an approval as the *decision*, never a token. An agent's grant is minted only by the process
+ * that wins the row from approved to collected ([poll]), from the stored decision clamped to
+ * current ceilings, with its lifetime counted from the approval; the collected row names the grant,
+ * so a revocation in any process reaches it. A file that cannot be read or written never falls back
+ * to memory. Without a file (tests, a local server) nothing touches disk and a grant is minted at
+ * approval, as before.
  */
 class ServeAgentGrantStore(
   /** How long an unopened link stays approvable. Short — a request is a live conversation. */
@@ -736,6 +738,7 @@ class ServeAgentGrantStore(
             state = ServeAgentGrantRequestFile.COLLECTED,
             grantId = grant.id,
             grantFingerprint = grant.fingerprint,
+            grantTokenSha256 = secretHash(grant.token),
           )
         }
     ) {
@@ -790,8 +793,70 @@ class ServeAgentGrantStore(
    */
   fun grantForToken(presented: String?): Grant? {
     val token = presented?.takeIf { isWellFormedToken(it) } ?: return null
-    return liveGrant(byToken[token] ?: return null)
+    return liveGrant(byToken[token] ?: return restoreFromDisk(token))
   }
+
+  /**
+   * The grant a well-formed [token] was collected as, in a process that does not hold it: this one
+   * after a restart, or the new one while a deploy overlaps the old. With a [requestsFile] the
+   * collected row records the bearer's SHA-256
+   * ([ServeAgentGrantRequestFile.Record.grantTokenSha256]) beside the stored decision, so the grant
+   * is rebuilt from that decision, clamped to the ceilings this process runs with exactly as
+   * [collect] does, under the same id — a revocation of it, from any process, still reaches it.
+   * Null without a file, for an unknown, revoked or expired grant, or while the file cannot be
+   * vouched for. Grants used to end with their process; they now last the lifetime their approver
+   * gave them (yschimke/watchface-tools#45).
+   */
+  private fun restoreFromDisk(token: String): Grant? =
+    synchronized(this) {
+      val disk = disk ?: return null
+      byToken[token]?.let {
+        return liveGrant(it)
+      }
+      if (!disk.isCurrent()) return null
+      val hash = secretHash(token)
+      val row =
+        disk.all().values.firstOrNull { row ->
+          row.state == ServeAgentGrantRequestFile.COLLECTED &&
+            row.grantTokenSha256 != null &&
+            ServeUrls.tokensMatch(row.grantTokenSha256, hash)
+        } ?: return null
+      val grantId = row.grantId ?: return null
+      if (grantId in disk.revokedGrantIds()) return null
+      val request = adopt(row) ?: return null
+      val decided = request.approval ?: return null
+      val expiresAt = effectiveExpiry(decided)
+      if (expiresAt <= clock()) return null
+      val capabilities = decided.capabilities intersect maxCapabilities
+      // As at collection: an approval for a capability this server has since withdrawn is not
+      // quietly served without it.
+      if (decided.capabilities.isNotEmpty() && capabilities.isEmpty()) return null
+      val grant =
+        Grant(
+          id = grantId,
+          token = token,
+          scope = minOf(decided.scope, maxScope),
+          capabilities = capabilities,
+          label = request.label,
+          approvedBy = decided.approvedBy,
+          approvedByActorId = decided.approvedByActorId,
+          requesterActorId = request.requesterActorId,
+          designIds = decided.designIds,
+          issuedAtMillis = decided.approvedAtMillis,
+          expiresAtMillis = expiresAt,
+        )
+      request.grantId = grantId
+      request.collected = true
+      register(grant)
+      audit(
+        "agent-grant: restored ${grant.fingerprint} scope=${grant.scope.wire} " +
+          capabilityAuditField(grant.capabilities) +
+          designAuditField(grant.designIds) +
+          "from the requests file, expires in ${grant.secondsUntilExpiry(clock())}s " +
+          "approver=${grant.approvedBy} label=\"${grant.label}\"",
+      )
+      liveGrant(grant.id)
+    }
 
   /** The live grant named by an HttpOnly browser credential, or null. */
   fun grantForBrowserCredential(presented: String?): Grant? {
@@ -850,7 +915,7 @@ class ServeAgentGrantStore(
   fun describeToken(presented: String?): TokenState {
     if (presented.isNullOrBlank()) return TokenState.ABSENT
     if (!isWellFormedToken(presented)) return TokenState.MALFORMED
-    val id = byToken[presented] ?: return TokenState.UNKNOWN
+    val id = byToken[presented] ?: restoreFromDisk(presented)?.id ?: return TokenState.UNKNOWN
     // Revoked by another process sharing the requests file reads as revoked here: unknown.
     if (disk != null && id in disk.revokedGrantIds()) {
       dropLocal(id)

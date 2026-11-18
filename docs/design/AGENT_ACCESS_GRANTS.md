@@ -96,11 +96,11 @@ very different responses to what used to be one indistinguishable empty reply.
 | `absent` | no credential on the request |
 | `malformed` | not shaped like a grant token |
 | `expired` | known here, past its TTL |
-| `unknown` | revoked, **or** issued by a previous run of this server |
+| `unknown` | revoked, **or** issued by a previous run of a server without a requests file |
 
-`unknown` deliberately conflates revocation with a restart. Grants are never persisted (only
-unresolved and uncollected *requests* are, below), so a redeploy invalidates every outstanding token,
-and telling the two apart would mean keeping a
+`unknown` deliberately conflates revocation with a restart of a server that keeps no requests file.
+With one, a collected bearer is recognised after a restart (below), so `unknown` there means revoked
+or never issued; telling revoked from never-issued would mean keeping a
 tombstone for every revoked token — retaining exactly what revocation is meant to discard. The
 message names both causes so the reader can tell which happened from context the server does not
 have.
@@ -250,10 +250,10 @@ internet mint itself credentials.
   request left waiting so it can be approved once a grant is revoked or expires; nothing live is
   ended to make room for it. Requests are bounded too, and
   shed only once denied or collected — an approval nobody has polled for yet still owes its owner a
-  credential. Grants are in memory, so a restart drops every grant. That is deliberate: the
-  TTLs are short, and a credential that cannot survive a redeploy has a much smaller worst case than
-  one that can.
-- **Requests survive a restart; no credential does.** A person slow to approve should not have to
+  credential. Grants used to be in memory only, so every redeploy dropped every grant and stopped
+  agents mid-task (yschimke/watchface-tools#45); with a requests file they now last the lifetime
+  their approver chose, as below.
+- **Requests and collected grants survive a restart; no credential is written.** A person slow to approve should not have to
   start over because the host was redeployed, so with a writable catalogs directory every request
   lives in `mcp-oauth/agent-access-requests.v2.json` beside the catalogs file (the OAuth client
   registry's directory, same file lock and atomic replace). A row holds what the approval page shows
@@ -285,6 +285,18 @@ internet mint itself credentials.
   modification time or size changes, so a check stays a stat. (A person's own request, carried by
   their session and never polled, is the exception: approving it is the claim, `pending` →
   `collected`, and mints there.)
+- **A collected bearer is recognised by any process, after a restart too.** The `collected` row
+  also records the bearer's **SHA-256** (`grantTokenSha256`) — a digest of 256 random bits, which
+  checks a presented bearer and cannot produce one. A process that does not hold the grant (the new
+  one during a deploy's overlap, or any process after a restart) looks a well-formed bearer it does
+  not know up by that digest, constant-time, and rebuilds the grant under the same id from the
+  stored decision, clamped to the ceilings it runs with now exactly as a collection is: no extra
+  lifetime, no capability it has withdrawn (a grant whose every capability was withdrawn is not
+  served at all), and nothing a revocation already reached. The browser and Wasm credentials derive
+  from the presented bearer, so they work again once the agent has presented it. What still ends
+  with a process: a person's own session-carried grant, which has no bearer to present, and the
+  MCP OAuth layer's pending authorizations and refresh bindings, below.
+  Without a file nothing is persisted and a restart drops every grant, as before.
 - **Either process can show and revoke a grant.** `/status` lists the grants this process holds and,
   from their `collected` rows, the ones the other process holds (by fingerprint, under the same
   approver rule), and the approval, request-access and revoke forms are sealed with a key kept
@@ -513,10 +525,10 @@ now asked per message: the handshake, `tools/list` and these two tools are open,
 reads a catalog is not, and an unrecognised method or tool name is gated by default. See
 [the catalog MCP guide](CATALOG_MCP.md#or-ask-from-inside-the-protocol).
 
-It is also how a client recovers from a restart. Grants are not persisted — deliberately, see
-above — so a redeployed host invalidates every live bearer at once, and an agent mid-task meets a
-401 with plenty of TTL left on a token that no longer exists. Asking again is the whole remedy, and
-now it costs no out-of-band tooling. A request still waiting for its human, or approved and not yet
+It is also how a client recovers from a restart of a host without a requests file, which
+invalidates every live bearer at once: an agent mid-task meets a 401 with plenty of TTL left on a
+token that no longer exists. Asking again is the whole remedy, and now it costs no out-of-band
+tooling. On a host with one, a collected bearer keeps working across the restart. A request still waiting for its human, or approved and not yet
 collected, is not lost: keep polling it after the restart.
 
 ## Using it without a header

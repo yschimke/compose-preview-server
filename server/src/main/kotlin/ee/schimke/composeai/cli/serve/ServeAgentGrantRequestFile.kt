@@ -87,6 +87,12 @@ internal class ServeAgentGrantRequestFile(
      * audit log show — so another process can list it. Not a credential.
      */
     val grantFingerprint: String? = null,
+    /**
+     * Base64url SHA-256 of that grant's bearer, from [COLLECTED] on, so a restarted or overlapping
+     * process can recognise the bearer when it is presented and serve the grant again. A digest of
+     * a 256-bit random token: it checks a presented bearer and cannot produce one.
+     */
+    val grantTokenSha256: String? = null,
     /** Why the server refused an approval at collection, for a [DENIED] row it refused. */
     val refusal: String? = null,
     /** A refusal's own lifetime, when it outlives the request's deadline. */
