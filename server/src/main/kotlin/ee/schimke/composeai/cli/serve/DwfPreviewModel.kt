@@ -108,6 +108,10 @@ internal class DwfSource(
       if (!SAFE_ASSET_PATH.matches(path) || path.split('/').any { it == ".." || it.isEmpty() }) {
         return "asset path `$path` is not a plain relative path under res/"
       }
+      if (normalizedAssetPath(path) in RESERVED_PATHS) {
+        return "asset path `$path` would replace a file this server writes itself " +
+          "(the watch face, its info, or the manifest)"
+      }
       total += bytes.size
       if (total > MAX_ASSET_BYTES) return "assets are larger than $MAX_ASSET_BYTES bytes in all"
     }
@@ -135,6 +139,18 @@ internal class DwfSource(
   }
 
   companion object {
+    /**
+     * Bundle paths this server writes from validated input. An asset that resolved to one would
+     * replace the document [problem] checked with one it did not (the DOCTYPE and size gates), so
+     * those names are refused after the same normalisation a filesystem applies: case, `.`
+     * segments, and repeated or leading separators.
+     */
+    private val RESERVED_PATHS =
+      setOf("raw/watchface.xml", "xml/watch_face_info.xml", "androidmanifest.xml")
+
+    internal fun normalizedAssetPath(path: String): String =
+      path.lowercase().split('/').filter { it.isNotEmpty() && it != "." }.joinToString("/")
+
     const val MAX_XML_CHARS = 2_000_000
     const val MAX_ASSETS = 256
     const val MAX_ASSET_BYTES = 16L * 1024 * 1024

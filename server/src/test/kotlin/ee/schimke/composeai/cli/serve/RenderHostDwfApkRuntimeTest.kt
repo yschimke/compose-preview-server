@@ -196,4 +196,31 @@ class RenderHostDwfApkRuntimeTest {
     val e = assertFailsWith<DwfRuntimeException> { r.connect(File("x.apk")) }
     assertTrue("no jvm for you" in e.message!!)
   }
+
+  @Test
+  fun `an asset cannot take the place of a file the server writes`() {
+    for (path in
+      listOf(
+        "raw/watchface.xml",
+        "RAW/WatchFace.xml",
+        "./raw/watchface.xml",
+        "raw//watchface.xml",
+        "raw/./watchface.xml",
+        "xml/watch_face_info.xml",
+        "AndroidManifest.xml",
+      )) {
+      val problem = DwfSource("<WatchFace/>", assets = mapOf(path to byteArrayOf(1))).problem()
+      assertTrue(problem != null && "replace a file" in problem, "$path: $problem")
+    }
+    assertNull(DwfSource("<WatchFace/>", assets = mapOf("raw/other.xml" to byteArrayOf(1))).problem())
+  }
+
+  @Test
+  fun `the validated document wins even if an asset got past the gate`() {
+    val src = DwfSource("<WatchFace id=\"good\"/>")
+    val sneaky =
+      DwfSource(src.wffXml, assets = mapOf("raw/watchface.xml" to "<!DOCTYPE x>".toByteArray()))
+    val files = DwfPackaging.bundleFiles(sneaky)
+    assertEquals(src.wffXml, files[WffBundleLayout.WATCH_FACE_PATH]!!.decodeToString())
+  }
 }

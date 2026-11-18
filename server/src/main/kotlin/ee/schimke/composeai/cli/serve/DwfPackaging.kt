@@ -39,8 +39,8 @@ internal object DwfPackaging {
   private val PREVIEW_PRESENT = Regex("drawable[^/]*/preview\\.(png|webp|jpe?g)")
 
   /**
-   * The bundle's files keyed by bundle-relative path. `res/xml/watch_face_info.xml` and a
-   * `drawable/preview.png` are supplied unless the design's [DwfSource.assets] carry their own,
+   * The bundle's files keyed by bundle-relative path. `res/xml/watch_face_info.xml` is always the server's default, and a
+   * `drawable/preview.png` is supplied unless the design's [DwfSource.assets] carry their own,
    * because the runtime's resource link fails on a face info that names a missing preview.
    */
   fun bundleFiles(source: DwfSource): Map<String, ByteArray> {
@@ -56,14 +56,14 @@ internal object DwfPackaging {
         wffVersion = version,
       )
     val files = LinkedHashMap<String, ByteArray>()
+    for ((path, bytes) in source.assets.toSortedMap()) files["res/$path"] = bytes
+    // The server's own files go in after the assets, so even an asset that slipped past
+    // `DwfSource.problem()` cannot replace the validated document or the manifest.
     files[WffBundleLayout.MANIFEST_PATH] =
       WffBundleLayout.manifestDocument(manifest).toXml().encodeToByteArray()
     files[WffBundleLayout.WATCH_FACE_PATH] = source.wffXml.encodeToByteArray()
-    for ((path, bytes) in source.assets.toSortedMap()) files["res/$path"] = bytes
-    if (WffBundleLayout.WATCH_FACE_INFO_PATH !in files) {
-      files[WffBundleLayout.WATCH_FACE_INFO_PATH] =
-        WffWatchFaceInfo().toDocument().toXml().encodeToByteArray()
-    }
+    files[WffBundleLayout.WATCH_FACE_INFO_PATH] =
+      WffWatchFaceInfo().toDocument().toXml().encodeToByteArray()
     if (files.keys.none { PREVIEW_PRESENT.matches(it.removePrefix("res/")) }) {
       files["res/$PREVIEW_PATH"] = placeholderPreview()
     }
