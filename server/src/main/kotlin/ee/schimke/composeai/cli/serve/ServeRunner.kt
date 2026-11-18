@@ -681,6 +681,8 @@ public class ServeRunner(
      * [ServeCatalogsConfig.Entry.importedFrom].
      */
     val importedFrom: String? = null,
+    /** Where the catalog is rebuilt; see [ServeCatalogsConfig.Entry.regenerateUrl]. */
+    val regenerateUrl: String? = null,
     /**
      * Startup fetch order, highest first ([ServeCatalogsConfig.Entry.loadPriority]); flag entries
      * keep their naming order.
@@ -724,6 +726,7 @@ public class ServeRunner(
           listed = entry.listed,
           group = ServeCatalogAdmin.homeGroup(entry, repo, catalogsConfig.groups),
           importedFrom = entry.importedFrom,
+          regenerateUrl = entry.regenerateUrl,
           loadPriority = entry.loadPriority,
           designSystem = entry.group == ServeCatalogsConfig.DESIGN_SYSTEMS_GROUP,
         )
@@ -832,6 +835,7 @@ public class ServeRunner(
           listed = entry.listed,
           group = contribution.homeGroup(entry),
           importedFrom = entry.importedFrom,
+          regenerateUrl = entry.regenerateUrl,
           loadPriority = entry.loadPriority,
         )
       }
@@ -4355,6 +4359,7 @@ public class ServeRunner(
             branch = "$catalogBranchPrefix${ref.system}",
             group = ref.group,
             importedFrom = ref.importedFrom,
+            regenerateUrl = ref.regenerateUrl,
             loadPriority = ref.loadPriority,
             designSystem = ref.designSystem,
           )
@@ -4519,6 +4524,7 @@ public class ServeRunner(
               branch = "$catalogBranchPrefix${entry.system}",
               group = contribution.homeGroup(entry),
               importedFrom = entry.importedFrom,
+              regenerateUrl = entry.regenerateUrl,
               loadPriority = entry.loadPriority,
               designSystem = entry.group == ServeCatalogsConfig.DESIGN_SYSTEMS_GROUP,
             )

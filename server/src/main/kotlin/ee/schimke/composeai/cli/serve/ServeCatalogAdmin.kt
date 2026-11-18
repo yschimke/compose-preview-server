@@ -136,6 +136,7 @@ class ServeCatalogAdmin(
           group = resolved,
           loadPriority = entry.loadPriority,
           importedFrom = entry.importedFrom,
+          regenerateUrl = entry.regenerateUrl,
           designSystem = entry.isDesignSystem,
         )
       ) {
@@ -190,6 +191,7 @@ class ServeCatalogAdmin(
                 group = resolved,
                 loadPriority = entry.loadPriority,
                 importedFrom = entry.importedFrom,
+                regenerateUrl = entry.regenerateUrl,
                 designSystem = entry.isDesignSystem,
               )
             }
@@ -237,6 +239,7 @@ class ServeCatalogAdmin(
         group = resolved,
         loadPriority = entry.loadPriority,
         importedFrom = entry.importedFrom,
+        regenerateUrl = entry.regenerateUrl,
         designSystem = entry.isDesignSystem,
       )
       onLog("serve: catalog ${entry.system} listing updated via admin API")
@@ -289,6 +292,7 @@ class ServeCatalogAdmin(
       // Carried, not dropped, so an admin-published import is attributed correctly on the front
       // page before a restart.
       importedFrom = entry.importedFrom,
+      regenerateUrl = entry.regenerateUrl,
       loadPriority = entry.loadPriority,
       designSystem = entry.isDesignSystem,
     )

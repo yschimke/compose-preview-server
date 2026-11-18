@@ -1877,7 +1877,28 @@ ${captureControlsHtml().prependIndent("          ")}
     val generatedAt: String? = null,
     val toolVersion: String? = null,
     val designParityVersion: String? = null,
+    /**
+     * Where the catalog is rebuilt, from its registration
+     * ([ServeCatalogsConfig.Entry.regenerateUrl]); null ⇒ the delivery [repo]'s
+     * `design-artifacts.yml`. Rendered through [regenerateLink].
+     */
+    val regenerateUrl: String? = null,
   )
+
+  /**
+   * The "regenerate" link for [prov]: its declared [CatalogProvenance.regenerateUrl] when that is a
+   * GitHub Actions workflow page, else the delivery repo's `design-artifacts.yml`. Only that one
+   * shape is accepted — the URL comes from a catalog registry, which is configuration rather than
+   * code, and lands in an `href`.
+   */
+  internal fun regenerateLink(prov: CatalogProvenance): String =
+    prov.regenerateUrl?.trim()?.takeIf { REGENERATE_URL.matches(it) }
+      ?: "https://github.com/${prov.repo}/actions/workflows/design-artifacts.yml"
+
+  private val REGENERATE_URL =
+    Regex(
+      """^https://github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/actions/workflows/[A-Za-z0-9._-]+\.ya?ml$""",
+    )
 
   /**
    * The **source** a catalog was built from (`catalog.json`'s `source = {repo, ref, module}`), as
@@ -1929,7 +1950,7 @@ ${captureControlsHtml().prependIndent("          ")}
     val branch = WebEscaping.htmlEscape(prov.branch)
     // Branch names carry a `/` (`design-artifacts/compose-m3`); it's a valid path in a tree URL.
     val branchUrl = "https://github.com/${prov.repo}/tree/${prov.branch}"
-    val actionUrl = "https://github.com/${prov.repo}/actions/workflows/design-artifacts.yml"
+    val actionUrl = WebEscaping.htmlEscape(regenerateLink(prov))
     val items = buildList {
       add(
         "<span class=\"cp-prov-item\"><span class=\"cp-prov-key\">catalog</span> " +

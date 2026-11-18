@@ -133,6 +133,14 @@ data class ServeCatalogsConfig(
      */
     val importedFrom: String? = null,
     /**
+     * Where this catalog is rebuilt: a `https://github.com/<owner>/<repo>/actions/workflows/<file>`
+     * page, linked as the catalog page's "regenerate". Null ⇒ the delivery [repo]'s own
+     * `design-artifacts.yml`, which is right for a catalog built where it is delivered and wrong
+     * for an import, whose delivery repository holds no workflows. Ignored unless [regenerateLink]
+     * accepts it.
+     */
+    val regenerateUrl: String? = null,
+    /**
      * Extra repos allowed to satisfy the [group] claim, for a catalog fetched from somewhere other
      * than where it is authored (e.g. a fork's preview branches). Only repos you trust to publish
      * under the heading.

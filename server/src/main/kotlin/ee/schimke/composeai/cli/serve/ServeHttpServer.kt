@@ -4287,7 +4287,13 @@ class ServeHttpServer(
           version = SERVE_VERSION,
           // Catalog provenance (delivery branch, generation date, tool versions) for the strip
           // under the header; null for a plain (non-catalog) module session.
-          provenance = catalogBundleHost(renderHost)?.provenance,
+          provenance =
+            catalogBundleHost(renderHost)?.provenance?.let { prov ->
+              // Where an import is rebuilt is declared by its registration, not its delivery repo.
+              catalogLoads?.configFor(selectedSessionId)?.regenerateUrl?.let {
+                prov.copy(regenerateUrl = it)
+              } ?: prov
+            },
           refreshUrl =
             if (catalogRefresh != null) "$basePath/refresh${requestQuerySuffix()}" else null,
           allModulesHref =

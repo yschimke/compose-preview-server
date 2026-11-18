@@ -7268,6 +7268,45 @@ class ServeWebFixtureTest {
   }
 
   @Test
+  fun `an imported catalog's regenerate link is the workflow its registration declares`() {
+    fun landingFor(regenerateUrl: String?) =
+      ServeWeb.landingPage(
+        "bonstio-casino-gshark",
+        themedPreviews,
+        token,
+        isPublic = true,
+        hasHomeIndex = true,
+        version = version,
+        provenance =
+          ServeWeb.CatalogProvenance(
+            repo = "yschimke/compose-preview-imports-out",
+            branch = "design-artifacts/bonstio-casino-gshark",
+            regenerateUrl = regenerateUrl,
+          ),
+      )
+    val declared =
+      "https://github.com/yschimke/compose-preview-imports/actions/workflows/import.yml"
+    val fallback =
+      "https://github.com/yschimke/compose-preview-imports-out/actions/workflows/design-artifacts.yml"
+    assertTrue(landingFor(declared).contains("href=\"$declared\">regenerate"))
+    assertFalse(
+      landingFor(declared).contains(fallback),
+      "the delivery repo's workflow is not offered",
+    )
+    // Nothing declared, or anything that is not a GitHub Actions workflow page: the delivery
+    // repo's.
+    for (url in
+      listOf(
+        null,
+        "javascript:alert(1)",
+        "https://example.test/actions/workflows/import.yml",
+        "https://github.com/yschimke/compose-preview-imports/actions/workflows/import.yml\"><x",
+      )) {
+      assertTrue(landingFor(url).contains("href=\"$fallback\">regenerate"), "falls back for $url")
+    }
+  }
+
+  @Test
   fun `a catalog landing shows the provenance strip with branch, date, versions and regenerate`() {
     val landing =
       ServeWeb.landingPage(
