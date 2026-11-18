@@ -997,6 +997,30 @@ class WatchFacePushUnitTest {
   }
 
   @Test
+  fun `a plain id shaped like a hashed name cannot take another design's package or record`() {
+    val hashed = WatchFacePushNaming.faceName("my-face")
+    assertTrue(Regex("my_face_[0-9a-f]{10}").matches(hashed), hashed)
+    val literal = WatchFacePushNaming.faceName(hashed)
+    assertNotEquals(hashed, literal)
+    assertTrue(Regex("[A-Za-z][A-Za-z0-9_]*").matches(literal), literal)
+
+    val root = dir.resolve("push")
+    val store = WatchFacePushStore(root)
+    store.publish("my-face", "github:alice", 1, "Dashed", DwfSource("<WatchFace a=\"1\"/>"))
+    store.publish(hashed, "github:bob", 1, "Literal", DwfSource("<WatchFace b=\"1\"/>"))
+    val reopened = WatchFacePushStore(root)
+    val dashed = reopened.publication("my-face")!!
+    val other = reopened.publication(hashed)!!
+    assertEquals("github:alice", dashed.accountActorId)
+    assertEquals("github:bob", other.accountActorId)
+    assertNotEquals(
+      WatchFacePushNaming.packageName(dashed.faceName),
+      WatchFacePushNaming.packageName(other.faceName),
+    )
+    assertEquals(2, reopened.published().size)
+  }
+
+  @Test
   fun `versions only grow, across unpublish, republish and a restart`() {
     val root = dir.resolve("push")
     val store = WatchFacePushStore(root)

@@ -132,8 +132,9 @@ revision is never rebuilt, across restarts too; builds run one at a time.
 `packageName` is `ee.schimke.watchface.push.watchfacepush.<faceName>`, the rule the Watch Face Push
 API and the app enforce. `faceName` comes from the design id:
 
-- an id that is already `[A-Za-z][A-Za-z0-9_]*`, at most 48 characters and not a Java keyword is
-  used as it is (`aurora` → `…watchfacepush.aurora`);
+- an id that is already `[A-Za-z][A-Za-z0-9_]*`, at most 48 characters, not a Java keyword, and
+  not itself shaped like a hashed name (ending `_` and ten hex characters) is used as it is
+  (`aurora` → `…watchfacepush.aurora`);
 - anything else is sanitised (every other character becomes `_`, a leading non-letter gains `d_`,
   at most 48 characters) and given `_` plus the first ten hex characters of the id's SHA-256, so
   `my-face` and `my_face` are different packages and never replace each other on a watch.

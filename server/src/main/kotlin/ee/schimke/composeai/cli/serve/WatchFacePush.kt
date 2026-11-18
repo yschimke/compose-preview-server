@@ -37,6 +37,13 @@ internal object WatchFacePushNaming {
   private const val MAX_PLAIN = 48
 
   private val PLAIN = Regex("[A-Za-z][A-Za-z0-9_]*")
+
+  /**
+   * The shape of a hashed name (`…_` and ten hex characters). A plain id of this shape is hashed
+   * too, so the plain and hashed names can never meet: `my-face` hashes to `my_face_0a48625fa2`,
+   * and a design literally called `my_face_0a48625fa2` gets a hash of its own.
+   */
+  private val HASHED_SHAPE = Regex(".*_[0-9a-f]{10}")
   private val FACE_NAME = Regex("[A-Za-z0-9_]+")
 
   /**
@@ -113,7 +120,10 @@ internal object WatchFacePushNaming {
   fun faceName(designId: String): String {
     require(designId.isNotEmpty()) { "a design id is required" }
     if (
-      PLAIN.matches(designId) && designId.length <= MAX_PLAIN && designId.lowercase() !in RESERVED
+      PLAIN.matches(designId) &&
+        designId.length <= MAX_PLAIN &&
+        designId.lowercase() !in RESERVED &&
+        !HASHED_SHAPE.matches(designId)
     ) {
       return designId
     }
@@ -692,7 +702,7 @@ internal class WatchFacePushStore(
 
   private fun store(publication: Publication) {
     writeAtomically(
-      publicationsDir.resolve("${publication.faceName}.json"),
+      publicationsDir.resolve(publicationFileName(publication.designId)),
       json.encodeToString(Publication.serializer(), publication).toByteArray(),
     )
     publications[publication.designId] = publication
@@ -780,6 +790,13 @@ internal class WatchFacePushStore(
     const val TOKEN_PREFIX = "wfp_"
     private const val TOUCH_PERSIST_MILLIS = 60 * 60 * 1000L
     private val random = SecureRandom()
+
+    /**
+     * A publication's file, keyed by its design id (hashed, so any id is a safe file name), not by
+     * its face name: the face name is derived, and the record must belong to exactly one design.
+     */
+    fun publicationFileName(designId: String): String =
+      sha256Hex(designId.toByteArray(StandardCharsets.UTF_8)) + ".json"
 
     fun tokenHash(token: String): String = sha256Hex(token.toByteArray(StandardCharsets.UTF_8))
 
