@@ -156,7 +156,12 @@ graphics-shapes = "1.1.0"
 # 2.99.2 gives a pushed face live frames too: the bridge's push path now waits for the runtime's
 # wallpaper engine instead of falling back to the screenshot path's forced 28th for good, and the
 # converted runtime's cache key moves to v4 (compose-ai-tools#6635).
-composeai-tools = "2.99.2"
+# 2.99.3 is what finally gets a pushed face live frames on a server: runtime instances are created
+# one at a time with the runtime's services kept bound, a late-returned instance is released, and
+# each `dwf-apk` request names its whole state (clock, sensors, slots mapped to the face's real ids)
+# and waits for its own frame (compose-ai-tools#6640, #6641, #6642). Also applies a requested
+# flavor in `dwf-rc` (#6637).
+composeai-tools = "2.99.3"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
 # in that repository's `docs/design/REPOSITORY_LAYERS.md`: between the contracts and
@@ -490,7 +495,11 @@ composeai-contracts = "3.43.0"
 # 3.133.0 imports PartDraw shapes, themes and flavors as builtins and refuses deleting a node the
 # schema requires (compose-ui-builder#1247), and strips a BOM from imported XML and draws each shape
 # in its own box (#1249). Built on compose-ai-tools 2.98.3, met here; `androidx-window` unchanged.
-composeai-ui-builder = "3.133.0"
+# 3.134.0 draws watch faces round, evaluates WFF Template/Transform text and angles in the canvas,
+# fills complication slots with a tidy sample, and makes both `wff-watchface` templates
+# self-contained shapes (compose-ui-builder#1255); it also depends on the published wff-core 0.3.1
+# (#1251). Built on compose-ai-tools 2.99.0, met here.
+composeai-ui-builder = "3.134.0"
 # First published version of the optional publication server library (Maven Central).
 livery = "0.15.0"
 # The Android Remote Compose players the server's own player-only Android daemon replays documents
