@@ -114,8 +114,8 @@ internal class ServeUiBuilderNativePreview(
           "catalog `${document.catalogPin.systemId}` is a Watch Face Format catalog " +
             "(`previewSurfaces.native.backend = \"${DwfPreviewSurface.BACKEND}\"`): its real " +
             "preview is the Wear OS watch-face runtime, started with " +
-            "`POST /api/ui-builder/v1/designs/{designId}/dwf-preview` and shown in its own tab, " +
-            "not a Compose compile",
+            "`POST /api/ui-builder/v1/designs/{designId}/dwf-preview` and shown in its own tab " +
+            "(`/ui-builder/{designId}/watch-face`), not a Compose compile",
         ),
       )
     }

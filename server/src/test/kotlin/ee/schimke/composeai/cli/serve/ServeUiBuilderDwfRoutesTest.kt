@@ -44,6 +44,7 @@ class ServeUiBuilderDwfRoutesTest {
     availability: DwfApkRuntime.Availability = DwfApkRuntime.Availability.Ready,
     dwfCatalog: String = "m3-catalog",
     tickMillis: Long = 1000,
+    sourceFor: (ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1) -> DwfSource? = { null },
   ): ServeHttpServer {
     runtime.availability = availability
     val service =
@@ -73,6 +74,7 @@ class ServeUiBuilderDwfRoutesTest {
             sessions = DwfPreviewSessions(runtime),
             isDwfCatalog = { it == dwfCatalog },
             tickMillis = tickMillis,
+            sourceFor = sourceFor,
           ),
         uiBuilderAuthorization =
           ServeUiBuilderAuthorization { _, _, _ ->
@@ -164,6 +166,25 @@ class ServeUiBuilderDwfRoutesTest {
     val (code, body) = post(base, "{}")
     assertEquals(422, code)
     assertEquals(DwfPreviewSurface.SOURCE_UNAVAILABLE, obj(body)["code"]!!.jsonPrimitive.content)
+  }
+
+  @Test
+  fun `an empty start body uses the WFF the server derives from the revision`() {
+    var derived = 0
+    start(
+      sourceFor = {
+        derived++
+        DwfSource(wffXml = "<WatchFace/>", label = "derived")
+      },
+    )
+    val (code, body) = post(base, "{}")
+    assertEquals(201, code, body)
+    assertEquals(1, derived)
+  }
+
+  @Test
+  fun `a design that is not a watch face derives no source`() {
+    assertEquals(null, deriveDwfSource(document()))
   }
 
   @Test
