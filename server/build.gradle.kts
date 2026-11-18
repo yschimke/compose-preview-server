@@ -284,6 +284,30 @@ fun Configuration.androidReleaseRuntime() {
   }
 }
 
+// `wff-packager` and everything it drags in, shipped as `<APP_HOME>/lib-wff-packager/` and run as
+// `java -cp 'lib-wff-packager/*' ee.schimke.watchface.packager.MainKt pack ...`. Never on a
+// classpath of this module: Google's validator carries `xercesImpl` (XSD 1.1), whose JAXP service
+// files would replace the JDK's parser for the whole server JVM and change what every DOM user
+// (`ExplodedSvg`) produces. `DwfPackaging` is the only caller.
+val wffPackager =
+  configurations.create("wffPackager") {
+    description = "wff-packager and its runtime, run in its own JVM by DwfPackaging."
+    isCanBeConsumed = false
+    isCanBeResolved = true
+    attributes {
+      attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage.JAVA_RUNTIME))
+      attribute(Category.CATEGORY_ATTRIBUTE, objects.named(Category.LIBRARY))
+      attribute(
+        TargetJvmEnvironment.TARGET_JVM_ENVIRONMENT_ATTRIBUTE,
+        objects.named(TargetJvmEnvironment.STANDARD_JVM),
+      )
+      attribute(
+        org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType.attribute,
+        org.jetbrains.kotlin.gradle.plugin.KotlinPlatformType.jvm,
+      )
+    }
+  }
+
 val rcPlayersAndroid =
   configurations.create("rcPlayersAndroid") {
     description = "The Android Remote Compose players the player-only daemon replays with."
@@ -556,6 +580,7 @@ distributions {
       into("lib-renderer") { from(stageRendererLibs) }
       into("lib-daemon-desktop") { from(stageDaemonDesktopLibs) }
       into("lib-rc-players-android") { from(stageRcPlayersAndroidLibs) }
+      into("lib-wff-packager") { from(wffPackager) }
       into("lib-rc-player-desktop") { from(stageRcPlayerDesktopLibs) }
     }
     // The CMP/Wasm Remote Compose player — see `stageRcPlayerWasm`. Its `fonts/` is also the
@@ -663,6 +688,11 @@ dependencies {
   // because their types (`ServeHost`, `RenderOutcome`) are throughout this module's signatures. The
   // sources keep the `ee.schimke.composeai.cli.serve` package.
   api(libs.composeai.render.host)
+
+  // The WFF bundle layout `DwfPackaging` lays a design revision out in. Only `wff-core`: the
+  // packager itself runs from `lib-wff-packager/` in its own JVM (see `wffPackager` below).
+  implementation(libs.wff.core)
+  wffPackager(libs.wff.packager)
 
   // The build-host protocol, `implementation`: only `ServeBuildHost` is programmed against
   // elsewhere.

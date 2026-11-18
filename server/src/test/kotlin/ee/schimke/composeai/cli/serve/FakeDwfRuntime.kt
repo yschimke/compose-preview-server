@@ -28,9 +28,13 @@ internal class FakeDwfRuntime(
   var statusAnswer: JsonElement? = healthyStatus()
   var failNext: String? = null
 
+  /** When set, [packageApk] fails the way the packager does: a refusal with these diagnostics. */
+  var packagingRefusal: List<String>? = null
+
   override fun availability(): DwfApkRuntime.Availability = availability
 
   override fun packageApk(source: DwfSource): File {
+    packagingRefusal?.let { throw DwfPackagingFailed(it) }
     packaged += source
     return File(dir, "wff-${source.digest().take(12)}.apk").also { it.writeBytes(byteArrayOf(1)) }
   }

@@ -74,6 +74,14 @@ dependencyResolutionManagement {
     google()
     mavenCentral()
 
+    // `wff-packager` pulls Google's watch face validator, which depends on
+    // `com.github.xgouchet:AXML`, published only on JitPack. Fenced to that group so JitPack can
+    // never answer a request for anything else (same filter as watchface-tools' own settings).
+    maven("https://jitpack.io") {
+      name = "jitpack"
+      content { includeGroup("com.github.xgouchet") }
+    }
+
     // The CMP Wear port (`ee.schimke.wearcmp:*`, jvm + wasmJs) so the canvas draws real Wear
     // components; see `docs/design/UI_BUILDER_WEAR_SCREEN.md`. Fenced with `includeGroup` so it can
     // never satisfy an `androidx.*` or `ee.schimke.composeai` request. The device-preview lane uses

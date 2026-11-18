@@ -50,49 +50,63 @@ Measured on `composeai-tools` 2.95–2.96, not assumed.
   `DwfApkSessionBridge` interface (`render(host, preview, overrides)`) is public. So this server
   cannot hand it "WFF XML + assets for revision N".
 
-## Packaging, the launcher, and what is still owed
+## Packaging and the launcher (implemented)
 
-Nothing is forked here. Packaging has a home now; two smaller asks remain.
+Nothing is forked here. `RenderHostDwfApkRuntime` is the production `DwfApkRuntime`, built from two
+published pieces:
 
-1. **Packaging — `:wff-packager`** (yschimke/watchface-tools, `main`; **not published yet**). It takes
-   a WFF source bundle (`WffBundleLayout.sourceFiles()`: `AndroidManifest.xml`, `res/raw/watchface.xml`,
-   `res/xml/watch_face_info.xml`, drawables, fonts, strings) and returns a signed, validated APK:
-   `WatchFacePackager().pack(files, PackagerOptions(target, versionCode, signing))`. It runs
-   `aapt2 compile/link` (mirroring compose-ai-tools' `ensureWffApk`), `zipalign`, in-process
-   `apksig` signing, and Google's validators, including the Watch Face Push validation token. This
-   supersedes the earlier ask that compose-ai-tools export `ensureWffApk` generalised; do not
-   reimplement either. The WFF version travels in the bundle's manifest
-   (`com.google.wear.watchface.format.version`) and the packager checks the face against it, which
-   also removes the hard-coded `android:value="2"` in `ensureWffApk`.
-   The binding is `DwfApkRuntime.packageApk(DwfSource)`: lay the source out as a bundle
-   (`xml` → `res/raw/watchface.xml`, `assets` under `res/`, version → the manifest property), call
-   `pack` with `PackageTarget.Sideload` and the default debug key (the runtime does not need a
-   publishable signature), and cache by `DwfSource.digest()`. A `PackagingException`'s diagnostics are
-   a refusal the tab can show, in the packager's words.
-   **Gate on consuming it:** default builds here resolve released Maven Central coordinates only
-   (`AGENTS.md`, boundary rules), so this waits for a published `wff-packager`. Prototyping against a
-   checkout is the staged-publication workflow in
-   [LOCAL_DEPENDENCIES.md](../development/LOCAL_DEPENDENCIES.md), and only when the user authorizes it.
-   The packager needs the Android SDK (`aapt2`, `zipalign`, `android.jar`), the same requirement the
-   daemon has today.
-2. **The daemon launcher** (compose-ai-tools `render-host`) — start/attach the shared
-   `SimulatorDaemonProcess` and expose its command channel:
-   `connect(initialApk): { command(cmd, payload): JsonElement?, alive, close() }`. Still owed.
-3. **The override builder** (optional, compose-ai-tools) — `buildOverrideCommands` is `internal` and
-   keyed on a bundle's `ServePreview`.
-   [`DwfDaemonCommands`](../../server/src/main/kotlin/ee/schimke/composeai/cli/serve/DwfPreviewModel.kt)
-   restates the vocabulary, small and under test; once exported it becomes a call and the restatement
-   goes.
+1. **Packaging: `ee.schimke.watchface:wff-packager`** (yschimke/watchface-tools, pinned in
+   `gradle/libs.versions.toml`; 0.3.2 is the first release that targets Java 17, which this build's
+   floor needs, watchface-tools#28). `DwfPackaging` lays a `DwfSource` out as a WFF source bundle:
+   `AndroidManifest.xml` from `WffBundleLayout.manifestDocument` (package
+   `ee.schimke.composeai.dwfpreview.f<digest16>`, the WFF version as
+   `com.google.wear.watchface.format.version`, `minSdk` from `WffBundleLayout.minSdkFor`),
+   `xml` -> `res/raw/watchface.xml`, `assets` under `res/`, a default `res/xml/watch_face_info.xml`,
+   and a 64x64 transparent `drawable/preview.png` unless the design supplies a `drawable*/preview.*`
+   (the resource link fails on a face info that names a missing preview). It runs the packager's CLI
+   (`pack --bundle ... --package ...`, sideload target, the generated debug key kept under the cache
+   directory because the runtime does not need a publishable signature) **in its own JVM**, from
+   `lib-wff-packager/` in the distribution (`DwfSubprocessPackager`). Not in-process, and not on any
+   classpath of the server: Google's `validator-push` carries `xercesImpl` (the XSD 1.1 build, which
+   the WFF schema needs), and a second JAXP implementation on the server's classpath replaces the
+   JDK's for every DOM user in the process; it made `ExplodedSvg` return its input unexploded. The
+   server compiles only against `wff-core` for the bundle layout. `design assets` named
+   `raw/watchface.xml`, `xml/watch_face_info.xml` or `AndroidManifest.xml` are refused
+   (`DwfSource.problem()`), so the validated document is the one packaged. The APK is cached by `DwfSource.digest()` in memory and on
+   disk (`composeAiCacheDir("dwf-preview-apks")`), so a re-push, a second session on the revision and
+   a restart all reuse it.
+   Packaging runs in `DwfPreviewSessions.start`, off the event loop, not on the first frame: a
+   `PackagingException` becomes `DwfPackagingFailed` and the start request answers
+   **422 `DWF_PACKAGING_FAILED`** with the packager's own diagnostics
+   (`error[wff-validator]: ...`, `error[aapt2]: ...`) as the reasons, which is what the tab shows.
+2. **The daemon launcher: compose-ai-tools `DwfSimulatorLauncher`** (render-host, compose-ai-tools#6643).
+   `connect(initialApk)` starts the shared `:simulator-host` daemon and returns a
+   `DwfSimulatorConnection { command(cmd, payload), alive, close() }`; `unavailableReason()` says why
+   it cannot start. It shares the bridge's environment lookup and runtime-conversion cache, and one
+   JVM-wide lock around the conversion. `RenderHostDwfApkRuntime.connect` adapts it to
+   `DwfDaemonConnection` (an `ok:false` answer becomes a `DwfRuntimeException`).
 
-Until then `RenderHostDwfApkRuntime` is the production binding and answers *unavailable* with the
-precise reason (`DWF_RUNTIME_MISSING` when the proprietary APK is not installed — the common hosted
-case — else `DWF_PACKAGING_UNAVAILABLE`). The route, socket, lifecycle and command mapping are
-complete and tested against a fake daemon; swapping the binding for `:wff-packager` plus the
-launcher is the only change when they land.
+`availability()` names the first thing missing, in the order an operator fixes it:
+
+| Code | HTTP | Meaning |
+| --- | --- | --- |
+| `DWF_RUNTIME_MISSING` | 503 | Google's proprietary `DeclarativeWatchFaceRuntime.apk` is not installed (the common hosted case). |
+| `DWF_ANDROID_SDK_MISSING` | 503 | No Android SDK for the packager: `aapt2` + `zipalign` (build-tools) and a platform `android.jar`, via `ANDROID_HOME` / `ANDROID_SDK_ROOT`. The message carries the `sdkmanager` line. |
+| `DWF_SIMULATOR_UNAVAILABLE` | 503 | The launcher's own prerequisites are missing (`lib-simulator/`, `lib-daemon-android/`, an `android.jar`). |
+| `DWF_PACKAGING_UNAVAILABLE` | 503 | Packaging could not run (a tool failed to start). |
+| `DWF_PACKAGING_FAILED` | 422 | The packager refused this face; the reasons are its diagnostics. |
+
+Still owed: **the override builder** (optional, compose-ai-tools): `buildOverrideCommands` is
+`internal` and keyed on a bundle's `ServePreview`.
+[`DwfDaemonCommands`](../../server/src/main/kotlin/ee/schimke/composeai/cli/serve/DwfPreviewModel.kt)
+restates the vocabulary, small and under test; once exported it becomes a call and the restatement
+goes.
 
 The runtime APK is Google's, never redistributed: it is found through the `dwf-runtime pull` cache,
-`$COMPOSE_PREVIEW_DWF_RUNTIME_APK`, or `PUT /admin/dwf-runtime`, and the preview deployment
-(`preview.coo.ee`) will normally lack it.
+`$COMPOSE_PREVIEW_DWF_RUNTIME_APK`, or `PUT /admin/dwf-runtime`. The preview deployment
+(`preview.coo.ee`) carries the Android build-tools and the `lib-simulator/` + `lib-dex2jar/`
+sidecars (preview-coo-ee#54) but not the APK, so it answers `DWF_RUNTIME_MISSING` until an operator
+installs one.
 
 ## Flow
 

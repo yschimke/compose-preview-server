@@ -217,8 +217,13 @@ internal fun Route.installUiBuilderDwfRoutes(
           return@post
         }
       }
-    // Packaging and the daemon boot happen on the first frame, off this request.
-    when (val started = dwf.sessions.start(designId, document.revision, actor.actorId, source)) {
+    // Packaging (aapt2, zipalign, the validators) happens here so the packager's diagnostics are a
+    // 422 on this request; the daemon boot is on the first frame. Off the event loop either way.
+    val started =
+      withContext(Dispatchers.IO) {
+        dwf.sessions.start(designId, document.revision, actor.actorId, source)
+      }
+    when (started) {
       is DwfPreviewSessions.Started.Refused ->
         call.respondDwfRefusal(started.code.httpStatus(), started.code, started.reason)
       is DwfPreviewSessions.Started.Ok -> {
@@ -455,6 +460,8 @@ private fun ownedSession(
 private fun String.httpStatus(): HttpStatusCode =
   when (this) {
     DwfPreviewSurface.RUNTIME_MISSING,
+    DwfPreviewSurface.ANDROID_SDK_MISSING,
+    DwfPreviewSurface.SIMULATOR_UNAVAILABLE,
     DwfPreviewSurface.PACKAGING_UNAVAILABLE -> HttpStatusCode.ServiceUnavailable
     DwfPreviewSurface.TOO_MANY_SESSIONS -> HttpStatusCode.TooManyRequests
     else -> HttpStatusCode.UnprocessableEntity

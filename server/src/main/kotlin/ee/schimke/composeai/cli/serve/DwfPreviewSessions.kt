@@ -11,26 +11,20 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 
 /**
- * The seam to compose-ai-tools' `DwfApkDaemonBridge`, which is `internal` there and keyed on a
- * served bundle's `ServeHost` + `ServePreview`. A design revision is neither, so this server cannot
- * call it; the three things it would call are named here instead. Packaging is `:wff-packager`
- * (yschimke/watchface-tools; consumed once published), the daemon launcher and optionally the
- * override builder are still owed by compose-ai-tools, as the design doc's "Packaging, the
- * launcher, and what is still owed" sets out. Until then [RenderHostDwfApkRuntime] answers
- * [Availability.Unavailable] and a fake stands in for it in tests — which is also why nothing below
- * knows about processes.
+ * What the sessions need from the host to draw with the real runtime, as three calls that know
+ * nothing about processes: [availability], [packageApk] (`:wff-packager`) and [connect]
+ * (compose-ai-tools' exported `DwfSimulatorLauncher`). [RenderHostDwfApkRuntime] is the production
+ * binding and a fake stands in for it in tests.
  */
 internal interface DwfApkRuntime {
   /** Whether this host can draw a watch face with the real runtime, and if not, why not. */
   fun availability(): Availability
 
   /**
-   * Package [source] as the resource-only APK the runtime loads (res/ + `watchface.xml` + a
-   * synthesized manifest and `watch_face_info.xml`, via aapt2), cached by [DwfSource.digest].
-   * `:wff-packager` does this (it mirrors compose-ai-tools' `ensureWffApk`); it is the part not to
-   * reimplement here.
+   * Package [source] as the signed APK the runtime loads, cached by [DwfSource.digest].
    *
-   * @throws DwfRuntimeException when packaging fails (aapt2 missing, a malformed resource).
+   * @throws DwfPackagingFailed when the packager refuses the face, with its diagnostics.
+   * @throws DwfRuntimeException on any other failure (aapt2 could not run, the disk).
    */
   fun packageApk(source: DwfSource): File
 
@@ -62,43 +56,8 @@ internal interface DwfDaemonConnection : AutoCloseable {
   fun command(command: DwfCommand): JsonElement?
 }
 
-internal class DwfRuntimeException(message: String, cause: Throwable? = null) :
+internal open class DwfRuntimeException(message: String, cause: Throwable? = null) :
   RuntimeException(message, cause)
-
-/**
- * The production [DwfApkRuntime] until `:wff-packager` is published and compose-ai-tools exports
- * the daemon launcher. It can still tell the tab the one thing that is true today and decides
- * whether anything would work: whether the proprietary `DeclarativeWatchFaceRuntime.apk` is
- * installed here (same lookup as `GET /admin/dwf-runtime`), so a host that lacks it says "runtime
- * missing" rather than something about packaging.
- */
-internal class RenderHostDwfApkRuntime(
-  private val runtimeInstalled: () -> Boolean,
-) : DwfApkRuntime {
-  override fun availability(): DwfApkRuntime.Availability =
-    if (!runtimeInstalled()) {
-      DwfApkRuntime.Availability.Unavailable(
-        DwfPreviewSurface.RUNTIME_MISSING,
-        "The Wear OS watch-face runtime (DeclarativeWatchFaceRuntime.apk) is not installed on " +
-          "this server. It is Google's proprietary runtime and is never redistributed; install " +
-          "it with `compose-preview dwf-runtime pull` on the host, or PUT /admin/dwf-runtime. " +
-          "The fast Remote Compose preview in the editor is unaffected.",
-      )
-    } else {
-      DwfApkRuntime.Availability.Unavailable(
-        DwfPreviewSurface.PACKAGING_UNAVAILABLE,
-        "The runtime is installed, but this server's compose-ai-tools release does not yet " +
-          "export watch-face packaging and the simulator launcher for a design revision " +
-          "(DwfApkDaemonBridge is bundle-only).",
-      )
-    }
-
-  override fun packageApk(source: DwfSource): File =
-    throw DwfRuntimeException("watch-face packaging is not exported by compose-ai-tools yet")
-
-  override fun connect(initialApk: File): DwfDaemonConnection =
-    throw DwfRuntimeException("the simulator launcher is not exported by compose-ai-tools yet")
-}
 
 /**
  * Real-runtime preview sessions for `android-dwf` designs: one per tab, each holding its revision's
@@ -192,8 +151,24 @@ internal class DwfPreviewSessions(
           "runtime; close one, or retry shortly (idle ones expire after ${idleMillis / 60_000} min)",
       )
     }
+    // Packaged here rather than on the first frame, so a face the packager refuses is a refusal of
+    // the start request (with the packager's diagnostics) instead of an error on a socket. Cached
+    // by
+    // digest, so the first frame and every later session on this revision reuse it.
+    val apk =
+      try {
+        runtime.packageApk(source)
+      } catch (e: DwfPackagingFailed) {
+        return Started.Refused(DwfPreviewSurface.PACKAGING_FAILED, e.message ?: "packaging failed")
+      } catch (e: DwfRuntimeException) {
+        return Started.Refused(
+          DwfPreviewSurface.PACKAGING_UNAVAILABLE,
+          e.message ?: "packaging is unavailable",
+        )
+      }
     val session =
       Session(UUID.randomUUID().toString(), designId, revision, ownerActorId, source, now())
+    session.apk = apk
     sessions[session.id] = session
     return Started.Ok(session)
   }

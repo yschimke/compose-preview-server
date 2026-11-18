@@ -48,6 +48,19 @@ class DwfPreviewSessionsTest {
   }
 
   @Test
+  fun `a face the packager refuses is a refusal of the start with its diagnostics`() {
+    runtime.packagingRefusal =
+      listOf("error[wff-validator]: cvc-complex-type.2.4.a", "error[aapt2]: resource not found")
+    val refused =
+      assertIs<DwfPreviewSessions.Started.Refused>(sessions.start("d", 1, "a", source()))
+    assertEquals(DwfPreviewSurface.PACKAGING_FAILED, refused.code)
+    assertTrue("cvc-complex-type.2.4.a" in refused.reason, refused.reason)
+    assertTrue("resource not found" in refused.reason, refused.reason)
+    assertEquals(0, sessions.sessionCount)
+    assertTrue(runtime.connections.isEmpty())
+  }
+
+  @Test
   fun `the first frame packages, pushes, applies the full state and draws`() {
     val s = open()
     patch(s.id, """{"batteryPercent":80,"heartRate":70}""")

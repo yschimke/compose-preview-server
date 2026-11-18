@@ -38,8 +38,17 @@ internal object DwfPreviewSurface {
   /** The runtime APK is not installed on this host. Host configuration, not a design problem. */
   const val RUNTIME_MISSING = "DWF_RUNTIME_MISSING"
 
-  /** The runtime is installed but compose-ai-tools does not export what packaging needs. */
+  /** Packaging could not run on this host (a tool failed to start, the disk). Not the design. */
   const val PACKAGING_UNAVAILABLE = "DWF_PACKAGING_UNAVAILABLE"
+
+  /** The packager refused this face; the reason carries its diagnostics. A design problem. */
+  const val PACKAGING_FAILED = "DWF_PACKAGING_FAILED"
+
+  /** No usable Android SDK (build-tools aapt2/zipalign, a platform android.jar) on this host. */
+  const val ANDROID_SDK_MISSING = "DWF_ANDROID_SDK_MISSING"
+
+  /** The simulator's own prerequisites are missing (its sidecar jars, an android.jar). */
+  const val SIMULATOR_UNAVAILABLE = "DWF_SIMULATOR_UNAVAILABLE"
 
   const val SOURCE_INVALID = "DWF_SOURCE_INVALID"
   const val SOURCE_UNAVAILABLE = "DWF_SOURCE_UNAVAILABLE"
@@ -99,6 +108,10 @@ internal class DwfSource(
       if (!SAFE_ASSET_PATH.matches(path) || path.split('/').any { it == ".." || it.isEmpty() }) {
         return "asset path `$path` is not a plain relative path under res/"
       }
+      if (normalizedAssetPath(path) in RESERVED_PATHS) {
+        return "asset path `$path` would replace a file this server writes itself " +
+          "(the watch face, its info, or the manifest)"
+      }
       total += bytes.size
       if (total > MAX_ASSET_BYTES) return "assets are larger than $MAX_ASSET_BYTES bytes in all"
     }
@@ -126,6 +139,18 @@ internal class DwfSource(
   }
 
   companion object {
+    /**
+     * Bundle paths this server writes from validated input. An asset that resolved to one would
+     * replace the document [problem] checked with one it did not (the DOCTYPE and size gates), so
+     * those names are refused after the same normalisation a filesystem applies: case, `.`
+     * segments, and repeated or leading separators.
+     */
+    private val RESERVED_PATHS =
+      setOf("raw/watchface.xml", "xml/watch_face_info.xml", "androidmanifest.xml")
+
+    internal fun normalizedAssetPath(path: String): String =
+      path.lowercase().split('/').filter { it.isNotEmpty() && it != "." }.joinToString("/")
+
     const val MAX_XML_CHARS = 2_000_000
     const val MAX_ASSETS = 256
     const val MAX_ASSET_BYTES = 16L * 1024 * 1024
