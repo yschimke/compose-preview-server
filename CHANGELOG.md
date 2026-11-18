@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.175.0](https://github.com/yschimke/compose-preview-server/compare/v3.174.0...v3.175.0) (2026-11-18)
+
+
+### Bug Fixes
+
+* **deps:** update compose-ai-tools to 2.99.3 and compose-ui-builder to 3.134.0 ([#1988](https://github.com/yschimke/compose-preview-server/issues/1988)) ([462d16f](https://github.com/yschimke/compose-preview-server/commit/462d16ffc3a8d795d795f1de5e6b339293395f6c))
+* **viewer:** keep the CMP Wasm frame's shape when the snapshot failed ([#1986](https://github.com/yschimke/compose-preview-server/issues/1986)) ([4c77e5b](https://github.com/yschimke/compose-preview-server/commit/4c77e5b82c7d148d291a89f307897a42d9649605))
+
 ## [3.174.0](https://github.com/yschimke/compose-preview-server/compare/v3.173.0...v3.174.0) (2026-11-18)
 
 
