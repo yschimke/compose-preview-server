@@ -472,7 +472,12 @@ composeai-contracts = "3.43.0"
 # and run headless on QuickJS compiled to JVM bytecode, behind `ui_builder_check_design`'s
 # `hostLogic` check and `ui_builder_simulate_action`. It brings quickjs4j, run.endive and
 # jackson-databind onto the server's classpath through the runtime.
-composeai-ui-builder = "3.130.0"
+# 3.131.0 emits the Remote Compose alpha24 API from the Kotlin export (compose-ui-builder#1223): a
+# change to the exported source text only, not to anything this server links against.
+# 3.132.0 adds the Watch Face Format target, create-from-XML and edit-time validation of WFF edits
+# (compose-ui-builder#1234, #1235, #1241). Built on compose-ai-tools 2.97.0 and contracts 3.43.0,
+# both met here; `androidx-window` is unchanged.
+composeai-ui-builder = "3.132.0"
 # First published version of the optional publication server library (Maven Central).
 livery = "0.15.0"
 # The Android Remote Compose players the server's own player-only Android daemon replays documents

@@ -755,7 +755,7 @@ class ServeUiBuilderMcpIntegrationTest {
         )
         .artifact
     assertEquals(emptyList(), next.diagnostics, next.content)
-    assertTrue("val page = rememberMutableRemoteInt(20)" in next.content, next.content)
+    assertTrue("val page = remember { MutableRemoteInt(20) }" in next.content, next.content)
   }
 
   @Test
