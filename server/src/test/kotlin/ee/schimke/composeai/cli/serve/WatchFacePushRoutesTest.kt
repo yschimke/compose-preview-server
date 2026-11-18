@@ -66,9 +66,13 @@ class WatchFacePushRoutesTest {
           "    --token-out) tok=\"\$2\"; shift;;\n" +
           "    --push-marketplace) market=\"\$2\"; shift;;\n" +
           "    --keystore-from-env) fromenv=\"\$2\"; shift;;\n" +
+          "    --bundle) bundle=\"\$2\"; shift;;\n" +
           "  esac\n" +
           "  shift\n" +
           "done\n" +
+          "if grep -q bad \"\$bundle/res/raw/watchface.xml\"; then\n" +
+          "  echo 'error[wff-validator]: bad face' >&2; exit 1\n" +
+          "fi\n" +
           "echo \"\$market \$face \$vc \$fromenv \${WFF_SIGNING_KEYSTORE_PASSWORD:-none} " +
           "\${WFF_SIGNING_CERT_SHA256:-none}\" >> ${packagerLog.path}\n" +
           "printf 'fake-apk:%s:%s' \"\$face\" \"\$vc\" > \"\$out\"\n" +
@@ -135,9 +139,13 @@ class WatchFacePushRoutesTest {
         // A signed-in person is named by a test header; without it, nobody is.
         uiBuilderAuthorization =
           ServeUiBuilderAuthorization { call, _, _ ->
-            call.request.headers["X-Test-Actor"]?.let {
-              UiBuilderAuthorizationDecision.Authorized(it)
-            } ?: UiBuilderAuthorizationDecision.Missing
+            call.request.headers["X-Test-Agent-For"]?.let {
+              UiBuilderAuthorizationDecision.Authorized("agent:fingerprint", onBehalfOfActorId = it)
+            }
+              ?: call.request.headers["X-Test-Actor"]?.let {
+                UiBuilderAuthorizationDecision.Authorized(it)
+              }
+              ?: UiBuilderAuthorizationDecision.Missing
           },
       )
       .also {
@@ -722,6 +730,111 @@ class WatchFacePushRoutesTest {
     assertTrue(
       declared.any { it["name"]!!.jsonPrimitive.content == ServeUiBuilderMcp.PUBLISH_WATCH_FACE },
     )
+  }
+
+  @Test
+  fun `a delegated grant can neither link a watch nor unlink one`() {
+    start()
+    val token = link(alice)
+    val code =
+      App.json.decodeFromString<App.DeviceCode>(send("POST", "$api/device-codes", "{}").body)
+    val agent = mapOf("X-Test-Agent-For" to alice)
+    val page = send("GET", "/link?code=${code.code}", headers = agent)
+    assertFalse("Link Wear OS watch?" in page.body, "an agent was offered the confirmation")
+    assertFalse("name=\"seal\"" in page.body)
+    // A seal minted for alice's own session does not help the agent either.
+    val seal =
+      Regex("""name="action" value="approve">\s*<input type="hidden" name="seal" value="([^"]+)"""")
+        .find(send("GET", "/link?code=${code.code}", actor = alice).body)!!
+        .groupValues[1]
+    val approved =
+      send(
+        "POST",
+        "/link",
+        headers = agent,
+        form = mapOf("subject" to code.code, "action" to "approve", "seal" to seal),
+      )
+    assertEquals(403, approved.code)
+    assertEquals(
+      "pending",
+      App.json
+        .decodeFromString<App.PollResponse>(
+          send(
+              "POST",
+              "$api/device-codes/${code.code}/poll",
+              App.json.encodeToString(App.PollRequest(code.pollSecret)),
+            )
+            .body,
+        )
+        .status,
+    )
+    assertEquals(401, send("GET", "$api/devices", headers = agent).code)
+    val deviceId = push.store.devices(alice).single().id
+    assertEquals(401, send("DELETE", "$api/devices/$deviceId", headers = agent).code)
+    assertEquals(200, send("GET", "$api/designs", bearer = token).code)
+  }
+
+  @Test
+  fun `a re-publish the packager refuses leaves the release on watches as it was`() {
+    start()
+    createDesign(alice, "aurora", "Aurora", public = true)
+    assertEquals(200, publish(alice, "aurora").code)
+    val before = designs().single()
+    faces["aurora"] = "<WatchFace id=\"aurora\" state=\"bad\"/>"
+    val refused = publish(alice, "aurora")
+    assertEquals(422, refused.code)
+    assertContains(refused.body, "bad face")
+    val after = designs().single()
+    assertEquals(before, after)
+    assertEquals(200, send("GET", pathOf(after.apkUrl)).code)
+    // Fixed, it ships as the next version.
+    faces["aurora"] = "<WatchFace id=\"aurora\" state=\"good\"/>"
+    assertEquals(200, publish(alice, "aurora").code)
+    assertEquals(2, designs().single().version)
+  }
+
+  @Test
+  fun `a rate-limit permit is held while the request runs and released after`() {
+    val drawing = kotlinx.coroutines.CompletableDeferred<Unit>()
+    val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+    start()
+    createDesign(alice, "aurora", "Aurora", public = true)
+    publish(alice, "aurora")
+    val listed = designs().single()
+    val slow =
+      WatchFacePush(
+        store = push.store,
+        packaging = push.packaging,
+        sourceFor = push.sourceFor,
+        isWatchFaceCatalog = push.isWatchFaceCatalog,
+        preview = { _, _, _ ->
+          drawing.complete(Unit)
+          release.await()
+          "png".toByteArray()
+        },
+      )
+    server?.stop()
+    server =
+      ServeHttpServer(
+          host = "127.0.0.1",
+          requestedPort = 0,
+          token = "local-fixture",
+          sessions = ServeSessionRegistry(open = { null }).also(registries::add),
+          defaultSessionId = "unused",
+          machineAuthorization = ServeMachineAuthorization("local-fixture", null, null),
+          uiBuilderService = service,
+          watchFacePush = slow,
+          uiBuilderAuthorization =
+            ServeUiBuilderAuthorization { _, _, _ -> UiBuilderAuthorizationDecision.Missing },
+        )
+        .also { it.start() }
+    val pending =
+      java.util.concurrent.CompletableFuture.supplyAsync { send("GET", pathOf(listed.previewUrl)) }
+    runBlocking { kotlinx.coroutines.withTimeout(10_000) { drawing.await() } }
+    assertEquals(1, slow.anonymousLimiter.activeCallers())
+    release.complete(Unit)
+    assertEquals(200, pending.get(10, TimeUnit.SECONDS).code)
+    assertEquals(0, slow.anonymousLimiter.activeCallers())
   }
 
   private fun document(id: String, title: String) =

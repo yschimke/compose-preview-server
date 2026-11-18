@@ -590,6 +590,18 @@ internal class WatchFacePushStore(
     revision: Long,
     title: String,
     source: DwfSource,
+  ): Publication = commit(candidate(designId, accountActorId, revision, title, source))
+
+  /**
+   * What [publish] would store, without storing it: the caller builds it first and [commit]s it
+   * only once it built, so a refused face never replaces a working release.
+   */
+  fun candidate(
+    designId: String,
+    accountActorId: String,
+    revision: Long,
+    title: String,
+    source: DwfSource,
   ): Publication =
     synchronized(lock) {
       val previous = publications[designId]
@@ -618,6 +630,24 @@ internal class WatchFacePushStore(
               previous.publishedAtEpochMillis
             } else clock(),
         )
+      publication
+    }
+
+  /**
+   * Make [candidate] the design's publication. Its version is re-checked against what is stored, so
+   * two publishes racing past [candidate] cannot both claim one version for different faces.
+   */
+  fun commit(candidate: Publication): Publication =
+    synchronized(lock) {
+      val current = publications[candidate.designId]
+      val publication =
+        if (
+          current != null &&
+            current.digest != candidate.digest &&
+            current.version >= candidate.version
+        ) {
+          candidate.copy(version = current.version + 1)
+        } else candidate
       store(publication)
       publication
     }
