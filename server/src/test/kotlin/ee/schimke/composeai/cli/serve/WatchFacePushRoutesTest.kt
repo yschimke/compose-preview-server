@@ -151,7 +151,7 @@ class WatchFacePushRoutesTest {
         preview = { _, designId, _ -> "png:$designId".toByteArray() },
         signInPath = { "/auth/github/start?return=$it" },
         clock = { now },
-        designSummary = { if (automaticListing) service.adminDesignSummary(it) else null },
+        designSummary = { service.adminDesignSummary(it) },
         // The tests run the scheduler themselves, on their own clock.
         automaticTickMillis = null,
         automaticBuilds = automaticListing,
@@ -1829,6 +1829,86 @@ class WatchFacePushRoutesTest {
     assertNull(push.store.publication("aurora")?.takeIf { it.published })
     assertNull(push.store.publication("pulse"))
     assertEquals(1, packagerLog.readLines().size)
+  }
+
+  /** `GET /designs?includePending=1` as raw JSON entries, by id. */
+  private fun pendingList(
+    token: String? = null,
+  ): Map<String, kotlinx.serialization.json.JsonObject> {
+    val reply = send("GET", "$api/designs?includePending=1", bearer = token)
+    assertEquals(200, reply.code, reply.body)
+    return Json.parseToJsonElement(reply.body).jsonObject["designs"]!!.jsonArray.associate {
+      it.jsonObject["id"]!!.jsonPrimitive.content to it.jsonObject
+    }
+  }
+
+  @Test
+  fun `includePending lists a face still building to its owner's watch, with no install fields`() {
+    val release = java.util.concurrent.CountDownLatch(1)
+    val ready = readyPackaging()() as WatchFacePushPackaging.Ready
+    val slow = WatchFacePushPackager { files, face, version, out ->
+      release.await(20, TimeUnit.SECONDS)
+      ready.packager.pack(files, face, version, out)
+    }
+    start(packaging = { WatchFacePushPackaging.Ready(slow, "c0ffee") })
+    createDesign(alice, "aurora", "Aurora", public = true)
+    val aliceToken = link(alice)
+    val bobToken = link(bob, "Bob's watch")
+    assertEquals(202, put(alice, "aurora", "public").code)
+
+    // Without the parameter, nothing unbuilt: an older app's list parses as it always did.
+    assertEquals(emptyList(), designs(aliceToken))
+    val mine = pendingList(aliceToken)["aurora"]!!
+    assertContains(
+      listOf("queued", "building"),
+      mine["build"]!!.jsonObject["state"]!!.jsonPrimitive.content,
+    )
+    for (field in listOf("version", "apkUrl", "sha256", "validationToken", "sizeBytes")) {
+      assertNull(mine[field], "an unbuilt entry carries $field")
+    }
+    assertEquals(
+      "ee.schimke.watchface.push.watchfacepush.aurora",
+      mine["packageName"]!!.jsonPrimitive.content,
+    )
+    // Nobody else sees an owner's build before it is published.
+    assertNull(pendingList(bobToken)["aurora"])
+    assertNull(pendingList()["aurora"])
+
+    release.countDown()
+    runBlocking { push.queue.awaitIdle() }
+    val built = pendingList()["aurora"]!!
+    assertEquals("1", built["version"]!!.jsonPrimitive.content)
+    assertNotNull(built["apkUrl"])
+    assertEquals("built", built["build"]!!.jsonObject["state"]!!.jsonPrimitive.content)
+  }
+
+  @Test
+  fun `includePending keeps the built version installable while a newer one waits to build`() {
+    automaticListing = true
+    start()
+    createDesign(alice, "aurora", "Aurora", public = true)
+    settle()
+    edit(alice, "aurora", face = "<WatchFace id=\"aurora\" edited=\"1\"/>")
+    val entry = pendingList()["aurora"]!!
+    assertEquals("1", entry["version"]!!.jsonPrimitive.content)
+    assertNotNull(entry["apkUrl"])
+    val build = entry["build"]!!.jsonObject
+    assertEquals("pending", build["state"]!!.jsonPrimitive.content)
+    assertNotNull(build["scheduledAtEpochMillis"])
+    // The app's own model still reads the plain list.
+    assertEquals(1, designs().single().version)
+  }
+
+  @Test
+  fun `includePending shows a public design waiting to settle, and not once it is private`() {
+    automaticListing = true
+    start()
+    createDesign(alice, "aurora", "Aurora", public = true)
+    val waiting = pendingList()["aurora"]!!
+    assertEquals("pending", waiting["build"]!!.jsonObject["state"]!!.jsonPrimitive.content)
+    assertNull(waiting["apkUrl"])
+    setVisibility(alice, "aurora", public = false)
+    assertNull(pendingList()["aurora"])
   }
 
   private fun document(id: String, title: String) =
