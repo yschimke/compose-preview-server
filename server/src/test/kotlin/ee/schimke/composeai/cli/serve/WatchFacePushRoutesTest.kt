@@ -1867,6 +1867,18 @@ class WatchFacePushRoutesTest {
     assertEquals(403, other.code, other.body)
     assertContains(other.body, "owner_required")
 
+    // The editor's capability says so too, for this grant and not the write-only one.
+    fun canPublish(headers: Map<String, String>) =
+      Json.parseToJsonElement(
+          send("GET", "/api/ui-builder/v1/designs/aurora/dwf-preview/status", headers = headers)
+            .body,
+        )
+        .jsonObject["watchFacePush"]!!
+        .jsonObject["canPublish"]!!
+        .jsonPrimitive
+        .content
+    assertEquals("true", canPublish(publisher))
+    assertEquals("false", canPublish(writeOnly))
     assertEquals(403, send("DELETE", path.format("aurora"), headers = writeOnly).code)
     assertEquals(200, send("DELETE", path.format("aurora"), headers = publisher).code)
     assertEquals(emptyList(), designs())

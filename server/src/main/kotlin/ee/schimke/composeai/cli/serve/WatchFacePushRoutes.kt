@@ -566,23 +566,7 @@ internal constructor(
     val snapshot =
       service.executeMapped(GetSnapshotRequestV1(designId = designId), actor)
         as? UiBuilderServiceResponse.Snapshot ?: return notFound
-    // The runtime names a design's owner only to its owner, so a grant acting for someone reads no
-    // owner here. Asked again as that person, it answers only when they own the design: a grant
-    // reaches its approver's designs and nobody else's.
-    val owner =
-      snapshot.snapshot.access?.ownerActorId
-        ?: actor.onBehalfOfActorId
-          ?.takeIf { it.isNotBlank() && it != actor.actorId }
-          ?.let { principal ->
-            (service.executeMapped(
-                GetSnapshotRequestV1(designId = designId),
-                AuthenticatedUiBuilderActor(principal),
-              ) as? UiBuilderServiceResponse.Snapshot)
-              ?.snapshot
-              ?.access
-              ?.ownerActorId
-              ?.takeIf { it == principal }
-          }
+    val owner = designOwner(service, actor, designId, snapshot)
     if (
       DesignAccessActionV1.WRITE !in actions || owner == null || owner !in actor.accessIdentities
     ) {
@@ -607,6 +591,32 @@ internal constructor(
     }
     return Owned.Document(document, owner)
   }
+
+  /**
+   * [designId]'s owner as [actor] may know it, from the [snapshot] it read. The runtime names a
+   * design's owner only to its owner, so a grant acting for someone reads no owner there; asked
+   * again as that person, it answers only when they own the design, so a grant reaches its
+   * approver's designs and nobody else's.
+   */
+  internal suspend fun designOwner(
+    service: UiBuilderServicePort,
+    actor: AuthenticatedUiBuilderActor,
+    designId: String,
+    snapshot: UiBuilderServiceResponse.Snapshot,
+  ): String? =
+    snapshot.snapshot.access?.ownerActorId
+      ?: actor.onBehalfOfActorId
+        ?.takeIf { it.isNotBlank() && it != actor.actorId }
+        ?.let { principal ->
+          (service.executeMapped(
+              GetSnapshotRequestV1(designId = designId),
+              AuthenticatedUiBuilderActor(principal),
+            ) as? UiBuilderServiceResponse.Snapshot)
+            ?.snapshot
+            ?.access
+            ?.ownerActorId
+            ?.takeIf { it == principal }
+        }
 
   internal suspend fun status(
     service: UiBuilderServicePort,
@@ -1832,7 +1842,7 @@ internal suspend fun WatchFacePush.capability(
     service.executeMapped(GetSnapshotRequestV1(designId = designId), decision.actor)
       as? UiBuilderServiceResponse.Snapshot ?: return null
   if (!isWatchFaceCatalog(snapshot.snapshot.state.document.catalogPin.systemId)) return null
-  val owner = snapshot.snapshot.access?.ownerActorId
+  val owner = designOwner(service, decision.actor, designId, snapshot)
   val canPublish =
     decision.mayPublishWatchFaces() &&
       owner != null &&
