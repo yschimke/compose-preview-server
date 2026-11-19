@@ -750,4 +750,43 @@ class WatchFacePushCatalogFacesTest {
     assertIs<WatchFacePushBuilds.Result.Built>(builds.build(publication, retryTransient = true))
     assertEquals(3, runs.get())
   }
+
+  @Test
+  fun `a packager exit with no diagnostics of its own is backed off, never stored as a refusal`() {
+    var now = 1_000L
+    val runs = java.util.concurrent.atomic.AtomicInteger()
+    val packager = WatchFacePushPackager { _, _, _, _ ->
+      runs.incrementAndGet()
+      // What `diagnostics()` hands back when a packager JVM is killed: its last line, no `error[`.
+      throw DwfPackagingFailed(listOf("Killed"))
+    }
+    val store = WatchFacePushStore(dir.resolve("killed"))
+    val builds =
+      WatchFacePushBuilds(
+        store,
+        { WatchFacePushPackaging.Ready(packager, "c0ffee") },
+        clock = { now },
+        transientBackoffMillis = 1_000L,
+        log = {},
+      )
+    val publication =
+      store.candidate(
+        "face",
+        "github:alice",
+        1,
+        "Face",
+        DwfSource("<WatchFace/>", 2, emptyMap()),
+        0L,
+      )
+    assertIs<WatchFacePushBuilds.Result.Failed>(builds.build(publication))
+    assertNull(builds.refusal(publication))
+    assertNull(store.refusal(publication), "nothing was written to disk")
+    assertIs<WatchFacePushBuilds.Result.Failed>(builds.build(publication))
+    assertEquals(1, runs.get(), "backed off")
+    now += 1_000L
+    builds.build(publication)
+    assertEquals(2, runs.get(), "retried once the backoff passed")
+    assertTrue(WatchFacePushBuilds.isSourceRefusal(listOf("error[validator]: bad face")))
+    assertFalse(WatchFacePushBuilds.isSourceRefusal(listOf("warning[x]: only a warning")))
+  }
 }

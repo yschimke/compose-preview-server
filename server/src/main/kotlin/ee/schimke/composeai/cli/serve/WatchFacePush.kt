@@ -1328,6 +1328,16 @@ internal class WatchFacePushBuilds(
       cached(publication)?.let {
         return it
       }
+      // Again under the lock: a build that held it may have just been refused or failed, and a
+      // caller that waited for it must not run the packager straight back into the same outcome.
+      refusal(publication)?.let {
+        return Result.Failed(it)
+      }
+      if (!retryTransient) {
+        transient[key]?.let { backoff ->
+          if (clock() < backoff.retryAtEpochMillis) return Result.Failed(backoff.diagnostics)
+        }
+      }
       val started = System.nanoTime()
       val waitedMillis = (started - waitStarted) / 1_000_000
       val out = store.apkFile(publication)
@@ -1358,6 +1368,12 @@ internal class WatchFacePushBuilds(
         )
         Result.Built(store.recordApk(publication, token), out)
       } catch (e: DwfPackagingFailed) {
+        if (!isSourceRefusal(e.diagnostics)) {
+          // A nonzero exit without the packager's own diagnostics (a JVM killed under memory
+          // pressure, a full disk): about the host, not these bytes, so never remembered as a
+          // refusal.
+          return transientFailure(publication, key, e.diagnostics, cause, elapsed())
+        }
         failures[key] = e.diagnostics
         noRefusal -= key
         transient.remove(key)
@@ -1370,29 +1386,61 @@ internal class WatchFacePushBuilds(
         Result.Failed(e.diagnostics)
       } catch (e: Exception) {
         // Not a refusal: a timeout or a full disk may well succeed later, so back off and retry.
-        val diagnostics = listOf("error[push]: ${e.message ?: e.javaClass.simpleName}")
-        val attempts = (transient[key]?.attempts ?: 0) + 1
-        val delay =
-          (transientBackoffMillis shl (attempts - 1).coerceAtMost(20)).coerceAtMost(
-            maxTransientBackoffMillis,
-          )
-        transient[key] = Backoff(attempts, clock() + delay, diagnostics)
-        log(
-          "serve: watchface-push: packaging ${publication.designId} v${publication.version} " +
-            "($cause) failed after ${elapsed()}; retrying no sooner than ${delay / 1000} s: " +
-            diagnostics.first(),
+        transientFailure(
+          publication,
+          key,
+          listOf("error[push]: ${e.message ?: e.javaClass.simpleName}"),
+          cause,
+          elapsed(),
         )
-        Result.Failed(diagnostics)
       } finally {
         tmp.delete()
       }
     }
   }
 
+  private fun transientFailure(
+    publication: WatchFacePushStore.Publication,
+    key: String,
+    diagnostics: List<String>,
+    cause: String,
+    elapsed: String,
+  ): Result.Failed {
+    val attempts = (transient[key]?.attempts ?: 0) + 1
+    val delay =
+      (transientBackoffMillis shl (attempts - 1).coerceAtMost(20)).coerceAtMost(
+        maxTransientBackoffMillis,
+      )
+    transient[key] = Backoff(attempts, clock() + delay, diagnostics)
+    log(
+      "serve: watchface-push: packaging ${publication.designId} v${publication.version} " +
+        "($cause) failed after $elapsed; retrying no sooner than ${delay / 1000} s: " +
+        diagnostics.firstOrNull(),
+    )
+    return Result.Failed(diagnostics)
+  }
+
+  /** Stop the background worker; a build already running finishes, nothing queued starts. */
+  fun close() {
+    worker.shutdownNow()
+  }
+
   private fun key(publication: WatchFacePushStore.Publication): String =
     "${publication.faceName}|${publication.version}|${publication.digest}"
 
   companion object {
+    /**
+     * Whether [diagnostics] are the packager refusing the source: every line one of its own
+     * `error[…]`/`warning[…]`/`info[…]` diagnostics, with at least one error. Anything else (the
+     * last line of a crashed JVM, say) is about the host.
+     */
+    internal fun isSourceRefusal(diagnostics: List<String>): Boolean =
+      diagnostics.isNotEmpty() &&
+        diagnostics.all { REFUSAL_LINE.matches(it) } &&
+        diagnostics.any { it.startsWith("error[") }
+
+    private val REFUSAL_LINE = Regex("^(error|warning|info)\\[[^\\]]+\\]: .*")
+
     const val DEFAULT_TRANSIENT_BACKOFF_MILLIS = 60_000L
     const val MAX_TRANSIENT_BACKOFF_MILLIS = 60 * 60_000L
   }

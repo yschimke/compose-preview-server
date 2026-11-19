@@ -68,6 +68,19 @@ internal constructor(
   /** The sources [startReconciling] was given, for [reconcileNow]. */
   @Volatile private var reconcileSources: () -> List<CatalogFaceSource> = { emptyList() }
 
+  @Volatile private var reconciler: java.util.concurrent.ScheduledExecutorService? = null
+
+  /**
+   * Stop the reconcile pass and the build worker, when the server that installed the routes stops;
+   * neither then holds the stopped server or its state directory.
+   */
+  internal fun close() {
+    reconciler?.shutdownNow()
+    reconciler = null
+    reconcileSources = { emptyList() }
+    builds.close()
+  }
+
   /** One reconcile pass now, against the sources the routes were installed with. */
   internal fun reconcileNow(): Int = reconcile(reconcileSources)
 
@@ -101,26 +114,28 @@ internal constructor(
   ) {
     if (!reconciling.compareAndSet(false, true)) return
     reconcileSources = catalogFaceSources
-    java.util.concurrent.Executors.newSingleThreadScheduledExecutor { runnable ->
+    val executor =
+      java.util.concurrent.Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "watchface-push-reconcile").apply { isDaemon = true }
       }
-      .scheduleWithFixedDelay(
-        {
-          try {
-            val queued = reconcile(catalogFaceSources)
-            if (queued > 0) {
-              System.err.println(
-                "serve: watchface-push: queued $queued APK build(s) in the background",
-              )
-            }
-          } catch (e: Exception) {
-            System.err.println("serve: watchface-push: reconcile failed: $e")
+    reconciler = executor
+    executor.scheduleWithFixedDelay(
+      {
+        try {
+          val queued = reconcile(catalogFaceSources)
+          if (queued > 0) {
+            System.err.println(
+              "serve: watchface-push: queued $queued APK build(s) in the background",
+            )
           }
-        },
-        initialDelayMillis,
-        periodMillis,
-        java.util.concurrent.TimeUnit.MILLISECONDS,
-      )
+        } catch (e: Exception) {
+          System.err.println("serve: watchface-push: reconcile failed: $e")
+        }
+      },
+      initialDelayMillis,
+      periodMillis,
+      java.util.concurrent.TimeUnit.MILLISECONDS,
+    )
   }
 
   internal val csrf = ServeAgentGrants.Csrf()
