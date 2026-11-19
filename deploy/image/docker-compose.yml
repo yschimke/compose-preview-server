@@ -69,8 +69,6 @@ services:
       SERVE_UMAMI_ENABLED: "${SERVE_UMAMI_ENABLED:-}"
       SERVE_UMAMI_URL: "${SERVE_UMAMI_URL:-}"
       SERVE_UMAMI_WEBSITE_ID: "${SERVE_UMAMI_WEBSITE_ID:-}"
-      # Google's watch-face validators; off unless settings.json says `watchFaceValidation`.
-      SERVE_WATCH_FACE_VALIDATION: "${SERVE_WATCH_FACE_VALIDATION:-}"
       DOMAIN: "${DOMAIN:-}"
       SERVE_UI_BUILDER_HOST: "${SERVE_UI_BUILDER_HOST:-}"
       SERVE_UI_BUILDER_START_URL: "${SERVE_UI_BUILDER_START_URL:-}"

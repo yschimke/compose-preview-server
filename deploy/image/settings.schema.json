@@ -291,15 +291,6 @@
         }
       }
     },
-    "watchFaceValidation": {
-      "description": "Let `watchface-validation` and `ui_builder_validate_watch_face` run Google's watch-face validators (a packager JVM per face). Off unless set; while off they answer `watch_face_validation_disabled` and the editor keeps to its in-browser checks.",
-      "type": "boolean",
-      "x-env": "SERVE_WATCH_FACE_VALIDATION",
-      "x-apply": "restart",
-      "x-roles": [
-        "preview"
-      ]
-    },
     "agents": {
       "type": "object",
       "additionalProperties": false,
