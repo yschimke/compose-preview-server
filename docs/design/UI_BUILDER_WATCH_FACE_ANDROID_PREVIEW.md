@@ -271,6 +271,27 @@ asks first and, if the runtime is not available, shows the reason in a banner �
 runtime is not available on this server", the sentence naming how to install it, and that the fast
 preview is unaffected — and offers no controls. The same reason is the body of a start request's 503.
 
+### Validation report
+
+`POST /api/ui-builder/v1/designs/{designId}/watchface-validation[?revision=N]` takes the same
+EXPORT gate, request body and source resolution as a session start, pinned design assets included,
+and runs `wff-packager validate --report-out` in its own JVM instead of `pack`
+(`WatchFaceValidation`). Up to two runs happen at once, off the event loop, and reports are cached
+by `DwfSource.digest`. The answer is the packager's report
+`{schemaVersion, wffVersion, minimumWffVersion, passed, checks:[{id, title, status,
+findings:[{severity, message, line?, column?, path?, suggestion?}], memory?, contributors?,
+passedChecks?, tokenIssued?}], mode?}` plus `designId`, `revision`, `digest` and `ranAtEpochMillis`.
+The run passes `--push-marketplace`, so the push validator runs as well. It is decoded field by field,
+so a validation token the packager writes is never passed on. A failing face is a `200` with
+`passed: false`. So is a bitmap that nothing supplies: one failed check, `bundle-resources`, with
+the `WFF_BUNDLE_MISSING_RESOURCE` finding for each name, and the packager is not run. A packager
+refusal that comes before any report is one failed `packager` check carrying its diagnostics. A
+`422` means only that the request names no usable face, a `503` that this host cannot validate (with
+`watch_face_validation_disabled` while the deployment's `watchFaceValidation` flag is off, which is
+the production default; the editor then keeps to its in-browser checks), and
+a `502` that the validator ran and returned nothing readable. `GET` on the same path returns the
+last report on the current revision (or `?revision=`), and `404` when there is none.
+
 ## What this does not do
 
 - It does not implement the fast Remote Compose path or the WFF → RC translator (compose-ai-tools),

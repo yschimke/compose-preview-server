@@ -8,6 +8,7 @@ import ee.schimke.composeai.bundle.BundleVerifier
 import ee.schimke.composeai.bundle.TrustStore
 import ee.schimke.composeai.daemon.protocol.PreviewOverrides
 import ee.schimke.composeai.discovery.ComponentRecord
+import ee.schimke.composeai.io.composeAiCacheDir
 import ee.schimke.composeai.previewdata.PreviewInfo
 import ee.schimke.composeai.previewdata.PreviewManifest
 import ee.schimke.composeai.previewdata.PreviewModule
@@ -3848,6 +3849,15 @@ public class ServeRunner(
               sourceFor = ::deriveDwfSource,
               // The editor sends only the XML; the design's pinned assets are its drawables.
               assets = lane.assets,
+              // The packager's validators, reported per check rather than only as a refusal.
+              validation =
+                WatchFaceValidation(
+                  WatchFaceValidatorAvailability.production(
+                    home = composeAiCacheDir("wff-validate-home"),
+                    // Off until the deployment's `watchFaceValidation` flag is wired here.
+                    enabled = { false },
+                  ),
+                ),
             )
           },
         // The Wear OS push app's site API: device linking, the published watch faces, their APKs.
