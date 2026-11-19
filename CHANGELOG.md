@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.183.0](https://github.com/yschimke/compose-preview-server/compare/v3.182.0...v3.183.0) (2026-11-19)
+
+
+### Features
+
+* **agent-access:** let a grant with ui-builder-publish publish its approver's watch faces ([#2032](https://github.com/yschimke/compose-preview-server/issues/2032)) ([79d27cd](https://github.com/yschimke/compose-preview-server/commit/79d27cd36e278f7cbff15a3c216c9eea5c5a44f9))
+* **watchface-push:** list faces still building, with their build, under includePending ([#2031](https://github.com/yschimke/compose-preview-server/issues/2031)) ([c854b47](https://github.com/yschimke/compose-preview-server/commit/c854b474643b9dfc7fcfb6133113f21cccc4ca0f))
+
+
+### Bug Fixes
+
+* **deps:** update the UI Builder to 3.139.0 ([#2034](https://github.com/yschimke/compose-preview-server/issues/2034)) ([c6c35c6](https://github.com/yschimke/compose-preview-server/commit/c6c35c6799ffcf3b70f7fd69e7f9ebe4d02b6fda))
+
 ## [3.182.0](https://github.com/yschimke/compose-preview-server/compare/v3.181.0...v3.182.0) (2026-11-19)
 
 
