@@ -64,6 +64,13 @@ class ServeCatalogMcp(
   private val uiBuilder: ServeUiBuilderMcp? = null,
   /** Whether this box can also compile a design natively; see [ServeUiBuilderMcp.RENDER_NATIVE]. */
   private val uiBuilderNative: Boolean = false,
+  /**
+   * [ServeFeatureFlags.nativePreview]: whether `wfRenderer: "dwf-apk"` may start the Android
+   * watch-face runtime. Off, it is refused with
+   * [WatchFaceRendererSelection.NATIVE_PREVIEW_DISABLED_REASON] and the default renderer is
+   * `dwf-rc`.
+   */
+  private val nativePreview: Boolean = false,
   /** Wall clock for [signResourceLink] expiry; a seam so tests can age a signed link. */
   private val nowMillis: () -> Long = System::currentTimeMillis,
   /**
@@ -704,9 +711,10 @@ class ServeCatalogMcp(
           "full-page capture of a scrollable screen rather than the viewport crop. Watch face " +
           "previews also accept structured 'complications', 'watchFace', 'ambient', " +
           "'previewTime' / 'clockEpochMillis', and 'wfRenderer' ('dwf-rc' or 'dwf-apk'). " +
+          WATCH_FACE_ARGS_DESCRIPTION +
           "Overrides, other observations and fresh renders require live grant scope; without it, " +
           "a call with no overrides returns the published snapshot (as resources/read does).",
-        """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"observe":{"type":"string","enum":["png","svg","scroll-png","scroll-svg","semantics","hash"]},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}},"complications":{"type":"array","items":{"type":"object"}},"watchFace":{"type":"object"},"ambient":{"type":"boolean"},"ambientBurnIn":{"type":"boolean"},"ambientLowBit":{"type":"boolean"},"clockEpochMillis":{"type":"integer"},"previewTime":{"type":"string"},"wfRenderer":{"type":"string"}},"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
+        """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"observe":{"type":"string","enum":["png","svg","scroll-png","scroll-svg","semantics","hash"]},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}},"complications":{"type":"array","items":{"type":"object"}},"watchFace":$WATCH_FACE_SCHEMA,"ambient":{"type":"boolean"},"ambientBurnIn":{"type":"boolean"},"ambientLowBit":{"type":"boolean"},"clockEpochMillis":{"type":"integer"},"previewTime":{"type":"string"},"wfRenderer":{"type":"string"}},"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
       ),
     )
     add(
@@ -803,7 +811,7 @@ class ServeCatalogMcp(
         "get_preview_data",
         "Fetch the merged accessibility, annotation, or watchface/complications product for a " +
           "preview. This lane requires live grant scope.",
-        """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"kind":{"type":"string"},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}},"complications":{"type":"array","items":{"type":"object"}},"watchFace":{"type":"object"},"ambient":{"type":"boolean"},"ambientBurnIn":{"type":"boolean"},"ambientLowBit":{"type":"boolean"},"clockEpochMillis":{"type":"integer"},"previewTime":{"type":"string"},"wfRenderer":{"type":"string"}},"required":["kind"],"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
+        """{"type":"object","properties":{"uri":{"type":"string"},"catalog":{"type":"string"},"previewId":{"type":"string"},"kind":{"type":"string"},"overrides":{"type":"object","additionalProperties":{"type":["string","number","boolean"]}},"complications":{"type":"array","items":{"type":"object"}},"watchFace":$WATCH_FACE_SCHEMA,"ambient":{"type":"boolean"},"ambientBurnIn":{"type":"boolean"},"ambientLowBit":{"type":"boolean"},"clockEpochMillis":{"type":"integer"},"previewTime":{"type":"string"},"wfRenderer":{"type":"string"}},"required":["kind"],"anyOf":[{"required":["uri"]},{"required":["catalog","previewId"]}]}""",
       ),
     )
     add(
@@ -2080,7 +2088,7 @@ class ServeCatalogMcp(
             host.previews.firstOrNull { it.id == previewId }
               ?: throw McpRequestException("no such preview '$previewId'")
           val backend =
-            WatchFaceRendererSelection.resolveFor(host, preview, wfRenderer)
+            WatchFaceRendererSelection.resolveFor(host, preview, wfRenderer, nativePreview)
               ?: throw McpRequestException(
                 "unknown watch face renderer '$wfRenderer'; expected one of " +
                   WatchFaceRendererRegistry.all().joinToString { it.id },
@@ -2164,7 +2172,7 @@ class ServeCatalogMcp(
     val preview = host.previews.firstOrNull { it.id == previewId }
     if (preview?.isWatchFace == true || wfRenderer != null) {
       val backend =
-        WatchFaceRendererSelection.resolveFor(host, preview, wfRenderer)
+        WatchFaceRendererSelection.resolveFor(host, preview, wfRenderer, nativePreview)
           ?: throw McpRequestException(
             "unknown watch face renderer '$wfRenderer'; expected one of " +
               WatchFaceRendererRegistry.all().joinToString { it.id },
@@ -2324,6 +2332,7 @@ class ServeCatalogMcp(
         ?.takeUnless { it is JsonNull }
         ?.let { raw ->
           val obj = raw as? JsonObject ?: throw McpRequestException("'watchFace' must be an object")
+          checkWatchFaceStateKeys(obj)
           if ("configurations" !in obj) {
             val alias = (obj["config"] ?: obj["userConfigurations"]) as? JsonObject
             if (alias != null) JsonObject(obj + ("configurations" to alias)) else obj
@@ -2361,6 +2370,28 @@ class ServeCatalogMcp(
     } catch (e: IllegalArgumentException) {
       throw McpRequestException(e.message ?: "invalid watch face override")
     }
+  }
+
+  /**
+   * `watchFace` is the state the preview's own face is drawn in, never a face of its own: a key
+   * outside [WATCH_FACE_STATE_KEYS] used to be dropped without a word, so `{"xml": ...}` rendered
+   * the catalog face and looked like it had rendered the caller's (watchface-tools#72).
+   */
+  private fun checkWatchFaceStateKeys(obj: JsonObject) {
+    val unknown = obj.keys.filter { it !in WATCH_FACE_STATE_KEYS }
+    if (unknown.isEmpty()) return
+    val source = unknown.filter { it in WATCH_FACE_SOURCE_KEYS }
+    throw McpRequestException(
+      if (source.isNotEmpty()) {
+        "'watchFace' sets the state the catalog preview's own face is drawn in; it does not " +
+          "take a face of its own (${source.joinToString { "'$it'" }}). To see a UI Builder " +
+          "design on the real runtime, open the design's Native pane; " +
+          "ui_builder_validate_watch_face checks its WFF."
+      } else {
+        "unknown 'watchFace' key(s) ${unknown.joinToString { "'$it'" }}; expected " +
+          WATCH_FACE_STATE_KEYS.joinToString { "'$it'" }
+      },
+    )
   }
 
   /**
@@ -2707,7 +2738,7 @@ class ServeCatalogMcp(
         put("complicationSlotCount", wf.slots.size)
         put("userConfigurationCount", wf.userConfigurations.size)
       }
-      val wfRenderers = WatchFaceRendererSelection.renderersFor(host, preview)
+      val wfRenderers = WatchFaceRendererSelection.renderersFor(host, preview, nativePreview)
       if (wfRenderers.isNotEmpty()) {
         put(
           "watchFaceRenderers",
@@ -3844,6 +3875,54 @@ class ServeCatalogMcp(
     private const val MAX_CATALOGS_IN_ERROR = 50
     private val ANNOTATION_KINDS =
       setOf("compose/annotations", "compose/semantics", "compose/typography", "compose/tags")
+    /**
+     * Every key `WatchFaceOverrides.mergeStructuredOverrides` reads from `watchFace`, plus this
+     * tool's `config` / `userConfigurations` aliases for `configurations`.
+     */
+    internal val WATCH_FACE_STATE_KEYS: Set<String> =
+      linkedSetOf(
+        "ambient",
+        "isAmbient",
+        "previewTime",
+        "clockEpochMillis",
+        "is24Hour",
+        "isDst",
+        "batteryPercent",
+        "batteryCharging",
+        "batteryIsLow",
+        "unreadNotifications",
+        "stepCount",
+        "stepGoal",
+        "heartRate",
+        "calories",
+        "distance",
+        "floors",
+        "flavor",
+        "configurations",
+        "config",
+        "userConfigurations",
+        "themeColors",
+      )
+
+    /** Keys a caller sends when it means "render this face", answered with where that lives. */
+    private val WATCH_FACE_SOURCE_KEYS =
+      setOf("xml", "wffXml", "wff", "designId", "revision", "apk", "source")
+
+    /** What `watchFace` and `wfRenderer` take, for the tool descriptions. */
+    private const val WATCH_FACE_ARGS_DESCRIPTION =
+      "'watchFace' is the state the preview's own face is drawn in, never a face of its own: " +
+        "'ambient', 'previewTime' (HH:mm, HH:mm:ss or epoch millis), 'clockEpochMillis', " +
+        "'is24Hour', sensor values ('batteryPercent', 'stepCount', 'heartRate', ...), " +
+        "'configurations' (UserConfiguration id to option) and 'themeColors'. Any other key, " +
+        "such as 'xml' or 'designId', is refused; a UI Builder design is seen on the real " +
+        "runtime in its Native pane. 'dwf-apk' runs the Android watch-face runtime and is " +
+        "refused with native_preview_disabled where this server has turned that off; the " +
+        "default is then 'dwf-rc'; see each preview's watchFaceRenderers. "
+
+    /** `watchFace`'s schema, shared by the render and data-product tools. */
+    private const val WATCH_FACE_SCHEMA =
+      """{"type":"object","description":"The state the preview's own face is drawn in; not a face of its own.","properties":{"ambient":{"type":"boolean"},"isAmbient":{"type":"boolean"},"previewTime":{"type":"string","description":"HH:mm, HH:mm:ss or epoch millis"},"clockEpochMillis":{"type":"integer"},"is24Hour":{"type":"boolean"},"isDst":{"type":"boolean"},"batteryPercent":{"type":"number"},"batteryCharging":{"type":"boolean"},"batteryIsLow":{"type":"boolean"},"unreadNotifications":{"type":"integer"},"stepCount":{"type":"integer"},"stepGoal":{"type":"integer"},"heartRate":{"type":"number"},"calories":{"type":"number"},"distance":{"type":"number"},"floors":{"type":"number"},"flavor":{"type":"string"},"configurations":{"type":"object","description":"UserConfiguration id to option id or value","additionalProperties":{"type":["string","number","boolean"]}},"config":{"type":"object","description":"alias of configurations"},"userConfigurations":{"type":"object","description":"alias of configurations"},"themeColors":{"type":"object","additionalProperties":{"type":["string","number"]}}},"additionalProperties":false}"""
+
     private val WATCHFACE_RENDER_ARGS =
       setOf(
         "complications",
