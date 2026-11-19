@@ -1779,6 +1779,35 @@ class WatchFacePushRoutesTest {
     assertEquals(1, packagerLog.readLines().size)
   }
 
+  @Test
+  fun `a stopped server's build queue starts nothing and commits nothing more`() {
+    val release = java.util.concurrent.CountDownLatch(1)
+    val started = java.util.concurrent.CountDownLatch(1)
+    val ready = readyPackaging()() as WatchFacePushPackaging.Ready
+    val slow = WatchFacePushPackager { files, face, version, out ->
+      started.countDown()
+      release.await(20, TimeUnit.SECONDS)
+      ready.packager.pack(files, face, version, out)
+    }
+    start(packaging = { WatchFacePushPackaging.Ready(slow, "c0ffee") })
+    createDesign(alice, "aurora", "Aurora", public = true)
+    createDesign(alice, "pulse", "Pulse", public = true)
+    assertEquals(202, put(alice, "aurora", "public").code)
+    assertEquals(202, put(alice, "pulse", "public").code)
+    assertTrue(started.await(20, TimeUnit.SECONDS), "aurora's build never started")
+    push.close()
+    assertTrue(push.queue.closed)
+    // The packager already running finishes; its result is not committed, and pulse never starts.
+    release.countDown()
+    val deadline = System.currentTimeMillis() + 20_000
+    while (!packagerLog.exists() && System.currentTimeMillis() < deadline) Thread.sleep(20)
+    // Past the packager's own run: what follows it (the commit) would have happened by now.
+    Thread.sleep(300)
+    assertNull(push.store.publication("aurora")?.takeIf { it.published })
+    assertNull(push.store.publication("pulse"))
+    assertEquals(1, packagerLog.readLines().size)
+  }
+
   private fun document(id: String, title: String) =
     DesignDocumentV1(
       schema = "compose-ui-builder-document/v1-candidate",

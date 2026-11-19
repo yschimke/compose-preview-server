@@ -80,7 +80,7 @@ internal class WatchFacePushAutomatic(
    * Start the scheduler for [service], with its one startup sweep first; once, and only enabled.
    */
   fun start(service: UiBuilderServicePort) {
-    if (!enabled) return
+    if (!enabled || queue.closed) return
     val tick = tickMillis ?: return
     if (!started.compareAndSet(false, true)) return
     // The build queue's one low-priority thread: these builds take their turn with the owners'.

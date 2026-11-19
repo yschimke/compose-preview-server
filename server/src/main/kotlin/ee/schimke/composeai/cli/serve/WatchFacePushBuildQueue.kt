@@ -7,6 +7,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -61,9 +62,28 @@ internal class WatchFacePushBuildQueue(private val clock: () -> Long) {
     }
   }
 
-  /** The one thread every build is started from. */
-  val scope: CoroutineScope by lazy {
+  private val scopeHolder = lazy {
     CoroutineScope(SupervisorJob() + executor.value.asCoroutineDispatcher())
+  }
+
+  /** The one thread every build is started from. */
+  val scope: CoroutineScope
+    get() = scopeHolder.value
+
+  /** Set by [close]: nothing more starts, and nothing more is committed. */
+  @Volatile
+  var closed: Boolean = false
+    private set
+
+  /**
+   * The server that owns this stopped: start nothing more, and let a commit of a build already
+   * running be refused ([WatchFacePush.stage] checks [closed]). The thread is shut down, not
+   * interrupted: a packager already running finishes and cleans up its own subprocess tree.
+   */
+  fun close() {
+    closed = true
+    if (scopeHolder.isInitialized()) scopeHolder.value.cancel()
+    if (executor.isInitialized()) executor.value.shutdown()
   }
 
   /** Held for the whole of a build, by an owner's job and the automatic listing alike. */
@@ -110,11 +130,16 @@ internal class WatchFacePushBuildQueue(private val clock: () -> Long) {
    * runs under [exclusive] and answers the state it ends in.
    */
   fun submit(designId: String, build: suspend () -> WatchFacePushBuildStatusV1?) {
+    if (closed) {
+      record(designId, WatchFacePushBuildStatusV1(FAILED, reason = "the server is stopping"))
+      return
+    }
     record(designId, WatchFacePushBuildStatusV1(QUEUED))
     waiting.addLast(designId)
     val job = scope.launch {
       exclusive.withLock {
         waiting.remove(designId)
+        if (closed) return@withLock
         building(designId)
         val result = runCatching {
           build()

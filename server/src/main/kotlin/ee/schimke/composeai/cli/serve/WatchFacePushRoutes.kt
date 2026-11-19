@@ -105,6 +105,8 @@ internal constructor(
     reconciler = null
     reconcileSources = { emptyList() }
     builds.close()
+    // The owner build queue and the automatic listing's scheduler, which runs on its thread.
+    queue.close()
   }
 
   /** One reconcile pass now, against the sources the routes were installed with. */
@@ -260,11 +262,14 @@ internal constructor(
           if (requireBuild) return Staged.Unavailable(build)
         is WatchFacePushBuilds.Result.Built -> Unit
       }
-      withContext(Dispatchers.IO) { store.commitIfBuiltVersion(next, replaces) }
+      // Once the server stops, a build that was already running is not committed.
+      withContext(Dispatchers.IO) {
+          store.commitIfBuiltVersion(next) { !queue.closed && replaces(it) }
+        }
         ?.let {
           return Staged.Committed(it, build)
         }
-      if (!replaces(store.publication(next.designId))) return Staged.Superseded
+      if (queue.closed || !replaces(store.publication(next.designId))) return Staged.Superseded
     }
     return Staged.Conflict
   }
