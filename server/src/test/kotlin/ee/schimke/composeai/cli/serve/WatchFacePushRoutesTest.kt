@@ -149,6 +149,13 @@ class WatchFacePushRoutesTest {
         designSummary = { if (automaticListing) service.adminDesignSummary(it) else null },
         // The tests run the scheduler themselves, on their own clock.
         automaticTickMillis = null,
+        automaticBuilds = automaticListing,
+        storedDesigns = {
+          service.adminListDesigns().map {
+            WatchFacePushStoredDesigns.Head(it.designId, it.catalogPin.systemId)
+          }
+        },
+        automaticSweepPauseMillis = 0,
         assets = assetStore,
       )
     feed = WatchFacePushChangeFeed(service) { id, access -> push.automatic.noteChanged(id, access) }
@@ -1446,6 +1453,7 @@ class WatchFacePushRoutesTest {
         isWatchFaceCatalog = push.isWatchFaceCatalog,
         designSummary = { service.adminDesignSummary(it) },
         automaticTickMillis = null,
+        automaticBuilds = true,
         clock = { now },
       )
     assertContains(reopened.automatic.refusal("broken").orEmpty().joinToString(), "bad face")
@@ -1454,6 +1462,83 @@ class WatchFacePushRoutesTest {
     runBlocking { reopened.automatic.runDue(service) }
     assertEquals(0, packs, "the refused revision was built again")
     assertFalse(reopened.automatic.isPending("broken"))
+  }
+
+  @Test
+  fun `with watchFacePushBuilds off, a public design is never built on its own`() {
+    automaticListing = false
+    start()
+    createDesign(alice, "aurora", "Aurora", public = true)
+    edit(alice, "aurora", face = "<WatchFace id=\"aurora\" edited=\"1\"/>")
+    assertFalse(push.automatic.isPending("aurora"))
+    assertEquals(emptyList(), settledDesigns())
+    runBlocking { push.automatic.sweep(service) }
+    assertEquals(emptyList(), designs())
+    assertFalse(packagerLog.exists(), "the packager ran with the flag off")
+    // The owner's explicit publish still works.
+    assertEquals(200, publish(alice, "aurora", "public").code)
+    assertEquals(listOf("aurora"), designs().map { it.id })
+  }
+
+  @Test
+  fun `the startup sweep builds public watch-face designs that had no event, and only those`() {
+    automaticListing = true
+    start()
+    // Created behind the feed's back, as designs made public before this host built them were.
+    fun quietly(owner: String, id: String, public: Boolean) = runBlocking {
+      service.execute(
+        UiBuilderServiceCall(
+          AuthenticatedUiBuilderActor(owner),
+          UiBuilderServiceRequest.CreateDesign(document(id, id)),
+        ),
+      )
+      if (public) {
+        service.setDesignVisibility(
+          AuthenticatedUiBuilderActor(owner),
+          id,
+          UiBuilderDefaultVisibility.PUBLIC,
+        )
+      }
+    }
+    quietly(alice, "aurora", public = true)
+    quietly(alice, "secret", public = false)
+    quietly(bob, "pulse", public = true)
+    assertFalse(push.automatic.isPending("aurora"))
+    runBlocking { push.automatic.sweep(service) }
+    assertEquals(listOf("aurora", "pulse"), designs().map { it.id }.sorted())
+    // Run again (a restart), it builds nothing: every current revision has its APK.
+    val built = packagerLog.readLines().size
+    runBlocking { push.automatic.sweep(service) }
+    assertEquals(built, packagerLog.readLines().size)
+  }
+
+  @Test
+  fun `the designs on disk are read from the per-design store's headers`() = runBlocking {
+    val state = dir.resolve("design-store")
+    val store =
+      PersistentUiBuilderService(
+        designStore = UiBuilderDesignStateStore.open(state),
+        catalogs = benchmarkCatalogExecutor(),
+        exporter = UiBuilderExportExecutor { error("no export in this test") },
+      )
+    for (id in listOf("aurora", "my-face/odd")) {
+      assertIs<UiBuilderServiceResponse.Snapshot>(
+        store.execute(
+          UiBuilderServiceCall(
+            AuthenticatedUiBuilderActor(alice),
+            UiBuilderServiceRequest.CreateDesign(document(id, id)),
+          ),
+        ),
+      )
+    }
+    assertEquals(
+      listOf(
+        WatchFacePushStoredDesigns.Head("aurora", "m3-catalog"),
+        WatchFacePushStoredDesigns.Head("my-face/odd", "m3-catalog"),
+      ),
+      WatchFacePushStoredDesigns.read(state),
+    )
+    assertEquals(emptyList(), WatchFacePushStoredDesigns.read(dir.resolve("nowhere")))
   }
 
   private fun document(id: String, title: String) =

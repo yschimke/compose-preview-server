@@ -62,6 +62,12 @@ internal constructor(
   internal val designSummary: (designId: String) -> UiBuilderAdminDesignSummary? = { null },
   /** How often the automatic listing's scheduler wakes; null: never on its own. */
   automaticTickMillis: Long? = WatchFacePushAutomatic.DEFAULT_TICK_MILLIS,
+  /** `watchFacePushBuilds`: whether public designs are built on their own. Off by default. */
+  automaticBuilds: Boolean = false,
+  /** The designs on disk, for the automatic listing's one startup sweep. */
+  storedDesigns: () -> List<WatchFacePushStoredDesigns.Head> = { emptyList() },
+  /** The pause between two designs the startup sweep looks at. */
+  automaticSweepPauseMillis: Long = WatchFacePushAutomatic.DEFAULT_SWEEP_PAUSE_MILLIS,
   /**
    * Where a design's uploaded asset bytes are, so a published face carries the drawables its WFF
    * names ([WatchFaceDrawables]).
@@ -71,7 +77,14 @@ internal constructor(
   internal val codes = WatchFacePushDeviceCodes(store, clock)
   internal val builds = WatchFacePushBuilds(store, packaging)
   internal val catalogFaces = WatchFacePushCatalogFaces(store.catalogFacesFile)
-  internal val automatic = WatchFacePushAutomatic(this, tickMillis = automaticTickMillis)
+  internal val automatic =
+    WatchFacePushAutomatic(
+      this,
+      enabled = automaticBuilds,
+      storedDesigns = storedDesigns,
+      sweepPauseMillis = automaticSweepPauseMillis,
+      tickMillis = automaticTickMillis,
+    )
   internal val csrf = ServeAgentGrants.Csrf()
 
   /**

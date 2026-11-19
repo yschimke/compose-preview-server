@@ -2390,6 +2390,12 @@ public class ServeRunner(
       is WatchFacePushSigning.Unavailable ->
         System.err.println("serve: watch-face push cannot build APKs: ${signing.reason}")
     }
+    val automaticBuilds = WatchFacePushBuildsSetting.enabled()
+    System.err.println(
+      "serve: watch-face push builds public designs on their own: " +
+        if (automaticBuilds) "on (${WatchFacePushBuildsSetting.ENV})"
+        else "off (set watchFacePushBuilds, ${WatchFacePushBuildsSetting.ENV}, to turn it on)",
+    )
     val thumbnails = lane.thumbnails
     return WatchFacePush(
       store = store,
@@ -2409,6 +2415,10 @@ public class ServeRunner(
           }
         },
       designSummary = { lane.service.adminDesignSummary(it) },
+      automaticBuilds = automaticBuilds,
+      storedDesigns = {
+        lane.stateDirectory?.let { WatchFacePushStoredDesigns.read(it.toPath()) } ?: emptyList()
+      },
     )
   }
 

@@ -179,8 +179,13 @@ public is already its owner's decision that anyone may read it. `GET /designs` l
 caller, with or without a token, built from a **settled revision**, with `visibility: "public"` and
 the same entry shape as a published design.
 
-Building runs the packager (`aapt2` and Google's validator in their own JVM), so it happens only on
-deliberate events, never on a request:
+**Behind a flag, off by default.** `watchFacePushBuilds` in the deployment's `settings.json`
+(`SERVE_WATCH_FACE_PUSH_BUILDS`, read at start; `deploy/image/SETTINGS.md`) turns this on. Off, no
+public design is built on its own and the scheduler below never starts; an owner's explicit publish
+still works, through the same one-at-a-time packager queue. The server logs which it is at start.
+
+Building runs the packager (`aapt2` and Google's validator in their own JVM), so even with the flag
+on it happens only on deliberate events, never on a request:
 
 - **No request builds.** `GET /designs` and `GET /status` only read what is already built. A design
   is scheduled when a write to it succeeds through the design service — an edit, a rename, a
@@ -208,9 +213,12 @@ deliberate events, never on a request:
   `designs.skipped` with the packager's first line, as it does catalog faces, and the owner sees the
   whole refusal on `GET …/watch-face-publication`. A failure around the packager — a timeout, a
   full disk — is not a refusal: the design is tried again, backing off from a minute to an hour.
-- **Not yet covered.** A design that was already public before this shipped is listed after its next
-  edit or change of access (or when its owner publishes it), since nothing sweeps every design. A
-  branch merged into a design schedules nothing until the design's next edit.
+- **One sweep at start.** Designs that were public before the flag was on have had no event, so the
+  scheduler's first job after a start is one pass over the designs on disk: it reads each design's
+  header in the store (`designs/*/design.json`, not through the service, so it takes no lock to
+  find them), and for each in a watch-face catalog asks the service about that one design, five
+  seconds apart, building those that are public and whose current revision has no APK.
+- **Not covered.** A branch merged into a design schedules nothing until the design's next edit.
 
 ## The APK
 

@@ -57,6 +57,12 @@ import kotlinx.coroutines.sync.withLock
  */
 internal class WatchFacePushAutomatic(
   private val push: WatchFacePush,
+  /** `watchFacePushBuilds` ([WatchFacePushBuildsSetting]); off, this does nothing at all. */
+  val enabled: Boolean = false,
+  /** The designs on disk, for the one sweep at start ([sweep]): read without the service's lock. */
+  private val storedDesigns: () -> List<WatchFacePushStoredDesigns.Head> = { emptyList() },
+  /** The pause between two designs the startup sweep looks at. */
+  private val sweepPauseMillis: Long = DEFAULT_SWEEP_PAUSE_MILLIS,
   private val settleMillis: Long = DEFAULT_SETTLE_MILLIS,
   private val accessSettleMillis: Long = DEFAULT_ACCESS_SETTLE_MILLIS,
   private val retryMillis: Long = DEFAULT_RETRY_MILLIS,
@@ -83,13 +89,18 @@ internal class WatchFacePushAutomatic(
     refusals.putAll(push.store.automaticRefusals())
   }
 
-  /** Start the scheduler for [service]; once. */
+  /**
+   * Start the scheduler for [service], with its one startup sweep first; once, and only enabled.
+   */
   fun start(service: UiBuilderServicePort) {
+    if (!enabled) return
     val tick = tickMillis ?: return
     if (!started.compareAndSet(false, true)) return
     val scope = CoroutineScope(SupervisorJob() + executor.value.asCoroutineDispatcher())
     this.scope = scope
     scope.launch {
+      runCatching { sweep(service) }
+        .onFailure { System.err.println("serve: watchface-push: startup sweep: $it") }
       while (isActive) {
         delay(tick)
         runCatching { runDue(service) }
@@ -107,7 +118,7 @@ internal class WatchFacePushAutomatic(
    * change of access. Cheap and non-blocking; the design is not read here.
    */
   fun noteChanged(designId: String, access: Boolean = false) {
-    if (designId.isBlank()) return
+    if (!enabled || designId.isBlank()) return
     val at = push.clock() + if (access) accessSettleMillis else settleMillis
     due.merge(designId, Due(at)) { old, new ->
       // An access change does not postpone an edit already waiting less; an edit always does.
@@ -133,6 +144,22 @@ internal class WatchFacePushAutomatic(
   fun forget(designId: String) {
     due.remove(designId)
     if (refusals.remove(designId) != null) persistRefusals()
+  }
+
+  /**
+   * Once, at start: the public watch-face designs that were public before this host built them (or
+   * before the flag was on) have had no event, so look at each design on disk in a watch-face
+   * catalog, one at a time with [sweepPauseMillis] between them, and build those whose current
+   * revision has no APK. Each is read on its own ([WatchFacePush.designSummary]); nothing lists
+   * every design through the service.
+   */
+  internal suspend fun sweep(service: UiBuilderServicePort) {
+    if (!enabled) return
+    for (head in storedDesigns()) {
+      if (head.catalogSystemId != null && !push.isWatchFaceCatalog(head.catalogSystemId)) continue
+      val worked = running.withLock { runCatching { consider(service, head.designId) }.isSuccess }
+      if (worked && sweepPauseMillis > 0) delay(sweepPauseMillis)
+    }
   }
 
   /** Handle every design that is due now, one at a time. */
@@ -277,6 +304,7 @@ internal class WatchFacePushAutomatic(
     const val DEFAULT_ACCESS_SETTLE_MILLIS = 30 * 1000L
     const val DEFAULT_RETRY_MILLIS = 60 * 1000L
     const val DEFAULT_TICK_MILLIS = 30 * 1000L
+    const val DEFAULT_SWEEP_PAUSE_MILLIS = 5 * 1000L
     private const val MAX_RETRY_MILLIS = 60 * 60 * 1000L
   }
 }

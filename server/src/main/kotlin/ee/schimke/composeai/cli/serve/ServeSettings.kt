@@ -451,6 +451,14 @@ object ServeSettings {
         BOTH,
       ),
       Setting(
+        "watchFacePushBuilds",
+        WatchFacePushBuildsSetting.ENV,
+        Type.Flag,
+        Apply.RESTART,
+        "Build public watch-face designs for the Watch Face Push app on their own, from a settled " +
+          "revision. Off, only an owner's explicit publish builds one.",
+      ),
+      Setting(
         "rendering.compileEngine",
         "SERVE_COMPILE_ENGINE",
         Type.Flag,

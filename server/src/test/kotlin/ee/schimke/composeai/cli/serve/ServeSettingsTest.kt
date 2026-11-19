@@ -57,14 +57,41 @@ class ServeSettingsTest {
           "server/src/main/kotlin/ee/schimke/composeai/cli/serve/ServeComponentPublications.kt",
         )
         .readText()
+    val watchFacePush =
+      File(
+          repoRoot,
+          "server/src/main/kotlin/ee/schimke/composeai/cli/serve/WatchFacePushSettings.kt",
+        )
+        .readText()
     for (setting in ServeSettings.ALL) {
       assertTrue(
         "\${${setting.env}" in entrypoint ||
           "\"${setting.env}\"" in analytics ||
-          "\"${setting.env}\"" in publications,
+          "\"${setting.env}\"" in publications ||
+          "\"${setting.env}\"" in watchFacePush,
         "${setting.env} (${setting.key}) is read by neither the entrypoint nor the server",
       )
     }
+  }
+
+  @Test
+  fun `watch-face push builds are off unless the setting turns them on`() {
+    assertFalse(WatchFacePushBuildsSetting.enabled(emptyMap()))
+    assertFalse(WatchFacePushBuildsSetting.enabled(mapOf(WatchFacePushBuildsSetting.ENV to "")))
+    assertFalse(WatchFacePushBuildsSetting.enabled(mapOf(WatchFacePushBuildsSetting.ENV to "0")))
+    assertTrue(WatchFacePushBuildsSetting.enabled(mapOf(WatchFacePushBuildsSetting.ENV to "1")))
+    assertTrue(WatchFacePushBuildsSetting.enabled(mapOf(WatchFacePushBuildsSetting.ENV to "true")))
+    val setting = ServeSettings.ALL.single { it.key == "watchFacePushBuilds" }
+    assertEquals(WatchFacePushBuildsSetting.ENV, setting.env)
+    assertEquals(ServeSettings.Apply.RESTART, setting.apply)
+    assertEquals(
+      emptyList(),
+      ServeSettings.validate(doc("""{"watchFacePushBuilds": true}""")),
+    )
+    assertEquals(
+      listOf("`watchFacePushBuilds` must be true or false"),
+      ServeSettings.validate(doc("""{"watchFacePushBuilds": "1"}""")),
+    )
   }
 
   @Test
