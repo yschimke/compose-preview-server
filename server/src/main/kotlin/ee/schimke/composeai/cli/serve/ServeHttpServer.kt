@@ -2585,6 +2585,8 @@ class ServeHttpServer(
   /** Stop with a short grace period. Idempotent enough for a shutdown hook. */
   fun stop() {
     readinessProber?.interrupt()
+    // Its background reconcile and build threads hold this server's catalog sources.
+    watchFacePush?.close()
     thumbWarmer.stop()
     server.stop(gracePeriodMillis = 500, timeoutMillis = 2000)
     uiBuilderPrecompressed.close()

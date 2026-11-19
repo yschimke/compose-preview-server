@@ -332,6 +332,7 @@ internal class WatchFacePushAutomatic(
           stored == null || !stored.isExplicitFor(owner, document.createdAtEpochMillis)
         },
         requireBuild = true,
+        cause = "public design settled",
       )
     return when (staged) {
       is WatchFacePush.Staged.Committed -> {

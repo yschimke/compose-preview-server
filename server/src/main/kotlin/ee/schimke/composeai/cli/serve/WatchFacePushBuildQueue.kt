@@ -151,7 +151,8 @@ internal class WatchFacePushBuildQueue(private val clock: () -> Long) {
 
   /** Wait for every submitted build. For tests. */
   internal suspend fun awaitIdle() {
-    while (jobs.isNotEmpty()) jobs.toList().joinAll()
+    // A snapshot by array: `toList()` on a one-element concurrent set can lose that element.
+    while (jobs.isNotEmpty()) jobs.toTypedArray().toList().joinAll()
   }
 
   companion object {

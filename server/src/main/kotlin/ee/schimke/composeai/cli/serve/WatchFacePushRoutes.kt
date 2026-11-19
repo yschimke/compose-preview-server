@@ -76,7 +76,7 @@ internal constructor(
   internal val assets: UiBuilderAssetStore? = null,
 ) {
   internal val codes = WatchFacePushDeviceCodes(store, clock)
-  internal val builds = WatchFacePushBuilds(store, packaging)
+  internal val builds = WatchFacePushBuilds(store, packaging, clock = clock)
   internal val catalogFaces = WatchFacePushCatalogFaces(store.catalogFacesFile)
   /** The one queue every build here runs through, with each design's progress. */
   internal val queue = WatchFacePushBuildQueue(clock)
@@ -88,6 +88,82 @@ internal constructor(
       sweepPauseMillis = automaticSweepPauseMillis,
       tickMillis = automaticTickMillis,
     )
+
+  private val reconciling = java.util.concurrent.atomic.AtomicBoolean(false)
+
+  /** The sources [startReconciling] was given, for [reconcileNow]. */
+  @Volatile private var reconcileSources: () -> List<CatalogFaceSource> = { emptyList() }
+
+  @Volatile private var reconciler: java.util.concurrent.ScheduledExecutorService? = null
+
+  /**
+   * Stop the reconcile pass and the build worker, when the server that installed the routes stops;
+   * neither then holds the stopped server or its state directory.
+   */
+  internal fun close() {
+    reconciler?.shutdownNow()
+    reconciler = null
+    reconcileSources = { emptyList() }
+    builds.close()
+  }
+
+  /** One reconcile pass now, against the sources the routes were installed with. */
+  internal fun reconcileNow(): Int = reconcile(reconcileSources)
+
+  /**
+   * Queue a background build for everything a watch could be offered and has no APK: a published
+   * design whose APK is missing (a lost cache) and a catalog face whose digest is new (an import, a
+   * republished catalog, a first start). Cheap and never packages on this thread, so it is safe to
+   * run on a timer. Returns how many builds were queued.
+   */
+  internal fun reconcile(catalogFaceSources: () -> List<CatalogFaceSource>): Int {
+    var queued = 0
+    for (publication in store.published()) {
+      if (builds.enqueue(publication, cause = "reconcile: unbuilt publication")) queued++
+    }
+    for (face in catalogFaces.resolve(catalogFaceSources()).faces) {
+      if (builds.enqueue(face.publication, { face.dwf }, cause = "catalog face digest changed")) {
+        queued++
+      }
+    }
+    return queued
+  }
+
+  /**
+   * Run [reconcile] shortly after start and then every [periodMillis], on one daemon thread. Only
+   * the first call starts it; later ones (a second route install) are no-ops.
+   */
+  internal fun startReconciling(
+    catalogFaceSources: () -> List<CatalogFaceSource>,
+    initialDelayMillis: Long = 15_000L,
+    periodMillis: Long = 60_000L,
+  ) {
+    if (!reconciling.compareAndSet(false, true)) return
+    reconcileSources = catalogFaceSources
+    val executor =
+      java.util.concurrent.Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "watchface-push-reconcile").apply { isDaemon = true }
+      }
+    reconciler = executor
+    executor.scheduleWithFixedDelay(
+      {
+        try {
+          val queued = reconcile(catalogFaceSources)
+          if (queued > 0) {
+            System.err.println(
+              "serve: watchface-push: queued $queued APK build(s) in the background",
+            )
+          }
+        } catch (e: Exception) {
+          System.err.println("serve: watchface-push: reconcile failed: $e")
+        }
+      },
+      initialDelayMillis,
+      periodMillis,
+      java.util.concurrent.TimeUnit.MILLISECONDS,
+    )
+  }
+
   internal val csrf = ServeAgentGrants.Csrf()
 
   /**
@@ -165,10 +241,18 @@ internal constructor(
     candidate: () -> WatchFacePushStore.Publication,
     replaces: (WatchFacePushStore.Publication?) -> Boolean = { true },
     requireBuild: Boolean = false,
+    /**
+     * An owner's publish skips a transient failure's backoff; the automatic listing waits it out.
+     */
+    retryTransient: Boolean = false,
+    cause: String = "publish",
   ): Staged {
     repeat(PUBLISH_ATTEMPTS) {
       val next = withContext(Dispatchers.IO) { candidate() }
-      val build = withContext(Dispatchers.IO) { builds.build(next) }
+      val build =
+        withContext(Dispatchers.IO) {
+          builds.build(next, retryTransient = retryTransient, cause = cause)
+        }
       when (build) {
         is WatchFacePushBuilds.Result.Failed ->
           return Staged.Refused(build.diagnostics, build.retryable)
@@ -267,7 +351,9 @@ internal constructor(
     replaces: (WatchFacePushStore.Publication?) -> Boolean = { true },
   ): Outcome {
     val designId = ready.designId
-    return when (val staged = stage(ready.candidate, replaces)) {
+    return when (
+      val staged = stage(ready.candidate, replaces, retryTransient = true, cause = "publish")
+    ) {
       is Staged.Committed -> {
         refusals.remove(designId)
         automatic.forget(designId)
@@ -706,6 +792,8 @@ internal data class WatchFacePushAttributionV1(
 data class WatchFacePushCatalogFacesStatusV1(
   val listed: Int,
   val skipped: List<WatchFacePushSkippedFaceV1>,
+  /** Faces whose APK is not built yet; the background worker builds them, never a listing. */
+  val pending: List<String> = emptyList(),
 )
 
 @Serializable data class WatchFacePushSkippedFaceV1(val id: String, val reason: String)
@@ -954,6 +1042,9 @@ internal fun Route.installWatchFacePushRoutes(
 ) {
   // Public designs are built by the automatic listing's own scheduler, never by these routes.
   push.automatic.start(service)
+  // Push APKs are built off the request path: publish builds inline, and this pass queues the rest
+  // (new catalog faces, lost APKs) onto the one background worker. Listings never build.
+  push.startReconciling(catalogFaceSources)
   post("${WatchFacePush.BASE_PATH}/device-codes") {
     call.limited {
       call.noStore()
@@ -1021,9 +1112,12 @@ internal fun Route.installWatchFacePushRoutes(
         push.reach(service, it, null) == WatchFacePush.VISIBILITY_PUBLIC
       }
     val catalog = withContext(Dispatchers.IO) { push.catalogFaces.resolve(catalogFaceSources()) }
-    // A face the packager already refused is not on `/designs`, so it is not counted as listed:
-    // it is skipped, with the packager's first diagnostic as the reason.
-    val (refused, listed) = catalog.faces.partition { push.builds.refusal(it.publication) != null }
+    // Only a face with a built APK is on `/designs`, so only those count as listed. One the
+    // packager refused is skipped, with its first diagnostic as the reason; one not built yet is
+    // pending (the background worker builds it), never built here.
+    val (refused, buildable) =
+      catalog.faces.partition { push.builds.refusal(it.publication) != null }
+    val (listed, pending) = buildable.partition { push.builds.cached(it.publication) != null }
     call.respondJson(
       WatchFacePushStatusV1.serializer(),
       push
@@ -1032,6 +1126,8 @@ internal fun Route.installWatchFacePushRoutes(
           catalogFaces =
             WatchFacePushCatalogFacesStatusV1(
               listed = listed.size,
+              pending =
+                pending.map { WatchFacePushCatalogFaces.id(it.source.system, it.source.previewId) },
               skipped =
                 catalog.skipped.map { WatchFacePushSkippedFaceV1(it.id, it.reason) } +
                   refused.map { face ->
@@ -1064,34 +1160,15 @@ internal fun Route.installWatchFacePushRoutes(
       val designs = mutableListOf<WatchFacePushDesignV1>()
       for (publication in push.store.published()) {
         val visibility = push.reach(service, publication, caller.account) ?: continue
-        val built =
-          when (val build = withContext(Dispatchers.IO) { push.builds.build(publication) }) {
-            is WatchFacePushBuilds.Result.Built -> build.apk
-            is WatchFacePushBuilds.Result.Unavailable -> continue
-            is WatchFacePushBuilds.Result.Failed -> {
-              System.err.println(
-                "serve: watchface-push: ${publication.designId} v${publication.version} is not " +
-                  "listed; the packager refused it: ${build.diagnostics.firstOrNull()}",
-              )
-              continue
-            }
-          }
-        designs += push.listing(origin(call), publication, built, visibility)
+        // Only what is already built: a listing never packages (the reconcile pass does).
+        val built = withContext(Dispatchers.IO) { push.builds.cached(publication) } ?: continue
+        designs += push.listing(origin(call), publication, built.apk, visibility)
       }
       // Then the public catalog faces, to every caller alike.
       val catalog = withContext(Dispatchers.IO) { push.catalogFaces.resolve(catalogFaceSources()) }
       for (face in catalog.faces) {
-        val build = withContext(Dispatchers.IO) { push.builds.build(face.publication, face.dwf) }
-        when (build) {
-          is WatchFacePushBuilds.Result.Built ->
-            designs += push.catalogListing(origin(call), face, build.apk)
-          is WatchFacePushBuilds.Result.Unavailable -> Unit
-          is WatchFacePushBuilds.Result.Failed ->
-            System.err.println(
-              "serve: watchface-push: ${face.publication.designId} is not listed; the packager " +
-                "refused it: ${build.diagnostics.firstOrNull()}",
-            )
-        }
+        val built = withContext(Dispatchers.IO) { push.builds.cached(face.publication) } ?: continue
+        designs += push.catalogListing(origin(call), face, built.apk)
       }
       call.respondJson(
         WatchFacePushDesignListV1.serializer(),
