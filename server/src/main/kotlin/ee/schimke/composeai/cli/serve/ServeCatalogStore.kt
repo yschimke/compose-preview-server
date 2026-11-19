@@ -985,6 +985,8 @@ class ServeCatalogStore(
     // there is nothing published to stay consistent with, so readers that must not wait for a
     // daemon ([bakedBundle]) see it now rather than after the live lane stands up. Re-staged after
     // each sidecar extraction below, so a cached reader notices the watch-face sources arriving.
+    // Baked previews only until a live lane publishes: live-only ids are served only where one
+    // runs.
     val stageForReaders = {
       stageBakedBundle(safe, generation) { bakedFallback(emptyList(), emptyList()) }
     }
@@ -1101,7 +1103,7 @@ class ServeCatalogStore(
             )
         ) {
           publishGeneration(safe, dir, wasmDir, generation) {
-            bakedFallback(emptyList(), emptyList())
+            bakedFallback(emptyList(), deferredIds.toList())
           }
           return Result.Ok(
             safe,
@@ -1179,7 +1181,7 @@ class ServeCatalogStore(
                 )
             ) {
               publishGeneration(safe, dir, wasmDir, generation) {
-                bakedFallback(emptyList(), emptyList())
+                bakedFallback(emptyList(), deferredIds.toList())
               }
               return Result.Ok(
                 safe,
@@ -1223,7 +1225,9 @@ class ServeCatalogStore(
           { bakedFallback(emptyList(), deferredIds.toList()) },
         )
     ) {
-      publishGeneration(safe, dir, wasmDir, generation) { bakedFallback(emptyList(), emptyList()) }
+      publishGeneration(safe, dir, wasmDir, generation) {
+        bakedFallback(emptyList(), deferredIds.toList())
+      }
       return Result.Ok(
         safe,
         count + deferredIds.size + failedIds.size,

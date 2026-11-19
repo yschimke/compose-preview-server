@@ -367,13 +367,22 @@ class WatchFacePushCatalogFacesTest {
   private fun liveBundleCatalogFetch(
     system: String,
     xml: String = "<WatchFace/>",
+    /** Also declare a live-only (deferred) face, with WFF sidecars but no baked PNG. */
+    deferredFace: Boolean = false,
   ): (String) -> ByteArray? {
+    val deferred =
+      if (!deferredFace) ""
+      else
+        """,
+       "deferred":[{"componentId":"Faces/Digital","reason":"mode",
+         "path":"images/digital/ideal__default__light.png","theme":"light",
+         "preview":"DigitalFace","previewId":"DigitalFaceLight"}]"""
     val catalogJson =
       """
       {"schema":"design-parity-catalog/v1","system":"$system",
        "liveBundle":{"path":"bundle/","file":"$system-bundle.png"},
        "components":[{"componentId":"Faces/Digital","images":[
-         {"path":"images/digital/ideal__default__dark.png","theme":"dark","previewId":"DigitalFace"}]}]}
+         {"path":"images/digital/ideal__default__dark.png","theme":"dark","previewId":"DigitalFace"}]}]$deferred}
       """
         .trimIndent()
     val bundleZip = ByteArrayOutputStream()
@@ -382,6 +391,9 @@ class WatchFacePushCatalogFacesTest {
         mapOf(
           "previews/DigitalFace.wff.json" to manifest("DigitalFace", "Apache-2.0").toByteArray(),
           "previews/DigitalFace.wff.zip" to wffZip(xml),
+          "previews/DigitalFaceLight.wff.json" to
+            manifest("DigitalFaceLight", "Apache-2.0").toByteArray(),
+          "previews/DigitalFaceLight.wff.zip" to wffZip(xml),
           "previews/Unaliased.wff.zip" to wffZip(xml),
         )) {
         zip.putNextEntry(ZipEntry(name))
@@ -453,6 +465,20 @@ class WatchFacePushCatalogFacesTest {
     fetch = liveBundleCatalogFetch("wear-faces", "<WatchFace a=\"2\"/>")
     assertIs<ServeCatalogStore.Result.Ok>(store.load("wear-faces"))
     assertEquals(2, designs().single().version)
+  }
+
+  @Test
+  fun `a live catalog's deferred faces stay listed from its bundle on disk`() {
+    val fetch = liveBundleCatalogFetch("wear-faces", deferredFace = true)
+    // The live lane stands up, so the catalog serves its live-only previews too.
+    val store = store({ fetch }, buildTrustedBundle = { true })
+    assertIs<ServeCatalogStore.Result.Ok>(store.load("wear-faces"))
+    val registry = ServeSessionRegistry(open = { null }).also(registries::add)
+    start(registry, listed = listOf("wear-faces"), catalogBakedBundle = store::bakedBundle)
+    assertEquals(
+      setOf(storeFaceId, "catalog:wear-faces/digital__ideal__default__light"),
+      designs().map { it.id }.toSet(),
+    )
   }
 
   @Test
