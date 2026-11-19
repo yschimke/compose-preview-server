@@ -131,6 +131,11 @@ internal fun Route.installUiBuilderDwfRoutes(
   service: UiBuilderServicePort,
   authorization: ServeUiBuilderAuthorization,
   dwf: UiBuilderDwfPreview,
+  /**
+   * [ServeFeatureFlags.nativePreview]: off, the runtime is never started, the status says so, and a
+   * start answers 503 [ServeFeatureFlags.NATIVE_PREVIEW_DISABLED].
+   */
+  enabled: Boolean = true,
 ) {
   /**
    * Whether the real runtime can run here. Read-gated and design-scoped like every other route
@@ -147,8 +152,15 @@ internal fun Route.installUiBuilderDwfRoutes(
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return@get
     }
-    val availability = dwf.sessions.availability()
-    val unavailable = availability as? DwfApkRuntime.Availability.Unavailable
+    val unavailable =
+      if (!enabled) {
+        DwfApkRuntime.Availability.Unavailable(
+          ServeFeatureFlags.NATIVE_PREVIEW_DISABLED,
+          "this server does not offer the Native watch-face preview",
+        )
+      } else {
+        dwf.sessions.availability() as? DwfApkRuntime.Availability.Unavailable
+      }
     call.respondText(
       UI_BUILDER_JSON.encodeToString(
         DwfPreviewStatusV1(
@@ -171,6 +183,15 @@ internal fun Route.installUiBuilderDwfRoutes(
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
     val (actor, designId, document, request) =
       call.receiveDwfDesignRequest(service, authorization, dwf) ?: return@post
+    // After authorization and the design's own checks, before anything is packaged or started.
+    if (!enabled) {
+      call.respondDwfRefusal(
+        HttpStatusCode.ServiceUnavailable,
+        ServeFeatureFlags.NATIVE_PREVIEW_DISABLED,
+        "this server does not offer the Native watch-face preview",
+      )
+      return@post
+    }
     val source =
       when (val resolved = resolveDwfSource(dwf, document, request)) {
         is ResolvedSource.Ok -> resolved.source

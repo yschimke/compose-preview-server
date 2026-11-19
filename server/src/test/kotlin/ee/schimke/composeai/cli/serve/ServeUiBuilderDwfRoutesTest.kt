@@ -47,6 +47,7 @@ class ServeUiBuilderDwfRoutesTest {
     sourceFor: (ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1) -> DwfSource? = { null },
     pinned: Map<String, ByteArray> = emptyMap(),
     validator: WatchFaceValidator? = null,
+    featureFlags: ServeFeatureFlags = ServeFeatureFlags(nativePreview = true),
   ): ServeHttpServer {
     runtime.availability = availability
     val assets = FileUiBuilderAssetStore(directory.resolve("assets"))
@@ -100,6 +101,7 @@ class ServeUiBuilderDwfRoutesTest {
           ServeUiBuilderAuthorization { _, _, _ ->
             UiBuilderAuthorizationDecision.Authorized(currentActor)
           },
+        featureFlags = featureFlags,
       )
       .also {
         it.start()
@@ -158,6 +160,52 @@ class ServeUiBuilderDwfRoutesTest {
     val (code, body) = post(base, """{"wffXml":"<WatchFace/>"}""")
     assertEquals(503, code)
     assertEquals(DwfPreviewSurface.RUNTIME_MISSING, obj(body)["code"]!!.jsonPrimitive.content)
+  }
+
+  @Test
+  fun `with the Native preview switched off the runtime is never started and the pane says why`() {
+    start(featureFlags = ServeFeatureFlags(nativePreview = false))
+    val status = obj(get("$base/status").second)
+    assertEquals(false, status["available"]!!.jsonPrimitive.boolean)
+    assertEquals(
+      ServeFeatureFlags.NATIVE_PREVIEW_DISABLED,
+      status["code"]!!.jsonPrimitive.content,
+    )
+    val (code, body) = post(base, """{"wffXml":"<WatchFace/>"}""")
+    assertEquals(503, code)
+    assertEquals(
+      ServeFeatureFlags.NATIVE_PREVIEW_DISABLED,
+      obj(body)["code"]!!.jsonPrimitive.content,
+    )
+    assertTrue(runtime.packaged.isEmpty(), "nothing was packaged")
+    assertTrue(runtime.connections.isEmpty(), "the runtime was never started")
+  }
+
+  @Test
+  fun `feature flags are off unless set to 1 or true`() {
+    assertEquals(
+      ServeFeatureFlags(false, false),
+      ServeFeatureFlags.fromEnvironment(emptyMap()),
+    )
+    assertEquals(ServeFeatureFlags(false, false), ServeFeatureFlags())
+    assertEquals(
+      ServeFeatureFlags(false, false),
+      ServeFeatureFlags.fromEnvironment(
+        mapOf(
+          ServeFeatureFlags.NATIVE_PREVIEW_ENV to "",
+          ServeFeatureFlags.WATCH_FACE_VALIDATION_ENV to "false",
+        ),
+      ),
+    )
+    assertEquals(
+      ServeFeatureFlags(nativePreview = true, watchFaceValidation = false),
+      ServeFeatureFlags.fromEnvironment(
+        mapOf(
+          ServeFeatureFlags.NATIVE_PREVIEW_ENV to "1",
+          ServeFeatureFlags.WATCH_FACE_VALIDATION_ENV to "yes",
+        ),
+      ),
+    )
   }
 
   @Test

@@ -2376,6 +2376,11 @@ public class ServeRunner(
    * the environment once, here; without one the API answers that it cannot build
    * ([WatchFacePushSigning]).
    */
+  /** Read once, at startup, and logged: see [ServeFeatureFlags]. */
+  private val featureFlags: ServeFeatureFlags by lazy {
+    ServeFeatureFlags.fromEnvironment().also { System.err.println(it.describe()) }
+  }
+
   private fun buildWatchFacePush(
     lane: UiBuilderLane,
     githubAuth: ServeGithubAuth?,
@@ -3603,6 +3608,7 @@ public class ServeRunner(
     val server =
       ServeHttpServer(
         host = host,
+        featureFlags = featureFlags,
         componentPublications = componentPublications,
         requestedPort = requestedPort,
         // Only an origin the operator stated is an identity a copy can point back at. An unusable
