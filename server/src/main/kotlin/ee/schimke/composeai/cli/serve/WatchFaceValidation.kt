@@ -313,13 +313,20 @@ internal class WatchFaceValidation(
           return Result.Unavailable(availability.code, availability.reason)
         is WatchFaceValidatorAvailability.Ready -> availability.validator
       }
-    admit(actorId)?.let {
-      return it
-    }
+    val chargedAt =
+      when (val admission = admit(actorId)) {
+        is Admission.Refused -> return admission.result
+        is Admission.Admitted -> admission.chargedAt
+      }
     val attempt =
       try {
         permits.withPermit {
-          withContext(dispatcher) { synchronized(lock) { byDigest[digest] } ?: run(ready, source) }
+          withContext(dispatcher) {
+            // Another request ran this face while this one waited: the cache answers, and a run
+            // that never happened is given back to the actor's allowance.
+            synchronized(lock) { byDigest[digest] }?.also { refund(actorId, chargedAt) }
+              ?: run(ready, source)
+          }
         }
       } finally {
         synchronized(lock) { admitted-- }
@@ -333,32 +340,47 @@ internal class WatchFaceValidation(
     }
   }
 
+  private sealed interface Admission {
+    class Admitted(val chargedAt: Long) : Admission
+
+    class Refused(val result: Result) : Admission
+  }
+
+  /** Undo [admit]'s charge to [actorId] at [chargedAt], for a request the cache answered. */
+  private fun refund(actorId: String, chargedAt: Long) {
+    synchronized(lock) { runsByActor[actorId]?.remove(chargedAt) }
+  }
+
   /** Admit one run for [actorId], or say why not; admitted, the caller must release `admitted`. */
-  private fun admit(actorId: String): Result? =
+  private fun admit(actorId: String): Admission =
     synchronized(lock) {
       val now = clock()
       val runs = runsByActor.getOrPut(actorId) { ArrayDeque() }
       while (runs.isNotEmpty() && runs.first() <= now - perActorWindowMillis) runs.removeFirst()
       if (runs.size >= perActorRuns) {
         val retry = (runs.first() + perActorWindowMillis - now + 999) / 1000
-        return@synchronized Result.RateLimited(
-          "this account has run $perActorRuns watch-face validations in the " +
-            "last ${perActorWindowMillis / 60_000} minutes; an unchanged face answers from " +
-            "cache, so validate when an edit pass is done rather than after every edit",
-          retry.coerceAtLeast(1),
+        return@synchronized Admission.Refused(
+          Result.RateLimited(
+            "this account has run $perActorRuns watch-face validations in the " +
+              "last ${perActorWindowMillis / 60_000} minutes; an unchanged face answers from " +
+              "cache, so validate when an edit pass is done rather than after every edit",
+            retry.coerceAtLeast(1),
+          ),
         )
       }
       if (admitted >= maxConcurrent + maxQueued) {
         val ahead = admitted - maxConcurrent + 1
-        return@synchronized Result.Busy(
-          "$admitted watch-face validations are already running or waiting on this " +
-            "server; try again shortly",
-          (ahead * typicalRunSeconds / maxConcurrent).coerceAtLeast(typicalRunSeconds),
+        return@synchronized Admission.Refused(
+          Result.Busy(
+            "$admitted watch-face validations are already running or waiting on this " +
+              "server; try again shortly",
+            (ahead * typicalRunSeconds / maxConcurrent).coerceAtLeast(typicalRunSeconds),
+          ),
         )
       }
       runs.addLast(now)
       admitted++
-      null
+      Admission.Admitted(now)
     }
 
   private fun run(validator: WatchFaceValidator, source: DwfSource): Attempt =

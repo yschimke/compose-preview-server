@@ -522,6 +522,44 @@ class ServeUiBuilderDwfRoutesTest {
   }
 
   @Test
+  fun `requests that wait for the same face and are answered from cache cost no allowance`() {
+    val release = java.util.concurrent.CountDownLatch(1)
+    var runs = 0
+    val validation =
+      WatchFaceValidation(
+        {
+          WatchFaceValidatorAvailability.Ready {
+            runs++
+            release.await(10, TimeUnit.SECONDS)
+            packagerReport(passed = true)
+          }
+        },
+        perActorRuns = 2,
+      )
+    val face = DwfSource(wffXml = "<WatchFace id=\"same\"/>")
+    runBlocking {
+      // Two tabs ask for the same uncached face at once: one runs, the other waits for it.
+      val first =
+        async(kotlinx.coroutines.Dispatchers.Default) { validation.validate("w", 1L, 1, face, "a") }
+      val second =
+        async(kotlinx.coroutines.Dispatchers.Default) { validation.validate("w", 1L, 1, face, "a") }
+      val deadline = System.currentTimeMillis() + 10_000
+      while (validation.pending < 2 && System.currentTimeMillis() < deadline) {
+        kotlinx.coroutines.delay(10)
+      }
+      release.countDown()
+      assertIs<WatchFaceValidation.Result.Ok>(first.await())
+      assertIs<WatchFaceValidation.Result.Ok>(second.await())
+      assertEquals(1, runs)
+      // One run was charged, so one more face still fits the allowance of two.
+      assertIs<WatchFaceValidation.Result.Ok>(
+        validation.validate("w", 1L, 2, DwfSource(wffXml = "<WatchFace id=\"next\"/>"), "a"),
+      )
+    }
+    assertEquals(2, runs)
+  }
+
+  @Test
   fun `a rate-limited validation is a 429 with Retry-After`() {
     start(
       validation =
