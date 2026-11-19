@@ -463,6 +463,9 @@ internal constructor(
       }
     // Any publish still queued or building is cancelled: the owner's last word wins.
     generations.merge(designId, 1L, Long::plus)
+    // And its build with it: a failed, refused or cancelled attempt is not shown once the owner
+    // has said no. A build still running finishes into nothing (its commit is refused).
+    queue.clear(designId)
     // Bound to this owner and this design, and written even before anything was built: for a
     // public design it is the owner's opt-out of the automatic listing.
     val updated =

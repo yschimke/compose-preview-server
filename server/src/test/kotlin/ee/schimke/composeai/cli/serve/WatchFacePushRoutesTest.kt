@@ -1935,6 +1935,29 @@ class WatchFacePushRoutesTest {
     assertNotEquals("pending", mine["build"]?.jsonObject?.get("state")?.jsonPrimitive?.content)
   }
 
+  @Test
+  fun `an unpublish takes a refused owner build off the pending list`() {
+    val release = java.util.concurrent.CountDownLatch(1)
+    val ready = readyPackaging()() as WatchFacePushPackaging.Ready
+    val slow = WatchFacePushPackager { files, face, version, out ->
+      release.await(20, TimeUnit.SECONDS)
+      ready.packager.pack(files, face, version, out)
+    }
+    start(packaging = { WatchFacePushPackaging.Ready(slow, "c0ffee") })
+    createDesign(alice, "aurora", "Aurora", public = true)
+    createDesign(alice, "broken", "Broken", public = true)
+    val aliceToken = link(alice)
+    val path = "/api/ui-builder/v1/designs/%s/watch-face-publication"
+    // A refused first publish, then unpublished.
+    faces["broken"] = "<WatchFace id=\"broken\" state=\"bad\"/>"
+    release.countDown()
+    assertEquals(422, publish(alice, "broken", "public").code)
+    assertNotNull(pendingList(aliceToken)["broken"])
+    assertEquals(200, send("DELETE", path.format("broken"), actor = alice).code)
+    assertNull(pendingList(aliceToken)["broken"])
+    assertNull(publication("broken").build)
+  }
+
   private fun document(id: String, title: String) =
     DesignDocumentV1(
       schema = "compose-ui-builder-document/v1-candidate",
