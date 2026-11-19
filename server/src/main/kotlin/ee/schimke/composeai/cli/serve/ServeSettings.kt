@@ -407,6 +407,15 @@ object ServeSettings {
         BOTH,
       ),
       Setting(
+        ServeNativePreview.SETTING_KEY,
+        ServeNativePreview.ENV,
+        Type.Flag,
+        Apply.RESTART,
+        "Let native preview start a runtime host: the real Wear OS watch-face runtime behind " +
+          "`dwf-preview`. Off unless set; while off those routes answer " +
+          "`native_preview_disabled` and start nothing.",
+      ),
+      Setting(
         "catalogs.mcp",
         "SERVE_CATALOG_MCP",
         Type.Flag,

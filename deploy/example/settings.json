@@ -1,6 +1,7 @@
 {
   "$schema": "../image/settings.schema.json",
   "uiBuilder": {"adminActors": []},
+  "nativePreview": false,
   "catalogs": {"mcp": false},
   "rendering": {"compileEngine": false},
   "uploads": {"acceptDocs": false, "acceptImages": false},
