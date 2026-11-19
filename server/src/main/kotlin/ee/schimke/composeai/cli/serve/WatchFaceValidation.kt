@@ -325,7 +325,11 @@ internal class WatchFaceValidation(
             // Another request ran this face while this one waited: the cache answers, and a run
             // that never happened is given back to the actor's allowance.
             synchronized(lock) { byDigest[digest] }?.also { refund(actorId, chargedAt) }
-              ?: run(ready, source)
+              ?: run(ready, source).also { ran ->
+                // Cached before the permit is released, so a request waiting on it finds the
+                // report instead of running the same face again.
+                if (ran is Ran) synchronized(lock) { byDigest[digest] = ran }
+              }
           }
         }
       } finally {
@@ -334,7 +338,6 @@ internal class WatchFaceValidation(
     return when (attempt) {
       is Attempt.Failed -> Result.Failed(VALIDATOR_FAILED, attempt.reason)
       is Ran -> {
-        synchronized(lock) { byDigest[digest] = attempt }
         Result.Ok(remember(designId, designCreatedAtEpochMillis, revision, digest, attempt))
       }
     }
