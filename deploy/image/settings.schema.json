@@ -291,15 +291,6 @@
         }
       }
     },
-    "nativePreview": {
-      "description": "Let native preview start a runtime host: the real Wear OS watch-face runtime behind `dwf-preview`. Off unless set; while off those routes answer `native_preview_disabled` and start nothing.",
-      "type": "boolean",
-      "x-env": "SERVE_NATIVE_PREVIEW",
-      "x-apply": "restart",
-      "x-roles": [
-        "preview"
-      ]
-    },
     "agents": {
       "type": "object",
       "additionalProperties": false,

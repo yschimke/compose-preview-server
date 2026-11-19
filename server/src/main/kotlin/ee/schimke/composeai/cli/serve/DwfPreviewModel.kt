@@ -50,13 +50,6 @@ internal object DwfPreviewSurface {
   /** The simulator's own prerequisites are missing (its sidecar jars, an android.jar). */
   const val SIMULATOR_UNAVAILABLE = "DWF_SIMULATOR_UNAVAILABLE"
 
-  /**
-   * The server's native-preview flag is off: nothing on this surface starts a runtime, whatever the
-   * host has installed. Lower-case because it is the flag's shared refusal code, the same one the
-   * other native-preview lanes answer with.
-   */
-  const val NATIVE_PREVIEW_DISABLED = "native_preview_disabled"
-
   const val SOURCE_INVALID = "DWF_SOURCE_INVALID"
   const val SOURCE_UNAVAILABLE = "DWF_SOURCE_UNAVAILABLE"
   const val TOO_MANY_SESSIONS = "DWF_TOO_MANY_SESSIONS"

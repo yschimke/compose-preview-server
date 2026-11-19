@@ -112,12 +112,6 @@ internal class DwfPreviewSessions(
   private val executor: Executor = defaultExecutor(),
   /** How the first-frame and settle waits pause between `watchface status` polls. */
   private val sleep: (Long) -> Unit = { Thread.sleep(it) },
-  /**
-   * The server's native-preview flag, read on every call so flipping it takes effect at once. While
-   * it is false nothing here starts a session, a packager or a runtime: [availability] says so,
-   * both starts refuse, and [frame] refuses even for a session started before.
-   */
-  private val enabled: () -> Boolean = { true },
 ) {
   class Session
   internal constructor(
@@ -224,8 +218,7 @@ internal class DwfPreviewSessions(
   private val waiting = LinkedHashSet<String>()
   private val slotLock = Object()
 
-  fun availability(): DwfApkRuntime.Availability =
-    if (!enabled()) DISABLED else runtime.availability()
+  fun availability(): DwfApkRuntime.Availability = runtime.availability()
 
   /**
    * Start a session and package its face on the caller's thread; a packager refusal is a
@@ -332,8 +325,6 @@ internal class DwfPreviewSessions(
   private fun prepare(session: Session, exports: Boolean, resolve: () -> Resolution) {
     try {
       if (!awaitSlot(session, if (exports) DwfStage.EXPORTING else DwfStage.PACKAGING)) return
-      // The flag can turn off while a start waits in line; then it never reaches the packager.
-      if (!enabled()) return fail(session, DISABLED.code, DISABLED.reason)
       val source =
         when (val resolved = resolve()) {
           is Resolution.Ok -> resolved.source
@@ -467,7 +458,6 @@ internal class DwfPreviewSessions(
    */
   fun frame(sessionId: String): Frame {
     val session = get(sessionId) ?: return Frame.Failed("DWF_NO_SESSION", "no such preview session")
-    if (!enabled()) return Frame.Failed(DISABLED.code, DISABLED.reason)
     val source =
       session.sourceOrNull
         ?: return session.failure
@@ -687,14 +677,6 @@ internal class DwfPreviewSessions(
     const val DEFAULT_MAX_SESSIONS = 4
     const val DEFAULT_IDLE_MILLIS = 15L * 60_000
     const val DEFAULT_MAX_QUEUED = 8
-
-    private val DISABLED =
-      DwfApkRuntime.Availability.Unavailable(
-        DwfPreviewSurface.NATIVE_PREVIEW_DISABLED,
-        "Native preview is turned off on this server (the `nativePreview` flag), so the real " +
-          "watch-face runtime is not started. The fast Remote Compose preview in the editor is " +
-          "unaffected.",
-      )
 
     /** How long a session with no socket survives: a reload reattaches well inside it. */
     const val DEFAULT_DETACHED_GRACE_MILLIS = 60_000L

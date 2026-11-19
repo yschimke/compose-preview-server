@@ -3830,10 +3830,6 @@ public class ServeRunner(
         // with the reason, which is what the tab shows.
         uiBuilderDwfPreview =
           uiBuilderLane?.let { lane ->
-            // The `nativePreview` flag, bound at startup: off, every dwf-preview start and frame
-            // answers `native_preview_disabled` and no runtime host is started.
-            val nativePreview = ServeNativePreview.enabled()
-            System.err.println(ServeNativePreview.startupLine(nativePreview))
             UiBuilderDwfPreview(
               sessions =
                 DwfPreviewSessions(
@@ -3844,7 +3840,6 @@ public class ServeRunner(
                       (dwfRuntimeAdmin ?: ServeDwfRuntimeAdmin()).status().activeSource != "none"
                     },
                   ),
-                  enabled = { nativePreview },
                 ),
               isDwfCatalog = { catalog ->
                 lane.nativeBackends[catalog] == DwfPreviewSurface.BACKEND

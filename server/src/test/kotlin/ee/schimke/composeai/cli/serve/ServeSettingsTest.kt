@@ -57,15 +57,11 @@ class ServeSettingsTest {
           "server/src/main/kotlin/ee/schimke/composeai/cli/serve/ServeComponentPublications.kt",
         )
         .readText()
-    val nativePreview =
-      File(repoRoot, "server/src/main/kotlin/ee/schimke/composeai/cli/serve/ServeNativePreview.kt")
-        .readText()
     for (setting in ServeSettings.ALL) {
       assertTrue(
         "\${${setting.env}" in entrypoint ||
           "\"${setting.env}\"" in analytics ||
-          "\"${setting.env}\"" in publications ||
-          "\"${setting.env}\"" in nativePreview,
+          "\"${setting.env}\"" in publications,
         "${setting.env} (${setting.key}) is read by neither the entrypoint nor the server",
       )
     }

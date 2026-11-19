@@ -67,8 +67,6 @@ services:
       # Every such variable is passed through EMPTY by default here, or settings.json could never
       # fill it.
       SERVE_UMAMI_ENABLED: "${SERVE_UMAMI_ENABLED:-}"
-      # Native preview (the real watch-face runtime); off unless settings.json says `nativePreview`.
-      SERVE_NATIVE_PREVIEW: "${SERVE_NATIVE_PREVIEW:-}"
       SERVE_UMAMI_URL: "${SERVE_UMAMI_URL:-}"
       SERVE_UMAMI_WEBSITE_ID: "${SERVE_UMAMI_WEBSITE_ID:-}"
       DOMAIN: "${DOMAIN:-}"

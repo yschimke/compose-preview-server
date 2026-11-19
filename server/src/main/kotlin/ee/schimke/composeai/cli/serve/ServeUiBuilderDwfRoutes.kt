@@ -676,8 +676,7 @@ private fun String.httpStatus(): HttpStatusCode =
     DwfPreviewSurface.RUNTIME_MISSING,
     DwfPreviewSurface.ANDROID_SDK_MISSING,
     DwfPreviewSurface.SIMULATOR_UNAVAILABLE,
-    DwfPreviewSurface.PACKAGING_UNAVAILABLE,
-    DwfPreviewSurface.NATIVE_PREVIEW_DISABLED -> HttpStatusCode.ServiceUnavailable
+    DwfPreviewSurface.PACKAGING_UNAVAILABLE -> HttpStatusCode.ServiceUnavailable
     DwfPreviewSurface.TOO_MANY_SESSIONS -> HttpStatusCode.TooManyRequests
     else -> HttpStatusCode.UnprocessableEntity
   }
