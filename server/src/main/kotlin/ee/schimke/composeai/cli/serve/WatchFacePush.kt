@@ -469,7 +469,7 @@ internal class WatchFacePushStore(
     val activationError: String? = null,
     val deviceModel: String? = null,
     val wearOsVersion: String? = null,
-    val watchFacePushApiVersion: Int? = null,
+    val watchFacePushApiVersion: String? = null,
     val appVersion: String? = null,
     val atEpochMillis: Long,
   )

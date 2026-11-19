@@ -21,6 +21,8 @@ internal data class WatchFacePackagerReportV1(
   val minimumWffVersion: Int? = null,
   val passed: Boolean,
   val checks: List<WatchFaceValidationCheckV1> = emptyList(),
+  /** `full` (Google's validators) or `estimate` (the packager's SDK-free path). */
+  val mode: String? = null,
 )
 
 @Serializable
@@ -31,7 +33,13 @@ internal data class WatchFaceValidationCheckV1(
   val status: String,
   val findings: List<WatchFaceValidationFindingV1> = emptyList(),
   val memory: WatchFaceValidationMemoryV1? = null,
-  val passedChecks: Int? = null,
+  /**
+   * On `memory-footprint`: each resource's cost, most expensive first. Present even when Google's
+   * evaluator failed (a missing asset, say), from the packager's own measurement.
+   */
+  val contributors: List<WatchFaceValidationContributorV1>? = null,
+  /** The names of the checks the push validator reports as passed. */
+  val passedChecks: List<String>? = null,
   /** Whether the validator would issue a Watch Face Push token; the token itself is never sent. */
   val tokenIssued: Boolean? = null,
 )
@@ -44,6 +52,29 @@ internal data class WatchFaceValidationFindingV1(
   val line: Int? = null,
   val column: Int? = null,
   val path: String? = null,
+  /** What to do about it, in words an authoring agent can act on. */
+  val suggestion: String? = null,
+)
+
+@Serializable
+internal data class WatchFaceValidationContributorV1(
+  /** `drawable/case_steel`. */
+  val resource: String,
+  /** `image`, `font` or `other`. */
+  val kind: String,
+  val width: Int? = null,
+  val height: Int? = null,
+  /** `png`, `jpeg`, `webp`, `ttf`, `otf` or `unknown`. */
+  val format: String? = null,
+  val fileBytes: Long? = null,
+  val decodedBytes: Long? = null,
+  val activeBytes: Long? = null,
+  val ambientBytes: Long? = null,
+  val renderedMaxWidth: Int? = null,
+  val renderedMaxHeight: Int? = null,
+  /** The face references this resource and the bundle does not ship it. */
+  val missing: Boolean = false,
+  val suggestion: String? = null,
 )
 
 @Serializable
@@ -67,12 +98,13 @@ internal data class WatchFaceValidationReportV1(
   val minimumWffVersion: Int? = null,
   val passed: Boolean,
   val checks: List<WatchFaceValidationCheckV1>,
+  val mode: String? = null,
   val designId: String,
   val revision: Long,
   /** [DwfSource.digest] of the validated face: the same digest is the same report. */
   val digest: String,
   /** When the validator ran, epoch milliseconds; a cached report keeps its first run's time. */
-  val ranAt: Long,
+  val ranAtEpochMillis: Long,
 )
 
 /** The validator as a function: a WFF source bundle in, the packager's JSON report out. */
@@ -135,7 +167,16 @@ internal class WatchFaceSubprocessValidator(
     WffPackagerProcess(libDir, sdk, home, java, timeoutSeconds).run(
       "validate",
       files,
-      arguments = { work -> listOf("--report-out", File(work, REPORT_FILE).path) },
+      // With a marketplace the push validator runs too; it needs no signing key, and the token
+      // it would issue is never read from the report.
+      arguments = { work ->
+        listOf(
+          "--report-out",
+          File(work, REPORT_FILE).path,
+          "--push-marketplace",
+          WatchFacePushNaming.MARKETPLACE_PACKAGE,
+        )
+      },
       environment = emptyMap(),
       succeeded = { exit, work -> exit == 0 || File(work, REPORT_FILE).isFile },
     ) { work ->
@@ -276,10 +317,11 @@ internal class WatchFaceValidation(
         minimumWffVersion = ran.report.minimumWffVersion,
         passed = ran.report.passed,
         checks = ran.report.checks,
+        mode = ran.report.mode,
         designId = designId,
         revision = revision,
         digest = digest,
-        ranAt = ran.ranAt,
+        ranAtEpochMillis = ran.ranAt,
       )
     synchronized(lock) { latest[designId] = report }
     return report

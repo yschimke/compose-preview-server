@@ -481,13 +481,13 @@ class WatchFacePushRoutesTest {
         App.InstallEvent(
           "aurora",
           1,
-          "installed",
+          "activation",
           wearOsApi = 36,
           packageName = "ee.schimke.watchface.push.watchfacepush.aurora",
           activation = "activated",
           deviceModel = "Pixel Watch 4",
           wearOsVersion = "6",
-          watchFacePushApiVersion = 1,
+          watchFacePushApiVersion = "1.0.0",
           appVersion = "1.2.3",
         ),
       ),
@@ -512,13 +512,13 @@ class WatchFacePushRoutesTest {
     assertEquals("failed", spareRow["result"]!!.jsonPrimitive.content)
     assertNull(spareRow["activation"], "an unknown activation is not kept")
     val wristRow = installs[1]
-    assertEquals("installed", wristRow["result"]!!.jsonPrimitive.content, "the latest replaces")
+    assertEquals("activation", wristRow["result"]!!.jsonPrimitive.content, "the latest replaces")
     assertEquals("activated", wristRow["activation"]!!.jsonPrimitive.content)
     assertEquals("Pixel Watch 4", wristRow["deviceModel"]!!.jsonPrimitive.content)
     assertEquals(36, wristRow["wearOsApi"]!!.jsonPrimitive.int)
     assertEquals(1, wristRow["version"]!!.jsonPrimitive.long)
     assertNotNull(wristRow["revisionPublished"])
-    assertNotNull(wristRow["at"])
+    assertNotNull(wristRow["atEpochMillis"])
     assertFalse(reply.body.contains("wfp_"), "no device token leaks")
 
     // An unlinked watch's reports go with it.
@@ -1110,7 +1110,7 @@ class WatchFacePushRoutesTest {
       val activationError: String? = null,
       val deviceModel: String? = null,
       val wearOsVersion: String? = null,
-      val watchFacePushApiVersion: Int? = null,
+      val watchFacePushApiVersion: String? = null,
       val appVersion: String? = null,
     )
   }

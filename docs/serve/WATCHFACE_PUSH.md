@@ -115,7 +115,8 @@ unpublishes; `GET` reports the publication and its APK status (`ready`, `pending
 
 `POST /installs` takes `{designId, version, result, errorKind?, wearOsApi?, packageName?,
 activation?, activationError?, deviceModel?, wearOsVersion?, watchFacePushApiVersion?,
-appVersion?}`; `activation` is one of `activated`, `not_requested`, `manual`, `failed` (any other
+appVersion?}`. `result` is free text (`installed`, `failed`, `activation` for a later "Set as watch
+face", …), and `wearOsVersion` and `watchFacePushApiVersion` are version strings. `activation` is one of `activated`, `not_requested`, `manual`, `failed` (any other
 value is dropped). It is `204` whether or not it is kept, because the app reports fire-and-forget,
 and `400` only without a `designId`, a non-negative `version` and a `result`. The server keeps a
 report only on a design published by the watch's own account (so never a catalog face, `c_…`): the
@@ -124,8 +125,8 @@ a watch drops its reports, and a purged design's go with it.
 
 `GET /api/ui-builder/v1/designs/{id}/watch-installs` is the owner's view:
 `{"installs":[{deviceName, deviceModel?, wearOsApi?, version, revisionPublished?, result,
-activation?, errorKind?, at}]}`, one row per still-linked watch, newest first. `at` is when the
-server received the report, in epoch milliseconds, and `revisionPublished` is the revision that
+activation?, errorKind?, atEpochMillis}]}`, one row per still-linked watch, newest first. `atEpochMillis` is when the
+server received the report, and `revisionPublished` is the revision that
 `version` was published from, if that version was still the published one when the report came in.
 
 ## The APK

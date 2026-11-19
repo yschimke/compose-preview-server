@@ -276,9 +276,12 @@ class ServeUiBuilderDwfRoutesTest {
       """"validationToken":"SECRET-TOKEN","checks":[{"id":"wff-xsd","title":"Schema",""" +
       """"status":"${if (passed) "passed" else "failed"}","findings":""" +
       (if (passed) "[]" else """[{"severity":"error","message":"bad","line":3,"column":7}]""") +
-      """},{"id":"push","title":"Watch Face Push","status":"passed","tokenIssued":true,""" +
+      """},{"id":"push","title":"Watch Face Push","status":"passed","tokenIssued":true,"passedChecks":["a","b"],""" +
       """"token":"SECRET-TOKEN","memory":{"totalBytes":10,"maxActiveBytes":5,""" +
-      """"maxAmbientBytes":2,"activeLimitBytes":100,"ambientLimitBytes":50}}]}"""
+      """"maxAmbientBytes":2,"activeLimitBytes":100,"ambientLimitBytes":50},""" +
+      """"contributors":[{"resource":"drawable/case_steel","kind":"image","width":1024,""" +
+      """"height":1024,"format":"png","fileBytes":81234,"decodedBytes":4194304,""" +
+      """"activeBytes":4194304,"ambientBytes":0,"suggestion":"downscale"}]}],"mode":"full"}"""
 
   @Test
   fun `validation returns the packager's report with the face it is on, never the token`() {
@@ -297,10 +300,17 @@ class ServeUiBuilderDwfRoutesTest {
     assertEquals(true, report["passed"]!!.jsonPrimitive.boolean)
     assertEquals("watch-1", report["designId"]!!.jsonPrimitive.content)
     assertEquals(64, report["digest"]!!.jsonPrimitive.content.length)
-    assertTrue(report["ranAt"]!!.jsonPrimitive.long > 0)
+    assertTrue(report["ranAtEpochMillis"]!!.jsonPrimitive.long > 0)
     val push = report["checks"]!!.jsonArray[1].jsonObject
     assertEquals(true, push["tokenIssued"]!!.jsonPrimitive.boolean)
     assertEquals(100, push["memory"]!!.jsonObject["activeLimitBytes"]!!.jsonPrimitive.int)
+    assertEquals(
+      listOf("a", "b"),
+      push["passedChecks"]!!.jsonArray.map { it.jsonPrimitive.content },
+    )
+    val contributor = push["contributors"]!!.jsonArray.single().jsonObject
+    assertEquals("downscale", contributor["suggestion"]!!.jsonPrimitive.content)
+    assertEquals("full", report["mode"]!!.jsonPrimitive.content)
     assertEquals("<WatchFace/>", seen.single()["res/raw/watchface.xml"]!!.decodeToString())
     // The same face again is the cached report, and GET reads it back.
     assertEquals(body, post(validation, """{"wffXml":"<WatchFace/>"}""").second)

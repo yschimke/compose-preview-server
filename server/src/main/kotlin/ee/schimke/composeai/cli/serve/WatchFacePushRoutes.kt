@@ -451,7 +451,8 @@ internal data class WatchFacePushInstallEventV1(
   val activationError: String? = null,
   val deviceModel: String? = null,
   val wearOsVersion: String? = null,
-  val watchFacePushApiVersion: Int? = null,
+  /** The androidx Watch Face Push library's version string. */
+  val watchFacePushApiVersion: String? = null,
   val appVersion: String? = null,
 )
 
@@ -470,8 +471,8 @@ internal data class WatchFacePushInstallV1(
   val result: String,
   val activation: String? = null,
   val errorKind: String? = null,
-  /** When the server received the report, epoch milliseconds. */
-  val at: Long,
+  /** When the server received the report. */
+  val atEpochMillis: Long,
 )
 
 internal object WatchFacePushInstalls {
@@ -497,7 +498,7 @@ internal object WatchFacePushInstalls {
       activationError = event.activationError.clip(),
       deviceModel = event.deviceModel.clip(),
       wearOsVersion = event.wearOsVersion.clip()?.take(64),
-      watchFacePushApiVersion = event.watchFacePushApiVersion,
+      watchFacePushApiVersion = event.watchFacePushApiVersion.clip()?.take(64),
       appVersion = event.appVersion.clip()?.take(64),
       atEpochMillis = 0,
     )
@@ -513,7 +514,7 @@ internal object WatchFacePushInstalls {
       result = event.result,
       activation = event.activation,
       errorKind = event.errorKind,
-      at = event.atEpochMillis,
+      atEpochMillis = event.atEpochMillis,
     )
 }
 
