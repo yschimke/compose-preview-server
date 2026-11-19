@@ -507,7 +507,13 @@ composeai-contracts = "3.43.0"
 # exports leftover shape properties and fractional geometry without refusing (#1265) and draws a
 # palette thumbnail for every watch face component (#1267). Built on compose-ai-tools 2.99.3,
 # contracts 3.43.0 and watchface-tools 0.4.0, all met here.
-composeai-ui-builder = "3.136.0"
+# 3.137.0 follows the real clock with interactive and ambient watch-face previews (compose-ui-builder
+# #1263), adds wff/transform and wff/gyro (#1269), complication samples and Condition branches
+# (#1271), typed configuration containers (#1270), WFF gradients, arcs and export rotation (#1273),
+# declared slots and hairlines (#1275), HH time and slot placement (#1278) and rotated selection
+# boxes (#1262). Built on compose-ai-tools 2.100.0, contracts 3.43.0 and watchface-tools 0.4.0, all
+# met here.
+composeai-ui-builder = "3.137.0"
 # First published version of the optional publication server library (Maven Central).
 livery = "0.15.0"
 # Packages a design revision's WFF source into the signed APK the real watch-face runtime loads
