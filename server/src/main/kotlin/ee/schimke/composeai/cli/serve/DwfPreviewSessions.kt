@@ -468,6 +468,12 @@ internal class DwfPreviewSessions(
       session.apk
         ?: return session.failure
           ?: Frame.Failed(DwfPreviewSurface.SOURCE_UNAVAILABLE, "the watch face is not ready yet")
+    // A failed session gave its runtime slot up; drawing again takes one back through the same
+    // admission as a start, so a retry can neither exceed the bound nor jump the queue.
+    if (session.stage == DwfStage.FAILED && !readmit(session)) {
+      return session.failure
+        ?: Frame.Failed(DwfPreviewSurface.TOO_MANY_SESSIONS, "no runtime slot is free")
+    }
     synchronized(daemonLock) {
       val wanted = session.effective(now())
       return try {
@@ -576,6 +582,16 @@ internal class DwfPreviewSessions(
       "this server is already drawing $maxSessions watch-face previews with the real " +
         "runtime; close one, or retry shortly (idle ones expire after ${idleMillis / 60_000} min)",
     )
+
+  private fun readmit(session: Session): Boolean =
+    synchronized(slotLock) {
+      if (session.stage != DwfStage.FAILED) return@synchronized true
+      if (occupying() >= maxSessions || waiting.isNotEmpty()) return@synchronized false
+      // Back to the runtime stages; the frame moves it on from here (or fails it again).
+      session.stage = DwfStage.INSTALLING
+      session.stageSince = now()
+      true
+    }
 
   /** Move a session forward. Once it is live it stays live: a re-push is not a reload. */
   private fun enter(session: Session, stage: DwfStage) {

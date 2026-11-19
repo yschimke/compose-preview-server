@@ -184,6 +184,27 @@ class DwfPreviewStagesTest {
   }
 
   @Test
+  fun `a failed session retries only once it can take a runtime slot back`() {
+    val s = sessions(deferred, max = 1)
+    runtime.failNext = "daemon crashed"
+    val a = s.async(owner = "a")
+    pending.removeFirst().run()
+    assertEquals(DwfStage.FAILED, s.progress(a).stage)
+    // Its slot went to the next start, which is live.
+    val b = s.async(owner = "b")
+    pending.removeFirst().run()
+    assertEquals(DwfStage.LIVE, s.progress(b).stage)
+    val before = runtime.commands.size
+    assertIs<DwfPreviewSessions.Frame.Failed>(s.frame(a.id))
+    assertEquals(before, runtime.commands.size, "a retry without a slot never reaches the daemon")
+    assertEquals(1, s.sessionCount)
+    s.close(b.id)
+    assertIs<DwfPreviewSessions.Frame.Ok>(s.frame(a.id))
+    assertEquals(DwfStage.LIVE, s.progress(a).stage)
+    assertEquals(1, s.sessionCount)
+  }
+
+  @Test
   fun `a pushed face is screenshot only once it has drawn`() {
     val s = sessions()
     runtime.statusScript.addAll(listOf(waiting(0), waiting(0), waiting(1)))
