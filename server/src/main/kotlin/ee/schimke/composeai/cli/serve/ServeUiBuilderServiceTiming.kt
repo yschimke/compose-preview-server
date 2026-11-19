@@ -19,11 +19,24 @@ internal class ServeUiBuilderServiceTiming(
   private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
   private val log: (String) -> Unit = System.err::println,
 ) : UiBuilderServicePort by delegate {
+  /** When a call last took [thresholdMillis] or more, on [clock]; null until one does. */
+  @Volatile private var lastSlowAt: Long? = null
+
+  /**
+   * Whether a call was slow within the last [windowMillis]: the service's lock is contended, so
+   * optional work that would take it (a thumbnail redraw is an export, and every export commits)
+   * should wait.
+   */
+  fun slowRecently(windowMillis: Long = SLOW_WINDOW_MILLIS): Boolean =
+    lastSlowAt?.let { clock() - it < windowMillis } == true
+
   override suspend fun execute(call: UiBuilderServiceCall): UiBuilderServiceResponse {
     val started = clock()
     val response = delegate.execute(call)
-    val millis = clock() - started
+    val ended = clock()
+    val millis = ended - started
     if (millis >= thresholdMillis) {
+      lastSlowAt = ended
       val request = call.request
       val error = (response as? UiBuilderServiceResponse.Error)?.error?.code
       log(
@@ -34,6 +47,10 @@ internal class ServeUiBuilderServiceTiming(
       )
     }
     return response
+  }
+
+  companion object {
+    const val SLOW_WINDOW_MILLIS = 60_000L
   }
 
   private fun designIdOf(request: UiBuilderServiceRequest): String? =

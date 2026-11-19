@@ -3772,6 +3772,8 @@ public class ServeRunner(
             // Timed once, under both the routes and the thumbnail worker, so a call that holds the
             // service's lock is logged whichever of them made it.
             val timed = ServeUiBuilderServiceTiming(lane.service)
+            // While that service is slow, keep stored thumbnails rather than redraw them.
+            lane.thumbnails?.deferRedraws = { timed.slowRecently() }
             ServeUiBuilderVisibility.withDefault(
               lane.thumbnails?.warming(timed) ?: timed,
               uiBuilderDefaultVisibility,
