@@ -3214,6 +3214,11 @@ class ServeCatalogMcp(
           authorize(UiBuilderRouteCapability.EXPORT, presentedToken) is
             UiBuilderAuthorizationDecision.Authorized
         },
+        mayPublish = {
+          (authorize(UiBuilderRouteCapability.WRITE, presentedToken)
+              as? UiBuilderAuthorizationDecision.Authorized)
+            ?.mayPublishWatchFaces() == true
+        },
       )
     if (name == ServeUiBuilderMcp.GUIDELINES_PROMPT) return uiBuilderGuidelinesPromptResult(text)
     if (

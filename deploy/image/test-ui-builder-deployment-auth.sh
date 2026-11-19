@@ -12,7 +12,7 @@ example="${ENV_EXAMPLE_FILE:-${here}/.env.example}"
 # `images` half is conditional on the upload repo being named, because the server refuses to start
 # when the capability is offered without the lane; `test-agent-grant-image-capability.sh` owns that
 # half. Written as one literal because that is how the entrypoint reads it.
-expected_capabilities='ui-builder-read,ui-builder-write,ui-builder-export,ui-builder-destructive${SERVE_IMAGE_UPLOAD_REPO:+,images}'
+expected_capabilities='ui-builder-read,ui-builder-write,ui-builder-export,ui-builder-destructive,ui-builder-publish${SERVE_IMAGE_UPLOAD_REPO:+,images}'
 
 grep -Fq \
   ": \"\${SERVE_AGENT_GRANT_CAPABILITIES:=${expected_capabilities}}\"" \

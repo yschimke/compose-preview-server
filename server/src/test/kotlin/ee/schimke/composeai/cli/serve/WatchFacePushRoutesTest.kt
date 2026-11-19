@@ -183,7 +183,12 @@ class WatchFacePushRoutesTest {
         uiBuilderAuthorization =
           ServeUiBuilderAuthorization { call, _, _ ->
             call.request.headers["X-Test-Agent-For"]?.let {
-              UiBuilderAuthorizationDecision.Authorized("agent:fingerprint", onBehalfOfActorId = it)
+              UiBuilderAuthorizationDecision.Authorized(
+                "agent:fingerprint",
+                onBehalfOfActorId = it,
+                // A grant whose approver also ticked `ui-builder-publish`.
+                mayPublishForPrincipal = call.request.headers["X-Test-Agent-Publish"] == "1",
+              )
             }
               ?: call.request.headers["X-Test-Actor"]?.let {
                 UiBuilderAuthorizationDecision.Authorized(it)
@@ -1003,6 +1008,8 @@ class WatchFacePushRoutesTest {
             Json.parseToJsonElement("""{"designId":"aurora","published":$published}""").jsonObject,
             AuthenticatedUiBuilderActor(actor),
             callId = "t",
+            // A person's own session, as the catalog MCP decides it.
+            mayPublish = { true },
           )
         }
       }
@@ -1829,6 +1836,72 @@ class WatchFacePushRoutesTest {
     assertNull(push.store.publication("aurora")?.takeIf { it.published })
     assertNull(push.store.publication("pulse"))
     assertEquals(1, packagerLog.readLines().size)
+  }
+
+  @Test
+  fun `a grant with ui-builder-publish publishes and unpublishes its approver's design, and only theirs`() {
+    start()
+    createDesign(alice, "aurora", "Aurora", public = true)
+    createDesign(bob, "pulse", "Pulse", public = true)
+    val path = "/api/ui-builder/v1/designs/%s/watch-face-publication"
+    val publisher = mapOf("X-Test-Agent-For" to alice, "X-Test-Agent-Publish" to "1")
+    val writeOnly = mapOf("X-Test-Agent-For" to alice)
+
+    // Write alone, or destructive, never implies publish.
+    val refused =
+      send("PUT", path.format("aurora"), json = """{"visibility":"public"}""", headers = writeOnly)
+    assertEquals(403, refused.code, refused.body)
+    assertContains(refused.body, "owner_session_required")
+    assertContains(refused.body, "ui-builder-publish")
+
+    val accepted =
+      send("PUT", path.format("aurora"), json = """{"visibility":"public"}""", headers = publisher)
+    assertEquals(202, accepted.code, accepted.body)
+    runBlocking { push.queue.awaitIdle() }
+    assertEquals(listOf("aurora"), designs().map { it.id })
+    val status = send("GET", path.format("aurora"), headers = publisher)
+    assertEquals(200, status.code, status.body)
+    // Another account's design: the grant acts for alice, who does not own it.
+    val other =
+      send("PUT", path.format("pulse"), json = """{"visibility":"public"}""", headers = publisher)
+    assertEquals(403, other.code, other.body)
+    assertContains(other.body, "owner_required")
+
+    assertEquals(403, send("DELETE", path.format("aurora"), headers = writeOnly).code)
+    assertEquals(200, send("DELETE", path.format("aurora"), headers = publisher).code)
+    assertEquals(emptyList(), designs())
+  }
+
+  @Test
+  fun `the MCP tool takes a grant only when it carries ui-builder-publish`() {
+    start()
+    createDesign(alice, "aurora", "Aurora", public = true)
+    createDesign(bob, "pulse", "Pulse", public = true)
+    val mcp = ServeUiBuilderMcp(service, watchFacePush = push)
+    val grant = AuthenticatedUiBuilderActor("agent:fingerprint", alice)
+    fun call(designId: String, mayPublish: Boolean, published: Boolean = true) = runBlocking {
+      runCatching {
+        mcp.call(
+          ServeUiBuilderMcp.PUBLISH_WATCH_FACE,
+          Json.parseToJsonElement("""{"designId":"$designId","published":$published}""").jsonObject,
+          grant,
+          callId = "t",
+          mayPublish = { mayPublish },
+        )
+      }
+    }
+    val writeOnly = call("aurora", mayPublish = false)
+    assertContains(writeOnly.exceptionOrNull()?.message.orEmpty(), "owner_session_required")
+    assertContains(writeOnly.exceptionOrNull()?.message.orEmpty(), "ui-builder-publish")
+    assertContains(call("aurora", mayPublish = true).getOrThrow(), "\"published\":true")
+    assertEquals(listOf("aurora"), designs().map { it.id })
+    val other = call("pulse", mayPublish = true)
+    assertTrue(other.isFailure, "a grant for alice published bob's design")
+    assertContains(
+      call("aurora", mayPublish = true, published = false).getOrThrow(),
+      "\"published\":false",
+    )
+    assertTrue(call("aurora", mayPublish = false, published = false).isFailure)
   }
 
   private fun document(id: String, title: String) =

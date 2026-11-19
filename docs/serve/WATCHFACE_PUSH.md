@@ -116,10 +116,16 @@ under `/api/ui-builder/v1`. MCP agents use `ui_builder_publish_watch_face` with 
 which returns the validation report described in [the preview design](../design/UI_BUILDER_WATCH_FACE_ANDROID_PREVIEW.md#validation-report);
 the HTTP routes are the person's own:
 
-- **Only the design's owner, in their own signed-in session.** A delegated grant (an agent acting
-  for the owner) and an agent's own identity are `403 owner_session_required`, exactly as `/link`
-  refuses them: putting a design on every watch outlives the grant. A collaborator who is not the
-  owner is `403 owner_required`; a design the caller cannot read is `404`. A session-cookie `PUT` or
+- **Only the design's owner, in their own signed-in session — or an agent the owner explicitly let
+  publish.** A grant whose approver ticked **`ui-builder-publish`** ("Publish this account's watch
+  faces to watches, including to every watch for public designs") may publish and unpublish the
+  approver's own designs, here and through `ui_builder_publish_watch_face`; it still needs the
+  ordinary `ui-builder-read`/`ui-builder-write` for the call itself. `ui-builder-write` and
+  `ui-builder-destructive` never imply it. Every other delegated grant, and an agent's own identity,
+  is `403 owner_session_required`, whose message names the capability so the agent can ask for it;
+  linking and unlinking watches stay the person's own (`/link`). A caller who is not the owner — a
+  grant acting for someone else included — is `403 owner_required`; a design the caller cannot read
+  is `404`. A session-cookie `PUT` or
   `DELETE` is accepted only from this server's own page.
 - **Rate limited** per account: 30 a minute, two at once (a publish runs the packager).
 - `visibility: "public"` lists the face to every watch; the design itself must be public, or it is

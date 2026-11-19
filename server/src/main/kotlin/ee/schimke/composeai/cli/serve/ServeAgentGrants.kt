@@ -288,6 +288,9 @@ object ServeAgentGrants {
       // No route asks for it; it rides on a grant to the design service. An open-UI-builder
       // approver may delete their own designs, so they may let an agent do it for them too.
       AgentGrantCapability.UI_BUILDER_DESTRUCTIVE,
+      // Likewise: an approver may publish their own watch faces, so they may let an agent publish
+      // them for them. Never implied by write or destructive; see [WatchFacePush].
+      AgentGrantCapability.UI_BUILDER_PUBLISH,
     )
 
   /** How [ServeMachineAuthorization] names the holder of `--token`. */

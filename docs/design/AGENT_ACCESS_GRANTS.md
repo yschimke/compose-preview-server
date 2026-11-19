@@ -157,6 +157,15 @@ for these minutes, and their name is on it*. So attribution improves rather than
 names the human who said yes. The rate-limit bucket is the grant, not an address or a login, because
 a grant is already the bounded thing.
 
+**`ui-builder-publish` lets an agent publish the approver's watch faces.** Publishing reaches
+watches — every watch, for a public design — so it is its own capability, offered only where the
+operator lists it (`--agent-grant-capabilities`; the hosted image does by default) and shown on the
+approval page as "Publish this account's watch faces to watches, including to every watch for
+public designs". It is never implied by `ui-builder-write` or `ui-builder-destructive`. A grant that
+carries it may publish and unpublish designs its approver owns, through the owner's publication route
+and `ui_builder_publish_watch_face`; it reaches nobody else's design, and linking or unlinking
+watches stays the person's own. See [Watch Face Push](../serve/WATCHFACE_PUSH.md#publishing).
+
 Three edges are worth stating, since none of them is obvious:
 
 1. **The approver must hold it themselves.** On a GitHub-gated box, ticking `images` requires the
