@@ -28,6 +28,7 @@ Non-secret settings live in a deployment's `settings.json` (see [`deploy/example
 | `uiBuilder.guidelines.triage` | `SERVE_UI_BUILDER_GUIDELINES_TRIAGE` | live | preview | Before a guidelines check, ask Jev which extra evidence would help (a dark render, a large-font render, the accessibility tree). Default `on`. |
 | `cli.startUrl` | `SERVE_CLI_START_URL` | restart | preview, playground | Where /start sends a visitor on the catalog host: the CLI and project-previews guide. |
 | `catalogs.registry` | `SERVE_CATALOG_REGISTRY` | restart | preview, playground | Catalog registries this box serves every catalog of, beyond `catalogs.json`, as `--catalog-registry` takes them. `none` turns it off. |
+| `watchFaceValidation` | `SERVE_WATCH_FACE_VALIDATION` | restart | preview | Let `watchface-validation` and `ui_builder_validate_watch_face` run Google's watch-face validators (a packager JVM per face). Off unless set; while off they answer `watch_face_validation_disabled` and the editor keeps to its in-browser checks. |
 | `catalogs.mcp` | `SERVE_CATALOG_MCP` | restart | preview | Serve the remote catalog MCP endpoint. Needs agent grants. |
 | `agents.grantCapabilities` | `SERVE_AGENT_GRANT_CAPABILITIES` | restart | preview | Capabilities an agent grant may be given, beyond the defaults. `images` is dropped unless the image lane is on. |
 | `uploads.acceptDocs` | `SERVE_ACCEPT_DOCS` | restart | preview | Accept Remote Compose document uploads at `/d/`. |
