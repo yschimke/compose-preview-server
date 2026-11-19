@@ -1032,6 +1032,12 @@ if [[ "${SERVE_CATALOG_MCP:-}" == "1" || "${SERVE_CATALOG_MCP:-}" == "true" ]]; 
   args+=(--catalog-mcp)
 fi
 
+# The server's expensive optional work (ServeFeatureFlags.kt): the Native pane's Android runtime
+# and the watch-face validator. The server reads these itself, and
+# each is OFF unless it is 1 or true, so a deployment turns each on deliberately in settings.json.
+export SERVE_NATIVE_PREVIEW="${SERVE_NATIVE_PREVIEW:-}"
+export SERVE_WATCH_FACE_VALIDATION="${SERVE_WATCH_FACE_VALIDATION:-}"
+
 # Extra Maven repositories the live-daemon classpath resolver may fetch from, beyond Maven Central +
 # Google Maven. A served catalog whose module pulls deps from a non-default repo (e.g.
 # meshcore-mobile's jitpack.io deps like usb-serial-for-android) otherwise has those coordinates
