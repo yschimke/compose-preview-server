@@ -33,6 +33,8 @@ class ServeUiBuilderDwfRoutesTest {
   private val runtime = FakeDwfRuntime()
   private var server: ServeHttpServer? = null
   private var currentActor = actor.actorId
+  private lateinit var service: PersistentUiBuilderService
+  private lateinit var dwfPreview: UiBuilderDwfPreview
 
   @AfterTest
   fun tearDown() {
@@ -48,10 +50,11 @@ class ServeUiBuilderDwfRoutesTest {
     sourceFor: (ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1) -> DwfSource? = { null },
     pinned: Map<String, ByteArray> = emptyMap(),
     validator: WatchFaceValidator? = null,
+    featureFlags: ServeFeatureFlags = ServeFeatureFlags(nativePreview = true),
   ): ServeHttpServer {
     runtime.availability = availability
     val assets = FileUiBuilderAssetStore(directory.resolve("assets"))
-    val service =
+    service =
       PersistentUiBuilderService(
           storage = FileUiBuilderStateStorage(directory),
           limits = UiBuilderServiceLimits(),
@@ -71,6 +74,25 @@ class ServeUiBuilderDwfRoutesTest {
             }
           }
         }
+    dwfPreview =
+      UiBuilderDwfPreview(
+        sessions = DwfPreviewSessions(runtime),
+        isDwfCatalog = { it == dwfCatalog },
+        tickMillis = tickMillis,
+        animatedTickMillis = animatedTickMillis,
+        sourceFor = sourceFor,
+        assets = assets,
+        validation =
+          WatchFaceValidation(
+            {
+              validator?.let(WatchFaceValidatorAvailability::Ready)
+                ?: WatchFaceValidatorAvailability.Unavailable(
+                  "NO_VALIDATOR",
+                  "not in this test",
+                )
+            },
+          ),
+      )
     return ServeHttpServer(
         host = "127.0.0.1",
         requestedPort = 0,
@@ -79,29 +101,12 @@ class ServeUiBuilderDwfRoutesTest {
         defaultSessionId = "unused",
         machineAuthorization = ServeMachineAuthorization("local-fixture", null, null),
         uiBuilderService = service,
-        uiBuilderDwfPreview =
-          UiBuilderDwfPreview(
-            sessions = DwfPreviewSessions(runtime),
-            isDwfCatalog = { it == dwfCatalog },
-            tickMillis = tickMillis,
-            animatedTickMillis = animatedTickMillis,
-            sourceFor = sourceFor,
-            assets = assets,
-            validation =
-              WatchFaceValidation(
-                {
-                  validator?.let(WatchFaceValidatorAvailability::Ready)
-                    ?: WatchFaceValidatorAvailability.Unavailable(
-                      "NO_VALIDATOR",
-                      "not in this test",
-                    )
-                },
-              ),
-          ),
+        uiBuilderDwfPreview = dwfPreview,
         uiBuilderAuthorization =
           ServeUiBuilderAuthorization { _, _, _ ->
             UiBuilderAuthorizationDecision.Authorized(currentActor)
           },
+        featureFlags = featureFlags,
       )
       .also {
         it.start()
@@ -160,6 +165,70 @@ class ServeUiBuilderDwfRoutesTest {
     val (code, body) = post(base, """{"wffXml":"<WatchFace/>"}""")
     assertEquals(503, code)
     assertEquals(DwfPreviewSurface.RUNTIME_MISSING, obj(body)["code"]!!.jsonPrimitive.content)
+  }
+
+  @Test
+  fun `with the Native preview switched off the runtime is never started and the pane says why`() {
+    start(featureFlags = ServeFeatureFlags(nativePreview = false))
+    val status = obj(get("$base/status").second)
+    assertEquals(false, status["available"]!!.jsonPrimitive.boolean)
+    assertEquals(
+      ServeFeatureFlags.NATIVE_PREVIEW_DISABLED,
+      status["code"]!!.jsonPrimitive.content,
+    )
+    val (code, body) = post(base, """{"wffXml":"<WatchFace/>"}""")
+    assertEquals(503, code)
+    assertEquals(
+      ServeFeatureFlags.NATIVE_PREVIEW_DISABLED,
+      obj(body)["code"]!!.jsonPrimitive.content,
+    )
+    assertTrue(runtime.packaged.isEmpty(), "nothing was packaged")
+    assertTrue(runtime.connections.isEmpty(), "the runtime was never started")
+  }
+
+  @Test
+  fun `with the Native preview switched off an async start is refused before any session exists`() {
+    start(featureFlags = ServeFeatureFlags(nativePreview = false))
+    // Both the editor-sent and the server-derived async starts, which would otherwise answer 202
+    // and package, queue or boot in the background.
+    for (body in listOf("""{"wffXml":"<WatchFace/>","async":true}""", """{"async":true}""")) {
+      val (code, answer) = post(base, body)
+      assertEquals(503, code, answer)
+      assertEquals(
+        ServeFeatureFlags.NATIVE_PREVIEW_DISABLED,
+        obj(answer)["code"]!!.jsonPrimitive.content,
+      )
+    }
+    assertEquals(0, obj(get("$base/status").second)["sessions"]!!.jsonPrimitive.int)
+    assertTrue(runtime.packaged.isEmpty(), "nothing was packaged")
+    assertTrue(runtime.connections.isEmpty(), "the runtime was never started")
+  }
+
+  @Test
+  fun `feature flags are off unless set to 1 or true`() {
+    assertEquals(
+      ServeFeatureFlags(false, false),
+      ServeFeatureFlags.fromEnvironment(emptyMap()),
+    )
+    assertEquals(ServeFeatureFlags(false, false), ServeFeatureFlags())
+    assertEquals(
+      ServeFeatureFlags(false, false),
+      ServeFeatureFlags.fromEnvironment(
+        mapOf(
+          ServeFeatureFlags.NATIVE_PREVIEW_ENV to "",
+          ServeFeatureFlags.WATCH_FACE_VALIDATION_ENV to "false",
+        ),
+      ),
+    )
+    assertEquals(
+      ServeFeatureFlags(nativePreview = true, watchFaceValidation = false),
+      ServeFeatureFlags.fromEnvironment(
+        mapOf(
+          ServeFeatureFlags.NATIVE_PREVIEW_ENV to "1",
+          ServeFeatureFlags.WATCH_FACE_VALIDATION_ENV to "yes",
+        ),
+      ),
+    )
   }
 
   @Test
@@ -429,6 +498,74 @@ class ServeUiBuilderDwfRoutesTest {
     assertEquals(503, post(validation, """{"wffXml":"<WatchFace/>"}""").first)
     assertEquals(422, post(validation, "{}").first)
     assertEquals(400, post(validation, "not json").first)
+  }
+
+  @Test
+  fun `the MCP tool returns the same report, exists only with the lane, and is an export`() {
+    start(
+      sourceFor = { DwfSource(wffXml = "<WatchFace/>", label = "derived") },
+      validator = { packagerReport(passed = false) },
+    )
+    val mcp = ServeUiBuilderMcp(service, watchFaces = dwfPreview)
+    assertEquals(
+      UiBuilderRouteCapability.EXPORT,
+      mcp.capabilityFor(ServeUiBuilderMcp.VALIDATE_WATCH_FACE),
+    )
+    assertNull(ServeUiBuilderMcp(service).capabilityFor(ServeUiBuilderMcp.VALIDATE_WATCH_FACE))
+    val reply = runBlocking {
+      mcp.call(
+        ServeUiBuilderMcp.VALIDATE_WATCH_FACE,
+        buildJsonObject { put("designId", "watch-1") },
+        actor,
+        callId = "t",
+      )
+    }
+    val report = obj(reply)
+    assertEquals(false, report["passed"]!!.jsonPrimitive.boolean)
+    assertEquals("watch-1", report["designId"]!!.jsonPrimitive.content)
+    assertFalse(reply.contains("SECRET-TOKEN"))
+    // The HTTP GET reads the report the tool ran.
+    assertEquals(200, get(validation).first)
+
+    val declared =
+      ServeUiBuilderMcp.declarations(
+        { name, description, _ ->
+          buildJsonObject {
+            put("name", name)
+            put("description", description)
+          }
+        },
+        watchFacePush = true,
+        watchFaceValidation = true,
+      )
+    val names = declared.map { it["name"]!!.jsonPrimitive.content }
+    assertContains(names, ServeUiBuilderMcp.VALIDATE_WATCH_FACE)
+    val publish = declared.first {
+      it["name"]!!.jsonPrimitive.content == ServeUiBuilderMcp.PUBLISH_WATCH_FACE
+    }
+    assertContains(publish["description"]!!.jsonPrimitive.content, "run ui_builder_validate")
+    assertFalse(
+      ServeUiBuilderMcp.declarations({ name, _, _ -> buildJsonObject { put("name", name) } }).any {
+        it["name"]!!.jsonPrimitive.content == ServeUiBuilderMcp.VALIDATE_WATCH_FACE
+      },
+    )
+  }
+
+  @Test
+  fun `the MCP tool refuses a design that is not a watch face`() {
+    start(dwfCatalog = "some-other-catalog", validator = { packagerReport(passed = true) })
+    val mcp = ServeUiBuilderMcp(service, watchFaces = dwfPreview)
+    val refused = runCatching {
+      runBlocking {
+        mcp.call(
+          ServeUiBuilderMcp.VALIDATE_WATCH_FACE,
+          buildJsonObject { put("designId", "watch-1") },
+          actor,
+          callId = "t",
+        )
+      }
+    }
+    assertContains(refused.exceptionOrNull()?.message ?: refused.getOrThrow(), "watch faces")
   }
 
   @Test

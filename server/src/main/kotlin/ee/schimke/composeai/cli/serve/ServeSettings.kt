@@ -407,6 +407,21 @@ object ServeSettings {
         BOTH,
       ),
       Setting(
+        "features.nativePreview",
+        ServeFeatureFlags.NATIVE_PREVIEW_ENV,
+        Type.Flag,
+        Apply.RESTART,
+        "Start the Android watch-face runtime for a design's Native pane. Off unless set: the " +
+          "pane then says the server does not offer it.",
+      ),
+      Setting(
+        "features.watchFaceValidation",
+        ServeFeatureFlags.WATCH_FACE_VALIDATION_ENV,
+        Type.Flag,
+        Apply.RESTART,
+        "Serve the Google watch-face validator route. Off unless set.",
+      ),
+      Setting(
         "catalogs.mcp",
         "SERVE_CATALOG_MCP",
         Type.Flag,
