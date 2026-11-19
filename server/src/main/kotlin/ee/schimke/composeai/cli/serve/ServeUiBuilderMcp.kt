@@ -527,7 +527,28 @@ class ServeUiBuilderMcp(
           }
         withDesignCreationVisibility(visibility) { execute(request, actor) }
       } else execute(request, actor)
+    if (request is ExportDesignRequestV1 && request.format == ExportFormatV1.BUNDLE) {
+      return withBundleFiles(
+        envelope(callId, response, includeCatalog = args.includeCatalog()),
+        response,
+      )
+    }
     return envelope(callId, response, includeCatalog = args.includeCatalog())
+  }
+
+  /**
+   * A bundle export's reply with its archive listed beside the base64 `content`, under
+   * `bundleFiles`: each entry's path and size, and the text of its XML files. An agent reads the
+   * face (`res/raw/watchface.xml`, what dwf-preview takes) without unzipping anything.
+   */
+  private fun withBundleFiles(envelope: String, response: UiBuilderServiceResponse): String {
+    val artifact = (response as? UiBuilderServiceResponse.Export)?.artifact ?: return envelope
+    if (artifact.encoding != ExportEncodingV1.BASE64 || artifact.content.isEmpty()) return envelope
+    val entries =
+      runCatching { bundleEntries(java.util.Base64.getDecoder().decode(artifact.content)) }
+        .getOrNull() ?: return envelope
+    val root = Json.parseToJsonElement(envelope) as? JsonObject ?: return envelope
+    return JsonObject(root + ("bundleFiles" to entries)).toString()
   }
 
   /**
@@ -4668,7 +4689,7 @@ class ServeUiBuilderMcp(
           {"type":"object","properties":{
             "designId":{"type":"string"},
             "revision":{"type":"integer"},
-            "format":{"type":"string","description":"Defaults to compose. Available formats: ${ExportFormatV1.entries.filter { UiBuilderBuildFeatures.remoteCompose || it.name !in setOf("JSON", "RC") }.joinToString(", ") { it.name.lowercase() }}. Check the catalog exportCapabilities."}
+            "format":{"type":"string","description":"Defaults to compose. Available formats: ${ExportFormatV1.entries.filter { UiBuilderBuildFeatures.remoteCompose || it.name !in setOf("JSON", "RC") }.joinToString(", ") { it.name.lowercase() }}. Check the catalog exportCapabilities. A watch face's bundle is its Watch Face Format source zip (res/raw/watchface.xml, watch_face_info.xml, AndroidManifest.xml, preview and pinned drawables); the reply lists the entries under bundleFiles, with the text of each XML file."}
           },"required":["designId"],"additionalProperties":false}
           """,
         ),
@@ -5443,6 +5464,32 @@ internal data class ComponentSummaryV1(
   val slots: List<String> = emptyList(),
   val properties: List<String> = emptyList(),
 )
+
+/** Above this an XML entry is listed by size only, so one large face cannot swamp the reply. */
+private const val MAX_BUNDLE_TEXT_BYTES = 256 * 1024
+
+/** The entries of a zip as `{path, sizeBytes, text?}`, `text` for the XML files. */
+internal fun bundleEntries(zip: ByteArray): JsonArray =
+  JsonArray(
+    buildList {
+      java.util.zip.ZipInputStream(zip.inputStream()).use { input ->
+        while (true) {
+          val entry = input.nextEntry ?: break
+          if (entry.isDirectory) continue
+          val bytes = input.readBytes()
+          add(
+            buildJsonObject {
+              put("path", entry.name)
+              put("sizeBytes", bytes.size)
+              if (entry.name.endsWith(".xml") && bytes.size <= MAX_BUNDLE_TEXT_BYTES) {
+                put("text", bytes.toString(Charsets.UTF_8))
+              }
+            },
+          )
+        }
+      }
+    },
+  )
 
 /**
  * The same JSON with every embedded `ServiceSnapshotV1`'s `catalog` removed. A snapshot is

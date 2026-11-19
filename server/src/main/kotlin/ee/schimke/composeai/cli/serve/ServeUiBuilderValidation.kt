@@ -280,6 +280,25 @@ class ScratchUiBuilderDraftValidator(
 
     // The scratch copy's id and revision are its own; the caller asked about theirs.
     checked = checked.copy(id = document.id, revision = document.revision)
+    // A watch face's export is its Watch Face Format bundle, so its gate is the bundle export's
+    // refusals: the exporter's own, then bitmaps it names that the design does not pin. Reported
+    // as errors, so a check that passes means `format: "bundle"` packages the face.
+    if (WatchFaceBundleExportExecutor.isWatchFace(snapshot.snapshot.catalog)) {
+      return UiBuilderDraft(
+        WatchFaceBundleExportExecutor.refusals(checked).map { refusal ->
+          UiBuilderValidationProblemV1(
+            severity = SEVERITY_ERROR,
+            source = SOURCE_EXPORT,
+            code = refusal.code,
+            message = refusal.message,
+            nodeId = refusal.nodeId,
+            field = WATCH_FACE_REASON_FIELD.find(refusal.message)?.groupValues?.get(1),
+          )
+        },
+        checked,
+        catalog,
+      )
+    }
     // The export gate: only where the pinned catalog exports Compose at all. A catalog that does
     // not has no gate to fail, and saying "valid" there is the truth rather than an omission.
     if (!snapshot.snapshot.catalog.exportCapabilities.composeCode) {
@@ -503,6 +522,10 @@ internal const val SOURCE_DOCUMENT = "document"
 
 /** The reducer refused the batch. */
 internal const val SOURCE_MUTATIONS = "mutations"
+
+/** The field a WFF exporter reason names: `nodes.<id> (`<component>`): <field>: …`. */
+private val WATCH_FACE_REASON_FIELD =
+  Regex("""^nodes\.[^ :]+(?: \(`[^`]*`\))?: ([A-Za-z][A-Za-z0-9_]*):""")
 
 /** The Compose export gate — the editor's problems panel. */
 internal const val SOURCE_EXPORT = "export"
