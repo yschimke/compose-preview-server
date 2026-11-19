@@ -277,31 +277,34 @@ internal fun Route.installUiBuilderDwfRoutes(
             }
           }
         }
+      // Off the event loop: admission is quick, but it releases abandoned sessions on the way.
       val started =
-        dwf.sessions.startAsync(
-          designId = designId,
-          revision = document.revision,
-          ownerActorId = actor.actorId,
-          wffVersion = editorSource?.wffVersion ?: request.wffVersion,
-          exports = editorSource == null,
-          controls = LIVE_CONTROLS,
-        ) {
-          if (editorSource != null) DwfPreviewSessions.Resolution.Ok(editorSource)
-          else
-            when (val resolved = resolveDwfSource(dwf, document, request)) {
-              is ResolvedSource.Ok -> DwfPreviewSessions.Resolution.Ok(resolved.source)
-              is ResolvedSource.Missing ->
-                DwfPreviewSessions.Resolution.Refused(
-                  WatchFaceDrawables.MISSING_RESOURCE,
-                  resolved.missing.joinToString("\n"),
-                )
-              is ResolvedSource.Refused ->
-                // A session's failure is one diagnostic; each missing resource keeps its line.
-                DwfPreviewSessions.Resolution.Refused(
-                  resolved.code,
-                  resolved.reasons.joinToString("\n"),
-                )
-            }
+        withContext(Dispatchers.IO) {
+          dwf.sessions.startAsync(
+            designId = designId,
+            revision = document.revision,
+            ownerActorId = actor.actorId,
+            wffVersion = editorSource?.wffVersion ?: request.wffVersion,
+            exports = editorSource == null,
+            controls = LIVE_CONTROLS,
+          ) {
+            if (editorSource != null) DwfPreviewSessions.Resolution.Ok(editorSource)
+            else
+              when (val resolved = resolveDwfSource(dwf, document, request)) {
+                is ResolvedSource.Ok -> DwfPreviewSessions.Resolution.Ok(resolved.source)
+                is ResolvedSource.Missing ->
+                  DwfPreviewSessions.Resolution.Refused(
+                    WatchFaceDrawables.MISSING_RESOURCE,
+                    resolved.missing.joinToString("\n"),
+                  )
+                is ResolvedSource.Refused ->
+                  // A session's failure is one diagnostic; each missing resource keeps its line.
+                  DwfPreviewSessions.Resolution.Refused(
+                    resolved.code,
+                    resolved.reasons.joinToString("\n"),
+                  )
+              }
+          }
         }
       call.respondDwfStarted(designId, document.revision, started, HttpStatusCode.Accepted)
       return@post

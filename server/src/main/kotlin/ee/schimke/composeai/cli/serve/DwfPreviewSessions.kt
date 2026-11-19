@@ -306,7 +306,9 @@ internal class DwfPreviewSessions(
     session.stage = if (exports) DwfStage.EXPORTING else DwfStage.PACKAGING
     session.reachedStep = session.stage.step
     synchronized(slotLock) {
-      if (occupying() >= maxSessions) {
+      // Anyone already waiting goes first: a slot freed a moment ago belongs to the head of the
+      // queue, whose worker may not have woken yet, not to whoever asks next.
+      if (occupying() >= maxSessions || waiting.isNotEmpty()) {
         if (waiting.size >= maxQueued) return full()
         session.stage = DwfStage.QUEUED
         waiting += session.id
@@ -546,11 +548,34 @@ internal class DwfPreviewSessions(
   }
 
   fun close(sessionId: String) {
-    val removed = sessions.remove(sessionId) ?: return
+    val removed = release(sessionId) ?: return
+    releaseDaemon(removed)
+  }
+
+  /**
+   * Take a session out of the bounds and the queue at once, without waiting for [daemonLock]: a
+   * start that releases an abandoned session must not wait behind another session's first frame (up
+   * to 90 s) to answer. The daemon's own cleanup follows on [executor].
+   */
+  private fun releaseDeferred(sessionId: String) {
+    val removed = release(sessionId) ?: return
+    try {
+      executor.execute { releaseDaemon(removed) }
+    } catch (_: RejectedExecutionException) {
+      releaseDaemon(removed)
+    }
+  }
+
+  private fun release(sessionId: String): Session? {
+    val removed = sessions.remove(sessionId) ?: return null
     synchronized(slotLock) {
       waiting.remove(removed.id)
       slotLock.notifyAll()
     }
+    return removed
+  }
+
+  private fun releaseDaemon(removed: Session) {
     synchronized(daemonLock) {
       if (holder?.first == removed.id) holder = null
       // The last session out takes the daemon with it: a Robolectric sandbox is not free to idle.
@@ -626,9 +651,10 @@ internal class DwfPreviewSessions(
           (it.sockets.get() == 0 &&
             // A preparing session is busy, not abandoned; one still queued has cost nothing yet.
             (!it.preparing || it.stage == DwfStage.QUEUED) &&
-            at - it.detachedSince > detachedGraceMillis)
+            // A client polling the status route instead of holding a socket is still there.
+            at - maxOf(it.detachedSince, it.lastUsed) > detachedGraceMillis)
       }
-      .forEach { close(it.id) }
+      .forEach { releaseDeferred(it.id) }
   }
 
   /**
@@ -644,7 +670,7 @@ internal class DwfPreviewSessions(
           it.everAttached &&
           it.sockets.get() == 0
       }
-      .forEach { close(it.id) }
+      .forEach { releaseDeferred(it.id) }
   }
 
   private fun poll(

@@ -205,6 +205,75 @@ class DwfPreviewStagesTest {
   }
 
   @Test
+  fun `a new start waits behind sessions already queued, even when a slot has just freed`() {
+    val s = sessions(deferred, max = 1)
+    val a = s.async(owner = "a")
+    pending.removeFirst().run()
+    val b = s.async(owner = "b")
+    assertEquals(DwfStage.QUEUED, s.progress(b).stage)
+    // The slot frees; b's worker has not woken yet when c asks.
+    s.close(a.id)
+    val c = s.async(owner = "c")
+    assertEquals(DwfStage.QUEUED, s.progress(c).stage)
+    assertEquals(1, s.progress(c).queueAhead)
+    pending.removeFirst().run()
+    assertEquals(DwfStage.LIVE, s.progress(b).stage)
+    assertEquals(DwfStage.QUEUED, s.progress(c).stage)
+  }
+
+  @Test
+  fun `a queued session a client polls without a socket is not abandoned`() {
+    val s = sessions(deferred, max = 1)
+    val a = s.async(owner = "a")
+    pending.removeFirst().run()
+    s.attach(a)
+    val b = s.async(owner = "b")
+    repeat(3) {
+      clock += 50_000
+      assertNotNull(s.get(b.id), "each status poll keeps it")
+      assertEquals(1, s.queuedCount)
+    }
+    clock += 61_000
+    assertEquals(1, s.sessionCount)
+    assertNull(s.get(b.id), "once the polling stops it is released after the grace")
+  }
+
+  @Test
+  fun `releasing a replaced session never waits for another session's frame`() {
+    val inFrame = java.util.concurrent.CountDownLatch(1)
+    val release = java.util.concurrent.CountDownLatch(1)
+    runtime.onCommand = {
+      if (it.cmd == "screenshot") {
+        inFrame.countDown()
+        release.await(10, java.util.concurrent.TimeUnit.SECONDS)
+      }
+    }
+    val s = sessions(deferred, max = 4)
+    val old = assertIs<DwfPreviewSessions.Started.Ok>(s.start("d", 1, "alice", source())).session
+    s.attach(old)
+    s.detach(old)
+    val busy =
+      assertIs<DwfPreviewSessions.Started.Ok>(s.start("e", 1, "bob", source("<WatchFace b/>")))
+        .session
+    val drawing = Thread { s.frame(busy.id) }.apply { start() }
+    try {
+      assertTrue(inFrame.await(10, java.util.concurrent.TimeUnit.SECONDS))
+      // The daemon lock is held by bob's frame; alice's Reload must still answer at once.
+      val started =
+        java.util.concurrent.CompletableFuture.supplyAsync {
+          s.startAsync("d", 1, "alice", 2, false) { DwfPreviewSessions.Resolution.Ok(source()) }
+        }
+      assertIs<DwfPreviewSessions.Started.Ok>(
+        started.get(2, java.util.concurrent.TimeUnit.SECONDS),
+      )
+      assertNull(s.get(old.id), "the replaced session is out of the bounds at once")
+    } finally {
+      release.countDown()
+      drawing.join(10_000)
+    }
+  }
+
+  @Test
   fun `a pushed face is screenshot only once it has drawn`() {
     val s = sessions()
     runtime.statusScript.addAll(listOf(waiting(0), waiting(0), waiting(1)))
