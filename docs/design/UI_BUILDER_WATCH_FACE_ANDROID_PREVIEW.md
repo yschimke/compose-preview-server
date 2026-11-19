@@ -232,8 +232,9 @@ so a validation token the packager writes is never passed on. A failing face is 
 the `WFF_BUNDLE_MISSING_RESOURCE` finding for each name, and the packager is not run. A packager
 refusal that comes before any report is one failed `packager` check carrying its diagnostics. A
 `422` means only that the request names no usable face, a `503` that this host cannot validate (with
-`watch_face_validation_disabled` while the deployment's `watchFaceValidation` flag is off, which is
-the production default; the editor then keeps to its in-browser checks), and
+`watch_face_validation_disabled` while the deployment's `features.watchFaceValidation` setting
+(`SERVE_WATCH_FACE_VALIDATION`, read once at startup as `ServeFeatureFlags.watchFaceValidation`) is
+off, which is the default; the editor then keeps to its in-browser checks), and
 a `502` that the validator ran and returned nothing readable. `GET` on the same path returns the
 last report on the current revision (or `?revision=`), and `404` when there is none.
 
