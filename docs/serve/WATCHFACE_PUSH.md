@@ -87,6 +87,25 @@ Each entry also carries `"visibility": "public" | "private"`, which the app igno
 cannot build APKs at all the list is empty and carries `"packaging": {"available": false, "code",
 "reason"}` (also ignored by the app, and the same object as `GET /status`).
 
+**Faces still building: `?includePending=1`.** A watch that shows build progress asks for
+`GET /designs?includePending=1`. Every entry then carries `build`, the newest *requested* build
+(the [publication status's](#publishing) object: `pending`, `queued`, `building`, `built`,
+`refused`, `failed`), while its top-level fields stay the newest *built* one — so v3 stays
+installable while v4 builds or fails. The list also gains entries not built at all, with `build` and
+none of the install fields (`version`, `apkUrl`, `sha256`, `sizeBytes`, `validationToken`):
+
+- a published face whose APK is not built yet (as reachable as when built; `previewUrl` present);
+- a public design waiting for its automatic build, to every caller while the design is public;
+- an owner's first publish still queued or building, **only to that owner's linked watches** (it
+  is not published yet, so whether it will be public is not known);
+- a listed catalog face whose APK the background worker has not built (`queued`, `pending`, or
+  `refused` with its diagnostics), with the same `catalog` and `attribution` as when built.
+
+`id`, `title`, `packageName`, `visibility` and `source` are always there; `previewUrl` and
+`wffVersion` may be absent on an entry that has not been exported yet. Without the parameter the list
+is exactly the built entries, because the 0.8.0 app's model requires every install field and would
+reject the whole list over one entry without them.
+
 `version` is the APK `versionCode`. It starts at 1, and moves (by one) only when a re-publish
 changes the face itself — its exported WFF, its assets, its WFF version — so a watch is never
 offered an "update" to the same APK. Unpublishing keeps the counter, so a face published again is
@@ -245,7 +264,8 @@ deliberate events, never on a request:
   leaves every list at once — its owner's watches included, since it was never published to them —
   and its APK is `404`. Made public again, it comes back as it was. A purged design's publication is
   retired as any other (#1998), and a design recreated under its id is a different design: it starts
-  above every version already installed and inherits nothing.
+  above every version already installed and inherits nothing, not even the purged design's build
+  progress, refusal or diagnostics (a build still running is never committed).
 - **Progress.** The owner's `GET …/watch-face-publication` shows the automatic build's `build` too:
   `pending` with `scheduledAtEpochMillis` while it settles, then `building`, `built`, `refused`, or
   `failed` with `nextRetryAtEpochMillis`.
