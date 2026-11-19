@@ -277,7 +277,7 @@ internal fun Route.installUiBuilderDwfRoutes(
               call.respondDwfRefusal(
                 HttpStatusCode.UnprocessableEntity,
                 resolved.code,
-                resolved.reason,
+                resolved.reasons,
               )
               return@post
             }
@@ -297,7 +297,11 @@ internal fun Route.installUiBuilderDwfRoutes(
             when (val resolved = resolveDwfSource(dwf, document, request)) {
               is ResolvedSource.Ok -> DwfPreviewSessions.Resolution.Ok(resolved.source)
               is ResolvedSource.Refused ->
-                DwfPreviewSessions.Resolution.Refused(resolved.code, resolved.reason)
+                // A session's failure is one diagnostic; each missing resource keeps its line.
+                DwfPreviewSessions.Resolution.Refused(
+                  resolved.code,
+                  resolved.reasons.joinToString("\n"),
+                )
             }
         }
       call.respondDwfStarted(designId, document.revision, started, HttpStatusCode.Accepted)
