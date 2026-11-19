@@ -743,7 +743,12 @@ class ServeHttpServer(
    * designs they name ([ServeUiBuilderGrantScope]). Nothing here reaches the unwrapped port, which
    * is why the constructor parameter is not a property.
    */
-  private val designService: UiBuilderServicePort? = uiBuilderService?.let { raw ->
+  private val designService: UiBuilderServicePort? = uiBuilderService?.let { unfed ->
+    // Watch Face Push hears which design changed, to schedule a public face's build; nothing more.
+    val raw =
+      watchFacePush?.let { push ->
+        WatchFacePushChangeFeed(unfed) { id, access -> push.automatic.noteChanged(id, access) }
+      } ?: unfed
     val service =
       uiBuilderProjectStore?.let { ServeUiBuilderProjectService(raw, it, uiBuilderBranches) } ?: raw
     agentGrants?.let {
@@ -1414,6 +1419,7 @@ class ServeHttpServer(
               designService,
               sameOriginUiBuilderAuthorization,
               it,
+              watchFacePush = watchFacePush,
               enabled = featureFlags.nativePreview,
             )
           }
