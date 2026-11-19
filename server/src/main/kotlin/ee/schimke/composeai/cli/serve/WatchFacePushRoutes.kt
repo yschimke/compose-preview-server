@@ -365,6 +365,8 @@ internal constructor(
     service: UiBuilderServicePort,
     ready: Ready,
     replaces: (WatchFacePushStore.Publication?) -> Boolean = { true },
+    /** False once the owner has unpublished since: a refusal is then not remembered. */
+    stillWanted: () -> Boolean = { true },
   ): Outcome {
     val designId = ready.designId
     return when (
@@ -376,7 +378,7 @@ internal constructor(
         Outcome.Ok(status(service, staged.publication, staged.build))
       }
       is Staged.Refused -> {
-        refusals[designId] = staged.diagnostics
+        if (stillWanted()) refusals[designId] = staged.diagnostics
         Outcome.Refused(
           HttpStatusCode.UnprocessableEntity,
           "packaging_failed",
@@ -436,7 +438,20 @@ internal constructor(
     val current = { generation(designId) == generation }
     queue.submit(designId) {
       if (!current()) return@submit null
-      when (val outcome = finish(service, ready) { current() }) {
+      val finished = runCatching {
+        finish(service, ready, replaces = { current() }, stillWanted = current)
+      }
+      // Unpublished while it was packaging: whatever it ended in, refused or failed included,
+      // leaves no state, so the owner's unpublish is not undone by a build it cancelled.
+      if (!current()) return@submit null
+      val outcome = finished.getOrElse {
+        if (it is kotlinx.coroutines.CancellationException) throw it
+        return@submit WatchFacePushBuildStatusV1(
+          WatchFacePushBuildQueue.FAILED,
+          reason = it.message ?: it.javaClass.simpleName,
+        )
+      }
+      when (outcome) {
         is Outcome.Ok ->
           WatchFacePushBuildStatusV1(
             WatchFacePushBuildQueue.BUILT,

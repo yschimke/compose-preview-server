@@ -1803,6 +1803,32 @@ class WatchFacePushRoutesTest {
   }
 
   @Test
+  fun `a build refused after its owner unpublished leaves no state behind`() {
+    val release = java.util.concurrent.CountDownLatch(1)
+    val started = java.util.concurrent.CountDownLatch(1)
+    val ready = readyPackaging()() as WatchFacePushPackaging.Ready
+    val slow = WatchFacePushPackager { files, face, version, out ->
+      started.countDown()
+      release.await(20, TimeUnit.SECONDS)
+      ready.packager.pack(files, face, version, out)
+    }
+    start(packaging = { WatchFacePushPackaging.Ready(slow, "c0ffee") })
+    createDesign(alice, "aurora", "Aurora", public = true)
+    val aliceToken = link(alice)
+    faces["aurora"] = "<WatchFace id=\"aurora\" state=\"bad\"/>"
+    assertEquals(202, put(alice, "aurora", "public").code)
+    assertTrue(started.await(20, TimeUnit.SECONDS), "aurora's build never started")
+    // Unpublished while packaging; the packager then refuses it.
+    val path = "/api/ui-builder/v1/designs/%s/watch-face-publication"
+    assertEquals(200, send("DELETE", path.format("aurora"), actor = alice).code)
+    release.countDown()
+    runBlocking { push.queue.awaitIdle() }
+    assertNull(push.queue.status("aurora"))
+    assertNull(publication("aurora").build)
+    assertNull(pendingList(aliceToken)["aurora"])
+  }
+
+  @Test
   fun `a stopped server's build queue starts nothing and commits nothing more`() {
     val release = java.util.concurrent.CountDownLatch(1)
     val started = java.util.concurrent.CountDownLatch(1)
