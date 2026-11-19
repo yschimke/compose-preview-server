@@ -232,8 +232,9 @@ so a validation token the packager writes is never passed on. A failing face is 
 the `WFF_BUNDLE_MISSING_RESOURCE` finding for each name, and the packager is not run. A packager
 refusal that comes before any report is one failed `packager` check carrying its diagnostics. A
 `422` means only that the request names no usable face, a `503` that this host cannot validate (with
-`watch_face_validation_disabled` while the deployment's `watchFaceValidation` flag is off, which is
-the production default; the editor then keeps to its in-browser checks), and
+`watch_face_validation_disabled` while the deployment's `features.watchFaceValidation` setting
+(`SERVE_WATCH_FACE_VALIDATION`, read once at startup as `ServeFeatureFlags.watchFaceValidation`) is
+off, which is the default; the editor then keeps to its in-browser checks), and
 a `502` that the validator ran and returned nothing readable. `GET` on the same path returns the
 last report on the current revision (or `?revision=`), and `404` when there is none.
 
@@ -242,8 +243,24 @@ Agents reach the same report through the MCP tool `ui_builder_validate_watch_fac
 XML. Its description and the MCP `initialize` instructions tell an agent to call it when an edit
 pass is done and before `ui_builder_publish_watch_face`, and to act on each finding's `suggestion`
 until the face fits both the active and the ambient limits. The tool runs the full packager, so it
-runs only when asked. A cheap per-edit cost summary waits on the packager's SDK-free estimate
-(`mode: "estimate"`, from watchface-tools), and nothing estimates a face on an ordinary edit.
+runs only when asked.
+
+Between those runs, `ui_builder_apply`, `ui_builder_replace_design_document` and
+`ui_builder_put_asset` on a watch-face design reply with `watchFaceCost` (`WatchFaceCostEstimator`).
+That is watchface-tools' SDK-free estimate (`WffEstimate`, in `wff-apk`, `mode: "estimate"`) of the
+face the server exports with its pinned drawables:
+
+```
+{mode:"estimate", revision, passed,
+ active?:{usedBytes, limitBytes, percentOfLimit}, ambient?:{…},
+ topContributors:[{resource, activeBytes?, ambientBytes?, percentOfActiveLimit?, percentOfAmbientLimit?,
+                   width?, height?, renderedMaxWidth?, renderedMaxHeight?, missing, suggestion?}],
+ errors:[{message, suggestion?}], note}
+```
+
+The estimate is one XML parse plus image headers, in process, after the edit has returned and
+outside the service lock. It is cached by source digest and never starts the packager JVM. It is
+on whatever the `watchFaceValidation` flag says, because the flag gates only Google's validators.
 
 ## What this does not do
 

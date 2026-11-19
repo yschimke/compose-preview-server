@@ -3875,8 +3875,9 @@ public class ServeRunner(
                 WatchFaceValidation(
                   WatchFaceValidatorAvailability.production(
                     home = composeAiCacheDir("wff-validate-home"),
-                    // Off until the deployment's `watchFaceValidation` flag is wired here.
-                    enabled = { false },
+                    // `features.watchFaceValidation` (`SERVE_WATCH_FACE_VALIDATION`), off unless
+                    // set: off, the route and the MCP tool answer `watch_face_validation_disabled`.
+                    enabled = { featureFlags.watchFaceValidation },
                   ),
                 ),
             )
