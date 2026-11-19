@@ -201,6 +201,22 @@ internal class WffPackagerProcess(
     arguments: (work: File) -> List<String>,
     environment: Map<String, String>,
     after: (work: File) -> T,
+  ): T = run("pack", files, arguments, environment, { exit, _ -> exit == 0 }, after)
+
+  /**
+   * Run `wff-packager <subcommand> --bundle <dir>` on [files]. [succeeded] decides from the exit
+   * code and what the run left in the scratch directory whether [after] reads it: `validate` exits
+   * non-zero on a failing face and still writes its report.
+   *
+   * @throws DwfPackagingFailed when [succeeded] says no, with the packager's diagnostics.
+   */
+  fun <T> run(
+    subcommand: String,
+    files: Map<String, ByteArray>,
+    arguments: (work: File) -> List<String>,
+    environment: Map<String, String>,
+    succeeded: (exitCode: Int, work: File) -> Boolean,
+    after: (work: File) -> T,
   ): T {
     val work = Files.createTempDirectory("dwf-pack").toFile()
     try {
@@ -221,7 +237,7 @@ internal class WffPackagerProcess(
           "-cp",
           libDir.resolve("*").path,
           "ee.schimke.watchface.packager.MainKt",
-          "pack",
+          subcommand,
           "--bundle",
           bundle.path,
         ) + arguments(work)
@@ -247,7 +263,7 @@ internal class WffPackagerProcess(
         throw DwfRuntimeException("wff-packager did not finish in ${timeoutSeconds}s")
       }
       val output = if (log.isFile) log.readText() else ""
-      if (process.exitValue() != 0) throw DwfPackagingFailed(diagnostics(output))
+      if (!succeeded(process.exitValue(), work)) throw DwfPackagingFailed(diagnostics(output))
       return after(work)
     } finally {
       work.deleteRecursively()
