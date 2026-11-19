@@ -888,6 +888,7 @@ class ServeHttpServer(
         references = uiBuilderReferenceStore,
         links = uiBuilderLinksStore,
         watchFacePush = watchFacePush,
+        watchFaces = uiBuilderDwfPreview,
         assets = designAssets,
         validator = uiBuilderValidator,
         reviews = uiBuilderReviewStore,

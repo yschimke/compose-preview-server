@@ -231,29 +231,13 @@ internal fun Route.installUiBuilderDwfRoutes(
     val (_, designId, document, request) =
       call.receiveDwfDesignRequest(service, authorization, dwf) ?: return@post
     val result =
-      when (val resolved = resolveDwfSource(dwf, document, request)) {
-        is ResolvedSource.Ok ->
-          dwf.validation.validate(
-            designId,
-            document.createdAtEpochMillis,
-            document.revision,
-            resolved.source,
-          )
-        is ResolvedSource.Missing ->
-          WatchFaceValidation.Result.Ok(
-            dwf.validation.missingResources(
-              designId,
-              document.createdAtEpochMillis,
-              document.revision,
-              resolved.source,
-              resolved.missing,
-            ),
-          )
-        is ResolvedSource.Refused -> {
+      when (val validated = dwf.validateDesign(designId, document, request)) {
+        is DwfDesignValidation.Ran -> validated.result
+        is DwfDesignValidation.Refused -> {
           call.respondDwfRefusal(
             HttpStatusCode.UnprocessableEntity,
-            resolved.code,
-            resolved.reasons,
+            validated.code,
+            validated.reasons,
           )
           return@post
         }
@@ -339,6 +323,49 @@ internal fun Route.installUiBuilderDwfRoutes(
     serveDwfSocket(dwf, session)
   }
 }
+
+/** [UiBuilderDwfPreview.validateDesign]'s answer: a report (or why none), or an unusable face. */
+internal sealed interface DwfDesignValidation {
+  data class Ran(val result: WatchFaceValidation.Result) : DwfDesignValidation
+
+  /** The request names no face that can be validated (a 422 over HTTP). */
+  data class Refused(val code: String, val reasons: List<String>) : DwfDesignValidation
+}
+
+/**
+ * Validate [document]'s face as `watchface-validation` does, for the route and the MCP tool alike:
+ * the editor's XML if [request] carries any, else the server's export, with the design's pinned
+ * drawables; a bitmap nothing supplies is a failed check, not a refusal.
+ */
+internal suspend fun UiBuilderDwfPreview.validateDesign(
+  designId: String,
+  document: DesignDocumentV1,
+  request: DwfPreviewStartRequestV1 = DwfPreviewStartRequestV1(),
+): DwfDesignValidation =
+  when (val resolved = resolveDwfSource(this, document, request)) {
+    is ResolvedSource.Ok ->
+      DwfDesignValidation.Ran(
+        validation.validate(
+          designId,
+          document.createdAtEpochMillis,
+          document.revision,
+          resolved.source,
+        ),
+      )
+    is ResolvedSource.Missing ->
+      DwfDesignValidation.Ran(
+        WatchFaceValidation.Result.Ok(
+          validation.missingResources(
+            designId,
+            document.createdAtEpochMillis,
+            document.revision,
+            resolved.source,
+            resolved.missing,
+          ),
+        ),
+      )
+    is ResolvedSource.Refused -> DwfDesignValidation.Refused(resolved.code, resolved.reasons)
+  }
 
 private data class DwfDesignRequest(
   val actor: AuthenticatedUiBuilderActor,
