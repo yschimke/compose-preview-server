@@ -924,7 +924,7 @@ class ServeHttpServer(
         projectHistory = projectHistory,
         uiBuilder = uiBuilderMcp,
         uiBuilderNative = admittedNativePreview != null,
-        nativePreview = featureFlags.nativePreview,
+        catalogNativeRender = featureFlags.catalogNativeRender,
         publicOrigin = ::canonicalServerOrigin,
         // The builder's own hostname (`--ui-builder-host`, ui.coo.ee beside preview.coo.ee) is
         // this same server under another name.
@@ -8270,7 +8270,11 @@ class ServeHttpServer(
     if (params.isEmpty() || !acceptsBakedFallback()) return seeds(params)
     val wfOverridesLive =
       preview.isWatchFace &&
-        WatchFaceRendererSelection.renderersFor(renderHost, preview, featureFlags.nativePreview)
+        WatchFaceRendererSelection.renderersFor(
+            renderHost,
+            preview,
+            featureFlags.catalogNativeRender,
+          )
           .any { it.available && it.supportsLiveOverrides }
     val overrideCanReachThePixels =
       renderHost.canApplyOverrides ||
@@ -10132,7 +10136,7 @@ class ServeHttpServer(
                     WatchFaceRendererSelection.renderersFor(
                       renderHost,
                       p,
-                      featureFlags.nativePreview,
+                      featureFlags.catalogNativeRender,
                     )
                   else emptyList(),
                 spatial = p.spatial,
@@ -11326,7 +11330,11 @@ class ServeHttpServer(
       // Watch faces use WatchFaceRendererRegistry lanes (DWF RemoteCompose, DWF Renderer APK)
       // rather than generic RemoteCompose player lanes.
       val wfRenderers =
-        WatchFaceRendererSelection.renderersFor(renderHost, preview, featureFlags.nativePreview)
+        WatchFaceRendererSelection.renderersFor(
+          renderHost,
+          preview,
+          featureFlags.catalogNativeRender,
+        )
       val wfOverridesLive =
         preview.isWatchFace && wfRenderers.any { it.available && it.supportsLiveOverrides }
       // Per-preview Remote Compose backend lanes: the host's server/client lanes plus the opt-in
@@ -13665,7 +13673,12 @@ class ServeHttpServer(
       val wfPreview = host.previews.firstOrNull { it.id == name }
       if (
         wfPreview?.isWatchFace == true &&
-          WatchFaceRendererSelection.resolveFor(host, wfPreview, null, featureFlags.nativePreview)
+          WatchFaceRendererSelection.resolveFor(
+              host,
+              wfPreview,
+              null,
+              featureFlags.catalogNativeRender,
+            )
             ?.id != WatchFaceRendererIds.DWF_RC
       ) {
         return false
@@ -14074,7 +14087,7 @@ class ServeHttpServer(
         renderHost,
         preview,
         wfRendererParam,
-        featureFlags.nativePreview,
+        featureFlags.catalogNativeRender,
       )
     if (backend == null) {
       call.respondText(
@@ -14148,7 +14161,7 @@ class ServeHttpServer(
         renderHost,
         preview,
         wfRendererParam,
-        featureFlags.nativePreview,
+        featureFlags.catalogNativeRender,
       )
     if (backend == null) {
       call.respondText(
@@ -14436,7 +14449,7 @@ class ServeHttpServer(
               send,
               system = sessionId,
               liveUnavailableReason = liveUnavailableReason,
-              nativePreview = featureFlags.nativePreview,
+              catalogNativeRender = featureFlags.catalogNativeRender,
             )
           // Renders block (renderNow + await); keep them off the socket's event-loop thread.
           withContext(Dispatchers.IO) { session.onOpen() }

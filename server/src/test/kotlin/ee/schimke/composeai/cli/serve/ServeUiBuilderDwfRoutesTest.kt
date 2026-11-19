@@ -9,6 +9,7 @@ import java.util.Base64
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import kotlin.test.*
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
 import okhttp3.MediaType.Companion.toMediaType
@@ -51,6 +52,7 @@ class ServeUiBuilderDwfRoutesTest {
     pinned: Map<String, ByteArray> = emptyMap(),
     validator: WatchFaceValidator? = null,
     featureFlags: ServeFeatureFlags = ServeFeatureFlags(nativePreview = true),
+    validation: WatchFaceValidation? = null,
   ): ServeHttpServer {
     runtime.availability = availability
     val assets = FileUiBuilderAssetStore(directory.resolve("assets"))
@@ -83,15 +85,16 @@ class ServeUiBuilderDwfRoutesTest {
         sourceFor = sourceFor,
         assets = assets,
         validation =
-          WatchFaceValidation(
-            {
-              validator?.let(WatchFaceValidatorAvailability::Ready)
-                ?: WatchFaceValidatorAvailability.Unavailable(
-                  "NO_VALIDATOR",
-                  "not in this test",
-                )
-            },
-          ),
+          validation
+            ?: WatchFaceValidation(
+              {
+                validator?.let(WatchFaceValidatorAvailability::Ready)
+                  ?: WatchFaceValidatorAvailability.Unavailable(
+                    "NO_VALIDATOR",
+                    "not in this test",
+                  )
+              },
+            ),
       )
     return ServeHttpServer(
         host = "127.0.0.1",
@@ -207,16 +210,17 @@ class ServeUiBuilderDwfRoutesTest {
   @Test
   fun `feature flags are off unless set to 1 or true`() {
     assertEquals(
-      ServeFeatureFlags(false, false),
+      ServeFeatureFlags(false, false, false),
       ServeFeatureFlags.fromEnvironment(emptyMap()),
     )
-    assertEquals(ServeFeatureFlags(false, false), ServeFeatureFlags())
+    assertEquals(ServeFeatureFlags(false, false, false), ServeFeatureFlags())
     assertEquals(
-      ServeFeatureFlags(false, false),
+      ServeFeatureFlags(false, false, false),
       ServeFeatureFlags.fromEnvironment(
         mapOf(
           ServeFeatureFlags.NATIVE_PREVIEW_ENV to "",
           ServeFeatureFlags.WATCH_FACE_VALIDATION_ENV to "false",
+          ServeFeatureFlags.CATALOG_NATIVE_RENDER_ENV to "0",
         ),
       ),
     )
@@ -398,7 +402,7 @@ class ServeUiBuilderDwfRoutesTest {
         { WatchFaceValidatorAvailability.Ready { packagerReport(passed = true) } },
       )
     val source = DwfSource(wffXml = "<WatchFace/>")
-    runBlocking { validation.validate("watch-1", 100L, 3, source) }
+    runBlocking { validation.validate("watch-1", 100L, 3, source, actor.actorId) }
     assertNotNull(validation.latest("watch-1", 100L, 3))
     assertNull(validation.latest("watch-1", 200L, 3), "another design at the same id and revision")
   }
@@ -433,6 +437,120 @@ class ServeUiBuilderDwfRoutesTest {
       DwfPreviewSurface.ANDROID_SDK_MISSING,
       assertIs<WatchFaceValidatorAvailability.Unavailable>(on()).code,
     )
+  }
+
+  @Test
+  fun `validation runs one packager at a time and refuses past a short queue`() {
+    val release = java.util.concurrent.CountDownLatch(1)
+    val running = java.util.concurrent.atomic.AtomicInteger()
+    val most = java.util.concurrent.atomic.AtomicInteger()
+    val validation =
+      WatchFaceValidation(
+        {
+          WatchFaceValidatorAvailability.Ready {
+            most.accumulateAndGet(running.incrementAndGet(), ::maxOf)
+            release.await(10, TimeUnit.SECONDS)
+            running.decrementAndGet()
+            packagerReport(passed = true)
+          }
+        },
+        maxQueued = 1,
+      )
+    fun face(n: Int) = DwfSource(wffXml = "<WatchFace id=\"$n\"/>")
+    runBlocking {
+      val first =
+        async(kotlinx.coroutines.Dispatchers.Default) {
+          validation.validate("watch-1", 1L, 1, face(1), "a")
+        }
+      val second =
+        async(kotlinx.coroutines.Dispatchers.Default) {
+          validation.validate("watch-1", 1L, 2, face(2), "b")
+        }
+      // Both admitted (one running, one waiting): the third is told to come back.
+      val deadline = System.currentTimeMillis() + 10_000
+      while (validation.pending < 2 && System.currentTimeMillis() < deadline) {
+        kotlinx.coroutines.delay(10)
+      }
+      assertEquals(2, validation.pending)
+      val busy =
+        assertIs<WatchFaceValidation.Result.Busy>(
+          validation.validate("watch-1", 1L, 3, face(3), "c"),
+        )
+      assertEquals(WatchFaceValidation.BUSY, busy.code)
+      assertTrue(busy.retryAfterSeconds > 0)
+      release.countDown()
+      assertIs<WatchFaceValidation.Result.Ok>(first.await())
+      assertIs<WatchFaceValidation.Result.Ok>(second.await())
+    }
+    assertEquals(1, most.get(), "never two packager JVMs at once")
+  }
+
+  @Test
+  fun `each account has a few validations per window, and a cached report costs none`() {
+    var now = 1_000_000L
+    var runs = 0
+    val validation =
+      WatchFaceValidation(
+        {
+          WatchFaceValidatorAvailability.Ready {
+            runs++
+            packagerReport(passed = true)
+          }
+        },
+        clock = { now },
+        perActorRuns = 2,
+        perActorWindowMillis = 60_000,
+      )
+    fun face(n: Int) = DwfSource(wffXml = "<WatchFace id=\"$n\"/>")
+    runBlocking {
+      assertIs<WatchFaceValidation.Result.Ok>(validation.validate("w", 1L, 1, face(1), "a"))
+      assertIs<WatchFaceValidation.Result.Ok>(validation.validate("w", 1L, 2, face(2), "a"))
+      // The same face again is the cache: no run, no count.
+      assertIs<WatchFaceValidation.Result.Ok>(validation.validate("w", 1L, 2, face(2), "a"))
+      val limited =
+        assertIs<WatchFaceValidation.Result.RateLimited>(
+          validation.validate("w", 1L, 3, face(3), "a"),
+        )
+      assertEquals(WatchFaceValidation.RATE_LIMITED, limited.code)
+      assertEquals(60L, limited.retryAfterSeconds)
+      // Another account is not held back by this one.
+      assertIs<WatchFaceValidation.Result.Ok>(validation.validate("w", 1L, 3, face(3), "b"))
+      now += 60_000
+      assertIs<WatchFaceValidation.Result.Ok>(validation.validate("w", 1L, 4, face(4), "a"))
+    }
+    assertEquals(4, runs)
+  }
+
+  @Test
+  fun `a rate-limited validation is a 429 with Retry-After`() {
+    start(
+      validation =
+        WatchFaceValidation(
+          { WatchFaceValidatorAvailability.Ready { packagerReport(passed = true) } },
+          perActorRuns = 1,
+        ),
+    )
+    assertEquals(200, post(validation, """{"wffXml":"<WatchFace/>"}""").first)
+    client
+      .newCall(
+        Request.Builder()
+          .url(url(validation))
+          .header(ServeHttpServer.TOKEN_HEADER, "local-fixture")
+          .post(
+            """{"wffXml":"<WatchFace id=\"2\"/>"}"""
+              .toRequestBody("application/json".toMediaType()),
+          )
+          .build(),
+      )
+      .execute()
+      .use {
+        assertEquals(429, it.code)
+        assertTrue(it.header("Retry-After")!!.toLong() > 0)
+        assertEquals(
+          WatchFaceValidation.RATE_LIMITED,
+          obj(it.body.string())["code"]!!.jsonPrimitive.content,
+        )
+      }
   }
 
   @Test
@@ -682,6 +800,64 @@ class ServeUiBuilderDwfRoutesTest {
     val missing = assertNotNull(estimator.summary(bare, document.copy(assets = emptyMap())))
     assertFalse(missing.passed, missing.toString())
     assertTrue(missing.errors.isNotEmpty(), missing.toString())
+  }
+
+  /** A new revision of the design, as the editor's next save would make. */
+  private fun editDesign(text: String) = runBlocking {
+    val opened =
+      assertIs<UiBuilderServiceResponse.Snapshot>(
+        service.execute(UiBuilderServiceCall(actor, UiBuilderServiceRequest.OpenDesign("watch-1"))),
+      )
+    val edited =
+      service.execute(
+        UiBuilderServiceCall(
+          actor,
+          UiBuilderServiceRequest.ApplyOperation(
+            UiBuilderSubmission.Batch(
+              "watch-1",
+              "edit-$text",
+              "test",
+              opened.snapshot.state.document.revision,
+              listOf(SetPropertyMutationV1("text", "text", StringValueV1(text))),
+            ),
+          ),
+        ),
+      )
+    assertIs<AcceptedOutcomeV1>(assertIs<UiBuilderServiceResponse.OperationOutcome>(edited).outcome)
+  }
+
+  @Test
+  fun `an edit never repackages a running session, which reports itself stale until a refresh`() {
+    start(sourceFor = { DwfSource(wffXml = "<WatchFace/>", label = "derived") })
+    val (code, body) = post(base, "{}")
+    assertEquals(201, code, body)
+    val started = obj(body)
+    val sessionId = started["sessionId"]!!.jsonPrimitive.content
+    val revision = started["revision"]!!.jsonPrimitive.long
+    assertEquals(1, runtime.packaged.size)
+
+    editDesign("edited")
+    // Nothing repackaged or restarted on the edit, and reading the status does not either.
+    val (statusCode, statusBody) = get("$base/$sessionId")
+    assertEquals(200, statusCode, statusBody)
+    val status = obj(statusBody)
+    assertEquals(true, status["stale"]!!.jsonPrimitive.boolean)
+    assertEquals(revision, status["revision"]!!.jsonPrimitive.long)
+    assertEquals(revision + 1, status["designRevision"]!!.jsonPrimitive.long)
+    assertEquals(1, runtime.packaged.size)
+    assertTrue(runtime.connections.isEmpty(), "the edit booted nothing")
+
+    // "Refresh" is an explicit start: a new session on the current revision, not stale.
+    val (refreshCode, refreshBody) = post(base, "{}")
+    assertEquals(201, refreshCode, refreshBody)
+    val refreshed = obj(refreshBody)["sessionId"]!!.jsonPrimitive.content
+    val fresh = obj(get("$base/$refreshed").second)
+    assertEquals(false, fresh["stale"]!!.jsonPrimitive.boolean)
+    assertEquals(revision + 1, fresh["revision"]!!.jsonPrimitive.long)
+    // The face did not change, so the refresh asked for the same package (cached by digest in
+    // the real runtime: RenderHostDwfApkRuntimeTest).
+    assertEquals(2, runtime.packaged.size)
+    assertEquals(runtime.packaged[0].digest(), runtime.packaged[1].digest())
   }
 
   @Test

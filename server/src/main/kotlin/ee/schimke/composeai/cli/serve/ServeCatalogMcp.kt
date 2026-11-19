@@ -65,12 +65,12 @@ class ServeCatalogMcp(
   /** Whether this box can also compile a design natively; see [ServeUiBuilderMcp.RENDER_NATIVE]. */
   private val uiBuilderNative: Boolean = false,
   /**
-   * [ServeFeatureFlags.nativePreview]: whether `wfRenderer: "dwf-apk"` may start the Android
+   * [ServeFeatureFlags.catalogNativeRender]: whether `wfRenderer: "dwf-apk"` may start the Android
    * watch-face runtime. Off, it is refused with
-   * [WatchFaceRendererSelection.NATIVE_PREVIEW_DISABLED_REASON] and the default renderer is
+   * [WatchFaceRendererSelection.CATALOG_NATIVE_RENDER_DISABLED_REASON] and the default renderer is
    * `dwf-rc`.
    */
-  private val nativePreview: Boolean = false,
+  private val catalogNativeRender: Boolean = false,
   /** Wall clock for [signResourceLink] expiry; a seam so tests can age a signed link. */
   private val nowMillis: () -> Long = System::currentTimeMillis,
   /**
@@ -365,11 +365,12 @@ class ServeCatalogMcp(
               else
                 " A watch face has a memory budget for each of active and ambient mode. Each " +
                   "edit of a `wff-watchface` design replies with " +
-                  "`${ServeUiBuilderMcp.WATCH_FACE_COST_KEY}`, an estimate of both: keep each " +
-                  "under 100 percentOfLimit and act on its suggestions as you go. When an edit " +
-                  "pass is done, and before publishing, call " +
-                  "${ServeUiBuilderMcp.VALIDATE_WATCH_FACE} and fix what it reports until the " +
-                  "face passes within both limits."),
+                  "`${ServeUiBuilderMcp.WATCH_FACE_COST_KEY}`, the cheap estimate of both: keep " +
+                  "each under 100 percentOfLimit and act on its suggestions as you go. " +
+                  "Validation is explicit: nothing runs Google's validators for you, not an " +
+                  "edit and not a publish. When an edit pass is done, call " +
+                  "${ServeUiBuilderMcp.VALIDATE_WATCH_FACE} before publishing, and fix what it " +
+                  "reports until the face passes within both limits."),
       )
     }
   }
@@ -2088,7 +2089,7 @@ class ServeCatalogMcp(
             host.previews.firstOrNull { it.id == previewId }
               ?: throw McpRequestException("no such preview '$previewId'")
           val backend =
-            WatchFaceRendererSelection.resolveFor(host, preview, wfRenderer, nativePreview)
+            WatchFaceRendererSelection.resolveFor(host, preview, wfRenderer, catalogNativeRender)
               ?: throw McpRequestException(
                 "unknown watch face renderer '$wfRenderer'; expected one of " +
                   WatchFaceRendererRegistry.all().joinToString { it.id },
@@ -2172,7 +2173,7 @@ class ServeCatalogMcp(
     val preview = host.previews.firstOrNull { it.id == previewId }
     if (preview?.isWatchFace == true || wfRenderer != null) {
       val backend =
-        WatchFaceRendererSelection.resolveFor(host, preview, wfRenderer, nativePreview)
+        WatchFaceRendererSelection.resolveFor(host, preview, wfRenderer, catalogNativeRender)
           ?: throw McpRequestException(
             "unknown watch face renderer '$wfRenderer'; expected one of " +
               WatchFaceRendererRegistry.all().joinToString { it.id },
@@ -2738,7 +2739,7 @@ class ServeCatalogMcp(
         put("complicationSlotCount", wf.slots.size)
         put("userConfigurationCount", wf.userConfigurations.size)
       }
-      val wfRenderers = WatchFaceRendererSelection.renderersFor(host, preview, nativePreview)
+      val wfRenderers = WatchFaceRendererSelection.renderersFor(host, preview, catalogNativeRender)
       if (wfRenderers.isNotEmpty()) {
         put(
           "watchFaceRenderers",
@@ -3916,8 +3917,8 @@ class ServeCatalogMcp(
         "'configurations' (UserConfiguration id to option) and 'themeColors'. Any other key, " +
         "such as 'xml' or 'designId', is refused; a UI Builder design is seen on the real " +
         "runtime in its Native pane. 'dwf-apk' runs the Android watch-face runtime and is " +
-        "refused with native_preview_disabled where this server has turned that off; the " +
-        "default is then 'dwf-rc'; see each preview's watchFaceRenderers. "
+        "refused with catalog_native_render_disabled where this server has turned that off; " +
+        "the default is then 'dwf-rc'; see each preview's watchFaceRenderers. "
 
     /** `watchFace`'s schema, shared by the render and data-product tools. */
     private const val WATCH_FACE_SCHEMA =

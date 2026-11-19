@@ -158,6 +158,19 @@ internal data class DwfPreviewSessionStatusV1(
   val reason: String? = null,
   /** How often a live, ticking session sends a frame. */
   val frameIntervalMillis: Long? = null,
+  /** The design revision this session packaged and shows. */
+  val revision: Long? = null,
+  /**
+   * The design's current revision, on `GET …/{sessionId}`; null where it was not looked up (the
+   * socket's stage messages).
+   */
+  val designRevision: Long? = null,
+  /**
+   * The design has moved on since this session packaged it ([designRevision] > [revision]). An edit
+   * never repackages or restarts a session: the pane offers "Refresh", which is a new start (and
+   * reuses the cached APK when the face itself did not change).
+   */
+  val stale: Boolean = false,
 )
 
 @Serializable
@@ -346,12 +359,20 @@ internal fun Route.installUiBuilderDwfRoutes(
           as? UiBuilderAuthorizationDecision.Authorized)
         ?.actor
     val session = actor?.let { ownedSession(dwf, it, call) }
-    if (session == null) {
+    if (actor == null || session == null) {
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return@get
     }
+    // Only read: whether the design has moved on is reported, never acted on here.
+    val current =
+      (service.executeMapped(GetSnapshotRequestV1(designId = session.designId), actor)
+          as? UiBuilderServiceResponse.Snapshot)
+        ?.snapshot
+        ?.state
+        ?.document
+        ?.revision
     call.respondText(
-      UI_BUILDER_JSON.encodeToString(dwfSessionStatus(dwf, session)),
+      UI_BUILDER_JSON.encodeToString(dwfSessionStatus(dwf, session, designRevision = current)),
       ContentType.Application.Json,
     )
   }
@@ -364,10 +385,10 @@ internal fun Route.installUiBuilderDwfRoutes(
    */
   post(UI_BUILDER_WATCHFACE_VALIDATION_PATH) {
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
-    val (_, designId, document, request) =
+    val (actor, designId, document, request) =
       call.receiveDwfDesignRequest(service, authorization, dwf) ?: return@post
     val result =
-      when (val validated = dwf.validateDesign(designId, document, request)) {
+      when (val validated = dwf.validateDesign(designId, document, actor.actorId, request)) {
         is DwfDesignValidation.Ran -> validated.result
         is DwfDesignValidation.Refused -> {
           call.respondDwfRefusal(
@@ -388,6 +409,14 @@ internal fun Route.installUiBuilderDwfRoutes(
         call.respondDwfRefusal(HttpStatusCode.ServiceUnavailable, result.code, result.reason)
       is WatchFaceValidation.Result.Failed ->
         call.respondDwfRefusal(HttpStatusCode.BadGateway, result.code, result.reason)
+      is WatchFaceValidation.Result.Busy -> {
+        call.response.headers.append(HttpHeaders.RetryAfter, "${result.retryAfterSeconds}")
+        call.respondDwfRefusal(HttpStatusCode.TooManyRequests, result.code, result.reason)
+      }
+      is WatchFaceValidation.Result.RateLimited -> {
+        call.response.headers.append(HttpHeaders.RetryAfter, "${result.retryAfterSeconds}")
+        call.respondDwfRefusal(HttpStatusCode.TooManyRequests, result.code, result.reason)
+      }
     }
   }
 
@@ -472,10 +501,14 @@ internal sealed interface DwfDesignValidation {
  * Validate [document]'s face as `watchface-validation` does, for the route and the MCP tool alike:
  * the editor's XML if [request] carries any, else the server's export, with the design's pinned
  * drawables; a bitmap nothing supplies is a failed check, not a refusal.
+ *
+ * These two explicit requests are the only callers, and must stay so: nothing on an edit, a read, a
+ * listing, a publish or a background path validates ([WatchFaceValidation]).
  */
 internal suspend fun UiBuilderDwfPreview.validateDesign(
   designId: String,
   document: DesignDocumentV1,
+  actorId: String,
   request: DwfPreviewStartRequestV1 = DwfPreviewStartRequestV1(),
 ): DwfDesignValidation =
   when (val resolved = resolveDwfSource(this, document, request)) {
@@ -486,6 +519,7 @@ internal suspend fun UiBuilderDwfPreview.validateDesign(
           document.createdAtEpochMillis,
           document.revision,
           resolved.source,
+          actorId,
         ),
       )
     is ResolvedSource.Missing ->
@@ -735,6 +769,7 @@ private fun dwfLaneMessage(dwf: UiBuilderDwfPreview, session: DwfPreviewSessions
 internal fun dwfSessionStatus(
   dwf: UiBuilderDwfPreview,
   session: DwfPreviewSessions.Session,
+  designRevision: Long? = null,
 ): DwfPreviewSessionStatusV1 {
   val p = dwf.sessions.progress(session)
   return DwfPreviewSessionStatusV1(
@@ -750,6 +785,9 @@ internal fun dwfSessionStatus(
     code = p.code,
     reason = p.reason,
     frameIntervalMillis = frameInterval(dwf, session).takeIf { session.controls.ticking },
+    revision = session.revision,
+    designRevision = designRevision,
+    stale = designRevision != null && designRevision > session.revision,
   )
 }
 

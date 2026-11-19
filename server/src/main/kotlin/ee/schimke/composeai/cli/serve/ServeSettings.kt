@@ -411,15 +411,27 @@ object ServeSettings {
         ServeFeatureFlags.NATIVE_PREVIEW_ENV,
         Type.Flag,
         Apply.RESTART,
-        "Start the Android watch-face runtime for a design's Native pane. Off unless set: the " +
-          "pane then says the server does not offer it.",
+        "Start the Android watch-face runtime for a design's Native pane, only when the pane " +
+          "opens or reloads; an edit marks a running session stale and never rebuilds it. On " +
+          "in the image unless set to false; off, the pane says the server does not offer it.",
       ),
       Setting(
         "features.watchFaceValidation",
         ServeFeatureFlags.WATCH_FACE_VALIDATION_ENV,
         Type.Flag,
         Apply.RESTART,
-        "Serve the Google watch-face validator route. Off unless set.",
+        "Serve Google's watch-face validators, run only on an explicit request (the Validate " +
+          "panel's Run button, or ui_builder_validate_watch_face), never on an edit, a read or " +
+          "a publish. On in the image unless set to false.",
+      ),
+      Setting(
+        "features.catalogNativeRender",
+        ServeFeatureFlags.CATALOG_NATIVE_RENDER_ENV,
+        Type.Flag,
+        Apply.RESTART,
+        "Render a catalog's watch faces on the Android runtime (`wfRenderer: dwf-apk`). Off " +
+          "unless set: that path still takes the render daemon down (watchface-tools#72), and " +
+          "`dwf-rc` draws the face instead.",
       ),
       Setting(
         "catalogs.mcp",

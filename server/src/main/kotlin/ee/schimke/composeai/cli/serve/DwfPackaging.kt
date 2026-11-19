@@ -188,6 +188,11 @@ internal class WffPackagerProcess(
   private val home: File,
   private val java: String = File(System.getProperty("java.home"), "bin/java").path,
   private val timeoutSeconds: Long = 180,
+  /**
+   * Run the child under `nice -n <this>` where the host has `nice`, so work nobody is waiting on
+   * the next frame of (validation) yields the CPU to requests. Null: the server's own priority.
+   */
+  private val niceness: Int? = null,
 ) {
   /**
    * Run the packager on [files]. [arguments] gets the scratch directory (for a `--token-out` file,
@@ -231,16 +236,18 @@ internal class WffPackagerProcess(
       }
       home.mkdirs()
       val command =
-        listOf(
-          java,
-          "-Djava.awt.headless=true",
-          "-cp",
-          libDir.resolve("*").path,
-          "ee.schimke.watchface.packager.MainKt",
-          subcommand,
-          "--bundle",
-          bundle.path,
-        ) + arguments(work)
+        lowered() +
+          listOf(
+            java,
+            "-Djava.awt.headless=true",
+            "-cp",
+            libDir.resolve("*").path,
+            "ee.schimke.watchface.packager.MainKt",
+            subcommand,
+            "--bundle",
+            bundle.path,
+          ) +
+          arguments(work)
       // Output goes to a file, not a pipe: draining a pipe blocks until EOF, so a hung packager (or
       // an aapt2 child holding stdout open) would never reach the timed wait below.
       val log = File(work, "packager.log")
@@ -270,7 +277,15 @@ internal class WffPackagerProcess(
     }
   }
 
+  private fun lowered(): List<String> {
+    val by = niceness ?: return emptyList()
+    val nice = NICE.firstOrNull { File(it).canExecute() } ?: return emptyList()
+    return listOf(nice, "-n", "$by")
+  }
+
   companion object {
+    private val NICE = listOf("/usr/bin/nice", "/bin/nice")
+
     /** Every variable the packager's `--keystore-from-env` reads starts with this. */
     const val SIGNING_ENV_PREFIX = "WFF_SIGNING_"
 

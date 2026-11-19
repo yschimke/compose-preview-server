@@ -1,7 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import java.io.File
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -170,7 +170,8 @@ internal sealed interface WatchFaceValidatorAvailability {
 /**
  * `wff-packager validate --bundle <dir> --report-out <file>` in its own JVM ([WffPackagerProcess]).
  * It signs nothing, so the child gets no signing environment. A non-zero exit that still wrote a
- * report is a failing face, which is a report like any other.
+ * report is a failing face, which is a report like any other. The child runs at a lowered OS
+ * priority ([NICENESS]) and is killed, with its whole process tree, after [timeoutSeconds].
  */
 internal class WatchFaceSubprocessValidator(
   private val libDir: File,
@@ -180,7 +181,7 @@ internal class WatchFaceSubprocessValidator(
   private val timeoutSeconds: Long = 180,
 ) : WatchFaceValidator {
   override fun validate(files: Map<String, ByteArray>): String =
-    WffPackagerProcess(libDir, sdk, home, java, timeoutSeconds).run(
+    WffPackagerProcess(libDir, sdk, home, java, timeoutSeconds, niceness = NICENESS).run(
       "validate",
       files,
       // With a marketplace the push validator runs too; it needs no signing key, and the token
@@ -200,20 +201,39 @@ internal class WatchFaceSubprocessValidator(
         ?: throw DwfPackagingFailed(listOf("error[validate]: the packager wrote no report"))
     }
 
-  private companion object {
+  internal companion object {
     const val REPORT_FILE = "validation-report.json"
+
+    /** `nice -n` for the validator's JVM: below requests, above nothing in particular. */
+    const val NICENESS = 10
   }
 }
 
 /**
- * Runs the validator off the event loop, at most [maxConcurrent] at once, and remembers its
- * reports: by [DwfSource.digest] (an unchanged face is not validated twice) and each design's
- * latest, for `GET`. In memory and bounded; a restart validates again on the next request.
+ * Runs the validator, and remembers its reports: by [DwfSource.digest] (an unchanged face is not
+ * validated twice) and each design's latest, for `GET`. In memory and bounded; a restart validates
+ * again on the next request.
+ *
+ * Only an explicit request reaches [validate]: `POST …/watchface-validation` (the Validate panel's
+ * Run button) and the `ui_builder_validate_watch_face` MCP tool. An edit, a read, a listing, a
+ * publish and the automatic Watch Face Push listing never do; the per-edit `watchFaceCost` is the
+ * cheap estimate between runs. Each run is a packager JVM, so it is kept lean:
+ * - at most [maxConcurrent] at once (one), on low-priority threads of its own, the packager itself
+ *   at a lowered OS priority ([WatchFaceSubprocessValidator]) and under its timeout;
+ * - at most [maxQueued] more waiting; past that the caller is told [Result.Busy] (a 429 with
+ *   `Retry-After`) rather than queued without end;
+ * - at most [perActorRuns] runs per actor per [perActorWindowMillis]; a cached report does not
+ *   count, since it runs nothing. Past that, [Result.RateLimited].
  */
 internal class WatchFaceValidation(
   private val validator: () -> WatchFaceValidatorAvailability,
   private val clock: () -> Long = System::currentTimeMillis,
-  maxConcurrent: Int = 2,
+  private val maxConcurrent: Int = 1,
+  private val maxQueued: Int = 3,
+  private val perActorRuns: Int = 10,
+  private val perActorWindowMillis: Long = 10 * 60 * 1000L,
+  /** What one run is assumed to take, for a [Result.Busy]'s `Retry-After`. */
+  private val typicalRunSeconds: Long = 30,
 ) {
   sealed interface Result {
     data class Ok(val report: WatchFaceValidationReportV1) : Result
@@ -223,6 +243,18 @@ internal class WatchFaceValidation(
 
     /** The validator ran and gave nothing usable: timed out, or wrote an unreadable report. */
     data class Failed(val code: String, val reason: String) : Result
+
+    /** Too many validations are already waiting here (429); try again after [retryAfterSeconds]. */
+    data class Busy(val reason: String, val retryAfterSeconds: Long) : Result {
+      val code: String
+        get() = BUSY
+    }
+
+    /** This actor has used its validations for now (429); try again after [retryAfterSeconds]. */
+    data class RateLimited(val reason: String, val retryAfterSeconds: Long) : Result {
+      val code: String
+        get() = RATE_LIMITED
+    }
   }
 
   private sealed interface Attempt {
@@ -235,17 +267,40 @@ internal class WatchFaceValidation(
   private val lock = Any()
   private val byDigest = lru<String, Ran>(MAX_CACHED)
   private val latest = lru<String, WatchFaceValidationReportV1>(MAX_DESIGNS)
+  /** Runs admitted and not yet finished: running plus waiting for a permit. */
+  private var admitted = 0
+  /** Validations running or waiting for the packager now. */
+  internal val pending: Int
+    get() = synchronized(lock) { admitted }
 
-  /** The packager's report on [source], from the cache when this face was validated before. */
+  /** Each actor's recent run start times, oldest first. */
+  private val runsByActor = lru<String, ArrayDeque<Long>>(MAX_ACTORS)
+
+  /** Low-priority daemon threads of their own, so a run never takes an IO thread from a request. */
+  private val dispatcher by lazy {
+    val count = java.util.concurrent.atomic.AtomicInteger()
+    java.util.concurrent.Executors.newFixedThreadPool(maxConcurrent) { runnable ->
+        Thread(runnable, "wff-validate-${count.incrementAndGet()}").apply {
+          isDaemon = true
+          priority = Thread.MIN_PRIORITY
+        }
+      }
+      .asCoroutineDispatcher()
+  }
+
   /**
+   * The packager's report on [source], from the cache when this face was validated before.
+   *
    * [designCreatedAtEpochMillis] is which design [designId] is: a design deleted and recreated
-   * under the same id is another one, and never reads this one's report.
+   * under the same id is another one, and never reads this one's report. [actorId] is who asked,
+   * for the per-actor limit.
    */
   suspend fun validate(
     designId: String,
     designCreatedAtEpochMillis: Long?,
     revision: Long,
     source: DwfSource,
+    actorId: String,
   ): Result {
     val digest = source.digest()
     synchronized(lock) { byDigest[digest] }
@@ -258,9 +313,17 @@ internal class WatchFaceValidation(
           return Result.Unavailable(availability.code, availability.reason)
         is WatchFaceValidatorAvailability.Ready -> availability.validator
       }
-    val attempt = permits.withPermit {
-      withContext(Dispatchers.IO) { synchronized(lock) { byDigest[digest] } ?: run(ready, source) }
+    admit(actorId)?.let {
+      return it
     }
+    val attempt =
+      try {
+        permits.withPermit {
+          withContext(dispatcher) { synchronized(lock) { byDigest[digest] } ?: run(ready, source) }
+        }
+      } finally {
+        synchronized(lock) { admitted-- }
+      }
     return when (attempt) {
       is Attempt.Failed -> Result.Failed(VALIDATOR_FAILED, attempt.reason)
       is Ran -> {
@@ -269,6 +332,34 @@ internal class WatchFaceValidation(
       }
     }
   }
+
+  /** Admit one run for [actorId], or say why not; admitted, the caller must release `admitted`. */
+  private fun admit(actorId: String): Result? =
+    synchronized(lock) {
+      val now = clock()
+      val runs = runsByActor.getOrPut(actorId) { ArrayDeque() }
+      while (runs.isNotEmpty() && runs.first() <= now - perActorWindowMillis) runs.removeFirst()
+      if (runs.size >= perActorRuns) {
+        val retry = (runs.first() + perActorWindowMillis - now + 999) / 1000
+        return@synchronized Result.RateLimited(
+          "this account has run $perActorRuns watch-face validations in the " +
+            "last ${perActorWindowMillis / 60_000} minutes; an unchanged face answers from " +
+            "cache, so validate when an edit pass is done rather than after every edit",
+          retry.coerceAtLeast(1),
+        )
+      }
+      if (admitted >= maxConcurrent + maxQueued) {
+        val ahead = admitted - maxConcurrent + 1
+        return@synchronized Result.Busy(
+          "$admitted watch-face validations are already running or waiting on this " +
+            "server; try again shortly",
+          (ahead * typicalRunSeconds / maxConcurrent).coerceAtLeast(typicalRunSeconds),
+        )
+      }
+      runs.addLast(now)
+      admitted++
+      null
+    }
 
   private fun run(validator: WatchFaceValidator, source: DwfSource): Attempt =
     try {
@@ -383,6 +474,11 @@ internal class WatchFaceValidation(
     const val MISSING_RESOURCE_CHECK = "bundle-resources"
     const val PACKAGER_CHECK = "packager"
     const val VALIDATOR_FAILED = "validator_failed"
+    /** [Result.Busy]'s code: the queue is full. */
+    const val BUSY = "watch_face_validation_busy"
+    /** [Result.RateLimited]'s code: this actor's runs for the window are used. */
+    const val RATE_LIMITED = "watch_face_validation_rate_limited"
+    private const val MAX_ACTORS = 1024
     private const val MAX_CACHED = 128
     private const val MAX_DESIGNS = 512
     private val DIAGNOSTIC = Regex("^(error|warning|info)\\[([^\\]]+)\\]: (.*)$")

@@ -1032,11 +1032,16 @@ if [[ "${SERVE_CATALOG_MCP:-}" == "1" || "${SERVE_CATALOG_MCP:-}" == "true" ]]; 
   args+=(--catalog-mcp)
 fi
 
-# The server's expensive optional work (ServeFeatureFlags.kt): the Native pane's Android runtime
-# and the watch-face validator. The server reads these itself, and
-# each is OFF unless it is 1 or true, so a deployment turns each on deliberately in settings.json.
-export SERVE_NATIVE_PREVIEW="${SERVE_NATIVE_PREVIEW:-}"
-export SERVE_WATCH_FACE_VALIDATION="${SERVE_WATCH_FACE_VALIDATION:-}"
+# The server's expensive optional work (ServeFeatureFlags.kt). The server reads these itself and
+# treats each as OFF unless it is 1 or true; the image chooses the defaults here. The Native pane's
+# Android runtime and the watch-face validator are ON unless the deployment sets them to false
+# (settings.json's features.*, exported as 0): both run only on an explicit request — the pane
+# opening or reloading, the Validate panel's Run button, ui_builder_validate_watch_face — never on
+# an edit. A catalog's own faces on the Android runtime (wfRenderer dwf-apk) stay OFF unless set:
+# that path still takes the render daemon down (watchface-tools#72).
+export SERVE_NATIVE_PREVIEW="${SERVE_NATIVE_PREVIEW:-1}"
+export SERVE_WATCH_FACE_VALIDATION="${SERVE_WATCH_FACE_VALIDATION:-1}"
+export SERVE_CATALOG_NATIVE_RENDER="${SERVE_CATALOG_NATIVE_RENDER:-}"
 
 # Extra Maven repositories the live-daemon classpath resolver may fetch from, beyond Maven Central +
 # Google Maven. A served catalog whose module pulls deps from a non-default repo (e.g.
