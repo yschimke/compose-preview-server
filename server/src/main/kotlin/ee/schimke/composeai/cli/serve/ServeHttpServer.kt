@@ -1121,6 +1121,25 @@ class ServeHttpServer(
   private val server: EmbeddedServer<*, *> =
     embeddedServer(CIO, host = host, port = port) {
       install(WebSockets)
+      // Any request slower than [SLOW_REQUEST_MILLIS] is logged with its method, path and status,
+      // so "it's slow" can be read off the log; [ServeStallWatchdog] says whether the whole process
+      // was stalled at the time. The path only: a query may carry a token.
+      intercept(ApplicationCallPipeline.Monitoring) {
+        val started = System.nanoTime()
+        try {
+          proceed()
+        } finally {
+          val millis = (System.nanoTime() - started) / 1_000_000
+          if (
+            millis >= SLOW_REQUEST_MILLIS && !ServeSameOriginRequests.isWebSocketUpgrade(context)
+          ) {
+            System.err.println(
+              "serve: slow request ${context.request.httpMethod.value} ${context.request.path()} " +
+                "took $millis ms (status ${context.response.status()?.value ?: "none"})",
+            )
+          }
+        }
+      }
       // A socket opened with the GitHub session cookie is accepted only from a page this server
       // served ([ServeSameOriginRequests]). Checked before the upgrade so refusal is a plain 403.
       // Covers every socket route; header/query-token clients send no cookie and are unaffected.
@@ -2569,12 +2588,16 @@ class ServeHttpServer(
 
   /** Start listening. Non-blocking; the caller keeps the process alive separately. */
   fun start() {
+    stallWatchdog.start()
     server.start(wait = false)
   }
+
+  private val stallWatchdog = ServeStallWatchdog()
 
   /** Stop with a short grace period. Idempotent enough for a shutdown hook. */
   fun stop() {
     readinessProber?.interrupt()
+    stallWatchdog.stop()
     thumbWarmer.stop()
     server.stop(gracePeriodMillis = 500, timeoutMillis = 2000)
     uiBuilderPrecompressed.close()
@@ -3142,6 +3165,9 @@ class ServeHttpServer(
 
   private fun RoutingContext.varyOnCookie() = call.varyOnCookie()
 
+  /** What a host boot during this request reports as its cause: the method and path. */
+  private fun ApplicationCall.bootCause(): String = "${request.httpMethod.value} ${request.path()}"
+
   /** Absolute externally visible URL for the current page (including its query). */
   private fun RoutingContext.externalPageUrl(): String = externalOrigin() + call.request.origin.uri
 
@@ -3159,7 +3185,10 @@ class ServeHttpServer(
     onMissing: (suspend RoutingContext.() -> Unit)? = null,
     block: suspend (ServeHost) -> Unit,
   ) {
-    val lease = withContext(Dispatchers.IO) { sessions.lease(sessionId) }
+    val lease =
+      withContext(Dispatchers.IO) {
+        ServeHostBootCause.with(call.bootCause()) { sessions.lease(sessionId) }
+      }
     if (lease == null) {
       if (loadingHomeSystem(sessionId) != null) {
         catalogLoads?.prioritize(sessionId)
@@ -3198,7 +3227,10 @@ class ServeHttpServer(
     block: (ServeHost) -> T?,
   ): T? {
     if (!sessions.isKnownSession(sessionId)) return null
-    val lease = withContext(Dispatchers.IO) { sessions.lease(sessionId) } ?: return null
+    val lease =
+      withContext(Dispatchers.IO) {
+        ServeHostBootCause.with(call.bootCause()) { sessions.lease(sessionId) }
+      } ?: return null
     return try {
       withContext(Dispatchers.IO) { block(lease.host) }
     } finally {
@@ -14214,7 +14246,12 @@ class ServeHttpServer(
       // Lease the tenant for the socket's life, since a fallback-lane socket opens no stream and
       // the reaper could close its host. `connection = true` makes this lease count as busy only on
       // activity; request-scoped leases count as busy until released.
-      val lease = withContext(Dispatchers.IO) { sessions.lease(sessionId, connection = true) }
+      val lease =
+        withContext(Dispatchers.IO) {
+          ServeHostBootCause.with("socket ${call.request.path()}") {
+            sessions.lease(sessionId, connection = true)
+          }
+        }
       if (lease == null) {
         close(CloseReason(CloseReason.Codes.CANNOT_ACCEPT, "no such session"))
         return

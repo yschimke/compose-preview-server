@@ -3075,8 +3075,9 @@ class ServeCatalogMcp(
   private suspend fun <T> withCatalog(catalog: String, block: suspend (ServeHost) -> T): T {
     if (catalog !in sessions.knownSessionIds()) throw unknownCatalog(catalog)
     val lease =
-      withContext(Dispatchers.IO) { sessions.lease(catalog) }
-        ?: throw McpRequestException("catalog '$catalog' is unavailable")
+      withContext(Dispatchers.IO) {
+        ServeHostBootCause.with("catalog MCP") { sessions.lease(catalog) }
+      } ?: throw McpRequestException("catalog '$catalog' is unavailable")
     return try {
       block(lease.host)
     } finally {

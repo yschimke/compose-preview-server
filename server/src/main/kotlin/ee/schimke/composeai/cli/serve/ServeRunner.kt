@@ -2883,7 +2883,19 @@ public class ServeRunner(
       }
       return true
     }
-    uiBuilderCatalogs.forEach { composePublished(it) }
+    // Timed, because a catalog's compose fetches from its delivery branch and a slow one delays
+    // the builder's start (or a refresh) with nothing else in the log to say so.
+    fun composePublishedTimed(systemId: String, refresh: Boolean): Boolean {
+      val started = System.nanoTime()
+      val composed = composePublished(systemId, refresh)
+      System.err.println(
+        "serve: UI-builder catalog $systemId ${if (refresh) "refresh" else "resolve"} " +
+          "${if (composed) "composed" else "withheld"} in " +
+          "${(System.nanoTime() - started) / 1_000_000} ms",
+      )
+      return composed
+    }
+    uiBuilderCatalogs.forEach { composePublishedTimed(it, refresh = false) }
     fun buildCatalogExecutor(): UiBuilderCatalogExecutor =
       CurrentM3UiBuilderCatalogExecutor.Builder()
         .also {
@@ -2936,7 +2948,7 @@ public class ServeRunner(
       val before = affected.associateWith {
         Triple(publishedRuntimeIds[it], publishedCatalogs[it], health.stateOf(it))
       }
-      affected.forEach { composePublished(it, refresh = true) }
+      affected.forEach { composePublishedTimed(it, refresh = true) }
       // Becoming unavailable, or available again, changes the served set as surely as a new
       // policy does.
       val changed = affected.filter {
