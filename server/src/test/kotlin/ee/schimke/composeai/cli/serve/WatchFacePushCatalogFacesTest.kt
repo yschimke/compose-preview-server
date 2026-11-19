@@ -102,6 +102,9 @@ class WatchFacePushCatalogFacesTest {
       registry.register(system, host = host, pinned = true)
     }
     val packager = WatchFacePushPackager { files, faceName, versionCode, out ->
+      if ("REFUSE" in files.getValue("res/raw/watchface.xml").decodeToString()) {
+        throw DwfPackagingFailed(listOf("error[validator]: refused for the test"))
+      }
       packed[faceName] = files
       out.writeBytes("catalog-apk:$faceName:$versionCode".toByteArray())
       "token-$faceName-$versionCode"
@@ -263,6 +266,30 @@ class WatchFacePushCatalogFacesTest {
     )
     assertContains(skipped.getValue("catalog:bonstio-casino-gshark/gshark"), "licence unknown")
     assertContains(skipped.getValue("catalog:copyleft/gpl_face"), "GPL-3.0-only")
+  }
+
+  @Test
+  fun `a face the packager refuses is skipped on status, not counted as listed`() {
+    val host =
+      catalog(
+        "wear",
+        Triple("good", "MIT", "<WatchFace/>"),
+        Triple("bad", "MIT", "<WatchFace REFUSE=\"1\"/>"),
+      )
+    start(mapOf("wear" to host))
+    // The listing builds both; only the good one is listed.
+    assertEquals(listOf("catalog:wear/good"), designs().map { it.id })
+    val status = Json.parseToJsonElement(get("${WatchFacePush.BASE_PATH}/status").body).jsonObject
+    val catalogFaces = status.getValue("catalogFaces").jsonObject
+    assertEquals(1, catalogFaces.getValue("listed").jsonPrimitive.content.toInt())
+    val skipped =
+      catalogFaces.getValue("skipped").jsonArray.associate {
+        it.jsonObject.getValue("id").jsonPrimitive.content to
+          it.jsonObject.getValue("reason").jsonPrimitive.content
+      }
+    assertEquals(setOf("catalog:wear/bad"), skipped.keys)
+    assertContains(skipped.getValue("catalog:wear/bad"), "the packager refused it")
+    assertContains(skipped.getValue("catalog:wear/bad"), "refused for the test")
   }
 
   @Test

@@ -1037,6 +1037,13 @@ internal class WatchFacePushBuilds(
   fun cached(publication: WatchFacePushStore.Publication): Result.Built? =
     store.apk(publication)?.let { Result.Built(it, store.apkFile(publication)) }
 
+  /**
+   * The packager's diagnostics for [publication] if an earlier build of this exact revision was
+   * refused, without building it: `/status` reports such a face as skipped rather than listed.
+   */
+  fun refusal(publication: WatchFacePushStore.Publication): List<String>? =
+    failures["${publication.faceName}|${publication.version}|${publication.digest}"]
+
   /** [source] defaults to the publication's own WFF; a catalog face passes its full source. */
   fun build(
     publication: WatchFacePushStore.Publication,
