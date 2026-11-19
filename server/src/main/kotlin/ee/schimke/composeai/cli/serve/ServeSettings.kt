@@ -407,6 +407,15 @@ object ServeSettings {
         BOTH,
       ),
       Setting(
+        ServeWatchFaceValidation.SETTING_KEY,
+        ServeWatchFaceValidation.ENV,
+        Type.Flag,
+        Apply.RESTART,
+        "Let `watchface-validation` and `ui_builder_validate_watch_face` run Google's " +
+          "watch-face validators (a packager JVM per face). Off unless set; while off they " +
+          "answer `watch_face_validation_disabled` and the editor keeps to its in-browser checks.",
+      ),
+      Setting(
         "catalogs.mcp",
         "SERVE_CATALOG_MCP",
         Type.Flag,

@@ -3849,15 +3849,18 @@ public class ServeRunner(
               sourceFor = ::deriveDwfSource,
               // The editor sends only the XML; the design's pinned assets are its drawables.
               assets = lane.assets,
-              // The packager's validators, reported per check rather than only as a refusal.
+              // The packager's validators, reported per check rather than only as a refusal; the
+              // `watchFaceValidation` flag, bound at startup, decides whether they run at all.
               validation =
-                WatchFaceValidation(
-                  WatchFaceValidatorAvailability.production(
-                    home = composeAiCacheDir("wff-validate-home"),
-                    // Off until the deployment's `watchFaceValidation` flag is wired here.
-                    enabled = { false },
-                  ),
-                ),
+                ServeWatchFaceValidation.enabled().let { enabled ->
+                  System.err.println(ServeWatchFaceValidation.startupLine(enabled))
+                  WatchFaceValidation(
+                    WatchFaceValidatorAvailability.production(
+                      home = composeAiCacheDir("wff-validate-home"),
+                      enabled = { enabled },
+                    ),
+                  )
+                },
             )
           },
         // The Wear OS push app's site API: device linking, the published watch faces, their APKs.
