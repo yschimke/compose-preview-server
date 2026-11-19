@@ -423,6 +423,7 @@ internal sealed interface WatchFacePushPackaging {
  * publications/<faceName>.json       one per design ever published to watches
  * apks/<faceName>-v<n>-<digest>.apk  built APKs, with a .json beside each
  * preview.key                        HMAC key for the signed preview URLs
+ * installs.json                      the latest install report per linked watch and design
  * ```
  *
  * A device token is never stored, only its SHA-256, so a copy of this directory cannot be used to
@@ -446,6 +447,34 @@ internal class WatchFacePushStore(
   )
 
   @Serializable private data class Devices(val devices: List<Device> = emptyList())
+
+  /**
+   * What a linked watch reported after installing [designId] at [version]: the latest one per
+   * device and design ([recordInstall]), kept for the design's owner (`watch-installs`). Free text
+   * from the watch is truncated; [revisionPublished] is the design revision [version] was built
+   * from, when the store still knew it as the published version.
+   */
+  @Serializable
+  data class InstallEvent(
+    val deviceId: String,
+    val accountActorId: String,
+    val designId: String,
+    val version: Long,
+    val revisionPublished: Long? = null,
+    val result: String,
+    val errorKind: String? = null,
+    val wearOsApi: Int? = null,
+    val packageName: String? = null,
+    val activation: String? = null,
+    val activationError: String? = null,
+    val deviceModel: String? = null,
+    val wearOsVersion: String? = null,
+    val watchFacePushApiVersion: String? = null,
+    val appVersion: String? = null,
+    val atEpochMillis: Long,
+  )
+
+  @Serializable private data class Installs(val installs: List<InstallEvent> = emptyList())
 
   /**
    * One design's watch publication. [wffXml] and [wffVersion] are the WFF exported from [revision]
@@ -534,6 +563,7 @@ internal class WatchFacePushStore(
   }
   private val lock = Any()
   private val devicesFile = root.resolve("devices.json")
+  private val installsFile = root.resolve("installs.json")
   private val publicationsDir = root.resolve("publications")
   /** Published faces' drawables, content-addressed ([Publication.assets]). */
   private val assetsDir = root.resolve("assets")
@@ -543,6 +573,7 @@ internal class WatchFacePushStore(
   val catalogFacesFile: Path = root.resolve("catalog-faces.json")
   private val automaticRefusalsFile = root.resolve("automatic-refusals.json")
   private var devices: MutableList<Device>
+  private var installs: MutableList<InstallEvent>
   private val publications = ConcurrentHashMap<String, Publication>()
 
   /** The key behind [previewSignature]; random once per server state, kept across restarts. */
@@ -555,6 +586,8 @@ internal class WatchFacePushStore(
     ServeOwnerOnlyFiles.createDirectories(apkDir)
     devices =
       readJson(devicesFile, Devices.serializer())?.devices?.toMutableList() ?: mutableListOf()
+    installs =
+      readJson(installsFile, Installs.serializer())?.installs?.toMutableList() ?: mutableListOf()
     Files.list(publicationsDir).use { files ->
       files
         .filter { it.fileName.toString().endsWith(".json") }
@@ -608,7 +641,10 @@ internal class WatchFacePushStore(
       val removed = devices.removeIf {
         it.id == deviceId && (accountActorId == null || it.accountActorId == accountActorId)
       }
-      if (removed) persistDevices()
+      if (removed) {
+        persistDevices()
+        if (installs.removeIf { it.deviceId == deviceId }) persistInstalls()
+      }
       removed
     }
 
@@ -629,6 +665,60 @@ internal class WatchFacePushStore(
     writeAtomically(
       devicesFile,
       json.encodeToString(Devices.serializer(), Devices(devices.toList())).toByteArray(),
+    )
+  }
+
+  // ----------------------------------------------------------------- installs
+
+  /**
+   * Keep [event] as its device's latest report on its design, replacing the one before it, and drop
+   * the oldest reports past [MAX_INSTALL_EVENTS]. Only a report on a design the device's own
+   * account published is kept: nobody else reads it (`watch-installs` is the owner's), and a
+   * catalog face (`c_…`) is no design at all. True when it was kept.
+   */
+  fun recordInstall(device: Device, event: InstallEvent): Boolean {
+    val publication = publications[event.designId] ?: return false
+    if (
+      publication.accountActorId.isEmpty() || publication.accountActorId != device.accountActorId
+    ) {
+      return false
+    }
+    val kept =
+      event.copy(
+        deviceId = device.id,
+        accountActorId = device.accountActorId,
+        revisionPublished = publication.revision.takeIf { publication.version == event.version },
+        atEpochMillis = clock(),
+      )
+    synchronized(lock) {
+      installs.removeIf { it.deviceId == kept.deviceId && it.designId == kept.designId }
+      installs.add(kept)
+      while (installs.size > MAX_INSTALL_EVENTS) {
+        installs.remove(installs.minBy { it.atEpochMillis })
+      }
+      persistInstalls()
+    }
+    return true
+  }
+
+  /**
+   * [designId]'s latest report from each of [accountActorId]'s still-linked watches, newest first.
+   */
+  fun installs(designId: String, accountActorId: String): List<Pair<Device, InstallEvent>> =
+    synchronized(lock) {
+      val linked = devices.filter { it.accountActorId == accountActorId }.associateBy { it.id }
+      installs
+        .filter { it.designId == designId && it.accountActorId == accountActorId }
+        .mapNotNull { event -> linked[event.deviceId]?.let { it to event } }
+        // Kept in arrival order, so reversed first: a tie on the clock is the later arrival first.
+        .asReversed()
+        .sortedByDescending { it.second.atEpochMillis }
+    }
+
+  private fun persistInstalls() {
+    writeAtomically(
+      installsFile,
+      json.encodeToString(Installs.serializer(), Installs(installs.toList())).toByteArray(),
     )
   }
 
@@ -783,6 +873,7 @@ internal class WatchFacePushStore(
   fun retire(designId: String): Publication? =
     synchronized(lock) {
       val previous = publications[designId] ?: return null
+      if (installs.removeIf { it.designId == designId }) persistInstalls()
       val retired =
         previous.copy(
           published = false,
@@ -951,6 +1042,9 @@ internal class WatchFacePushStore(
     /** Marks a device token in logs and leaked-secret scanners; carries no meaning. */
     const val TOKEN_PREFIX = "wfp_"
     private const val TOUCH_PERSIST_MILLIS = 60 * 60 * 1000L
+
+    /** Every kept install report, across devices and designs; one per device and design. */
+    const val MAX_INSTALL_EVENTS = 500
     private val ASSET_DIGEST = Regex("[0-9a-f]{64}")
     private val random = SecureRandom()
 

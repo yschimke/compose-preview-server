@@ -10,9 +10,11 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import okhttp3.FormBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -594,6 +596,78 @@ class WatchFacePushRoutesTest {
     assertEquals(401, revoked.code)
     assertEquals("Bearer", revoked.headers["WWW-Authenticate"])
     assertEquals(401, send("GET", "$api/designs/aurora/apk", bearer = token).code)
+  }
+
+  @Test
+  fun `install reports are kept per watch and design, and only the owner reads them`() {
+    start()
+    createDesign(alice, "aurora", "Aurora")
+    assertEquals(200, publish(alice, "aurora").code)
+    val wrist = link(alice, "Wrist")
+    val spare = link(alice, "Spare")
+    val bobs = link(bob, "Bob's")
+    fun report(token: String, event: App.InstallEvent) =
+      send("POST", "$api/installs", App.json.encodeToString(event), bearer = token).code
+    assertEquals(204, report(wrist, App.InstallEvent("aurora", 1, "failed", errorKind = "x")))
+    assertEquals(
+      204,
+      report(
+        wrist,
+        App.InstallEvent(
+          "aurora",
+          1,
+          "activation",
+          wearOsApi = 36,
+          packageName = "ee.schimke.watchface.push.watchfacepush.aurora",
+          activation = "activated",
+          deviceModel = "Pixel Watch 4",
+          wearOsVersion = "6",
+          watchFacePushApiVersion = "1.0.0",
+          appVersion = "1.2.3",
+        ),
+      ),
+    )
+    assertEquals(204, report(spare, App.InstallEvent("aurora", 1, "failed", activation = "bogus")))
+    // Neither a catalog face nor another account's watch is kept.
+    assertEquals(204, report(wrist, App.InstallEvent("c_wear_aurora_1", 1, "installed")))
+    assertEquals(204, report(bobs, App.InstallEvent("aurora", 1, "installed")))
+    assertEquals(400, report(wrist, App.InstallEvent("", 1, "installed")))
+
+    val path = "/api/ui-builder/v1/designs/aurora/watch-installs"
+    assertNotEquals(200, send("GET", path, actor = bob).code)
+    val reply = send("GET", path, actor = alice)
+    assertEquals(200, reply.code, reply.body)
+    val installs =
+      Json.parseToJsonElement(reply.body).jsonObject["installs"]!!.jsonArray.map { it.jsonObject }
+    assertEquals(
+      listOf("Spare", "Wrist"),
+      installs.map { it["deviceName"]!!.jsonPrimitive.content },
+    )
+    val spareRow = installs[0]
+    assertEquals("failed", spareRow["result"]!!.jsonPrimitive.content)
+    assertNull(spareRow["activation"], "an unknown activation is not kept")
+    val wristRow = installs[1]
+    assertEquals("activation", wristRow["result"]!!.jsonPrimitive.content, "the latest replaces")
+    assertEquals("activated", wristRow["activation"]!!.jsonPrimitive.content)
+    assertEquals("Pixel Watch 4", wristRow["deviceModel"]!!.jsonPrimitive.content)
+    assertEquals(36, wristRow["wearOsApi"]!!.jsonPrimitive.int)
+    assertEquals(1, wristRow["version"]!!.jsonPrimitive.long)
+    assertNotNull(wristRow["revisionPublished"])
+    assertNotNull(wristRow["atEpochMillis"])
+    assertFalse(reply.body.contains("wfp_"), "no device token leaks")
+
+    // An unlinked watch's reports go with it.
+    val spareId =
+      Json.parseToJsonElement(send("GET", "$api/devices", actor = alice).body)
+        .jsonObject["devices"]!!
+        .jsonArray
+        .first { it.jsonObject["deviceName"]!!.jsonPrimitive.content == "Spare" }
+        .jsonObject["id"]!!
+        .jsonPrimitive
+        .content
+    assertEquals(204, send("DELETE", "$api/devices/$spareId", actor = alice).code)
+    val after = Json.parseToJsonElement(send("GET", path, actor = alice).body).jsonObject
+    assertEquals(1, after["installs"]!!.jsonArray.size)
   }
 
   @Test
@@ -1678,6 +1752,33 @@ class WatchFacePushRoutesTest {
     assertEquals(listOf("aurora"), settledDesigns().map { it.id })
   }
 
+  @Test
+  fun `an unpublish cancels a publish still queued or building`() {
+    val release = java.util.concurrent.CountDownLatch(1)
+    val ready = readyPackaging()() as WatchFacePushPackaging.Ready
+    val slow = WatchFacePushPackager { files, face, version, out ->
+      release.await(20, TimeUnit.SECONDS)
+      ready.packager.pack(files, face, version, out)
+    }
+    start(packaging = { WatchFacePushPackaging.Ready(slow, "c0ffee") })
+    createDesign(alice, "aurora", "Aurora", public = true)
+    createDesign(alice, "pulse", "Pulse", public = true)
+    assertEquals(202, put(alice, "aurora", "public").code)
+    assertEquals(202, put(alice, "pulse", "public").code)
+    // aurora is building, pulse is queued behind it; both are unpublished now.
+    val path = "/api/ui-builder/v1/designs/%s/watch-face-publication"
+    assertEquals(200, send("DELETE", path.format("aurora"), actor = alice).code)
+    assertEquals(200, send("DELETE", path.format("pulse"), actor = alice).code)
+    release.countDown()
+    runBlocking { push.queue.awaitIdle() }
+    assertEquals(emptyList(), designs())
+    assertFalse(publication("aurora").published)
+    assertNull(publication("aurora").build)
+    assertFalse(publication("pulse").published)
+    // pulse was never built: it was cancelled before its turn.
+    assertEquals(1, packagerLog.readLines().size)
+  }
+
   private fun document(id: String, title: String) =
     DesignDocumentV1(
       schema = "compose-ui-builder-document/v1-candidate",
@@ -1770,6 +1871,13 @@ class WatchFacePushRoutesTest {
       val result: String,
       val errorKind: String? = null,
       val wearOsApi: Int? = null,
+      val packageName: String? = null,
+      val activation: String? = null,
+      val activationError: String? = null,
+      val deviceModel: String? = null,
+      val wearOsVersion: String? = null,
+      val watchFacePushApiVersion: String? = null,
+      val appVersion: String? = null,
     )
   }
 }

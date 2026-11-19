@@ -109,7 +109,7 @@ internal class WatchFacePushBuildQueue(private val clock: () -> Long) {
    * Queue [build] for [designId] behind every build already waiting, and return at once; [build]
    * runs under [exclusive] and answers the state it ends in.
    */
-  fun submit(designId: String, build: suspend () -> WatchFacePushBuildStatusV1) {
+  fun submit(designId: String, build: suspend () -> WatchFacePushBuildStatusV1?) {
     record(designId, WatchFacePushBuildStatusV1(QUEUED))
     waiting.addLast(designId)
     val job = scope.launch {
@@ -122,7 +122,8 @@ internal class WatchFacePushBuildQueue(private val clock: () -> Long) {
           .getOrElse {
             WatchFacePushBuildStatusV1(FAILED, reason = it.message ?: it.javaClass.simpleName)
           }
-        record(designId, result)
+        // Null: cancelled (unpublished before it was built), so it leaves no state.
+        if (result != null) record(designId, result) else clear(designId)
         building = null
       }
     }

@@ -252,10 +252,22 @@ internal constructor(
     }
   }
 
+  /**
+   * Each design's owner-publish generation: an unpublish moves it, so a publish queued before the
+   * unpublish neither builds nor commits after it. Checked under the store's lock at commit.
+   */
+  private val generations = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+  private fun generation(designId: String): Long = generations[designId] ?: 0L
+
   /** Build and commit [ready]; the caller holds the build queue's lock. */
-  private suspend fun finish(service: UiBuilderServicePort, ready: Ready): Outcome {
+  private suspend fun finish(
+    service: UiBuilderServicePort,
+    ready: Ready,
+    replaces: (WatchFacePushStore.Publication?) -> Boolean = { true },
+  ): Outcome {
     val designId = ready.designId
-    return when (val staged = stage(ready.candidate)) {
+    return when (val staged = stage(ready.candidate, replaces)) {
       is Staged.Committed -> {
         refusals.remove(designId)
         automatic.forget(designId)
@@ -270,8 +282,9 @@ internal constructor(
           staged.diagnostics,
         )
       }
+      Staged.Superseded ->
+        Outcome.Refused(HttpStatusCode.Conflict, SUPERSEDED, "unpublished before it was built")
       is Staged.Unavailable,
-      Staged.Superseded,
       Staged.Conflict ->
         Outcome.Refused(
           HttpStatusCode.Conflict,
@@ -315,15 +328,21 @@ internal constructor(
         is Ready -> prepared
         else -> error("prepare answered $prepared")
       }
+    // An unpublish after this answers cancels it: not built if it has not started, not committed
+    // if it has.
+    val generation = generation(designId)
+    val current = { generation(designId) == generation }
     queue.submit(designId) {
-      when (val outcome = finish(service, ready)) {
+      if (!current()) return@submit null
+      when (val outcome = finish(service, ready) { current() }) {
         is Outcome.Ok ->
           WatchFacePushBuildStatusV1(
             WatchFacePushBuildQueue.BUILT,
             version = outcome.status.version,
           )
         is Outcome.Refused ->
-          if (outcome.code == "packaging_failed") {
+          if (outcome.code == SUPERSEDED) null
+          else if (outcome.code == "packaging_failed") {
             WatchFacePushBuildStatusV1(
               WatchFacePushBuildQueue.REFUSED,
               reason = "the packager refused it",
@@ -351,6 +370,8 @@ internal constructor(
         is Owned.Refused -> return owned.outcome
         is Owned.Document -> owned
       }
+    // Any publish still queued or building is cancelled: the owner's last word wins.
+    generations.merge(designId, 1L, Long::plus)
     // Bound to this owner and this design, and written even before anything was built: for a
     // public design it is the owner's opt-out of the automatic listing.
     val updated =
@@ -404,6 +425,31 @@ internal constructor(
       packaging = packagingStatus().takeIf { !it.available },
       build = queue.status(designId),
     )
+
+  internal sealed interface Installs {
+    data class Ok(val installs: WatchFacePushInstallsV1) : Installs
+
+    data class Refused(val refused: Outcome.Refused) : Installs
+  }
+
+  /** [designId]'s latest install report from each of its owner's linked watches; owner only. */
+  internal suspend fun installs(
+    service: UiBuilderServicePort,
+    actor: AuthenticatedUiBuilderActor,
+    designId: String,
+  ): Installs {
+    val owner =
+      when (val owned = ownedDocument(service, actor, designId)) {
+        is Owned.Refused -> return Installs.Refused(owned.outcome)
+        is Owned.Document -> owned.ownerActorId
+      }
+    val reports = withContext(Dispatchers.IO) { store.installs(designId, owner) }
+    return Installs.Ok(
+      WatchFacePushInstallsV1(
+        reports.map { (device, event) -> WatchFacePushInstalls.wire(device, event) },
+      ),
+    )
+  }
 
   private sealed interface Owned {
     data class Document(val document: DesignDocumentV1, val ownerActorId: String) : Owned
@@ -585,9 +631,11 @@ internal constructor(
     private const val PUBLISH_ATTEMPTS = 5
     const val LINK_PATH = "/link"
     const val PUBLICATION_PATH = "/api/ui-builder/v1/designs/{designId}/watch-face-publication"
+    const val INSTALLS_PATH = "/api/ui-builder/v1/designs/{designId}/watch-installs"
     const val VISIBILITY_PUBLIC = "public"
     const val VISIBILITY_PRIVATE = "private"
     val VISIBILITIES = setOf(VISIBILITY_PUBLIC, VISIBILITY_PRIVATE)
+    private const val SUPERSEDED = "superseded"
     internal val ANONYMOUS =
       AuthenticatedUiBuilderActor(ServeUiBuilderVisibility.ANONYMOUS_ACTOR_ID)
   }
@@ -676,7 +724,78 @@ internal data class WatchFacePushInstallEventV1(
   val result: String,
   val errorKind: String? = null,
   val wearOsApi: Int? = null,
+  val packageName: String? = null,
+  /** One of [WatchFacePushInstalls.ACTIVATIONS]; anything else is kept as null. */
+  val activation: String? = null,
+  val activationError: String? = null,
+  val deviceModel: String? = null,
+  val wearOsVersion: String? = null,
+  /** The androidx Watch Face Push library's version string. */
+  val watchFacePushApiVersion: String? = null,
+  val appVersion: String? = null,
 )
+
+/** `GET /api/ui-builder/v1/designs/{id}/watch-installs`: the owner's watches' latest reports. */
+@Serializable
+internal data class WatchFacePushInstallsV1(val installs: List<WatchFacePushInstallV1>)
+
+@Serializable
+internal data class WatchFacePushInstallV1(
+  val deviceName: String,
+  val deviceModel: String? = null,
+  val wearOsApi: Int? = null,
+  val version: Long,
+  /** The design revision [version] was published from, when it was still the published one. */
+  val revisionPublished: Long? = null,
+  val result: String,
+  val activation: String? = null,
+  val errorKind: String? = null,
+  /** When the server received the report. */
+  val atEpochMillis: Long,
+)
+
+internal object WatchFacePushInstalls {
+  val ACTIVATIONS = setOf("activated", "not_requested", "manual", "failed")
+  private const val MAX_ID = 200
+  private const val MAX_TEXT = 200
+
+  /** [event] as kept: free text truncated, an unknown activation dropped; null when unusable. */
+  fun stored(event: WatchFacePushInstallEventV1): WatchFacePushStore.InstallEvent? {
+    if (event.designId.isBlank() || event.designId.length > MAX_ID || event.version < 0) return null
+    if (event.result.isBlank()) return null
+    fun String?.clip(): String? = this?.trim()?.take(MAX_TEXT)?.takeIf { it.isNotEmpty() }
+    return WatchFacePushStore.InstallEvent(
+      deviceId = "",
+      accountActorId = "",
+      designId = event.designId,
+      version = event.version,
+      result = event.result.trim().take(64),
+      errorKind = event.errorKind.clip()?.take(64),
+      wearOsApi = event.wearOsApi,
+      packageName = event.packageName.clip(),
+      activation = event.activation?.trim()?.takeIf { it in ACTIVATIONS },
+      activationError = event.activationError.clip(),
+      deviceModel = event.deviceModel.clip(),
+      wearOsVersion = event.wearOsVersion.clip()?.take(64),
+      watchFacePushApiVersion = event.watchFacePushApiVersion.clip()?.take(64),
+      appVersion = event.appVersion.clip()?.take(64),
+      atEpochMillis = 0,
+    )
+  }
+
+  fun wire(device: WatchFacePushStore.Device, event: WatchFacePushStore.InstallEvent) =
+    WatchFacePushInstallV1(
+      deviceName = device.deviceName,
+      deviceModel = event.deviceModel,
+      wearOsApi = event.wearOsApi ?: device.wearOsApi,
+      version = event.version,
+      revisionPublished = event.revisionPublished,
+      result = event.result,
+      activation = event.activation,
+      errorKind = event.errorKind,
+      atEpochMillis = event.atEpochMillis,
+    )
+}
 
 @Serializable
 data class WatchFacePushStatusV1(
@@ -1134,8 +1253,21 @@ internal fun Route.installWatchFacePushRoutes(
       call.noStore()
       val caller = call.watchCaller(push, clientAddress, required = true) ?: return@limited
       if (!call.admit(caller.limiter, caller.key)) return@limited
-      call.receiveJson(WatchFacePushInstallEventV1.serializer()) ?: return@limited
-      // Accepted and not kept: the app reports fire-and-forget, and nothing here reads it yet.
+      val event = call.receiveJson(WatchFacePushInstallEventV1.serializer()) ?: return@limited
+      val stored =
+        WatchFacePushInstalls.stored(event)
+          ?: run {
+            call.respondError(
+              HttpStatusCode.BadRequest,
+              "invalid_request",
+              "an install report needs a designId, a non-negative version and a result",
+            )
+            return@limited
+          }
+      // Fire-and-forget from the app: a report on a face this watch's account did not publish (a
+      // catalog face, someone else's public design) is accepted and not kept.
+      val device = caller.device ?: return@limited
+      withContext(Dispatchers.IO) { push.store.recordInstall(device, stored) }
       call.respondText("", status = HttpStatusCode.NoContent)
     }
   }
@@ -1237,6 +1369,19 @@ internal fun Route.installWatchFacePushRoutes(
       call.respondOutcome(
         push.publicationStatus(service, actor, call.parameters["designId"].orEmpty()),
       )
+    }
+  }
+
+  // The owner's own watches' latest install reports on this design.
+  get(WatchFacePush.INSTALLS_PATH) {
+    call.noStore()
+    val actor =
+      call.authorizedActorOrRespond(authorization, UiBuilderRouteCapability.READ) ?: return@get
+    when (val installs = push.installs(service, actor, call.parameters["designId"].orEmpty())) {
+      is WatchFacePush.Installs.Refused ->
+        call.respondError(installs.refused.status, installs.refused.code, installs.refused.reason)
+      is WatchFacePush.Installs.Ok ->
+        call.respondJson(WatchFacePushInstallsV1.serializer(), installs.installs)
     }
   }
 
@@ -1419,6 +1564,7 @@ private class WatchCaller(
   val account: String?,
   val limiter: ServeRateLimiter,
   val key: String,
+  val device: WatchFacePushStore.Device? = null,
 )
 
 /**
@@ -1445,7 +1591,7 @@ private suspend fun ApplicationCall.watchCaller(
     return null
   }
   withContext(Dispatchers.IO) { push.store.touch(device) }
-  return WatchCaller(device.accountActorId, push.deviceLimiter, "device:" + device.id)
+  return WatchCaller(device.accountActorId, push.deviceLimiter, "device:" + device.id, device)
 }
 
 /** The signed-in person's account, or null for a signed-out visitor (or an anonymous reader). */
@@ -1534,6 +1680,23 @@ internal suspend fun WatchFacePush.capability(
     canPublish = canPublish,
   )
 }
+
+private suspend fun ApplicationCall.authorizedActorOrRespond(
+  authorization: ServeUiBuilderAuthorization,
+  capability: UiBuilderRouteCapability,
+): AuthenticatedUiBuilderActor? =
+  when (val decision = authorization.authorize(this, capability, null)) {
+    is UiBuilderAuthorizationDecision.Authorized -> decision.actor
+    UiBuilderAuthorizationDecision.Missing -> {
+      response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
+      respondError(HttpStatusCode.Unauthorized, "unauthorized", "authentication is required")
+      null
+    }
+    UiBuilderAuthorizationDecision.Forbidden -> {
+      respondError(HttpStatusCode.Forbidden, "forbidden", "UI-builder access is required")
+      null
+    }
+  }
 
 private suspend fun ApplicationCall.respondOutcome(outcome: WatchFacePush.Outcome) {
   when (outcome) {
