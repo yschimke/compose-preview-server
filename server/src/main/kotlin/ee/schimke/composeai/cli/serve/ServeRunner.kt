@@ -3644,6 +3644,7 @@ public class ServeRunner(
         uiBuilderProfile = uiBuilderProfile,
         uiBuilderHostRoot = uiBuilderHostRoot,
         catalogLoads = catalogLoads,
+        catalogBakedBundle = { system -> catalogStore?.bakedBundle(system) },
         heroCacheDir = catalogCacheDirFlag?.takeIf { it != "none" }?.let { File(it, "heroes") },
         catalogRefresh = catalogRefresh,
         localRebuild = localRebuild,
