@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.184.0](https://github.com/yschimke/compose-preview-server/compare/v3.183.0...v3.184.0) (2026-11-19)
+
+
+### Features
+
+* **serve:** run watch-face validation by default, on explicit request only ([#2039](https://github.com/yschimke/compose-preview-server/issues/2039)) ([fb67f12](https://github.com/yschimke/compose-preview-server/commit/fb67f12e5b9e33bdb71fe65621d125b94d905a08))
+
+
+### Bug Fixes
+
+* **deps:** update androidx-compose to v1.0.0-alpha24 ([#2035](https://github.com/yschimke/compose-preview-server/issues/2035)) ([1abad5b](https://github.com/yschimke/compose-preview-server/commit/1abad5b40944db21eb69f90cd55f7373e56c63d1))
+* **deps:** update the UI Builder to 3.140.0 ([#2040](https://github.com/yschimke/compose-preview-server/issues/2040)) ([aa9ce58](https://github.com/yschimke/compose-preview-server/commit/aa9ce58b022f167f40199463213ceb293d63bc0a))
+* **dwf-preview:** tick live, report loading stages, and release abandoned sessions ([#2016](https://github.com/yschimke/compose-preview-server/issues/2016)) ([24f602e](https://github.com/yschimke/compose-preview-server/commit/24f602e4952f25d7d330e866b4bc55eb3d293dfe))
+* **serve:** gate catalog dwf-apk renders on nativePreview and document watchFace ([#2037](https://github.com/yschimke/compose-preview-server/issues/2037)) ([067de40](https://github.com/yschimke/compose-preview-server/commit/067de4022892485159225f4e6e3dce8c9c41503e))
+
 ## [3.183.0](https://github.com/yschimke/compose-preview-server/compare/v3.182.0...v3.183.0) (2026-11-19)
 
 
