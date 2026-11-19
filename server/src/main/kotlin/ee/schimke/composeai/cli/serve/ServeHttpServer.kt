@@ -924,6 +924,7 @@ class ServeHttpServer(
         projectHistory = projectHistory,
         uiBuilder = uiBuilderMcp,
         uiBuilderNative = admittedNativePreview != null,
+        nativePreview = featureFlags.nativePreview,
         publicOrigin = ::canonicalServerOrigin,
         // The builder's own hostname (`--ui-builder-host`, ui.coo.ee beside preview.coo.ee) is
         // this same server under another name.
@@ -8269,9 +8270,8 @@ class ServeHttpServer(
     if (params.isEmpty() || !acceptsBakedFallback()) return seeds(params)
     val wfOverridesLive =
       preview.isWatchFace &&
-        WatchFaceRendererSelection.renderersFor(renderHost, preview).any {
-          it.available && it.supportsLiveOverrides
-        }
+        WatchFaceRendererSelection.renderersFor(renderHost, preview, featureFlags.nativePreview)
+          .any { it.available && it.supportsLiveOverrides }
     val overrideCanReachThePixels =
       renderHost.canApplyOverrides ||
         renderHost.canRenderOverridesFor(preview.id) ||
@@ -10128,7 +10128,12 @@ class ServeHttpServer(
                 remoteComposeKnobs = p.remoteComposeKnobs,
                 watchFace = p.watchFace,
                 watchFaceRenderers =
-                  if (p.isWatchFace) WatchFaceRendererSelection.renderersFor(renderHost, p)
+                  if (p.isWatchFace)
+                    WatchFaceRendererSelection.renderersFor(
+                      renderHost,
+                      p,
+                      featureFlags.nativePreview,
+                    )
                   else emptyList(),
                 spatial = p.spatial,
                 liveOnly = p.id in renderHost.liveOnlyPreviewIds,
@@ -11320,7 +11325,8 @@ class ServeHttpServer(
         withContext(Dispatchers.IO) { renderHost.canDownloadExecutableBundle(preview.id) }
       // Watch faces use WatchFaceRendererRegistry lanes (DWF RemoteCompose, DWF Renderer APK)
       // rather than generic RemoteCompose player lanes.
-      val wfRenderers = WatchFaceRendererSelection.renderersFor(renderHost, preview)
+      val wfRenderers =
+        WatchFaceRendererSelection.renderersFor(renderHost, preview, featureFlags.nativePreview)
       val wfOverridesLive =
         preview.isWatchFace && wfRenderers.any { it.available && it.supportsLiveOverrides }
       // Per-preview Remote Compose backend lanes: the host's server/client lanes plus the opt-in
@@ -13659,8 +13665,8 @@ class ServeHttpServer(
       val wfPreview = host.previews.firstOrNull { it.id == name }
       if (
         wfPreview?.isWatchFace == true &&
-          WatchFaceRendererSelection.resolveFor(host, wfPreview, null)?.id !=
-            WatchFaceRendererIds.DWF_RC
+          WatchFaceRendererSelection.resolveFor(host, wfPreview, null, featureFlags.nativePreview)
+            ?.id != WatchFaceRendererIds.DWF_RC
       ) {
         return false
       }
@@ -14063,7 +14069,13 @@ class ServeHttpServer(
     wfRendererParam: String?,
   ) {
     val preview = renderHost.previews.firstOrNull { it.id == previewId }
-    val backend = WatchFaceRendererSelection.resolveFor(renderHost, preview, wfRendererParam)
+    val backend =
+      WatchFaceRendererSelection.resolveFor(
+        renderHost,
+        preview,
+        wfRendererParam,
+        featureFlags.nativePreview,
+      )
     if (backend == null) {
       call.respondText(
         "unknown '${WatchFaceOverrides.WF_RENDERER_PARAM}' value '$wfRendererParam'; expected one of " +
@@ -14131,7 +14143,13 @@ class ServeHttpServer(
     belowLiveGrant: ServeAgentGrantStore.Grant?,
     staged: suspend (ByteArray, Map<String, String>) -> ByteArray,
   ) {
-    val backend = WatchFaceRendererSelection.resolveFor(renderHost, preview, wfRendererParam)
+    val backend =
+      WatchFaceRendererSelection.resolveFor(
+        renderHost,
+        preview,
+        wfRendererParam,
+        featureFlags.nativePreview,
+      )
     if (backend == null) {
       call.respondText(
         "unknown '${WatchFaceOverrides.WF_RENDERER_PARAM}' value '$wfRendererParam'; expected one of " +
@@ -14418,6 +14436,7 @@ class ServeHttpServer(
               send,
               system = sessionId,
               liveUnavailableReason = liveUnavailableReason,
+              nativePreview = featureFlags.nativePreview,
             )
           // Renders block (renderNow + await); keep them off the socket's event-loop thread.
           withContext(Dispatchers.IO) { session.onOpen() }

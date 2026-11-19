@@ -198,6 +198,7 @@ class ServeWatchFaceTest {
   private fun startServer(
     rcPlayerWasmDir: Path? = null,
     hasRcDoc: Boolean = false,
+    featureFlags: ServeFeatureFlags = ServeFeatureFlags.ALL_ON,
   ): Pair<ServeHttpServer, LiveWatchFaceHost> {
     val wfPreview =
       ServePreview(
@@ -221,6 +222,7 @@ class ServeWatchFaceTest {
           isPublic = true,
           rcPlayerWasmDir = rcPlayerWasmDir?.toFile(),
           catalogSessions = listOf("wear-wf"),
+          featureFlags = featureFlags,
         )
         .also { it.start() }
     activeServer = server
@@ -499,7 +501,15 @@ class ServeWatchFaceTest {
       )
     val host = LiveWatchFaceHost(wfPreview, ServePreview(plainPreviewId, "Plain"), bakedPngBytes)
     val sent = CopyOnWriteArrayList<String>()
-    val session = ServeStreamSession(host, wfPreviewId, emptyMap(), sent::add, system = "wear-wf")
+    val session =
+      ServeStreamSession(
+        host,
+        wfPreviewId,
+        emptyMap(),
+        sent::add,
+        system = "wear-wf",
+        nativePreview = true,
+      )
 
     session.onOpen()
     assertEquals(1, sent.size)
@@ -548,6 +558,7 @@ class ServeWatchFaceTest {
       ServeCatalogMcp(
         registry,
         Semaphore(2),
+        nativePreview = true,
         publicOrigin = { "https://preview.example.test" },
       )
 
@@ -898,7 +909,15 @@ class ServeWatchFaceTest {
     }
 
     val sent = CopyOnWriteArrayList<String>()
-    val session = ServeStreamSession(host, wfPreviewId, emptyMap(), sent::add, system = "wear-wf")
+    val session =
+      ServeStreamSession(
+        host,
+        wfPreviewId,
+        emptyMap(),
+        sent::add,
+        system = "wear-wf",
+        nativePreview = true,
+      )
     session.onOpen()
     assertEquals(1, sent.size)
     val openFrame =
@@ -1017,6 +1036,7 @@ class ServeWatchFaceTest {
         isPublic = false,
         agentGrants = grants,
         machineAuthorization = machineAuthorization,
+        featureFlags = ServeFeatureFlags.ALL_ON,
       )
     server.start()
     try {
@@ -1106,5 +1126,149 @@ class ServeWatchFaceTest {
       server.stop()
       registry.close()
     }
+  }
+
+  /** A `dwf-apk` that is ready to run, and fails the test if anything starts it. */
+  private fun registerUntouchableApkBackend() {
+    WatchFaceRendererRegistry.register(
+      object : WatchFaceRendererBackend {
+        override val id: String = WatchFaceRendererIds.DWF_APK
+        override val label: String = "DWF Renderer APK (Launch)"
+        override val badgeLabel: String = "dwf · apk"
+
+        override fun infoFor(host: ServeHost, preview: ServePreview): WatchFaceRendererInfo =
+          WatchFaceRendererInfo(id = id, label = label, badgeLabel = badgeLabel, available = true)
+
+        override fun render(
+          host: ServeHost,
+          preview: ServePreview,
+          overrides: PreviewOverrides,
+        ): RenderOutcome = error("dwf-apk must not start with nativePreview off")
+
+        override fun complications(
+          host: ServeHost,
+          preview: ServePreview,
+          overrides: PreviewOverrides,
+        ): WatchFaceComplicationsOutcome = error("dwf-apk must not start with nativePreview off")
+      },
+    )
+  }
+
+  @Test
+  fun `nativePreview off refuses dwf-apk by name and defaults watch faces to dwf-rc`() {
+    registerUntouchableApkBackend()
+    val (server, _) = startServer(featureFlags = ServeFeatureFlags())
+    val base = "http://127.0.0.1:${server.port}"
+
+    for (lane in listOf("png", "complications")) {
+      client
+        .newCall(
+          Request.Builder().url("$base/render/$wfPreviewId.$lane?wfRenderer=dwf-apk").build(),
+        )
+        .execute()
+        .use {
+          assertEquals(503, it.code, lane)
+          val body = it.body.string()
+          assertTrue(body.startsWith(ServeFeatureFlags.NATIVE_PREVIEW_DISABLED), body)
+          assertTrue(ServeFeatureFlags.NATIVE_PREVIEW_ENV in body, body)
+        }
+    }
+    // No wfRenderer: the face still draws, on dwf-rc, rather than on the switched-off runtime.
+    client.newCall(Request.Builder().url("$base/render/$wfPreviewId.png").build()).execute().use {
+      assertEquals(200, it.code)
+    }
+
+    val wfPreview =
+      ServePreview(
+        id = wfPreviewId,
+        label = "watchface",
+        watchFace = watchFacePayload,
+        dwfAssetPath = watchFacePayload.dwfAssetPath,
+      )
+    val registry = ServeSessionRegistry(open = { null })
+    registry.register(
+      "wear-wf",
+      host = LiveWatchFaceHost(wfPreview, ServePreview(plainPreviewId, "Plain"), bakedPngBytes),
+      pinned = true,
+    )
+    val mcp = ServeCatalogMcp(registry, Semaphore(2))
+    fun callMcp(argsJson: String): JsonObject {
+      val req =
+        Json.parseToJsonElement(
+            """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":$argsJson}}""",
+          )
+          .jsonObject
+      return requireNotNull(
+          runBlocking {
+            mcp.handle(req) { ServeMachineAuthorization.Decision.Authorized("agent:test") }
+          }
+            .body,
+        )
+        .getValue("result")
+        .jsonObject
+    }
+    val refused =
+      callMcp(
+        """{"catalog":"wear-wf","previewId":"$wfPreviewId","observe":"png","ambient":true,"wfRenderer":"dwf-apk"}""",
+      )
+    assertTrue(refused.getValue("isError").jsonPrimitive.boolean)
+    val text = refused.getValue("content").jsonArray.first().jsonObject.getValue("text")
+    assertTrue(
+      text.jsonPrimitive.content.startsWith(ServeFeatureFlags.NATIVE_PREVIEW_DISABLED),
+      text.toString(),
+    )
+    registry.close()
+  }
+
+  @Test
+  fun `catalog render refuses a watchFace that carries a face instead of state`() {
+    val wfPreview =
+      ServePreview(
+        id = wfPreviewId,
+        label = "watchface",
+        watchFace = watchFacePayload,
+        dwfAssetPath = watchFacePayload.dwfAssetPath,
+      )
+    val registry = ServeSessionRegistry(open = { null })
+    registry.register(
+      "wear-wf",
+      host = LiveWatchFaceHost(wfPreview, ServePreview(plainPreviewId, "Plain"), bakedPngBytes),
+      pinned = true,
+    )
+    val mcp = ServeCatalogMcp(registry, Semaphore(2))
+    fun render(watchFace: String): JsonObject {
+      val req =
+        Json.parseToJsonElement(
+            """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"catalog_render_preview","arguments":{"catalog":"wear-wf","previewId":"$wfPreviewId","observe":"png","watchFace":$watchFace}}}""",
+          )
+          .jsonObject
+      return requireNotNull(
+          runBlocking {
+            mcp.handle(req) { ServeMachineAuthorization.Decision.Authorized("agent:test") }
+          }
+            .body,
+        )
+        .getValue("result")
+        .jsonObject
+    }
+    fun errorText(result: JsonObject): String {
+      assertTrue(result["isError"]?.jsonPrimitive?.boolean == true, result.toString())
+      return result
+        .getValue("content")
+        .jsonArray
+        .first()
+        .jsonObject
+        .getValue("text")
+        .jsonPrimitive
+        .content
+    }
+
+    val xml = errorText(render("""{"xml":"<WatchFace/>"}"""))
+    assertTrue("'xml'" in xml && "Native pane" in xml, xml)
+    val typo = errorText(render("""{"batteryPercnt":40}"""))
+    assertTrue("'batteryPercnt'" in typo && "'batteryPercent'" in typo, typo)
+    // A known key still renders.
+    assertFalse(render("""{"batteryPercent":40}""")["isError"]?.jsonPrimitive?.boolean == true)
+    registry.close()
   }
 }
