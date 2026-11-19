@@ -129,6 +129,29 @@ class RenderHostDwfApkRuntimeTest {
   }
 
   @Test
+  fun `a refresh with no change to the face reuses the packaged APK`() {
+    val sessions = DwfPreviewSessions(runtime())
+    val face = DwfSource(wffXml = "<WatchFace/>", label = "face")
+    fun start(revision: Long, source: DwfSource) =
+      assertIs<DwfPreviewSessions.Started.Ok>(sessions.start("watch-1", revision, "a", source))
+        .session
+    try {
+      val first = start(1, face)
+      assertFalse(first.cachedPackage)
+      // An edit elsewhere in the design (a new revision) that exports the same WFF.
+      val refreshed = start(2, DwfSource(wffXml = "<WatchFace/>", label = "face"))
+      assertTrue(refreshed.cachedPackage)
+      assertEquals(first.apk, refreshed.apk)
+      assertEquals(1, packs.size)
+      // A changed face is packaged once more.
+      start(3, DwfSource(wffXml = "<WatchFace id=\"2\"/>", label = "face"))
+      assertEquals(2, packs.size)
+    } finally {
+      sessions.closeAll()
+    }
+  }
+
+  @Test
   fun `a design preview in the assets replaces the placeholder`() {
     val files =
       DwfPackaging.bundleFiles(

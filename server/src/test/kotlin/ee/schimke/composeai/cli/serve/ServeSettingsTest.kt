@@ -8,6 +8,8 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
 
@@ -94,6 +96,37 @@ class ServeSettingsTest {
     assertEquals(
       listOf("`watchFacePushBuilds` must be true or false"),
       ServeSettings.validate(doc("""{"watchFacePushBuilds": "1"}""")),
+    )
+  }
+
+  @Test
+  fun `the image runs watch-face validation and the Native pane by default, with an off switch`() {
+    val entrypoint = File(repoRoot, "deploy/image/entrypoint.sh").readText()
+    // On unless the deployment says false (settings.json exports it as 0, which is not empty).
+    for (env in
+      listOf(ServeFeatureFlags.WATCH_FACE_VALIDATION_ENV, ServeFeatureFlags.NATIVE_PREVIEW_ENV)) {
+      assertTrue("export $env=\"\${$env:-1}\"" in entrypoint, "$env defaults on in the image")
+      assertFalse(
+        ServeFeatureFlags.fromEnvironment(mapOf(env to "0")).let {
+          it.nativePreview || it.watchFaceValidation
+        },
+      )
+    }
+    // Catalog dwf-apk renders stay off in the image (watchface-tools#72).
+    val catalog = ServeFeatureFlags.CATALOG_NATIVE_RENDER_ENV
+    assertTrue("export $catalog=\"\${$catalog:-}\"" in entrypoint, entrypoint)
+    val example =
+      ServeSettings.parse(File(repoRoot, "deploy/example/settings.json").readText())["features"]!!
+        .jsonObject
+    assertEquals("true", example["watchFaceValidation"]!!.jsonPrimitive.content)
+    assertEquals("true", example["nativePreview"]!!.jsonPrimitive.content)
+    assertEquals("false", example["catalogNativeRender"]!!.jsonPrimitive.content)
+    val validation = ServeSettings.ALL.single { it.key == "features.watchFaceValidation" }
+    assertEquals(ServeFeatureFlags.WATCH_FACE_VALIDATION_ENV, validation.env)
+    assertEquals(ServeSettings.Apply.RESTART, validation.apply)
+    assertEquals(
+      listOf("`features.watchFaceValidation` must be true or false"),
+      ServeSettings.validate(doc("""{"features": {"watchFaceValidation": "1"}}""")),
     )
   }
 

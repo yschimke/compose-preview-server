@@ -2,6 +2,7 @@
   "$schema": "../image/settings.schema.json",
   "uiBuilder": {"adminActors": []},
   "catalogs": {"mcp": false},
+  "features": {"nativePreview": true, "watchFaceValidation": true, "catalogNativeRender": false},
   "rendering": {"compileEngine": false},
   "uploads": {"acceptDocs": false, "acceptImages": false},
   "analytics": {"umami": {"enabled": false}},

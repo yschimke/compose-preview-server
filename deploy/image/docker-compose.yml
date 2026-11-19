@@ -87,6 +87,7 @@ services:
       SERVE_UI_BUILDER_HOST_ROOT: "${SERVE_UI_BUILDER_HOST_ROOT:-}"
       SERVE_NATIVE_PREVIEW: "${SERVE_NATIVE_PREVIEW:-}"
       SERVE_WATCH_FACE_VALIDATION: "${SERVE_WATCH_FACE_VALIDATION:-}"
+      SERVE_CATALOG_NATIVE_RENDER: "${SERVE_CATALOG_NATIVE_RENDER:-}"
       # Public preview server by default: open, serving the published design
       # systems in catalogs.json. The in-browser CMP Wasm tier rides --catalogs —
       # `serve` fetches each system's web/wasm/ from the trusted branch (the

@@ -508,7 +508,7 @@ class ServeWatchFaceTest {
         emptyMap(),
         sent::add,
         system = "wear-wf",
-        nativePreview = true,
+        catalogNativeRender = true,
       )
 
     session.onOpen()
@@ -558,7 +558,7 @@ class ServeWatchFaceTest {
       ServeCatalogMcp(
         registry,
         Semaphore(2),
-        nativePreview = true,
+        catalogNativeRender = true,
         publicOrigin = { "https://preview.example.test" },
       )
 
@@ -916,7 +916,7 @@ class ServeWatchFaceTest {
         emptyMap(),
         sent::add,
         system = "wear-wf",
-        nativePreview = true,
+        catalogNativeRender = true,
       )
     session.onOpen()
     assertEquals(1, sent.size)
@@ -1143,21 +1143,26 @@ class ServeWatchFaceTest {
           host: ServeHost,
           preview: ServePreview,
           overrides: PreviewOverrides,
-        ): RenderOutcome = error("dwf-apk must not start with nativePreview off")
+        ): RenderOutcome = error("dwf-apk must not start with catalogNativeRender off")
 
         override fun complications(
           host: ServeHost,
           preview: ServePreview,
           overrides: PreviewOverrides,
-        ): WatchFaceComplicationsOutcome = error("dwf-apk must not start with nativePreview off")
+        ): WatchFaceComplicationsOutcome =
+          error("dwf-apk must not start with catalogNativeRender off")
       },
     )
   }
 
   @Test
-  fun `nativePreview off refuses dwf-apk by name and defaults watch faces to dwf-rc`() {
+  fun `catalogNativeRender off refuses dwf-apk by name, even with the Native pane on`() {
     registerUntouchableApkBackend()
-    val (server, _) = startServer(featureFlags = ServeFeatureFlags())
+    // The image's defaults: the Native pane and validation on, catalog dwf-apk renders off.
+    val (server, _) =
+      startServer(
+        featureFlags = ServeFeatureFlags(nativePreview = true, watchFaceValidation = true),
+      )
     val base = "http://127.0.0.1:${server.port}"
 
     for (lane in listOf("png", "complications")) {
@@ -1169,8 +1174,8 @@ class ServeWatchFaceTest {
         .use {
           assertEquals(503, it.code, lane)
           val body = it.body.string()
-          assertTrue(body.startsWith(ServeFeatureFlags.NATIVE_PREVIEW_DISABLED), body)
-          assertTrue(ServeFeatureFlags.NATIVE_PREVIEW_ENV in body, body)
+          assertTrue(body.startsWith(ServeFeatureFlags.CATALOG_NATIVE_RENDER_DISABLED), body)
+          assertTrue(ServeFeatureFlags.CATALOG_NATIVE_RENDER_ENV in body, body)
         }
     }
     // No wfRenderer: the face still draws, on dwf-rc, rather than on the switched-off runtime.
@@ -1214,7 +1219,7 @@ class ServeWatchFaceTest {
     assertTrue(refused.getValue("isError").jsonPrimitive.boolean)
     val text = refused.getValue("content").jsonArray.first().jsonObject.getValue("text")
     assertTrue(
-      text.jsonPrimitive.content.startsWith(ServeFeatureFlags.NATIVE_PREVIEW_DISABLED),
+      text.jsonPrimitive.content.startsWith(ServeFeatureFlags.CATALOG_NATIVE_RENDER_DISABLED),
       text.toString(),
     )
     registry.close()

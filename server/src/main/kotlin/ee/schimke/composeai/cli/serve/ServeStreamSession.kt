@@ -35,10 +35,11 @@ class ServeStreamSession(
    */
   private val liveUnavailableReason: String? = null,
   /**
-   * [ServeFeatureFlags.nativePreview]: off, `wfRenderer=dwf-apk` is refused with
-   * [WatchFaceRendererSelection.NATIVE_PREVIEW_DISABLED_REASON] and the default lane is `dwf-rc`.
+   * [ServeFeatureFlags.catalogNativeRender]: off, `wfRenderer=dwf-apk` is refused with
+   * [WatchFaceRendererSelection.CATALOG_NATIVE_RENDER_DISABLED_REASON] and the default lane is
+   * `dwf-rc`.
    */
-  private val nativePreview: Boolean = false,
+  private val catalogNativeRender: Boolean = false,
 ) {
   private var previewId: String = previewId
   private var overrides: Map<String, String> = initialOverrides
@@ -181,7 +182,12 @@ class ServeStreamSession(
           wfRendererId != null
       ) {
         val resolved =
-          WatchFaceRendererSelection.resolveFor(renderHost, preview, wfRendererId, nativePreview)
+          WatchFaceRendererSelection.resolveFor(
+            renderHost,
+            preview,
+            wfRendererId,
+            catalogNativeRender,
+          )
         if (resolved == null) {
           send(ServeStreamProtocol.errorMessage("unknown watch face renderer: $wfRendererId"))
           return

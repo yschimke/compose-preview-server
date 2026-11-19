@@ -1897,7 +1897,7 @@ class ServeUiBuilderMcp(
       )
     }
     val result =
-      when (val validated = dwf.validateDesign(designId, document)) {
+      when (val validated = dwf.validateDesign(designId, document, actor.actorId)) {
         is DwfDesignValidation.Refused ->
           throw McpRequestException("${validated.code}: ${validated.reasons.joinToString("; ")}")
         is DwfDesignValidation.Ran -> validated.result
@@ -1909,6 +1909,14 @@ class ServeUiBuilderMcp(
         throw McpRequestException("${result.code}: ${result.reason}")
       is WatchFaceValidation.Result.Failed ->
         throw McpRequestException("${result.code}: ${result.reason}")
+      is WatchFaceValidation.Result.Busy ->
+        throw McpRequestException(
+          "${result.code}: ${result.reason}; retryAfterSeconds=${result.retryAfterSeconds}",
+        )
+      is WatchFaceValidation.Result.RateLimited ->
+        throw McpRequestException(
+          "${result.code}: ${result.reason}; retryAfterSeconds=${result.retryAfterSeconds}",
+        )
     }
   }
 
@@ -4603,11 +4611,16 @@ class ServeUiBuilderMcp(
               "bytes, the size each is drawn at). Keep both modes under their limits: downscale " +
               "an image to the size it is drawn at, and give ambient a dim or reduced variant " +
               "rather than the full-colour one. A bitmap the face names that the design does " +
-              "not pin fails `bundle-resources`; pin it with $PUT_ASSET. This runs the full " +
-              "packager, so call it when an edit pass is done and before " +
-              "$PUBLISH_WATCH_FACE, not after every edit; an unchanged face answers from " +
-              "cache. Between runs, every $APPLY, $REPLACE_DESIGN_DOCUMENT and $PUT_ASSET on a " +
-              "watch face already replies with `$WATCH_FACE_COST_KEY`: a cheap estimate of the " +
+              "not pin fails `bundle-resources`; pin it with $PUT_ASSET. Validation is " +
+              "explicit: nothing else runs it, not an edit, a read or a publish. It runs the " +
+              "full packager, so call $VALIDATE_WATCH_FACE when an edit pass is done and " +
+              "before $PUBLISH_WATCH_FACE, not after every edit; an unchanged face answers from " +
+              "cache. The server runs one validation at a time and limits each account, so a " +
+              "busy or rate-limited call answers `${WatchFaceValidation.BUSY}` or " +
+              "`${WatchFaceValidation.RATE_LIMITED}` with `retryAfterSeconds`; wait that long. " +
+              "The per-edit `$WATCH_FACE_COST_KEY` is the cheap estimate: every $APPLY, " +
+              "$REPLACE_DESIGN_DOCUMENT and $PUT_ASSET on a " +
+              "watch face already replies with it, an estimate of the " +
               "same budgets (`active` and `ambient` as `usedBytes`, `limitBytes`, " +
               "`percentOfLimit`), the `topContributors` with what to do about each, and the " +
               "estimate's `errors`; read it after each edit and fix what it flags before " +

@@ -205,6 +205,20 @@ than leaving it to hold a slot. A session still showing in another tab keeps its
 alone. All of this is checked on use and on every start — no timer thread. The last session out
 stops the daemon. `DELETE …/dwf-preview/{sessionId}` closes explicitly.
 
+**Packaged and booted only on an explicit start.** A session is born only from
+`POST …/dwf-preview` — the pane opening, or its Reload. A design edit never repackages, restarts or
+replaces a running session; `GET …/dwf-preview/{sessionId}` reports the session's `revision`, the
+design's current `designRevision`, and `stale: true` once the design has moved on, so the pane can
+offer "Refresh", which is a new start. The editor asks the design's status route instead, once after
+an edit settles: `GET …/dwf-preview/status?session={sessionId}` adds `stale`, `revision` (the
+session's) and `currentRevision` (the design's) for the caller's own session, and is unchanged
+without `session`. The APK is cached by `DwfSource.digest`, so a refresh after an
+edit that left the face unchanged reuses the package (`cachedPackage: true`). The pane is on in the
+image (`features.nativePreview`, `false` to switch it off). A catalog's own faces on the Android
+runtime (`wfRenderer: "dwf-apk"` on a catalog render) are a separate switch,
+`features.catalogNativeRender`, off even in the image: that path still takes the render daemon down
+(watchface-tools#72), and those requests answer `catalog_native_render_disabled`.
+
 **The first frame is the app's face.** A push answers before the runtime has drawn anything, so the
 session polls `watchface status` until the face reports a frame (at most 90 s, as
 `DwfApkDaemonBridge` does) and, after any override, until it is no longer `rendering` (a short
@@ -276,8 +290,12 @@ preview is unaffected — and offers no controls. The same reason is the body of
 `POST /api/ui-builder/v1/designs/{designId}/watchface-validation[?revision=N]` takes the same
 EXPORT gate, request body and source resolution as a session start, pinned design assets included,
 and runs `wff-packager validate --report-out` in its own JVM instead of `pack`
-(`WatchFaceValidation`). Up to two runs happen at once, off the event loop, and reports are cached
-by `DwfSource.digest`. The answer is the packager's report
+(`WatchFaceValidation`). Reports are cached by `DwfSource.digest`, and a run is kept lean: one
+packager JVM at a time, on low-priority threads of its own, the child under `nice -n 10` and killed
+with its process tree after 180 seconds; at most three more wait, and past that the request is a
+`429` `watch_face_validation_busy` with `Retry-After`. Each account gets ten runs in ten minutes (a
+cached report costs none); past that, a `429` `watch_face_validation_rate_limited`, also with
+`Retry-After`. The answer is the packager's report
 `{schemaVersion, wffVersion, minimumWffVersion, passed, checks:[{id, title, status,
 findings:[{severity, message, line?, column?, path?, suggestion?}], memory?, contributors?,
 passedChecks?, tokenIssued?}], mode?}` plus `designId`, `revision`, `digest` and `ranAtEpochMillis`.
@@ -289,7 +307,8 @@ refusal that comes before any report is one failed `packager` check carrying its
 `422` means only that the request names no usable face, a `503` that this host cannot validate (with
 `watch_face_validation_disabled` while the deployment's `features.watchFaceValidation` setting
 (`SERVE_WATCH_FACE_VALIDATION`, read once at startup as `ServeFeatureFlags.watchFaceValidation`) is
-off, which is the default; the editor then keeps to its in-browser checks), and
+off; the image turns it on unless the deployment sets it to `false`, and the editor then keeps to its
+in-browser checks), and
 a `502` that the validator ran and returned nothing readable. `GET` on the same path returns the
 last report on the current revision (or `?revision=`), and `404` when there is none.
 
@@ -299,6 +318,13 @@ XML. Its description and the MCP `initialize` instructions tell an agent to call
 pass is done and before `ui_builder_publish_watch_face`, and to act on each finding's `suggestion`
 until the face fits both the active and the ambient limits. The tool runs the full packager, so it
 runs only when asked.
+
+**Validation is explicit.** The `POST` above (the editor's Validate panel, on its Run button) and
+this tool are the only callers of the validators. A design edit, a `GET` of the design or of the
+report, a listing, a publish and the automatic Watch Face Push listing run none of it
+(`WatchFacePushRoutesTest` pins that: zero runs across all of those, then one per explicit request,
+cached by digest). Turning `features.watchFaceValidation` on therefore offers validation; it never
+schedules any.
 
 Between those runs, `ui_builder_apply`, `ui_builder_replace_design_document` and
 `ui_builder_put_asset` on a watch-face design reply with `watchFaceCost` (`WatchFaceCostEstimator`).

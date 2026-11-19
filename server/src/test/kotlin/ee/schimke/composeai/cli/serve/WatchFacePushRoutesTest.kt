@@ -50,6 +50,10 @@ class WatchFacePushRoutesTest {
   /** What each design exports, by id; a test changes it to stand in for an edit. */
   private val faces = mutableMapOf<String, String>()
 
+  /** Runs of Google's validators: only an explicit request may add one. */
+  private var validatorRuns = 0
+  private lateinit var dwfPreview: UiBuilderDwfPreview
+
   private val alice = "github:alice"
   private val bob = "github:bob"
 
@@ -163,6 +167,21 @@ class WatchFacePushRoutesTest {
         automaticSweepPauseMillis = 0,
         assets = assetStore,
       )
+    dwfPreview =
+      UiBuilderDwfPreview(
+        sessions = DwfPreviewSessions(FakeDwfRuntime()),
+        isDwfCatalog = { true },
+        sourceFor = push.sourceFor,
+        validation =
+          WatchFaceValidation(
+            {
+              WatchFaceValidatorAvailability.Ready {
+                validatorRuns++
+                """{"schemaVersion":1,"passed":true,"checks":[]}"""
+              }
+            },
+          ),
+      )
     feed = WatchFacePushChangeFeed(service) { id, access -> push.automatic.noteChanged(id, access) }
     return ServeHttpServer(
         host = "127.0.0.1",
@@ -173,11 +192,7 @@ class WatchFacePushRoutesTest {
         machineAuthorization = ServeMachineAuthorization("local-fixture", null, null),
         uiBuilderService = service,
         watchFacePush = push,
-        uiBuilderDwfPreview =
-          UiBuilderDwfPreview(
-            sessions = DwfPreviewSessions(FakeDwfRuntime()),
-            isDwfCatalog = { true },
-          ),
+        uiBuilderDwfPreview = dwfPreview,
         uiBuilderHost = uiBuilderHost,
         // A signed-in person is named by a test header; without it, nobody is.
         uiBuilderAuthorization =
@@ -2130,6 +2145,63 @@ class WatchFacePushRoutesTest {
     push.store.retire("broken")
     assertNull(push.queue.status("broken"))
     assertNull(pendingList(aliceToken)["broken"])
+  }
+
+  @Test
+  fun `validation runs only on an explicit request, never on an edit, a read, a listing or a publish`() {
+    automaticListing = true
+    start()
+    val mcp = ServeUiBuilderMcp(service, watchFaces = dwfPreview)
+    val owner = AuthenticatedUiBuilderActor(alice)
+    fun mcpCall(tool: String) = runBlocking {
+      mcp.call(
+        tool,
+        kotlinx.serialization.json.buildJsonObject {
+          put("designId", kotlinx.serialization.json.JsonPrimitive("face-1"))
+        },
+        owner,
+        callId = "t",
+      )
+    }
+    val validation = "/api/ui-builder/v1/designs/face-1/watchface-validation"
+
+    createDesign(alice, "face-1", public = true)
+    edit(alice, "face-1", "<WatchFace id=\"one\"/>")
+    // Reads: the design over MCP, the designs listing, the push app's listing, the report.
+    mcpCall(ServeUiBuilderMcp.GET_DESIGN)
+    runBlocking {
+      mcp.call(
+        ServeUiBuilderMcp.LIST_DESIGNS,
+        kotlinx.serialization.json.JsonObject(emptyMap()),
+        owner,
+        callId = "t",
+      )
+    }
+    assertEquals(200, send("GET", "$api/designs").code)
+    assertEquals(404, send("GET", validation, actor = alice).code, "nothing validated yet")
+    // The background path: the automatic listing builds the settled public face.
+    settle()
+    // A publish, through its build.
+    assertEquals(200, publish(alice, "face-1").code)
+    assertEquals(0, validatorRuns, "nothing but an explicit request runs the validators")
+
+    // The Validate panel's Run button: one run, and the same face again is the cached report.
+    assertEquals(200, send("POST", validation, json = "{}", actor = alice).code)
+    assertEquals(1, validatorRuns)
+    assertEquals(200, send("POST", validation, json = "{}", actor = alice).code)
+    assertEquals(200, send("GET", validation, actor = alice).code)
+    // The MCP tool on the unchanged face answers from the same cache.
+    mcpCall(ServeUiBuilderMcp.VALIDATE_WATCH_FACE)
+    assertEquals(1, validatorRuns)
+
+    // An edit runs nothing; the next explicit call validates the new face once.
+    edit(alice, "face-1", "<WatchFace id=\"two\"/>", title = "second")
+    settle()
+    assertEquals(1, validatorRuns)
+    mcpCall(ServeUiBuilderMcp.VALIDATE_WATCH_FACE)
+    assertEquals(2, validatorRuns)
+    assertEquals(200, send("POST", validation, json = "{}", actor = alice).code)
+    assertEquals(2, validatorRuns)
   }
 
   private fun document(id: String, title: String) =
