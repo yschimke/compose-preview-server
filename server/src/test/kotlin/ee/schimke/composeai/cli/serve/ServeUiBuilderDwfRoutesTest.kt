@@ -885,6 +885,21 @@ class ServeUiBuilderDwfRoutesTest {
     assertEquals(1, runtime.packaged.size)
     assertTrue(runtime.connections.isEmpty(), "the edit booted nothing")
 
+    // The editor's one check after an edit settles: the design status route, for its session.
+    val (designCode, designBody) = get("$base/status?session=$sessionId")
+    assertEquals(200, designCode, designBody)
+    val design = obj(designBody)
+    assertEquals(true, design["stale"]!!.jsonPrimitive.boolean)
+    assertEquals(revision, design["revision"]!!.jsonPrimitive.long)
+    assertEquals(revision + 1, design["currentRevision"]!!.jsonPrimitive.long)
+    // Without `session`, or for one that is not the caller's, the status is what it was.
+    assertNull(obj(get("$base/status").second)["stale"])
+    currentActor = "someone-else"
+    val (otherCode, otherBody) = get("$base/status?session=$sessionId")
+    assertTrue(otherCode == 404 || obj(otherBody)["stale"] == null, otherBody)
+    currentActor = actor.actorId
+    assertEquals(1, runtime.packaged.size)
+
     // "Refresh" is an explicit start: a new session on the current revision, not stale.
     val (refreshCode, refreshBody) = post(base, "{}")
     assertEquals(201, refreshCode, refreshBody)
@@ -892,6 +907,10 @@ class ServeUiBuilderDwfRoutesTest {
     val fresh = obj(get("$base/$refreshed").second)
     assertEquals(false, fresh["stale"]!!.jsonPrimitive.boolean)
     assertEquals(revision + 1, fresh["revision"]!!.jsonPrimitive.long)
+    assertEquals(
+      false,
+      obj(get("$base/status?session=$refreshed").second)["stale"]!!.jsonPrimitive.boolean,
+    )
     // The face did not change, so the refresh asked for the same package (cached by digest in
     // the real runtime: RenderHostDwfApkRuntimeTest).
     assertEquals(2, runtime.packaged.size)

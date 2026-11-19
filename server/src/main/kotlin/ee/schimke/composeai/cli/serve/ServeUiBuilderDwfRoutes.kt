@@ -195,6 +195,17 @@ internal data class DwfPreviewStatusV1(
    * watch faces ([WatchFacePush.capability]). Independent of [available], which is the preview's.
    */
   val watchFacePush: WatchFacePushCapabilityV1? = null,
+  /**
+   * With `?session=`: whether that session (the caller's own, on this design) shows an older
+   * revision than the design's current one. The editor asks once after an edit settles and offers
+   * "Refresh"; nothing is repackaged or restarted by asking. Null without `session`, or for a
+   * session that is not the caller's.
+   */
+  val stale: Boolean? = null,
+  /** With `?session=`: the revision that session packaged. */
+  val revision: Long? = null,
+  /** With `?session=`: the design's current revision. */
+  val currentRevision: Long? = null,
 )
 
 internal fun Route.installUiBuilderDwfRoutes(
@@ -224,6 +235,19 @@ internal fun Route.installUiBuilderDwfRoutes(
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return@get
     }
+    // `?session=`: the caller's own session on this design, compared with the design as it is now.
+    val session =
+      call.request.queryParameters["session"]?.let(dwf.sessions::get)?.takeIf {
+        it.designId == designId && it.ownerActorId == actor.actorId
+      }
+    val currentRevision = session?.let {
+      (service.executeMapped(GetSnapshotRequestV1(designId = designId), actor)
+          as? UiBuilderServiceResponse.Snapshot)
+        ?.snapshot
+        ?.state
+        ?.document
+        ?.revision
+    }
     val unavailable =
       if (!enabled) {
         DwfApkRuntime.Availability.Unavailable(
@@ -243,6 +267,9 @@ internal fun Route.installUiBuilderDwfRoutes(
           maxSessions = DwfPreviewSessions.DEFAULT_MAX_SESSIONS,
           queued = dwf.sessions.queuedCount,
           watchFacePush = watchFacePush?.capability(service, authorization, call, designId),
+          stale = currentRevision?.let { it > session.revision },
+          revision = session?.takeIf { currentRevision != null }?.revision,
+          currentRevision = currentRevision,
         ),
       ),
       ContentType.Application.Json,

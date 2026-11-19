@@ -209,7 +209,10 @@ stops the daemon. `DELETE …/dwf-preview/{sessionId}` closes explicitly.
 `POST …/dwf-preview` — the pane opening, or its Reload. A design edit never repackages, restarts or
 replaces a running session; `GET …/dwf-preview/{sessionId}` reports the session's `revision`, the
 design's current `designRevision`, and `stale: true` once the design has moved on, so the pane can
-offer "Refresh", which is a new start. The APK is cached by `DwfSource.digest`, so a refresh after an
+offer "Refresh", which is a new start. The editor asks the design's status route instead, once after
+an edit settles: `GET …/dwf-preview/status?session={sessionId}` adds `stale`, `revision` (the
+session's) and `currentRevision` (the design's) for the caller's own session, and is unchanged
+without `session`. The APK is cached by `DwfSource.digest`, so a refresh after an
 edit that left the face unchanged reuses the package (`cachedPackage: true`). The pane is on in the
 image (`features.nativePreview`, `false` to switch it off). A catalog's own faces on the Android
 runtime (`wfRenderer: "dwf-apk"` on a catalog render) are a separate switch,
