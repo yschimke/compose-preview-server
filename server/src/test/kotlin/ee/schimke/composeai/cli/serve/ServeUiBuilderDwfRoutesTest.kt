@@ -333,6 +333,38 @@ class ServeUiBuilderDwfRoutesTest {
   }
 
   @Test
+  fun `with the flag off the validators are never looked for, and the route says so`() {
+    var looked = 0
+    val off =
+      WatchFaceValidatorAvailability.production(
+        home = directory.toFile(),
+        enabled = { false },
+        sdk = {
+          looked++
+          null
+        },
+        libDir = {
+          looked++
+          null
+        },
+      )
+    val answer = assertIs<WatchFaceValidatorAvailability.Unavailable>(off())
+    assertEquals(WatchFaceValidatorAvailability.DISABLED, answer.code)
+    assertEquals(0, looked)
+    val on =
+      WatchFaceValidatorAvailability.production(
+        home = directory.toFile(),
+        enabled = { true },
+        sdk = { null },
+        libDir = { null },
+      )
+    assertEquals(
+      DwfPreviewSurface.ANDROID_SDK_MISSING,
+      assertIs<WatchFaceValidatorAvailability.Unavailable>(on()).code,
+    )
+  }
+
+  @Test
   fun `a failing face is a 200 report, not an error`() {
     start(validator = { packagerReport(passed = false) })
     val (code, body) = post(validation, """{"wffXml":"<WatchFace/>"}""")

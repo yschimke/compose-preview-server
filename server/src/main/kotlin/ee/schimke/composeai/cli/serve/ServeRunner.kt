@@ -3854,6 +3854,8 @@ public class ServeRunner(
                 WatchFaceValidation(
                   WatchFaceValidatorAvailability.production(
                     home = composeAiCacheDir("wff-validate-home"),
+                    // Off until the deployment's `watchFaceValidation` flag is wired here.
+                    enabled = { false },
                   ),
                 ),
             )
