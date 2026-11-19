@@ -543,9 +543,11 @@ livery = "0.15.0"
 # `wff-apk`, whose `WffEstimate` is the SDK-free cost estimate returned after each MCP edit of a
 # watch face (`WatchFaceCostEstimator`). `wff-apk` is on the server's classpath: pure Kotlin over
 # `wff-core`, with none of the packager's validator jars.
-wff-packager = "0.9.0"
-wff-apk = "0.9.0"
-wff-core = "0.4.0"
+# 0.11.0 moves all three together (0.10.0 published no libraries): `wff-apk` 0.11.0 needs
+# `wff-core` 0.11.0 at run time, so the core pin follows it.
+wff-packager = "0.11.0"
+wff-apk = "0.11.0"
+wff-core = "0.11.0"
 # The Android Remote Compose players the server's own player-only Android daemon replays documents
 # with, staged as `lib-rc-players-android/` (`stageRcPlayersAndroidLibs`). The Android daemon
 # sidecar deliberately ships none of this family (a consumer brings it, compose-preview-daemon's
