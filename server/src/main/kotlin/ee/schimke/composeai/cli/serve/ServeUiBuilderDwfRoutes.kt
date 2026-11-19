@@ -136,6 +136,11 @@ internal fun Route.installUiBuilderDwfRoutes(
   service: UiBuilderServicePort,
   authorization: ServeUiBuilderAuthorization,
   dwf: UiBuilderDwfPreview,
+  /**
+   * [ServeFeatureFlags.nativePreview]: off, the runtime is never started, the status says so, and a
+   * start answers 503 [ServeFeatureFlags.NATIVE_PREVIEW_DISABLED].
+   */
+  enabled: Boolean = true,
   /** Watch Face Push on this host, for [DwfPreviewStatusV1.watchFacePush]; null: none. */
   watchFacePush: WatchFacePush? = null,
 ) {
@@ -154,8 +159,15 @@ internal fun Route.installUiBuilderDwfRoutes(
       call.respondText("not found", status = HttpStatusCode.NotFound)
       return@get
     }
-    val availability = dwf.sessions.availability()
-    val unavailable = availability as? DwfApkRuntime.Availability.Unavailable
+    val unavailable =
+      if (!enabled) {
+        DwfApkRuntime.Availability.Unavailable(
+          ServeFeatureFlags.NATIVE_PREVIEW_DISABLED,
+          "this server does not offer the Native watch-face preview",
+        )
+      } else {
+        dwf.sessions.availability() as? DwfApkRuntime.Availability.Unavailable
+      }
     call.respondText(
       UI_BUILDER_JSON.encodeToString(
         DwfPreviewStatusV1(
@@ -179,6 +191,15 @@ internal fun Route.installUiBuilderDwfRoutes(
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
     val (actor, designId, document, request) =
       call.receiveDwfDesignRequest(service, authorization, dwf) ?: return@post
+    // After authorization and the design's own checks, before anything is packaged or started.
+    if (!enabled) {
+      call.respondDwfRefusal(
+        HttpStatusCode.ServiceUnavailable,
+        ServeFeatureFlags.NATIVE_PREVIEW_DISABLED,
+        "this server does not offer the Native watch-face preview",
+      )
+      return@post
+    }
     val source =
       when (val resolved = resolveDwfSource(dwf, document, request)) {
         is ResolvedSource.Ok -> resolved.source
@@ -239,29 +260,13 @@ internal fun Route.installUiBuilderDwfRoutes(
     val (_, designId, document, request) =
       call.receiveDwfDesignRequest(service, authorization, dwf) ?: return@post
     val result =
-      when (val resolved = resolveDwfSource(dwf, document, request)) {
-        is ResolvedSource.Ok ->
-          dwf.validation.validate(
-            designId,
-            document.createdAtEpochMillis,
-            document.revision,
-            resolved.source,
-          )
-        is ResolvedSource.Missing ->
-          WatchFaceValidation.Result.Ok(
-            dwf.validation.missingResources(
-              designId,
-              document.createdAtEpochMillis,
-              document.revision,
-              resolved.source,
-              resolved.missing,
-            ),
-          )
-        is ResolvedSource.Refused -> {
+      when (val validated = dwf.validateDesign(designId, document, request)) {
+        is DwfDesignValidation.Ran -> validated.result
+        is DwfDesignValidation.Refused -> {
           call.respondDwfRefusal(
             HttpStatusCode.UnprocessableEntity,
-            resolved.code,
-            resolved.reasons,
+            validated.code,
+            validated.reasons,
           )
           return@post
         }
@@ -347,6 +352,49 @@ internal fun Route.installUiBuilderDwfRoutes(
     serveDwfSocket(dwf, session)
   }
 }
+
+/** [UiBuilderDwfPreview.validateDesign]'s answer: a report (or why none), or an unusable face. */
+internal sealed interface DwfDesignValidation {
+  data class Ran(val result: WatchFaceValidation.Result) : DwfDesignValidation
+
+  /** The request names no face that can be validated (a 422 over HTTP). */
+  data class Refused(val code: String, val reasons: List<String>) : DwfDesignValidation
+}
+
+/**
+ * Validate [document]'s face as `watchface-validation` does, for the route and the MCP tool alike:
+ * the editor's XML if [request] carries any, else the server's export, with the design's pinned
+ * drawables; a bitmap nothing supplies is a failed check, not a refusal.
+ */
+internal suspend fun UiBuilderDwfPreview.validateDesign(
+  designId: String,
+  document: DesignDocumentV1,
+  request: DwfPreviewStartRequestV1 = DwfPreviewStartRequestV1(),
+): DwfDesignValidation =
+  when (val resolved = resolveDwfSource(this, document, request)) {
+    is ResolvedSource.Ok ->
+      DwfDesignValidation.Ran(
+        validation.validate(
+          designId,
+          document.createdAtEpochMillis,
+          document.revision,
+          resolved.source,
+        ),
+      )
+    is ResolvedSource.Missing ->
+      DwfDesignValidation.Ran(
+        WatchFaceValidation.Result.Ok(
+          validation.missingResources(
+            designId,
+            document.createdAtEpochMillis,
+            document.revision,
+            resolved.source,
+            resolved.missing,
+          ),
+        ),
+      )
+    is ResolvedSource.Refused -> DwfDesignValidation.Refused(resolved.code, resolved.reasons)
+  }
 
 private data class DwfDesignRequest(
   val actor: AuthenticatedUiBuilderActor,

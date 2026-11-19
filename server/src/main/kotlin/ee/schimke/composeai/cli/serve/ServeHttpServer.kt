@@ -722,6 +722,8 @@ class ServeHttpServer(
    * a UI builder; the routes then 404.
    */
   private val push: ServePushLane? = null,
+  /** The expensive optional work this box offers ([ServeFeatureFlags]); all off unless told. */
+  private val featureFlags: ServeFeatureFlags = ServeFeatureFlags(),
 ) {
 
   /**
@@ -893,6 +895,7 @@ class ServeHttpServer(
         references = uiBuilderReferenceStore,
         links = uiBuilderLinksStore,
         watchFacePush = watchFacePush,
+        watchFaces = uiBuilderDwfPreview,
         assets = designAssets,
         validator = uiBuilderValidator,
         reviews = uiBuilderReviewStore,
@@ -1391,7 +1394,8 @@ class ServeHttpServer(
               designService,
               sameOriginUiBuilderAuthorization,
               it,
-              watchFacePush,
+              watchFacePush = watchFacePush,
+              enabled = featureFlags.nativePreview,
             )
           }
           watchFacePush?.let { push ->
@@ -9211,6 +9215,7 @@ class ServeHttpServer(
                   },
               )
             },
+        featureFlags = featureFlags,
         uiBuilder =
           uiBuilderDiagnostics
             ?.takeIf { onlySystem == null }
@@ -18863,6 +18868,8 @@ private data class StatusResponse(
   val agentAccess: AgentAccessDto? = null,
   /** Aggregate UI-builder pressure counters. Owner and document identifiers are never included. */
   val uiBuilder: UiBuilderDto? = null,
+  /** Which of the server's expensive optional lanes are switched on ([ServeFeatureFlags]). */
+  val featureFlags: ServeFeatureFlags? = null,
   /**
    * This container's process census ([ServeProcessCensusSnapshot]), or null off Linux. `zombies` is
    * the alert: render daemons, compile jails and UI-builder renderers are subprocesses, and every

@@ -132,6 +132,11 @@ class ServeUiBuilderMcp(
    * absent).
    */
   private val watchFacePush: WatchFacePush? = null,
+  /**
+   * The `android-dwf` surface, for [VALIDATE_WATCH_FACE]: the packager's validators on a revision's
+   * face. Null on a host without the UI builder's watch-face lane (tool absent).
+   */
+  private val watchFaces: UiBuilderDwfPreview? = null,
   private val onLog: (String) -> Unit = { System.err.println(it) },
   /**
    * Bytes behind a design's `assets` map, so an agent can put a photograph in a design. Null
@@ -221,6 +226,10 @@ class ServeUiBuilderMcp(
   val supportsWatchFacePush: Boolean
     get() = watchFacePush != null
 
+  /** Whether this host has the watch-face lane, and so whether [VALIDATE_WATCH_FACE] exists. */
+  val supportsWatchFaceValidation: Boolean
+    get() = watchFaces != null
+
   /** Whether this host keeps reference overlays, and so whether the reference tools exist. */
   val supportsReferences: Boolean
     get() = references != null
@@ -299,6 +308,8 @@ class ServeUiBuilderMcp(
       SET_LINKS -> if (links == null) null else UiBuilderRouteCapability.WRITE
       // A write gated at the door; the push lane then admits only the design's owner.
       PUBLISH_WATCH_FACE -> if (watchFacePush == null) null else UiBuilderRouteCapability.WRITE
+      // The same gate as the HTTP route: the face goes to the packager, which is an export.
+      VALIDATE_WATCH_FACE -> if (watchFaces == null) null else UiBuilderRouteCapability.EXPORT
       // The reference overlay is gated as the browser's reference routes are: attaching one is
       // the design's own write, measuring against it the design's read.
       SET_REFERENCE -> if (references == null) null else UiBuilderRouteCapability.WRITE
@@ -492,6 +503,7 @@ class ServeUiBuilderMcp(
         GET_LINKS,
         SET_LINKS -> return linksTool(tool, args, actor)
         PUBLISH_WATCH_FACE -> return publishWatchFace(args, actor)
+        VALIDATE_WATCH_FACE -> return validateWatchFace(args, actor)
         VALIDATE -> return validate(args, actor)
         CHECK_DESIGN -> return checkDesign(args, actor)
         SIMULATE_ACTION -> return simulateAction(args, actor)
@@ -1834,6 +1846,45 @@ class ServeUiBuilderMcp(
         WATCHFACE_PUSH_JSON.encodeToString(WatchFacePushPublicationV1.serializer(), outcome.status)
       is WatchFacePush.Outcome.Refused ->
         throw McpRequestException("${outcome.code}: ${outcome.reason}")
+    }
+  }
+
+  /**
+   * Run the packager's validators on a `wff-watchface` design's revision ([validateDesign]) and
+   * reply with the report: every check, its findings with what to do about each, and the memory
+   * footprint against the active and ambient limits with the resources that dominate it. A failing
+   * face is a report with `passed: false`, not an error.
+   */
+  private suspend fun validateWatchFace(
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+  ): String {
+    val dwf = watchFaces ?: throw McpRequestException("this host does not validate watch faces")
+    val designId = args.requiredText("designId")
+    val snapshot =
+      execute(GetSnapshotRequestV1(designId = designId, revision = args.number("revision")), actor)
+        as? UiBuilderServiceResponse.Snapshot
+        ?: throw McpRequestException("no design `$designId` this actor can read")
+    val document = snapshot.snapshot.state.document
+    if (!dwf.isDwfCatalog(document.catalogPin.systemId)) {
+      throw McpRequestException(
+        "${DwfPreviewSurface.SOURCE_INVALID}: catalog `${document.catalogPin.systemId}` does " +
+          "not draw watch faces, so this design has nothing to validate",
+      )
+    }
+    val result =
+      when (val validated = dwf.validateDesign(designId, document)) {
+        is DwfDesignValidation.Refused ->
+          throw McpRequestException("${validated.code}: ${validated.reasons.joinToString("; ")}")
+        is DwfDesignValidation.Ran -> validated.result
+      }
+    return when (result) {
+      is WatchFaceValidation.Result.Ok ->
+        UI_BUILDER_JSON.encodeToString(WatchFaceValidationReportV1.serializer(), result.report)
+      is WatchFaceValidation.Result.Unavailable ->
+        throw McpRequestException("${result.code}: ${result.reason}")
+      is WatchFaceValidation.Result.Failed ->
+        throw McpRequestException("${result.code}: ${result.reason}")
     }
   }
 
@@ -4173,6 +4224,7 @@ class ServeUiBuilderMcp(
     const val GET_LINKS = "ui_builder_get_links"
     const val SET_LINKS = "ui_builder_set_links"
     const val PUBLISH_WATCH_FACE = "ui_builder_publish_watch_face"
+    const val VALIDATE_WATCH_FACE = "ui_builder_validate_watch_face"
     const val SHARE_DESIGN = "ui_builder_share_design"
     const val RENAME_DESIGN = "ui_builder_rename_design"
     const val DELETE_DESIGN = "ui_builder_delete_design"
@@ -4457,8 +4509,36 @@ class ServeUiBuilderMcp(
       references: Boolean = false,
       guidelineRecords: Boolean = false,
       watchFacePush: Boolean = false,
+      watchFaceValidation: Boolean = false,
     ): List<JsonObject> =
       listOfNotNull(
+        if (!watchFaceValidation) null
+        else
+          tool(
+            VALIDATE_WATCH_FACE,
+            "Check what a watch-face design (a `wff-watchface` catalog design) costs on a " +
+              "watch, with Google's own validators: the WFF schema, the memory footprint and " +
+              "the Watch Face Push checks a watch runs before it installs a face. Returns " +
+              "`passed` and one entry per check with its findings; each finding carries a " +
+              "`suggestion` saying what to change. The `memory-footprint` check's `memory` is " +
+              "the face's decoded size against `activeLimitBytes` and `ambientLimitBytes`, and " +
+              "its `contributors` list the resources that cost the most (pixel size, decoded " +
+              "bytes, the size each is drawn at). Keep both modes under their limits: downscale " +
+              "an image to the size it is drawn at, and give ambient a dim or reduced variant " +
+              "rather than the full-colour one. A bitmap the face names that the design does " +
+              "not pin fails `bundle-resources`; pin it with $PUT_ASSET. This runs the full " +
+              "packager, so call it when an edit pass is done and before " +
+              "$PUBLISH_WATCH_FACE, not after every edit; an unchanged face answers from " +
+              "cache. A failing face is a report with `passed: false`, not an error. A host whose " +
+              "operator left Google's validators off answers " +
+              "`${WatchFaceValidatorAvailability.DISABLED}`.",
+            """
+            {"type":"object","properties":{
+              "designId":{"type":"string"},
+              "revision":{"type":"integer","minimum":0,"description":"The revision to validate. Defaults to the current one."}
+            },"required":["designId"],"additionalProperties":false}
+            """,
+          ),
         if (!watchFacePush) null
         else
           tool(
@@ -4471,8 +4551,12 @@ class ServeUiBuilderMcp(
               "`version` moves only when the face itself changed. `published: false` stops " +
               "listing it. Only the design's owner may. A face the packager refuses is refused " +
               "here with its diagnostics. A public design is listed to every watch on its own, " +
-              "from its latest revision; publishing pins the revision, and `visibility: " +
-              "private` keeps a public design to the owner's linked watches only.",
+              "from a settled revision; publishing pins the revision, and `visibility: " +
+              "private` keeps a public design to the owner's linked watches only" +
+              (if (watchFaceValidation) {
+                "; run $VALIDATE_WATCH_FACE first, which says per check what to fix and how " +
+                  "much of the memory budget the face uses."
+              } else "."),
             """
             {"type":"object","properties":{
               "designId":{"type":"string"},

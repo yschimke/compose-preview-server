@@ -112,7 +112,9 @@ The design's owner publishes from the editor ("Publish to watch") through
 | `DELETE …/designs/{id}/watch-face-publication` | unpublish |
 
 under `/api/ui-builder/v1`. MCP agents use `ui_builder_publish_watch_face` with `{"designId",
-"published", "visibility"}` instead; the HTTP routes are the person's own:
+"published", "visibility"}` instead, after `ui_builder_validate_watch_face` with `{"designId"}`,
+which returns the validation report described in [the preview design](../design/UI_BUILDER_WATCH_FACE_ANDROID_PREVIEW.md#validation-report);
+the HTTP routes are the person's own:
 
 - **Only the design's owner, in their own signed-in session.** A delegated grant (an agent acting
   for the owner) and an agent's own identity are `403 owner_session_required`, exactly as `/link`

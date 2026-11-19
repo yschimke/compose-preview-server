@@ -291,6 +291,30 @@
         }
       }
     },
+    "features": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "nativePreview": {
+          "description": "Start the Android watch-face runtime for a design's Native pane. Off unless set: the pane then says the server does not offer it.",
+          "type": "boolean",
+          "x-env": "SERVE_NATIVE_PREVIEW",
+          "x-apply": "restart",
+          "x-roles": [
+            "preview"
+          ]
+        },
+        "watchFaceValidation": {
+          "description": "Serve the Google watch-face validator route. Off unless set.",
+          "type": "boolean",
+          "x-env": "SERVE_WATCH_FACE_VALIDATION",
+          "x-apply": "restart",
+          "x-roles": [
+            "preview"
+          ]
+        }
+      }
+    },
     "agents": {
       "type": "object",
       "additionalProperties": false,

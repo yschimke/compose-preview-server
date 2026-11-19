@@ -348,12 +348,18 @@ class ServeCatalogMcp(
             " UI-builder tools accept optional agentName and agentModel for the participant toolbar; report your client name and current model only when known. Active tool calls and the last 30 seconds of activity appear on that design. A UI-builder document's `home` is canonical: edit that original, and never " +
               "re-import it as a second design or move, save back, or discard it without the " +
               "human explicitly choosing." +
-              if (uiBuilder?.supportsComments != true) ""
+              (if (uiBuilder?.supportsComments != true) ""
               else
                 " Keep design discussion at that home: read and " +
                   "acknowledge its pending comments and post design-specific findings there; an " +
                   "external issue or pull-request link supplements but never replaces that " +
-                  "discussion.",
+                  "discussion.") +
+              (if (uiBuilder?.supportsWatchFaceValidation != true) ""
+              else
+                " A watch face has a memory budget for each of active and ambient mode: when an " +
+                  "edit pass on a `wff-watchface` design is done, and before publishing it, call " +
+                  "${ServeUiBuilderMcp.VALIDATE_WATCH_FACE} and act on its suggestions until the " +
+                  "face passes within both limits."),
       )
     }
   }
@@ -777,6 +783,7 @@ class ServeCatalogMcp(
           it.supportsReferences,
           it.supportsGuidelineRecords,
           it.supportsWatchFacePush,
+          it.supportsWatchFaceValidation,
         ),
       )
     }

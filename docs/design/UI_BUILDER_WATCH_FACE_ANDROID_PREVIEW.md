@@ -237,6 +237,14 @@ the production default; the editor then keeps to its in-browser checks), and
 a `502` that the validator ran and returned nothing readable. `GET` on the same path returns the
 last report on the current revision (or `?revision=`), and `404` when there is none.
 
+Agents reach the same report through the MCP tool `ui_builder_validate_watch_face`
+(`{designId, revision?}`, EXPORT). It uses the server's own export of the design, never editor
+XML. Its description and the MCP `initialize` instructions tell an agent to call it when an edit
+pass is done and before `ui_builder_publish_watch_face`, and to act on each finding's `suggestion`
+until the face fits both the active and the ambient limits. The tool runs the full packager, so it
+runs only when asked. A cheap per-edit cost summary waits on the packager's SDK-free estimate
+(`mode: "estimate"`, from watchface-tools), and nothing estimates a face on an ordinary edit.
+
 ## What this does not do
 
 - It does not implement the fast Remote Compose path or the WFF → RC translator (compose-ai-tools),
