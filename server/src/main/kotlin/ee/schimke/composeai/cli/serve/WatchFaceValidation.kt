@@ -124,12 +124,27 @@ internal sealed interface WatchFaceValidatorAvailability {
   data class Unavailable(val code: String, val reason: String) : WatchFaceValidatorAvailability
 
   companion object {
-    /** The production answer, re-read per call, like the push packaging's. */
+    /** The server flag that turns Google's validators on; off, the route is [DISABLED]. */
+    const val DISABLED = "watch_face_validation_disabled"
+
+    /**
+     * The production answer, re-read per call, like the push packaging's. [enabled] is the
+     * deployment's flag: the validators start a packager JVM per face, so a server runs them only
+     * when its operator chose to, and the editor otherwise keeps to its in-browser checks.
+     */
     fun production(
       home: File,
+      enabled: () -> Boolean,
       sdk: () -> DwfAndroidSdk? = { DwfAndroidSdk.locate() },
       libDir: () -> File? = { locateWffPackagerDir() },
-    ): () -> WatchFaceValidatorAvailability = {
+    ): () -> WatchFaceValidatorAvailability = available@{
+      if (!enabled()) {
+        return@available Unavailable(
+          DISABLED,
+          "this server does not run Google's watch-face validators (its " +
+            "`watchFaceValidation` flag is off); the editor's in-browser checks still apply",
+        )
+      }
       val located = sdk()
       val lib = libDir()
       when {

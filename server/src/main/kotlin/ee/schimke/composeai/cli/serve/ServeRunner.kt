@@ -3644,6 +3644,7 @@ public class ServeRunner(
         uiBuilderProfile = uiBuilderProfile,
         uiBuilderHostRoot = uiBuilderHostRoot,
         catalogLoads = catalogLoads,
+        catalogBakedBundle = { system -> catalogStore?.bakedBundle(system) },
         heroCacheDir = catalogCacheDirFlag?.takeIf { it != "none" }?.let { File(it, "heroes") },
         catalogRefresh = catalogRefresh,
         localRebuild = localRebuild,
@@ -3853,6 +3854,8 @@ public class ServeRunner(
                 WatchFaceValidation(
                   WatchFaceValidatorAvailability.production(
                     home = composeAiCacheDir("wff-validate-home"),
+                    // Off until the deployment's `watchFaceValidation` flag is wired here.
+                    enabled = { false },
                   ),
                 ),
             )
