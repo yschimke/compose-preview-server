@@ -1958,6 +1958,23 @@ class WatchFacePushRoutesTest {
     assertNull(publication("broken").build)
   }
 
+  @Test
+  fun `a purged design takes its build state with it`() {
+    start()
+    createDesign(alice, "broken", "Broken", public = true)
+    val aliceToken = link(alice)
+    faces["broken"] = "<WatchFace id=\"broken\" state=\"bad\"/>"
+    // A refused first publish writes no publication, only its build state.
+    assertEquals(422, publish(alice, "broken", "public").code)
+    assertNotNull(push.queue.status("broken"))
+    assertNotNull(pendingList(aliceToken)["broken"])
+    // Purged from the trash or deleted by an administrator: the production callbacks retire the
+    // store's record, and whoever creates the id next sees nothing of this design's build.
+    push.store.retire("broken")
+    assertNull(push.queue.status("broken"))
+    assertNull(pendingList(aliceToken)["broken"])
+  }
+
   private fun document(id: String, title: String) =
     DesignDocumentV1(
       schema = "compose-ui-builder-document/v1-candidate",

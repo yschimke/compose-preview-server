@@ -349,6 +349,17 @@ internal constructor(
 
   private fun generation(designId: String): Long = generations[designId] ?: 0L
 
+  init {
+    // A design purged for good takes its build with it, as an unpublish does: whoever creates the
+    // id next must not see this design's progress or diagnostics, nor have its build commit.
+    store.onRetired { designId ->
+      generations.merge(designId, 1L, Long::plus)
+      queue.clear(designId)
+      refusals.remove(designId)
+      automatic.forget(designId)
+    }
+  }
+
   /** Build and commit [ready]; the caller holds the build queue's lock. */
   private suspend fun finish(
     service: UiBuilderServicePort,

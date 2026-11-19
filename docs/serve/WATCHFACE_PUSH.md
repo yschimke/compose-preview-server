@@ -257,7 +257,8 @@ deliberate events, never on a request:
   leaves every list at once — its owner's watches included, since it was never published to them —
   and its APK is `404`. Made public again, it comes back as it was. A purged design's publication is
   retired as any other (#1998), and a design recreated under its id is a different design: it starts
-  above every version already installed and inherits nothing.
+  above every version already installed and inherits nothing, not even the purged design's build
+  progress, refusal or diagnostics (a build still running is never committed).
 - **Progress.** The owner's `GET …/watch-face-publication` shows the automatic build's `build` too:
   `pending` with `scheduledAtEpochMillis` while it settles, then `building`, `built`, `refused`, or
   `failed` with `nextRetryAtEpochMillis`.
