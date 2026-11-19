@@ -45,6 +45,7 @@ class ServeUiBuilderDwfRoutesTest {
     dwfCatalog: String = "m3-catalog",
     tickMillis: Long = 1000,
     animatedTickMillis: Long = 250,
+    nativePreview: Boolean = true,
     sourceFor: (ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1) -> DwfSource? = { null },
   ): ServeHttpServer {
     runtime.availability = availability
@@ -72,7 +73,7 @@ class ServeUiBuilderDwfRoutesTest {
         uiBuilderService = service,
         uiBuilderDwfPreview =
           UiBuilderDwfPreview(
-            sessions = DwfPreviewSessions(runtime),
+            sessions = DwfPreviewSessions(runtime, enabled = { nativePreview }),
             isDwfCatalog = { it == dwfCatalog },
             tickMillis = tickMillis,
             animatedTickMillis = animatedTickMillis,
@@ -455,6 +456,28 @@ class ServeUiBuilderDwfRoutesTest {
     } finally {
       socket.close(1000, null)
     }
+  }
+
+  @Test
+  fun `with the native-preview flag off both starts are 503 and status says disabled`() {
+    start(nativePreview = false)
+    val status = obj(get("$base/status").second)
+    assertEquals(false, status["available"]!!.jsonPrimitive.boolean)
+    assertEquals(
+      DwfPreviewSurface.NATIVE_PREVIEW_DISABLED,
+      status["code"]!!.jsonPrimitive.content,
+    )
+    for (body in
+      listOf("""{"wffXml":"<WatchFace/>"}""", """{"wffXml":"<WatchFace/>","async":true}""")) {
+      val (code, answer) = post(base, body)
+      assertEquals(503, code, answer)
+      assertEquals(
+        DwfPreviewSurface.NATIVE_PREVIEW_DISABLED,
+        obj(answer)["code"]!!.jsonPrimitive.content,
+      )
+    }
+    assertTrue(runtime.packaged.isEmpty())
+    assertTrue(runtime.connections.isEmpty())
   }
 
   @Test

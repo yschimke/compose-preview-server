@@ -273,6 +273,42 @@ class DwfPreviewStagesTest {
   }
 
   @Test
+  fun `with the native-preview flag off nothing starts and nothing reaches the runtime`() {
+    var flag = false
+    val s = DwfPreviewSessions(runtime, now = { clock }, executor = deferred, enabled = { flag })
+    val unavailable = assertIs<DwfApkRuntime.Availability.Unavailable>(s.availability())
+    assertEquals(DwfPreviewSurface.NATIVE_PREVIEW_DISABLED, unavailable.code)
+    assertEquals(
+      DwfPreviewSurface.NATIVE_PREVIEW_DISABLED,
+      assertIs<DwfPreviewSessions.Started.Refused>(s.start("d", 1, "a", source())).code,
+    )
+    assertEquals(
+      DwfPreviewSurface.NATIVE_PREVIEW_DISABLED,
+      assertIs<DwfPreviewSessions.Started.Refused>(
+          s.startAsync("d", 1, "a", 2, false) { DwfPreviewSessions.Resolution.Ok(source()) },
+        )
+        .code,
+    )
+    // Turned off after a start: neither the waiting preparation nor a later frame starts anything.
+    flag = true
+    val started =
+      assertIs<DwfPreviewSessions.Started.Ok>(
+          s.startAsync("d", 1, "a", 2, false) { DwfPreviewSessions.Resolution.Ok(source()) },
+        )
+        .session
+    val live = assertIs<DwfPreviewSessions.Started.Ok>(s.start("d", 1, "b", source())).session
+    flag = false
+    pending.removeFirst().run()
+    assertEquals(DwfPreviewSurface.NATIVE_PREVIEW_DISABLED, s.progress(started).code)
+    assertEquals(
+      DwfPreviewSurface.NATIVE_PREVIEW_DISABLED,
+      assertIs<DwfPreviewSessions.Frame.Failed>(s.frame(live.id)).code,
+    )
+    assertEquals(1, runtime.packaged.size, "only the sync start packaged, before the flag went off")
+    assertTrue(runtime.connections.isEmpty(), "no runtime was started")
+  }
+
+  @Test
   fun `faces that move between seconds are recognised`() {
     assertTrue(
       source("""<Transform target="alpha" value="sin([SECOND_MILLISECOND])"/>""").animates,
