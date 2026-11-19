@@ -26,7 +26,11 @@ import java.nio.charset.StandardCharsets
 import java.util.Base64
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
@@ -75,6 +79,12 @@ internal constructor(
     ),
   /** How often a ticking session redraws. One second is the watch's own granularity. */
   internal val tickMillis: Long = 1000,
+  /**
+   * How often a ticking session redraws a face that moves between seconds ([DwfSource.animates]).
+   * Each frame is a screenshot of a Robolectric sandbox, so this is a ceiling, not a promise: the
+   * loop never asks for the next frame before the last one has been sent.
+   */
+  internal val animatedTickMillis: Long = 250,
 )
 
 internal const val UI_BUILDER_DWF_PREVIEW_PATH = "/api/ui-builder/v1/designs/{designId}/dwf-preview"
@@ -95,6 +105,12 @@ internal data class DwfPreviewStartRequestV1(
   /** Path inside `res/` → base64 bytes. */
   val assets: Map<String, String> = emptyMap(),
   val label: String? = null,
+  /**
+   * Answer at once (`202 Accepted`) and do the export, the packaging and the first frame in the
+   * background, reporting each [DwfStage] on the session's status and socket. Without it the
+   * request packages before answering, as it always has, and a packager refusal is its `422`.
+   */
+  val async: Boolean = false,
 )
 
 @Serializable
@@ -108,6 +124,40 @@ internal data class DwfPreviewStartedV1(
   val socketPath: String,
   /** The tab: open this in a new window. */
   val pagePath: String,
+  /** The session's [DwfPreviewSessionStatusV1], relative to this server's origin. */
+  val statusPath: String? = null,
+  /** Where the session is now: `queued` or the first working stage for an async start. */
+  val stage: String? = null,
+)
+
+/**
+ * One session's way to its first frame. The same fields arrive on the socket as a `stage` message
+ * (`{"type":"stage",…}`) whenever the stage changes, and about once a second while it has not.
+ */
+@Serializable
+internal data class DwfPreviewSessionStatusV1(
+  val schema: String = "compose-preview/ui-builder-dwf-preview-session/v1",
+  val sessionId: String,
+  /**
+   * `queued`, `exporting`, `packaging`, `starting-runtime`, `installing`, `loading-face`, `live`,
+   * `failed`.
+   */
+  val stage: String,
+  /** The stage's place among [steps] working stages; 0 queued, [steps] live, kept on failure. */
+  val step: Int,
+  val steps: Int,
+  /** A sentence for the pane: "Packaging the watch face", "Using the cached package", … */
+  val label: String,
+  val elapsedMillis: Long,
+  val stageElapsedMillis: Long,
+  val cachedPackage: Boolean,
+  /** Sessions ahead of this one for a free runtime; only while `queued`. */
+  val queueAhead: Int? = null,
+  /** On `failed`: the refusal code and the diagnostic (a packager refusal's text, verbatim). */
+  val code: String? = null,
+  val reason: String? = null,
+  /** How often a live, ticking session sends a frame. */
+  val frameIntervalMillis: Long? = null,
 )
 
 @Serializable
@@ -125,6 +175,8 @@ internal data class DwfPreviewStatusV1(
   val reason: String? = null,
   val sessions: Int,
   val maxSessions: Int,
+  /** Async starts waiting for one of the [maxSessions] runtime slots. */
+  val queued: Int = 0,
   /**
    * "Publish to watch": present only when this host builds push APKs and the design's catalog draws
    * watch faces ([WatchFacePush.capability]). Independent of [available], which is the preview's.
@@ -176,6 +228,7 @@ internal fun Route.installUiBuilderDwfRoutes(
           reason = unavailable?.reason,
           sessions = dwf.sessions.sessionCount,
           maxSessions = DwfPreviewSessions.DEFAULT_MAX_SESSIONS,
+          queued = dwf.sessions.queuedCount,
           watchFacePush = watchFacePush?.capability(service, authorization, call, designId),
         ),
       ),
@@ -191,13 +244,69 @@ internal fun Route.installUiBuilderDwfRoutes(
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
     val (actor, designId, document, request) =
       call.receiveDwfDesignRequest(service, authorization, dwf) ?: return@post
-    // After authorization and the design's own checks, before anything is packaged or started.
+    // After authorization and the design's own checks, before anything is packaged or started,
+    // and before the async start too: every session, async and queued ones included, is born here.
     if (!enabled) {
       call.respondDwfRefusal(
         HttpStatusCode.ServiceUnavailable,
         ServeFeatureFlags.NATIVE_PREVIEW_DISABLED,
         "this server does not offer the Native watch-face preview",
       )
+      return@post
+    }
+    if (request.async) {
+      val editorSource =
+        request.wffXml?.let {
+          when (val resolved = resolveDwfSource(dwf, document, request)) {
+            is ResolvedSource.Ok -> resolved.source
+            is ResolvedSource.Missing -> {
+              call.respondDwfRefusal(
+                HttpStatusCode.UnprocessableEntity,
+                WatchFaceDrawables.MISSING_RESOURCE,
+                resolved.missing,
+              )
+              return@post
+            }
+            is ResolvedSource.Refused -> {
+              call.respondDwfRefusal(
+                HttpStatusCode.UnprocessableEntity,
+                resolved.code,
+                resolved.reasons,
+              )
+              return@post
+            }
+          }
+        }
+      // Off the event loop: admission is quick, but it releases abandoned sessions on the way.
+      val started =
+        withContext(Dispatchers.IO) {
+          dwf.sessions.startAsync(
+            designId = designId,
+            revision = document.revision,
+            ownerActorId = actor.actorId,
+            wffVersion = editorSource?.wffVersion ?: request.wffVersion,
+            exports = editorSource == null,
+            controls = LIVE_CONTROLS,
+          ) {
+            if (editorSource != null) DwfPreviewSessions.Resolution.Ok(editorSource)
+            else
+              when (val resolved = resolveDwfSource(dwf, document, request)) {
+                is ResolvedSource.Ok -> DwfPreviewSessions.Resolution.Ok(resolved.source)
+                is ResolvedSource.Missing ->
+                  DwfPreviewSessions.Resolution.Refused(
+                    WatchFaceDrawables.MISSING_RESOURCE,
+                    resolved.missing.joinToString("\n"),
+                  )
+                is ResolvedSource.Refused ->
+                  // A session's failure is one diagnostic; each missing resource keeps its line.
+                  DwfPreviewSessions.Resolution.Refused(
+                    resolved.code,
+                    resolved.reasons.joinToString("\n"),
+                  )
+              }
+          }
+        }
+      call.respondDwfStarted(designId, document.revision, started, HttpStatusCode.Accepted)
       return@post
     }
     val source =
@@ -224,29 +333,27 @@ internal fun Route.installUiBuilderDwfRoutes(
     // 422 on this request; the daemon boot is on the first frame. Off the event loop either way.
     val started =
       withContext(Dispatchers.IO) {
-        dwf.sessions.start(designId, document.revision, actor.actorId, source)
+        dwf.sessions.start(designId, document.revision, actor.actorId, source, LIVE_CONTROLS)
       }
-    when (started) {
-      is DwfPreviewSessions.Started.Refused ->
-        call.respondDwfRefusal(started.code.httpStatus(), started.code, started.reason)
-      is DwfPreviewSessions.Started.Ok -> {
-        val id = started.session.id
-        call.respondText(
-          UI_BUILDER_JSON.encodeToString(
-            DwfPreviewStartedV1(
-              designId = designId,
-              revision = document.revision,
-              sessionId = id,
-              wffVersion = source.wffVersion,
-              socketPath = "/api/ui-builder/v1/designs/$designId/dwf-preview/$id/ws",
-              pagePath = "/ui-builder/$designId/watch-face?session=$id",
-            ),
-          ),
-          ContentType.Application.Json,
-          HttpStatusCode.Created,
-        )
-      }
+    call.respondDwfStarted(designId, document.revision, started, HttpStatusCode.Created)
+  }
+
+  /** One session's stage, for a client that polls rather than holds the socket. */
+  get(UI_BUILDER_DWF_SESSION_PATH) {
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    val actor =
+      (authorization.authorize(call, UiBuilderRouteCapability.EXPORT)
+          as? UiBuilderAuthorizationDecision.Authorized)
+        ?.actor
+    val session = actor?.let { ownedSession(dwf, it, call) }
+    if (session == null) {
+      call.respondText("not found", status = HttpStatusCode.NotFound)
+      return@get
     }
+    call.respondText(
+      UI_BUILDER_JSON.encodeToString(dwfSessionStatus(dwf, session)),
+      ContentType.Application.Json,
+    )
   }
 
   /**
@@ -479,51 +586,94 @@ private suspend fun ApplicationCall.receiveDwfDesignRequest(
 
 /**
  * The tab's socket: the server half of `composeai-stream/1` (`lane`, `frame`, `error`, the same
- * shapes the viewer's own socket uses, so a frame handler written for that works here), with one
- * client message of its own, `controls`, because the viewer's `setOverrides` is a flat string map
- * keyed on a served preview, and a watch face's controls are typed.
+ * shapes the viewer's own socket uses, so a frame handler written for that works here), with
+ * `stage` messages of its own ([DwfPreviewSessionStatusV1] plus `"type":"stage"`) while the session
+ * is on its way to its first frame, and one client message of its own, `controls`, because the
+ * viewer's `setOverrides` is a flat string map keyed on a served preview, and a watch face's
+ * controls are typed.
  *
  * Client → server: `{"type":"controls","controls":{…}}` (a partial [DwfControls.patch]),
- * `{"type":"requestFrame"}`, `{"type":"visibility","visible":false}` (a hidden tab stops ticking).
- * A frame follows every accepted `controls` and, while `ticking`, every
- * [UiBuilderDwfPreview.tickMillis].
+ * `{"type":"requestFrame"}`, `{"type":"visibility","visible":false}` (a hidden tab gets no frames
+ * until it says it is visible again). A frame follows every accepted `controls` and, while the
+ * session is live and `ticking` (the default: a session starts on the wall clock), every
+ * [UiBuilderDwfPreview.tickMillis] — or [UiBuilderDwfPreview.animatedTickMillis] for a face that
+ * moves between seconds.
+ *
+ * The socket holds the session: while one is attached the session is never released as abandoned,
+ * and when the last one goes the session survives a reload's worth of grace and no more.
  */
 private suspend fun DefaultWebSocketServerSession.serveDwfSocket(
   dwf: UiBuilderDwfPreview,
   session: DwfPreviewSessions.Session,
 ) {
   var visible = true
-  send(Frame.Text(dwfLaneMessage(session)))
-
-  suspend fun drawFrame() {
-    val frame = withContext(Dispatchers.IO) { dwf.sessions.frame(session.id) }
-    when (frame) {
-      is DwfPreviewSessions.Frame.Ok ->
-        send(
-          Frame.Text(
-            ServeStreamProtocol.frameMessage(
-              frame.seq,
-              frame.widthPx ?: 0,
-              frame.heightPx ?: 0,
-              frame.png,
-            ),
-          ),
-        )
-      is DwfPreviewSessions.Frame.Failed ->
-        send(Frame.Text(ServeStreamProtocol.errorMessage("${frame.code}: ${frame.reason}")))
-    }
-  }
-
+  dwf.sessions.attach(session)
   try {
-    drawFrame()
+    send(Frame.Text(dwfLaneMessage(dwf, session)))
+
+    suspend fun sendFrame(frame: DwfPreviewSessions.Frame) {
+      when (frame) {
+        is DwfPreviewSessions.Frame.Ok ->
+          send(
+            Frame.Text(
+              ServeStreamProtocol.frameMessage(
+                frame.seq,
+                frame.widthPx ?: 0,
+                frame.heightPx ?: 0,
+                frame.png,
+              ),
+            ),
+          )
+        is DwfPreviewSessions.Frame.Failed ->
+          send(Frame.Text(ServeStreamProtocol.errorMessage("${frame.code}: ${frame.reason}")))
+      }
+    }
+
+    suspend fun drawFrame() {
+      sendFrame(withContext(Dispatchers.IO) { dwf.sessions.frame(session.id) })
+    }
+
+    // The way to the first frame: stage messages while an async start prepares (or while this
+    // socket's own first frame boots the runtime), then that frame.
+    coroutineScope {
+      val reporter = launch {
+        var last: DwfStage? = null
+        var sentAt = 0L
+        while (isActive) {
+          val progress = dwf.sessions.progress(session)
+          val at = System.currentTimeMillis()
+          if (progress.stage != last || at - sentAt >= STAGE_HEARTBEAT_MILLIS) {
+            send(Frame.Text(dwfStageMessage(dwf, session)))
+            last = progress.stage
+            sentAt = at
+          }
+          if (progress.stage.terminal && !session.preparing) break
+          delay(STAGE_POLL_MILLIS)
+        }
+      }
+      while (session.preparing) delay(STAGE_POLL_MILLIS)
+      val warm = session.warmFrame?.also { session.warmFrame = null }
+      when {
+        warm != null -> sendFrame(warm)
+        session.stage != DwfStage.FAILED -> drawFrame()
+      }
+      reporter.cancelAndJoin()
+      send(Frame.Text(dwfStageMessage(dwf, session)))
+      if (session.stage == DwfStage.FAILED) {
+        session.failure?.let { sendFrame(it) }
+      }
+    }
+
     // One loop does both jobs: block for a client message for at most a tick, and if nothing came
     // and the face is ticking, redraw. `receiveCatching`-with-timeout keeps frames and control
     // handling on one coroutine, so they can never interleave on the daemon.
     while (isActive) {
-      val ticking = session.controls.ticking && visible
+      val ticking = session.controls.ticking && visible && session.stage == DwfStage.LIVE
       val message =
         if (ticking)
-          kotlinx.coroutines.withTimeoutOrNull(dwf.tickMillis) { incoming.receiveCatching() }
+          kotlinx.coroutines.withTimeoutOrNull(frameInterval(dwf, session)) {
+            incoming.receiveCatching()
+          }
         else incoming.receiveCatching()
       if (message == null) {
         drawFrame()
@@ -536,12 +686,15 @@ private suspend fun DefaultWebSocketServerSession.serveDwfSocket(
           when (val patched = dwf.sessions.patch(session.id, parsed.patch)) {
             is DwfControls.Patched.Ok -> {
               drawFrame()
-              send(Frame.Text(dwfLaneMessage(session)))
+              send(Frame.Text(dwfLaneMessage(dwf, session)))
             }
             is DwfControls.Patched.Invalid ->
               send(Frame.Text(ServeStreamProtocol.errorMessage(patched.reason)))
           }
-        DwfClientMessage.RequestFrame -> drawFrame()
+        DwfClientMessage.RequestFrame -> {
+          drawFrame()
+          send(Frame.Text(dwfStageMessage(dwf, session)))
+        }
         is DwfClientMessage.Visibility -> {
           visible = parsed.visible
           if (visible) drawFrame()
@@ -551,20 +704,69 @@ private suspend fun DefaultWebSocketServerSession.serveDwfSocket(
       }
     }
   } catch (_: CancellationException) {
-    // The tab went away; the session stays until it is closed or idles out, so a reload resumes.
+    // The tab went away; the session stays for the reload grace, so a reload resumes it.
+  } finally {
+    dwf.sessions.detach(session)
   }
 }
 
-private fun dwfLaneMessage(session: DwfPreviewSessions.Session): String =
+private const val STAGE_POLL_MILLIS = 250L
+private const val STAGE_HEARTBEAT_MILLIS = 1_000L
+
+/** Faster for a face that moves between seconds; one second, the watch's own, for the rest. */
+private fun frameInterval(dwf: UiBuilderDwfPreview, session: DwfPreviewSessions.Session): Long =
+  if (session.sourceOrNull?.animates == true) dwf.animatedTickMillis else dwf.tickMillis
+
+/** A new session runs on the wall clock, so a face shows the time and moves without a click. */
+internal val LIVE_CONTROLS = DwfControls(ticking = true)
+
+private fun dwfLaneMessage(dwf: UiBuilderDwfPreview, session: DwfPreviewSessions.Session): String =
   kotlinx.serialization.json
     .buildJsonObject {
       put("type", JsonPrimitive("lane"))
       put("input", JsonPrimitive(false))
       put("renderer", JsonPrimitive("dwf-apk"))
-      put("wffVersion", JsonPrimitive(session.source.wffVersion))
+      put("wffVersion", JsonPrimitive(session.wffVersion))
       put("ticking", JsonPrimitive(session.controls.ticking))
+      put("frameIntervalMillis", JsonPrimitive(frameInterval(dwf, session)))
     }
     .toString()
+
+internal fun dwfSessionStatus(
+  dwf: UiBuilderDwfPreview,
+  session: DwfPreviewSessions.Session,
+): DwfPreviewSessionStatusV1 {
+  val p = dwf.sessions.progress(session)
+  return DwfPreviewSessionStatusV1(
+    sessionId = session.id,
+    stage = p.stage.wire,
+    step = p.step,
+    steps = p.steps,
+    label = p.label,
+    elapsedMillis = p.elapsedMillis,
+    stageElapsedMillis = p.stageElapsedMillis,
+    cachedPackage = p.cachedPackage,
+    queueAhead = p.queueAhead,
+    code = p.code,
+    reason = p.reason,
+    frameIntervalMillis = frameInterval(dwf, session).takeIf { session.controls.ticking },
+  )
+}
+
+private fun dwfStageMessage(dwf: UiBuilderDwfPreview, session: DwfPreviewSessions.Session): String {
+  val status =
+    UI_BUILDER_JSON.encodeToJsonElement(
+      DwfPreviewSessionStatusV1.serializer(),
+      dwfSessionStatus(dwf, session),
+    ) as JsonObject
+  return JsonObject(
+      buildMap {
+        put("type", JsonPrimitive("stage"))
+        status.forEach { (k, v) -> if (k != "schema") put(k, v) }
+      },
+    )
+    .toString()
+}
 
 internal sealed interface DwfClientMessage {
   data class Controls(val patch: JsonObject) : DwfClientMessage
@@ -686,6 +888,39 @@ private fun String.httpStatus(): HttpStatusCode =
     DwfPreviewSurface.TOO_MANY_SESSIONS -> HttpStatusCode.TooManyRequests
     else -> HttpStatusCode.UnprocessableEntity
   }
+
+private suspend fun ApplicationCall.respondDwfStarted(
+  designId: String,
+  revision: Long,
+  started: DwfPreviewSessions.Started,
+  status: HttpStatusCode,
+) {
+  when (started) {
+    is DwfPreviewSessions.Started.Refused ->
+      respondDwfRefusal(started.code.httpStatus(), started.code, started.reason)
+    is DwfPreviewSessions.Started.Ok -> {
+      val session = started.session
+      val id = session.id
+      val base = "/api/ui-builder/v1/designs/$designId/dwf-preview/$id"
+      respondText(
+        UI_BUILDER_JSON.encodeToString(
+          DwfPreviewStartedV1(
+            designId = designId,
+            revision = revision,
+            sessionId = id,
+            wffVersion = session.wffVersion,
+            socketPath = "$base/ws",
+            pagePath = "/ui-builder/$designId/watch-face?session=$id",
+            statusPath = base,
+            stage = session.stage.wire,
+          ),
+        ),
+        ContentType.Application.Json,
+        status,
+      )
+    }
+  }
+}
 
 private suspend fun ApplicationCall.respondDwfRefusal(
   status: HttpStatusCode,

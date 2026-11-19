@@ -26,6 +26,16 @@ internal class FakeDwfRuntime(
     get() = connections.flatMap { it.log }
 
   var statusAnswer: JsonElement? = healthyStatus()
+
+  /** Answers for the next `watchface status` commands, before [statusAnswer] takes over. */
+  val statusScript = ArrayDeque<JsonElement?>()
+
+  /** What [isPackaged] answers: whether the packager would be skipped. */
+  var cached = false
+
+  /** Called before each command and each connect, to observe a session mid-frame. */
+  var onCommand: ((DwfCommand) -> Unit)? = null
+  var onConnect: (() -> Unit)? = null
   var failNext: String? = null
 
   /** When set, [packageApk] fails the way the packager does: a refusal with these diagnostics. */
@@ -39,8 +49,12 @@ internal class FakeDwfRuntime(
     return File(dir, "wff-${source.digest().take(12)}.apk").also { it.writeBytes(byteArrayOf(1)) }
   }
 
-  override fun connect(initialApk: File): DwfDaemonConnection =
-    FakeConnection().also { connections += it }
+  override fun isPackaged(source: DwfSource): Boolean = cached
+
+  override fun connect(initialApk: File): DwfDaemonConnection {
+    onConnect?.invoke()
+    return FakeConnection().also { connections += it }
+  }
 
   inner class FakeConnection : DwfDaemonConnection {
     val log = mutableListOf<DwfCommand>()
@@ -52,13 +66,15 @@ internal class FakeDwfRuntime(
         failNext = null
         throw DwfRuntimeException(it)
       }
+      onCommand?.invoke(command)
       log += command
       return when {
         command.cmd == "screenshot" -> {
           File(command.payload["path"]!!.let { (it as JsonPrimitive).content }).writeBytes(PNG_1X1)
           null
         }
-        command.cmd == "watchface" && op(command) == "status" -> statusAnswer
+        command.cmd == "watchface" && op(command) == "status" ->
+          if (statusScript.isNotEmpty()) statusScript.removeFirst() else statusAnswer
         else -> null
       }
     }

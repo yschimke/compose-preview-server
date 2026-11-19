@@ -56,6 +56,9 @@ internal object UiBuilderDwfPage {
   button { padding:4px 10px; font:inherit; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:4px; cursor:pointer; }
   #status { color:var(--muted); min-height:1.4em; }
   #status.error { color:#d93025; }
+  #progress { display:none; margin:4px 0 0; }
+  #progress progress { width:100%; max-width:420px; height:8px; accent-color:var(--accent); }
+  #steplabel { color:var(--muted); font-size:12px; }
   .row { display:flex; gap:8px; align-items:center; }
 </style>
 </head>
@@ -66,6 +69,7 @@ internal object UiBuilderDwfPage {
     <p class="sub">Drawn by the Wear OS watch-face runtime. The editor's own preview is the fast one; this is the real one.</p>
     <div id="stage" aria-label="Watch face"><img id="frame" alt="" hidden></div>
     <p id="status" role="status">Starting…</p>
+    <div id="progress"><progress id="bar" max="5" value="0"></progress><div id="steplabel"></div></div>
   </section>
   <section>
     <div id="banner" role="alert"><strong id="banner-title"></strong><span id="banner-body"></span></div>
@@ -111,6 +115,25 @@ internal object UiBuilderDwfPage {
   var socket = null;
 
   function say(text, isError) { statusEl.textContent = text; statusEl.className = isError ? 'error' : ''; }
+  var live = false;
+  function stage(m) {
+    var progressEl = document.getElementById('progress');
+    if (m.stage === 'live') { progressEl.style.display = 'none'; live = true; return; }
+    live = false;
+    var secs = Math.round((m.elapsedMillis || 0) / 1000);
+    if (m.stage === 'failed') {
+      progressEl.style.display = 'none';
+      banner('The watch face did not load', m.reason || m.label);
+      say('Failed after ' + secs + ' s.', true);
+      return;
+    }
+    progressEl.style.display = 'block';
+    document.getElementById('bar').max = m.steps;
+    document.getElementById('bar').value = m.step;
+    say(m.label + '… ' + secs + '\u00a0s');
+    document.getElementById('steplabel').textContent =
+      m.stage === 'queued' ? 'Queued' : 'Step ' + m.step + ' of ' + m.steps;
+  }
   function banner(title, body) {
     document.getElementById('banner-title').textContent = title;
     document.getElementById('banner-body').textContent = body;
@@ -132,7 +155,7 @@ internal object UiBuilderDwfPage {
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     var q = params.get('token') ? '?token=' + encodeURIComponent(params.get('token')) : '';
     socket = new WebSocket(proto + '//' + location.host + base + '/' + encodeURIComponent(sessionId) + '/ws' + q);
-    socket.onopen = function () { say('Connected. Waiting for the first frame…'); };
+    socket.onopen = function () { say('Connected.'); };
     socket.onclose = function () { say('Disconnected. Reload to resume this session.', true); };
     socket.onmessage = function (ev) {
       var m; try { m = JSON.parse(ev.data); } catch (e) { return; }
@@ -140,7 +163,11 @@ internal object UiBuilderDwfPage {
         var img = document.getElementById('frame');
         img.src = 'data:image/' + (m.codec || 'png') + ';base64,' + m.dataBase64;
         img.hidden = false;
-        say('Frame ' + m.seq);
+        if (live || document.getElementById('progress').style.display !== 'block') say('Live · frame ' + m.seq);
+      } else if (m.type === 'stage') {
+        stage(m);
+      } else if (m.type === 'lane') {
+        document.getElementById('ticking').checked = !!m.ticking;
       } else if (m.type === 'error') {
         say(m.message, true);
       }
@@ -201,9 +228,11 @@ internal object UiBuilderDwfPage {
     var existing = params.get('session');
     if (existing) return existing;
     say('Starting a session…');
-    return api('', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(function (r) {
+    // async: the session answers at once and the socket reports each stage on the way to the
+    // first frame, instead of a request that hangs for as long as the packager and runtime take.
+    return api('', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"async":true}' }).then(function (r) {
       return r.text().then(function (body) {
-        if (r.status === 201) return JSON.parse(body).sessionId;
+        if (r.status === 201 || r.status === 202) return JSON.parse(body).sessionId;
         banner('Could not start the real preview', reasons(body));
         say('No session.', true);
         return null;

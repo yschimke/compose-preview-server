@@ -74,6 +74,9 @@ class DwfPreviewSessionsTest {
         "health" to null,
         "battery" to null,
         "watchface" to "config",
+        // The first-frame wait, then the settle wait, each answered at once by a healthy face.
+        "watchface" to "status",
+        "watchface" to "status",
         "screenshot" to null,
         "watchface" to "status",
       ),
@@ -92,7 +95,13 @@ class DwfPreviewSessionsTest {
     patch(s.id, """{"batteryPercent":10}""")
     assertEquals(2, ok(s.id).seq)
     assertEquals(
-      listOf("battery" to null, "screenshot" to null, "watchface" to "status"),
+      // The override settles (one status poll) before the screenshot shows it.
+      listOf(
+        "battery" to null,
+        "watchface" to "status",
+        "screenshot" to null,
+        "watchface" to "status",
+      ),
       cmds(seen),
     )
     // An unchanged redraw is a screenshot and a status check, nothing else.
