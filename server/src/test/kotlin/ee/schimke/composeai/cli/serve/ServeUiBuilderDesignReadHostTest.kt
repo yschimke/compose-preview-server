@@ -148,6 +148,24 @@ class ServeUiBuilderDesignReadHostTest {
   }
 
   @Test
+  fun `a boot caused by a request names its route template, never the raw path`() {
+    start()
+    client
+      .newCall(
+        Request.Builder()
+          .url("http://127.0.0.1:${server!!.port}/$CATALOG/render/com.example.Red")
+          .header(ServeHttpServer.TOKEN_HEADER, "operator-token")
+          .build(),
+      )
+      .execute()
+      .close()
+    val boot = bootLog.single { "boot" in it }
+    val cause = boot.substringAfter("cause: ")
+    assertEquals("GET /{system}/render/{name}", cause, boot)
+    assertTrue(CATALOG !in cause, "the raw path is never logged: $boot")
+  }
+
+  @Test
   fun `a host boot is logged with its cause, and a suspension with its reason`() {
     var now = 0L
     val log = CopyOnWriteArrayList<String>()

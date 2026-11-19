@@ -1121,9 +1121,14 @@ class ServeHttpServer(
   private val server: EmbeddedServer<*, *> =
     embeddedServer(CIO, host = host, port = port) {
       install(WebSockets)
-      // Any request slower than [SLOW_REQUEST_MILLIS] is logged with its method, path and status,
-      // so "it's slow" can be read off the log; [ServeStallWatchdog] says whether the whole process
-      // was stalled at the time. The path only: a query may carry a token.
+      // Any request slower than [SLOW_REQUEST_MILLIS] is logged with its method, matched route and
+      // status, so "it's slow" can be read off the log; [ServeStallWatchdog] says whether the whole
+      // process was stalled at the time. The route TEMPLATE, never the path: a query, and some path
+      // segments (`/wasm-private/{access}/…`, a device code), carry credentials.
+      monitor.subscribe(io.ktor.server.routing.RoutingRoot.RoutingCallStarted) { routed ->
+        // `/{system}/render/{name}/(method:GET)`: the selector suffix repeats the method.
+        routed.attributes.put(ROUTE_TEMPLATE, routed.route.toString().substringBefore("/("))
+      }
       intercept(ApplicationCallPipeline.Monitoring) {
         val started = System.nanoTime()
         try {
@@ -1134,7 +1139,8 @@ class ServeHttpServer(
             millis >= SLOW_REQUEST_MILLIS && !ServeSameOriginRequests.isWebSocketUpgrade(context)
           ) {
             System.err.println(
-              "serve: slow request ${context.request.httpMethod.value} ${context.request.path()} " +
+              "serve: slow request ${context.request.httpMethod.value} " +
+                "${context.attributes.getOrNull(ROUTE_TEMPLATE) ?: "(no route)"} " +
                 "took $millis ms (status ${context.response.status()?.value ?: "none"})",
             )
           }
@@ -3165,8 +3171,12 @@ class ServeHttpServer(
 
   private fun RoutingContext.varyOnCookie() = call.varyOnCookie()
 
-  /** What a host boot during this request reports as its cause: the method and path. */
-  private fun ApplicationCall.bootCause(): String = "${request.httpMethod.value} ${request.path()}"
+  /**
+   * What a host boot during this request reports as its cause: the method and the matched route
+   * template, never the raw path, which can carry a credential.
+   */
+  private fun ApplicationCall.bootCause(): String =
+    "${request.httpMethod.value} ${attributes.getOrNull(ROUTE_TEMPLATE) ?: "(no route)"}"
 
   /** Absolute externally visible URL for the current page (including its query). */
   private fun RoutingContext.externalPageUrl(): String = externalOrigin() + call.request.origin.uri
@@ -14248,7 +14258,7 @@ class ServeHttpServer(
       // activity; request-scoped leases count as busy until released.
       val lease =
         withContext(Dispatchers.IO) {
-          ServeHostBootCause.with("socket ${call.request.path()}") {
+          ServeHostBootCause.with("socket ${call.attributes.getOrNull(ROUTE_TEMPLATE) ?: ""}") {
             sessions.lease(sessionId, connection = true)
           }
         }
@@ -19974,3 +19984,6 @@ private data class OptimizerPauseDto(
   val pausedUntilEpochMillis: Long? = null,
   val reason: String? = null,
 )
+
+/** The matched route's template, set by routing for the slow-request and host-boot log lines. */
+private val ROUTE_TEMPLATE = AttributeKey<String>("serve.routeTemplate")
