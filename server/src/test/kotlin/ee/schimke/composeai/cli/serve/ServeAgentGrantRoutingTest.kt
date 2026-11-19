@@ -162,16 +162,16 @@ class ServeAgentGrantRoutingTest {
     val (code, opened) =
       post(
         "/agent-access/request",
-        """{"scope":"preview","capabilities":["ui-builder-read","ui-builder-publish",""" +
-          """" telepathy ","ui-builder-publish"]}""",
+        """{"scope":"preview","capabilities":["ui-builder-read","ui-builder-teleport",""" +
+          """" telepathy ","ui-builder-teleport"]}""",
       )
     assertEquals(200, code, opened)
     val body = json(opened)
     assertEquals(
-      listOf("ui-builder-publish", "telepathy"),
+      listOf("ui-builder-teleport", "telepathy"),
       body["unsupportedCapabilities"]!!.jsonArray.map { it.jsonPrimitive.content },
     )
-    assertContains(str(opened, "message"), "ui-builder-publish")
+    assertContains(str(opened, "message"), "ui-builder-teleport")
     // The rest of the request goes ahead.
     assertEquals(
       listOf("ui-builder-read"),

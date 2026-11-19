@@ -54,6 +54,12 @@ class ServeMachineAuthorization(
        * grant sets it, and it means nothing without [onBehalfOfActorId].
        */
       val mayDeleteForPrincipal: Boolean = false,
+      /**
+       * True when the agent grant behind this decision carries `ui-builder-publish`: the human who
+       * approved it also let it publish their watch faces to watches (and to every watch, for a
+       * public design). Only a grant sets it, and it means nothing without [onBehalfOfActorId].
+       */
+      val mayPublishForPrincipal: Boolean = false,
     ) : Decision
 
     data object Missing : Decision
@@ -249,6 +255,7 @@ class ServeMachineAuthorization(
         actorId = holderActorId,
         onBehalfOfActorId = approvedByActorId.takeIf { it.isNotBlank() },
         mayDeleteForPrincipal = allows(AgentGrantCapability.UI_BUILDER_DESTRUCTIVE),
+        mayPublishForPrincipal = allows(AgentGrantCapability.UI_BUILDER_PUBLISH),
       )
   }
 }

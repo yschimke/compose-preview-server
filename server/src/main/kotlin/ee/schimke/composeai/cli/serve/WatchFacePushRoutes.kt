@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.agentgrants.AgentGrantCapability
 import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.GetSnapshotRequestV1
@@ -88,6 +89,18 @@ internal constructor(
       sweepPauseMillis = automaticSweepPauseMillis,
       tickMillis = automaticTickMillis,
     )
+
+  /**
+   * Whether a grant acting for someone lends that person's standing for this design
+   * ([ServeUiBuilderGrantScope.delegationReaches]); set by the server that holds the grants, and,
+   * until it is, true, as it is where no grant names designs. [designOwner] asks it before it asks
+   * the service as the approver, which the design scope does not see.
+   */
+  @Volatile
+  internal var delegationReaches: suspend (AuthenticatedUiBuilderActor, String) -> Boolean =
+    { _, _ ->
+      true
+    }
 
   private val reconciling = java.util.concurrent.atomic.AtomicBoolean(false)
 
@@ -565,7 +578,7 @@ internal constructor(
     val snapshot =
       service.executeMapped(GetSnapshotRequestV1(designId = designId), actor)
         as? UiBuilderServiceResponse.Snapshot ?: return notFound
-    val owner = snapshot.snapshot.access?.ownerActorId
+    val owner = designOwner(service, actor, designId, snapshot)
     if (
       DesignAccessActionV1.WRITE !in actions || owner == null || owner !in actor.accessIdentities
     ) {
@@ -590,6 +603,33 @@ internal constructor(
     }
     return Owned.Document(document, owner)
   }
+
+  /**
+   * [designId]'s owner as [actor] may know it, from the [snapshot] it read. The runtime names a
+   * design's owner only to its owner, so a grant acting for someone reads no owner there; asked
+   * again as that person, it answers only when they own the design, so a grant reaches its
+   * approver's designs and nobody else's. A grant that names designs reaches only those
+   * ([delegationReaches]): asked as the approver, the service would not hold it to them.
+   */
+  internal suspend fun designOwner(
+    service: UiBuilderServicePort,
+    actor: AuthenticatedUiBuilderActor,
+    designId: String,
+    snapshot: UiBuilderServiceResponse.Snapshot,
+  ): String? =
+    snapshot.snapshot.access?.ownerActorId
+      ?: actor.onBehalfOfActorId
+        ?.takeIf { it.isNotBlank() && it != actor.actorId && delegationReaches(actor, designId) }
+        ?.let { principal ->
+          (service.executeMapped(
+              GetSnapshotRequestV1(designId = designId),
+              AuthenticatedUiBuilderActor(principal),
+            ) as? UiBuilderServiceResponse.Snapshot)
+            ?.snapshot
+            ?.access
+            ?.ownerActorId
+            ?.takeIf { it == principal }
+        }
 
   internal suspend fun status(
     service: UiBuilderServicePort,
@@ -726,6 +766,11 @@ internal constructor(
     const val VISIBILITY_PUBLIC = "public"
     const val VISIBILITY_PRIVATE = "private"
     val VISIBILITIES = setOf(VISIBILITY_PUBLIC, VISIBILITY_PRIVATE)
+    const val OWNER_SESSION_REQUIRED = "owner_session_required"
+    val OWNER_SESSION_REQUIRED_MESSAGE =
+      "only the design's owner, signed in on this server, or an agent grant the owner approved " +
+        "with `${AgentGrantCapability.UI_BUILDER_PUBLISH.wire}`, can publish it to watches; " +
+        "an agent calls request_access with that capability"
     private const val SUPERSEDED = "superseded"
     internal val ANONYMOUS =
       AuthenticatedUiBuilderActor(ServeUiBuilderVisibility.ANONYMOUS_ACTOR_ID)
@@ -1741,6 +1786,15 @@ private fun ApplicationCall.signedInAccount(authorization: ServeUiBuilderAuthori
  * may read their designs, but must not mint a durable device token in their name, unlink their
  * watches, or put a design on every watch: those outlive the grant, and are the person's to decide.
  */
+/**
+ * Whether this caller may publish (or unpublish) watch faces at all: a person in their own session,
+ * or an agent grant acting for its approver that carries `ui-builder-publish`. Whose design it is
+ * is checked by the call itself, against the design's owner, so a grant reaches only its approver's
+ * designs.
+ */
+internal fun UiBuilderAuthorizationDecision.Authorized.mayPublishWatchFaces(): Boolean =
+  isPersonalSession() || (!onBehalfOfActorId.isNullOrBlank() && mayPublishForPrincipal)
+
 private fun UiBuilderAuthorizationDecision.Authorized.isPersonalSession(): Boolean {
   if (!onBehalfOfActorId.isNullOrBlank()) return false
   return !(actorId == ServeUiBuilderVisibility.ANONYMOUS_ACTOR_ID ||
@@ -1771,11 +1825,11 @@ private suspend fun ApplicationCall.ownerSessionOrRespond(
         return null
       }
     }
-  if (!decision.isPersonalSession()) {
+  if (!decision.mayPublishWatchFaces()) {
     respondError(
       HttpStatusCode.Forbidden,
-      "owner_session_required",
-      "only the design's owner, signed in on this server, can publish it to watches here",
+      WatchFacePush.OWNER_SESSION_REQUIRED,
+      WatchFacePush.OWNER_SESSION_REQUIRED_MESSAGE,
     )
     return null
   }
@@ -1801,9 +1855,9 @@ internal suspend fun WatchFacePush.capability(
     service.executeMapped(GetSnapshotRequestV1(designId = designId), decision.actor)
       as? UiBuilderServiceResponse.Snapshot ?: return null
   if (!isWatchFaceCatalog(snapshot.snapshot.state.document.catalogPin.systemId)) return null
-  val owner = snapshot.snapshot.access?.ownerActorId
+  val owner = designOwner(service, decision.actor, designId, snapshot)
   val canPublish =
-    decision.isPersonalSession() &&
+    decision.mayPublishWatchFaces() &&
       owner != null &&
       owner in decision.actor.accessIdentities &&
       authorization.authorize(call, UiBuilderRouteCapability.WRITE, null) is
