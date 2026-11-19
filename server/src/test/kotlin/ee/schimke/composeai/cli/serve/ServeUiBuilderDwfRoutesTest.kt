@@ -321,6 +321,18 @@ class ServeUiBuilderDwfRoutesTest {
   }
 
   @Test
+  fun `a design recreated under the same id never reads the old one's report`() {
+    val validation =
+      WatchFaceValidation(
+        { WatchFaceValidatorAvailability.Ready { packagerReport(passed = true) } },
+      )
+    val source = DwfSource(wffXml = "<WatchFace/>")
+    runBlocking { validation.validate("watch-1", 100L, 3, source) }
+    assertNotNull(validation.latest("watch-1", 100L, 3))
+    assertNull(validation.latest("watch-1", 200L, 3), "another design at the same id and revision")
+  }
+
+  @Test
   fun `a failing face is a 200 report, not an error`() {
     start(validator = { packagerReport(passed = false) })
     val (code, body) = post(validation, """{"wffXml":"<WatchFace/>"}""")

@@ -221,11 +221,20 @@ internal class WatchFaceValidation(
   private val latest = lru<String, WatchFaceValidationReportV1>(MAX_DESIGNS)
 
   /** The packager's report on [source], from the cache when this face was validated before. */
-  suspend fun validate(designId: String, revision: Long, source: DwfSource): Result {
+  /**
+   * [designCreatedAtEpochMillis] is which design [designId] is: a design deleted and recreated
+   * under the same id is another one, and never reads this one's report.
+   */
+  suspend fun validate(
+    designId: String,
+    designCreatedAtEpochMillis: Long?,
+    revision: Long,
+    source: DwfSource,
+  ): Result {
     val digest = source.digest()
     synchronized(lock) { byDigest[digest] }
       ?.let {
-        return Result.Ok(remember(designId, revision, digest, it))
+        return Result.Ok(remember(designId, designCreatedAtEpochMillis, revision, digest, it))
       }
     val ready =
       when (val availability = validator()) {
@@ -240,7 +249,7 @@ internal class WatchFaceValidation(
       is Attempt.Failed -> Result.Failed(VALIDATOR_FAILED, attempt.reason)
       is Ran -> {
         synchronized(lock) { byDigest[digest] = attempt }
-        Result.Ok(remember(designId, revision, digest, attempt))
+        Result.Ok(remember(designId, designCreatedAtEpochMillis, revision, digest, attempt))
       }
     }
   }
@@ -268,6 +277,7 @@ internal class WatchFaceValidation(
    */
   fun missingResources(
     designId: String,
+    designCreatedAtEpochMillis: Long?,
     revision: Long,
     source: DwfSource,
     missing: List<String>,
@@ -297,15 +307,21 @@ internal class WatchFaceValidation(
         ),
         clock(),
       )
-    return remember(designId, revision, digest, ran)
+    return remember(designId, designCreatedAtEpochMillis, revision, digest, ran)
   }
 
-  /** The last report on [designId] if it was on [revision]. */
-  fun latest(designId: String, revision: Long): WatchFaceValidationReportV1? =
-    synchronized(lock) { latest[designId] }?.takeIf { it.revision == revision }
+  /** The last report on [designId] (the one created then) if it was on [revision]. */
+  fun latest(
+    designId: String,
+    designCreatedAtEpochMillis: Long?,
+    revision: Long,
+  ): WatchFaceValidationReportV1? =
+    synchronized(lock) { latest[designKey(designId, designCreatedAtEpochMillis)] }
+      ?.takeIf { it.revision == revision }
 
   private fun remember(
     designId: String,
+    designCreatedAtEpochMillis: Long?,
     revision: Long,
     digest: String,
     ran: Ran,
@@ -323,7 +339,7 @@ internal class WatchFaceValidation(
         digest = digest,
         ranAtEpochMillis = ran.ranAt,
       )
-    synchronized(lock) { latest[designId] = report }
+    synchronized(lock) { latest[designKey(designId, designCreatedAtEpochMillis)] = report }
     return report
   }
 
@@ -367,6 +383,9 @@ internal class WatchFaceValidation(
           path = match.groupValues[2],
         )
     }
+
+    private fun designKey(designId: String, createdAtEpochMillis: Long?) =
+      "$createdAtEpochMillis/$designId"
 
     private fun <K, V> lru(max: Int): MutableMap<K, V> =
       object : LinkedHashMap<K, V>(16, 0.75f, true) {

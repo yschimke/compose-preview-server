@@ -233,11 +233,17 @@ internal fun Route.installUiBuilderDwfRoutes(
     val result =
       when (val resolved = resolveDwfSource(dwf, document, request)) {
         is ResolvedSource.Ok ->
-          dwf.validation.validate(designId, document.revision, resolved.source)
+          dwf.validation.validate(
+            designId,
+            document.createdAtEpochMillis,
+            document.revision,
+            resolved.source,
+          )
         is ResolvedSource.Missing ->
           WatchFaceValidation.Result.Ok(
             dwf.validation.missingResources(
               designId,
+              document.createdAtEpochMillis,
               document.revision,
               resolved.source,
               resolved.missing,
@@ -287,7 +293,9 @@ internal fun Route.installUiBuilderDwfRoutes(
             as? UiBuilderServiceResponse.Snapshot
         }
     val report = snapshot?.let {
-      dwf.validation.latest(designId, it.snapshot.state.document.revision)
+      it.snapshot.state.document.let { document ->
+        dwf.validation.latest(designId, document.createdAtEpochMillis, document.revision)
+      }
     }
     if (report == null) {
       call.respondText("no validation report for this revision", status = HttpStatusCode.NotFound)
