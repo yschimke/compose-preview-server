@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.180.0](https://github.com/yschimke/compose-preview-server/compare/v3.179.0...v3.180.0) (2026-11-19)
+
+
+### Bug Fixes
+
+* **deps:** update the UI Builder to 3.137.0 ([#2006](https://github.com/yschimke/compose-preview-server/issues/2006)) ([40d7e65](https://github.com/yschimke/compose-preview-server/commit/40d7e65e29231aa4c7537fa4d0bc3e62b5e48525))
+* **watchface-push:** report a catalog face the packager refuses as skipped on /status ([#2005](https://github.com/yschimke/compose-preview-server/issues/2005)) ([00719c4](https://github.com/yschimke/compose-preview-server/commit/00719c4ffb1d3bf230c8027664ce8604950ea7ef))
+
 ## [3.179.0](https://github.com/yschimke/compose-preview-server/compare/v3.178.0...v3.179.0) (2026-11-19)
 
 
