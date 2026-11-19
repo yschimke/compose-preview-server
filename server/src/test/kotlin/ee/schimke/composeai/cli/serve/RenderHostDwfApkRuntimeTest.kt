@@ -138,6 +138,18 @@ class RenderHostDwfApkRuntimeTest {
   }
 
   @Test
+  fun `a pinned GIF preview also replaces the placeholder, so the resource is not duplicated`() {
+    val files =
+      DwfPackaging.bundleFiles(
+        DwfSource("<WatchFace/>", assets = mapOf("drawable/preview.gif" to byteArrayOf(1))),
+      )
+    assertEquals(
+      listOf("res/drawable/preview.gif"),
+      files.keys.filter { it.substringAfterLast('/').startsWith("preview.") },
+    )
+  }
+
+  @Test
   fun `packager diagnostics become one failure carrying every finding`() {
     refuse = listOf("error[wff-validator]: cvc-bad", "error[aapt2]: no such resource")
     val e = assertFailsWith<DwfPackagingFailed> { runtime().packageApk(source()) }

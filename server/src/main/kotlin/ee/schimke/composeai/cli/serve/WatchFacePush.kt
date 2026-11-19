@@ -471,9 +471,14 @@ internal class WatchFacePushStore(
      * design this is. A design deleted and recreated under the same id (by anyone) is not it.
      */
     val designCreatedAtEpochMillis: Long? = null,
-  ) {
-    fun source(): DwfSource = DwfSource(wffXml = wffXml, wffVersion = wffVersion, label = label)
-  }
+    /**
+     * The face's drawables (paths relative to `res/`, as [DwfSource.assets]) by the SHA-256 of
+     * their bytes, which [WatchFacePushStore] keeps beside the publications: a design's pinned
+     * assets are packaged into every rebuild, as the WFF is, after its revision is pruned. Empty
+     * for a publication stored before faces carried their assets.
+     */
+    val assets: Map<String, String> = emptyMap(),
+  )
 
   /** A built APK's facts; the bytes are the `.apk` file beside it. */
   @Serializable
@@ -494,6 +499,8 @@ internal class WatchFacePushStore(
   private val lock = Any()
   private val devicesFile = root.resolve("devices.json")
   private val publicationsDir = root.resolve("publications")
+  /** Published faces' drawables, content-addressed ([Publication.assets]). */
+  private val assetsDir = root.resolve("assets")
   val apkDir: Path = root.resolve("apks")
 
   /** Where [WatchFacePushCatalogFaces] keeps catalog faces' versions. */
@@ -507,6 +514,7 @@ internal class WatchFacePushStore(
   init {
     ServeOwnerOnlyFiles.createDirectories(root)
     ServeOwnerOnlyFiles.createDirectories(publicationsDir)
+    ServeOwnerOnlyFiles.createDirectories(assetsDir)
     ServeOwnerOnlyFiles.createDirectories(apkDir)
     devices =
       readJson(devicesFile, Devices.serializer())?.devices?.toMutableList() ?: mutableListOf()
@@ -651,9 +659,38 @@ internal class WatchFacePushStore(
               previous.publishedAtEpochMillis
             } else clock(),
           designCreatedAtEpochMillis = designCreatedAtEpochMillis,
+          assets = source.assets.entries.associate { (path, bytes) -> path to storeAsset(bytes) },
         )
       publication
     }
+
+  /**
+   * [publication]'s source as it was published: its WFF and its drawables. A drawable whose bytes
+   * are gone is left out, and the packager then reports the resource it misses.
+   */
+  fun source(publication: Publication): DwfSource =
+    DwfSource(
+      wffXml = publication.wffXml,
+      wffVersion = publication.wffVersion,
+      assets =
+        publication.assets.entries
+          .mapNotNull { (path, digest) -> assetBytes(digest)?.let { path to it } }
+          .toMap(),
+      label = publication.label,
+    )
+
+  private fun storeAsset(bytes: ByteArray): String {
+    val digest = sha256Hex(bytes)
+    val file = assetsDir.resolve(digest)
+    if (!Files.isRegularFile(file)) writeAtomically(file, bytes)
+    return digest
+  }
+
+  private fun assetBytes(digest: String): ByteArray? {
+    if (!ASSET_DIGEST.matches(digest)) return null
+    val file = assetsDir.resolve(digest)
+    return runCatching { Files.readAllBytes(file) }.getOrNull()
+  }
 
   /**
    * Make [candidate] the design's publication. Its version is re-checked against what is stored, so
@@ -807,6 +844,7 @@ internal class WatchFacePushStore(
     /** Marks a device token in logs and leaked-secret scanners; carries no meaning. */
     const val TOKEN_PREFIX = "wfp_"
     private const val TOUCH_PERSIST_MILLIS = 60 * 60 * 1000L
+    private val ASSET_DIGEST = Regex("[0-9a-f]{64}")
     private val random = SecureRandom()
 
     /**
@@ -1047,7 +1085,7 @@ internal class WatchFacePushBuilds(
   /** [source] defaults to the publication's own WFF; a catalog face passes its full source. */
   fun build(
     publication: WatchFacePushStore.Publication,
-    source: DwfSource = publication.source(),
+    source: DwfSource = store.source(publication),
   ): Result {
     cached(publication)?.let {
       return it
