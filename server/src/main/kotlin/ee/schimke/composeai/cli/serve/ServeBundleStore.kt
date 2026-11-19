@@ -161,6 +161,12 @@ class ServeBundleStore(
         val isOverrides = underPreviews && name.endsWith(OVERRIDES_SUFFIX)
         val isRemoteCompose = underPreviews && name.endsWith(REMOTECOMPOSE_SUFFIX)
         val isWatchFace = underPreviews && name.endsWith(WATCHFACE_SUFFIX)
+        // A watch face's WFF source and its provenance and licence (compose-ai-tools#6647), which
+        // the Watch Face Push API packages. Inert data: read, never executed.
+        val isWffSource =
+          underPreviews &&
+            (name.endsWith(ServeCatalogStore.WFF_SOURCE_SUFFIX) ||
+              name.endsWith(ServeCatalogStore.WFF_MANIFEST_SUFFIX))
         // Spatial previews: a scene document plus image textures under `previews/<id>.spatial/`.
         // The allowlist stays closed; nothing executable is needed.
         val spatialLeaf = segments.lastOrNull().orEmpty()
@@ -190,6 +196,7 @@ class ServeBundleStore(
               isOverrides ||
               isRemoteCompose ||
               isWatchFace ||
+              isWffSource ||
               isSpatial ||
               isRc ||
               isReferenceData ||

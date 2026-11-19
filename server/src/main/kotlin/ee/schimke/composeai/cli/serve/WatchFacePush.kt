@@ -495,6 +495,9 @@ internal class WatchFacePushStore(
   private val devicesFile = root.resolve("devices.json")
   private val publicationsDir = root.resolve("publications")
   val apkDir: Path = root.resolve("apks")
+
+  /** Where [WatchFacePushCatalogFaces] keeps catalog faces' versions. */
+  val catalogFacesFile: Path = root.resolve("catalog-faces.json")
   private var devices: MutableList<Device>
   private val publications = ConcurrentHashMap<String, Publication>()
 
@@ -1034,7 +1037,11 @@ internal class WatchFacePushBuilds(
   fun cached(publication: WatchFacePushStore.Publication): Result.Built? =
     store.apk(publication)?.let { Result.Built(it, store.apkFile(publication)) }
 
-  fun build(publication: WatchFacePushStore.Publication): Result {
+  /** [source] defaults to the publication's own WFF; a catalog face passes its full source. */
+  fun build(
+    publication: WatchFacePushStore.Publication,
+    source: DwfSource = publication.source(),
+  ): Result {
     cached(publication)?.let {
       return it
     }
@@ -1055,7 +1062,6 @@ internal class WatchFacePushBuilds(
       val out = store.apkFile(publication)
       val tmp = File(out.parentFile, out.name + ".tmp")
       return try {
-        val source = publication.source()
         source.problem()?.let { throw DwfPackagingFailed(listOf("error[bundle]: $it")) }
         val files =
           DwfPackaging.bundleFiles(

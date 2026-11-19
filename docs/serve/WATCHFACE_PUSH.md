@@ -185,6 +185,61 @@ builder's state; losing it unlinks every watch and restarts versions at 1 (which
 not this directory, is the one thing that must never be lost: a reinstall at version 1 still works
 when it is signed by the same key, an update signed by another never does).
 
+## Catalog faces
+
+Beside UI-builder designs, `GET /designs` lists the watch faces of the **served catalogs**
+(preview.coo.ee's `wear-os-samples-watchfaces`, for instance), after the designs. They are public:
+every caller, with or without a token, sees the same ones.
+
+A catalog face is listed when all of these hold:
+
+- its catalog is served and **listed** (an unlisted catalog, `--catalogs-unlisted`, never is) and
+  resident (the listing never wakes a suspended catalog);
+- its bundle carries the face's Watch Face Format source, `previews/<id>.wff.zip`, and its
+  provenance manifest, `previews/<id>.wff.json` (compose-ai-tools#6647,
+  `ee.schimke.composeai.bundle.WffSourceManifest`, mirrored here as `WffSourceManifestV1` until a
+  release of `:bundle-format` is pinned). A trusted catalog's live bundle delivers both, beside
+  the `.watchface.json` sidecar, and an uploaded bundle keeps them too;
+- the manifest's `license` is one this server redistributes: `Apache-2.0`, `MIT`, `BSD-2-Clause`,
+  `BSD-3-Clause`, `CC0-1.0`, `Unlicense` or `CC-BY-4.0`, or an SPDX `OR` of alternatives one of
+  which is all on that list. No licence (`null`) means no permission;
+- the source is usable: `res/raw/watchface.xml` is there, the WFF version is one the packager
+  takes, and the zip is within 512 entries and 16 MB.
+
+`GET /status` counts the listed ones and names each skipped face with why
+(`"catalogFaces": {"listed": 1, "skipped": [{"id": "…", "reason": "licence unknown …"}]}`).
+
+Each entry is a normal design entry plus:
+
+```json
+{
+  "id": "catalog:wear-os-samples-watchfaces/simple_digital",
+  "source": "catalog",
+  "catalog": { "system": "wear-os-samples-watchfaces", "title": "…" },
+  "attribution": {
+    "repoUrl": "https://github.com/android/wear-os-samples",
+    "sourceUrl": "https://github.com/android/wear-os-samples/blob/<commit>/…",
+    "license": "Apache-2.0"
+  },
+  "visibility": "public",
+  "packageName": "ee.schimke.watchface.push.watchfacepush.c_wear_os_samples_watchfaces_simple_digital_0a1b2c3d4e",
+  "apkUrl": "https://…/api/watchface-push/v1/catalog-faces/apk?system=…&preview=…&v=1",
+  "previewUrl": "https://…/api/watchface-push/v1/catalog-faces/preview.png?system=…&preview=…&v=1"
+}
+```
+
+Design entries carry `"source": "design"`. `id` is for display and matching only; the app uses
+`apkUrl` and `previewUrl` as given (a preview id may hold a `/`, so the face is named by query).
+
+The APK is the same push build as a design's, signed with the same marketplace key: the zip's
+`res/**` (its drawables, fonts and values) with the server's own manifest and face info, so the
+upstream module's package, `hasCode` or permissions never reach it, and its `LICENSE` stays out of
+the APK. The face name is `c_`, the sanitised system and preview, and `_` plus ten hex characters
+of the SHA-256 of the face's id: always hashed, from an input no design shares, so it is never a
+design's package, and under this marketplace's prefix, so never the upstream app's.
+`version` starts at 1 and moves by one whenever the face's source changes; it is kept in
+`watchface-push/catalog-faces.json` and only ever grows. The picture is the catalog's baked PNG.
+
 ## Rate limits
 
 Per client address (under `--trust-forwarded-for`, the forwarded one): 10 link starts and 120 polls

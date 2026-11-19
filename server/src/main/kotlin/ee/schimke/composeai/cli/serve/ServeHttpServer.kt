@@ -1395,6 +1395,7 @@ class ServeHttpServer(
                   themeCss = skin.second,
                 )
               },
+              catalogFaceSources = ::watchFaceCatalogSources,
             )
           }
           installUiBuilderRoutes(
@@ -6484,6 +6485,30 @@ class ServeHttpServer(
    * The catalogs on the front-page index now: from [catalogLoads] when wired (the admin API changes
    * the set at runtime), else the constructor's [catalogSessions].
    */
+  /**
+   * Every listed catalog's previews that carry a Watch Face Format source (`previews/<id>.wff.zip`
+   * and `.wff.json`), for the Watch Face Push API. Unlisted catalogs are left out, and so is a
+   * catalog that is not resident: this never wakes one ([ServeSessionRegistry.peekHost]).
+   */
+  private fun watchFaceCatalogSources(): List<CatalogFaceSource> =
+    listedCatalogs().flatMap { system ->
+      val host = sessions.peekHost(system) ?: return@flatMap emptyList()
+      val bundle = catalogBundleHost(host) ?: return@flatMap emptyList()
+      val catalogTitle = bundle.title?.takeIf { it.isNotBlank() } ?: host.label
+      bundle.previews.mapNotNull { preview ->
+        val (manifest, zip) = bundle.wffSource(preview.id) ?: return@mapNotNull null
+        CatalogFaceSource(
+          system = system,
+          catalogTitle = catalogTitle,
+          previewId = preview.id,
+          title = preview.caption?.takeIf { it.isNotBlank() } ?: preview.label,
+          manifestJson = manifest,
+          zip = zip,
+          png = { bundle.bakedPngBytes(preview.id) },
+        )
+      }
+    }
+
   private fun listedCatalogs(): List<String> =
     catalogLoads?.snapshot()?.filter { it.config.listed }?.map { it.config.system }
       ?: catalogSessions

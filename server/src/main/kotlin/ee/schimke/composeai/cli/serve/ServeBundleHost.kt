@@ -613,6 +613,27 @@ class ServeBundleHost(
   }
 
   /** Resolve one per-preview file without allowing an untrusted catalog id to escape previews/. */
+  /**
+   * Watch-face preview [id]'s Watch Face Format source (compose-ai-tools#6647): the text of its
+   * `previews/<id>.wff.json` manifest and its `previews/<id>.wff.zip`, or null when the bundle
+   * carries none. Read by the Watch Face Push API ([WatchFacePushCatalogFaces]).
+   */
+  internal fun wffSource(id: String): Pair<String, File>? {
+    val manifest =
+      previewFile(id, ServeCatalogStore.WFF_MANIFEST_SUFFIX)?.takeIf {
+        it.isFile && it.length() <= 1024 * 1024
+      } ?: return null
+    val zip =
+      previewFile(id, ServeCatalogStore.WFF_SOURCE_SUFFIX)?.takeIf { it.isFile } ?: return null
+    return runCatching { manifest.readText() to zip }.getOrNull()
+  }
+
+  /** [previewId]'s baked PNG, fetched from the delivery branch if needed; null when it has none. */
+  internal fun bakedPngBytes(previewId: String): ByteArray? =
+    bakedPngFile(previewId)?.let { path ->
+      runCatching { fileSystem.read(path) { readByteArray() } }.getOrNull()
+    }
+
   private fun previewFile(id: String, suffix: String): File? {
     if (
       id.isBlank() ||
