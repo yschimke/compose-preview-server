@@ -1124,6 +1124,31 @@ class ServeHttpServer(
   private val server: EmbeddedServer<*, *> =
     embeddedServer(CIO, host = host, port = port) {
       install(WebSockets)
+      // Any request slower than [SLOW_REQUEST_MILLIS] is logged with its method, matched route and
+      // status, so "it's slow" can be read off the log; [ServeStallWatchdog] says whether the whole
+      // process was stalled at the time. The route TEMPLATE, never the path: a query, and some path
+      // segments (`/wasm-private/{access}/…`, a device code), carry credentials.
+      monitor.subscribe(io.ktor.server.routing.RoutingRoot.RoutingCallStarted) { routed ->
+        // `/{system}/render/{name}/(method:GET)`: the selector suffix repeats the method.
+        routed.attributes.put(ROUTE_TEMPLATE, routed.route.toString().substringBefore("/("))
+      }
+      intercept(ApplicationCallPipeline.Monitoring) {
+        val started = System.nanoTime()
+        try {
+          proceed()
+        } finally {
+          val millis = (System.nanoTime() - started) / 1_000_000
+          if (
+            millis >= SLOW_REQUEST_MILLIS && !ServeSameOriginRequests.isWebSocketUpgrade(context)
+          ) {
+            System.err.println(
+              "serve: slow request ${context.request.httpMethod.value} " +
+                "${context.attributes.getOrNull(ROUTE_TEMPLATE) ?: "(no route)"} " +
+                "took $millis ms (status ${context.response.status()?.value ?: "none"})",
+            )
+          }
+        }
+      }
       // A socket opened with the GitHub session cookie is accepted only from a page this server
       // served ([ServeSameOriginRequests]). Checked before the upgrade so refusal is a plain 403.
       // Covers every socket route; header/query-token clients send no cookie and are unaffected.
@@ -2577,12 +2602,16 @@ class ServeHttpServer(
 
   /** Start listening. Non-blocking; the caller keeps the process alive separately. */
   fun start() {
+    stallWatchdog.start()
     server.start(wait = false)
   }
+
+  private val stallWatchdog = ServeStallWatchdog()
 
   /** Stop with a short grace period. Idempotent enough for a shutdown hook. */
   fun stop() {
     readinessProber?.interrupt()
+    stallWatchdog.stop()
     // Its background reconcile and build threads hold this server's catalog sources.
     watchFacePush?.close()
     thumbWarmer.stop()
@@ -3152,6 +3181,13 @@ class ServeHttpServer(
 
   private fun RoutingContext.varyOnCookie() = call.varyOnCookie()
 
+  /**
+   * What a host boot during this request reports as its cause: the method and the matched route
+   * template, never the raw path, which can carry a credential.
+   */
+  private fun ApplicationCall.bootCause(): String =
+    "${request.httpMethod.value} ${attributes.getOrNull(ROUTE_TEMPLATE) ?: "(no route)"}"
+
   /** Absolute externally visible URL for the current page (including its query). */
   private fun RoutingContext.externalPageUrl(): String = externalOrigin() + call.request.origin.uri
 
@@ -3169,7 +3205,10 @@ class ServeHttpServer(
     onMissing: (suspend RoutingContext.() -> Unit)? = null,
     block: suspend (ServeHost) -> Unit,
   ) {
-    val lease = withContext(Dispatchers.IO) { sessions.lease(sessionId) }
+    val lease =
+      withContext(Dispatchers.IO) {
+        ServeHostBootCause.with(call.bootCause()) { sessions.lease(sessionId) }
+      }
     if (lease == null) {
       if (loadingHomeSystem(sessionId) != null) {
         catalogLoads?.prioritize(sessionId)
@@ -3208,7 +3247,10 @@ class ServeHttpServer(
     block: (ServeHost) -> T?,
   ): T? {
     if (!sessions.isKnownSession(sessionId)) return null
-    val lease = withContext(Dispatchers.IO) { sessions.lease(sessionId) } ?: return null
+    val lease =
+      withContext(Dispatchers.IO) {
+        ServeHostBootCause.with(call.bootCause()) { sessions.lease(sessionId) }
+      } ?: return null
     return try {
       withContext(Dispatchers.IO) { block(lease.host) }
     } finally {
@@ -14225,7 +14267,12 @@ class ServeHttpServer(
       // Lease the tenant for the socket's life, since a fallback-lane socket opens no stream and
       // the reaper could close its host. `connection = true` makes this lease count as busy only on
       // activity; request-scoped leases count as busy until released.
-      val lease = withContext(Dispatchers.IO) { sessions.lease(sessionId, connection = true) }
+      val lease =
+        withContext(Dispatchers.IO) {
+          ServeHostBootCause.with("socket ${call.attributes.getOrNull(ROUTE_TEMPLATE) ?: ""}") {
+            sessions.lease(sessionId, connection = true)
+          }
+        }
       if (lease == null) {
         close(CloseReason(CloseReason.Codes.CANNOT_ACCEPT, "no such session"))
         return
@@ -19950,3 +19997,6 @@ private data class OptimizerPauseDto(
   val pausedUntilEpochMillis: Long? = null,
   val reason: String? = null,
 )
+
+/** The matched route's template, set by routing for the slow-request and host-boot log lines. */
+private val ROUTE_TEMPLATE = AttributeKey<String>("serve.routeTemplate")

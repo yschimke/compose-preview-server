@@ -56,6 +56,11 @@ class ServeSessionRegistry(
    */
   private val underMemoryPressure: () -> Boolean = { false },
   private val clock: () -> Long = System::currentTimeMillis,
+  /**
+   * Where host boots and suspensions are reported, each with its cause and duration, so a slow
+   * request on a box that keeps re-booting hosts can be read off the log. A parameter for tests.
+   */
+  private val log: (String) -> Unit = System.err::println,
 ) : AutoCloseable {
 
   private class Entry(
@@ -442,7 +447,8 @@ class ServeSessionRegistry(
    * listener notification and host `close()` run after, with each entry marked [Entry.closing] so a
    * concurrent resume waits for the old daemon (see [liveHost]).
    */
-  fun suspendIdle(): Int = suspendResident(idleTimeoutMillis, limit = Int.MAX_VALUE)
+  fun suspendIdle(): Int =
+    suspendResident(idleTimeoutMillis, limit = Int.MAX_VALUE, reason = "idle")
 
   /**
    * Suspend resident sessions now because the box is out of memory, least-recently-touched first,
@@ -451,7 +457,12 @@ class ServeSessionRegistry(
    * streaming or background-active sessions are never shed.
    */
   fun shedUnderPressure(limit: Int = 1): Int =
-    suspendResident(idleMillis = 0, limit = limit, leastRecentlyUsedFirst = true)
+    suspendResident(
+      idleMillis = 0,
+      limit = limit,
+      leastRecentlyUsedFirst = true,
+      reason = "memory pressure",
+    )
 
   /**
    * Shared sweep behind [suspendIdle] and [shedUnderPressure], kept as one body because the detach
@@ -462,6 +473,7 @@ class ServeSessionRegistry(
     idleMillis: Long,
     limit: Int,
     leastRecentlyUsedFirst: Boolean = false,
+    reason: String,
   ): Int {
     if (limit <= 0) return 0
     val detached = lock.withLock {
@@ -487,6 +499,10 @@ class ServeSessionRegistry(
           if (optimizerUnfinished(entry.state)) {
             runCatching { entry.state?.backgroundWork?.recordOptimizerHostSuspended() }
           }
+          log(
+            "serve: host $id suspended ($reason): idle ${(now - entry.lastAccess) / 1000} s, " +
+              "resident ${entry.startedAt?.let { (now - it) / 1000 }?.let { "$it s" } ?: "unknown"}",
+          )
           entry.host = null
           entry.startedAt = null
           entry.suspendedAt = now
@@ -712,6 +728,11 @@ class ServeSessionRegistry(
     }
     val state = entry.state ?: return null
     entry.opening = true
+    // Read before the lock is released: what to say about this boot once it has happened.
+    val id = sessions.entries.firstOrNull { it.value === entry }?.key ?: "?"
+    val parked = entry.suspendedAt?.let { "resumed after ${(clock() - it) / 1000} s suspended" }
+    val cause = ServeHostBootCause.current() ?: ServeHostBootCause.callerFrame()
+    val bootStarted = System.nanoTime()
     // Every hold this thread has, not one: a caller may have re-entered the lock (e.g.
     // `resumeIdleOptimizers` → `idleMillis`), and a single unlock would keep it held.
     val holds = lock.holdCount
@@ -727,6 +748,11 @@ class ServeSessionRegistry(
         entry.opening = false
         closeFinished.signalAll()
       }
+    log(
+      "serve: host $id ${if (resumed == null) "failed to boot" else "booted"} " +
+        "(${parked ?: "first open"}) in ${(System.nanoTime() - bootStarted) / 1_000_000} ms; " +
+        "cause: $cause",
+    )
     if (resumed == null) return null
     if (closed || sessions.values.none { it === entry }) {
       repeat(holds) { lock.unlock() }
@@ -796,4 +822,40 @@ class ServeSessionRegistry(
      */
     const val DEFAULT_LEASE_BUSY_MILLIS = 30 * 1000L
   }
+}
+
+/**
+ * Why a session host is being opened, for [ServeSessionRegistry]'s boot log. A route that leases a
+ * session names itself (its method and path) around the lease; anything else is described by the
+ * first stack frame outside the registry, which is enough to tell a request from a background job.
+ */
+internal object ServeHostBootCause {
+  private val cause = ThreadLocal<String?>()
+
+  fun current(): String? = cause.get()
+
+  /** Run [block] (which may open a host) with [why] as the cause any boot inside it reports. */
+  fun <T> with(why: String, block: () -> T): T {
+    val previous = cause.get()
+    cause.set(why)
+    try {
+      return block()
+    } finally {
+      cause.set(previous)
+    }
+  }
+
+  fun callerFrame(): String =
+    StackWalker.getInstance().walk { frames ->
+      frames
+        .map { "${it.className.substringAfterLast('.')}.${it.methodName}" }
+        .filter {
+          !it.startsWith("ServeSessionRegistry") &&
+            !it.startsWith("ServeHostBootCause") &&
+            !it.startsWith("ReentrantLock") &&
+            !it.startsWith("LocksKt")
+        }
+        .findFirst()
+        .orElse("unknown")
+    }
 }
