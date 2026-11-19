@@ -55,6 +55,7 @@ internal constructor(
 ) {
   internal val codes = WatchFacePushDeviceCodes(store, clock)
   internal val builds = WatchFacePushBuilds(store, packaging)
+  internal val catalogFaces = WatchFacePushCatalogFaces(store.catalogFacesFile)
   internal val csrf = ServeAgentGrants.Csrf()
 
   /** Starting a link: a person does it once per watch, so ten a minute per address is plenty. */
@@ -362,7 +363,32 @@ internal data class WatchFacePushDesignV1(
   val validationToken: String,
   /** Not in the app's model (it ignores unknown keys): `public` or `private`. */
   val visibility: String? = null,
+  /** `design` (a UI-builder design) or `catalog` (a face from a served catalog). */
+  val source: String? = null,
+  /** For `source: catalog`: the catalog it comes from. */
+  val catalog: WatchFacePushCatalogV1? = null,
+  /** For `source: catalog`: where the face's source lives and under which licence. */
+  val attribution: WatchFacePushAttributionV1? = null,
 )
+
+@Serializable internal data class WatchFacePushCatalogV1(val system: String, val title: String)
+
+@Serializable
+internal data class WatchFacePushAttributionV1(
+  val repoUrl: String? = null,
+  val sourceUrl: String? = null,
+  /** SPDX id (or expression), always one on [WatchFacePushLicenses.REDISTRIBUTABLE]. */
+  val license: String,
+)
+
+/** `/status`'s account of the catalog faces: how many are listed, and why the rest are not. */
+@Serializable
+internal data class WatchFacePushCatalogFacesStatusV1(
+  val listed: Int,
+  val skipped: List<WatchFacePushSkippedFaceV1>,
+)
+
+@Serializable internal data class WatchFacePushSkippedFaceV1(val id: String, val reason: String)
 
 @Serializable
 internal data class WatchFacePushDesignListV1(
@@ -387,6 +413,8 @@ internal data class WatchFacePushStatusV1(
   val reason: String? = null,
   val marketplacePackage: String = WatchFacePushNaming.MARKETPLACE_PACKAGE,
   val signerCertificateSha256: String? = null,
+  /** On `/status` only. */
+  val catalogFaces: WatchFacePushCatalogFacesStatusV1? = null,
 )
 
 @Serializable internal data class WatchFacePushErrorV1(val error: String, val message: String)
@@ -478,6 +506,11 @@ internal fun Route.installWatchFacePushRoutes(
   clientAddress: (ApplicationCall) -> String,
   /** A server-styled HTML page around [body]. */
   page: (call: ApplicationCall, title: String, body: String) -> String,
+  /**
+   * The served, listed catalogs' watch-face previews that carry their WFF source; read per request,
+   * resident catalogs only (it never wakes one).
+   */
+  catalogFaceSources: () -> List<CatalogFaceSource> = { emptyList() },
 ) {
   post("${WatchFacePush.BASE_PATH}/device-codes") {
     call.limited {
@@ -540,7 +573,19 @@ internal fun Route.installWatchFacePushRoutes(
 
   get("${WatchFacePush.BASE_PATH}/status") {
     call.noStore()
-    call.respondJson(WatchFacePushStatusV1.serializer(), push.packagingStatus())
+    val catalog = withContext(Dispatchers.IO) { push.catalogFaces.resolve(catalogFaceSources()) }
+    call.respondJson(
+      WatchFacePushStatusV1.serializer(),
+      push
+        .packagingStatus()
+        .copy(
+          catalogFaces =
+            WatchFacePushCatalogFacesStatusV1(
+              listed = catalog.faces.size,
+              skipped = catalog.skipped.map { WatchFacePushSkippedFaceV1(it.id, it.reason) },
+            ),
+        ),
+    )
   }
 
   get("${WatchFacePush.BASE_PATH}/designs") {
@@ -566,10 +611,64 @@ internal fun Route.installWatchFacePushRoutes(
           }
         designs += push.listing(origin(call), publication, built, visibility)
       }
+      // Then the public catalog faces, to every caller alike.
+      val catalog = withContext(Dispatchers.IO) { push.catalogFaces.resolve(catalogFaceSources()) }
+      for (face in catalog.faces) {
+        val build = withContext(Dispatchers.IO) { push.builds.build(face.publication, face.dwf) }
+        when (build) {
+          is WatchFacePushBuilds.Result.Built ->
+            designs += push.catalogListing(origin(call), face, build.apk)
+          is WatchFacePushBuilds.Result.Unavailable -> Unit
+          is WatchFacePushBuilds.Result.Failed ->
+            System.err.println(
+              "serve: watchface-push: ${face.publication.designId} is not listed; the packager " +
+                "refused it: ${build.diagnostics.firstOrNull()}",
+            )
+        }
+      }
       call.respondJson(
         WatchFacePushDesignListV1.serializer(),
         WatchFacePushDesignListV1(designs, packaging.takeIf { !it.available }),
       )
+    }
+  }
+
+  // A catalog face, named by query rather than path: a preview id may hold a `/`.
+  get("${WatchFacePush.BASE_PATH}/catalog-faces/apk") {
+    call.limited {
+      val caller = call.watchCaller(push, clientAddress) ?: return@limited
+      if (!call.admit(caller.limiter, caller.key)) return@limited
+      if (caller.account == null && !call.admit(push.anonymousApkLimiter, caller.key))
+        return@limited
+      val face = call.catalogFace(push, catalogFaceSources) ?: return@limited
+      when (
+        val build = withContext(Dispatchers.IO) { push.builds.build(face.publication, face.dwf) }
+      ) {
+        is WatchFacePushBuilds.Result.Unavailable -> {
+          call.noStore()
+          call.respondError(HttpStatusCode.ServiceUnavailable, build.code, build.reason)
+        }
+        is WatchFacePushBuilds.Result.Failed -> {
+          call.noStore()
+          call.respondError(HttpStatusCode.NotFound, "not_found", "this face has no APK")
+        }
+        is WatchFacePushBuilds.Result.Built -> call.respondApk(build, face.publication.version)
+      }
+    }
+  }
+
+  get("${WatchFacePush.BASE_PATH}/catalog-faces/preview.png") {
+    call.limited {
+      if (!call.admit(push.anonymousLimiter, "ip:" + clientAddress(call))) return@limited
+      val face = call.catalogFace(push, catalogFaceSources) ?: return@limited
+      val png = withContext(Dispatchers.IO) { face.source.png() }
+      if (png == null) {
+        call.noStore()
+        call.respondText("no preview", status = HttpStatusCode.NotFound)
+        return@limited
+      }
+      call.response.headers.append(HttpHeaders.CacheControl, "public, max-age=86400")
+      call.respondBytes(png, ContentType.Image.PNG)
     }
   }
 
@@ -816,6 +915,96 @@ internal fun WatchFacePush.packagingStatus(): WatchFacePushStatusV1 =
       WatchFacePushStatusV1(available = false, code = packaging.code, reason = packaging.reason)
   }
 
+internal fun WatchFacePush.catalogListing(
+  origin: String,
+  face: WatchFacePushCatalogFaces.Face,
+  apk: WatchFacePushStore.Apk,
+): WatchFacePushDesignV1 {
+  val query =
+    "system=" +
+      WebEscaping.urlEncodeSegment(face.source.system) +
+      "&preview=" +
+      WebEscaping.urlEncodeSegment(face.source.previewId) +
+      "&v=" +
+      face.publication.version
+  val base = "$origin${WatchFacePush.BASE_PATH}/catalog-faces"
+  return WatchFacePushDesignV1(
+    id = face.publication.designId,
+    title = face.source.title,
+    previewUrl = "$base/preview.png?$query",
+    version = face.publication.version,
+    versionName =
+      face.manifest.commit?.take(12)?.let { "${face.publication.version} ($it)" }
+        ?: face.publication.version.toString(),
+    wffVersion = face.dwf.wffVersion,
+    packageName = apk.packageName,
+    apkUrl = "$base/apk?$query",
+    sha256 = apk.sha256,
+    sizeBytes = apk.sizeBytes,
+    validationToken = apk.validationToken,
+    visibility = WatchFacePush.VISIBILITY_PUBLIC,
+    source = SOURCE_CATALOG,
+    catalog = WatchFacePushCatalogV1(face.source.system, face.source.catalogTitle),
+    attribution =
+      WatchFacePushAttributionV1(
+        repoUrl = face.manifest.repoUrl,
+        sourceUrl = face.manifest.sourceUrl,
+        license = face.manifest.license!!,
+      ),
+  )
+}
+
+internal const val SOURCE_DESIGN = "design"
+internal const val SOURCE_CATALOG = "catalog"
+
+/**
+ * The catalog face `?system=&preview=` names, at `?v=` when given; null once a 404 is written. Only
+ * a face that is listed (its catalog served and listed, its source present, its licence on the
+ * allowlist) is found.
+ */
+private suspend fun ApplicationCall.catalogFace(
+  push: WatchFacePush,
+  sources: () -> List<CatalogFaceSource>,
+): WatchFacePushCatalogFaces.Face? {
+  val system = request.queryParameters["system"].orEmpty()
+  val previewId = request.queryParameters["preview"].orEmpty()
+  val requested = request.queryParameters["v"]?.toLongOrNull()
+  val face =
+    withContext(Dispatchers.IO) {
+      push.catalogFaces
+        .resolve(sources().filter { it.system == system && it.previewId == previewId })
+        .faces
+        .singleOrNull()
+    }
+  if (face == null || (requested != null && requested != face.publication.version)) {
+    noStore()
+    respondError(HttpStatusCode.NotFound, "not_found", "no such catalog face")
+    return null
+  }
+  return face
+}
+
+/** The APK [build] with its validators, as the design route serves one. */
+private suspend fun ApplicationCall.respondApk(
+  build: WatchFacePushBuilds.Result.Built,
+  version: Long,
+) {
+  val etag = "\"${build.apk.sha256}\""
+  response.headers.append(HttpHeaders.ETag, etag)
+  response.headers.append(HttpHeaders.CacheControl, "private, no-cache")
+  response.headers.append("X-Watchface-Version", version.toString())
+  if (request.headers[HttpHeaders.IfNoneMatch]?.split(',')?.any { it.trim() == etag } == true) {
+    respondText("", status = HttpStatusCode.NotModified)
+    return
+  }
+  response.headers.append(
+    HttpHeaders.ContentDisposition,
+    "attachment; filename=\"${build.apk.packageName}-$version.apk\"",
+  )
+  val bytes = withContext(Dispatchers.IO) { build.file.readBytes() }
+  respondBytes(bytes, ContentType.parse(APK_CONTENT_TYPE))
+}
+
 internal fun WatchFacePush.listing(
   origin: String,
   publication: WatchFacePushStore.Publication,
@@ -839,6 +1028,7 @@ internal fun WatchFacePush.listing(
     sizeBytes = apk.sizeBytes,
     validationToken = apk.validationToken,
     visibility = visibility,
+    source = SOURCE_DESIGN,
   )
 }
 

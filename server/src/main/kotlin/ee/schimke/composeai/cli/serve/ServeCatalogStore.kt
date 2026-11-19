@@ -1922,10 +1922,13 @@ class ServeCatalogStore(
   }
 
   /**
-   * Extract `previews/<daemon-id>.watchface.json` sidecars from [bundleFile], re-key them through
-   * [alias], and write `<dir>/previews/<catalog-id>.watchface.json` for [ServeBundleHost] so static
-   * and degraded catalog opens still advertise watch-face complication slots and user
-   * configurations.
+   * Extract the per-preview watch-face sidecars from [bundleFile], re-key them through [alias], and
+   * write them under `<dir>/previews/<catalog-id><suffix>` for [ServeBundleHost]:
+   * - `.watchface.json`, so static and degraded catalog opens still advertise watch-face
+   *   complication slots and user configurations;
+   * - `.wff.zip` and `.wff.json` ([WFF_SOURCE_SUFFIX], [WFF_MANIFEST_SUFFIX]), the face's Watch
+   *   Face Format source and its provenance and licence, which the Watch Face Push API packages
+   *   ([WatchFacePushCatalogFaces]).
    */
   private fun extractCatalogWatchFaceSidecars(
     bundleFile: File,
@@ -1934,26 +1937,30 @@ class ServeCatalogStore(
   ) {
     val wantedDaemonIds = alias.values.toHashSet()
     if (wantedDaemonIds.isEmpty()) return
-    val maxDocBytes = 4L * 1024 * 1024
-    val maxTotalBytes = 32L * 1024 * 1024
-    val sidecarsByDaemonId =
+    val suffixes = WATCHFACE_PREVIEW_SUFFIXES
+    val maxTotalBytes = 96L * 1024 * 1024
+    val sidecars =
       try {
         val zipBytes = BundleReader.extractZipBytes(bundleFile)
-        val out = HashMap<String, ByteArray>()
+        val out = HashMap<Pair<String, String>, ByteArray>()
         var total = 0L
         ZipInputStream(ByteArrayInputStream(zipBytes)).use { zin ->
           var entry = zin.nextEntry
           while (entry != null) {
             val name = entry.name.replace('\\', '/')
-            if (
-              !entry.isDirectory &&
-                name.startsWith("$PER_PREVIEW_DIR/") &&
-                name.endsWith(WATCHFACE_SIDECAR_SUFFIX) &&
-                ".." !in name.split("/")
-            ) {
-              val daemonId =
-                name.removePrefix("$PER_PREVIEW_DIR/").removeSuffix(WATCHFACE_SIDECAR_SUFFIX)
-              if (daemonId in wantedDaemonIds && daemonId !in out) {
+            val suffix =
+              suffixes.keys
+                .firstOrNull { name.endsWith(it) }
+                .takeIf {
+                  !entry.isDirectory &&
+                    name.startsWith("$PER_PREVIEW_DIR/") &&
+                    ".." !in name.split("/")
+                }
+            if (suffix != null) {
+              val daemonId = name.removePrefix("$PER_PREVIEW_DIR/").removeSuffix(suffix)
+              val key = daemonId to suffix
+              if (daemonId in wantedDaemonIds && key !in out) {
+                val maxDocBytes = suffixes.getValue(suffix)
                 val buf = ByteArrayOutputStream()
                 val chunk = ByteArray(64 * 1024)
                 var docBytes = 0L
@@ -1967,7 +1974,7 @@ class ServeCatalogStore(
                   }
                   buf.write(chunk, 0, n)
                 }
-                out[daemonId] = buf.toByteArray()
+                out[key] = buf.toByteArray()
               }
             }
             zin.closeEntry()
@@ -1978,15 +1985,17 @@ class ServeCatalogStore(
       } catch (_: Exception) {
         return
       }
-    if (sidecarsByDaemonId.isEmpty()) return
+    if (sidecars.isEmpty()) return
     val previewsDir = File(dir, PER_PREVIEW_DIR)
     val previewsRoot = previewsDir.canonicalFile.toPath()
     for ((catalogId, daemonId) in alias) {
-      val bytes = sidecarsByDaemonId[daemonId] ?: continue
-      val target = File(previewsDir, "$catalogId$WATCHFACE_SIDECAR_SUFFIX")
-      if (!target.canonicalFile.toPath().startsWith(previewsRoot)) continue
-      target.parentFile?.mkdirs()
-      target.writeBytes(bytes)
+      for (suffix in suffixes.keys) {
+        val bytes = sidecars[daemonId to suffix] ?: continue
+        val target = File(previewsDir, "$catalogId$suffix")
+        if (!target.canonicalFile.toPath().startsWith(previewsRoot)) continue
+        target.parentFile?.mkdirs()
+        target.writeBytes(bytes)
+      }
     }
   }
 
@@ -3505,6 +3514,20 @@ class ServeCatalogStore(
     const val IR_DOC_DIR = "ir"
     const val RC_DOC_SUFFIX = ".rc"
     const val WATCHFACE_SIDECAR_SUFFIX = ".watchface.json"
+
+    /** `ee.schimke.composeai.bundle.BUNDLE_WFF_SOURCE_SUFFIX` (compose-ai-tools#6647). */
+    const val WFF_SOURCE_SUFFIX = ".wff.zip"
+
+    /** `ee.schimke.composeai.bundle.BUNDLE_WFF_MANIFEST_SUFFIX` (compose-ai-tools#6647). */
+    const val WFF_MANIFEST_SUFFIX = ".wff.json"
+
+    /** The per-preview watch-face files kept from a live bundle, with each one's size cap. */
+    internal val WATCHFACE_PREVIEW_SUFFIXES: Map<String, Long> =
+      linkedMapOf(
+        WATCHFACE_SIDECAR_SUFFIX to 4L * 1024 * 1024,
+        WFF_MANIFEST_SUFFIX to 1L * 1024 * 1024,
+        WFF_SOURCE_SUFFIX to 16L * 1024 * 1024,
+      )
 
     /**
      * Subdir (under `liveBundle.path` / [LIVE_BUNDLE_DIR]) of per-preview split bundles, fetched by
