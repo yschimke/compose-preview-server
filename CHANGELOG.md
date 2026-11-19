@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.179.0](https://github.com/yschimke/compose-preview-server/compare/v3.178.0...v3.179.0) (2026-11-19)
+
+
+### Features
+
+* list the served catalogs' watch faces in the Watch Face Push API ([#2004](https://github.com/yschimke/compose-preview-server/issues/2004)) ([51b5247](https://github.com/yschimke/compose-preview-server/commit/51b52474ad21392202e3f604ef994beb0d3fa2df))
+* serve the Wear OS push app's watch-face API at /api/watchface-push/v1 ([#1998](https://github.com/yschimke/compose-preview-server/issues/1998)) ([a2e0209](https://github.com/yschimke/compose-preview-server/commit/a2e02099ae94247d972ca388ac834457b44fe9e5))
+
 ## [3.178.0](https://github.com/yschimke/compose-preview-server/compare/v3.177.0...v3.178.0) (2026-11-18)
 
 
