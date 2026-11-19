@@ -871,6 +871,21 @@ internal class WatchFacePushStore(
    * id next starts above every version already installed and never inherits this publication.
    */
   fun retire(designId: String): Publication? =
+    retireRecord(designId).also { retiredListeners.forEach { it(designId) } }
+
+  /** Told of every [retire], published or not, after the record is written: see [onRetired]. */
+  private val retiredListeners = java.util.concurrent.CopyOnWriteArrayList<(String) -> Unit>()
+
+  /**
+   * Call [listener] each time a design is retired, whether or not it was ever published: what is
+   * kept beside the record by design id alone (a build's progress, a refusal) belongs to the design
+   * that is gone, not to whoever creates the id next.
+   */
+  fun onRetired(listener: (designId: String) -> Unit) {
+    retiredListeners += listener
+  }
+
+  private fun retireRecord(designId: String): Publication? =
     synchronized(lock) {
       val previous = publications[designId] ?: return null
       if (installs.removeIf { it.designId == designId }) persistInstalls()
