@@ -24,11 +24,12 @@ All under `/api/watchface-push/v1` unless noted. JSON, UTF-8. Errors are
 | `GET /designs` | **optional** device token | published watch faces, newest first |
 | `GET /designs/{id}/apk?v=<version>` | optional device token | the signed APK |
 | `GET /designs/{id}/preview.png?v=…&sig=…` | the signed URL | the design's picture |
-| `POST /installs` | device token | install telemetry; accepted with `204` and not kept |
+| `POST /installs` | device token | an install report; `204`, kept per watch and design ([Install reports](#install-reports)) |
 | `GET /status` | none | whether this server can build APKs, and why not |
 | `GET /devices`, `DELETE /devices/{id}` | signed-in person | their linked watches |
 | `GET /link?code=…`, `POST /link` | signed-in person | the page a watch's QR code opens |
 | `GET`/`PUT`/`DELETE /api/ui-builder/v1/designs/{id}/watch-push` | the design's owner | the publish flag |
+| `GET /api/ui-builder/v1/designs/{id}/watch-installs` | the design's owner | each linked watch's latest install report |
 
 ### Linking
 
@@ -109,6 +110,23 @@ straight away: a face the packager or Google's validator refuses is a `422` with
 to the person who can fix it. Edits are not shipped until the owner publishes again. `DELETE`
 unpublishes; `GET` reports the publication and its APK status (`ready`, `pending`, `unavailable`,
 `failed`).
+
+### Install reports
+
+`POST /installs` takes `{designId, version, result, errorKind?, wearOsApi?, packageName?,
+activation?, activationError?, deviceModel?, wearOsVersion?, watchFacePushApiVersion?,
+appVersion?}`; `activation` is one of `activated`, `not_requested`, `manual`, `failed` (any other
+value is dropped). It is `204` whether or not it is kept, because the app reports fire-and-forget,
+and `400` only without a `designId`, a non-negative `version` and a `result`. The server keeps a
+report only on a design published by the watch's own account (so never a catalog face, `c_…`): the
+latest per watch and design, at most 500 in all, in `installs.json` beside `devices.json`. Unlinking
+a watch drops its reports, and a purged design's go with it.
+
+`GET /api/ui-builder/v1/designs/{id}/watch-installs` is the owner's view:
+`{"installs":[{deviceName, deviceModel?, wearOsApi?, version, revisionPublished?, result,
+activation?, errorKind?, at}]}`, one row per still-linked watch, newest first. `at` is when the
+server received the report, in epoch milliseconds, and `revisionPublished` is the revision that
+`version` was published from, if that version was still the published one when the report came in.
 
 ## The APK
 
