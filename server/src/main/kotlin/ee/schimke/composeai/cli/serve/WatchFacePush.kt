@@ -1216,8 +1216,15 @@ internal class WatchFacePushBuilds(
   /** Keys queued on, or being built by, [worker]. */
   private val queued = ConcurrentHashMap.newKeySet<String>()
 
+  /** One thread; a [java.util.concurrent.ThreadPoolExecutor] so [close] can drop its queue. */
   private val worker =
-    java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+    java.util.concurrent.ThreadPoolExecutor(
+      1,
+      1,
+      0L,
+      java.util.concurrent.TimeUnit.MILLISECONDS,
+      java.util.concurrent.LinkedBlockingQueue(),
+    ) { runnable ->
       Thread(runnable, "watchface-push-builds").apply {
         isDaemon = true
         priority = Thread.MIN_PRIORITY
@@ -1271,22 +1278,24 @@ internal class WatchFacePushBuilds(
     if (packaging() is WatchFacePushPackaging.Unavailable) return false
     if (!queued.add(key)) return false
     try {
-      worker.execute {
-        try {
-          when (val result = build(publication, source(), cause = cause)) {
-            is Result.Failed ->
-              log(
-                "serve: watchface-push: ${publication.designId} v${publication.version} is not " +
-                  "listed: ${result.diagnostics.firstOrNull()}",
-              )
-            else -> Unit
+      worker.execute(
+        Queued(key) {
+          try {
+            when (val result = build(publication, source(), cause = cause)) {
+              is Result.Failed ->
+                log(
+                  "serve: watchface-push: ${publication.designId} v${publication.version} is not " +
+                    "listed: ${result.diagnostics.firstOrNull()}",
+                )
+              else -> Unit
+            }
+          } catch (e: Exception) {
+            log("serve: watchface-push: background build of ${publication.designId} failed: $e")
+          } finally {
+            queued.remove(key)
           }
-        } catch (e: Exception) {
-          log("serve: watchface-push: background build of ${publication.designId} failed: $e")
-        } finally {
-          queued.remove(key)
-        }
-      }
+        },
+      )
     } catch (e: java.util.concurrent.RejectedExecutionException) {
       queued.remove(key)
       return false
@@ -1420,9 +1429,22 @@ internal class WatchFacePushBuilds(
     return Result.Failed(diagnostics)
   }
 
-  /** Stop the background worker; a build already running finishes, nothing queued starts. */
+  /**
+   * Stop the background worker: nothing queued starts, and a build already running finishes. Not
+   * interrupted: the packager kills its subprocess tree only on its own timeout, so interrupting
+   * its wait would leave the packager JVM and its Android tools running unsupervised.
+   */
   fun close() {
-    worker.shutdownNow()
+    // Drop what has not started, then shut down without interrupting the build that has.
+    val dropped = mutableListOf<Runnable>()
+    worker.queue.drainTo(dropped)
+    dropped.forEach { (it as? Queued)?.let { task -> queued.remove(task.key) } }
+    worker.shutdown()
+  }
+
+  /** A queued build, carrying its key so [close] can forget the ones it drops. */
+  private class Queued(val key: String, private val run: () -> Unit) : Runnable {
+    override fun run() = run.invoke()
   }
 
   private fun key(publication: WatchFacePushStore.Publication): String =

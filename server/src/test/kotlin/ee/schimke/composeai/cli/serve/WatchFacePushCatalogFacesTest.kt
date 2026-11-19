@@ -789,4 +789,42 @@ class WatchFacePushCatalogFacesTest {
     assertTrue(WatchFacePushBuilds.isSourceRefusal(listOf("error[validator]: bad face")))
     assertFalse(WatchFacePushBuilds.isSourceRefusal(listOf("warning[x]: only a warning")))
   }
+
+  @Test
+  fun `closing lets the running build finish uninterrupted and drops what is queued`() {
+    val started = java.util.concurrent.CountDownLatch(1)
+    val release = java.util.concurrent.CountDownLatch(1)
+    val interrupted = java.util.concurrent.atomic.AtomicBoolean(false)
+    val runs = java.util.concurrent.CopyOnWriteArrayList<String>()
+    val packager = WatchFacePushPackager { _, faceName, versionCode, out ->
+      runs += faceName
+      started.countDown()
+      try {
+        release.await(30, TimeUnit.SECONDS)
+      } catch (e: InterruptedException) {
+        interrupted.set(true)
+        throw e
+      }
+      out.writeBytes("apk:$faceName:$versionCode".toByteArray())
+      "token"
+    }
+    val store = WatchFacePushStore(dir.resolve("closing"))
+    val builds =
+      WatchFacePushBuilds(store, { WatchFacePushPackaging.Ready(packager, "c0ffee") }, log = {})
+    val source = DwfSource("<WatchFace/>", 2, emptyMap())
+    val first = store.candidate("first", "github:alice", 1, "First", source, 0L)
+    val second = store.candidate("second", "github:alice", 1, "Second", source, 0L)
+    assertTrue(builds.enqueue(first, { source }, cause = "test"))
+    assertTrue(started.await(30, TimeUnit.SECONDS))
+    assertTrue(builds.enqueue(second, { source }, cause = "test"))
+
+    builds.close()
+    release.countDown()
+    assertTrue(builds.awaitIdle(30_000))
+    // The running build was not interrupted and completed; the queued one never started.
+    assertFalse(interrupted.get())
+    assertNotNull(builds.cached(first))
+    assertEquals(listOf(first.faceName), runs)
+    assertNull(builds.cached(second))
+  }
 }
