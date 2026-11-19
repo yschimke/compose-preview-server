@@ -1911,6 +1911,30 @@ class WatchFacePushRoutesTest {
     assertNull(pendingList()["aurora"])
   }
 
+  @Test
+  fun `includePending honours an owner's unpublish or private publish of a public design`() {
+    automaticListing = true
+    start()
+    createDesign(alice, "aurora", "Aurora", public = true)
+    createDesign(alice, "secret", "Secret", public = true)
+    val aliceToken = link(alice)
+    // Unpublished, then edited: the edit schedules an automatic build that will never run.
+    assertEquals(
+      200,
+      send("DELETE", "/api/ui-builder/v1/designs/aurora/watch-face-publication", actor = alice)
+        .code,
+    )
+    edit(alice, "aurora", face = "<WatchFace id=\"aurora\" edited=\"1\"/>")
+    assertNull(pendingList()["aurora"], "an unpublished design is listed to anonymous watches")
+    // Published as private, then edited: still only on the owner's watch, as private.
+    assertEquals(200, publish(alice, "secret", "private").code)
+    edit(alice, "secret", face = "<WatchFace id=\"secret\" edited=\"1\"/>")
+    assertNull(pendingList()["secret"], "a private publication is listed to anonymous watches")
+    val mine = pendingList(aliceToken)["secret"]!!
+    assertEquals("private", mine["visibility"]!!.jsonPrimitive.content)
+    assertNotEquals("pending", mine["build"]?.jsonObject?.get("state")?.jsonPrimitive?.content)
+  }
+
   private fun document(id: String, title: String) =
     DesignDocumentV1(
       schema = "compose-ui-builder-document/v1-candidate",

@@ -1732,7 +1732,9 @@ internal fun WatchFacePush.listing(
 internal fun WatchFacePush.designBuild(
   publication: WatchFacePushStore.Publication,
 ): WatchFacePushBuildStatusV1? =
-  queue.status(publication.designId)
+  // An automatic state on the owner's own publication is not what will happen: the automatic
+  // listing leaves an explicit publication alone.
+  queue.status(publication.designId)?.takeIf { !it.automatic || publication.automatic }
     ?: builds.refusal(publication)?.let {
       WatchFacePushBuildStatusV1(
         WatchFacePushBuildQueue.REFUSED,
@@ -1785,9 +1787,16 @@ internal suspend fun WatchFacePush.queuedOnly(
     if (designId in listed || build.state == WatchFacePushBuildQueue.BUILT) return@mapNotNull null
     val summary = designSummary(designId) ?: return@mapNotNull null
     if (!isWatchFaceCatalog(summary.catalogPin.systemId)) return@mapNotNull null
+    // The owner's own decision — unpublished, or published as private — wins over a public
+    // design's automatic listing here as it does in the scheduler, which only checks it once the
+    // design has settled.
+    val explicit =
+      store
+        .publication(designId)
+        ?.isExplicitFor(summary.ownerActorId, summary.createdAtEpochMillis) == true
     val visibility =
       when {
-        build.automatic && service.canRead(WatchFacePush.ANONYMOUS, designId) ->
+        build.automatic && !explicit && service.canRead(WatchFacePush.ANONYMOUS, designId) ->
           WatchFacePush.VISIBILITY_PUBLIC
         !build.automatic && account != null && account == summary.ownerActorId ->
           WatchFacePush.VISIBILITY_PRIVATE
