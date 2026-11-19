@@ -16,8 +16,9 @@ import kotlinx.serialization.json.Json
  */
 @Serializable
 internal data class WatchFacePackagerReportV1(
-  val schemaVersion: Int,
-  val wffVersion: Int,
+  val schemaVersion: Int = 1,
+  /** Null when the packager could not read one from the bundle; the source's is used then. */
+  val wffVersion: Int? = null,
   val minimumWffVersion: Int? = null,
   val passed: Boolean,
   val checks: List<WatchFaceValidationCheckV1> = emptyList(),
@@ -272,7 +273,8 @@ internal class WatchFaceValidation(
   private fun run(validator: WatchFaceValidator, source: DwfSource): Attempt =
     try {
       val text = validator.validate(DwfPackaging.bundleFiles(source))
-      Ran(REPORT_JSON.decodeFromString(WatchFacePackagerReportV1.serializer(), text), clock())
+      val report = REPORT_JSON.decodeFromString(WatchFacePackagerReportV1.serializer(), text)
+      Ran(report.copy(wffVersion = report.wffVersion ?: source.wffVersion), clock())
     } catch (failed: DwfPackagingFailed) {
       Ran(packagerFailed(source, failed.diagnostics), clock())
     } catch (_: SerializationException) {
@@ -344,7 +346,7 @@ internal class WatchFaceValidation(
     val report =
       WatchFaceValidationReportV1(
         schemaVersion = ran.report.schemaVersion,
-        wffVersion = ran.report.wffVersion,
+        wffVersion = ran.report.wffVersion ?: DwfPreviewSurface.DEFAULT_WFF_VERSION,
         minimumWffVersion = ran.report.minimumWffVersion,
         passed = ran.report.passed,
         checks = ran.report.checks,

@@ -526,7 +526,12 @@ livery = "0.15.0"
 # the process (it made `ExplodedSvg` return its input unexploded). It ships as `lib-wff-packager/`
 # and runs in its own JVM. Needs the Android SDK's aapt2 and zipalign plus a platform android.jar at
 # run time, never at build time.
-wff-packager = "0.4.0"
+# 0.9.0 adds `validate --report-out` (the per-check report `watchface-validation` serves) and
+# `wff-apk`, whose `WffEstimate` is the SDK-free cost estimate returned after each MCP edit of a
+# watch face (`WatchFaceCostEstimator`). `wff-apk` is on the server's classpath: pure Kotlin over
+# `wff-core`, with none of the packager's validator jars.
+wff-packager = "0.9.0"
+wff-apk = "0.9.0"
 wff-core = "0.4.0"
 # The Android Remote Compose players the server's own player-only Android daemon replays documents
 # with, staged as `lib-rc-players-android/` (`stageRcPlayersAndroidLibs`). The Android daemon
@@ -566,6 +571,7 @@ composeai-common-web-escaping = { module = "ee.schimke.composeai:common-web-esca
 # The WFF source bundle -> signed, validated APK packager (see the `wff-packager` pin above).
 wff-packager = { module = "ee.schimke.watchface:wff-packager", version.ref = "wff-packager" }
 wff-core = { module = "ee.schimke.watchface:wff-core", version.ref = "wff-core" }
+wff-apk = { module = "ee.schimke.watchface:wff-apk", version.ref = "wff-apk" }
 # The render host, the bundle daemon and the git-backed preview history. Was this repository's own
 # `:render-host` module, published as `compose-preview-render-host`, until yschimke/compose-preview-server#180
 # moved it to the repository that owns everything it depends on. It has no web server and never did;

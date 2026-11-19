@@ -137,6 +137,8 @@ class ServeUiBuilderMcp(
    * face. Null on a host without the UI builder's watch-face lane (tool absent).
    */
   private val watchFaces: UiBuilderDwfPreview? = null,
+  /** The per-edit cost of a watch face ([WATCH_FACE_COST_KEY]); only used with [watchFaces]. */
+  private val watchFaceCost: WatchFaceCostEstimator = WatchFaceCostEstimator(),
   private val onLog: (String) -> Unit = { System.err.println(it) },
   /**
    * Bytes behind a design's `assets` map, so an agent can put a photograph in a design. Null
@@ -409,7 +411,15 @@ class ServeUiBuilderMcp(
         withLinks(
           tool,
           args,
-          withHome(tool, run(tool, args, actor, callId, clientInteraction, mayExport)),
+          withHome(
+            tool,
+            withWatchFaceCost(
+              tool,
+              args,
+              actor,
+              run(tool, args, actor, callId, clientInteraction, mayExport),
+            ),
+          ),
         ),
       )
     } finally {
@@ -1899,6 +1909,53 @@ class ServeUiBuilderMcp(
       )
     }
     return links
+  }
+
+  /**
+   * A watch-face edit's reply plus [WATCH_FACE_COST_KEY]: what the face now costs, from the
+   * packager's SDK-free estimate ([WatchFaceCostEstimator]), so an agent keeps within the active
+   * and ambient budgets as it builds rather than finding out at publish. Only on
+   * [WATCH_FACE_COST_TOOLS], only for a design this actor can read whose catalog draws watch faces,
+   * and computed after the edit has returned, never inside it. No packager JVM runs. A reply that
+   * is not a JSON object, a design that exports no face, or an estimate that fails passes through
+   * unchanged.
+   */
+  private suspend fun withWatchFaceCost(
+    tool: String,
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+    reply: String,
+  ): String {
+    val dwf = watchFaces ?: return reply
+    if (tool !in WATCH_FACE_COST_TOOLS) return reply
+    val designId = args.text("designId") ?: return reply
+    val parsed =
+      try {
+        UI_BUILDER_JSON.parseToJsonElement(reply) as? JsonObject ?: return reply
+      } catch (_: SerializationException) {
+        return reply
+      }
+    val document =
+      try {
+        (execute(GetSnapshotRequestV1(designId = designId), actor)
+            as? UiBuilderServiceResponse.Snapshot)
+          ?.snapshot
+          ?.state
+          ?.document
+      } catch (cancelled: CancellationException) {
+        throw cancelled
+      } catch (_: Exception) {
+        null
+      } ?: return reply
+    if (!dwf.isDwfCatalog(document.catalogPin.systemId)) return reply
+    val summary =
+      withContext(Dispatchers.Default) { watchFaceCost.summary(dwf, document) } ?: return reply
+    return JsonObject(
+        parsed +
+          (WATCH_FACE_COST_KEY to
+            UI_BUILDER_JSON.encodeToJsonElement(WatchFaceCostSummaryV1.serializer(), summary)),
+      )
+      .toString()
   }
 
   /**
@@ -4217,6 +4274,12 @@ class ServeUiBuilderMcp(
     const val SET_LINKS = "ui_builder_set_links"
     const val PUBLISH_WATCH_FACE = "ui_builder_publish_watch_face"
     const val VALIDATE_WATCH_FACE = "ui_builder_validate_watch_face"
+
+    /** The key a watch-face edit's reply carries its [WatchFaceCostSummaryV1] under. */
+    const val WATCH_FACE_COST_KEY = "watchFaceCost"
+
+    /** The edits whose replies carry [WATCH_FACE_COST_KEY]. */
+    val WATCH_FACE_COST_TOOLS = setOf(APPLY, REPLACE_DESIGN_DOCUMENT, PUT_ASSET)
     const val SHARE_DESIGN = "ui_builder_share_design"
     const val RENAME_DESIGN = "ui_builder_rename_design"
     const val DELETE_DESIGN = "ui_builder_delete_design"
@@ -4521,7 +4584,12 @@ class ServeUiBuilderMcp(
               "not pin fails `bundle-resources`; pin it with $PUT_ASSET. This runs the full " +
               "packager, so call it when an edit pass is done and before " +
               "$PUBLISH_WATCH_FACE, not after every edit; an unchanged face answers from " +
-              "cache. A failing face is a report with `passed: false`, not an error. A host whose " +
+              "cache. Between runs, every $APPLY, $REPLACE_DESIGN_DOCUMENT and $PUT_ASSET on a " +
+              "watch face already replies with `$WATCH_FACE_COST_KEY`: a cheap estimate of the " +
+              "same budgets (`active` and `ambient` as `usedBytes`, `limitBytes`, " +
+              "`percentOfLimit`), the `topContributors` with what to do about each, and the " +
+              "estimate's `errors`; read it after each edit and fix what it flags before " +
+              "building further. A failing face is a report with `passed: false`, not an error. A host whose " +
               "operator left Google's validators off answers " +
               "`${WatchFaceValidatorAvailability.DISABLED}`.",
             """

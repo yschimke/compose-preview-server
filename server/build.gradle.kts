@@ -692,6 +692,8 @@ dependencies {
   // The WFF bundle layout `DwfPackaging` lays a design revision out in. Only `wff-core`: the
   // packager itself runs from `lib-wff-packager/` in its own JVM (see `wffPackager` below).
   implementation(libs.wff.core)
+  // The packager's SDK-free cost estimate, in process: an XML parse and image headers per edit.
+  implementation(libs.wff.apk)
   wffPackager(libs.wff.packager)
 
   // The build-host protocol, `implementation`: only `ServeBuildHost` is programmed against
