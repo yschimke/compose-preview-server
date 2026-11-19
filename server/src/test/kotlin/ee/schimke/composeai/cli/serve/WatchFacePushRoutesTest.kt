@@ -124,7 +124,10 @@ class WatchFacePushRoutesTest {
     return { WatchFacePushPackaging.Ready(packager, "c0ffee") }
   }
 
-  private fun start(packaging: () -> WatchFacePushPackaging = readyPackaging()): ServeHttpServer {
+  private fun start(
+    packaging: () -> WatchFacePushPackaging = readyPackaging(),
+    uiBuilderHost: String? = null,
+  ): ServeHttpServer {
     service =
       PersistentUiBuilderService(
         storage = FileUiBuilderStateStorage(dir.resolve("state")),
@@ -175,6 +178,7 @@ class WatchFacePushRoutesTest {
             sessions = DwfPreviewSessions(FakeDwfRuntime()),
             isDwfCatalog = { true },
           ),
+        uiBuilderHost = uiBuilderHost,
         // A signed-in person is named by a test header; without it, nobody is.
         uiBuilderAuthorization =
           ServeUiBuilderAuthorization { call, _, _ ->
@@ -692,6 +696,25 @@ class WatchFacePushRoutesTest {
         ),
     )
     assertEquals(401, send("GET", "$api/designs", bearer = token).code)
+  }
+
+  @Test
+  fun `with a builder host, its designs are listed only on that host`() {
+    start(uiBuilderHost = "ui.example")
+    createDesign(alice, "aurora", "Aurora", public = true)
+    assertEquals(200, publish(alice, "aurora").code)
+    fun on(host: String, path: String) = send("GET", path, headers = mapOf("Host" to host))
+
+    val builder = on("ui.example", "$api/designs")
+    assertEquals(200, builder.code)
+    assertTrue("\"aurora\"" in builder.body, builder.body)
+    assertEquals(200, on("ui.example", "$api/designs/aurora/apk").code)
+
+    // Another site on the same box (the catalog site) never lists or serves the builder's designs.
+    val elsewhere = on("preview.example", "$api/designs")
+    assertEquals(200, elsewhere.code)
+    assertFalse("\"aurora\"" in elsewhere.body, elsewhere.body)
+    assertEquals(404, on("preview.example", "$api/designs/aurora/apk").code)
   }
 
   @Test

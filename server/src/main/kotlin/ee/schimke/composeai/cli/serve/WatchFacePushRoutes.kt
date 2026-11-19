@@ -1044,6 +1044,8 @@ internal fun Route.installWatchFacePushRoutes(
    * resident catalogs only (it never wakes one).
    */
   catalogFaceSources: () -> List<CatalogFaceSource> = { emptyList() },
+  /** What the host a request addressed offers a watch ([WatchFacePushSite]). */
+  site: (ApplicationCall) -> WatchFacePushSite = { WatchFacePushSite.BOTH },
 ) {
   // Public designs are built by the automatic listing's own scheduler, never by these routes.
   push.automatic.start(service)
@@ -1111,47 +1113,57 @@ internal fun Route.installWatchFacePushRoutes(
 
   get("${WatchFacePush.BASE_PATH}/status") {
     call.noStore()
-    // Reports what the automatic listing found; it builds nothing.
-    val listedDesigns =
-      push.store.published().count {
-        push.reach(service, it, null) == WatchFacePush.VISIBILITY_PUBLIC
+    // Each part only on a site that lists it: designs and their builds, catalog faces.
+    val offered = site(call)
+    val designs =
+      if (!offered.designs) null
+      else {
+        // Reports what the automatic listing found; it builds nothing.
+        WatchFacePushCatalogFacesStatusV1(
+          listed =
+            push.store.published().count {
+              push.reach(service, it, null) == WatchFacePush.VISIBILITY_PUBLIC
+            },
+          skipped =
+            push.automatic.skipped(service).map { (id, reason) ->
+              WatchFacePushSkippedFaceV1(id, reason)
+            },
+        )
       }
-    val catalog = withContext(Dispatchers.IO) { push.catalogFaces.resolve(catalogFaceSources()) }
-    // Only a face with a built APK is on `/designs`, so only those count as listed. One the
-    // packager refused is skipped, with its first diagnostic as the reason; one not built yet is
-    // pending (the background worker builds it), never built here.
-    val (refused, buildable) =
-      catalog.faces.partition { push.builds.refusal(it.publication) != null }
-    val (listed, pending) = buildable.partition { push.builds.cached(it.publication) != null }
+    val catalogFaces =
+      if (!offered.catalogFaces) null
+      else {
+        val catalog =
+          withContext(Dispatchers.IO) { push.catalogFaces.resolve(catalogFaceSources()) }
+        // Only a face with a built APK is on `/designs`, so only those count as listed. One the
+        // packager refused is skipped, with its first diagnostic as the reason; one not built yet
+        // is pending (the background worker builds it), never built here.
+        val (refused, buildable) =
+          catalog.faces.partition { push.builds.refusal(it.publication) != null }
+        val (listed, pending) = buildable.partition { push.builds.cached(it.publication) != null }
+        WatchFacePushCatalogFacesStatusV1(
+          listed = listed.size,
+          pending =
+            pending.map { WatchFacePushCatalogFaces.id(it.source.system, it.source.previewId) },
+          skipped =
+            catalog.skipped.map { WatchFacePushSkippedFaceV1(it.id, it.reason) } +
+              refused.map { face ->
+                val first = push.builds.refusal(face.publication)?.firstOrNull()
+                WatchFacePushSkippedFaceV1(
+                  WatchFacePushCatalogFaces.id(face.source.system, face.source.previewId),
+                  "the packager refused it: ${first ?: "no diagnostic"}",
+                )
+              },
+        )
+      }
     call.respondJson(
       WatchFacePushStatusV1.serializer(),
       push
         .packagingStatus()
         .copy(
-          catalogFaces =
-            WatchFacePushCatalogFacesStatusV1(
-              listed = listed.size,
-              pending =
-                pending.map { WatchFacePushCatalogFaces.id(it.source.system, it.source.previewId) },
-              skipped =
-                catalog.skipped.map { WatchFacePushSkippedFaceV1(it.id, it.reason) } +
-                  refused.map { face ->
-                    val first = push.builds.refusal(face.publication)?.firstOrNull()
-                    WatchFacePushSkippedFaceV1(
-                      WatchFacePushCatalogFaces.id(face.source.system, face.source.previewId),
-                      "the packager refused it: ${first ?: "no diagnostic"}",
-                    )
-                  },
-            ),
-          builds = push.queue.summary(),
-          designs =
-            WatchFacePushCatalogFacesStatusV1(
-              listed = listedDesigns,
-              skipped =
-                push.automatic.skipped(service).map { (id, reason) ->
-                  WatchFacePushSkippedFaceV1(id, reason)
-                },
-            ),
+          catalogFaces = catalogFaces,
+          designs = designs,
+          builds = if (offered.designs) push.queue.summary() else null,
         ),
     )
   }
@@ -1162,16 +1174,20 @@ internal fun Route.installWatchFacePushRoutes(
       val caller = call.watchCaller(push, clientAddress) ?: return@limited
       if (!call.admit(caller.limiter, caller.key)) return@limited
       val packaging = push.packagingStatus()
+      val offered = site(call)
       val designs = mutableListOf<WatchFacePushDesignV1>()
-      for (publication in push.store.published()) {
+      for (publication in if (offered.designs) push.store.published() else emptyList()) {
         val visibility = push.reach(service, publication, caller.account) ?: continue
         // Only what is already built: a listing never packages (the reconcile pass does).
         val built = withContext(Dispatchers.IO) { push.builds.cached(publication) } ?: continue
         designs += push.listing(origin(call), publication, built.apk, visibility)
       }
       // Then the public catalog faces, to every caller alike.
-      val catalog = withContext(Dispatchers.IO) { push.catalogFaces.resolve(catalogFaceSources()) }
-      for (face in catalog.faces) {
+      val catalog =
+        if (offered.catalogFaces) {
+          withContext(Dispatchers.IO) { push.catalogFaces.resolve(catalogFaceSources()) }.faces
+        } else emptyList()
+      for (face in catalog) {
         val built = withContext(Dispatchers.IO) { push.builds.cached(face.publication) } ?: continue
         designs += push.catalogListing(origin(call), face, built.apk)
       }
@@ -1185,6 +1201,7 @@ internal fun Route.installWatchFacePushRoutes(
   // A catalog face, named by query rather than path: a preview id may hold a `/`.
   get("${WatchFacePush.BASE_PATH}/catalog-faces/apk") {
     call.limited {
+      if (!call.offersCatalogFaces(site)) return@limited
       val caller = call.watchCaller(push, clientAddress) ?: return@limited
       if (!call.admit(caller.limiter, caller.key)) return@limited
       if (caller.account == null && !call.admit(push.anonymousApkLimiter, caller.key))
@@ -1208,6 +1225,7 @@ internal fun Route.installWatchFacePushRoutes(
 
   get("${WatchFacePush.BASE_PATH}/catalog-faces/preview.png") {
     call.limited {
+      if (!call.offersCatalogFaces(site)) return@limited
       if (!call.admit(push.anonymousLimiter, "ip:" + clientAddress(call))) return@limited
       val face = call.catalogFace(push, catalogFaceSources) ?: return@limited
       val png = withContext(Dispatchers.IO) { face.source.png() }
@@ -1223,6 +1241,7 @@ internal fun Route.installWatchFacePushRoutes(
 
   get("${WatchFacePush.BASE_PATH}/designs/{designId}/apk") {
     call.limited {
+      if (!call.offersDesigns(site)) return@limited
       val caller = call.watchCaller(push, clientAddress) ?: return@limited
       if (!call.admit(caller.limiter, caller.key)) return@limited
       if (caller.account == null && !call.admit(push.anonymousApkLimiter, caller.key))
@@ -1297,6 +1316,7 @@ internal fun Route.installWatchFacePushRoutes(
 
   get("${WatchFacePush.BASE_PATH}/designs/{designId}/preview.png") {
     call.limited {
+      if (!call.offersDesigns(site)) return@limited
       if (!call.admit(push.anonymousLimiter, "ip:" + clientAddress(call))) return@limited
       val designId = call.parameters["designId"].orEmpty()
       val publication = push.store.publication(designId)
@@ -1568,6 +1588,39 @@ internal const val SOURCE_CATALOG = "catalog"
  * a face that is listed (its catalog served and listed, its source present, its licence on the
  * allowlist) is found.
  */
+/**
+ * What one host offers a watch. A box serving both the UI builder's own host and a catalog site
+ * keeps each list on its own site: the builder's host lists the designs made in it, the catalog
+ * site lists its catalog faces. A box with no builder host offers both on every host.
+ */
+internal data class WatchFacePushSite(val designs: Boolean, val catalogFaces: Boolean) {
+  companion object {
+    val BOTH = WatchFacePushSite(designs = true, catalogFaces = true)
+    val DESIGNS_ONLY = WatchFacePushSite(designs = true, catalogFaces = false)
+    val CATALOG_FACES_ONLY = WatchFacePushSite(designs = false, catalogFaces = true)
+  }
+}
+
+/** False, having answered 404, when this host lists no catalog faces. */
+private suspend fun ApplicationCall.offersCatalogFaces(
+  site: (ApplicationCall) -> WatchFacePushSite,
+): Boolean {
+  if (site(this).catalogFaces) return true
+  noStore()
+  respondError(HttpStatusCode.NotFound, "not_found", "this site lists no catalog faces")
+  return false
+}
+
+/** False, having answered 404, when this host lists no UI-builder designs. */
+private suspend fun ApplicationCall.offersDesigns(
+  site: (ApplicationCall) -> WatchFacePushSite,
+): Boolean {
+  if (site(this).designs) return true
+  noStore()
+  respondError(HttpStatusCode.NotFound, "not_found", "no such published design")
+  return false
+}
+
 private suspend fun ApplicationCall.catalogFace(
   push: WatchFacePush,
   sources: () -> List<CatalogFaceSource>,
