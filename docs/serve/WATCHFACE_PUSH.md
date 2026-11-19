@@ -176,27 +176,41 @@ session, with write access. Without the object the editor shows no publish actio
 
 A public `wff-watchface` design is on every watch without an explicit publish: making a design
 public is already its owner's decision that anyone may read it. `GET /designs` lists it to every
-caller, with or without a token, built from its **latest revision**, with `visibility: "public"` and
+caller, with or without a token, built from a **settled revision**, with `visibility: "public"` and
 the same entry shape as a published design.
 
-- **Built lazily, off the request.** Each listing starts one background pass (if none is running)
-  over the host's designs and returns at once with what is already built; a face appears once its
-  APK is. A design is exported again only when its revision moves, and built again only when its
-  face's content digest does.
+Building runs the packager (`aapt2` and Google's validator in their own JVM), so it happens only on
+deliberate events, never on a request:
+
+- **No request builds.** `GET /designs` and `GET /status` only read what is already built. A design
+  is scheduled when a write to it succeeds through the design service — an edit, a rename, a
+  revision or trash restore, a document replacement, a change of access, a create.
+- **Debounced.** An edit makes the design due **ten minutes after its last edit**, so a live
+  editing session builds once, when it settles; becoming public makes it due after thirty seconds.
+- **One slow scheduler.** A single low-priority thread wakes every thirty seconds and handles what
+  is due one design at a time, reading only that design (its admin summary and one snapshot), never
+  a listing of every design. Builds share the server's one-at-a-time packager queue with explicit
+  publishes. A design is exported only when its revision has moved, and built only when its face's
+  content digest has.
 - **Versions** share the counter of an explicit publication: they move when the digest changes, and
   are never lowered or reused. The package name is the one an explicit publish gives the same design.
 - **Explicit wins.** An owner's publication — public, private, or a pinned revision — is left alone,
-  and so is an owner's unpublish. An explicit publish that lands while an automatic build runs is
-  never overwritten by it.
+  and so is an owner's unpublish, even one made before anything was built. An explicit publish that
+  lands while an automatic build runs is never overwritten by it.
 - **Lifecycle.** A design made private, trashed or deleted is no longer readable anonymously, so it
   leaves every list at once — its owner's watches included, since it was never published to them —
   and its APK is `404`. Made public again, it comes back as it was. A purged design's publication is
   retired as any other (#1998), and a design recreated under its id is a different design: it starts
   above every version already installed and inherits nothing.
 - **Refusals.** A face the packager refuses is not listed; the version already on watches, if any,
-  stays. `GET /status` names it under `designs.skipped` with the packager's first line, as it does
-  catalog faces, and the owner sees the whole refusal on `GET …/watch-face-publication`. A refused
-  revision is not rebuilt until the design changes.
+  stays. The refusal is kept in `watchface-push/automatic-refusals.json`, with the revision it was
+  for, so that revision is not built again, across restarts too. `GET /status` names it under
+  `designs.skipped` with the packager's first line, as it does catalog faces, and the owner sees the
+  whole refusal on `GET …/watch-face-publication`. A failure around the packager — a timeout, a
+  full disk — is not a refusal: the design is tried again, backing off from a minute to an hour.
+- **Not yet covered.** A design that was already public before this shipped is listed after its next
+  edit or change of access (or when its owner publishes it), since nothing sweeps every design. A
+  branch merged into a design schedules nothing until the design's next edit.
 
 ## The APK
 

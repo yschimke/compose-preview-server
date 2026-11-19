@@ -23,9 +23,7 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import java.nio.charset.StandardCharsets
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.future.await
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -56,18 +54,18 @@ internal constructor(
   internal val signInPath: ((returnTo: String) -> String)? = null,
   internal val clock: () -> Long = System::currentTimeMillis,
   /**
-   * Every design on the host with its owner, as the administrator sees them; the automatic listing
-   * of public watch faces reads it ([WatchFacePushAutomatic]). Empty: nothing is listed
-   * automatically.
+   * One design's owner, revision and catalog, as the administrator sees it; the automatic listing
+   * of public watch faces reads it, one design at a time ([WatchFacePushAutomatic]). Null: no such
+   * design (and, by default, nothing is listed automatically).
    */
-  internal val designs: () -> List<UiBuilderAdminDesignSummary> = { emptyList() },
-  /** Where the automatic listing builds, off every request. */
-  internal val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+  internal val designSummary: (designId: String) -> UiBuilderAdminDesignSummary? = { null },
+  /** How often the automatic listing's scheduler wakes; null: never on its own. */
+  automaticTickMillis: Long? = WatchFacePushAutomatic.DEFAULT_TICK_MILLIS,
 ) {
   internal val codes = WatchFacePushDeviceCodes(store, clock)
   internal val builds = WatchFacePushBuilds(store, packaging)
   internal val catalogFaces = WatchFacePushCatalogFaces(store.catalogFacesFile)
-  internal val automatic = WatchFacePushAutomatic(this)
+  internal val automatic = WatchFacePushAutomatic(this, tickMillis = automaticTickMillis)
   internal val csrf = ServeAgentGrants.Csrf()
 
   /**
@@ -713,6 +711,8 @@ internal fun Route.installWatchFacePushRoutes(
    */
   catalogFaceSources: () -> List<CatalogFaceSource> = { emptyList() },
 ) {
+  // Public designs are built by the automatic listing's own scheduler, never by these routes.
+  push.automatic.start(service)
   post("${WatchFacePush.BASE_PATH}/device-codes") {
     call.limited {
       call.noStore()
@@ -774,7 +774,7 @@ internal fun Route.installWatchFacePushRoutes(
 
   get("${WatchFacePush.BASE_PATH}/status") {
     call.noStore()
-    // Reports what the listing's passes found; it starts none, being unauthenticated and unlimited.
+    // Reports what the automatic listing found; it builds nothing.
     val listedDesigns =
       push.store.published().count {
         push.reach(service, it, null) == WatchFacePush.VISIBILITY_PUBLIC
@@ -819,8 +819,6 @@ internal fun Route.installWatchFacePushRoutes(
       val caller = call.watchCaller(push, clientAddress) ?: return@limited
       if (!call.admit(caller.limiter, caller.key)) return@limited
       val packaging = push.packagingStatus()
-      // Public watch-face designs join the list on their own; building them never holds this up.
-      push.automatic.refresh(service)
       val designs = mutableListOf<WatchFacePushDesignV1>()
       for (publication in push.store.published()) {
         val visibility = push.reach(service, publication, caller.account) ?: continue

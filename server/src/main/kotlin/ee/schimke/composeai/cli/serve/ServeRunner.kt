@@ -2406,7 +2406,7 @@ public class ServeRunner(
               java.net.URLEncoder.encode(returnTo, Charsets.UTF_8)
           }
         },
-      designs = { lane.service.adminListDesigns() },
+      designSummary = { lane.service.adminDesignSummary(it) },
     )
   }
 

@@ -500,6 +500,17 @@ internal class WatchFacePushStore(
     fun source(): DwfSource = DwfSource(wffXml = wffXml, wffVersion = wffVersion, label = label)
   }
 
+  /** A public design's revision the packager refused, kept so it is not built again. */
+  @Serializable
+  data class AutomaticRefusal(
+    val revision: Long,
+    val designCreatedAtEpochMillis: Long? = null,
+    val diagnostics: List<String>,
+  )
+
+  @Serializable
+  private data class AutomaticRefusals(val refusals: Map<String, AutomaticRefusal> = emptyMap())
+
   /** A built APK's facts; the bytes are the `.apk` file beside it. */
   @Serializable
   data class Apk(
@@ -523,6 +534,7 @@ internal class WatchFacePushStore(
 
   /** Where [WatchFacePushCatalogFaces] keeps catalog faces' versions. */
   val catalogFacesFile: Path = root.resolve("catalog-faces.json")
+  private val automaticRefusalsFile = root.resolve("automatic-refusals.json")
   private var devices: MutableList<Device>
   private val publications = ConcurrentHashMap<String, Publication>()
 
@@ -806,6 +818,20 @@ internal class WatchFacePushStore(
     publications[publication.designId] = publication
     return publication
   }
+
+  /** What [WatchFacePushAutomatic] last recorded as refused, by design id. */
+  fun automaticRefusals(): Map<String, AutomaticRefusal> =
+    readJson(automaticRefusalsFile, AutomaticRefusals.serializer())?.refusals ?: emptyMap()
+
+  fun saveAutomaticRefusals(refusals: Map<String, AutomaticRefusal>) =
+    synchronized(lock) {
+      writeAtomically(
+        automaticRefusalsFile,
+        json
+          .encodeToString(AutomaticRefusals.serializer(), AutomaticRefusals(refusals))
+          .toByteArray(),
+      )
+    }
 
   // --------------------------------------------------------------------- APKs
 

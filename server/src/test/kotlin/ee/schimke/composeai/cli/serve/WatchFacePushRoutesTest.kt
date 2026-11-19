@@ -33,6 +33,9 @@ class WatchFacePushRoutesTest {
   private var server: ServeHttpServer? = null
   private lateinit var service: PersistentUiBuilderService
   private lateinit var push: WatchFacePush
+
+  /** The service as the server's routes reach it: its writes tell the automatic listing. */
+  private lateinit var feed: UiBuilderServicePort
   private var now = 1_700_000_000_000L
   private var watchCatalogs = setOf("m3-catalog")
 
@@ -133,8 +136,11 @@ class WatchFacePushRoutesTest {
         preview = { _, designId, _ -> "png:$designId".toByteArray() },
         signInPath = { "/auth/github/start?return=$it" },
         clock = { now },
-        designs = { if (automaticListing) service.adminListDesigns() else emptyList() },
+        designSummary = { if (automaticListing) service.adminDesignSummary(it) else null },
+        // The tests run the scheduler themselves, on their own clock.
+        automaticTickMillis = null,
       )
+    feed = WatchFacePushChangeFeed(service) { id, access -> push.automatic.noteChanged(id, access) }
     return ServeHttpServer(
         host = "127.0.0.1",
         requestedPort = 0,
@@ -174,7 +180,7 @@ class WatchFacePushRoutesTest {
     public: Boolean = false,
   ) = runBlocking {
     val created =
-      service.execute(
+      feed.execute(
         UiBuilderServiceCall(
           AuthenticatedUiBuilderActor(owner),
           UiBuilderServiceRequest.CreateDesign(document(id, title)),
@@ -183,7 +189,7 @@ class WatchFacePushRoutesTest {
     assertIs<UiBuilderServiceResponse.Snapshot>(created, "create $id: $created")
     if (public) {
       val shared =
-        service.setDesignVisibility(
+        feed.setDesignVisibility(
           AuthenticatedUiBuilderActor(owner),
           id,
           UiBuilderDefaultVisibility.PUBLIC,
@@ -263,11 +269,18 @@ class WatchFacePushRoutesTest {
       ?.jsonPrimitive
       ?.content
 
-  /** List, let the automatic listing's background pass finish, and list again. */
+  /**
+   * Let every scheduled design settle (the clock moves past the debounce) and run the automatic
+   * listing's scheduler once, as its thread would; then list.
+   */
   private fun settledDesigns(token: String? = null): List<App.Design> {
-    designs(token)
-    runBlocking { push.automatic.awaitIdle() }
+    settle()
     return designs(token)
+  }
+
+  private fun settle() {
+    now += WatchFacePushAutomatic.DEFAULT_SETTLE_MILLIS + 1
+    runBlocking { push.automatic.runDue(service) }
   }
 
   /** An edit: a new revision of the design (its text set to [title]), exporting [face]. */
@@ -282,7 +295,7 @@ class WatchFacePushRoutesTest {
           ),
         )
       val edited =
-        service.execute(
+        feed.execute(
           UiBuilderServiceCall(
             actor,
             UiBuilderServiceRequest.ApplyOperation(
@@ -299,13 +312,13 @@ class WatchFacePushRoutesTest {
       assertIs<AcceptedOutcomeV1>(
         assertIs<UiBuilderServiceResponse.OperationOutcome>(edited, "edit $designId").outcome,
       )
-      service.execute(
+      feed.execute(
         UiBuilderServiceCall(actor, UiBuilderServiceRequest.RenameDesign(designId, title)),
       )
     }
 
   private fun setVisibility(owner: String, designId: String, public: Boolean) = runBlocking {
-    service.setDesignVisibility(
+    feed.setDesignVisibility(
       AuthenticatedUiBuilderActor(owner),
       designId,
       if (public) UiBuilderDefaultVisibility.PUBLIC else UiBuilderDefaultVisibility.PRIVATE,
@@ -1144,9 +1157,11 @@ class WatchFacePushRoutesTest {
     createDesign(alice, "secret", "Secret")
     val aliceToken = link(alice)
 
-    // The first list does not wait for the build; the face is there once it is built.
-    assertEquals(emptyList(), designs())
-    runBlocking { push.automatic.awaitIdle() }
+    // A listing never builds: however often a watch asks, nothing runs until the design settles.
+    repeat(3) { assertEquals(emptyList(), designs()) }
+    assertFalse(packagerLog.exists())
+    assertTrue(push.automatic.isPending("aurora"))
+    settle()
     val aurora = designs().single()
     assertEquals("aurora", aurora.id)
     assertEquals("public", visibilityOf("aurora"))
@@ -1297,8 +1312,10 @@ class WatchFacePushRoutesTest {
     }
     start(packaging = { WatchFacePushPackaging.Ready(flaky, "c0ffee") })
     createDesign(alice, "aurora", "Aurora", public = true)
+    // A failure around the packager is not a refusal: it is tried again, later.
     assertEquals(emptyList(), settledDesigns())
-    assertContains(publication("aurora").refusal.orEmpty().joinToString(), "No space left")
+    assertNull(publication("aurora").refusal)
+    assertTrue(push.automatic.isPending("aurora"))
     assertEquals(listOf("aurora"), settledDesigns().map { it.id })
     assertNull(publication("aurora").refusal)
   }
@@ -1319,6 +1336,60 @@ class WatchFacePushRoutesTest {
     val bobs = settledDesigns().single()
     assertEquals("Bob's", bobs.title)
     assertEquals(2, bobs.version)
+  }
+
+  @Test
+  fun `a live editing session builds once, when the design settles`() {
+    automaticListing = true
+    start()
+    createDesign(alice, "aurora", "Aurora", public = true)
+    assertEquals(1, settledDesigns().single().version)
+    edit(alice, "aurora", face = "<WatchFace id=\"aurora\" edited=\"1\"/>", title = "one")
+    now += 5 * 60 * 1000L
+    edit(alice, "aurora", face = "<WatchFace id=\"aurora\" edited=\"2\"/>", title = "two")
+    // Ten minutes after the first edit, but five after the last: not yet.
+    now += 6 * 60 * 1000L
+    runBlocking { push.automatic.runDue(service) }
+    assertEquals(1, designs().single().version)
+    now += 5 * 60 * 1000L
+    runBlocking { push.automatic.runDue(service) }
+    assertEquals(2, designs().single().version)
+    assertEquals(listOf("1", "2"), packagerLog.readLines().map { it.split(' ')[2] })
+  }
+
+  @Test
+  fun `a refusal is kept across a restart and not built again`() {
+    automaticListing = true
+    start()
+    createDesign(alice, "broken", "Broken", public = true)
+    faces["broken"] = "<WatchFace id=\"broken\" state=\"bad\"/>"
+    settle()
+    var packs = 0
+    val reopened =
+      WatchFacePush(
+        store = WatchFacePushStore(dir.resolve("watchface-push"), clock = { now }),
+        packaging = {
+          val ready = push.packaging() as WatchFacePushPackaging.Ready
+          WatchFacePushPackaging.Ready(
+            WatchFacePushPackager { files, face, version, out ->
+              packs++
+              ready.packager.pack(files, face, version, out)
+            },
+            "c0ffee",
+          )
+        },
+        sourceFor = push.sourceFor,
+        isWatchFaceCatalog = push.isWatchFaceCatalog,
+        designSummary = { service.adminDesignSummary(it) },
+        automaticTickMillis = null,
+        clock = { now },
+      )
+    assertContains(reopened.automatic.refusal("broken").orEmpty().joinToString(), "bad face")
+    reopened.automatic.noteChanged("broken", access = true)
+    now += WatchFacePushAutomatic.DEFAULT_SETTLE_MILLIS + 1
+    runBlocking { reopened.automatic.runDue(service) }
+    assertEquals(0, packs, "the refused revision was built again")
+    assertFalse(reopened.automatic.isPending("broken"))
   }
 
   private fun document(id: String, title: String) =
