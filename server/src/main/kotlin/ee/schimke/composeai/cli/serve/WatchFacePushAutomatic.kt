@@ -41,8 +41,11 @@ internal class WatchFacePushAutomatic(private val push: WatchFacePush) {
 
   private val skips = ConcurrentHashMap<String, Skip>()
 
-  /** The revision each design was last considered at, so an unchanged design is not re-exported. */
-  private val considered = ConcurrentHashMap<String, Long>()
+  /**
+   * The design (its creation time) and revision each id was last considered at, so an unchanged
+   * design is not re-exported, and one recreated under the id is.
+   */
+  private val considered = ConcurrentHashMap<String, Pair<Long?, Long>>()
   private val running = AtomicBoolean(false)
 
   /** Whether a pass was asked for while one ran; that pass runs again when it finishes. */
@@ -112,8 +115,9 @@ internal class WatchFacePushAutomatic(private val push: WatchFacePush) {
           existing.accountActorId == owner &&
           existing.designCreatedAtEpochMillis == summary.createdAtEpochMillis
       if (current && existing!!.revision == summary.revision) continue
-      if (considered[designId] == summary.revision) continue
-      considered[designId] = summary.revision
+      val seen = summary.createdAtEpochMillis to summary.revision
+      if (considered[designId] == seen) continue
+      considered[designId] = seen
       stageLatest(service, designId, owner)
     }
     skips.keys.retainAll(live)
@@ -164,6 +168,8 @@ internal class WatchFacePushAutomatic(private val push: WatchFacePush) {
           "serve: watchface-push: public design $designId revision ${document.revision} is not " +
             "listed; the packager refused it: ${staged.diagnostics.firstOrNull()}",
         )
+        // Not the packager's verdict on the face: the next pass builds it again.
+        if (staged.retryable) considered.remove(designId)
       }
       // Not built here now, or the owner published it meanwhile: try again on a later pass.
       is WatchFacePush.Staged.Unavailable,

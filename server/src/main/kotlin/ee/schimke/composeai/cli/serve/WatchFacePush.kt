@@ -753,10 +753,47 @@ internal class WatchFacePushStore(
    * is the owner's decision, so an automatic listing becomes an explicit opt-out: a public design
    * its owner unpublished is not listed again until they publish it.
    */
-  fun unpublish(designId: String): Publication? =
+  fun unpublish(
+    designId: String,
+    /**
+     * The owner and the design's creation time, when the owner is the one deciding: the record is
+     * then bound to them, and is written even when nothing was published yet (version 0, no face),
+     * so an automatic build still in flight, or the next pass, cannot list the design after all.
+     */
+    ownerActorId: String? = null,
+    designCreatedAtEpochMillis: Long? = null,
+  ): Publication? =
     synchronized(lock) {
-      val previous = publications[designId] ?: return null
-      val updated = previous.copy(published = false, automatic = false)
+      val previous = publications[designId]
+      val updated =
+        when {
+          previous != null && ownerActorId == null ->
+            previous.copy(published = false, automatic = false)
+          previous != null ->
+            previous.copy(
+              published = false,
+              automatic = false,
+              accountActorId = ownerActorId!!,
+              designCreatedAtEpochMillis = designCreatedAtEpochMillis,
+            )
+          ownerActorId == null -> return null
+          else ->
+            Publication(
+              designId = designId,
+              accountActorId = ownerActorId,
+              faceName = WatchFacePushNaming.faceName(designId),
+              published = false,
+              version = 0,
+              revision = 0,
+              title = "",
+              wffVersion = 0,
+              wffXml = "",
+              label = "",
+              digest = "",
+              publishedAtEpochMillis = clock(),
+              designCreatedAtEpochMillis = designCreatedAtEpochMillis,
+            )
+        }
       store(updated)
       updated
     }
@@ -1070,7 +1107,11 @@ internal class WatchFacePushBuilds(
 
     data class Unavailable(val code: String, val reason: String) : Result
 
-    data class Failed(val diagnostics: List<String>) : Result
+    /**
+     * [retryable]: not the packager's verdict on the face but a failure around it (a timeout, a
+     * full disk), which may well succeed next time.
+     */
+    data class Failed(val diagnostics: List<String>, val retryable: Boolean = false) : Result
   }
 
   private val lock = Any()
@@ -1138,7 +1179,10 @@ internal class WatchFacePushBuilds(
         Result.Failed(e.diagnostics)
       } catch (e: Exception) {
         // Not remembered: a timeout or a full disk may well succeed next time.
-        Result.Failed(listOf("error[push]: ${e.message ?: e.javaClass.simpleName}"))
+        Result.Failed(
+          listOf("error[push]: ${e.message ?: e.javaClass.simpleName}"),
+          retryable = true,
+        )
       } finally {
         tmp.delete()
       }

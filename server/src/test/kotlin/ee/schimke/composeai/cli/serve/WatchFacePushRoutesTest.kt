@@ -1269,6 +1269,58 @@ class WatchFacePushRoutesTest {
     assertEquals(bob, push.store.publication("aurora")?.accountActorId)
   }
 
+  @Test
+  fun `an owner's unpublish before the first automatic build keeps the design off watches`() {
+    automaticListing = true
+    start()
+    createDesign(alice, "aurora", "Aurora", public = true)
+    val off =
+      publicationOf(
+        send("DELETE", "/api/ui-builder/v1/designs/aurora/watch-face-publication", actor = alice),
+      )
+    assertFalse(off.published)
+    assertNull(off.version)
+    assertEquals(emptyList(), settledDesigns())
+    assertFalse(packagerLog.exists(), "nothing was built for an opted-out design")
+    // Published later, it starts at version 1.
+    assertEquals(1, publicationOf(publish(alice, "aurora")).version)
+  }
+
+  @Test
+  fun `a public design whose build failed for a passing reason is built again`() {
+    automaticListing = true
+    val ready = readyPackaging()().let { it as WatchFacePushPackaging.Ready }
+    var failures = 1
+    val flaky = WatchFacePushPackager { files, faceName, versionCode, out ->
+      if (failures-- > 0) throw java.io.IOException("No space left on device")
+      ready.packager.pack(files, faceName, versionCode, out)
+    }
+    start(packaging = { WatchFacePushPackaging.Ready(flaky, "c0ffee") })
+    createDesign(alice, "aurora", "Aurora", public = true)
+    assertEquals(emptyList(), settledDesigns())
+    assertContains(publication("aurora").refusal.orEmpty().joinToString(), "No space left")
+    assertEquals(listOf("aurora"), settledDesigns().map { it.id })
+    assertNull(publication("aurora").refusal)
+  }
+
+  @Test
+  fun `a public design recreated under its id at the same revision is listed without a gap`() {
+    automaticListing = true
+    start()
+    createDesign(alice, "aurora", "Aurora", public = true)
+    assertEquals(1, settledDesigns().single().version)
+    // Purged and recreated with no listing in between: same id, same revision, another design.
+    val admin =
+      ServeUiBuilderAdmin(service = service, retireWatchPublication = { push.store.retire(it) })
+    assertIs<ServeUiBuilderAdmin.Result.Deleted>(admin.delete("aurora"))
+    now += 1_000
+    createDesign(bob, "aurora", "Bob's", public = true)
+    faces["aurora"] = "<WatchFace id=\"bobs\"/>"
+    val bobs = settledDesigns().single()
+    assertEquals("Bob's", bobs.title)
+    assertEquals(2, bobs.version)
+  }
+
   private fun document(id: String, title: String) =
     DesignDocumentV1(
       schema = "compose-ui-builder-document/v1-candidate",

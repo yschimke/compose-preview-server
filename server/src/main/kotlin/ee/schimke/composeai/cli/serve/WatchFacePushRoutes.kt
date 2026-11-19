@@ -119,7 +119,7 @@ internal constructor(
     ) : Staged
 
     /** The packager refused it; nothing was stored. */
-    data class Refused(val diagnostics: List<String>) : Staged
+    data class Refused(val diagnostics: List<String>, val retryable: Boolean = false) : Staged
 
     /** This host cannot build, and the caller asked for a built face; nothing was stored. */
     data class Unavailable(val build: WatchFacePushBuilds.Result.Unavailable) : Staged
@@ -147,7 +147,8 @@ internal constructor(
       val next = withContext(Dispatchers.IO) { candidate() }
       val build = withContext(Dispatchers.IO) { builds.build(next) }
       when (build) {
-        is WatchFacePushBuilds.Result.Failed -> return Staged.Refused(build.diagnostics)
+        is WatchFacePushBuilds.Result.Failed ->
+          return Staged.Refused(build.diagnostics, build.retryable)
         is WatchFacePushBuilds.Result.Unavailable ->
           if (requireBuild) return Staged.Unavailable(build)
         is WatchFacePushBuilds.Result.Built -> Unit
@@ -245,11 +246,17 @@ internal constructor(
     actor: AuthenticatedUiBuilderActor,
     designId: String,
   ): Outcome {
-    when (val owned = ownedDocument(service, actor, designId)) {
-      is Owned.Refused -> return owned.outcome
-      is Owned.Document -> Unit
-    }
-    val updated = withContext(Dispatchers.IO) { store.unpublish(designId) }
+    val owned =
+      when (val owned = ownedDocument(service, actor, designId)) {
+        is Owned.Refused -> return owned.outcome
+        is Owned.Document -> owned
+      }
+    // Bound to this owner and this design, and written even before anything was built: for a
+    // public design it is the owner's opt-out of the automatic listing.
+    val updated =
+      withContext(Dispatchers.IO) {
+        store.unpublish(designId, owned.ownerActorId, owned.document.createdAtEpochMillis)
+      }
     refusals.remove(designId)
     automatic.forget(designId)
     return Outcome.Ok(
@@ -358,8 +365,9 @@ internal constructor(
       requestedVisibility = publication.visibility,
       automatic = publication.automatic,
       packaging = packagingStatus().takeIf { !it.available },
-      version = publication.version,
-      revision = publication.revision,
+      // Version 0 is an opt-out recorded before anything was built: nothing was ever shipped.
+      version = publication.version.takeIf { it > 0 },
+      revision = publication.revision.takeIf { publication.version > 0 },
       title = publication.title,
       faceName = publication.faceName,
       packageName = WatchFacePushNaming.packageName(publication.faceName),
