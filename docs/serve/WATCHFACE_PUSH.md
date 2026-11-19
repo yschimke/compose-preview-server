@@ -21,14 +21,14 @@ All under `/api/watchface-push/v1` unless noted. JSON, UTF-8. Errors are
 | --- | --- | --- |
 | `POST /device-codes` | none, 10/min per address | start linking |
 | `POST /device-codes/{code}/poll` | the `pollSecret` | `pending` / `approved` (once) / `denied` / `expired` |
-| `GET /designs` | **optional** device token | published watch faces, newest first |
+| `GET /designs` | **optional** device token | published and public watch faces, newest first |
 | `GET /designs/{id}/apk?v=<version>` | optional device token | the signed APK |
 | `GET /designs/{id}/preview.png?v=…&sig=…` | the signed URL | the design's picture |
 | `POST /installs` | device token | install telemetry; accepted with `204` and not kept |
-| `GET /status` | none | whether this server can build APKs, and why not |
+| `GET /status` | none | whether this server can build APKs, and why not; what is listed and skipped |
 | `GET /devices`, `DELETE /devices/{id}` | signed-in person | their linked watches |
 | `GET /link?code=…`, `POST /link` | signed-in person | the page a watch's QR code opens |
-| `GET`/`PUT`/`DELETE /api/ui-builder/v1/designs/{id}/watch-push` | the design's owner | the publish flag |
+| `GET`/`PUT`/`DELETE /api/ui-builder/v1/designs/{id}/watch-face-publication` | the design's owner, in their own session | the publication ([Publishing](#publishing)) |
 
 ### Linking
 
@@ -71,13 +71,16 @@ none yet).
 
 **Who sees what.** Linking is optional:
 
-- **No token:** every *public* published watch face on the server, from every account. Public is
-  the builder's own visibility (the editor's Private / public switch, `ui_builder_share_design`).
+- **No token:** every *public* watch face on the server, from every account: each public
+  `wff-watchface` design, published or not ([Public designs](#public-designs-listed-on-their-own)),
+  unless its owner unpublished it or published it as private. Public is the builder's own visibility
+  (the editor's Private / public switch, `ui_builder_share_design`).
 - **A device token:** those, plus the linked account's own published faces, private ones included.
 - A private design is never listed to, or downloadable by, anyone without its owner's token. Its
   APK asked for with no token is `401` (so the app offers to link); with another account's live
   token it is `404`, so that watch does not discard a token that is fine.
-- A design that is not published for watches (a draft) is never listed, public or not.
+- A private design that is not published for watches is never listed, to anyone, its owner's
+  watches included.
 
 Each entry also carries `"visibility": "public" | "private"`, which the app ignores. When the server
 cannot build APKs at all the list is empty and carries `"packaging": {"available": false, "code",
@@ -99,16 +102,101 @@ published revision.
 
 ### Publishing
 
-`PUT /api/ui-builder/v1/designs/{id}/watch-push` (empty body) publishes the design's **current
-revision**; MCP agents use `ui_builder_publish_watch_face` with `{"designId", "published": true}`.
-Only the design's owner may (or an agent acting for them), and only for a design whose catalog
-draws watch faces (native backend `android-dwf`, i.e. `wff-watchface`). The server exports the
-design's Watch Face Format with the same exporter as the real-runtime preview tab, keeps that WFF
-with the publication (so the APK can be rebuilt after the revision is pruned), and builds the APK
-straight away: a face the packager or Google's validator refuses is a `422` with their diagnostics,
-to the person who can fix it. Edits are not shipped until the owner publishes again. `DELETE`
-unpublishes; `GET` reports the publication and its APK status (`ready`, `pending`, `unavailable`,
-`failed`).
+The design's owner publishes from the editor ("Publish to watch") through
+
+| | |
+| --- | --- |
+| `GET …/designs/{id}/watch-face-publication` | where the design is on watches |
+| `PUT …/designs/{id}/watch-face-publication`, body `{"visibility": "public" \| "private"}` | publish (or re-publish) the **current revision** |
+| `DELETE …/designs/{id}/watch-face-publication` | unpublish |
+
+under `/api/ui-builder/v1`. MCP agents use `ui_builder_publish_watch_face` with `{"designId",
+"published", "visibility"}` instead; the HTTP routes are the person's own:
+
+- **Only the design's owner, in their own signed-in session.** A delegated grant (an agent acting
+  for the owner) and an agent's own identity are `403 owner_session_required`, exactly as `/link`
+  refuses them: putting a design on every watch outlives the grant. A collaborator who is not the
+  owner is `403 owner_required`; a design the caller cannot read is `404`. A session-cookie `PUT` or
+  `DELETE` is accepted only from this server's own page.
+- **Rate limited** per account: 30 a minute, two at once (a publish runs the packager).
+- `visibility: "public"` lists the face to every watch; the design itself must be public, or it is
+  `422 design_not_public` (making a design public is the editor's own switch, not this route's).
+  `"private"` lists it only to the owner's linked watches, even when the design is public. Omitted,
+  it follows the design's own visibility. A public publication whose design is later made private
+  falls back to the owner's watches.
+- Only for a design whose catalog draws watch faces (native backend `android-dwf`, i.e.
+  `wff-watchface`): otherwise `422 not_a_watch_face`.
+
+The server exports the design's Watch Face Format with the same exporter as the real-runtime preview
+tab, keeps that WFF with the publication (so the APK can be rebuilt after the revision is pruned),
+and builds the APK through the staged path — candidate, build, commit at the version that was built
+— so a face the packager or Google's validator refuses is a `422` and leaves what is on watches as
+it was:
+
+```json
+{"error": "packaging_failed", "message": "error[wff-validator]: …", "diagnostics": ["error[wff-validator]: …"]}
+```
+
+A publication pins its revision: edits are not shipped until the owner publishes again. `DELETE`
+takes it off every watch and keeps the version counter; for a public design it is also the owner's
+opt-out of the automatic listing, until they publish again.
+
+`GET` (and a successful `PUT`/`DELETE`) answers
+
+```json
+{
+  "schema": "compose-preview/watchface-push-publication/v1",
+  "designId": "aurora", "published": true, "version": 3, "revision": 41,
+  "visibility": "public", "requestedVisibility": "public", "automatic": false,
+  "faceName": "aurora", "packageName": "ee.schimke.watchface.push.watchfacepush.aurora",
+  "apk": {"status": "ready", "sha256": "…", "sizeBytes": 18213},
+  "refusal": ["error[wff-validator]: …"]
+}
+```
+
+`visibility` is who it reaches now (`public`, `private`, or absent when nobody); `requestedVisibility`
+is the owner's choice; `automatic` is true for a public design listed without a publish. `apk.status`
+is `ready`, `pending`, `unavailable` (this host cannot build; `packaging` then says why) or `failed`.
+`refusal` is the packager's lines for the latest attempt it refused — the owner's publish, or the
+automatic listing of a new revision — beside whatever version is still on watches. `packageName` is
+there before the first publish too.
+
+**The editor's capability.** The `android-dwf` status the editor already reads for a watch-face
+design, `GET /api/ui-builder/v1/designs/{id}/dwf-preview/status`, carries
+
+```json
+"watchFacePush": {"publicationPath": "/api/ui-builder/v1/designs/aurora/watch-face-publication", "canPublish": true}
+```
+
+only when this host can build push APKs (`GET /status` is `available`) and the design's catalog
+draws watch faces. `canPublish` is whether this caller may use the route: the owner, in their own
+session, with write access. Without the object the editor shows no publish action.
+
+## Public designs, listed on their own
+
+A public `wff-watchface` design is on every watch without an explicit publish: making a design
+public is already its owner's decision that anyone may read it. `GET /designs` lists it to every
+caller, with or without a token, built from its **latest revision**, with `visibility: "public"` and
+the same entry shape as a published design.
+
+- **Built lazily, off the request.** Each listing starts one background pass (if none is running)
+  over the host's designs and returns at once with what is already built; a face appears once its
+  APK is. A design is exported again only when its revision moves, and built again only when its
+  face's content digest does.
+- **Versions** share the counter of an explicit publication: they move when the digest changes, and
+  are never lowered or reused. The package name is the one an explicit publish gives the same design.
+- **Explicit wins.** An owner's publication — public, private, or a pinned revision — is left alone,
+  and so is an owner's unpublish. An explicit publish that lands while an automatic build runs is
+  never overwritten by it.
+- **Lifecycle.** A design made private, trashed or deleted is no longer readable anonymously, so it
+  leaves every list at once — its owner's watches included, since it was never published to them —
+  and its APK is `404`. Made public again, it comes back as it was. A purged design's publication is
+  retired as any other (#1998), and a design recreated under its id is a different design: it starts
+  above every version already installed and inherits nothing.
+- **Refusals.** A face the packager refuses is not listed; the version already on watches, if any,
+  stays. `GET /status` names it under `designs.skipped` with the packager's first line, as it does
+  catalog faces, and the owner sees the whole refusal on `GET …/watch-face-publication`. A refused
+  revision is not rebuilt until the design changes.
 
 ## The APK
 
@@ -207,7 +295,9 @@ A catalog face is listed when all of these hold:
   takes, and the zip is within 512 entries and 16 MB.
 
 `GET /status` counts the listed ones and names each skipped face with why
-(`"catalogFaces": {"listed": 1, "skipped": [{"id": "…", "reason": "licence unknown …"}]}`).
+(`"catalogFaces": {"listed": 1, "skipped": [{"id": "…", "reason": "licence unknown …"}]}`), and does
+the same for UI-builder designs under `"designs"`: how many are on the anonymous list, and each public
+watch-face design the automatic listing could not build.
 
 Each entry is a normal design entry plus:
 
@@ -244,7 +334,8 @@ design's package, and under this marketplace's prefix, so never the upstream app
 
 Per client address (under `--trust-forwarded-for`, the forwarded one): 10 link starts and 120 polls
 a minute; 60 anonymous reads (lists, APKs, pictures) and 20 anonymous APK downloads a minute. A
-device token is charged per device, 240 a minute. Over the limit is `429` with `Retry-After`.
+device token is charged per device, 240 a minute. The owner's publication route is charged per
+account, 30 a minute and two at once. Over the limit is `429` with `Retry-After`.
 
 ## Where this goes beyond `PUSH_API.md`
 

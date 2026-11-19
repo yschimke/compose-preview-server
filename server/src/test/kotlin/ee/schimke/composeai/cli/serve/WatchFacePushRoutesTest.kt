@@ -10,6 +10,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.FormBody
@@ -34,6 +35,12 @@ class WatchFacePushRoutesTest {
   private lateinit var push: WatchFacePush
   private var now = 1_700_000_000_000L
   private var watchCatalogs = setOf("m3-catalog")
+
+  /**
+   * Whether public designs are listed on their own ([WatchFacePushAutomatic]). Off for the tests of
+   * the explicit path, which then see exactly what they publish.
+   */
+  private var automaticListing = false
 
   /** What each design exports, by id; a test changes it to stand in for an edit. */
   private val faces = mutableMapOf<String, String>()
@@ -126,6 +133,7 @@ class WatchFacePushRoutesTest {
         preview = { _, designId, _ -> "png:$designId".toByteArray() },
         signInPath = { "/auth/github/start?return=$it" },
         clock = { now },
+        designs = { if (automaticListing) service.adminListDesigns() else emptyList() },
       )
     return ServeHttpServer(
         host = "127.0.0.1",
@@ -136,6 +144,11 @@ class WatchFacePushRoutesTest {
         machineAuthorization = ServeMachineAuthorization("local-fixture", null, null),
         uiBuilderService = service,
         watchFacePush = push,
+        uiBuilderDwfPreview =
+          UiBuilderDwfPreview(
+            sessions = DwfPreviewSessions(FakeDwfRuntime()),
+            isDwfCatalog = { true },
+          ),
         // A signed-in person is named by a test header; without it, nobody is.
         uiBuilderAuthorization =
           ServeUiBuilderAuthorization { call, _, _ ->
@@ -220,8 +233,84 @@ class WatchFacePushRoutesTest {
 
   private val api = WatchFacePush.BASE_PATH
 
-  private fun publish(actor: String, designId: String): Reply =
-    send("PUT", "/api/ui-builder/v1/designs/$designId/watch-push", actor = actor)
+  private fun publish(actor: String, designId: String, visibility: String? = null): Reply =
+    send(
+      "PUT",
+      "/api/ui-builder/v1/designs/$designId/watch-face-publication",
+      json = visibility?.let { "{\"visibility\":\"$it\"}" },
+      actor = actor,
+    )
+
+  private fun publication(designId: String, actor: String = alice): WatchFacePushPublicationV1 {
+    val reply =
+      send("GET", "/api/ui-builder/v1/designs/$designId/watch-face-publication", actor = actor)
+    assertEquals(200, reply.code, reply.body)
+    return WATCHFACE_PUSH_JSON.decodeFromString(WatchFacePushPublicationV1.serializer(), reply.body)
+  }
+
+  private fun publicationOf(reply: Reply): WatchFacePushPublicationV1 {
+    assertEquals(200, reply.code, reply.body)
+    return WATCHFACE_PUSH_JSON.decodeFromString(WatchFacePushPublicationV1.serializer(), reply.body)
+  }
+
+  /** The `visibility` the list gives [designId] (the app's model does not carry it). */
+  private fun visibilityOf(designId: String, token: String? = null): String? =
+    Json.parseToJsonElement(send("GET", "$api/designs", bearer = token).body)
+      .jsonObject["designs"]!!
+      .jsonArray
+      .map { it.jsonObject }
+      .single { it["id"]!!.jsonPrimitive.content == designId }["visibility"]
+      ?.jsonPrimitive
+      ?.content
+
+  /** List, let the automatic listing's background pass finish, and list again. */
+  private fun settledDesigns(token: String? = null): List<App.Design> {
+    designs(token)
+    runBlocking { push.automatic.awaitIdle() }
+    return designs(token)
+  }
+
+  /** An edit: a new revision of the design (its text set to [title]), exporting [face]. */
+  private fun edit(owner: String, designId: String, face: String?, title: String = "edited") =
+    runBlocking {
+      if (face != null) faces[designId] = face
+      val actor = AuthenticatedUiBuilderActor(owner)
+      val opened =
+        assertIs<UiBuilderServiceResponse.Snapshot>(
+          service.execute(
+            UiBuilderServiceCall(actor, UiBuilderServiceRequest.OpenDesign(designId)),
+          ),
+        )
+      val edited =
+        service.execute(
+          UiBuilderServiceCall(
+            actor,
+            UiBuilderServiceRequest.ApplyOperation(
+              UiBuilderSubmission.Batch(
+                designId,
+                "edit-$title",
+                "test",
+                opened.snapshot.state.document.revision,
+                listOf(SetPropertyMutationV1("text", "text", StringValueV1(title))),
+              ),
+            ),
+          ),
+        )
+      assertIs<AcceptedOutcomeV1>(
+        assertIs<UiBuilderServiceResponse.OperationOutcome>(edited, "edit $designId").outcome,
+      )
+      service.execute(
+        UiBuilderServiceCall(actor, UiBuilderServiceRequest.RenameDesign(designId, title)),
+      )
+    }
+
+  private fun setVisibility(owner: String, designId: String, public: Boolean) = runBlocking {
+    service.setDesignVisibility(
+      AuthenticatedUiBuilderActor(owner),
+      designId,
+      if (public) UiBuilderDefaultVisibility.PUBLIC else UiBuilderDefaultVisibility.PRIVATE,
+    )
+  }
 
   /** Link a watch to [account] the way the app and a person do; returns the device token. */
   private fun link(account: String, deviceName: String = "Pixel Watch 4"): String {
@@ -520,7 +609,8 @@ class WatchFacePushRoutesTest {
     // Unpublishing takes it off watches.
     assertEquals(
       200,
-      send("DELETE", "/api/ui-builder/v1/designs/secret/watch-push", actor = alice).code,
+      send("DELETE", "/api/ui-builder/v1/designs/secret/watch-face-publication", actor = alice)
+        .code,
     )
     assertEquals(listOf("aurora", "pulse"), designs(aliceToken).map { it.id })
     // Making a public face private takes it off everybody else's.
@@ -614,7 +704,7 @@ class WatchFacePushRoutesTest {
         publish(alice, "aurora").body,
       )
     assertEquals(2, second.version)
-    send("DELETE", "/api/ui-builder/v1/designs/aurora/watch-push", actor = alice)
+    send("DELETE", "/api/ui-builder/v1/designs/aurora/watch-face-publication", actor = alice)
     faces["aurora"] = "<WatchFace id=\"aurora\" edited=\"2\"/>"
     publish(alice, "aurora")
     val listed = designs().single()
@@ -631,8 +721,9 @@ class WatchFacePushRoutesTest {
     createDesign(alice, "aurora", "Aurora", public = true)
     assertEquals(403, publish(bob, "aurora").code)
     assertEquals(404, publish(bob, "nope").code)
-    assertEquals(401, send("PUT", "/api/ui-builder/v1/designs/aurora/watch-push").code)
-    val unpublished = send("GET", "/api/ui-builder/v1/designs/aurora/watch-push", actor = alice)
+    assertEquals(401, send("PUT", "/api/ui-builder/v1/designs/aurora/watch-face-publication").code)
+    val unpublished =
+      send("GET", "/api/ui-builder/v1/designs/aurora/watch-face-publication", actor = alice)
     assertEquals(
       false,
       WATCHFACE_PUSH_JSON.decodeFromString(
@@ -642,7 +733,8 @@ class WatchFacePushRoutesTest {
         .published,
     )
     watchCatalogs = emptySet()
-    val refused = send("PUT", "/api/ui-builder/v1/designs/aurora/watch-push", actor = alice)
+    val refused =
+      send("PUT", "/api/ui-builder/v1/designs/aurora/watch-face-publication", actor = alice)
     assertEquals(422, refused.code)
     assertContains(refused.body, "not_a_watch_face")
   }
@@ -872,6 +964,309 @@ class WatchFacePushRoutesTest {
     val bobs = designs().single()
     assertEquals(2, bobs.version)
     assertEquals("fake-apk:secret:2", send("GET", pathOf(bobs.apkUrl)).body)
+  }
+
+  // ------------------------------------------------- the owner's publication route
+
+  @Test
+  fun `the owner publishes, re-publishes and unpublishes, as public or private`() {
+    start()
+    createDesign(alice, "aurora", "Aurora", public = true)
+    createDesign(alice, "secret", "Secret")
+    val aliceToken = link(alice)
+
+    val before = publication("aurora")
+    assertFalse(before.published)
+    assertEquals("ee.schimke.watchface.push.watchfacepush.aurora", before.packageName)
+    assertNull(before.packaging)
+
+    // Private: only the owner's linked watches, though the design itself is public.
+    val private = publicationOf(publish(alice, "aurora", "private"))
+    assertTrue(private.published)
+    assertEquals("private", private.visibility)
+    assertEquals("private", private.requestedVisibility)
+    assertEquals(1, private.version)
+    assertEquals("ready", private.apk?.status)
+    assertEquals(emptyList(), designs())
+    assertEquals("private", visibilityOf("aurora", aliceToken))
+
+    // Re-published public, unchanged: every watch, at the same version.
+    val public = publicationOf(publish(alice, "aurora", "public"))
+    assertEquals("public", public.visibility)
+    assertEquals(1, public.version)
+    assertEquals(listOf("aurora"), designs().map { it.id })
+    assertEquals(public, publication("aurora").copy(refusal = null))
+
+    // An edit ships when it is published again, as the next version.
+    faces["aurora"] = "<WatchFace id=\"aurora\" edited=\"1\"/>"
+    assertEquals(2, publicationOf(publish(alice, "aurora", "public")).version)
+    assertEquals(2, designs().single().version)
+
+    // Unpublished: off every watch, the counter kept.
+    val off =
+      publicationOf(
+        send("DELETE", "/api/ui-builder/v1/designs/aurora/watch-face-publication", actor = alice),
+      )
+    assertFalse(off.published)
+    assertEquals(2, off.version)
+    assertEquals(emptyList(), designs(aliceToken))
+
+    // A private design is never put on every watch; it is published to the owner's.
+    val refused = publish(alice, "secret", "public")
+    assertEquals(422, refused.code)
+    assertContains(refused.body, "design_not_public")
+    assertEquals("private", publicationOf(publish(alice, "secret", "private")).visibility)
+    assertEquals(400, publish(alice, "secret", "everyone").code)
+    assertEquals(listOf("secret"), designs(aliceToken).map { it.id })
+  }
+
+  @Test
+  fun `only the owner in their own session may use the publication route`() {
+    start()
+    createDesign(alice, "aurora", "Aurora", public = true)
+    val path = "/api/ui-builder/v1/designs/aurora/watch-face-publication"
+    val agent = mapOf("X-Test-Agent-For" to alice)
+    for (method in listOf("GET", "PUT", "DELETE")) {
+      assertEquals(401, send(method, path).code, method)
+      val stranger = send(method, path, actor = bob)
+      assertEquals(403, stranger.code, "$method by a non-owner: ${stranger.body}")
+      assertContains(stranger.body, "owner_required")
+      // A delegated grant, even for the owner, and an agent's own identity: refused, as on /link.
+      val delegated = send(method, path, headers = agent)
+      assertEquals(403, delegated.code, "$method by a delegated grant: ${delegated.body}")
+      assertContains(delegated.body, "owner_session_required")
+      assertEquals(403, send(method, path, actor = "agent:fingerprint").code, method)
+      assertEquals(
+        404,
+        send(method, "/api/ui-builder/v1/designs/nope/watch-face-publication", actor = alice).code,
+      )
+    }
+    assertFalse(push.store.publication("aurora")?.published ?: false)
+    assertEquals(200, publish(alice, "aurora").code)
+  }
+
+  @Test
+  fun `a refused publish is a 422 with the packager's diagnostics, kept on the status`() {
+    start()
+    createDesign(alice, "aurora", "Aurora", public = true)
+    faces["aurora"] = "<WatchFace id=\"aurora\" state=\"bad\"/>"
+    val refused = publish(alice, "aurora", "public")
+    assertEquals(422, refused.code)
+    val error =
+      WATCHFACE_PUSH_JSON.decodeFromString(WatchFacePushErrorV1.serializer(), refused.body)
+    assertEquals("packaging_failed", error.error)
+    assertEquals(
+      listOf("error[wff-validator]: bad face"),
+      error.diagnostics?.filter { "bad face" in it },
+    )
+    val status = publication("aurora")
+    assertFalse(status.published)
+    assertContains(status.refusal.orEmpty().joinToString("\n"), "bad face")
+    // Fixed, the refusal is gone.
+    faces["aurora"] = "<WatchFace id=\"aurora\"/>"
+    assertEquals(200, publish(alice, "aurora", "public").code)
+    assertNull(publication("aurora").refusal)
+  }
+
+  @Test
+  fun `the publication route is rate limited per account`() {
+    start()
+    createDesign(alice, "aurora", "Aurora", public = true)
+    repeat(30) {
+      assertEquals(
+        200,
+        send("GET", "/api/ui-builder/v1/designs/aurora/watch-face-publication", actor = alice).code,
+      )
+    }
+    val limited =
+      send("GET", "/api/ui-builder/v1/designs/aurora/watch-face-publication", actor = alice)
+    assertEquals(429, limited.code)
+    assertNotNull(limited.headers["Retry-After"])
+  }
+
+  @Test
+  fun `the editor is offered publishing only for a watch-face design, and only its owner may`() {
+    start()
+    createDesign(alice, "aurora", "Aurora", public = true)
+    fun capability(actor: String? = null, headers: Map<String, String> = emptyMap()) =
+      Json.parseToJsonElement(
+          send(
+              "GET",
+              "/api/ui-builder/v1/designs/aurora/dwf-preview/status",
+              actor = actor,
+              headers = headers,
+            )
+            .body,
+        )
+        .jsonObject["watchFacePush"]
+        ?.jsonObject
+    val owner = capability(alice)!!
+    assertEquals(
+      "/api/ui-builder/v1/designs/aurora/watch-face-publication",
+      owner["publicationPath"]!!.jsonPrimitive.content,
+    )
+    assertEquals("true", owner["canPublish"]!!.jsonPrimitive.content)
+    assertEquals("false", capability(bob)!!["canPublish"]!!.jsonPrimitive.content)
+    assertEquals(
+      "false",
+      capability(headers = mapOf("X-Test-Agent-For" to alice))!!["canPublish"]!!
+        .jsonPrimitive
+        .content,
+    )
+    watchCatalogs = emptySet()
+    assertNull(capability(alice))
+  }
+
+  @Test
+  fun `a host that cannot build offers no publishing`() {
+    start(
+      packaging = {
+        WatchFacePushPackaging.Unavailable(WatchFacePushPackaging.SIGNING_KEY_MISSING, "no key")
+      },
+    )
+    createDesign(alice, "aurora", "Aurora", public = true)
+    val status =
+      Json.parseToJsonElement(
+          send("GET", "/api/ui-builder/v1/designs/aurora/dwf-preview/status", actor = alice).body,
+        )
+        .jsonObject
+    assertNull(status["watchFacePush"])
+    assertEquals(WatchFacePushPackaging.SIGNING_KEY_MISSING, publication("aurora").packaging?.code)
+  }
+
+  // ------------------------------------------------- public designs, listed on their own
+
+  @Test
+  fun `a public watch-face design is listed and downloadable anonymously, a private one is not`() {
+    automaticListing = true
+    start()
+    createDesign(alice, "aurora", "Aurora", public = true)
+    createDesign(alice, "secret", "Secret")
+    val aliceToken = link(alice)
+
+    // The first list does not wait for the build; the face is there once it is built.
+    assertEquals(emptyList(), designs())
+    runBlocking { push.automatic.awaitIdle() }
+    val aurora = designs().single()
+    assertEquals("aurora", aurora.id)
+    assertEquals("public", visibilityOf("aurora"))
+    assertEquals(1, aurora.version)
+    assertEquals("ee.schimke.watchface.push.watchfacepush.aurora", aurora.packageName)
+    assertEquals("fake-apk:aurora:1", send("GET", pathOf(aurora.apkUrl)).body)
+    assertEquals(200, send("GET", pathOf(aurora.previewUrl)).code)
+    // The private design is on nobody's watch, its owner's included: it was never published.
+    assertEquals(listOf("aurora"), settledDesigns(aliceToken).map { it.id })
+    assertEquals(404, send("GET", "$api/designs/secret/apk").code)
+    assertEquals(404, send("GET", "$api/designs/secret/apk", bearer = aliceToken).code)
+    val status = publication("aurora")
+    assertTrue(status.published)
+    assertTrue(status.automatic)
+    assertEquals("public", status.visibility)
+
+    val pushStatus = Json.parseToJsonElement(send("GET", "$api/status").body).jsonObject
+    assertEquals("1", pushStatus["designs"]!!.jsonObject["listed"]!!.jsonPrimitive.content)
+
+    // Made private, it leaves every list at once, its owner's watch included.
+    setVisibility(alice, "aurora", public = false)
+    assertEquals(emptyList(), designs())
+    assertEquals(emptyList(), designs(aliceToken))
+    assertEquals(404, send("GET", pathOf(aurora.apkUrl)).code)
+    assertNull(publication("aurora").visibility)
+    // Public again, back as it was, with no rebuild.
+    setVisibility(alice, "aurora", public = true)
+    assertEquals(listOf("aurora"), settledDesigns().map { it.id })
+    assertEquals(1, packagerLog.readLines().size)
+  }
+
+  @Test
+  fun `an edit to a public design is listed as the next version, only when the face changed`() {
+    automaticListing = true
+    start()
+    createDesign(alice, "aurora", "Aurora", public = true)
+    assertEquals(1, settledDesigns().single().version)
+    // A new revision whose face is the same: same version, no rebuild.
+    edit(alice, "aurora", face = null, title = "Aurora two")
+    val renamed = settledDesigns().single()
+    assertEquals(1, renamed.version)
+    // A new revision whose face changed: the next version, never one reused.
+    edit(alice, "aurora", face = "<WatchFace id=\"aurora\" edited=\"1\"/>", title = "Aurora three")
+    val edited = settledDesigns().single()
+    assertEquals(2, edited.version)
+    assertEquals("Aurora three", edited.title)
+    assertEquals("fake-apk:aurora:2", send("GET", pathOf(edited.apkUrl)).body)
+    assertEquals(listOf("1", "2"), packagerLog.readLines().map { it.split(' ')[2] })
+  }
+
+  @Test
+  fun `a public design the packager refuses is skipped on status, and its last version stays`() {
+    automaticListing = true
+    start()
+    createDesign(alice, "aurora", "Aurora", public = true)
+    createDesign(alice, "broken", "Broken", public = true)
+    faces["broken"] = "<WatchFace id=\"broken\" state=\"bad\"/>"
+    assertEquals(listOf("aurora"), settledDesigns().map { it.id })
+    edit(alice, "aurora", face = "<WatchFace id=\"aurora\" state=\"bad\"/>")
+    assertEquals(1, settledDesigns().single().version)
+
+    val skipped =
+      Json.parseToJsonElement(send("GET", "$api/status").body)
+        .jsonObject["designs"]!!
+        .jsonObject["skipped"]!!
+        .toString()
+    assertContains(skipped, "\"aurora\"")
+    assertContains(skipped, "\"broken\"")
+    assertContains(skipped, "bad face")
+    assertContains(publication("broken").refusal.orEmpty().joinToString(), "bad face")
+    // Built once each: a refused revision is not re-run on every listing.
+    settledDesigns()
+    assertEquals(1, packagerLog.readLines().size)
+  }
+
+  @Test
+  fun `an explicit publication wins over the automatic one, keeping its package and version`() {
+    automaticListing = true
+    start()
+    createDesign(alice, "aurora", "Aurora", public = true)
+    val aliceToken = link(alice)
+    val automatic = settledDesigns().single()
+
+    // Kept to the owner's watch: off everyone else's, though the design is public.
+    val private = publicationOf(publish(alice, "aurora", "private"))
+    assertFalse(private.automatic)
+    assertEquals(automatic.version, private.version)
+    assertEquals(automatic.packageName, private.packageName)
+    assertEquals(emptyList(), settledDesigns())
+    assertEquals("private", visibilityOf("aurora", aliceToken))
+
+    // Pinned: a later edit is not shipped until the owner publishes again.
+    publish(alice, "aurora", "public")
+    edit(alice, "aurora", face = "<WatchFace id=\"aurora\" edited=\"1\"/>")
+    assertEquals(1, settledDesigns().single().version)
+
+    // Unpublished by the owner: off every watch, though public.
+    send("DELETE", "/api/ui-builder/v1/designs/aurora/watch-face-publication", actor = alice)
+    assertEquals(emptyList(), settledDesigns())
+    assertEquals(emptyList(), designs(aliceToken))
+    // Published again, the edit ships above every version already out.
+    assertEquals(2, publicationOf(publish(alice, "aurora")).version)
+  }
+
+  @Test
+  fun `a purged public design is retired, and one recreated under its id starts above it`() {
+    automaticListing = true
+    start()
+    createDesign(alice, "aurora", "Aurora", public = true)
+    assertEquals(1, settledDesigns().single().version)
+    val admin =
+      ServeUiBuilderAdmin(service = service, retireWatchPublication = { push.store.retire(it) })
+    assertIs<ServeUiBuilderAdmin.Result.Deleted>(admin.delete("aurora"))
+    assertEquals(emptyList(), settledDesigns())
+    createDesign(bob, "aurora", "Bob's", public = true)
+    faces["aurora"] = "<WatchFace id=\"bobs\"/>"
+    val bobs = settledDesigns().single()
+    assertEquals(2, bobs.version)
+    assertEquals("Bob's", bobs.title)
+    assertEquals(bob, push.store.publication("aurora")?.accountActorId)
   }
 
   private fun document(id: String, title: String) =

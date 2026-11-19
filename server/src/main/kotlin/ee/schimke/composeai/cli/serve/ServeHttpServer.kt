@@ -1376,7 +1376,12 @@ class ServeHttpServer(
               browserHosts
             }
           uiBuilderDwfPreview?.let {
-            installUiBuilderDwfRoutes(designService, sameOriginUiBuilderAuthorization, it)
+            installUiBuilderDwfRoutes(
+              designService,
+              sameOriginUiBuilderAuthorization,
+              it,
+              watchFacePush,
+            )
           }
           watchFacePush?.let { push ->
             installWatchFacePushRoutes(

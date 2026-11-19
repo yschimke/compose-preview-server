@@ -1797,8 +1797,14 @@ class ServeUiBuilderMcp(
     val published =
       (args["published"] as? JsonPrimitive)?.booleanOrNull
         ?: throw McpRequestException("`published` must be true or false")
+    val visibility =
+      (args["visibility"] as? JsonPrimitive)?.contentOrNull?.also {
+        if (it !in WatchFacePush.VISIBILITIES) {
+          throw McpRequestException("`visibility` must be `public` or `private`")
+        }
+      }
     val outcome =
-      if (published) push.publish(service, actor, designId)
+      if (published) push.publish(service, actor, designId, visibility)
       else push.unpublish(service, actor, designId)
     return when (outcome) {
       is WatchFacePush.Outcome.Ok ->
@@ -4441,11 +4447,14 @@ class ServeUiBuilderMcp(
               "design, to any watch). Publish again after editing to ship the edit; the " +
               "`version` moves only when the face itself changed. `published: false` stops " +
               "listing it. Only the design's owner may. A face the packager refuses is refused " +
-              "here with its diagnostics.",
+              "here with its diagnostics. A public design is listed to every watch on its own, " +
+              "from its latest revision; publishing pins the revision, and `visibility: " +
+              "private` keeps a public design to the owner's linked watches only.",
             """
             {"type":"object","properties":{
               "designId":{"type":"string"},
-              "published":{"type":"boolean","description":"true to publish the current revision, false to unpublish."}
+              "published":{"type":"boolean","description":"true to publish the current revision, false to unpublish."},
+              "visibility":{"type":"string","enum":["public","private"],"description":"With published: true. public lists it to every watch (the design must be public); private only to the owner's linked watches. Omit to follow the design's own visibility."}
             },"required":["designId","published"],"additionalProperties":false}
             """,
           ),

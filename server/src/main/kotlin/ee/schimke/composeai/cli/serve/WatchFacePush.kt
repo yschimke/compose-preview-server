@@ -471,7 +471,32 @@ internal class WatchFacePushStore(
      * design this is. A design deleted and recreated under the same id (by anyone) is not it.
      */
     val designCreatedAtEpochMillis: Long? = null,
+    /**
+     * Who the owner chose to list it to: `public` (every watch, while the design itself is public)
+     * or `private` (only the owner's linked watches, even when the design is public). Null on a
+     * publication made before the choice existed, or through MCP without one: it follows the
+     * design's own visibility, as `public` does.
+     */
+    val visibility: String? = null,
+    /**
+     * Listed because the design is public, not because its owner published it
+     * ([WatchFacePushAutomatic]). It reaches anonymous watches only while the design is public, and
+     * never the owner's watches as a private face. An explicit publish or unpublish clears it.
+     */
+    val automatic: Boolean = false,
   ) {
+    /**
+     * Whether this is the owner's own decision about the design [ownerActorId] owns and created at
+     * [designCreatedAtEpochMillis], published or not: then the automatic listing leaves it alone. A
+     * retired record (no account) or one for a design since recreated under the id is not.
+     */
+    fun isExplicitFor(ownerActorId: String?, designCreatedAtEpochMillis: Long?): Boolean =
+      !automatic &&
+        accountActorId.isNotBlank() &&
+        accountActorId == ownerActorId &&
+        (this.designCreatedAtEpochMillis == null ||
+          this.designCreatedAtEpochMillis == designCreatedAtEpochMillis)
+
     fun source(): DwfSource = DwfSource(wffXml = wffXml, wffVersion = wffVersion, label = label)
   }
 
@@ -623,6 +648,8 @@ internal class WatchFacePushStore(
     title: String,
     source: DwfSource,
     designCreatedAtEpochMillis: Long? = null,
+    visibility: String? = null,
+    automatic: Boolean = false,
   ): Publication =
     synchronized(lock) {
       val previous = publications[designId]
@@ -651,6 +678,8 @@ internal class WatchFacePushStore(
               previous.publishedAtEpochMillis
             } else clock(),
           designCreatedAtEpochMillis = designCreatedAtEpochMillis,
+          visibility = visibility,
+          automatic = automatic,
         )
       publication
     }
@@ -681,9 +710,18 @@ internal class WatchFacePushStore(
    * [commit] [candidate] only if it lands at exactly the version it was built for; null (nothing
    * stored) when a concurrent publish moved the stored version, so the caller rebuilds first.
    */
-  fun commitIfBuiltVersion(candidate: Publication): Publication? =
+  fun commitIfBuiltVersion(
+    candidate: Publication,
+    /**
+     * Whether [candidate] may replace what is stored now, asked under the store's lock: the
+     * automatic listing passes "not the owner's own publication", so an explicit publish that lands
+     * while an automatic build runs is never overwritten by it.
+     */
+    replaces: (current: Publication?) -> Boolean = { true },
+  ): Publication? =
     synchronized(lock) {
       val current = publications[candidate.designId]
+      if (!replaces(current)) return null
       if (committedVersion(current, candidate) != candidate.version) return null
       store(candidate)
     }
@@ -703,16 +741,22 @@ internal class WatchFacePushStore(
           title = "",
           wffXml = "",
           designCreatedAtEpochMillis = null,
+          visibility = null,
+          automatic = false,
         )
       store(retired)
       retired
     }
 
-  /** Take [designId] off watches; its version counter is kept. Null when it was never published. */
+  /**
+   * Take [designId] off watches; its version counter is kept. Null when it was never published. It
+   * is the owner's decision, so an automatic listing becomes an explicit opt-out: a public design
+   * its owner unpublished is not listed again until they publish it.
+   */
   fun unpublish(designId: String): Publication? =
     synchronized(lock) {
       val previous = publications[designId] ?: return null
-      val updated = previous.copy(published = false)
+      val updated = previous.copy(published = false, automatic = false)
       store(updated)
       updated
     }
@@ -1043,6 +1087,10 @@ internal class WatchFacePushBuilds(
    */
   fun refusal(publication: WatchFacePushStore.Publication): List<String>? =
     failures["${publication.faceName}|${publication.version}|${publication.digest}"]
+
+  /** [refusal] as a result, for a status that reports it. */
+  fun failure(publication: WatchFacePushStore.Publication): Result.Failed? =
+    refusal(publication)?.let { Result.Failed(it) }
 
   /** [source] defaults to the publication's own WFF; a catalog face passes its full source. */
   fun build(

@@ -104,12 +104,19 @@ internal data class DwfPreviewStatusV1(
   val reason: String? = null,
   val sessions: Int,
   val maxSessions: Int,
+  /**
+   * "Publish to watch": present only when this host builds push APKs and the design's catalog draws
+   * watch faces ([WatchFacePush.capability]). Independent of [available], which is the preview's.
+   */
+  val watchFacePush: WatchFacePushCapabilityV1? = null,
 )
 
 internal fun Route.installUiBuilderDwfRoutes(
   service: UiBuilderServicePort,
   authorization: ServeUiBuilderAuthorization,
   dwf: UiBuilderDwfPreview,
+  /** Watch Face Push on this host, for [DwfPreviewStatusV1.watchFacePush]; null: none. */
+  watchFacePush: WatchFacePush? = null,
 ) {
   /**
    * Whether the real runtime can run here. Read-gated and design-scoped like every other route
@@ -136,6 +143,7 @@ internal fun Route.installUiBuilderDwfRoutes(
           reason = unavailable?.reason,
           sessions = dwf.sessions.sessionCount,
           maxSessions = DwfPreviewSessions.DEFAULT_MAX_SESSIONS,
+          watchFacePush = watchFacePush?.capability(service, authorization, call, designId),
         ),
       ),
       ContentType.Application.Json,
