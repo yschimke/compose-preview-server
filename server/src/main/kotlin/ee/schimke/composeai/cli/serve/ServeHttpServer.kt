@@ -16761,10 +16761,12 @@ class ServeHttpServer(
     parsed: ServeAgentGrants.OpenRequest,
   ): ServeAgentGrants.OpenResponse? {
     val scope = AgentGrantScope.parse(parsed.scope) ?: AgentGrantScope.DEFAULT_REQUEST
-    // Unknown capability names are dropped, not refused ([OpenRequest.capabilities]). The approval
-    // page decides what is offered and approval clamps what is minted; the request keeps the whole
-    // ask.
+    // Unknown capability names are not granted and do not refuse the request
+    // ([OpenRequest.capabilities]); they are reported back, so the agent can tell. The approval
+    // page
+    // decides what is offered and approval clamps what is minted; the request keeps the whole ask.
     val capabilities = parsed.capabilities.mapNotNull { AgentGrantCapability.parse(it) }.toSet()
+    val unsupported = ServeAgentGrants.unsupportedCapabilities(parsed.capabilities)
     val ttl = parsed.ttlSeconds.takeIf { it > 0 } ?: ServeAgentGrantStore.DEFAULT_GRANT_TTL_SECONDS
     val request =
       store.openRequest(
@@ -16793,6 +16795,15 @@ class ServeHttpServer(
       maxTtlSeconds = store.maxGrantTtlSeconds,
       requestedCapabilities = AgentGrantCapability.wireNames(request.requestedCapabilities),
       maxCapabilities = AgentGrantCapability.wireNames(store.maxCapabilities),
+      unsupportedCapabilities = unsupported.takeIf { it.isNotEmpty() },
+      message =
+        unsupported
+          .takeIf { it.isNotEmpty() }
+          ?.let {
+            "this server does not support the capabilit${if (it.size == 1) "y" else "ies"} " +
+              it.joinToString(", ") +
+              "; the request goes ahead without ${if (it.size == 1) "it" else "them"}"
+          },
     )
   }
 
