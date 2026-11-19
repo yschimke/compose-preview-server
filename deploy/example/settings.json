@@ -3,7 +3,6 @@
   "uiBuilder": {"adminActors": []},
   "catalogs": {"mcp": false},
   "rendering": {"compileEngine": false},
-  "watchFaceValidation": false,
   "uploads": {"acceptDocs": false, "acceptImages": false},
   "analytics": {"umami": {"enabled": false}}
 }
