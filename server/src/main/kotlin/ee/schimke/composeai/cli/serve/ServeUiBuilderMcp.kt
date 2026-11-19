@@ -137,6 +137,8 @@ class ServeUiBuilderMcp(
    * face. Null on a host without the UI builder's watch-face lane (tool absent).
    */
   private val watchFaces: UiBuilderDwfPreview? = null,
+  /** The per-edit cost of a watch face ([WATCH_FACE_COST_KEY]); only used with [watchFaces]. */
+  private val watchFaceCost: WatchFaceCostEstimator = WatchFaceCostEstimator(),
   private val onLog: (String) -> Unit = { System.err.println(it) },
   /**
    * Bytes behind a design's `assets` map, so an agent can put a photograph in a design. Null
@@ -388,6 +390,11 @@ class ServeUiBuilderMcp(
      * no `renderer`, to choose the native frame when a selection has to be outlined.
      */
     mayExport: () -> Boolean = { false },
+    /**
+     * Whether the caller may publish watch faces ([mayPublishWatchFaces]): a person's own session,
+     * or a grant carrying `ui-builder-publish`. Asked only by [PUBLISH_WATCH_FACE].
+     */
+    mayPublish: () -> Boolean = { false },
   ): String {
     // Only a design this actor may read can acquire presence. A failed or spoofed design id
     // must never reveal another actor's access or add a participant to someone else's room.
@@ -409,7 +416,15 @@ class ServeUiBuilderMcp(
         withLinks(
           tool,
           args,
-          withHome(tool, run(tool, args, actor, callId, clientInteraction, mayExport)),
+          withHome(
+            tool,
+            withWatchFaceCost(
+              tool,
+              args,
+              actor,
+              run(tool, args, actor, callId, clientInteraction, mayExport, mayPublish),
+            ),
+          ),
         ),
       )
     } finally {
@@ -424,6 +439,7 @@ class ServeUiBuilderMcp(
     callId: String,
     clientInteraction: ServeCatalogMcp.ClientInteraction,
     mayExport: () -> Boolean,
+    mayPublish: () -> Boolean,
   ): String {
     val request =
       when (tool) {
@@ -502,7 +518,7 @@ class ServeUiBuilderMcp(
         REACT_TO_COMMENT -> return commentTool(tool, args, actor)
         GET_LINKS,
         SET_LINKS -> return linksTool(tool, args, actor)
-        PUBLISH_WATCH_FACE -> return publishWatchFace(args, actor)
+        PUBLISH_WATCH_FACE -> return publishWatchFace(args, actor, mayPublish)
         VALIDATE_WATCH_FACE -> return validateWatchFace(args, actor)
         VALIDATE -> return validate(args, actor)
         CHECK_DESIGN -> return checkDesign(args, actor)
@@ -1824,17 +1840,33 @@ class ServeUiBuilderMcp(
   private suspend fun publishWatchFace(
     args: JsonObject,
     actor: AuthenticatedUiBuilderActor,
+    mayPublish: () -> Boolean,
   ): String {
     val push = watchFacePush ?: throw McpRequestException("this host does not publish watch faces")
+    // Publishing reaches watches, every watch for a public design: a grant needs its approver's
+    // explicit `ui-builder-publish`, which write and destructive never imply.
+    if (!mayPublish()) {
+      throw McpRequestException(
+        "${WatchFacePush.OWNER_SESSION_REQUIRED}: ${WatchFacePush.OWNER_SESSION_REQUIRED_MESSAGE}",
+      )
+    }
     val designId = args.requiredText("designId")
     val published =
       (args["published"] as? JsonPrimitive)?.booleanOrNull
         ?: throw McpRequestException("`published` must be true or false")
+    val visibility =
+      (args["visibility"] as? JsonPrimitive)?.contentOrNull?.also {
+        if (it !in WatchFacePush.VISIBILITIES) {
+          throw McpRequestException("`visibility` must be `public` or `private`")
+        }
+      }
     val outcome =
-      if (published) push.publish(service, actor, designId)
+      if (published) push.publish(service, actor, designId, visibility)
       else push.unpublish(service, actor, designId)
     return when (outcome) {
       is WatchFacePush.Outcome.Ok ->
+        WATCHFACE_PUSH_JSON.encodeToString(WatchFacePushPublicationV1.serializer(), outcome.status)
+      is WatchFacePush.Outcome.Accepted ->
         WATCHFACE_PUSH_JSON.encodeToString(WatchFacePushPublicationV1.serializer(), outcome.status)
       is WatchFacePush.Outcome.Refused ->
         throw McpRequestException("${outcome.code}: ${outcome.reason}")
@@ -1899,6 +1931,53 @@ class ServeUiBuilderMcp(
       )
     }
     return links
+  }
+
+  /**
+   * A watch-face edit's reply plus [WATCH_FACE_COST_KEY]: what the face now costs, from the
+   * packager's SDK-free estimate ([WatchFaceCostEstimator]), so an agent keeps within the active
+   * and ambient budgets as it builds rather than finding out at publish. Only on
+   * [WATCH_FACE_COST_TOOLS], only for a design this actor can read whose catalog draws watch faces,
+   * and computed after the edit has returned, never inside it. No packager JVM runs. A reply that
+   * is not a JSON object, a design that exports no face, or an estimate that fails passes through
+   * unchanged.
+   */
+  private suspend fun withWatchFaceCost(
+    tool: String,
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+    reply: String,
+  ): String {
+    val dwf = watchFaces ?: return reply
+    if (tool !in WATCH_FACE_COST_TOOLS) return reply
+    val designId = args.text("designId") ?: return reply
+    val parsed =
+      try {
+        UI_BUILDER_JSON.parseToJsonElement(reply) as? JsonObject ?: return reply
+      } catch (_: SerializationException) {
+        return reply
+      }
+    val document =
+      try {
+        (execute(GetSnapshotRequestV1(designId = designId), actor)
+            as? UiBuilderServiceResponse.Snapshot)
+          ?.snapshot
+          ?.state
+          ?.document
+      } catch (cancelled: CancellationException) {
+        throw cancelled
+      } catch (_: Exception) {
+        null
+      } ?: return reply
+    if (!dwf.isDwfCatalog(document.catalogPin.systemId)) return reply
+    val summary =
+      withContext(Dispatchers.Default) { watchFaceCost.summary(dwf, document) } ?: return reply
+    return JsonObject(
+        parsed +
+          (WATCH_FACE_COST_KEY to
+            UI_BUILDER_JSON.encodeToJsonElement(WatchFaceCostSummaryV1.serializer(), summary)),
+      )
+      .toString()
   }
 
   /**
@@ -4217,6 +4296,12 @@ class ServeUiBuilderMcp(
     const val SET_LINKS = "ui_builder_set_links"
     const val PUBLISH_WATCH_FACE = "ui_builder_publish_watch_face"
     const val VALIDATE_WATCH_FACE = "ui_builder_validate_watch_face"
+
+    /** The key a watch-face edit's reply carries its [WatchFaceCostSummaryV1] under. */
+    const val WATCH_FACE_COST_KEY = "watchFaceCost"
+
+    /** The edits whose replies carry [WATCH_FACE_COST_KEY]. */
+    val WATCH_FACE_COST_TOOLS = setOf(APPLY, REPLACE_DESIGN_DOCUMENT, PUT_ASSET)
     const val SHARE_DESIGN = "ui_builder_share_design"
     const val RENAME_DESIGN = "ui_builder_rename_design"
     const val DELETE_DESIGN = "ui_builder_delete_design"
@@ -4521,7 +4606,12 @@ class ServeUiBuilderMcp(
               "not pin fails `bundle-resources`; pin it with $PUT_ASSET. This runs the full " +
               "packager, so call it when an edit pass is done and before " +
               "$PUBLISH_WATCH_FACE, not after every edit; an unchanged face answers from " +
-              "cache. A failing face is a report with `passed: false`, not an error. A host whose " +
+              "cache. Between runs, every $APPLY, $REPLACE_DESIGN_DOCUMENT and $PUT_ASSET on a " +
+              "watch face already replies with `$WATCH_FACE_COST_KEY`: a cheap estimate of the " +
+              "same budgets (`active` and `ambient` as `usedBytes`, `limitBytes`, " +
+              "`percentOfLimit`), the `topContributors` with what to do about each, and the " +
+              "estimate's `errors`; read it after each edit and fix what it flags before " +
+              "building further. A failing face is a report with `passed: false`, not an error. A host whose " +
               "operator left Google's validators off answers " +
               "`${WatchFaceValidatorAvailability.DISABLED}`.",
             """
@@ -4541,8 +4631,12 @@ class ServeUiBuilderMcp(
               "and lists it to every watch linked to the owner's account (and, for a public " +
               "design, to any watch). Publish again after editing to ship the edit; the " +
               "`version` moves only when the face itself changed. `published: false` stops " +
-              "listing it. Only the design's owner may. A face the packager refuses is refused " +
-              "here with its diagnostics" +
+              "listing it. Only the design's owner may, or a grant the owner approved with " +
+              "`ui-builder-publish` (request_access with that capability; write alone never " +
+              "implies it). A face the packager refuses is refused " +
+              "here with its diagnostics. A public design is listed to every watch on its own, " +
+              "from a settled revision; publishing pins the revision, and `visibility: " +
+              "private` keeps a public design to the owner's linked watches only" +
               (if (watchFaceValidation) {
                 "; run $VALIDATE_WATCH_FACE first, which says per check what to fix and how " +
                   "much of the memory budget the face uses."
@@ -4550,7 +4644,8 @@ class ServeUiBuilderMcp(
             """
             {"type":"object","properties":{
               "designId":{"type":"string"},
-              "published":{"type":"boolean","description":"true to publish the current revision, false to unpublish."}
+              "published":{"type":"boolean","description":"true to publish the current revision, false to unpublish."},
+              "visibility":{"type":"string","enum":["public","private"],"description":"With published: true. public lists it to every watch (the design must be public); private only to the owner's linked watches. Omit to follow the design's own visibility."}
             },"required":["designId","published"],"additionalProperties":false}
             """,
           ),

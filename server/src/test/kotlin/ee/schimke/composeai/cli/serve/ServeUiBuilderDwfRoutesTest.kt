@@ -568,6 +568,122 @@ class ServeUiBuilderDwfRoutesTest {
     assertContains(refused.exceptionOrNull()?.message ?: refused.getOrThrow(), "watch faces")
   }
 
+  private val estimateJson =
+    """{"schemaVersion":1,"mode":"estimate","passed":false,"checks":[""" +
+      """{"id":"wff-xsd","title":"Schema","status":"skipped","findings":[""" +
+      """{"severity":"warning","message":"Not run: estimate only"}]},""" +
+      """{"id":"memory-footprint","title":"Memory footprint (estimate)","status":"failed",""" +
+      """"findings":[{"severity":"error","message":"ambient over budget",""" +
+      """"suggestion":"hide case_steel in ambient"}],""" +
+      """"memory":{"totalBytes":5000000,"maxActiveBytes":4194304,"maxAmbientBytes":4194304,""" +
+      """"activeLimitBytes":10000000,"ambientLimitBytes":4000000},""" +
+      """"contributors":[{"resource":"drawable/case_steel","kind":"image","width":1024,""" +
+      """"height":1024,"format":"png","fileBytes":81234,"decodedBytes":4194304,""" +
+      """"activeBytes":4194304,"ambientBytes":4194304,"renderedMaxWidth":450,""" +
+      """"renderedMaxHeight":450,"missing":false,"suggestion":"downscale to 450x450"}]}]}"""
+
+  @Test
+  fun `the cost summary keeps the budgets, the top contributors and the errors`() {
+    val summary =
+      WatchFaceCostEstimator.summarize(
+        7,
+        Json { ignoreUnknownKeys = true }
+          .decodeFromString(WatchFacePackagerReportV1.serializer(), estimateJson),
+      )
+    assertEquals(7, summary.revision)
+    assertFalse(summary.passed)
+    assertEquals(104, summary.ambient!!.percentOfLimit)
+    assertEquals(41, summary.active!!.percentOfLimit)
+    val top = summary.topContributors.single()
+    assertEquals("drawable/case_steel", top.resource)
+    assertEquals(104, top.percentOfAmbientLimit)
+    assertEquals("downscale to 450x450", top.suggestion)
+    assertEquals("hide case_steel in ambient", summary.errors.single().suggestion)
+  }
+
+  @Test
+  fun `a watch-face edit over MCP replies with its cost, and nothing runs the packager`() {
+    var estimated = 0
+    start(
+      sourceFor = { DwfSource(wffXml = imageFace, label = "derived") },
+      validator = { error("the full validator must not run on an edit") },
+    )
+    val mcp =
+      ServeUiBuilderMcp(
+        service,
+        watchFaces = dwfPreview,
+        assets = service,
+        watchFaceCost =
+          WatchFaceCostEstimator { files ->
+            estimated++
+            assertContentEquals(PNG, files["res/drawable/case_steel.png"])
+            estimateJson
+          },
+      )
+    val reply = runBlocking {
+      mcp.call(
+        ServeUiBuilderMcp.PUT_ASSET,
+        buildJsonObject {
+          put("designId", "watch-1")
+          put("assetKey", "case_steel")
+          put("imageBase64", Base64.getEncoder().encodeToString(PNG))
+        },
+        actor,
+        callId = "t",
+      )
+    }
+    val cost = obj(reply)[ServeUiBuilderMcp.WATCH_FACE_COST_KEY]!!.jsonObject
+    assertEquals("estimate", cost["mode"]!!.jsonPrimitive.content)
+    assertEquals(
+      "drawable/case_steel",
+      cost["topContributors"]!!.jsonArray.single().jsonObject["resource"]!!.jsonPrimitive.content,
+    )
+    assertEquals(1, estimated)
+    // A read is not an edit, and carries no cost.
+    val read = runBlocking {
+      mcp.call(
+        ServeUiBuilderMcp.GET_DESIGN,
+        buildJsonObject { put("designId", "watch-1") },
+        actor,
+        callId = "t",
+      )
+    }
+    assertNull(obj(read)[ServeUiBuilderMcp.WATCH_FACE_COST_KEY])
+    assertEquals(1, estimated)
+  }
+
+  @Test
+  fun `the real estimate reads a pinned bitmap and flags a missing one`() {
+    val withAsset =
+      start(sourceFor = { DwfSource(wffXml = imageFace) }, pinned = mapOf("case_steel" to PNG))
+    val document = runBlocking {
+      (service.execute(
+          UiBuilderServiceCall(actor, UiBuilderServiceRequest.GetSnapshot("watch-1", null)),
+        ) as UiBuilderServiceResponse.Snapshot)
+        .snapshot
+        .state
+        .document
+    }
+    withAsset.stop()
+    val estimator = WatchFaceCostEstimator()
+    val present = assertNotNull(estimator.summary(dwfPreview, document))
+    assertEquals("estimate", present.mode)
+    assertNotNull(present.active)
+    assertTrue(
+      present.topContributors.any { it.resource.endsWith("case_steel") && !it.missing },
+      present.toString(),
+    )
+    val bare =
+      UiBuilderDwfPreview(
+        sessions = DwfPreviewSessions(runtime),
+        isDwfCatalog = { true },
+        sourceFor = { DwfSource(wffXml = imageFace) },
+      )
+    val missing = assertNotNull(estimator.summary(bare, document.copy(assets = emptyMap())))
+    assertFalse(missing.passed, missing.toString())
+    assertTrue(missing.errors.isNotEmpty(), missing.toString())
+  }
+
   @Test
   fun `a design that is not a watch face derives no source`() {
     assertEquals(null, deriveDwfSource(document()))

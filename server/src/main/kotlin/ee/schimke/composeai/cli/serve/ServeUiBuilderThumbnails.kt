@@ -128,6 +128,14 @@ internal constructor(
       }
     }
 
+  /**
+   * Whether to hold back redraws of designs that already have a picture: true while the design
+   * service is slow ([ServeUiBuilderServiceTiming.slowRecently]). Every redraw is an export, and
+   * every export commits under the service's lock, so redrawing then makes every read wait longer.
+   * The stored picture is served meanwhile, and the next view offers the redraw again.
+   */
+  @Volatile internal var deferRedraws: () -> Boolean = { false }
+
   /** Whether nothing is queued or drawing; guideline frames warm only then. */
   internal fun isIdle(): Boolean = jobs.isEmpty() && pending.isEmpty()
 
@@ -308,6 +316,8 @@ internal constructor(
     native: Boolean = false,
   ) {
     if (knownRevision != null && isCurrent(designId, knownRevision, native)) return
+    // A first picture is still drawn: without one the card has nothing to show.
+    if (cached(designId) != null && deferRedraws()) return
     submit(designId, actor, urgent = false, native = native)
   }
 

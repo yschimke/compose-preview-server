@@ -790,6 +790,9 @@ class ServeUiBuilderRoutesTest {
           ExportFormatV1.BUNDLE -> error("the live routes never ask for a bundle")
           ExportFormatV1.JSON -> error("the live routes never ask for remote JSON")
           ExportFormatV1.RC -> error("the live routes never ask for a remote document")
+          ExportFormatV1.WFF_XML,
+          ExportFormatV1.WFF_BUNDLE,
+          ExportFormatV1.WFF_APK -> error("the live routes never ask for a watch face")
         }
       }
     }

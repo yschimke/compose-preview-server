@@ -72,7 +72,8 @@ object ServeAgentGrants {
     @SerialName("ttlSeconds") val ttlSeconds: Long = 0,
     /**
      * Independent permissions wanted beside [scope], by wire name ([AgentGrantCapability]). Unknown
-     * names are ignored, not refused, so a newer client still gets the rest of its request.
+     * names are not granted but do not refuse the request, so a newer client still gets the rest of
+     * it; they come back in [OpenResponse.unsupportedCapabilities], so it can tell.
      */
     val capabilities: List<String> = emptyList(),
   )
@@ -102,7 +103,29 @@ object ServeAgentGrants {
     val requestedCapabilities: List<String> = emptyList(),
     /** Every capability this server will grant at all — empty on a box that offers none. */
     val maxCapabilities: List<String> = emptyList(),
+    /**
+     * Requested capabilities this server does not know at all, as asked (trimmed, at most
+     * [MAX_UNSUPPORTED_ECHOED]): not granted, and not shown to the approver. An agent that asked
+     * for one learns here that this server cannot give it, rather than finding it missing later.
+     * Absent when there are none.
+     */
+    val unsupportedCapabilities: List<String>? = null,
+    /** Human-readable, safe to print; set when something requested cannot be granted here. */
+    val message: String? = null,
   )
+
+  /** How many unknown capability names, of what length, [OpenResponse] echoes back. */
+  const val MAX_UNSUPPORTED_ECHOED = 16
+  const val MAX_UNSUPPORTED_NAME_LENGTH = 64
+
+  /** The requested capability names this server does not know, as [OpenResponse] reports them. */
+  fun unsupportedCapabilities(requested: List<String>): List<String> =
+    requested
+      .map { it.trim() }
+      .filter { it.isNotEmpty() && AgentGrantCapability.parse(it) == null }
+      .map { name -> name.filter { !it.isISOControl() }.take(MAX_UNSUPPORTED_NAME_LENGTH) }
+      .distinct()
+      .take(MAX_UNSUPPORTED_ECHOED)
 
   @Serializable
   data class PollRequest(
@@ -288,6 +311,9 @@ object ServeAgentGrants {
       // No route asks for it; it rides on a grant to the design service. An open-UI-builder
       // approver may delete their own designs, so they may let an agent do it for them too.
       AgentGrantCapability.UI_BUILDER_DESTRUCTIVE,
+      // Likewise: an approver may publish their own watch faces, so they may let an agent publish
+      // them for them. Never implied by write or destructive; see [WatchFacePush].
+      AgentGrantCapability.UI_BUILDER_PUBLISH,
     )
 
   /** How [ServeMachineAuthorization] names the holder of `--token`. */

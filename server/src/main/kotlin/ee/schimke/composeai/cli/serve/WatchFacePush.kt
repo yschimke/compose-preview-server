@@ -507,7 +507,43 @@ internal class WatchFacePushStore(
      * for a publication stored before faces carried their assets.
      */
     val assets: Map<String, String> = emptyMap(),
+    /**
+     * Who the owner chose to list it to: `public` (every watch, while the design itself is public)
+     * or `private` (only the owner's linked watches, even when the design is public). Null on a
+     * publication made before the choice existed, or through MCP without one: it follows the
+     * design's own visibility, as `public` does.
+     */
+    val visibility: String? = null,
+    /**
+     * Listed because the design is public, not because its owner published it
+     * ([WatchFacePushAutomatic]). It reaches anonymous watches only while the design is public, and
+     * never the owner's watches as a private face. An explicit publish or unpublish clears it.
+     */
+    val automatic: Boolean = false,
+  ) {
+    /**
+     * Whether this is the owner's own decision about the design [ownerActorId] owns and created at
+     * [designCreatedAtEpochMillis], published or not: then the automatic listing leaves it alone. A
+     * retired record (no account) or one for a design since recreated under the id is not.
+     */
+    fun isExplicitFor(ownerActorId: String?, designCreatedAtEpochMillis: Long?): Boolean =
+      !automatic &&
+        accountActorId.isNotBlank() &&
+        accountActorId == ownerActorId &&
+        (this.designCreatedAtEpochMillis == null ||
+          this.designCreatedAtEpochMillis == designCreatedAtEpochMillis)
+  }
+
+  /** A public design's revision the packager refused, kept so it is not built again. */
+  @Serializable
+  data class AutomaticRefusal(
+    val revision: Long,
+    val designCreatedAtEpochMillis: Long? = null,
+    val diagnostics: List<String>,
   )
+
+  @Serializable
+  private data class AutomaticRefusals(val refusals: Map<String, AutomaticRefusal> = emptyMap())
 
   /** A built APK's facts; the bytes are the `.apk` file beside it. */
   @Serializable
@@ -535,6 +571,7 @@ internal class WatchFacePushStore(
 
   /** Where [WatchFacePushCatalogFaces] keeps catalog faces' versions. */
   val catalogFacesFile: Path = root.resolve("catalog-faces.json")
+  private val automaticRefusalsFile = root.resolve("automatic-refusals.json")
   private var devices: MutableList<Device>
   private var installs: MutableList<InstallEvent>
   private val publications = ConcurrentHashMap<String, Publication>()
@@ -721,6 +758,8 @@ internal class WatchFacePushStore(
     title: String,
     source: DwfSource,
     designCreatedAtEpochMillis: Long? = null,
+    visibility: String? = null,
+    automatic: Boolean = false,
   ): Publication =
     synchronized(lock) {
       val previous = publications[designId]
@@ -749,6 +788,8 @@ internal class WatchFacePushStore(
               previous.publishedAtEpochMillis
             } else clock(),
           designCreatedAtEpochMillis = designCreatedAtEpochMillis,
+          visibility = visibility,
+          automatic = automatic,
           assets = source.assets.entries.associate { (path, bytes) -> path to storeAsset(bytes) },
         )
       publication
@@ -808,9 +849,18 @@ internal class WatchFacePushStore(
    * [commit] [candidate] only if it lands at exactly the version it was built for; null (nothing
    * stored) when a concurrent publish moved the stored version, so the caller rebuilds first.
    */
-  fun commitIfBuiltVersion(candidate: Publication): Publication? =
+  fun commitIfBuiltVersion(
+    candidate: Publication,
+    /**
+     * Whether [candidate] may replace what is stored now, asked under the store's lock: the
+     * automatic listing passes "not the owner's own publication", so an explicit publish that lands
+     * while an automatic build runs is never overwritten by it.
+     */
+    replaces: (current: Publication?) -> Boolean = { true },
+  ): Publication? =
     synchronized(lock) {
       val current = publications[candidate.designId]
+      if (!replaces(current)) return null
       if (committedVersion(current, candidate) != candidate.version) return null
       store(candidate)
     }
@@ -821,6 +871,21 @@ internal class WatchFacePushStore(
    * id next starts above every version already installed and never inherits this publication.
    */
   fun retire(designId: String): Publication? =
+    retireRecord(designId).also { retiredListeners.forEach { it(designId) } }
+
+  /** Told of every [retire], published or not, after the record is written: see [onRetired]. */
+  private val retiredListeners = java.util.concurrent.CopyOnWriteArrayList<(String) -> Unit>()
+
+  /**
+   * Call [listener] each time a design is retired, whether or not it was ever published: what is
+   * kept beside the record by design id alone (a build's progress, a refusal) belongs to the design
+   * that is gone, not to whoever creates the id next.
+   */
+  fun onRetired(listener: (designId: String) -> Unit) {
+    retiredListeners += listener
+  }
+
+  private fun retireRecord(designId: String): Publication? =
     synchronized(lock) {
       val previous = publications[designId] ?: return null
       if (installs.removeIf { it.designId == designId }) persistInstalls()
@@ -831,16 +896,59 @@ internal class WatchFacePushStore(
           title = "",
           wffXml = "",
           designCreatedAtEpochMillis = null,
+          visibility = null,
+          automatic = false,
         )
       store(retired)
       retired
     }
 
-  /** Take [designId] off watches; its version counter is kept. Null when it was never published. */
-  fun unpublish(designId: String): Publication? =
+  /**
+   * Take [designId] off watches; its version counter is kept. Null when it was never published. It
+   * is the owner's decision, so an automatic listing becomes an explicit opt-out: a public design
+   * its owner unpublished is not listed again until they publish it.
+   */
+  fun unpublish(
+    designId: String,
+    /**
+     * The owner and the design's creation time, when the owner is the one deciding: the record is
+     * then bound to them, and is written even when nothing was published yet (version 0, no face),
+     * so an automatic build still in flight, or the next pass, cannot list the design after all.
+     */
+    ownerActorId: String? = null,
+    designCreatedAtEpochMillis: Long? = null,
+  ): Publication? =
     synchronized(lock) {
-      val previous = publications[designId] ?: return null
-      val updated = previous.copy(published = false)
+      val previous = publications[designId]
+      val updated =
+        when {
+          previous != null && ownerActorId == null ->
+            previous.copy(published = false, automatic = false)
+          previous != null ->
+            previous.copy(
+              published = false,
+              automatic = false,
+              accountActorId = ownerActorId!!,
+              designCreatedAtEpochMillis = designCreatedAtEpochMillis,
+            )
+          ownerActorId == null -> return null
+          else ->
+            Publication(
+              designId = designId,
+              accountActorId = ownerActorId,
+              faceName = WatchFacePushNaming.faceName(designId),
+              published = false,
+              version = 0,
+              revision = 0,
+              title = "",
+              wffVersion = 0,
+              wffXml = "",
+              label = "",
+              digest = "",
+              publishedAtEpochMillis = clock(),
+              designCreatedAtEpochMillis = designCreatedAtEpochMillis,
+            )
+        }
       store(updated)
       updated
     }
@@ -853,6 +961,20 @@ internal class WatchFacePushStore(
     publications[publication.designId] = publication
     return publication
   }
+
+  /** What [WatchFacePushAutomatic] last recorded as refused, by design id. */
+  fun automaticRefusals(): Map<String, AutomaticRefusal> =
+    readJson(automaticRefusalsFile, AutomaticRefusals.serializer())?.refusals ?: emptyMap()
+
+  fun saveAutomaticRefusals(refusals: Map<String, AutomaticRefusal>) =
+    synchronized(lock) {
+      writeAtomically(
+        automaticRefusalsFile,
+        json
+          .encodeToString(AutomaticRefusals.serializer(), AutomaticRefusals(refusals))
+          .toByteArray(),
+      )
+    }
 
   // --------------------------------------------------------------------- APKs
 
@@ -1191,7 +1313,11 @@ internal class WatchFacePushBuilds(
 
     data class Unavailable(val code: String, val reason: String) : Result
 
-    data class Failed(val diagnostics: List<String>) : Result
+    /**
+     * [retryable]: not the packager's verdict on the face but a failure around it (a timeout, a
+     * full disk), which may well succeed next time.
+     */
+    data class Failed(val diagnostics: List<String>, val retryable: Boolean = false) : Result
   }
 
   private val lock = Any()
@@ -1249,6 +1375,10 @@ internal class WatchFacePushBuilds(
     if (stored != null) failures[key] = stored else noRefusal += key
     return stored
   }
+
+  /** [refusal] as a result, for a status that reports it. */
+  fun failure(publication: WatchFacePushStore.Publication): Result.Failed? =
+    refusal(publication)?.let { Result.Failed(it) }
 
   /** Wait until the background worker has nothing queued; false on timeout. For tests. */
   fun awaitIdle(timeoutMillis: Long = 60_000L): Boolean {
@@ -1323,7 +1453,9 @@ internal class WatchFacePushBuilds(
     }
     if (!retryTransient) {
       transient[key]?.let { backoff ->
-        if (clock() < backoff.retryAtEpochMillis) return Result.Failed(backoff.diagnostics)
+        if (clock() < backoff.retryAtEpochMillis) {
+          return Result.Failed(backoff.diagnostics, retryable = true)
+        }
       }
     }
     val ready =
@@ -1344,7 +1476,9 @@ internal class WatchFacePushBuilds(
       }
       if (!retryTransient) {
         transient[key]?.let { backoff ->
-          if (clock() < backoff.retryAtEpochMillis) return Result.Failed(backoff.diagnostics)
+          if (clock() < backoff.retryAtEpochMillis) {
+            return Result.Failed(backoff.diagnostics, retryable = true)
+          }
         }
       }
       val started = System.nanoTime()
@@ -1426,7 +1560,7 @@ internal class WatchFacePushBuilds(
         "($cause) failed after $elapsed; retrying no sooner than ${delay / 1000} s: " +
         diagnostics.firstOrNull(),
     )
-    return Result.Failed(diagnostics)
+    return Result.Failed(diagnostics, retryable = true)
   }
 
   /**

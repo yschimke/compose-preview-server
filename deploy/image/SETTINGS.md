@@ -35,6 +35,7 @@ Non-secret settings live in a deployment's `settings.json` (see [`deploy/example
 | `uploads.acceptDocs` | `SERVE_ACCEPT_DOCS` | restart | preview | Accept Remote Compose document uploads at `/d/`. |
 | `uploads.acceptImages` | `SERVE_ACCEPT_IMAGES` | restart | preview | Accept image uploads. Left out, it is on exactly when `imageRepository` is named. |
 | `uploads.imageRepository` | `SERVE_IMAGE_UPLOAD_REPO` | restart | preview, playground | The repository whose collaborators may upload images. Falls back to the sign-in repository. |
+| `watchFacePushBuilds` | `SERVE_WATCH_FACE_PUSH_BUILDS` | restart | preview | Build public watch-face designs for the Watch Face Push app on their own, from a settled revision. On unless set to false; off, only an owner's explicit publish builds one. |
 | `rendering.compileEngine` | `SERVE_COMPILE_ENGINE` | restart | preview | Run the playground's compile engine without mounting the playground page. |
 | `rendering.rcDefaultPlayer` | `SERVE_RC_DEFAULT_PLAYER` | restart | preview | The Remote Compose player the viewer opens on, where a preview offers it. |
 | `analytics.umami.enabled` | `SERVE_UMAMI_ENABLED` | restart | preview | Add the Umami analytics script to served pages. |

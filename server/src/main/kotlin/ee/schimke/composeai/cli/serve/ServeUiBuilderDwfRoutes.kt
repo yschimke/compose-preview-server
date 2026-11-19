@@ -177,6 +177,11 @@ internal data class DwfPreviewStatusV1(
   val maxSessions: Int,
   /** Async starts waiting for one of the [maxSessions] runtime slots. */
   val queued: Int = 0,
+  /**
+   * "Publish to watch": present only when this host builds push APKs and the design's catalog draws
+   * watch faces ([WatchFacePush.capability]). Independent of [available], which is the preview's.
+   */
+  val watchFacePush: WatchFacePushCapabilityV1? = null,
 )
 
 internal fun Route.installUiBuilderDwfRoutes(
@@ -188,6 +193,8 @@ internal fun Route.installUiBuilderDwfRoutes(
    * start answers 503 [ServeFeatureFlags.NATIVE_PREVIEW_DISABLED].
    */
   enabled: Boolean = true,
+  /** Watch Face Push on this host, for [DwfPreviewStatusV1.watchFacePush]; null: none. */
+  watchFacePush: WatchFacePush? = null,
 ) {
   /**
    * Whether the real runtime can run here. Read-gated and design-scoped like every other route
@@ -222,6 +229,7 @@ internal fun Route.installUiBuilderDwfRoutes(
           sessions = dwf.sessions.sessionCount,
           maxSessions = DwfPreviewSessions.DEFAULT_MAX_SESSIONS,
           queued = dwf.sessions.queuedCount,
+          watchFacePush = watchFacePush?.capability(service, authorization, call, designId),
         ),
       ),
       ContentType.Application.Json,

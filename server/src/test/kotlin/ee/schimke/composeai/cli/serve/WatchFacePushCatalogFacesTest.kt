@@ -113,6 +113,7 @@ class WatchFacePushCatalogFacesTest {
     listed: List<String>,
     unlisted: List<String> = emptyList(),
     catalogBakedBundle: (String) -> ServeCatalogStore.BakedBundle? = { null },
+    uiBuilderHost: String? = null,
   ) {
     val packager = WatchFacePushPackager { files, faceName, versionCode, out ->
       packagerRuns += faceName
@@ -141,6 +142,7 @@ class WatchFacePushCatalogFacesTest {
           catalogSessions = listed,
           appCatalogSessions = unlisted,
           catalogBakedBundle = catalogBakedBundle,
+          uiBuilderHost = uiBuilderHost,
           machineAuthorization = ServeMachineAuthorization("local-fixture", null, null),
           uiBuilderService =
             PersistentUiBuilderService(
@@ -158,9 +160,14 @@ class WatchFacePushCatalogFacesTest {
 
   private data class Reply(val code: Int, val body: String, val bytes: ByteArray)
 
-  private fun get(path: String): Reply =
+  private fun get(path: String, host: String? = null): Reply =
     client
-      .newCall(Request.Builder().url("http://127.0.0.1:${server!!.port}$path").build())
+      .newCall(
+        Request.Builder()
+          .url("http://127.0.0.1:${server!!.port}$path")
+          .also { builder -> host?.let { builder.header("Host", it) } }
+          .build(),
+      )
       .execute()
       .use {
         val bytes = it.body.bytes()
@@ -322,6 +329,41 @@ class WatchFacePushCatalogFacesTest {
     assertEquals(setOf("catalog:wear/bad"), skipped.keys)
     assertContains(skipped.getValue("catalog:wear/bad"), "the packager refused it")
     assertContains(skipped.getValue("catalog:wear/bad"), "refused for the test")
+  }
+
+  @Test
+  fun `includePending lists a refused catalog face with its attribution`() {
+    val host =
+      catalog(
+        "wear",
+        Triple("good", "MIT", "<WatchFace/>"),
+        Triple("bad", "MIT", "<WatchFace REFUSE=\"1\"/>"),
+      )
+    start(mapOf("wear" to host))
+    built()
+    val entries =
+      Json.parseToJsonElement(get("${WatchFacePush.BASE_PATH}/designs?includePending=1").body)
+        .jsonObject
+        .getValue("designs")
+        .jsonArray
+        .associateBy { it.jsonObject.getValue("id").jsonPrimitive.content }
+    val bad = entries.getValue("catalog:wear/bad").jsonObject
+    assertEquals(
+      "refused",
+      bad.getValue("build").jsonObject.getValue("state").jsonPrimitive.content,
+    )
+    assertNull(bad["apkUrl"], "nothing to install")
+    // Where it is from and its licence travel with it, built or not.
+    val attribution =
+      json.decodeFromJsonElement(Attribution.serializer(), bad.getValue("attribution"))
+    assertEquals("MIT", attribution.license)
+    assertEquals(
+      json.decodeFromJsonElement(
+        Attribution.serializer(),
+        entries.getValue("catalog:wear/good").jsonObject.getValue("attribution"),
+      ),
+      attribution,
+    )
   }
 
   @Test
@@ -826,5 +868,54 @@ class WatchFacePushCatalogFacesTest {
     assertNotNull(builds.cached(first))
     assertEquals(listOf(first.faceName), runs)
     assertNull(builds.cached(second))
+  }
+
+  @Test
+  fun `with a builder host, catalog faces are listed only on the other sites`() {
+    val host = catalog("wear", Triple("face", "MIT", "<WatchFace/>"))
+    val registry = ServeSessionRegistry(open = { null }).also(registries::add)
+    registry.register("wear", host = host, pinned = true)
+    start(registry, listOf("wear"), uiBuilderHost = "ui.example")
+    built()
+    fun designsOn(site: String) =
+      json
+        .decodeFromString<DesignList>(get("${WatchFacePush.BASE_PATH}/designs", site).body)
+        .designs
+    val apk = "${WatchFacePush.BASE_PATH}/catalog-faces/apk?system=wear&preview=face"
+
+    // The catalog site lists, counts and serves its faces.
+    assertEquals(listOf("catalog:wear/face"), designsOn("preview.example").map { it.id })
+    assertEquals(200, get(apk, "preview.example").code)
+    val status =
+      Json.parseToJsonElement(get("${WatchFacePush.BASE_PATH}/status", "preview.example").body)
+    assertEquals(
+      1,
+      status.jsonObject
+        .getValue("catalogFaces")
+        .jsonObject
+        .getValue("listed")
+        .jsonPrimitive
+        .content
+        .toInt(),
+    )
+
+    // The builder's own host lists only its designs: no catalog face, no count, no APK.
+    assertEquals(emptyList(), designsOn("ui.example"))
+    assertEquals(404, get(apk, "ui.example").code)
+    val builderStatus =
+      Json.parseToJsonElement(get("${WatchFacePush.BASE_PATH}/status", "ui.example").body)
+    assertNull(
+      builderStatus.jsonObject["catalogFaces"]?.takeUnless {
+        it is kotlinx.serialization.json.JsonNull
+      },
+    )
+    assertEquals(
+      404,
+      get(
+          "${WatchFacePush.BASE_PATH}/catalog-faces/preview.png?system=wear&preview=face",
+          "ui.example",
+        )
+        .code,
+    )
   }
 }

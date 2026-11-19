@@ -177,6 +177,53 @@ class ServeUiBuilderThumbnailsTest {
   }
 
   @Test
+  fun `while the design service is slow a stored picture is served and not redrawn`() {
+    fetch(DESIGN, 3).use { assertEquals(200, it.code) }
+    assertEquals(1, exports.get())
+    revision.set(4)
+    var slow = true
+    thumbnails.deferRedraws = { slow }
+
+    repeat(3) {
+      fetch(DESIGN, 4).use { response ->
+        assertEquals(200, response.code)
+        assertEquals("3", response.header(UI_BUILDER_REVISION_HEADER), "the stored picture")
+      }
+    }
+    Thread.sleep(200)
+    assertEquals(1, exports.get(), "no redraw while the service is slow")
+    // A design with no picture yet is still drawn: its card would otherwise have nothing.
+    fetch("evening-player", 4).use { assertEquals(200, it.code) }
+    assertEquals(2, exports.get())
+
+    // Once the service recovers, the next view redraws the stale one.
+    slow = false
+    fetch(DESIGN, 4).use { assertEquals("3", it.header(UI_BUILDER_REVISION_HEADER)) }
+    awaitCurrent(4)
+    assertEquals(3, exports.get())
+  }
+
+  @Test
+  fun `a slow design-service call is remembered for a minute`() {
+    var now = 0L
+    kotlinx.coroutines.runBlocking {
+      // The clock is read before and after: make this call take 150 ms.
+      val call = UiBuilderServiceCall(actor, UiBuilderServiceRequest.GetDesignActions(DESIGN))
+      val clocked =
+        ServeUiBuilderServiceTiming(
+          service,
+          thresholdMillis = 100,
+          clock = { now.also { now += 150 } },
+          log = {},
+        )
+      clocked.execute(call)
+      assertEquals(true, clocked.slowRecently(windowMillis = 60_000))
+      now += 60_000
+      assertEquals(false, clocked.slowRecently(windowMillis = 60_000))
+    }
+  }
+
+  @Test
   fun `the cache outlives the process, and a new generation redraws in the background`() {
     runBlocking { assertNotNull(thumbnails.render(DESIGN, actor)) }
 

@@ -1,5 +1,44 @@
 # Changelog
 
+## [3.183.0](https://github.com/yschimke/compose-preview-server/compare/v3.182.0...v3.183.0) (2026-11-19)
+
+
+### Features
+
+* **agent-access:** let a grant with ui-builder-publish publish its approver's watch faces ([#2032](https://github.com/yschimke/compose-preview-server/issues/2032)) ([79d27cd](https://github.com/yschimke/compose-preview-server/commit/79d27cd36e278f7cbff15a3c216c9eea5c5a44f9))
+* **watchface-push:** list faces still building, with their build, under includePending ([#2031](https://github.com/yschimke/compose-preview-server/issues/2031)) ([c854b47](https://github.com/yschimke/compose-preview-server/commit/c854b474643b9dfc7fcfb6133113f21cccc4ca0f))
+
+
+### Bug Fixes
+
+* **deps:** update the UI Builder to 3.139.0 ([#2034](https://github.com/yschimke/compose-preview-server/issues/2034)) ([c6c35c6](https://github.com/yschimke/compose-preview-server/commit/c6c35c6799ffcf3b70f7fd69e7f9ebe4d02b6fda))
+
+## [3.182.0](https://github.com/yschimke/compose-preview-server/compare/v3.181.0...v3.182.0) (2026-11-19)
+
+
+### Features
+
+* **serve:** flags for the Native pane and the watch-face validator ([#2019](https://github.com/yschimke/compose-preview-server/issues/2019)) ([b79e9c4](https://github.com/yschimke/compose-preview-server/commit/b79e9c407394594851fbdc34df7382eb53755866))
+* **ui-builder:** estimated watch-face cost after each MCP edit, on watchface-tools 0.9.0 ([#2025](https://github.com/yschimke/compose-preview-server/issues/2025)) ([93e15bc](https://github.com/yschimke/compose-preview-server/commit/93e15bcb65a7adff9f6a79ca74b5f9d7424310ce))
+* **ui-builder:** ui_builder_validate_watch_face MCP tool and watch-face budget guidance ([#2018](https://github.com/yschimke/compose-preview-server/issues/2018)) ([9bdbb66](https://github.com/yschimke/compose-preview-server/commit/9bdbb66b9c4bd6dabb537ced6f53155a2c47d6b3))
+* **watchface-push:** keep designs and catalog faces each on their own site ([#2023](https://github.com/yschimke/compose-preview-server/issues/2023)) ([f86a6d5](https://github.com/yschimke/compose-preview-server/commit/f86a6d5ce31877f8bb37d9bf0717763ff56e8df4))
+* **watchface-push:** owner publication route, editor capability, public faces listed automatically ([#2011](https://github.com/yschimke/compose-preview-server/issues/2011)) ([d8e0dbc](https://github.com/yschimke/compose-preview-server/commit/d8e0dbc7b66736602c60088ba461f9847f1495b3))
+* **watchface:** validation report per check, and kept watch install reports ([#2014](https://github.com/yschimke/compose-preview-server/issues/2014)) ([ed50516](https://github.com/yschimke/compose-preview-server/commit/ed505162ec4edf62fbd4d6afc822d9e5a9e7f8eb))
+
+
+### Bug Fixes
+
+* **agent-access:** report requested capabilities this server does not support ([#2026](https://github.com/yschimke/compose-preview-server/issues/2026)) ([a0dac68](https://github.com/yschimke/compose-preview-server/commit/a0dac6891359c48ef35415be980eecee200fb778))
+* **deps:** update dependency ee.schimke.watchface:wff-packager to v0.8.0 ([#2021](https://github.com/yschimke/compose-preview-server/issues/2021)) ([0be9b83](https://github.com/yschimke/compose-preview-server/commit/0be9b8340bf6af4050d9cb79d03fdd3f47d1fd0e))
+* **deps:** update the UI Builder to 3.138.0 ([#2029](https://github.com/yschimke/compose-preview-server/issues/2029)) ([6e69fb5](https://github.com/yschimke/compose-preview-server/commit/6e69fb5e38036f49727b66e921348b00481ed14f))
+* **serve:** log host boots with their cause, slow requests and process stalls ([#2017](https://github.com/yschimke/compose-preview-server/issues/2017)) ([26e39b6](https://github.com/yschimke/compose-preview-server/commit/26e39b68b02bc6b5429bba90e5f9329768294d30))
+
+
+### Performance Improvements
+
+* **ui-builder:** keep stored thumbnails while the design service is slow ([#2020](https://github.com/yschimke/compose-preview-server/issues/2020)) ([2a32ce5](https://github.com/yschimke/compose-preview-server/commit/2a32ce58b6c18c0c5460dda1110963b49263d42a))
+* **watchface-push:** build push APKs off the request path ([#2015](https://github.com/yschimke/compose-preview-server/issues/2015)) ([96cecb8](https://github.com/yschimke/compose-preview-server/commit/96cecb8812eb4a78c2e01814871715c8dd6338a9))
+
 ## [3.181.0](https://github.com/yschimke/compose-preview-server/compare/v3.180.0...v3.181.0) (2026-11-19)
 
 

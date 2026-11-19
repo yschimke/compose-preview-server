@@ -97,12 +97,59 @@ class ServeAgentGrantsTest {
             AgentGrantCapability.UI_BUILDER_WRITE,
             AgentGrantCapability.UI_BUILDER_EXPORT,
             AgentGrantCapability.UI_BUILDER_DESTRUCTIVE,
+            AgentGrantCapability.UI_BUILDER_PUBLISH,
           ),
         opensUiBuilder = true,
       )
     assertEquals(ServeAgentGrants.UI_BUILDER_CAPABILITIES, approver.capabilityCeiling)
     // The scope rungs still ask about the repository: the playground stays out of reach.
     assertEquals(AgentGrantScope.LIVE, approver.ceiling)
+  }
+
+  @Test
+  fun `ui-builder-publish is offered only where the operator allows it, and the page says what it does`() {
+    val withPublish =
+      ServeAgentGrants.Approver.github(
+        login = "owner",
+        repositoryAccess = false,
+        storeCeiling = AgentGrantScope.LIVE,
+        storeCapabilities = ServeAgentGrants.UI_BUILDER_CAPABILITIES,
+        opensUiBuilder = true,
+      )
+    assertTrue(AgentGrantCapability.UI_BUILDER_PUBLISH in withPublish.capabilityCeiling)
+    // An operator who leaves it out of --agent-grant-capabilities: no approver can pass it on.
+    val without =
+      ServeAgentGrants.Approver.github(
+        login = "owner",
+        repositoryAccess = true,
+        storeCeiling = AgentGrantScope.LIVE,
+        storeCapabilities =
+          ServeAgentGrants.UI_BUILDER_CAPABILITIES - AgentGrantCapability.UI_BUILDER_PUBLISH,
+      )
+    assertFalse(AgentGrantCapability.UI_BUILDER_PUBLISH in without.capabilityCeiling)
+    val page =
+      ServeWeb.agentGrantApprovalPage(
+        requestId = "r",
+        userCode = "KX7M-9QD4",
+        label = "publish my face",
+        client = "203.0.113.42",
+        requestedScope = AgentGrantScope.PREVIEW,
+        requestedTtlSeconds = 3600,
+        expiresInSeconds = 540,
+        approver = "@owner",
+        selectableScopes = listOf(AgentGrantScope.PREVIEW),
+        maxTtlSeconds = 8 * 3600,
+        selectableCapabilities = listOf(AgentGrantCapability.UI_BUILDER_PUBLISH),
+        approveCsrf = "a",
+        denyCsrf = "d",
+        formAction = "/agent-access/r",
+      )
+    assertTrue("ui-builder-publish" in page, "the approval page does not name the capability")
+    assertTrue(
+      "Publish this account&#39;s watch faces to watches" in page ||
+        "Publish this account's watch faces to watches" in page,
+      "the approval page does not say what ui-builder-publish does",
+    )
   }
 
   @Test

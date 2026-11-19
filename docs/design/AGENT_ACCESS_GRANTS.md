@@ -157,6 +157,16 @@ for these minutes, and their name is on it*. So attribution improves rather than
 names the human who said yes. The rate-limit bucket is the grant, not an address or a login, because
 a grant is already the bounded thing.
 
+**`ui-builder-publish` lets an agent publish the approver's watch faces.** Publishing reaches
+watches — every watch, for a public design — so it is its own capability, offered only where the
+operator lists it (`--agent-grant-capabilities`; the hosted image does by default) and shown on the
+approval page as "Publish this account's watch faces to watches, including to every watch for
+public designs". It is never implied by `ui-builder-write` or `ui-builder-destructive`. A grant that
+carries it may publish and unpublish designs its approver owns, through the owner's publication route
+and `ui_builder_publish_watch_face` — only those the grant names, and their branches, for a grant
+that names designs; it reaches nobody else's design, and linking or unlinking
+watches stays the person's own. See [Watch Face Push](../serve/WATCHFACE_PUSH.md#publishing).
+
 Three edges are worth stating, since none of them is obvious:
 
 1. **The approver must hold it themselves.** On a GitHub-gated box, ticking `images` requires the
@@ -173,6 +183,12 @@ Three edges are worth stating, since none of them is obvious:
    link lives for `--image-ttl` (7 days by default), because the upload was authorized when it
    happened. An operator who needs the picture gone needs the image lane's own controls, not the
    revoke button.
+
+**A capability this server does not know is reported, not dropped in silence.** A request naming
+one (a newer client's, or one this release does not have yet) still opens, without it; the
+request's answer lists such names in `unsupportedCapabilities` with a `message` saying so, so an
+agent can tell "this server cannot give that" from "the approver did not tick it". `request_access`
+over MCP returns the same answer. Names are echoed trimmed, at most sixteen of up to 64 characters.
 
 **The other ingest lanes are outside the scope system entirely.** `POST /bundles/{name}` and `POST /docs`
 run through the same `rejectBadToken` as everything else, so a `preview` grant would have satisfied

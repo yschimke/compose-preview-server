@@ -356,9 +356,12 @@ class ServeCatalogMcp(
                   "discussion.") +
               (if (uiBuilder?.supportsWatchFaceValidation != true) ""
               else
-                " A watch face has a memory budget for each of active and ambient mode: when an " +
-                  "edit pass on a `wff-watchface` design is done, and before publishing it, call " +
-                  "${ServeUiBuilderMcp.VALIDATE_WATCH_FACE} and act on its suggestions until the " +
+                " A watch face has a memory budget for each of active and ambient mode. Each " +
+                  "edit of a `wff-watchface` design replies with " +
+                  "`${ServeUiBuilderMcp.WATCH_FACE_COST_KEY}`, an estimate of both: keep each " +
+                  "under 100 percentOfLimit and act on its suggestions as you go. When an edit " +
+                  "pass is done, and before publishing, call " +
+                  "${ServeUiBuilderMcp.VALIDATE_WATCH_FACE} and fix what it reports until the " +
                   "face passes within both limits."),
       )
     }
@@ -3082,8 +3085,9 @@ class ServeCatalogMcp(
   private suspend fun <T> withCatalog(catalog: String, block: suspend (ServeHost) -> T): T {
     if (catalog !in sessions.knownSessionIds()) throw unknownCatalog(catalog)
     val lease =
-      withContext(Dispatchers.IO) { sessions.lease(catalog) }
-        ?: throw McpRequestException("catalog '$catalog' is unavailable")
+      withContext(Dispatchers.IO) {
+        ServeHostBootCause.with("catalog MCP") { sessions.lease(catalog) }
+      } ?: throw McpRequestException("catalog '$catalog' is unavailable")
     return try {
       block(lease.host)
     } finally {
@@ -3209,6 +3213,11 @@ class ServeCatalogMcp(
         mayExport = {
           authorize(UiBuilderRouteCapability.EXPORT, presentedToken) is
             UiBuilderAuthorizationDecision.Authorized
+        },
+        mayPublish = {
+          (authorize(UiBuilderRouteCapability.WRITE, presentedToken)
+              as? UiBuilderAuthorizationDecision.Authorized)
+            ?.mayPublishWatchFaces() == true
         },
       )
     if (name == ServeUiBuilderMcp.GUIDELINES_PROMPT) return uiBuilderGuidelinesPromptResult(text)

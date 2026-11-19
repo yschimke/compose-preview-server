@@ -347,6 +347,10 @@ private fun ExportFormatV1.fileExtension(): String =
     // JSON.
     ExportFormatV1.JSON -> "json"
     ExportFormatV1.RC -> "rc"
+    // Added by contracts 3.44.0: a watch face's Watch Face Format, as the file each one names.
+    ExportFormatV1.WFF_XML -> "xml"
+    ExportFormatV1.WFF_BUNDLE -> "zip"
+    ExportFormatV1.WFF_APK -> "apk"
   }
 
 /** The live SVG of one design: the current committed revision, rendered on every request. */

@@ -743,7 +743,12 @@ class ServeHttpServer(
    * designs they name ([ServeUiBuilderGrantScope]). Nothing here reaches the unwrapped port, which
    * is why the constructor parameter is not a property.
    */
-  private val designService: UiBuilderServicePort? = uiBuilderService?.let { raw ->
+  private val designService: UiBuilderServicePort? = uiBuilderService?.let { unfed ->
+    // Watch Face Push hears which design changed, to schedule a public face's build; nothing more.
+    val raw =
+      watchFacePush?.let { push ->
+        WatchFacePushChangeFeed(unfed) { id, access -> push.automatic.noteChanged(id, access) }
+      } ?: unfed
     val service =
       uiBuilderProjectStore?.let { ServeUiBuilderProjectService(raw, it, uiBuilderBranches) } ?: raw
     agentGrants?.let {
@@ -1124,6 +1129,31 @@ class ServeHttpServer(
   private val server: EmbeddedServer<*, *> =
     embeddedServer(CIO, host = host, port = port) {
       install(WebSockets)
+      // Any request slower than [SLOW_REQUEST_MILLIS] is logged with its method, matched route and
+      // status, so "it's slow" can be read off the log; [ServeStallWatchdog] says whether the whole
+      // process was stalled at the time. The route TEMPLATE, never the path: a query, and some path
+      // segments (`/wasm-private/{access}/…`, a device code), carry credentials.
+      monitor.subscribe(io.ktor.server.routing.RoutingRoot.RoutingCallStarted) { routed ->
+        // `/{system}/render/{name}/(method:GET)`: the selector suffix repeats the method.
+        routed.attributes.put(ROUTE_TEMPLATE, routed.route.toString().substringBefore("/("))
+      }
+      intercept(ApplicationCallPipeline.Monitoring) {
+        val started = System.nanoTime()
+        try {
+          proceed()
+        } finally {
+          val millis = (System.nanoTime() - started) / 1_000_000
+          if (
+            millis >= SLOW_REQUEST_MILLIS && !ServeSameOriginRequests.isWebSocketUpgrade(context)
+          ) {
+            System.err.println(
+              "serve: slow request ${context.request.httpMethod.value} " +
+                "${context.attributes.getOrNull(ROUTE_TEMPLATE) ?: "(no route)"} " +
+                "took $millis ms (status ${context.response.status()?.value ?: "none"})",
+            )
+          }
+        }
+      }
       // A socket opened with the GitHub session cookie is accepted only from a page this server
       // served ([ServeSameOriginRequests]). Checked before the upgrade so refusal is a plain 403.
       // Covers every socket route; header/query-token clients send no cookie and are unaffected.
@@ -1389,6 +1419,7 @@ class ServeHttpServer(
               designService,
               sameOriginUiBuilderAuthorization,
               it,
+              watchFacePush = watchFacePush,
               enabled = featureFlags.nativePreview,
             )
           }
@@ -1410,6 +1441,15 @@ class ServeHttpServer(
                 )
               },
               catalogFaceSources = ::watchFaceCatalogSources,
+              // Each list on its own site: the builder's host lists its designs, any other host
+              // its catalog faces. With no builder host configured, every host offers both.
+              site = { call ->
+                when {
+                  uiBuilderHost == null -> WatchFacePushSite.BOTH
+                  isUiBuilderHost(call) -> WatchFacePushSite.DESIGNS_ONLY
+                  else -> WatchFacePushSite.CATALOG_FACES_ONLY
+                }
+              },
             )
           }
           installUiBuilderRoutes(
@@ -2577,12 +2617,16 @@ class ServeHttpServer(
 
   /** Start listening. Non-blocking; the caller keeps the process alive separately. */
   fun start() {
+    stallWatchdog.start()
     server.start(wait = false)
   }
+
+  private val stallWatchdog = ServeStallWatchdog()
 
   /** Stop with a short grace period. Idempotent enough for a shutdown hook. */
   fun stop() {
     readinessProber?.interrupt()
+    stallWatchdog.stop()
     // Its background reconcile and build threads hold this server's catalog sources.
     watchFacePush?.close()
     thumbWarmer.stop()
@@ -3152,6 +3196,13 @@ class ServeHttpServer(
 
   private fun RoutingContext.varyOnCookie() = call.varyOnCookie()
 
+  /**
+   * What a host boot during this request reports as its cause: the method and the matched route
+   * template, never the raw path, which can carry a credential.
+   */
+  private fun ApplicationCall.bootCause(): String =
+    "${request.httpMethod.value} ${attributes.getOrNull(ROUTE_TEMPLATE) ?: "(no route)"}"
+
   /** Absolute externally visible URL for the current page (including its query). */
   private fun RoutingContext.externalPageUrl(): String = externalOrigin() + call.request.origin.uri
 
@@ -3169,7 +3220,10 @@ class ServeHttpServer(
     onMissing: (suspend RoutingContext.() -> Unit)? = null,
     block: suspend (ServeHost) -> Unit,
   ) {
-    val lease = withContext(Dispatchers.IO) { sessions.lease(sessionId) }
+    val lease =
+      withContext(Dispatchers.IO) {
+        ServeHostBootCause.with(call.bootCause()) { sessions.lease(sessionId) }
+      }
     if (lease == null) {
       if (loadingHomeSystem(sessionId) != null) {
         catalogLoads?.prioritize(sessionId)
@@ -3208,7 +3262,10 @@ class ServeHttpServer(
     block: (ServeHost) -> T?,
   ): T? {
     if (!sessions.isKnownSession(sessionId)) return null
-    val lease = withContext(Dispatchers.IO) { sessions.lease(sessionId) } ?: return null
+    val lease =
+      withContext(Dispatchers.IO) {
+        ServeHostBootCause.with(call.bootCause()) { sessions.lease(sessionId) }
+      } ?: return null
     return try {
       withContext(Dispatchers.IO) { block(lease.host) }
     } finally {
@@ -8630,6 +8687,15 @@ class ServeHttpServer(
   )
 
   init {
+    // Publishing to watches asks who owns a design as the grant's approver, past the design
+    // scope [designService] applies; this holds it to the designs the grant names.
+    agentGrants?.let { store ->
+      watchFacePush?.delegationReaches =
+        ServeUiBuilderGrantScope.delegationReaches(
+          ServeUiBuilderGrantScope.lookupOf(store),
+          branchParents,
+        )
+    }
     // Widget thumbnails are drawn in their host container wherever this server can render one.
     uiBuilderThumbnails?.nativePreview = admittedNativePreview
     // Snapshot a catalog's facts as its daemon goes idle — the last moment they're readable.
@@ -14225,7 +14291,12 @@ class ServeHttpServer(
       // Lease the tenant for the socket's life, since a fallback-lane socket opens no stream and
       // the reaper could close its host. `connection = true` makes this lease count as busy only on
       // activity; request-scoped leases count as busy until released.
-      val lease = withContext(Dispatchers.IO) { sessions.lease(sessionId, connection = true) }
+      val lease =
+        withContext(Dispatchers.IO) {
+          ServeHostBootCause.with("socket ${call.attributes.getOrNull(ROUTE_TEMPLATE) ?: ""}") {
+            sessions.lease(sessionId, connection = true)
+          }
+        }
       if (lease == null) {
         close(CloseReason(CloseReason.Codes.CANNOT_ACCEPT, "no such session"))
         return
@@ -16699,10 +16770,12 @@ class ServeHttpServer(
     parsed: ServeAgentGrants.OpenRequest,
   ): ServeAgentGrants.OpenResponse? {
     val scope = AgentGrantScope.parse(parsed.scope) ?: AgentGrantScope.DEFAULT_REQUEST
-    // Unknown capability names are dropped, not refused ([OpenRequest.capabilities]). The approval
-    // page decides what is offered and approval clamps what is minted; the request keeps the whole
-    // ask.
+    // Unknown capability names are not granted and do not refuse the request
+    // ([OpenRequest.capabilities]); they are reported back, so the agent can tell. The approval
+    // page
+    // decides what is offered and approval clamps what is minted; the request keeps the whole ask.
     val capabilities = parsed.capabilities.mapNotNull { AgentGrantCapability.parse(it) }.toSet()
+    val unsupported = ServeAgentGrants.unsupportedCapabilities(parsed.capabilities)
     val ttl = parsed.ttlSeconds.takeIf { it > 0 } ?: ServeAgentGrantStore.DEFAULT_GRANT_TTL_SECONDS
     val request =
       store.openRequest(
@@ -16731,6 +16804,15 @@ class ServeHttpServer(
       maxTtlSeconds = store.maxGrantTtlSeconds,
       requestedCapabilities = AgentGrantCapability.wireNames(request.requestedCapabilities),
       maxCapabilities = AgentGrantCapability.wireNames(store.maxCapabilities),
+      unsupportedCapabilities = unsupported.takeIf { it.isNotEmpty() },
+      message =
+        unsupported
+          .takeIf { it.isNotEmpty() }
+          ?.let {
+            "this server does not support the capabilit${if (it.size == 1) "y" else "ies"} " +
+              it.joinToString(", ") +
+              "; the request goes ahead without ${if (it.size == 1) "it" else "them"}"
+          },
     )
   }
 
@@ -19950,3 +20032,6 @@ private data class OptimizerPauseDto(
   val pausedUntilEpochMillis: Long? = null,
   val reason: String? = null,
 )
+
+/** The matched route's template, set by routing for the slow-request and host-boot log lines. */
+private val ROUTE_TEMPLATE = AttributeKey<String>("serve.routeTemplate")

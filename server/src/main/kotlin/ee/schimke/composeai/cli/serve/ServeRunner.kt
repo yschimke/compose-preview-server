@@ -2396,6 +2396,12 @@ public class ServeRunner(
       is WatchFacePushSigning.Unavailable ->
         System.err.println("serve: watch-face push cannot build APKs: ${signing.reason}")
     }
+    val automaticBuilds = WatchFacePushBuildsSetting.enabled()
+    System.err.println(
+      "serve: watch-face push builds public designs on their own: " +
+        if (automaticBuilds) "on (turn it off with watchFacePushBuilds: false)"
+        else "off (watchFacePushBuilds, ${WatchFacePushBuildsSetting.ENV}, is false)",
+    )
     val thumbnails = lane.thumbnails
     return WatchFacePush(
       store = store,
@@ -2414,6 +2420,11 @@ public class ServeRunner(
               java.net.URLEncoder.encode(returnTo, Charsets.UTF_8)
           }
         },
+      designSummary = { lane.service.adminDesignSummary(it) },
+      automaticBuilds = automaticBuilds,
+      storedDesigns = {
+        lane.stateDirectory?.let { WatchFacePushStoredDesigns.read(it.toPath()) } ?: emptyList()
+      },
     )
   }
 
@@ -2893,7 +2904,19 @@ public class ServeRunner(
       }
       return true
     }
-    uiBuilderCatalogs.forEach { composePublished(it) }
+    // Timed, because a catalog's compose fetches from its delivery branch and a slow one delays
+    // the builder's start (or a refresh) with nothing else in the log to say so.
+    fun composePublishedTimed(systemId: String, refresh: Boolean): Boolean {
+      val started = System.nanoTime()
+      val composed = composePublished(systemId, refresh)
+      System.err.println(
+        "serve: UI-builder catalog $systemId ${if (refresh) "refresh" else "resolve"} " +
+          "${if (composed) "composed" else "withheld"} in " +
+          "${(System.nanoTime() - started) / 1_000_000} ms",
+      )
+      return composed
+    }
+    uiBuilderCatalogs.forEach { composePublishedTimed(it, refresh = false) }
     fun buildCatalogExecutor(): UiBuilderCatalogExecutor =
       CurrentM3UiBuilderCatalogExecutor.Builder()
         .also {
@@ -2946,7 +2969,7 @@ public class ServeRunner(
       val before = affected.associateWith {
         Triple(publishedRuntimeIds[it], publishedCatalogs[it], health.stateOf(it))
       }
-      affected.forEach { composePublished(it, refresh = true) }
+      affected.forEach { composePublishedTimed(it, refresh = true) }
       // Becoming unavailable, or available again, changes the served set as surely as a new
       // policy does.
       val changed = affected.filter {
@@ -3746,8 +3769,13 @@ public class ServeRunner(
         // Wrapped so every accepted edit also queues a redraw of that design's listing card.
         uiBuilderService =
           uiBuilderLane?.let { lane ->
+            // Timed once, under both the routes and the thumbnail worker, so a call that holds the
+            // service's lock is logged whichever of them made it.
+            val timed = ServeUiBuilderServiceTiming(lane.service)
+            // While that service is slow, keep stored thumbnails rather than redraw them.
+            lane.thumbnails?.deferRedraws = { timed.slowRecently() }
             ServeUiBuilderVisibility.withDefault(
-              lane.thumbnails?.warming(lane.service) ?: lane.service,
+              lane.thumbnails?.warming(timed) ?: timed,
               uiBuilderDefaultVisibility,
             )
           },
@@ -3860,8 +3888,9 @@ public class ServeRunner(
                 WatchFaceValidation(
                   WatchFaceValidatorAvailability.production(
                     home = composeAiCacheDir("wff-validate-home"),
-                    // Off until the deployment's `watchFaceValidation` flag is wired here.
-                    enabled = { false },
+                    // `features.watchFaceValidation` (`SERVE_WATCH_FACE_VALIDATION`), off unless
+                    // set: off, the route and the MCP tool answer `watch_face_validation_disabled`.
+                    enabled = { featureFlags.watchFaceValidation },
                   ),
                 ),
             )
