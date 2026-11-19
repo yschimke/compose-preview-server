@@ -236,6 +236,18 @@ class ServeUiBuilderDwfRoutesTest {
   }
 
   @Test
+  fun `a request asset replaces a pinned one of the same resource under another extension`() {
+    val merged =
+      WatchFaceDrawables.merged(
+        pinned =
+          mapOf("drawable/logo.png" to byteArrayOf(1), "drawable-hdpi/logo.png" to byteArrayOf(2)),
+        requested = mapOf("drawable/logo.webp" to byteArrayOf(3)),
+      )
+    // One `drawable/logo` (the request's), and the other density's variant kept.
+    assertEquals(setOf("drawable/logo.webp", "drawable-hdpi/logo.png"), merged.keys)
+  }
+
+  @Test
   fun `a bitmap the face names and nothing supplies is refused before packaging`() {
     start()
     val (code, body) = startFace("")

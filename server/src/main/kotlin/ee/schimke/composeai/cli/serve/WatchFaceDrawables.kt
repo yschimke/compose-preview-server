@@ -150,22 +150,32 @@ internal object WatchFaceDrawables {
       }
 
   /**
-   * [document]'s drawables under [requested] (paths relative to `res/`): the request's file wins
-   * for the same path, and a pinned drawable the request also supplies under another density
-   * qualifier or extension is kept, as Android resolves a name across them itself. The result is
-   * still checked by [DwfSource.problem] wherever it is packaged.
+   * [pinned] drawables under [requested] (paths relative to `res/`). The request wins for the same
+   * resource: the same directory, configuration qualifiers included, and the same name whatever the
+   * extension, since `drawable/logo.png` and `drawable/logo.webp` are one resource to Android and
+   * packaging both is a duplicate-resource error. A pinned file under another qualifier
+   * (`drawable-hdpi/logo.png`) is a different variant and is kept. The result is still checked by
+   * [DwfSource.problem] wherever it is packaged.
    */
   fun merged(
     pinned: Map<String, ByteArray>,
     requested: Map<String, ByteArray>,
   ): Map<String, ByteArray> {
-    val requestedPaths = requested.keys.map(DwfSource::normalizedAssetPath).toSet()
+    val requestedResources = requested.keys.map(::resourceIdentity).toSet()
     val out = LinkedHashMap<String, ByteArray>()
     for ((path, bytes) in pinned) {
-      if (DwfSource.normalizedAssetPath(path) !in requestedPaths) out[path] = bytes
+      if (resourceIdentity(path) !in requestedResources) out[path] = bytes
     }
     out.putAll(requested)
     return out
+  }
+
+  /** A package path as Android identifies the resource: its directory and extensionless name. */
+  private fun resourceIdentity(path: String): String {
+    val normalized = DwfSource.normalizedAssetPath(path)
+    val directory = normalized.substringBeforeLast('/', "")
+    val name = normalized.substringAfterLast('/').substringBefore('.')
+    return "$directory/$name"
   }
 
   private fun nodeNaming(document: DesignDocumentV1, resource: String): String? =
