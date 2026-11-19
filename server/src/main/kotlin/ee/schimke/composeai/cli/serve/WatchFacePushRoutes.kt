@@ -576,8 +576,7 @@ internal fun Route.installWatchFacePushRoutes(
     val catalog = withContext(Dispatchers.IO) { push.catalogFaces.resolve(catalogFaceSources()) }
     // A face the packager already refused is not on `/designs`, so it is not counted as listed:
     // it is skipped, with the packager's first diagnostic as the reason.
-    val (refused, listed) =
-      catalog.faces.partition { push.builds.refusal(it.publication) != null }
+    val (refused, listed) = catalog.faces.partition { push.builds.refusal(it.publication) != null }
     call.respondJson(
       WatchFacePushStatusV1.serializer(),
       push
