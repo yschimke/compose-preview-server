@@ -26,6 +26,7 @@ import io.ktor.server.routing.put
 import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.future.await
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.KSerializer
@@ -77,6 +78,8 @@ internal constructor(
   internal val codes = WatchFacePushDeviceCodes(store, clock)
   internal val builds = WatchFacePushBuilds(store, packaging)
   internal val catalogFaces = WatchFacePushCatalogFaces(store.catalogFacesFile)
+  /** The one queue every build here runs through, with each design's progress. */
+  internal val queue = WatchFacePushBuildQueue(clock)
   internal val automatic =
     WatchFacePushAutomatic(
       this,
@@ -118,6 +121,9 @@ internal constructor(
 
   sealed interface Outcome {
     data class Ok(val status: WatchFacePushPublicationV1) : Outcome
+
+    /** Queued to build in the background: `202`, with the status as it is now. */
+    data class Accepted(val status: WatchFacePushPublicationV1) : Outcome
 
     data class Refused(
       val status: HttpStatusCode,
@@ -184,13 +190,19 @@ internal constructor(
    * when this host can, so a face the packager refuses is refused here, to the person who can fix
    * it, with the packager's own diagnostics — not silently left out of every watch's list.
    */
-  internal suspend fun publish(
+  /** A publish that passed every check made before building: what to build. */
+  private class Ready(val designId: String, val candidate: () -> WatchFacePushStore.Publication)
+
+  /**
+   * Everything a publish checks before the packager: the owner, the catalog, the visibility, the
+   * export and its drawables. A refusal here is immediate (a `422`), with nothing queued.
+   */
+  private suspend fun prepare(
     service: UiBuilderServicePort,
     actor: AuthenticatedUiBuilderActor,
     designId: String,
-    /** [VISIBILITY_PUBLIC], [VISIBILITY_PRIVATE], or null to follow the design's own. */
-    visibility: String? = null,
-  ): Outcome {
+    visibility: String?,
+  ): Any {
     require(visibility == null || visibility in VISIBILITIES) { "visibility $visibility" }
     val (document, owner) =
       when (val owned = ownedDocument(service, actor, designId)) {
@@ -227,21 +239,23 @@ internal constructor(
     }
     // The owner's account, not the caller's: an agent publishing for its approver publishes to
     // the approver's watches.
-    val staged =
-      stage(
-        {
-          store.candidate(
-            designId,
-            owner,
-            document.revision,
-            document.title,
-            source,
-            document.createdAtEpochMillis,
-            visibility = visibility,
-          )
-        },
+    return Ready(designId) {
+      store.candidate(
+        designId,
+        owner,
+        document.revision,
+        document.title,
+        source,
+        document.createdAtEpochMillis,
+        visibility = visibility,
       )
-    return when (staged) {
+    }
+  }
+
+  /** Build and commit [ready]; the caller holds the build queue's lock. */
+  private suspend fun finish(service: UiBuilderServicePort, ready: Ready): Outcome {
+    val designId = ready.designId
+    return when (val staged = stage(ready.candidate)) {
       is Staged.Committed -> {
         refusals.remove(designId)
         automatic.forget(designId)
@@ -265,6 +279,66 @@ internal constructor(
           "this design is being published concurrently; try again",
         )
     }
+  }
+
+  /**
+   * Publish [designId]'s current revision now and wait for the build: the MCP tool's path, whose
+   * caller wants the result in its reply. It still takes its turn in the one build queue.
+   */
+  internal suspend fun publish(
+    service: UiBuilderServicePort,
+    actor: AuthenticatedUiBuilderActor,
+    designId: String,
+    /** [VISIBILITY_PUBLIC], [VISIBILITY_PRIVATE], or null to follow the design's own. */
+    visibility: String? = null,
+  ): Outcome =
+    when (val prepared = prepare(service, actor, designId, visibility)) {
+      is Outcome.Refused -> prepared
+      is Ready -> queue.exclusive.withLock { finish(service, prepared) }
+      else -> error("prepare answered $prepared")
+    }
+
+  /**
+   * Publish [designId]'s current revision in the background: the owner's route. Every check that
+   * can refuse up front does, as a `422`; otherwise the build is queued and this answers at once
+   * ([Outcome.Accepted]), its progress on the publication's `build`.
+   */
+  internal suspend fun publishInBackground(
+    service: UiBuilderServicePort,
+    actor: AuthenticatedUiBuilderActor,
+    designId: String,
+    visibility: String? = null,
+  ): Outcome {
+    val ready =
+      when (val prepared = prepare(service, actor, designId, visibility)) {
+        is Outcome.Refused -> return prepared
+        is Ready -> prepared
+        else -> error("prepare answered $prepared")
+      }
+    queue.submit(designId) {
+      when (val outcome = finish(service, ready)) {
+        is Outcome.Ok ->
+          WatchFacePushBuildStatusV1(
+            WatchFacePushBuildQueue.BUILT,
+            version = outcome.status.version,
+          )
+        is Outcome.Refused ->
+          if (outcome.code == "packaging_failed") {
+            WatchFacePushBuildStatusV1(
+              WatchFacePushBuildQueue.REFUSED,
+              reason = "the packager refused it",
+              diagnostics = outcome.diagnostics,
+            )
+          } else WatchFacePushBuildStatusV1(WatchFacePushBuildQueue.FAILED, reason = outcome.reason)
+        is Outcome.Accepted -> error("a build answered accepted")
+      }
+    }
+    val now =
+      when (val current = publicationStatus(service, actor, designId)) {
+        is Outcome.Ok -> current.status
+        else -> unpublishedStatus(designId)
+      }
+    return Outcome.Accepted(now)
   }
 
   internal suspend fun unpublish(
@@ -328,6 +402,7 @@ internal constructor(
       faceName = WatchFacePushNaming.faceName(designId),
       packageName = WatchFacePushNaming.packageName(WatchFacePushNaming.faceName(designId)),
       packaging = packagingStatus().takeIf { !it.available },
+      build = queue.status(designId),
     )
 
   private sealed interface Owned {
@@ -391,6 +466,7 @@ internal constructor(
       requestedVisibility = publication.visibility,
       automatic = publication.automatic,
       packaging = packagingStatus().takeIf { !it.available },
+      build = queue.status(publication.designId),
       // Version 0 is an opt-out recorded before anything was built: nothing was ever shipped.
       version = publication.version.takeIf { it > 0 },
       revision = publication.revision.takeIf { publication.version > 0 },
@@ -420,7 +496,21 @@ internal constructor(
               reason = build.diagnostics.joinToString("\n"),
               diagnostics = build.diagnostics,
             )
-          null -> if (publication.published) WatchFacePushApkStatusV1(status = "pending") else null
+          null ->
+            when {
+              !publication.published -> null
+              else ->
+                when (val packaging = packaging()) {
+                  // Not built because this host cannot build: say so, not "pending".
+                  is WatchFacePushPackaging.Unavailable ->
+                    WatchFacePushApkStatusV1(
+                      status = "unavailable",
+                      code = packaging.code,
+                      reason = packaging.reason,
+                    )
+                  is WatchFacePushPackaging.Ready -> WatchFacePushApkStatusV1(status = "pending")
+                }
+            }
         },
     )
 
@@ -597,6 +687,8 @@ data class WatchFacePushStatusV1(
   val signerCertificateSha256: String? = null,
   /** On `/status` only. */
   val catalogFaces: WatchFacePushCatalogFacesStatusV1? = null,
+  /** On `/status` only: how many builds are pending, queued and building. */
+  val builds: WatchFacePushBuildSummaryV1? = null,
   /**
    * On `/status` only: the UI-builder designs on the anonymous list, and the public watch-face
    * designs the automatic listing could not build, each with why.
@@ -681,6 +773,8 @@ data class WatchFacePushPublicationV1(
    * automatic listing of a public design); what is on watches, if anything, is unchanged.
    */
   val refusal: List<String>? = null,
+  /** The design's build, while one is pending or running and after it ends. */
+  val build: WatchFacePushBuildStatusV1? = null,
 )
 
 internal val WATCHFACE_PUSH_JSON = Json {
@@ -829,11 +923,12 @@ internal fun Route.installWatchFacePushRoutes(
                     )
                   },
             ),
+          builds = push.queue.summary(),
           designs =
             WatchFacePushCatalogFacesStatusV1(
               listed = listedDesigns,
               skipped =
-                push.automatic.skipped().map { (id, reason) ->
+                push.automatic.skipped(service).map { (id, reason) ->
                   WatchFacePushSkippedFaceV1(id, reason)
                 },
             ),
@@ -1163,7 +1258,12 @@ internal fun Route.installWatchFacePushRoutes(
         return@limited
       }
       call.respondOutcome(
-        push.publish(service, actor, call.parameters["designId"].orEmpty(), request.visibility),
+        push.publishInBackground(
+          service,
+          actor,
+          call.parameters["designId"].orEmpty(),
+          request.visibility,
+        ),
       )
     }
   }
@@ -1439,6 +1539,8 @@ private suspend fun ApplicationCall.respondOutcome(outcome: WatchFacePush.Outcom
   when (outcome) {
     is WatchFacePush.Outcome.Ok ->
       respondJson(WatchFacePushPublicationV1.serializer(), outcome.status)
+    is WatchFacePush.Outcome.Accepted ->
+      respondJson(WatchFacePushPublicationV1.serializer(), outcome.status, HttpStatusCode.Accepted)
     is WatchFacePush.Outcome.Refused ->
       respondJson(
         WatchFacePushErrorV1.serializer(),

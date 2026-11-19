@@ -1830,6 +1830,8 @@ class ServeUiBuilderMcp(
     return when (outcome) {
       is WatchFacePush.Outcome.Ok ->
         WATCHFACE_PUSH_JSON.encodeToString(WatchFacePushPublicationV1.serializer(), outcome.status)
+      is WatchFacePush.Outcome.Accepted ->
+        WATCHFACE_PUSH_JSON.encodeToString(WatchFacePushPublicationV1.serializer(), outcome.status)
       is WatchFacePush.Outcome.Refused ->
         throw McpRequestException("${outcome.code}: ${outcome.reason}")
     }

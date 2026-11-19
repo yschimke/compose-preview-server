@@ -257,13 +257,40 @@ class WatchFacePushRoutesTest {
 
   private val api = WatchFacePush.BASE_PATH
 
-  private fun publish(actor: String, designId: String, visibility: String? = null): Reply =
+  private fun put(actor: String, designId: String, visibility: String? = null): Reply =
     send(
       "PUT",
       "/api/ui-builder/v1/designs/$designId/watch-face-publication",
       json = visibility?.let { "{\"visibility\":\"$it\"}" },
       actor = actor,
     )
+
+  /**
+   * Publish and wait for the build, as an owner watching the editor does: the `PUT`'s own answer
+   * when it refused up front, else the publication once its queued build ended — a refused build
+   * read back as the `422` it would have been.
+   */
+  private fun publish(actor: String, designId: String, visibility: String? = null): Reply {
+    val accepted = put(actor, designId, visibility)
+    if (accepted.code != 202) return accepted
+    runBlocking { push.queue.awaitIdle() }
+    val after =
+      send("GET", "/api/ui-builder/v1/designs/$designId/watch-face-publication", actor = actor)
+    val build =
+      WATCHFACE_PUSH_JSON.decodeFromString(WatchFacePushPublicationV1.serializer(), after.body)
+        .build
+    if (build?.state != WatchFacePushBuildQueue.REFUSED) return after
+    val refused =
+      WATCHFACE_PUSH_JSON.encodeToString(
+        WatchFacePushErrorV1.serializer(),
+        WatchFacePushErrorV1(
+          "packaging_failed",
+          build.diagnostics.orEmpty().joinToString("\n"),
+          build.diagnostics,
+        ),
+      )
+    return Reply(422, refused, after.headers, refused.toByteArray())
+  }
 
   private fun publication(designId: String, actor: String = alice): WatchFacePushPublicationV1 {
     val reply =
@@ -1539,6 +1566,84 @@ class WatchFacePushRoutesTest {
       WatchFacePushStoredDesigns.read(state),
     )
     assertEquals(emptyList(), WatchFacePushStoredDesigns.read(dir.resolve("nowhere")))
+  }
+
+  @Test
+  fun `a publish answers 202 at once and its build shows its progress until it is built`() {
+    val release = java.util.concurrent.CountDownLatch(1)
+    val ready = readyPackaging()() as WatchFacePushPackaging.Ready
+    val slow = WatchFacePushPackager { files, face, version, out ->
+      release.await(20, TimeUnit.SECONDS)
+      ready.packager.pack(files, face, version, out)
+    }
+    start(packaging = { WatchFacePushPackaging.Ready(slow, "c0ffee") })
+    createDesign(alice, "aurora", "Aurora", public = true)
+    createDesign(alice, "pulse", "Pulse", public = true)
+
+    val first = put(alice, "aurora", "public")
+    assertEquals(202, first.code, first.body)
+    val queued = publicationOf(first.copy(code = 200))
+    assertFalse(queued.published)
+    assertContains(listOf("queued", "building"), queued.build?.state)
+    // A second one waits behind it.
+    val second = publicationOf(put(alice, "pulse", "public").copy(code = 200))
+    assertEquals("queued", second.build?.state)
+    assertEquals(1, second.build?.queueAhead)
+    val building = publication("aurora").build!!
+    assertEquals("building", building.state)
+    assertEquals("packaging", building.stage)
+    assertNotNull(building.startedAtEpochMillis)
+    val summary = Json.parseToJsonElement(send("GET", "$api/status").body).jsonObject["builds"]!!
+    assertEquals("1", summary.jsonObject["building"]!!.jsonPrimitive.content)
+    assertEquals("1", summary.jsonObject["queued"]!!.jsonPrimitive.content)
+
+    release.countDown()
+    runBlocking { push.queue.awaitIdle() }
+    val built = publication("aurora")
+    assertTrue(built.published)
+    assertEquals("built", built.build?.state)
+    assertEquals(1, built.build?.version)
+    assertEquals(listOf("aurora", "pulse"), designs().map { it.id }.sorted())
+  }
+
+  @Test
+  fun `an automatic build shows as pending until the design settles`() {
+    automaticListing = true
+    start()
+    createDesign(alice, "aurora", "Aurora", public = true)
+    settle()
+    edit(alice, "aurora", face = "<WatchFace id=\"aurora\" edited=\"1\"/>")
+    val pending = publication("aurora").build!!
+    assertEquals("pending", pending.state)
+    assertTrue(pending.automatic)
+    assertEquals(now + WatchFacePushAutomatic.DEFAULT_SETTLE_MILLIS, pending.scheduledAtEpochMillis)
+    settle()
+    val built = publication("aurora").build!!
+    assertEquals("built", built.state)
+    assertEquals(2, built.version)
+  }
+
+  @Test
+  fun `a refusal is not named on status once its design is private or gone`() {
+    automaticListing = true
+    start()
+    createDesign(alice, "broken", "Broken", public = true)
+    faces["broken"] = "<WatchFace id=\"broken\" state=\"bad\"/>"
+    settle()
+    fun skipped() =
+      Json.parseToJsonElement(send("GET", "$api/status").body)
+        .jsonObject["designs"]!!
+        .jsonObject["skipped"]!!
+        .toString()
+    assertContains(skipped(), "\"broken\"")
+    setVisibility(alice, "broken", public = false)
+    assertFalse("broken" in skipped(), "a private design's id and diagnostics are on /status")
+    // Its owner still sees why.
+    assertContains(publication("broken").refusal.orEmpty().joinToString(), "bad face")
+    setVisibility(alice, "broken", public = true)
+    assertContains(skipped(), "\"broken\"")
+    assertTrue(service.adminDeleteDesign("broken"))
+    assertFalse("broken" in skipped(), "a deleted design is on /status")
   }
 
   private fun document(id: String, title: String) =

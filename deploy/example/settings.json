@@ -5,5 +5,5 @@
   "rendering": {"compileEngine": false},
   "uploads": {"acceptDocs": false, "acceptImages": false},
   "analytics": {"umami": {"enabled": false}},
-  "watchFacePushBuilds": false
+  "watchFacePushBuilds": true
 }

@@ -75,10 +75,13 @@ class ServeSettingsTest {
   }
 
   @Test
-  fun `watch-face push builds are off unless the setting turns them on`() {
-    assertFalse(WatchFacePushBuildsSetting.enabled(emptyMap()))
-    assertFalse(WatchFacePushBuildsSetting.enabled(mapOf(WatchFacePushBuildsSetting.ENV to "")))
+  fun `watch-face push builds are on unless the setting turns them off`() {
+    assertTrue(WatchFacePushBuildsSetting.enabled(emptyMap()))
+    assertTrue(WatchFacePushBuildsSetting.enabled(mapOf(WatchFacePushBuildsSetting.ENV to "")))
     assertFalse(WatchFacePushBuildsSetting.enabled(mapOf(WatchFacePushBuildsSetting.ENV to "0")))
+    assertFalse(
+      WatchFacePushBuildsSetting.enabled(mapOf(WatchFacePushBuildsSetting.ENV to "false")),
+    )
     assertTrue(WatchFacePushBuildsSetting.enabled(mapOf(WatchFacePushBuildsSetting.ENV to "1")))
     assertTrue(WatchFacePushBuildsSetting.enabled(mapOf(WatchFacePushBuildsSetting.ENV to "true")))
     val setting = ServeSettings.ALL.single { it.key == "watchFacePushBuilds" }

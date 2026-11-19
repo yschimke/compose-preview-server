@@ -10,15 +10,10 @@ import ee.schimke.composeai.uibuilder.service.UiBuilderServiceUpdate
 import ee.schimke.composeai.uibuilder.service.UiBuilderSubscriptionCall
 import java.io.Closeable
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /**
@@ -73,17 +68,9 @@ internal class WatchFacePushAutomatic(
 
   private val due = ConcurrentHashMap<String, Due>()
   private val refusals = ConcurrentHashMap<String, WatchFacePushStore.AutomaticRefusal>()
-  private val running = Mutex()
   private val started = AtomicBoolean(false)
-  private val executor = lazy {
-    Executors.newSingleThreadExecutor { task ->
-      Thread(task, "watchface-push-automatic").apply {
-        isDaemon = true
-        priority = Thread.MIN_PRIORITY
-      }
-    }
-  }
-  private var scope: CoroutineScope? = null
+  private val queue: WatchFacePushBuildQueue
+    get() = push.queue
 
   init {
     refusals.putAll(push.store.automaticRefusals())
@@ -96,9 +83,8 @@ internal class WatchFacePushAutomatic(
     if (!enabled) return
     val tick = tickMillis ?: return
     if (!started.compareAndSet(false, true)) return
-    val scope = CoroutineScope(SupervisorJob() + executor.value.asCoroutineDispatcher())
-    this.scope = scope
-    scope.launch {
+    // The build queue's one low-priority thread: these builds take their turn with the owners'.
+    queue.scope.launch {
       runCatching { sweep(service) }
         .onFailure { System.err.println("serve: watchface-push: startup sweep: $it") }
       while (isActive) {
@@ -109,9 +95,7 @@ internal class WatchFacePushAutomatic(
     }
   }
 
-  override fun close() {
-    if (executor.isInitialized()) executor.value.shutdownNow()
-  }
+  override fun close() = Unit
 
   /**
    * [designId] changed: (re)schedule it [settleMillis] from now, or [accessSettleMillis] for a
@@ -120,19 +104,40 @@ internal class WatchFacePushAutomatic(
   fun noteChanged(designId: String, access: Boolean = false) {
     if (!enabled || designId.isBlank()) return
     val at = push.clock() + if (access) accessSettleMillis else settleMillis
-    due.merge(designId, Due(at)) { old, new ->
-      // An access change does not postpone an edit already waiting less; an edit always does.
-      if (access) Due(minOf(old.atMillis, new.atMillis)) else new
+    val scheduled =
+      due.merge(designId, Due(at)) { old, new ->
+        // An access change does not postpone an edit already waiting less; an edit always does.
+        if (access) Due(minOf(old.atMillis, new.atMillis)) else new
+      }!!
+    // "Will build 10 min after your last edit", unless a build is already running for it.
+    if (queue.status(designId)?.state != WatchFacePushBuildQueue.BUILDING) {
+      queue.record(
+        designId,
+        WatchFacePushBuildStatusV1(
+          WatchFacePushBuildQueue.PENDING,
+          reason = "builds once the design has settled",
+          scheduledAtEpochMillis = scheduled.atMillis,
+          automatic = true,
+        ),
+      )
     }
   }
 
   /** The packager's diagnostics for [designId]'s refused revision, when it refused it. */
   fun refusal(designId: String): List<String>? = refusals[designId]?.diagnostics
 
-  /** Every public watch-face design skipped, by id, with why. */
-  fun skipped(): List<Pair<String, String>> =
+  /**
+   * The public watch-face designs skipped, by id, with why, for the unauthenticated `/status`: only
+   * a refusal for the design that is at its id now (created when it was), and only while anyone may
+   * read that design. A design since made private, trashed, deleted or recreated is not named.
+   */
+  suspend fun skipped(service: UiBuilderServicePort): List<Pair<String, String>> =
     refusals.entries
       .sortedBy { it.key }
+      .filter { (id, refusal) ->
+        service.canRead(WatchFacePush.ANONYMOUS, id) &&
+          push.designSummary(id)?.createdAtEpochMillis == refusal.designCreatedAtEpochMillis
+      }
       .map { (id, refusal) ->
         id to "the packager refused it: ${refusal.diagnostics.firstOrNull() ?: "no diagnostic"}"
       }
@@ -143,6 +148,7 @@ internal class WatchFacePushAutomatic(
   /** The owner published or unpublished [designId]: nothing is left for the scheduler to do. */
   fun forget(designId: String) {
     due.remove(designId)
+    if (queue.status(designId)?.automatic == true) queue.clear(designId)
     if (refusals.remove(designId) != null) persistRefusals()
   }
 
@@ -157,14 +163,15 @@ internal class WatchFacePushAutomatic(
     if (!enabled) return
     for (head in storedDesigns()) {
       if (head.catalogSystemId != null && !push.isWatchFaceCatalog(head.catalogSystemId)) continue
-      val worked = running.withLock { runCatching { consider(service, head.designId) }.isSuccess }
+      val worked =
+        queue.exclusive.withLock { runCatching { consider(service, head.designId) }.isSuccess }
       if (worked && sweepPauseMillis > 0) delay(sweepPauseMillis)
     }
   }
 
   /** Handle every design that is due now, one at a time. */
   internal suspend fun runDue(service: UiBuilderServicePort) {
-    running.withLock {
+    queue.exclusive.withLock {
       val now = push.clock()
       for ((designId, entry) in due.entries.sortedBy { it.value.atMillis }) {
         if (entry.atMillis > now) continue
@@ -175,27 +182,58 @@ internal class WatchFacePushAutomatic(
         }
           .getOrElse {
             System.err.println("serve: watchface-push: automatic listing of $designId: $it")
-            true
+            it.message ?: it.javaClass.simpleName
           }
-        if (retry) {
+        queue.done(designId)
+        if (retry != null) {
           val failures = entry.failures + 1
           val backoff = (retryMillis shl minOf(failures - 1, 6)).coerceAtMost(MAX_RETRY_MILLIS)
-          due.putIfAbsent(designId, Due(push.clock() + backoff, failures))
+          val next = push.clock() + backoff
+          due.putIfAbsent(designId, Due(next, failures))
+          queue.record(
+            designId,
+            WatchFacePushBuildStatusV1(
+              WatchFacePushBuildQueue.FAILED,
+              reason = retry,
+              nextRetryAtEpochMillis = next,
+              automatic = true,
+            ),
+          )
         }
       }
     }
   }
 
-  /** Build [designId]'s latest revision if it should be listed; true to try again later. */
-  private suspend fun consider(service: UiBuilderServicePort, designId: String): Boolean {
-    val summary = push.designSummary(designId) ?: return false
-    if (!push.isWatchFaceCatalog(summary.catalogPin.systemId)) return false
-    if (!service.canRead(WatchFacePush.ANONYMOUS, designId)) return false
+  /** A pending state for [designId] that nothing will now build is dropped. */
+  private fun settle(designId: String) {
+    if (queue.status(designId)?.state == WatchFacePushBuildQueue.PENDING) queue.clear(designId)
+  }
+
+  /**
+   * Build [designId]'s latest revision if it should be listed; the reason to try again later, or
+   * null when it is done with.
+   */
+  private suspend fun consider(service: UiBuilderServicePort, designId: String): String? {
+    val summary =
+      push.designSummary(designId)
+        ?: run {
+          // Gone: nothing of it is kept, its refusal included.
+          if (refusals.remove(designId) != null) persistRefusals()
+          settle(designId)
+          return null
+        }
+    if (
+      !push.isWatchFaceCatalog(summary.catalogPin.systemId) ||
+        !service.canRead(WatchFacePush.ANONYMOUS, designId)
+    ) {
+      settle(designId)
+      return null
+    }
     val owner = summary.ownerActorId
     val existing = push.store.publication(designId)
     if (existing?.isExplicitFor(owner, summary.createdAtEpochMillis) == true) {
       forget(designId)
-      return false
+      return null
     }
     val current =
       existing != null &&
@@ -204,14 +242,27 @@ internal class WatchFacePushAutomatic(
         existing.accountActorId == owner &&
         existing.designCreatedAtEpochMillis == summary.createdAtEpochMillis &&
         existing.revision == summary.revision
-    if (current) return false
+    if (current) {
+      if (queue.status(designId)?.state == WatchFacePushBuildQueue.PENDING) {
+        queue.record(
+          designId,
+          WatchFacePushBuildStatusV1(
+            WatchFacePushBuildQueue.BUILT,
+            version = existing!!.version,
+            automatic = true,
+          ),
+        )
+      }
+      return null
+    }
     val refused = refusals[designId]
     if (
       refused != null &&
         refused.revision == summary.revision &&
         refused.designCreatedAtEpochMillis == summary.createdAtEpochMillis
     ) {
-      return false
+      queue.record(designId, refusedStatus(refused.diagnostics))
+      return null
     }
     // Read as the owner: the runtime names a design's owner only to its owner, and the publication
     // records the owner, as an explicit one does, so [WatchFacePush.isSameDesign] can tell a
@@ -220,8 +271,15 @@ internal class WatchFacePushAutomatic(
       service.executeMapped(
         GetSnapshotRequestV1(designId = designId),
         AuthenticatedUiBuilderActor(owner),
-      ) as? UiBuilderServiceResponse.Snapshot ?: return false
-    if (snapshot.snapshot.access?.ownerActorId != owner) return false
+      ) as? UiBuilderServiceResponse.Snapshot
+        ?: run {
+          settle(designId)
+          return null
+        }
+    if (snapshot.snapshot.access?.ownerActorId != owner) {
+      settle(designId)
+      return null
+    }
     val document = snapshot.snapshot.state.document
     // The same face an explicit publish would build: the export, with the design's pinned
     // drawables.
@@ -243,8 +301,9 @@ internal class WatchFacePushAutomatic(
         document.createdAtEpochMillis,
         listOf("error[bundle]: $problem"),
       )
-      return false
+      return null
     }
+    queue.building(designId, automatic = true)
     val staged =
       push.stage(
         candidate = {
@@ -266,20 +325,39 @@ internal class WatchFacePushAutomatic(
     return when (staged) {
       is WatchFacePush.Staged.Committed -> {
         if (refusals.remove(designId) != null) persistRefusals()
-        false
+        queue.record(
+          designId,
+          WatchFacePushBuildStatusV1(
+            WatchFacePushBuildQueue.BUILT,
+            version = staged.publication.version,
+            automatic = true,
+          ),
+        )
+        null
       }
       is WatchFacePush.Staged.Refused -> {
-        if (staged.retryable) return true
+        if (staged.retryable) return staged.diagnostics.firstOrNull() ?: "the build failed"
         refuse(designId, document.revision, document.createdAtEpochMillis, staged.diagnostics)
-        false
+        null
       }
       // Not buildable here now, or concurrent publishes: later.
-      is WatchFacePush.Staged.Unavailable,
-      WatchFacePush.Staged.Conflict -> true
+      is WatchFacePush.Staged.Unavailable -> staged.build.reason
+      WatchFacePush.Staged.Conflict -> "published concurrently"
       // The owner published it meanwhile.
-      WatchFacePush.Staged.Superseded -> false
+      WatchFacePush.Staged.Superseded -> {
+        settle(designId)
+        null
+      }
     }
   }
+
+  private fun refusedStatus(diagnostics: List<String>) =
+    WatchFacePushBuildStatusV1(
+      WatchFacePushBuildQueue.REFUSED,
+      reason = "the packager refused it",
+      diagnostics = diagnostics,
+      automatic = true,
+    )
 
   private fun refuse(
     designId: String,
@@ -289,6 +367,7 @@ internal class WatchFacePushAutomatic(
   ) {
     refusals[designId] = WatchFacePushStore.AutomaticRefusal(revision, createdAt, diagnostics)
     persistRefusals()
+    queue.record(designId, refusedStatus(diagnostics))
     System.err.println(
       "serve: watchface-push: public design $designId revision $revision is not listed; the " +
         "packager refused it: ${diagnostics.firstOrNull()}",

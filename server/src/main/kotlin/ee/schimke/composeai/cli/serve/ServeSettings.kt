@@ -456,7 +456,7 @@ object ServeSettings {
         Type.Flag,
         Apply.RESTART,
         "Build public watch-face designs for the Watch Face Push app on their own, from a settled " +
-          "revision. Off, only an owner's explicit publish builds one.",
+          "revision. On unless set to false; off, only an owner's explicit publish builds one.",
       ),
       Setting(
         "rendering.compileEngine",

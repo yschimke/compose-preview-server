@@ -2393,8 +2393,8 @@ public class ServeRunner(
     val automaticBuilds = WatchFacePushBuildsSetting.enabled()
     System.err.println(
       "serve: watch-face push builds public designs on their own: " +
-        if (automaticBuilds) "on (${WatchFacePushBuildsSetting.ENV})"
-        else "off (set watchFacePushBuilds, ${WatchFacePushBuildsSetting.ENV}, to turn it on)",
+        if (automaticBuilds) "on (turn it off with watchFacePushBuilds: false)"
+        else "off (watchFacePushBuilds, ${WatchFacePushBuildsSetting.ENV}, is false)",
     )
     val thumbnails = lane.thumbnails
     return WatchFacePush(

@@ -127,15 +127,43 @@ under `/api/ui-builder/v1`. MCP agents use `ui_builder_publish_watch_face` with 
 - Only for a design whose catalog draws watch faces (native backend `android-dwf`, i.e.
   `wff-watchface`): otherwise `422 not_a_watch_face`.
 
+**No request waits on the packager.** `PUT` checks everything it can up front — the owner, the
+catalog, the visibility, that the design exports to Watch Face Format with all its drawables — and
+refuses there with a `422` (`design_not_public`, `not_a_watch_face`, `not_exportable`,
+`WFF_BUNDLE_MISSING_RESOURCE`). Otherwise it queues the build and answers **`202`** at once with the publication
+as it is now and its `build`. Every build on the host — owners' publishes and the automatic listing
+— runs through one queue, one at a time, on one low-priority thread. The MCP tool alone waits for
+its build, since an agent wants the result in its reply; it still takes its turn in the queue.
+
 The server exports the design's Watch Face Format with the same exporter as the real-runtime preview
 tab, keeps that WFF with the publication (so the APK can be rebuilt after the revision is pruned),
 and builds the APK through the staged path — candidate, build, commit at the version that was built
-— so a face the packager or Google's validator refuses is a `422` and leaves what is on watches as
-it was:
+— so a face the packager or Google's validator refuses leaves what is on watches as it was, and
+ends the build `refused` with the packager's lines (for the MCP tool, a `packaging_failed` error
+with the same `diagnostics`).
+
+`build` is
 
 ```json
-{"error": "packaging_failed", "message": "error[wff-validator]: …", "diagnostics": ["error[wff-validator]: …"]}
+{
+  "state": "pending | queued | building | built | refused | failed",
+  "reason": "…",
+  "scheduledAtEpochMillis": 0,
+  "queueAhead": 1,
+  "stage": "packaging",
+  "startedAtEpochMillis": 0, "elapsedMillis": 0,
+  "version": 7,
+  "diagnostics": ["error[wff-validator]: …"],
+  "nextRetryAtEpochMillis": 0,
+  "automatic": false
+}
 ```
+
+with only the fields of its state: `pending` (an automatic build waiting for the design to settle,
+`scheduledAtEpochMillis`), `queued` (`queueAhead`), `building` (`stage`, `startedAtEpochMillis`,
+`elapsedMillis`), `built` (`version`), `refused` (`diagnostics`), `failed` (`reason`, and for an
+automatic build `nextRetryAtEpochMillis`). `GET /status` counts them: `"builds": {"pending",
+"queued", "building"}`.
 
 A publication pins its revision: edits are not shipped until the owner publishes again. `DELETE`
 takes it off every watch and keeps the version counter; for a public design it is also the owner's
@@ -179,13 +207,14 @@ public is already its owner's decision that anyone may read it. `GET /designs` l
 caller, with or without a token, built from a **settled revision**, with `visibility: "public"` and
 the same entry shape as a published design.
 
-**Behind a flag, off by default.** `watchFacePushBuilds` in the deployment's `settings.json`
-(`SERVE_WATCH_FACE_PUSH_BUILDS`, read at start; `deploy/image/SETTINGS.md`) turns this on. Off, no
-public design is built on its own and the scheduler below never starts; an owner's explicit publish
-still works, through the same one-at-a-time packager queue. The server logs which it is at start.
+**On by default, with an off switch.** `watchFacePushBuilds: false` in the deployment's
+`settings.json` (`SERVE_WATCH_FACE_PUSH_BUILDS=false`, read at start; `deploy/image/SETTINGS.md`)
+turns this off: no public design is built on its own and the scheduler below never starts, while an
+owner's explicit publish still works, through the same one-at-a-time build queue. The server logs
+which it is at start.
 
-Building runs the packager (`aapt2` and Google's validator in their own JVM), so even with the flag
-on it happens only on deliberate events, never on a request:
+Building runs the packager (`aapt2` and Google's validator in their own JVM), so it happens only on
+deliberate events, never on a request:
 
 - **No request builds.** `GET /designs` and `GET /status` only read what is already built. A design
   is scheduled when a write to it succeeds through the design service — an edit, a rename, a
@@ -207,8 +236,12 @@ on it happens only on deliberate events, never on a request:
   and its APK is `404`. Made public again, it comes back as it was. A purged design's publication is
   retired as any other (#1998), and a design recreated under its id is a different design: it starts
   above every version already installed and inherits nothing.
+- **Progress.** The owner's `GET …/watch-face-publication` shows the automatic build's `build` too:
+  `pending` with `scheduledAtEpochMillis` while it settles, then `building`, `built`, `refused`, or
+  `failed` with `nextRetryAtEpochMillis`.
 - **Refusals.** A face the packager refuses is not listed; the version already on watches, if any,
-  stays. The refusal is kept in `watchface-push/automatic-refusals.json`, with the revision it was
+  stays. `/status` names it only while the design is public and is the one that was refused: a
+  design since made private, trashed, deleted or recreated is not named there. The refusal is kept in `watchface-push/automatic-refusals.json`, with the revision it was
   for, so that revision is not built again, across restarts too. `GET /status` names it under
   `designs.skipped` with the packager's first line, as it does catalog faces, and the owner sees the
   whole refusal on `GET …/watch-face-publication`. A failure around the packager — a timeout, a

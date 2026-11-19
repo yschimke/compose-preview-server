@@ -9,15 +9,16 @@ import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * `watchFacePushBuilds` (`SERVE_WATCH_FACE_PUSH_BUILDS`): whether public watch-face designs are
- * built for watches on their own ([WatchFacePushAutomatic]). Off by default: building runs the
- * packager, so an operator turns it on deliberately. With it off the automatic listing never
- * starts, and an owner's explicit publish still works, through the one packager queue.
+ * built for watches on their own ([WatchFacePushAutomatic]). On unless set to `false` or `0`: a
+ * public design on the watch is the feature, and the flag is its off switch. Off, the automatic
+ * listing never starts, and an owner's explicit publish still works, through the one packager
+ * queue.
  */
 internal object WatchFacePushBuildsSetting {
   const val ENV = "SERVE_WATCH_FACE_PUSH_BUILDS"
 
   fun enabled(env: Map<String, String> = System.getenv()): Boolean =
-    env["SERVE_WATCH_FACE_PUSH_BUILDS"]?.trim()?.lowercase() in setOf("1", "true")
+    env["SERVE_WATCH_FACE_PUSH_BUILDS"]?.trim()?.lowercase() !in setOf("0", "false")
 }
 
 /**
