@@ -196,9 +196,19 @@ internal class WatchFacePushAutomatic(
       ) as? UiBuilderServiceResponse.Snapshot ?: return false
     if (snapshot.snapshot.access?.ownerActorId != owner) return false
     val document = snapshot.snapshot.state.document
-    val source = push.sourceFor(document)
+    // The same face an explicit publish would build: the export, with the design's pinned
+    // drawables.
+    val exported = push.sourceFor(document)
+    val packaged = exported?.let {
+      packagedWithPinnedDrawables(document, it, emptyMap(), push.assets)
+    }
+    val source = packaged?.source?.takeIf { packaged.missing.isEmpty() }
     val problem =
-      if (source == null) "this design does not export to Watch Face Format" else source.problem()
+      when {
+        exported == null -> "this design does not export to Watch Face Format"
+        packaged!!.missing.isNotEmpty() -> packaged.missing.joinToString("; ")
+        else -> source!!.problem()
+      }
     if (source == null || problem != null) {
       refuse(
         designId,

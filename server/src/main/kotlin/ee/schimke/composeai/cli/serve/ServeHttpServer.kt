@@ -297,6 +297,12 @@ class ServeHttpServer(
    * explicit. Null for plain/test servers.
    */
   private val catalogLoads: CatalogLoadTracker? = null,
+  /**
+   * A catalog's baked bundle as the catalog store laid it out on disk
+   * ([ServeCatalogStore.bakedBundle]), whether or not its session is resident. Null when the store
+   * has none (a test server, a `--bundles` directory); readers then fall back to a resident host.
+   */
+  private val catalogBakedBundle: (system: String) -> ServeCatalogStore.BakedBundle? = { null },
   /** Persistent last-successful thumbnails, independent of catalog initialization. */
   private val heroCacheDir: File? = null,
   /** Immediate catalog branch check exposed by `POST /{system}/refresh`. */
@@ -6497,27 +6503,54 @@ class ServeHttpServer(
    */
   /**
    * Every listed catalog's previews that carry a Watch Face Format source (`previews/<id>.wff.zip`
-   * and `.wff.json`), for the Watch Face Push API. Unlisted catalogs are left out, and so is a
-   * catalog that is not resident: this never wakes one ([ServeSessionRegistry.peekHost]).
+   * and `.wff.json`), for the Watch Face Push API's `/designs` and `/status` alike, so the two
+   * cannot disagree. Unlisted catalogs are left out.
+   *
+   * Read from the catalog's baked bundle on disk ([catalogBakedBundle]), not from its session, so
+   * the list does not come and go with residency: a suspended or evicted catalog keeps its faces,
+   * and one still waiting in the startup queue lists them as soon as its bundle is laid out. A
+   * catalog the store does not hold falls back to its resident host. Nothing here resumes a session
+   * or wakes a daemon. Derived once per bundle [ServeCatalogStore.BakedBundle.key].
    */
   private fun watchFaceCatalogSources(): List<CatalogFaceSource> =
     listedCatalogs().flatMap { system ->
-      val host = sessions.peekHost(system) ?: return@flatMap emptyList()
-      val bundle = catalogBundleHost(host) ?: return@flatMap emptyList()
-      val catalogTitle = bundle.title?.takeIf { it.isNotBlank() } ?: host.label
-      bundle.previews.mapNotNull { preview ->
-        val (manifest, zip) = bundle.wffSource(preview.id) ?: return@mapNotNull null
-        CatalogFaceSource(
-          system = system,
-          catalogTitle = catalogTitle,
-          previewId = preview.id,
-          title = preview.caption?.takeIf { it.isNotBlank() } ?: preview.label,
-          manifestJson = manifest,
-          zip = zip,
-          png = { bundle.bakedPngBytes(preview.id) },
-        )
+      val baked = catalogBakedBundle(system)
+      if (baked != null) {
+        val cached = catalogFaceSourceCache[system]?.takeIf { it.first == baked.key }
+        cached?.second
+          ?: catalogFaceSources(system, baked.host, label = system).also {
+            catalogFaceSourceCache[system] = baked.key to it
+          }
+      } else {
+        val host = sessions.peekHost(system) ?: return@flatMap emptyList()
+        val bundle = catalogBundleHost(host) ?: return@flatMap emptyList()
+        catalogFaceSources(system, bundle, label = host.label)
       }
     }
+
+  /** [watchFaceCatalogSources] per system, keyed by the baked bundle it was read from. */
+  private val catalogFaceSourceCache =
+    java.util.concurrent.ConcurrentHashMap<String, Pair<String, List<CatalogFaceSource>>>()
+
+  private fun catalogFaceSources(
+    system: String,
+    bundle: ServeBundleHost,
+    label: String,
+  ): List<CatalogFaceSource> {
+    val catalogTitle = bundle.title?.takeIf { it.isNotBlank() } ?: label
+    return bundle.previews.mapNotNull { preview ->
+      val (manifest, zip) = bundle.wffSource(preview.id) ?: return@mapNotNull null
+      CatalogFaceSource(
+        system = system,
+        catalogTitle = catalogTitle,
+        previewId = preview.id,
+        title = preview.caption?.takeIf { it.isNotBlank() } ?: preview.label,
+        manifestJson = manifest,
+        zip = zip,
+        png = { bundle.bakedPngBytes(preview.id) },
+      )
+    }
+  }
 
   private fun listedCatalogs(): List<String> =
     catalogLoads?.snapshot()?.filter { it.config.listed }?.map { it.config.system }

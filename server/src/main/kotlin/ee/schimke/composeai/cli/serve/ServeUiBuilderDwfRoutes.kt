@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.GetSnapshotRequestV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
+import ee.schimke.composeai.uibuilder.service.UiBuilderAssetStore
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import io.ktor.http.ContentType
@@ -54,6 +55,11 @@ internal constructor(
    * start request.
    */
   internal val sourceFor: (DesignDocumentV1) -> DwfSource? = { null },
+  /**
+   * Where a design's uploaded asset bytes are, so its pinned assets are packaged as the drawables
+   * its WFF names ([WatchFaceDrawables]); the editor sends only the XML.
+   */
+  internal val assets: UiBuilderAssetStore? = null,
   /** How often a ticking session redraws. One second is the watch's own granularity. */
   internal val tickMillis: Long = 1000,
 )
@@ -221,7 +227,11 @@ internal fun Route.installUiBuilderDwfRoutes(
       when (val resolved = resolveDwfSource(dwf, document, request)) {
         is ResolvedSource.Ok -> resolved.source
         is ResolvedSource.Refused -> {
-          call.respondDwfRefusal(HttpStatusCode.UnprocessableEntity, resolved.code, resolved.reason)
+          call.respondDwfRefusal(
+            HttpStatusCode.UnprocessableEntity,
+            resolved.code,
+            resolved.reasons,
+          )
           return@post
         }
       }
@@ -408,7 +418,9 @@ internal fun parseDwfClientMessage(text: String): DwfClientMessage =
 private sealed interface ResolvedSource {
   data class Ok(val source: DwfSource) : ResolvedSource
 
-  data class Refused(val code: String, val reason: String) : ResolvedSource
+  data class Refused(val code: String, val reasons: List<String>) : ResolvedSource {
+    constructor(code: String, reason: String) : this(code, listOf(reason))
+  }
 }
 
 /** The editor's XML if it sent any, else what the server derives; never both silently merged. */
@@ -426,7 +438,7 @@ private fun resolveDwfSource(
           "this design does not export to Watch Face Format (the code pane lists why), or this " +
             "server cannot derive it; send the editor's `wffXml` (and `assets`) in the request body",
         )
-    return ResolvedSource.Ok(derived)
+    return withPinnedDrawables(dwf, document, derived, requested = emptyMap())
   }
   val assets = LinkedHashMap<String, ByteArray>()
   for ((path, encoded) in request.assets) {
@@ -444,13 +456,30 @@ private fun resolveDwfSource(
     DwfSource(
       wffXml = xml,
       wffVersion = request.wffVersion,
-      assets = assets,
       label = request.label?.take(64)?.takeIf { it.isNotBlank() } ?: "watch face",
     )
-  source.problem()?.let {
+  return withPinnedDrawables(dwf, document, source, requested = assets)
+}
+
+/**
+ * [source] with [document]'s pinned assets as drawables under [requested] (which win for the same
+ * path), refused when its XML names a bitmap neither supplies: the packager's own report of that is
+ * an opaque `memory-footprint` error from the runtime.
+ */
+private fun withPinnedDrawables(
+  dwf: UiBuilderDwfPreview,
+  document: DesignDocumentV1,
+  source: DwfSource,
+  requested: Map<String, ByteArray>,
+): ResolvedSource {
+  val packaged = packagedWithPinnedDrawables(document, source, requested, dwf.assets)
+  if (packaged.missing.isNotEmpty()) {
+    return ResolvedSource.Refused(WatchFaceDrawables.MISSING_RESOURCE, packaged.missing)
+  }
+  packaged.source.problem()?.let {
     return ResolvedSource.Refused(DwfPreviewSurface.SOURCE_INVALID, it)
   }
-  return ResolvedSource.Ok(source)
+  return ResolvedSource.Ok(packaged.source)
 }
 
 /** The session, if it exists, is on this design, and belongs to this actor. */
@@ -479,9 +508,15 @@ private suspend fun ApplicationCall.respondDwfRefusal(
   status: HttpStatusCode,
   code: String,
   reason: String,
+) = respondDwfRefusal(status, code, listOf(reason))
+
+private suspend fun ApplicationCall.respondDwfRefusal(
+  status: HttpStatusCode,
+  code: String,
+  reasons: List<String>,
 ) {
   respondText(
-    UI_BUILDER_JSON.encodeToString(DwfPreviewRefusalV1(code = code, reasons = listOf(reason))),
+    UI_BUILDER_JSON.encodeToString(DwfPreviewRefusalV1(code = code, reasons = reasons)),
     ContentType.Application.Json,
     status,
   )

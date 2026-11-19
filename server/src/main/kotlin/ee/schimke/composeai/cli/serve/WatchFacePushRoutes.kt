@@ -5,6 +5,7 @@ import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.GetSnapshotRequestV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.UiBuilderAdminDesignSummary
+import ee.schimke.composeai.uibuilder.service.UiBuilderAssetStore
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import ee.schimke.composeai.web.WebEscaping
@@ -61,6 +62,11 @@ internal constructor(
   internal val designSummary: (designId: String) -> UiBuilderAdminDesignSummary? = { null },
   /** How often the automatic listing's scheduler wakes; null: never on its own. */
   automaticTickMillis: Long? = WatchFacePushAutomatic.DEFAULT_TICK_MILLIS,
+  /**
+   * Where a design's uploaded asset bytes are, so a published face carries the drawables its WFF
+   * names ([WatchFaceDrawables]).
+   */
+  internal val assets: UiBuilderAssetStore? = null,
 ) {
   internal val codes = WatchFacePushDeviceCodes(store, clock)
   internal val builds = WatchFacePushBuilds(store, packaging)
@@ -187,13 +193,22 @@ internal constructor(
         "this design is private; make it public first, or publish it to your own watches as private",
       )
     }
-    val source =
+    val exported =
       sourceFor(document)
         ?: return Outcome.Refused(
           HttpStatusCode.UnprocessableEntity,
           "not_exportable",
           "this design does not export to Watch Face Format; the editor's code pane lists why",
         )
+    val packaged = packagedWithPinnedDrawables(document, exported, emptyMap(), assets)
+    if (packaged.missing.isNotEmpty()) {
+      return Outcome.Refused(
+        HttpStatusCode.UnprocessableEntity,
+        WatchFaceDrawables.MISSING_RESOURCE,
+        packaged.missing.joinToString("\n"),
+      )
+    }
+    val source = packaged.source
     source.problem()?.let {
       return Outcome.Refused(HttpStatusCode.UnprocessableEntity, "not_exportable", it)
     }
