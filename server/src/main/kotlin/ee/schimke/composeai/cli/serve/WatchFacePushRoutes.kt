@@ -4,6 +4,7 @@ import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.GetSnapshotRequestV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
+import ee.schimke.composeai.uibuilder.service.UiBuilderAssetStore
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import ee.schimke.composeai.web.WebEscaping
@@ -52,10 +53,91 @@ internal constructor(
   /** Where a signed-out person signs in and comes back to the given path; null: no sign-in. */
   internal val signInPath: ((returnTo: String) -> String)? = null,
   internal val clock: () -> Long = System::currentTimeMillis,
+  /**
+   * Where a design's uploaded asset bytes are, so a published face carries the drawables its WFF
+   * names ([WatchFaceDrawables]).
+   */
+  internal val assets: UiBuilderAssetStore? = null,
 ) {
   internal val codes = WatchFacePushDeviceCodes(store, clock)
   internal val builds = WatchFacePushBuilds(store, packaging)
   internal val catalogFaces = WatchFacePushCatalogFaces(store.catalogFacesFile)
+
+  private val reconciling = java.util.concurrent.atomic.AtomicBoolean(false)
+
+  /** The sources [startReconciling] was given, for [reconcileNow]. */
+  @Volatile private var reconcileSources: () -> List<CatalogFaceSource> = { emptyList() }
+
+  @Volatile private var reconciler: java.util.concurrent.ScheduledExecutorService? = null
+
+  /**
+   * Stop the reconcile pass and the build worker, when the server that installed the routes stops;
+   * neither then holds the stopped server or its state directory.
+   */
+  internal fun close() {
+    reconciler?.shutdownNow()
+    reconciler = null
+    reconcileSources = { emptyList() }
+    builds.close()
+  }
+
+  /** One reconcile pass now, against the sources the routes were installed with. */
+  internal fun reconcileNow(): Int = reconcile(reconcileSources)
+
+  /**
+   * Queue a background build for everything a watch could be offered and has no APK: a published
+   * design whose APK is missing (a lost cache) and a catalog face whose digest is new (an import, a
+   * republished catalog, a first start). Cheap and never packages on this thread, so it is safe to
+   * run on a timer. Returns how many builds were queued.
+   */
+  internal fun reconcile(catalogFaceSources: () -> List<CatalogFaceSource>): Int {
+    var queued = 0
+    for (publication in store.published()) {
+      if (builds.enqueue(publication, cause = "reconcile: unbuilt publication")) queued++
+    }
+    for (face in catalogFaces.resolve(catalogFaceSources()).faces) {
+      if (builds.enqueue(face.publication, { face.dwf }, cause = "catalog face digest changed")) {
+        queued++
+      }
+    }
+    return queued
+  }
+
+  /**
+   * Run [reconcile] shortly after start and then every [periodMillis], on one daemon thread. Only
+   * the first call starts it; later ones (a second route install) are no-ops.
+   */
+  internal fun startReconciling(
+    catalogFaceSources: () -> List<CatalogFaceSource>,
+    initialDelayMillis: Long = 15_000L,
+    periodMillis: Long = 60_000L,
+  ) {
+    if (!reconciling.compareAndSet(false, true)) return
+    reconcileSources = catalogFaceSources
+    val executor =
+      java.util.concurrent.Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "watchface-push-reconcile").apply { isDaemon = true }
+      }
+    reconciler = executor
+    executor.scheduleWithFixedDelay(
+      {
+        try {
+          val queued = reconcile(catalogFaceSources)
+          if (queued > 0) {
+            System.err.println(
+              "serve: watchface-push: queued $queued APK build(s) in the background",
+            )
+          }
+        } catch (e: Exception) {
+          System.err.println("serve: watchface-push: reconcile failed: $e")
+        }
+      },
+      initialDelayMillis,
+      periodMillis,
+      java.util.concurrent.TimeUnit.MILLISECONDS,
+    )
+  }
+
   internal val csrf = ServeAgentGrants.Csrf()
 
   /** Starting a link: a person does it once per watch, so ten a minute per address is plenty. */
@@ -101,13 +183,22 @@ internal constructor(
         is Owned.Refused -> return owned.outcome
         is Owned.Document -> owned.document to owned.ownerActorId
       }
-    val source =
+    val exported =
       sourceFor(document)
         ?: return Outcome.Refused(
           HttpStatusCode.UnprocessableEntity,
           "not_exportable",
           "this design does not export to Watch Face Format; the editor's code pane lists why",
         )
+    val packaged = packagedWithPinnedDrawables(document, exported, emptyMap(), assets)
+    if (packaged.missing.isNotEmpty()) {
+      return Outcome.Refused(
+        HttpStatusCode.UnprocessableEntity,
+        WatchFaceDrawables.MISSING_RESOURCE,
+        packaged.missing.joinToString("\n"),
+      )
+    }
+    val source = packaged.source
     source.problem()?.let {
       return Outcome.Refused(HttpStatusCode.UnprocessableEntity, "not_exportable", it)
     }
@@ -128,7 +219,10 @@ internal constructor(
           source,
           document.createdAtEpochMillis,
         )
-      val build = withContext(Dispatchers.IO) { builds.build(candidate) }
+      val build =
+        withContext(Dispatchers.IO) {
+          builds.build(candidate, retryTransient = true, cause = "publish")
+        }
       if (build is WatchFacePushBuilds.Result.Failed) {
         return Outcome.Refused(
           HttpStatusCode.UnprocessableEntity,
@@ -176,6 +270,31 @@ internal constructor(
       store.publication(designId)
         ?: return Outcome.Ok(WatchFacePushPublicationV1(designId = designId, published = false))
     return Outcome.Ok(status(publication, builds.cached(publication)))
+  }
+
+  internal sealed interface Installs {
+    data class Ok(val installs: WatchFacePushInstallsV1) : Installs
+
+    data class Refused(val refused: Outcome.Refused) : Installs
+  }
+
+  /** [designId]'s latest install report from each of its owner's linked watches; owner only. */
+  internal suspend fun installs(
+    service: UiBuilderServicePort,
+    actor: AuthenticatedUiBuilderActor,
+    designId: String,
+  ): Installs {
+    val owner =
+      when (val owned = ownedDocument(service, actor, designId)) {
+        is Owned.Refused -> return Installs.Refused(owned.outcome)
+        is Owned.Document -> owned.ownerActorId
+      }
+    val reports = withContext(Dispatchers.IO) { store.installs(designId, owner) }
+    return Installs.Ok(
+      WatchFacePushInstallsV1(
+        reports.map { (device, event) -> WatchFacePushInstalls.wire(device, event) },
+      ),
+    )
   }
 
   private sealed interface Owned {
@@ -314,6 +433,7 @@ internal constructor(
     private const val PUBLISH_ATTEMPTS = 5
     const val LINK_PATH = "/link"
     const val PUBLICATION_PATH = "/api/ui-builder/v1/designs/{designId}/watch-push"
+    const val INSTALLS_PATH = "/api/ui-builder/v1/designs/{designId}/watch-installs"
     const val VISIBILITY_PUBLIC = "public"
     const val VISIBILITY_PRIVATE = "private"
     internal val ANONYMOUS =
@@ -386,6 +506,8 @@ internal data class WatchFacePushAttributionV1(
 internal data class WatchFacePushCatalogFacesStatusV1(
   val listed: Int,
   val skipped: List<WatchFacePushSkippedFaceV1>,
+  /** Faces whose APK is not built yet; the background worker builds them, never a listing. */
+  val pending: List<String> = emptyList(),
 )
 
 @Serializable internal data class WatchFacePushSkippedFaceV1(val id: String, val reason: String)
@@ -404,7 +526,78 @@ internal data class WatchFacePushInstallEventV1(
   val result: String,
   val errorKind: String? = null,
   val wearOsApi: Int? = null,
+  val packageName: String? = null,
+  /** One of [WatchFacePushInstalls.ACTIVATIONS]; anything else is kept as null. */
+  val activation: String? = null,
+  val activationError: String? = null,
+  val deviceModel: String? = null,
+  val wearOsVersion: String? = null,
+  /** The androidx Watch Face Push library's version string. */
+  val watchFacePushApiVersion: String? = null,
+  val appVersion: String? = null,
 )
+
+/** `GET /api/ui-builder/v1/designs/{id}/watch-installs`: the owner's watches' latest reports. */
+@Serializable
+internal data class WatchFacePushInstallsV1(val installs: List<WatchFacePushInstallV1>)
+
+@Serializable
+internal data class WatchFacePushInstallV1(
+  val deviceName: String,
+  val deviceModel: String? = null,
+  val wearOsApi: Int? = null,
+  val version: Long,
+  /** The design revision [version] was published from, when it was still the published one. */
+  val revisionPublished: Long? = null,
+  val result: String,
+  val activation: String? = null,
+  val errorKind: String? = null,
+  /** When the server received the report. */
+  val atEpochMillis: Long,
+)
+
+internal object WatchFacePushInstalls {
+  val ACTIVATIONS = setOf("activated", "not_requested", "manual", "failed")
+  private const val MAX_ID = 200
+  private const val MAX_TEXT = 200
+
+  /** [event] as kept: free text truncated, an unknown activation dropped; null when unusable. */
+  fun stored(event: WatchFacePushInstallEventV1): WatchFacePushStore.InstallEvent? {
+    if (event.designId.isBlank() || event.designId.length > MAX_ID || event.version < 0) return null
+    if (event.result.isBlank()) return null
+    fun String?.clip(): String? = this?.trim()?.take(MAX_TEXT)?.takeIf { it.isNotEmpty() }
+    return WatchFacePushStore.InstallEvent(
+      deviceId = "",
+      accountActorId = "",
+      designId = event.designId,
+      version = event.version,
+      result = event.result.trim().take(64),
+      errorKind = event.errorKind.clip()?.take(64),
+      wearOsApi = event.wearOsApi,
+      packageName = event.packageName.clip(),
+      activation = event.activation?.trim()?.takeIf { it in ACTIVATIONS },
+      activationError = event.activationError.clip(),
+      deviceModel = event.deviceModel.clip(),
+      wearOsVersion = event.wearOsVersion.clip()?.take(64),
+      watchFacePushApiVersion = event.watchFacePushApiVersion.clip()?.take(64),
+      appVersion = event.appVersion.clip()?.take(64),
+      atEpochMillis = 0,
+    )
+  }
+
+  fun wire(device: WatchFacePushStore.Device, event: WatchFacePushStore.InstallEvent) =
+    WatchFacePushInstallV1(
+      deviceName = device.deviceName,
+      deviceModel = event.deviceModel,
+      wearOsApi = event.wearOsApi ?: device.wearOsApi,
+      version = event.version,
+      revisionPublished = event.revisionPublished,
+      result = event.result,
+      activation = event.activation,
+      errorKind = event.errorKind,
+      atEpochMillis = event.atEpochMillis,
+    )
+}
 
 @Serializable
 internal data class WatchFacePushStatusV1(
@@ -512,6 +705,9 @@ internal fun Route.installWatchFacePushRoutes(
    */
   catalogFaceSources: () -> List<CatalogFaceSource> = { emptyList() },
 ) {
+  // Push APKs are built off the request path: publish builds inline, and this pass queues the rest
+  // (new catalog faces, lost APKs) onto the one background worker. Listings never build.
+  push.startReconciling(catalogFaceSources)
   post("${WatchFacePush.BASE_PATH}/device-codes") {
     call.limited {
       call.noStore()
@@ -574,9 +770,12 @@ internal fun Route.installWatchFacePushRoutes(
   get("${WatchFacePush.BASE_PATH}/status") {
     call.noStore()
     val catalog = withContext(Dispatchers.IO) { push.catalogFaces.resolve(catalogFaceSources()) }
-    // A face the packager already refused is not on `/designs`, so it is not counted as listed:
-    // it is skipped, with the packager's first diagnostic as the reason.
-    val (refused, listed) = catalog.faces.partition { push.builds.refusal(it.publication) != null }
+    // Only a face with a built APK is on `/designs`, so only those count as listed. One the
+    // packager refused is skipped, with its first diagnostic as the reason; one not built yet is
+    // pending (the background worker builds it), never built here.
+    val (refused, buildable) =
+      catalog.faces.partition { push.builds.refusal(it.publication) != null }
+    val (listed, pending) = buildable.partition { push.builds.cached(it.publication) != null }
     call.respondJson(
       WatchFacePushStatusV1.serializer(),
       push
@@ -585,6 +784,8 @@ internal fun Route.installWatchFacePushRoutes(
           catalogFaces =
             WatchFacePushCatalogFacesStatusV1(
               listed = listed.size,
+              pending =
+                pending.map { WatchFacePushCatalogFaces.id(it.source.system, it.source.previewId) },
               skipped =
                 catalog.skipped.map { WatchFacePushSkippedFaceV1(it.id, it.reason) } +
                   refused.map { face ->
@@ -608,34 +809,15 @@ internal fun Route.installWatchFacePushRoutes(
       val designs = mutableListOf<WatchFacePushDesignV1>()
       for (publication in push.store.published()) {
         val visibility = push.reach(service, publication, caller.account) ?: continue
-        val built =
-          when (val build = withContext(Dispatchers.IO) { push.builds.build(publication) }) {
-            is WatchFacePushBuilds.Result.Built -> build.apk
-            is WatchFacePushBuilds.Result.Unavailable -> continue
-            is WatchFacePushBuilds.Result.Failed -> {
-              System.err.println(
-                "serve: watchface-push: ${publication.designId} v${publication.version} is not " +
-                  "listed; the packager refused it: ${build.diagnostics.firstOrNull()}",
-              )
-              continue
-            }
-          }
-        designs += push.listing(origin(call), publication, built, visibility)
+        // Only what is already built: a listing never packages (the reconcile pass does).
+        val built = withContext(Dispatchers.IO) { push.builds.cached(publication) } ?: continue
+        designs += push.listing(origin(call), publication, built.apk, visibility)
       }
       // Then the public catalog faces, to every caller alike.
       val catalog = withContext(Dispatchers.IO) { push.catalogFaces.resolve(catalogFaceSources()) }
       for (face in catalog.faces) {
-        val build = withContext(Dispatchers.IO) { push.builds.build(face.publication, face.dwf) }
-        when (build) {
-          is WatchFacePushBuilds.Result.Built ->
-            designs += push.catalogListing(origin(call), face, build.apk)
-          is WatchFacePushBuilds.Result.Unavailable -> Unit
-          is WatchFacePushBuilds.Result.Failed ->
-            System.err.println(
-              "serve: watchface-push: ${face.publication.designId} is not listed; the packager " +
-                "refused it: ${build.diagnostics.firstOrNull()}",
-            )
-        }
+        val built = withContext(Dispatchers.IO) { push.builds.cached(face.publication) } ?: continue
+        designs += push.catalogListing(origin(call), face, built.apk)
       }
       call.respondJson(
         WatchFacePushDesignListV1.serializer(),
@@ -795,8 +977,21 @@ internal fun Route.installWatchFacePushRoutes(
       call.noStore()
       val caller = call.watchCaller(push, clientAddress, required = true) ?: return@limited
       if (!call.admit(caller.limiter, caller.key)) return@limited
-      call.receiveJson(WatchFacePushInstallEventV1.serializer()) ?: return@limited
-      // Accepted and not kept: the app reports fire-and-forget, and nothing here reads it yet.
+      val event = call.receiveJson(WatchFacePushInstallEventV1.serializer()) ?: return@limited
+      val stored =
+        WatchFacePushInstalls.stored(event)
+          ?: run {
+            call.respondError(
+              HttpStatusCode.BadRequest,
+              "invalid_request",
+              "an install report needs a designId, a non-negative version and a result",
+            )
+            return@limited
+          }
+      // Fire-and-forget from the app: a report on a face this watch's account did not publish (a
+      // catalog face, someone else's public design) is accepted and not kept.
+      val device = caller.device ?: return@limited
+      withContext(Dispatchers.IO) { push.store.recordInstall(device, stored) }
       call.respondText("", status = HttpStatusCode.NoContent)
     }
   }
@@ -894,6 +1089,19 @@ internal fun Route.installWatchFacePushRoutes(
     call.respondOutcome(
       push.publicationStatus(service, actor, call.parameters["designId"].orEmpty()),
     )
+  }
+
+  // The owner's own watches' latest install reports on this design.
+  get(WatchFacePush.INSTALLS_PATH) {
+    call.noStore()
+    val actor =
+      call.authorizedActorOrRespond(authorization, UiBuilderRouteCapability.READ) ?: return@get
+    when (val installs = push.installs(service, actor, call.parameters["designId"].orEmpty())) {
+      is WatchFacePush.Installs.Refused ->
+        call.respondError(installs.refused.status, installs.refused.code, installs.refused.reason)
+      is WatchFacePush.Installs.Ok ->
+        call.respondJson(WatchFacePushInstallsV1.serializer(), installs.installs)
+    }
   }
 
   put(WatchFacePush.PUBLICATION_PATH) {
@@ -1051,6 +1259,7 @@ private class WatchCaller(
   val account: String?,
   val limiter: ServeRateLimiter,
   val key: String,
+  val device: WatchFacePushStore.Device? = null,
 )
 
 /**
@@ -1077,7 +1286,7 @@ private suspend fun ApplicationCall.watchCaller(
     return null
   }
   withContext(Dispatchers.IO) { push.store.touch(device) }
-  return WatchCaller(device.accountActorId, push.deviceLimiter, "device:" + device.id)
+  return WatchCaller(device.accountActorId, push.deviceLimiter, "device:" + device.id, device)
 }
 
 /** The signed-in person's account, or null for a signed-out visitor (or an anonymous reader). */

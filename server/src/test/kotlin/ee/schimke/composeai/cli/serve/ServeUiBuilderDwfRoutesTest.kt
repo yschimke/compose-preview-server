@@ -45,20 +45,29 @@ class ServeUiBuilderDwfRoutesTest {
     dwfCatalog: String = "m3-catalog",
     tickMillis: Long = 1000,
     sourceFor: (ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1) -> DwfSource? = { null },
+    pinned: Map<String, ByteArray> = emptyMap(),
+    validator: WatchFaceValidator? = null,
   ): ServeHttpServer {
     runtime.availability = availability
+    val assets = FileUiBuilderAssetStore(directory.resolve("assets"))
     val service =
       PersistentUiBuilderService(
           storage = FileUiBuilderStateStorage(directory),
           limits = UiBuilderServiceLimits(),
           catalogs = benchmarkCatalogExecutor(),
           exporter = UiBuilderExportExecutor { error("no export in this test") },
+          assets = assets,
         )
         .also {
           runBlocking {
             it.execute(
               UiBuilderServiceCall(actor, UiBuilderServiceRequest.CreateDesign(document())),
             )
+            for ((key, bytes) in pinned) {
+              assertIs<UiBuilderServiceResponse.OperationOutcome>(
+                it.putAsset(UiBuilderAssetWrite(actor, "watch-1", key, bytes)),
+              )
+            }
           }
         }
     return ServeHttpServer(
@@ -75,6 +84,17 @@ class ServeUiBuilderDwfRoutesTest {
             isDwfCatalog = { it == dwfCatalog },
             tickMillis = tickMillis,
             sourceFor = sourceFor,
+            assets = assets,
+            validation =
+              WatchFaceValidation(
+                {
+                  validator?.let(WatchFaceValidatorAvailability::Ready)
+                    ?: WatchFaceValidatorAvailability.Unavailable(
+                      "NO_VALIDATOR",
+                      "not in this test",
+                    )
+                },
+              ),
           ),
         uiBuilderAuthorization =
           ServeUiBuilderAuthorization { _, _, _ ->
@@ -180,6 +200,233 @@ class ServeUiBuilderDwfRoutesTest {
     val (code, body) = post(base, "{}")
     assertEquals(201, code, body)
     assertEquals(1, derived)
+  }
+
+  /** A face drawing one bitmap, `case_steel`, as the editor sends it: XML and no assets. */
+  private val imageFace =
+    """<WatchFace width="450" height="450"><Scene><PartImage x="0" y="0" width="450" """ +
+      """height="450"><Image resource="case_steel"/></PartImage></Scene></WatchFace>"""
+
+  private fun startFace(body: String) =
+    post(
+      base,
+      buildJsonObject { put("wffXml", imageFace) }
+        .let {
+          if (body.isEmpty()) it.toString()
+          else JsonObject(it + Json.parseToJsonElement(body).jsonObject).toString()
+        },
+    )
+
+  @Test
+  fun `a design's pinned assets are packaged as the drawables its XML names`() {
+    start(pinned = mapOf("case_steel" to PNG))
+    val (code, body) = startFace("")
+    assertEquals(201, code, body)
+    val packaged = runtime.packaged.last()
+    assertContentEquals(PNG, packaged.assets["drawable/case_steel.png"])
+  }
+
+  @Test
+  fun `an asset the request supplies wins over the pinned one at the same path`() {
+    start(pinned = mapOf("case_steel" to PNG))
+    val sent = byteArrayOf(9, 9, 9)
+    val (code, body) =
+      startFace(
+        buildJsonObject {
+          put(
+            "assets",
+            buildJsonObject {
+              put("drawable/case_steel.png", Base64.getEncoder().encodeToString(sent))
+            },
+          )
+        }
+          .toString(),
+      )
+    assertEquals(201, code, body)
+    assertContentEquals(sent, runtime.packaged.last().assets["drawable/case_steel.png"])
+  }
+
+  @Test
+  fun `a request asset replaces a pinned one of the same resource under another extension`() {
+    val merged =
+      WatchFaceDrawables.merged(
+        pinned =
+          mapOf("drawable/logo.png" to byteArrayOf(1), "drawable-hdpi/logo.png" to byteArrayOf(2)),
+        requested = mapOf("drawable/logo.webp" to byteArrayOf(3)),
+      )
+    // One `drawable/logo` (the request's), and the other density's variant kept.
+    assertEquals(setOf("drawable/logo.webp", "drawable-hdpi/logo.png"), merged.keys)
+  }
+
+  @Test
+  fun `a bitmap the face names and nothing supplies is refused before packaging`() {
+    start()
+    val (code, body) = startFace("")
+    assertEquals(422, code, body)
+    val refusal = obj(body)
+    assertEquals(WatchFaceDrawables.MISSING_RESOURCE, refusal["code"]!!.jsonPrimitive.content)
+    assertContains(refusal["reasons"]!!.jsonArray.single().jsonPrimitive.content, "case_steel")
+    assertTrue(runtime.packaged.isEmpty(), "nothing reaches the packager")
+  }
+
+  private val validation = "/api/ui-builder/v1/designs/watch-1/watchface-validation"
+
+  private fun packagerReport(passed: Boolean) =
+    """{"schemaVersion":1,"wffVersion":4,"minimumWffVersion":2,"passed":$passed,""" +
+      """"validationToken":"SECRET-TOKEN","checks":[{"id":"wff-xsd","title":"Schema",""" +
+      """"status":"${if (passed) "passed" else "failed"}","findings":""" +
+      (if (passed) "[]" else """[{"severity":"error","message":"bad","line":3,"column":7}]""") +
+      """},{"id":"push","title":"Watch Face Push","status":"passed","tokenIssued":true,"passedChecks":["a","b"],""" +
+      """"token":"SECRET-TOKEN","memory":{"totalBytes":10,"maxActiveBytes":5,""" +
+      """"maxAmbientBytes":2,"activeLimitBytes":100,"ambientLimitBytes":50},""" +
+      """"contributors":[{"resource":"drawable/case_steel","kind":"image","width":1024,""" +
+      """"height":1024,"format":"png","fileBytes":81234,"decodedBytes":4194304,""" +
+      """"activeBytes":4194304,"ambientBytes":0,"suggestion":"downscale"}]}],"mode":"full"}"""
+
+  @Test
+  fun `validation returns the packager's report with the face it is on, never the token`() {
+    val seen = mutableListOf<Map<String, ByteArray>>()
+    start(
+      validator = { files ->
+        seen += files
+        packagerReport(passed = true)
+      },
+    )
+    assertEquals(404, get(validation).first, "nothing validated yet")
+    val (code, body) = post(validation, """{"wffXml":"<WatchFace/>"}""")
+    assertEquals(200, code, body)
+    assertFalse(body.contains("SECRET-TOKEN"), body)
+    val report = obj(body)
+    assertEquals(true, report["passed"]!!.jsonPrimitive.boolean)
+    assertEquals("watch-1", report["designId"]!!.jsonPrimitive.content)
+    assertEquals(64, report["digest"]!!.jsonPrimitive.content.length)
+    assertTrue(report["ranAtEpochMillis"]!!.jsonPrimitive.long > 0)
+    val push = report["checks"]!!.jsonArray[1].jsonObject
+    assertEquals(true, push["tokenIssued"]!!.jsonPrimitive.boolean)
+    assertEquals(100, push["memory"]!!.jsonObject["activeLimitBytes"]!!.jsonPrimitive.int)
+    assertEquals(
+      listOf("a", "b"),
+      push["passedChecks"]!!.jsonArray.map { it.jsonPrimitive.content },
+    )
+    val contributor = push["contributors"]!!.jsonArray.single().jsonObject
+    assertEquals("downscale", contributor["suggestion"]!!.jsonPrimitive.content)
+    assertEquals("full", report["mode"]!!.jsonPrimitive.content)
+    assertEquals("<WatchFace/>", seen.single()["res/raw/watchface.xml"]!!.decodeToString())
+    // The same face again is the cached report, and GET reads it back.
+    assertEquals(body, post(validation, """{"wffXml":"<WatchFace/>"}""").second)
+    assertEquals(1, seen.size)
+    val (getCode, getBody) = get(validation)
+    assertEquals(200, getCode)
+    assertEquals(body, getBody)
+  }
+
+  @Test
+  fun `a design recreated under the same id never reads the old one's report`() {
+    val validation =
+      WatchFaceValidation(
+        { WatchFaceValidatorAvailability.Ready { packagerReport(passed = true) } },
+      )
+    val source = DwfSource(wffXml = "<WatchFace/>")
+    runBlocking { validation.validate("watch-1", 100L, 3, source) }
+    assertNotNull(validation.latest("watch-1", 100L, 3))
+    assertNull(validation.latest("watch-1", 200L, 3), "another design at the same id and revision")
+  }
+
+  @Test
+  fun `with the flag off the validators are never looked for, and the route says so`() {
+    var looked = 0
+    val off =
+      WatchFaceValidatorAvailability.production(
+        home = directory.toFile(),
+        enabled = { false },
+        sdk = {
+          looked++
+          null
+        },
+        libDir = {
+          looked++
+          null
+        },
+      )
+    val answer = assertIs<WatchFaceValidatorAvailability.Unavailable>(off())
+    assertEquals(WatchFaceValidatorAvailability.DISABLED, answer.code)
+    assertEquals(0, looked)
+    val on =
+      WatchFaceValidatorAvailability.production(
+        home = directory.toFile(),
+        enabled = { true },
+        sdk = { null },
+        libDir = { null },
+      )
+    assertEquals(
+      DwfPreviewSurface.ANDROID_SDK_MISSING,
+      assertIs<WatchFaceValidatorAvailability.Unavailable>(on()).code,
+    )
+  }
+
+  @Test
+  fun `a failing face is a 200 report, not an error`() {
+    start(validator = { packagerReport(passed = false) })
+    val (code, body) = post(validation, """{"wffXml":"<WatchFace/>"}""")
+    assertEquals(200, code, body)
+    val report = obj(body)
+    assertEquals(false, report["passed"]!!.jsonPrimitive.boolean)
+    val finding = report["checks"]!!.jsonArray[0].jsonObject["findings"]!!.jsonArray.single()
+    assertEquals(3, finding.jsonObject["line"]!!.jsonPrimitive.int)
+  }
+
+  @Test
+  fun `a bitmap nothing supplies is a failed check, and the packager is not run`() {
+    var ran = 0
+    start(
+      validator = {
+        ran++
+        packagerReport(passed = true)
+      },
+    )
+    val (code, body) = post(validation, buildJsonObject { put("wffXml", imageFace) }.toString())
+    assertEquals(200, code, body)
+    val report = obj(body)
+    assertEquals(false, report["passed"]!!.jsonPrimitive.boolean)
+    val check = report["checks"]!!.jsonArray.single().jsonObject
+    assertEquals(WatchFaceValidation.MISSING_RESOURCE_CHECK, check["id"]!!.jsonPrimitive.content)
+    assertContains(check["findings"]!!.jsonArray.single().toString(), "case_steel")
+    assertEquals(0, ran)
+  }
+
+  @Test
+  fun `validation packages the design's pinned drawables`() {
+    val seen = mutableListOf<Map<String, ByteArray>>()
+    start(
+      pinned = mapOf("case_steel" to PNG),
+      validator = { files ->
+        seen += files
+        packagerReport(passed = true)
+      },
+    )
+    val (code, body) = post(validation, buildJsonObject { put("wffXml", imageFace) }.toString())
+    assertEquals(200, code, body)
+    assertContentEquals(PNG, seen.single()["res/drawable/case_steel.png"])
+  }
+
+  @Test
+  fun `a packager refusal before any report is a failed check with its diagnostics`() {
+    start(validator = { throw DwfPackagingFailed(listOf("error[aapt2]: link failed")) })
+    val (code, body) = post(validation, """{"wffXml":"<WatchFace/>"}""")
+    assertEquals(200, code, body)
+    val check = obj(body)["checks"]!!.jsonArray.single().jsonObject
+    assertEquals(WatchFaceValidation.PACKAGER_CHECK, check["id"]!!.jsonPrimitive.content)
+    val finding = check["findings"]!!.jsonArray.single().jsonObject
+    assertEquals("link failed", finding["message"]!!.jsonPrimitive.content)
+    assertEquals("aapt2", finding["path"]!!.jsonPrimitive.content)
+  }
+
+  @Test
+  fun `validation without a validator is a 503, and an unusable request a 422`() {
+    start()
+    assertEquals(503, post(validation, """{"wffXml":"<WatchFace/>"}""").first)
+    assertEquals(422, post(validation, "{}").first)
+    assertEquals(400, post(validation, "not json").first)
   }
 
   @Test
@@ -484,4 +731,19 @@ class ServeUiBuilderDwfRoutesTest {
             ),
         ),
     )
+
+  private companion object {
+    /** A real 1x1 PNG: the asset port sniffs uploads and refuses anything else. */
+    val PNG: ByteArray =
+      java.io
+        .ByteArrayOutputStream()
+        .also {
+          javax.imageio.ImageIO.write(
+            java.awt.image.BufferedImage(1, 1, java.awt.image.BufferedImage.TYPE_INT_ARGB),
+            "png",
+            it,
+          )
+        }
+        .toByteArray()
+  }
 }

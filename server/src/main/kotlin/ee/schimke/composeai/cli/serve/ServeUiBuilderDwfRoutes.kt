@@ -3,6 +3,7 @@ package ee.schimke.composeai.cli.serve
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.GetSnapshotRequestV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
+import ee.schimke.composeai.uibuilder.service.UiBuilderAssetStore
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import io.ktor.http.ContentType
@@ -54,6 +55,24 @@ internal constructor(
    * start request.
    */
   internal val sourceFor: (DesignDocumentV1) -> DwfSource? = { null },
+  /**
+   * Where a design's uploaded asset bytes are, so its pinned assets are packaged as the drawables
+   * its WFF names ([WatchFaceDrawables]); the editor sends only the XML.
+   */
+  internal val assets: UiBuilderAssetStore? = null,
+  /**
+   * The packager's validators run on a revision's face (`watchface-validation`). Unavailable by
+   * default; the host wires [WatchFaceValidatorAvailability.production].
+   */
+  internal val validation: WatchFaceValidation =
+    WatchFaceValidation(
+      {
+        WatchFaceValidatorAvailability.Unavailable(
+          DwfPreviewSurface.PACKAGING_UNAVAILABLE,
+          "this server does not validate watch faces",
+        )
+      },
+    ),
   /** How often a ticking session redraws. One second is the watch's own granularity. */
   internal val tickMillis: Long = 1000,
 )
@@ -62,6 +81,8 @@ internal const val UI_BUILDER_DWF_PREVIEW_PATH = "/api/ui-builder/v1/designs/{de
 internal const val UI_BUILDER_DWF_STATUS_PATH = "$UI_BUILDER_DWF_PREVIEW_PATH/status"
 internal const val UI_BUILDER_DWF_SESSION_PATH = "$UI_BUILDER_DWF_PREVIEW_PATH/{sessionId}"
 internal const val UI_BUILDER_DWF_SOCKET_PATH = "$UI_BUILDER_DWF_SESSION_PATH/ws"
+internal const val UI_BUILDER_WATCHFACE_VALIDATION_PATH =
+  "/api/ui-builder/v1/designs/{designId}/watchface-validation"
 
 /**
  * The editor-supplied part of a start request. All optional: a bare `{}` asks the server to derive
@@ -148,72 +169,25 @@ internal fun Route.installUiBuilderDwfRoutes(
    */
   post(UI_BUILDER_DWF_PREVIEW_PATH) {
     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
-    val actor =
-      when (val decision = authorization.authorize(call, UiBuilderRouteCapability.EXPORT)) {
-        is UiBuilderAuthorizationDecision.Authorized -> decision.actor
-        UiBuilderAuthorizationDecision.Missing -> {
-          call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
-          call.respondText("authentication is required", status = HttpStatusCode.Unauthorized)
-          return@post
-        }
-        UiBuilderAuthorizationDecision.Forbidden -> {
-          call.respondText("UI-builder export access required", status = HttpStatusCode.Forbidden)
-          return@post
-        }
-      }
-    val designId = call.parameters["designId"].orEmpty()
-    val revisionParameter = call.request.queryParameters["revision"]
-    val revision = revisionParameter?.toLongOrNull()
-    if (designId.isBlank() || (revisionParameter != null && (revision == null || revision < 0))) {
-      call.respondText(
-        "a design id and, if given, a non-negative revision are required",
-        status = HttpStatusCode.BadRequest,
-      )
-      return@post
-    }
-    val snapshot =
-      service.executeMapped(GetSnapshotRequestV1(designId = designId, revision = revision), actor)
-        as? UiBuilderServiceResponse.Snapshot
-    if (snapshot == null) {
-      call.respondText("no such design", status = HttpStatusCode.NotFound)
-      return@post
-    }
-    val document = snapshot.snapshot.state.document
-    if (!dwf.isDwfCatalog(document.catalogPin.systemId)) {
-      call.respondDwfRefusal(
-        HttpStatusCode.UnprocessableEntity,
-        DwfPreviewSurface.SOURCE_INVALID,
-        "catalog `${document.catalogPin.systemId}` does not declare the " +
-          "`${DwfPreviewSurface.BACKEND}` native backend, so this design is not a watch face",
-      )
-      return@post
-    }
-    val bytes =
-      withContext(Dispatchers.IO) {
-        call.receiveStream().use { it.readNBytes(MAX_UI_BUILDER_REQUEST_BYTES + 1) }
-      }
-    if (bytes.size > MAX_UI_BUILDER_REQUEST_BYTES) {
-      call.respondText("request body too large", status = HttpStatusCode.PayloadTooLarge)
-      return@post
-    }
-    val request =
-      try {
-        UI_BUILDER_JSON.decodeFromString(
-          DwfPreviewStartRequestV1.serializer(),
-          bytes.toString(StandardCharsets.UTF_8).ifBlank { "{}" },
-        )
-      } catch (_: SerializationException) {
-        call.respondText(
-          "dwf-preview request body is not valid JSON for this route",
-          status = HttpStatusCode.BadRequest,
-        )
-        return@post
-      }
+    val (actor, designId, document, request) =
+      call.receiveDwfDesignRequest(service, authorization, dwf) ?: return@post
     val source =
       when (val resolved = resolveDwfSource(dwf, document, request)) {
         is ResolvedSource.Ok -> resolved.source
+        is ResolvedSource.Missing -> {
+          call.respondDwfRefusal(
+            HttpStatusCode.UnprocessableEntity,
+            WatchFaceDrawables.MISSING_RESOURCE,
+            resolved.missing,
+          )
+          return@post
+        }
         is ResolvedSource.Refused -> {
-          call.respondDwfRefusal(HttpStatusCode.UnprocessableEntity, resolved.code, resolved.reason)
+          call.respondDwfRefusal(
+            HttpStatusCode.UnprocessableEntity,
+            resolved.code,
+            resolved.reasons,
+          )
           return@post
         }
       }
@@ -244,6 +218,93 @@ internal fun Route.installUiBuilderDwfRoutes(
         )
       }
     }
+  }
+
+  /**
+   * Validate one revision's face with the packager's validators (Google's WFF validator, the memory
+   * footprint, the Watch Face Push checks) and say what each found. EXPORT, like starting a
+   * session: the same source goes to the same packager. A failing face is a 200 report with
+   * `passed: false`; only a request that names no usable face is a 422.
+   */
+  post(UI_BUILDER_WATCHFACE_VALIDATION_PATH) {
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    val (_, designId, document, request) =
+      call.receiveDwfDesignRequest(service, authorization, dwf) ?: return@post
+    val result =
+      when (val resolved = resolveDwfSource(dwf, document, request)) {
+        is ResolvedSource.Ok ->
+          dwf.validation.validate(
+            designId,
+            document.createdAtEpochMillis,
+            document.revision,
+            resolved.source,
+          )
+        is ResolvedSource.Missing ->
+          WatchFaceValidation.Result.Ok(
+            dwf.validation.missingResources(
+              designId,
+              document.createdAtEpochMillis,
+              document.revision,
+              resolved.source,
+              resolved.missing,
+            ),
+          )
+        is ResolvedSource.Refused -> {
+          call.respondDwfRefusal(
+            HttpStatusCode.UnprocessableEntity,
+            resolved.code,
+            resolved.reasons,
+          )
+          return@post
+        }
+      }
+    when (result) {
+      is WatchFaceValidation.Result.Ok ->
+        call.respondText(
+          UI_BUILDER_JSON.encodeToString(WatchFaceValidationReportV1.serializer(), result.report),
+          ContentType.Application.Json,
+        )
+      is WatchFaceValidation.Result.Unavailable ->
+        call.respondDwfRefusal(HttpStatusCode.ServiceUnavailable, result.code, result.reason)
+      is WatchFaceValidation.Result.Failed ->
+        call.respondDwfRefusal(HttpStatusCode.BadGateway, result.code, result.reason)
+    }
+  }
+
+  /** The last report on the design's current revision (or `?revision=`), else 404. */
+  get(UI_BUILDER_WATCHFACE_VALIDATION_PATH) {
+    call.response.headers.append(HttpHeaders.CacheControl, "no-store")
+    val actor =
+      (authorization.authorize(call, UiBuilderRouteCapability.READ)
+          as? UiBuilderAuthorizationDecision.Authorized)
+        ?.actor
+    val designId = call.parameters["designId"].orEmpty()
+    val revisionParameter = call.request.queryParameters["revision"]
+    val revision = revisionParameter?.toLongOrNull()
+    if (revisionParameter != null && (revision == null || revision < 0)) {
+      call.respondText("a revision, if given, is non-negative", status = HttpStatusCode.BadRequest)
+      return@get
+    }
+    val snapshot =
+      actor
+        ?.takeIf { designId.isNotBlank() }
+        ?.let {
+          service.executeMapped(GetSnapshotRequestV1(designId = designId, revision = revision), it)
+            as? UiBuilderServiceResponse.Snapshot
+        }
+    val report = snapshot?.let {
+      it.snapshot.state.document.let { document ->
+        dwf.validation.latest(designId, document.createdAtEpochMillis, document.revision)
+      }
+    }
+    if (report == null) {
+      call.respondText("no validation report for this revision", status = HttpStatusCode.NotFound)
+      return@get
+    }
+    call.respondText(
+      UI_BUILDER_JSON.encodeToString(WatchFaceValidationReportV1.serializer(), report),
+      ContentType.Application.Json,
+    )
   }
 
   delete(UI_BUILDER_DWF_SESSION_PATH) {
@@ -277,6 +338,87 @@ internal fun Route.installUiBuilderDwfRoutes(
     }
     serveDwfSocket(dwf, session)
   }
+}
+
+private data class DwfDesignRequest(
+  val actor: AuthenticatedUiBuilderActor,
+  val designId: String,
+  val document: DesignDocumentV1,
+  val request: DwfPreviewStartRequestV1,
+)
+
+/**
+ * An EXPORT-authorised request on one revision of a watch-face design, with its optional
+ * [DwfPreviewStartRequestV1] body; null once a refusal has been written.
+ */
+private suspend fun ApplicationCall.receiveDwfDesignRequest(
+  service: UiBuilderServicePort,
+  authorization: ServeUiBuilderAuthorization,
+  dwf: UiBuilderDwfPreview,
+): DwfDesignRequest? {
+  val call = this
+  val actor =
+    when (val decision = authorization.authorize(call, UiBuilderRouteCapability.EXPORT)) {
+      is UiBuilderAuthorizationDecision.Authorized -> decision.actor
+      UiBuilderAuthorizationDecision.Missing -> {
+        call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
+        call.respondText("authentication is required", status = HttpStatusCode.Unauthorized)
+        return null
+      }
+      UiBuilderAuthorizationDecision.Forbidden -> {
+        call.respondText("UI-builder export access required", status = HttpStatusCode.Forbidden)
+        return null
+      }
+    }
+  val designId = call.parameters["designId"].orEmpty()
+  val revisionParameter = call.request.queryParameters["revision"]
+  val revision = revisionParameter?.toLongOrNull()
+  if (designId.isBlank() || (revisionParameter != null && (revision == null || revision < 0))) {
+    call.respondText(
+      "a design id and, if given, a non-negative revision are required",
+      status = HttpStatusCode.BadRequest,
+    )
+    return null
+  }
+  val snapshot =
+    service.executeMapped(GetSnapshotRequestV1(designId = designId, revision = revision), actor)
+      as? UiBuilderServiceResponse.Snapshot
+  if (snapshot == null) {
+    call.respondText("no such design", status = HttpStatusCode.NotFound)
+    return null
+  }
+  val document = snapshot.snapshot.state.document
+  if (!dwf.isDwfCatalog(document.catalogPin.systemId)) {
+    call.respondDwfRefusal(
+      HttpStatusCode.UnprocessableEntity,
+      DwfPreviewSurface.SOURCE_INVALID,
+      "catalog `${document.catalogPin.systemId}` does not declare the " +
+        "`${DwfPreviewSurface.BACKEND}` native backend, so this design is not a watch face",
+    )
+    return null
+  }
+  val bytes =
+    withContext(Dispatchers.IO) {
+      call.receiveStream().use { it.readNBytes(MAX_UI_BUILDER_REQUEST_BYTES + 1) }
+    }
+  if (bytes.size > MAX_UI_BUILDER_REQUEST_BYTES) {
+    call.respondText("request body too large", status = HttpStatusCode.PayloadTooLarge)
+    return null
+  }
+  val request =
+    try {
+      UI_BUILDER_JSON.decodeFromString(
+        DwfPreviewStartRequestV1.serializer(),
+        bytes.toString(StandardCharsets.UTF_8).ifBlank { "{}" },
+      )
+    } catch (_: SerializationException) {
+      call.respondText(
+        "request body is not valid JSON for this route",
+        status = HttpStatusCode.BadRequest,
+      )
+      return null
+    }
+  return DwfDesignRequest(actor, designId, document, request)
 }
 
 /**
@@ -400,7 +542,12 @@ internal fun parseDwfClientMessage(text: String): DwfClientMessage =
 private sealed interface ResolvedSource {
   data class Ok(val source: DwfSource) : ResolvedSource
 
-  data class Refused(val code: String, val reason: String) : ResolvedSource
+  /** [source] names bitmaps nothing supplies; [missing] says which, for each. */
+  data class Missing(val source: DwfSource, val missing: List<String>) : ResolvedSource
+
+  data class Refused(val code: String, val reasons: List<String>) : ResolvedSource {
+    constructor(code: String, reason: String) : this(code, listOf(reason))
+  }
 }
 
 /** The editor's XML if it sent any, else what the server derives; never both silently merged. */
@@ -418,7 +565,7 @@ private fun resolveDwfSource(
           "this design does not export to Watch Face Format (the code pane lists why), or this " +
             "server cannot derive it; send the editor's `wffXml` (and `assets`) in the request body",
         )
-    return ResolvedSource.Ok(derived)
+    return withPinnedDrawables(dwf, document, derived, requested = emptyMap())
   }
   val assets = LinkedHashMap<String, ByteArray>()
   for ((path, encoded) in request.assets) {
@@ -436,13 +583,30 @@ private fun resolveDwfSource(
     DwfSource(
       wffXml = xml,
       wffVersion = request.wffVersion,
-      assets = assets,
       label = request.label?.take(64)?.takeIf { it.isNotBlank() } ?: "watch face",
     )
-  source.problem()?.let {
+  return withPinnedDrawables(dwf, document, source, requested = assets)
+}
+
+/**
+ * [source] with [document]'s pinned assets as drawables under [requested] (which win for the same
+ * path), refused when its XML names a bitmap neither supplies: the packager's own report of that is
+ * an opaque `memory-footprint` error from the runtime.
+ */
+private fun withPinnedDrawables(
+  dwf: UiBuilderDwfPreview,
+  document: DesignDocumentV1,
+  source: DwfSource,
+  requested: Map<String, ByteArray>,
+): ResolvedSource {
+  val packaged = packagedWithPinnedDrawables(document, source, requested, dwf.assets)
+  if (packaged.missing.isNotEmpty()) {
+    return ResolvedSource.Missing(packaged.source, packaged.missing)
+  }
+  packaged.source.problem()?.let {
     return ResolvedSource.Refused(DwfPreviewSurface.SOURCE_INVALID, it)
   }
-  return ResolvedSource.Ok(source)
+  return ResolvedSource.Ok(packaged.source)
 }
 
 /** The session, if it exists, is on this design, and belongs to this actor. */
@@ -471,9 +635,15 @@ private suspend fun ApplicationCall.respondDwfRefusal(
   status: HttpStatusCode,
   code: String,
   reason: String,
+) = respondDwfRefusal(status, code, listOf(reason))
+
+private suspend fun ApplicationCall.respondDwfRefusal(
+  status: HttpStatusCode,
+  code: String,
+  reasons: List<String>,
 ) {
   respondText(
-    UI_BUILDER_JSON.encodeToString(DwfPreviewRefusalV1(code = code, reasons = listOf(reason))),
+    UI_BUILDER_JSON.encodeToString(DwfPreviewRefusalV1(code = code, reasons = reasons)),
     ContentType.Application.Json,
     status,
   )

@@ -2604,6 +2604,8 @@ class ServeHttpServer(
   fun stop() {
     readinessProber?.interrupt()
     stallWatchdog.stop()
+    // Its background reconcile and build threads hold this server's catalog sources.
+    watchFacePush?.close()
     thumbWarmer.stop()
     server.stop(gracePeriodMillis = 500, timeoutMillis = 2000)
     uiBuilderPrecompressed.close()

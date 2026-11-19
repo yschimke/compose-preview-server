@@ -30,8 +30,6 @@ internal object DwfPackaging {
   /** A drawable a face's `watch_face_info.xml` points at when the design supplies none. */
   private const val PREVIEW_PATH = "drawable/preview.png"
 
-  private val PREVIEW_PRESENT = Regex("drawable[^/]*/preview\\.(png|webp|jpe?g)")
-
   /**
    * The bundle's files keyed by bundle-relative path. `res/xml/watch_face_info.xml` is always the
    * server's default, and a `drawable/preview.png` is supplied unless the design's
@@ -63,7 +61,13 @@ internal object DwfPackaging {
     files[WffBundleLayout.WATCH_FACE_PATH] = source.wffXml.encodeToByteArray()
     files[WffBundleLayout.WATCH_FACE_INFO_PATH] =
       WffWatchFaceInfo().toDocument().toXml().encodeToByteArray()
-    if (files.keys.none { PREVIEW_PRESENT.matches(it.removePrefix("res/")) }) {
+    // Any `drawable*/preview.*` is the preview resource whatever its format (a pinned GIF too):
+    // Android names a drawable without its extension, so a second one would be a duplicate.
+    if (
+      files.keys.none {
+        WatchFaceDrawables.drawableName(it.removePrefix("res/")) == WatchFaceDrawables.PREVIEW
+      }
+    ) {
       files["res/$PREVIEW_PATH"] = placeholderPreview()
     }
     return files
@@ -197,6 +201,22 @@ internal class WffPackagerProcess(
     arguments: (work: File) -> List<String>,
     environment: Map<String, String>,
     after: (work: File) -> T,
+  ): T = run("pack", files, arguments, environment, { exit, _ -> exit == 0 }, after)
+
+  /**
+   * Run `wff-packager <subcommand> --bundle <dir>` on [files]. [succeeded] decides from the exit
+   * code and what the run left in the scratch directory whether [after] reads it: `validate` exits
+   * non-zero on a failing face and still writes its report.
+   *
+   * @throws DwfPackagingFailed when [succeeded] says no, with the packager's diagnostics.
+   */
+  fun <T> run(
+    subcommand: String,
+    files: Map<String, ByteArray>,
+    arguments: (work: File) -> List<String>,
+    environment: Map<String, String>,
+    succeeded: (exitCode: Int, work: File) -> Boolean,
+    after: (work: File) -> T,
   ): T {
     val work = Files.createTempDirectory("dwf-pack").toFile()
     try {
@@ -217,7 +237,7 @@ internal class WffPackagerProcess(
           "-cp",
           libDir.resolve("*").path,
           "ee.schimke.watchface.packager.MainKt",
-          "pack",
+          subcommand,
           "--bundle",
           bundle.path,
         ) + arguments(work)
@@ -243,7 +263,7 @@ internal class WffPackagerProcess(
         throw DwfRuntimeException("wff-packager did not finish in ${timeoutSeconds}s")
       }
       val output = if (log.isFile) log.readText() else ""
-      if (process.exitValue() != 0) throw DwfPackagingFailed(diagnostics(output))
+      if (!succeeded(process.exitValue(), work)) throw DwfPackagingFailed(diagnostics(output))
       return after(work)
     } finally {
       work.deleteRecursively()

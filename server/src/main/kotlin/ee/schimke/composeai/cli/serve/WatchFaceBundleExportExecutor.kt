@@ -2,25 +2,19 @@ package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.export.UiBuilderCatalogPlatform
 import ee.schimke.composeai.uibuilder.export.WatchFaceXmlExporter
-import ee.schimke.composeai.uibuilder.protocol.AssetBindingV1
-import ee.schimke.composeai.uibuilder.protocol.CatalogAssetSourceV1
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
-import ee.schimke.composeai.uibuilder.protocol.EmbeddedAssetSourceV1
 import ee.schimke.composeai.uibuilder.protocol.ExportArtifactV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDiagnosticV1
 import ee.schimke.composeai.uibuilder.protocol.ExportEncodingV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
-import ee.schimke.composeai.uibuilder.protocol.StringValueV1
-import ee.schimke.composeai.uibuilder.protocol.UploadedAssetSourceV1
 import ee.schimke.composeai.uibuilder.service.RevisionPinnedUiBuilderExport
 import ee.schimke.composeai.uibuilder.service.UiBuilderAssetStore
 import ee.schimke.composeai.uibuilder.service.UiBuilderExportExecutor
 import ee.schimke.watchface.wff.WffAssets
 import ee.schimke.watchface.wff.WffBundle
 import ee.schimke.watchface.wff.WffBundleLayout
-import ee.schimke.watchface.wff.WffElement
 import ee.schimke.watchface.wff.WffManifest
 import ee.schimke.watchface.wff.WffResourceFile
 import ee.schimke.watchface.wff.WffVersion
@@ -128,16 +122,10 @@ internal class WatchFaceBundleExportExecutor(
     const val EXPORT_REFUSED = "WFF_EXPORT_REFUSED"
 
     /** A `resource` attribute naming a bitmap the design does not pin. */
-    const val MISSING_RESOURCE = "WFF_BUNDLE_MISSING_RESOURCE"
+    const val MISSING_RESOURCE = WatchFaceDrawables.MISSING_RESOURCE
 
     /** A pinned asset whose bytes this host cannot read, or whose key is no drawable name. */
-    const val UNUSABLE_ASSET = "WFF_BUNDLE_UNUSABLE_ASSET"
-
-    /** The drawable `watch_face_info.xml` names as the face's preview. */
-    private const val PREVIEW = "preview"
-
-    /** An Android resource file name, which is what a WFF `resource` attribute refers to. */
-    private val RESOURCE_NAME = Regex("[a-z][a-z0-9_]*")
+    const val UNUSABLE_ASSET = WatchFaceDrawables.UNUSABLE_ASSET
 
     private val NODE_REASON = Regex("^nodes\\.([^ .(:]+)")
 
@@ -174,45 +162,10 @@ internal class WatchFaceBundleExportExecutor(
         )
       }
 
-    private fun missingResources(document: DesignDocumentV1, xml: String): List<Refusal> {
-      val pinned = document.assets.keys.filter(RESOURCE_NAME::matches).toSet()
-      val named = WffXmlParser.parseOrNull(xml)?.root?.let(::resourceNames).orEmpty()
-      return named
-        .filterNot { it in pinned }
-        .map { name ->
-          Refusal(
-            MISSING_RESOURCE,
-            "resource \"$name\": the face draws a bitmap named $name, and the design pins no " +
-              "asset under that key; upload one with ui_builder_put_asset (assetKey \"$name\")",
-            nodeNaming(document, name),
-          )
-        }
-    }
-
-    /**
-     * The bitmap names `resource` attributes refer to, in document order. An expression (a
-     * complication's `[COMPLICATION.SMALL_IMAGE]`) is the watch's, not a file the bundle supplies.
-     */
-    private fun resourceNames(root: WffElement): List<String> {
-      val out = LinkedHashSet<String>()
-      fun walk(element: WffElement) {
-        element
-          .attr("resource")
-          ?.trim()
-          ?.takeIf { it.isNotEmpty() && !it.startsWith("[") }
-          ?.let(out::add)
-        element.childElements.forEach(::walk)
+    private fun missingResources(document: DesignDocumentV1, xml: String): List<Refusal> =
+      WatchFaceDrawables.missing(xml, WatchFaceDrawables.pinnedNames(document), document).map {
+        Refusal(it.code, it.message, it.nodeId)
       }
-      walk(root)
-      return out.toList()
-    }
-
-    private fun nodeNaming(document: DesignDocumentV1, resource: String): String? =
-      document.nodes.entries
-        .firstOrNull { (_, node) ->
-          (node.properties["resource"] as? StringValueV1)?.value?.trim() == resource
-        }
-        ?.key
 
     /**
      * [document] as bundle files, or every reason it cannot be one. [preview] answers the PNG
@@ -234,39 +187,28 @@ internal class WatchFaceBundleExportExecutor(
       exported.notes.forEach {
         diagnostics += ExportDiagnosticV1(DiagnosticSeverityV1.INFO, "WFF_EXPORT_NOTE", it)
       }
-      val named =
-        WffXmlParser.parseOrNull(exported.xml)?.root?.let(::resourceNames).orEmpty().toSet()
-      val files = mutableListOf<WffResourceFile>()
-      for ((key, binding) in document.assets.toSortedMap()) {
-        val required = key in named || key == PREVIEW
-        fun unusable(why: String) {
-          val diagnostic =
-            ExportDiagnosticV1(
-              if (required) DiagnosticSeverityV1.ERROR else DiagnosticSeverityV1.WARNING,
-              UNUSABLE_ASSET,
-              "assets.$key: $why" + if (required) "" else "; it is left out of the bundle",
-            )
-          if (required) errors += diagnostic else diagnostics += diagnostic
-        }
-        if (!RESOURCE_NAME.matches(key)) {
-          unusable(
-            "an asset key becomes a drawable name, which is lowercase letters, digits and " +
-              "underscores starting with a letter",
+      val pinned =
+        WatchFaceDrawables.pinned(
+          document,
+          assets,
+          WatchFaceDrawables.referenced(exported.xml).toSet(),
+        )
+      for (problem in pinned.problems) {
+        val diagnostic =
+          ExportDiagnosticV1(
+            if (problem.required) DiagnosticSeverityV1.ERROR else DiagnosticSeverityV1.WARNING,
+            problem.code,
+            problem.message,
+            problem.nodeId,
           )
-          continue
-        }
-        val extension = EXTENSIONS[binding.mediaType.substringBefore(';').trim().lowercase()]
-        if (extension == null) {
-          unusable("${binding.mediaType} is not a bitmap a watch face can draw")
-          continue
-        }
-        val bytes = bytesOf(binding, assets)
-        if (bytes == null) {
-          unusable("the bytes behind this asset are not on this host")
-          continue
-        }
-        files += WffResourceFile("drawable", "$key.$extension", bytes)
+        if (problem.required) errors += diagnostic else diagnostics += diagnostic
       }
+      val files =
+        pinned.files
+          .map { (path, bytes) ->
+            WffResourceFile(path.substringBefore('/'), path.substringAfter('/'), bytes)
+          }
+          .toMutableList()
       if (errors.isNotEmpty()) return Bundle.Refused(errors + diagnostics)
 
       val version = WffVersion.fromNumber(exported.wffVersion)
@@ -281,12 +223,12 @@ internal class WatchFaceBundleExportExecutor(
           ),
         )
       }
-      if (files.none { it.fileName.substringBeforeLast('.') == PREVIEW }) {
+      if (files.none { it.fileName.substringBeforeLast('.') == WatchFaceDrawables.PREVIEW }) {
         val (png, why) = preview()
         files +=
           WffResourceFile(
             "drawable",
-            "$PREVIEW.png",
+            "${WatchFaceDrawables.PREVIEW}.png",
             png
               ?: placeholderPreview().also {
                 diagnostics +=
@@ -334,23 +276,6 @@ internal class WatchFaceBundleExportExecutor(
           .digest(document.id.encodeToByteArray())
           .joinToString("") { "%02x".format(it) }
           .take(16)
-
-    private val EXTENSIONS =
-      mapOf(
-        "image/png" to "png",
-        "image/jpeg" to "jpg",
-        "image/webp" to "webp",
-        "image/gif" to "gif",
-      )
-
-    private fun bytesOf(binding: AssetBindingV1, assets: UiBuilderAssetStore?): ByteArray? =
-      when (val source = binding.source) {
-        is UploadedAssetSourceV1 -> assets?.read(source.storageKey)
-        is EmbeddedAssetSourceV1 ->
-          runCatching { Base64.getDecoder().decode(source.base64) }.getOrNull()
-        is CatalogAssetSourceV1 -> null
-        else -> null
-      }
 
     private fun Refusal.diagnostic() =
       ExportDiagnosticV1(DiagnosticSeverityV1.ERROR, code, message, nodeId)

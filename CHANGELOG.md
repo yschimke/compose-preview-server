@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.181.0](https://github.com/yschimke/compose-preview-server/compare/v3.180.0...v3.181.0) (2026-11-19)
+
+
+### Features
+
+* **ui-builder:** export watch faces as WFF source bundles ([#2012](https://github.com/yschimke/compose-preview-server/issues/2012)) ([992fcba](https://github.com/yschimke/compose-preview-server/commit/992fcba9abaa7b382aa58de7380c7b5006bb3989))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.101.0 ([#2008](https://github.com/yschimke/compose-preview-server/issues/2008)) ([1c6914a](https://github.com/yschimke/compose-preview-server/commit/1c6914a3f2c3b23923183b8f46f7b2b68c520f3a))
+* **ui-builder:** package a watch face's pinned assets in dwf-preview and Watch Face Push ([#2013](https://github.com/yschimke/compose-preview-server/issues/2013)) ([15ad2eb](https://github.com/yschimke/compose-preview-server/commit/15ad2eb893b0380a79c03d311a57b8e3ed9a8c66))
+* **watchface-push:** list catalog faces from the bundle on disk, not the session ([#2010](https://github.com/yschimke/compose-preview-server/issues/2010)) ([e3da4b2](https://github.com/yschimke/compose-preview-server/commit/e3da4b2217d8689c28f9710625e2fea8026ca728))
+
 ## [3.180.0](https://github.com/yschimke/compose-preview-server/compare/v3.179.0...v3.180.0) (2026-11-19)
 
 

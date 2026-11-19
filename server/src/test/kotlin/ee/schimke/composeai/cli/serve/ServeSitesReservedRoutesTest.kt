@@ -90,6 +90,7 @@ class ServeSitesReservedRoutesTest {
       "WatchFacePush.BASE_PATH" to WatchFacePush.BASE_PATH,
       "WatchFacePush.LINK_PATH" to WatchFacePush.LINK_PATH,
       "WatchFacePush.PUBLICATION_PATH" to WatchFacePush.PUBLICATION_PATH,
+      "WatchFacePush.INSTALLS_PATH" to WatchFacePush.INSTALLS_PATH,
     )
 
   /**

@@ -10,8 +10,11 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import okhttp3.FormBody
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -52,6 +55,11 @@ class WatchFacePushRoutesTest {
   private val packagerLog: File
     get() = dir.resolve("packager.log").toFile()
 
+  private val drawablesLog: File
+    get() = dir.resolve("drawables.log").toFile()
+
+  private val assetStore by lazy { FileUiBuilderAssetStore(dir.resolve("assets")) }
+
   /** A `java` that is wff-packager's CLI as far as this server can tell. */
   private fun fakeJava(): File =
     dir.resolve("fake-java.sh").toFile().apply {
@@ -70,6 +78,10 @@ class WatchFacePushRoutesTest {
           "  esac\n" +
           "  shift\n" +
           "done\n" +
+          // What the build packaged as drawables: "<versionCode> <file> <bytes>" per file.
+          "if [ -d \"\$bundle/res/drawable\" ]; then for f in \"\$bundle\"/res/drawable/*; do " +
+          "echo \"\$vc \$(basename \"\$f\") \$(wc -c < \"\$f\" | tr -d ' ')\" >> ${drawablesLog.path}; " +
+          "done; fi\n" +
           "if grep -q bad \"\$bundle/res/raw/watchface.xml\"; then\n" +
           "  echo 'error[wff-validator]: bad face' >&2; exit 1\n" +
           "fi\n" +
@@ -110,6 +122,7 @@ class WatchFacePushRoutesTest {
         limits = UiBuilderServiceLimits(),
         catalogs = benchmarkCatalogExecutor(),
         exporter = UiBuilderExportExecutor { error("no export in this test") },
+        assets = assetStore,
       )
     push =
       WatchFacePush(
@@ -126,6 +139,7 @@ class WatchFacePushRoutesTest {
         preview = { _, designId, _ -> "png:$designId".toByteArray() },
         signInPath = { "/auth/github/start?return=$it" },
         clock = { now },
+        assets = assetStore,
       )
     return ServeHttpServer(
         host = "127.0.0.1",
@@ -450,6 +464,78 @@ class WatchFacePushRoutesTest {
   }
 
   @Test
+  fun `install reports are kept per watch and design, and only the owner reads them`() {
+    start()
+    createDesign(alice, "aurora", "Aurora")
+    assertEquals(200, publish(alice, "aurora").code)
+    val wrist = link(alice, "Wrist")
+    val spare = link(alice, "Spare")
+    val bobs = link(bob, "Bob's")
+    fun report(token: String, event: App.InstallEvent) =
+      send("POST", "$api/installs", App.json.encodeToString(event), bearer = token).code
+    assertEquals(204, report(wrist, App.InstallEvent("aurora", 1, "failed", errorKind = "x")))
+    assertEquals(
+      204,
+      report(
+        wrist,
+        App.InstallEvent(
+          "aurora",
+          1,
+          "activation",
+          wearOsApi = 36,
+          packageName = "ee.schimke.watchface.push.watchfacepush.aurora",
+          activation = "activated",
+          deviceModel = "Pixel Watch 4",
+          wearOsVersion = "6",
+          watchFacePushApiVersion = "1.0.0",
+          appVersion = "1.2.3",
+        ),
+      ),
+    )
+    assertEquals(204, report(spare, App.InstallEvent("aurora", 1, "failed", activation = "bogus")))
+    // Neither a catalog face nor another account's watch is kept.
+    assertEquals(204, report(wrist, App.InstallEvent("c_wear_aurora_1", 1, "installed")))
+    assertEquals(204, report(bobs, App.InstallEvent("aurora", 1, "installed")))
+    assertEquals(400, report(wrist, App.InstallEvent("", 1, "installed")))
+
+    val path = "/api/ui-builder/v1/designs/aurora/watch-installs"
+    assertNotEquals(200, send("GET", path, actor = bob).code)
+    val reply = send("GET", path, actor = alice)
+    assertEquals(200, reply.code, reply.body)
+    val installs =
+      Json.parseToJsonElement(reply.body).jsonObject["installs"]!!.jsonArray.map { it.jsonObject }
+    assertEquals(
+      listOf("Spare", "Wrist"),
+      installs.map { it["deviceName"]!!.jsonPrimitive.content },
+    )
+    val spareRow = installs[0]
+    assertEquals("failed", spareRow["result"]!!.jsonPrimitive.content)
+    assertNull(spareRow["activation"], "an unknown activation is not kept")
+    val wristRow = installs[1]
+    assertEquals("activation", wristRow["result"]!!.jsonPrimitive.content, "the latest replaces")
+    assertEquals("activated", wristRow["activation"]!!.jsonPrimitive.content)
+    assertEquals("Pixel Watch 4", wristRow["deviceModel"]!!.jsonPrimitive.content)
+    assertEquals(36, wristRow["wearOsApi"]!!.jsonPrimitive.int)
+    assertEquals(1, wristRow["version"]!!.jsonPrimitive.long)
+    assertNotNull(wristRow["revisionPublished"])
+    assertNotNull(wristRow["atEpochMillis"])
+    assertFalse(reply.body.contains("wfp_"), "no device token leaks")
+
+    // An unlinked watch's reports go with it.
+    val spareId =
+      Json.parseToJsonElement(send("GET", "$api/devices", actor = alice).body)
+        .jsonObject["devices"]!!
+        .jsonArray
+        .first { it.jsonObject["deviceName"]!!.jsonPrimitive.content == "Spare" }
+        .jsonObject["id"]!!
+        .jsonPrimitive
+        .content
+    assertEquals(204, send("DELETE", "$api/devices/$spareId", actor = alice).code)
+    val after = Json.parseToJsonElement(send("GET", path, actor = alice).body).jsonObject
+    assertEquals(1, after["installs"]!!.jsonArray.size)
+  }
+
+  @Test
   fun `unlinking from the page revokes the token`() {
     start()
     val token = link(alice)
@@ -585,6 +671,59 @@ class WatchFacePushRoutesTest {
     designs()
     send("GET", pathOf(aurora.apkUrl))
     assertEquals(2, packagerLog.readLines().size)
+  }
+
+  /** A face drawing the bitmap `case_steel`. */
+  private val imageFace =
+    """<WatchFace width="450" height="450"><Scene><PartImage x="0" y="0" width="450" """ +
+      """height="450"><Image resource="case_steel"/></PartImage></Scene></WatchFace>"""
+
+  private val png: ByteArray by lazy {
+    java.io
+      .ByteArrayOutputStream()
+      .also {
+        javax.imageio.ImageIO.write(
+          java.awt.image.BufferedImage(2, 2, java.awt.image.BufferedImage.TYPE_INT_ARGB),
+          "png",
+          it,
+        )
+      }
+      .toByteArray()
+  }
+
+  @Test
+  fun `a published face carries the design's pinned drawables, across a restart`() {
+    start()
+    createDesign(alice, "steel", "Steel", public = true)
+    runBlocking {
+      assertIs<UiBuilderServiceResponse.OperationOutcome>(
+        service.putAsset(
+          UiBuilderAssetWrite(AuthenticatedUiBuilderActor(alice), "steel", "case_steel", png),
+        ),
+      )
+    }
+    faces["steel"] = imageFace
+    val published = publish(alice, "steel")
+    assertEquals(200, published.code, published.body)
+    assertContains(drawablesLog.readLines(), "1 case_steel.png ${png.size}")
+
+    // A rebuild long after the revision was pruned reads the face back from the push store alone.
+    val reopened = WatchFacePushStore(dir.resolve("watchface-push"), clock = { now })
+    val source = reopened.source(assertNotNull(reopened.publication("steel")))
+    assertContentEquals(png, source.assets["drawable/case_steel.png"])
+    assertEquals(imageFace, source.wffXml)
+  }
+
+  @Test
+  fun `a face naming a bitmap the design does not pin is refused, not left to the packager`() {
+    start()
+    createDesign(alice, "bare", "Bare", public = true)
+    faces["bare"] = imageFace
+    val refused = publish(alice, "bare")
+    assertEquals(422, refused.code, refused.body)
+    assertContains(refused.body, WatchFaceDrawables.MISSING_RESOURCE)
+    assertContains(refused.body, "case_steel")
+    assertFalse(packagerLog.exists(), "nothing reaches the packager")
   }
 
   @Test
@@ -966,6 +1105,13 @@ class WatchFacePushRoutesTest {
       val result: String,
       val errorKind: String? = null,
       val wearOsApi: Int? = null,
+      val packageName: String? = null,
+      val activation: String? = null,
+      val activationError: String? = null,
+      val deviceModel: String? = null,
+      val wearOsVersion: String? = null,
+      val watchFacePushApiVersion: String? = null,
+      val appVersion: String? = null,
     )
   }
 }
