@@ -45,20 +45,28 @@ class ServeUiBuilderDwfRoutesTest {
     dwfCatalog: String = "m3-catalog",
     tickMillis: Long = 1000,
     sourceFor: (ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1) -> DwfSource? = { null },
+    pinned: Map<String, ByteArray> = emptyMap(),
   ): ServeHttpServer {
     runtime.availability = availability
+    val assets = FileUiBuilderAssetStore(directory.resolve("assets"))
     val service =
       PersistentUiBuilderService(
           storage = FileUiBuilderStateStorage(directory),
           limits = UiBuilderServiceLimits(),
           catalogs = benchmarkCatalogExecutor(),
           exporter = UiBuilderExportExecutor { error("no export in this test") },
+          assets = assets,
         )
         .also {
           runBlocking {
             it.execute(
               UiBuilderServiceCall(actor, UiBuilderServiceRequest.CreateDesign(document())),
             )
+            for ((key, bytes) in pinned) {
+              assertIs<UiBuilderServiceResponse.OperationOutcome>(
+                it.putAsset(UiBuilderAssetWrite(actor, "watch-1", key, bytes)),
+              )
+            }
           }
         }
     return ServeHttpServer(
@@ -75,6 +83,7 @@ class ServeUiBuilderDwfRoutesTest {
             isDwfCatalog = { it == dwfCatalog },
             tickMillis = tickMillis,
             sourceFor = sourceFor,
+            assets = assets,
           ),
         uiBuilderAuthorization =
           ServeUiBuilderAuthorization { _, _, _ ->
@@ -180,6 +189,61 @@ class ServeUiBuilderDwfRoutesTest {
     val (code, body) = post(base, "{}")
     assertEquals(201, code, body)
     assertEquals(1, derived)
+  }
+
+  /** A face drawing one bitmap, `case_steel`, as the editor sends it: XML and no assets. */
+  private val imageFace =
+    """<WatchFace width="450" height="450"><Scene><PartImage x="0" y="0" width="450" """ +
+      """height="450"><Image resource="case_steel"/></PartImage></Scene></WatchFace>"""
+
+  private fun startFace(body: String) =
+    post(
+      base,
+      buildJsonObject { put("wffXml", imageFace) }
+        .let {
+          if (body.isEmpty()) it.toString()
+          else JsonObject(it + Json.parseToJsonElement(body).jsonObject).toString()
+        },
+    )
+
+  @Test
+  fun `a design's pinned assets are packaged as the drawables its XML names`() {
+    start(pinned = mapOf("case_steel" to PNG))
+    val (code, body) = startFace("")
+    assertEquals(201, code, body)
+    val packaged = runtime.packaged.last()
+    assertContentEquals(PNG, packaged.assets["drawable/case_steel.png"])
+  }
+
+  @Test
+  fun `an asset the request supplies wins over the pinned one at the same path`() {
+    start(pinned = mapOf("case_steel" to PNG))
+    val sent = byteArrayOf(9, 9, 9)
+    val (code, body) =
+      startFace(
+        buildJsonObject {
+          put(
+            "assets",
+            buildJsonObject {
+              put("drawable/case_steel.png", Base64.getEncoder().encodeToString(sent))
+            },
+          )
+        }
+          .toString(),
+      )
+    assertEquals(201, code, body)
+    assertContentEquals(sent, runtime.packaged.last().assets["drawable/case_steel.png"])
+  }
+
+  @Test
+  fun `a bitmap the face names and nothing supplies is refused before packaging`() {
+    start()
+    val (code, body) = startFace("")
+    assertEquals(422, code, body)
+    val refusal = obj(body)
+    assertEquals(WatchFaceDrawables.MISSING_RESOURCE, refusal["code"]!!.jsonPrimitive.content)
+    assertContains(refusal["reasons"]!!.jsonArray.single().jsonPrimitive.content, "case_steel")
+    assertTrue(runtime.packaged.isEmpty(), "nothing reaches the packager")
   }
 
   @Test
@@ -484,4 +548,19 @@ class ServeUiBuilderDwfRoutesTest {
             ),
         ),
     )
+
+  private companion object {
+    /** A real 1x1 PNG: the asset port sniffs uploads and refuses anything else. */
+    val PNG: ByteArray =
+      java.io
+        .ByteArrayOutputStream()
+        .also {
+          javax.imageio.ImageIO.write(
+            java.awt.image.BufferedImage(1, 1, java.awt.image.BufferedImage.TYPE_INT_ARGB),
+            "png",
+            it,
+          )
+        }
+        .toByteArray()
+  }
 }

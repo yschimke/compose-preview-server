@@ -30,6 +30,7 @@ import ee.schimke.composeai.uibuilder.service.PackagedUiBuilderRenderBundle
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import ee.schimke.composeai.uibuilder.service.ProductionUiBuilderExportExecutor
 import ee.schimke.composeai.uibuilder.service.PublishedUiBuilderCatalog
+import ee.schimke.composeai.uibuilder.service.UiBuilderAssetStore
 import ee.schimke.composeai.uibuilder.service.UiBuilderBranchPort
 import ee.schimke.composeai.uibuilder.service.UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.UiBuilderDesignStateStore
@@ -2394,6 +2395,7 @@ public class ServeRunner(
       store = store,
       packaging = WatchFacePushPackaging.production(signing, directory.resolve("packager-home")),
       sourceFor = ::deriveDwfSource,
+      assets = lane.assets,
       isWatchFaceCatalog = { catalog -> lane.nativeBackends[catalog] == DwfPreviewSurface.BACKEND },
       preview = { actor, designId, revision ->
         thumbnails?.watchFacePreview(actor, designId, revision)
@@ -2475,6 +2477,8 @@ public class ServeRunner(
     val stateDirectory: File? = null,
     /** Watch publications and linked watches ([WatchFacePush]); shared with the trash sweep. */
     val watchFacePush: WatchFacePushStore? = null,
+    /** Uploaded asset bytes, so the watch-face lanes package a design's pinned drawables. */
+    val assets: UiBuilderAssetStore? = null,
   ) : AutoCloseable {
     override fun close() {
       thumbnails?.close()
@@ -3019,6 +3023,7 @@ public class ServeRunner(
     }
     return UiBuilderLane(
       service = service,
+      assets = assetStore,
       catalogs = catalogs,
       renderer = renderer,
       refreshPublished = refreshPublished,
@@ -3840,6 +3845,8 @@ public class ServeRunner(
               },
               // The tab starts with an empty body, so the server writes the WFF itself.
               sourceFor = ::deriveDwfSource,
+              // The editor sends only the XML; the design's pinned assets are its drawables.
+              assets = lane.assets,
             )
           },
         // The Wear OS push app's site API: device linking, the published watch faces, their APKs.

@@ -52,6 +52,11 @@ class WatchFacePushRoutesTest {
   private val packagerLog: File
     get() = dir.resolve("packager.log").toFile()
 
+  private val drawablesLog: File
+    get() = dir.resolve("drawables.log").toFile()
+
+  private val assetStore by lazy { FileUiBuilderAssetStore(dir.resolve("assets")) }
+
   /** A `java` that is wff-packager's CLI as far as this server can tell. */
   private fun fakeJava(): File =
     dir.resolve("fake-java.sh").toFile().apply {
@@ -70,6 +75,10 @@ class WatchFacePushRoutesTest {
           "  esac\n" +
           "  shift\n" +
           "done\n" +
+          // What the build packaged as drawables: "<versionCode> <file> <bytes>" per file.
+          "if [ -d \"\$bundle/res/drawable\" ]; then for f in \"\$bundle\"/res/drawable/*; do " +
+          "echo \"\$vc \$(basename \"\$f\") \$(wc -c < \"\$f\" | tr -d ' ')\" >> ${drawablesLog.path}; " +
+          "done; fi\n" +
           "if grep -q bad \"\$bundle/res/raw/watchface.xml\"; then\n" +
           "  echo 'error[wff-validator]: bad face' >&2; exit 1\n" +
           "fi\n" +
@@ -110,6 +119,7 @@ class WatchFacePushRoutesTest {
         limits = UiBuilderServiceLimits(),
         catalogs = benchmarkCatalogExecutor(),
         exporter = UiBuilderExportExecutor { error("no export in this test") },
+        assets = assetStore,
       )
     push =
       WatchFacePush(
@@ -126,6 +136,7 @@ class WatchFacePushRoutesTest {
         preview = { _, designId, _ -> "png:$designId".toByteArray() },
         signInPath = { "/auth/github/start?return=$it" },
         clock = { now },
+        assets = assetStore,
       )
     return ServeHttpServer(
         host = "127.0.0.1",
@@ -585,6 +596,59 @@ class WatchFacePushRoutesTest {
     designs()
     send("GET", pathOf(aurora.apkUrl))
     assertEquals(2, packagerLog.readLines().size)
+  }
+
+  /** A face drawing the bitmap `case_steel`. */
+  private val imageFace =
+    """<WatchFace width="450" height="450"><Scene><PartImage x="0" y="0" width="450" """ +
+      """height="450"><Image resource="case_steel"/></PartImage></Scene></WatchFace>"""
+
+  private val png: ByteArray by lazy {
+    java.io
+      .ByteArrayOutputStream()
+      .also {
+        javax.imageio.ImageIO.write(
+          java.awt.image.BufferedImage(2, 2, java.awt.image.BufferedImage.TYPE_INT_ARGB),
+          "png",
+          it,
+        )
+      }
+      .toByteArray()
+  }
+
+  @Test
+  fun `a published face carries the design's pinned drawables, across a restart`() {
+    start()
+    createDesign(alice, "steel", "Steel", public = true)
+    runBlocking {
+      assertIs<UiBuilderServiceResponse.OperationOutcome>(
+        service.putAsset(
+          UiBuilderAssetWrite(AuthenticatedUiBuilderActor(alice), "steel", "case_steel", png),
+        ),
+      )
+    }
+    faces["steel"] = imageFace
+    val published = publish(alice, "steel")
+    assertEquals(200, published.code, published.body)
+    assertContains(drawablesLog.readLines(), "1 case_steel.png ${png.size}")
+
+    // A rebuild long after the revision was pruned reads the face back from the push store alone.
+    val reopened = WatchFacePushStore(dir.resolve("watchface-push"), clock = { now })
+    val source = reopened.source(assertNotNull(reopened.publication("steel")))
+    assertContentEquals(png, source.assets["drawable/case_steel.png"])
+    assertEquals(imageFace, source.wffXml)
+  }
+
+  @Test
+  fun `a face naming a bitmap the design does not pin is refused, not left to the packager`() {
+    start()
+    createDesign(alice, "bare", "Bare", public = true)
+    faces["bare"] = imageFace
+    val refused = publish(alice, "bare")
+    assertEquals(422, refused.code, refused.body)
+    assertContains(refused.body, WatchFaceDrawables.MISSING_RESOURCE)
+    assertContains(refused.body, "case_steel")
+    assertFalse(packagerLog.exists(), "nothing reaches the packager")
   }
 
   @Test
