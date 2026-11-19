@@ -517,7 +517,10 @@ composeai-contracts = "3.44.0"
 # own (compose-ui-builder#1296), and every commit's store IO runs outside the service's global lock
 # (#1298), so a slow fsync no longer queues every design read behind it. Built on compose-ai-tools
 # 2.101.0, contracts 3.43.0 and Kotlin 2.4.21, all met here.
-composeai-ui-builder = "3.138.0"
+# 3.139.0 adds the editor's Publish to watch (compose-ui-builder#1304), the client of this server's
+# owner publication route and `watchFacePush` capability (#2011, #2032). Built on compose-ai-tools
+# 2.101.0, contracts 3.43.0 and Kotlin 2.4.21, all met here.
+composeai-ui-builder = "3.139.0"
 # First published version of the optional publication server library (Maven Central).
 livery = "0.15.0"
 # Packages a design revision's WFF source into the signed APK the real watch-face runtime loads
