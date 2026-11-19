@@ -1885,6 +1885,52 @@ class WatchFacePushRoutesTest {
   }
 
   @Test
+  fun `a grant that names designs publishes only those, though its approver owns others`() {
+    start()
+    createDesign(alice, "aurora", "Aurora", public = true)
+    createDesign(alice, "comet", "Comet", public = true)
+    // The grant names aurora alone. Asked as alice, the service would answer for comet too: the
+    // design scope holds the grant's holder, not the approver the owner is looked up as.
+    push.delegationReaches =
+      ServeUiBuilderGrantScope.delegationReaches(
+        ServeUiBuilderGrantScope.Lookup { holder, approver ->
+          setOf("aurora").takeIf { holder == "agent:fingerprint" && approver == alice }
+        },
+        parents = null,
+      )
+    val path = "/api/ui-builder/v1/designs/%s/watch-face-publication"
+    val publisher = mapOf("X-Test-Agent-For" to alice, "X-Test-Agent-Publish" to "1")
+
+    val outside =
+      send("PUT", path.format("comet"), json = """{"visibility":"public"}""", headers = publisher)
+    assertEquals(403, outside.code, outside.body)
+    assertContains(outside.body, "owner_required")
+    assertEquals(403, send("DELETE", path.format("comet"), headers = publisher).code)
+
+    val named =
+      send("PUT", path.format("aurora"), json = """{"visibility":"public"}""", headers = publisher)
+    assertEquals(202, named.code, named.body)
+    runBlocking { push.queue.awaitIdle() }
+    assertEquals(listOf("aurora"), designs().map { it.id })
+
+    fun canPublish(designId: String) =
+      Json.parseToJsonElement(
+          send(
+              "GET",
+              "/api/ui-builder/v1/designs/$designId/dwf-preview/status",
+              headers = publisher,
+            )
+            .body,
+        )
+        .jsonObject["watchFacePush"]!!
+        .jsonObject["canPublish"]!!
+        .jsonPrimitive
+        .content
+    assertEquals("true", canPublish("aurora"))
+    assertEquals("false", canPublish("comet"))
+  }
+
+  @Test
   fun `the MCP tool takes a grant only when it carries ui-builder-publish`() {
     start()
     createDesign(alice, "aurora", "Aurora", public = true)

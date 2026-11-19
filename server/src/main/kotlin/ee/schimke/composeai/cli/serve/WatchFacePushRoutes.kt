@@ -90,6 +90,18 @@ internal constructor(
       tickMillis = automaticTickMillis,
     )
 
+  /**
+   * Whether a grant acting for someone lends that person's standing for this design
+   * ([ServeUiBuilderGrantScope.delegationReaches]); set by the server that holds the grants, and,
+   * until it is, true, as it is where no grant names designs. [designOwner] asks it before it asks
+   * the service as the approver, which the design scope does not see.
+   */
+  @Volatile
+  internal var delegationReaches: suspend (AuthenticatedUiBuilderActor, String) -> Boolean =
+    { _, _ ->
+      true
+    }
+
   private val reconciling = java.util.concurrent.atomic.AtomicBoolean(false)
 
   /** The sources [startReconciling] was given, for [reconcileNow]. */
@@ -596,7 +608,8 @@ internal constructor(
    * [designId]'s owner as [actor] may know it, from the [snapshot] it read. The runtime names a
    * design's owner only to its owner, so a grant acting for someone reads no owner there; asked
    * again as that person, it answers only when they own the design, so a grant reaches its
-   * approver's designs and nobody else's.
+   * approver's designs and nobody else's. A grant that names designs reaches only those
+   * ([delegationReaches]): asked as the approver, the service would not hold it to them.
    */
   internal suspend fun designOwner(
     service: UiBuilderServicePort,
@@ -606,7 +619,7 @@ internal constructor(
   ): String? =
     snapshot.snapshot.access?.ownerActorId
       ?: actor.onBehalfOfActorId
-        ?.takeIf { it.isNotBlank() && it != actor.actorId }
+        ?.takeIf { it.isNotBlank() && it != actor.actorId && delegationReaches(actor, designId) }
         ?.let { principal ->
           (service.executeMapped(
               GetSnapshotRequestV1(designId = designId),
