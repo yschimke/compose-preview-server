@@ -4521,7 +4521,9 @@ class ServeUiBuilderMcp(
               "not pin fails `bundle-resources`; pin it with $PUT_ASSET. This runs the full " +
               "packager, so call it when an edit pass is done and before " +
               "$PUBLISH_WATCH_FACE, not after every edit; an unchanged face answers from " +
-              "cache. A failing face is a report with `passed: false`, not an error.",
+              "cache. A failing face is a report with `passed: false`, not an error. A host whose " +
+              "operator left Google's validators off answers " +
+              "`${WatchFaceValidatorAvailability.DISABLED}`.",
             """
             {"type":"object","properties":{
               "designId":{"type":"string"},
