@@ -30,9 +30,13 @@ class WatchFacePushCatalogFacesTest {
   private val client = OkHttpClient.Builder().callTimeout(30, TimeUnit.SECONDS).build()
   private val registries = mutableListOf<ServeSessionRegistry>()
   private var server: ServeHttpServer? = null
+  private var push: WatchFacePush? = null
 
   /** What the fake packager was handed, per face name. */
-  private val packed = mutableMapOf<String, Map<String, ByteArray>>()
+  private val packed = java.util.concurrent.ConcurrentHashMap<String, Map<String, ByteArray>>()
+
+  /** Every packager run, refused or not, in order; the background worker writes it. */
+  private val packagerRuns = java.util.concurrent.CopyOnWriteArrayList<String>()
 
   @AfterTest
   fun tearDown() {
@@ -111,6 +115,7 @@ class WatchFacePushCatalogFacesTest {
     catalogBakedBundle: (String) -> ServeCatalogStore.BakedBundle? = { null },
   ) {
     val packager = WatchFacePushPackager { files, faceName, versionCode, out ->
+      packagerRuns += faceName
       if ("REFUSE" in files.getValue("res/raw/watchface.xml").decodeToString()) {
         throw DwfPackagingFailed(listOf("error[validator]: refused for the test"))
       }
@@ -125,6 +130,7 @@ class WatchFacePushCatalogFacesTest {
         sourceFor = { null },
         isWatchFaceCatalog = { false },
       )
+    this.push = push
     server =
       ServeHttpServer(
           host = "127.0.0.1",
@@ -194,8 +200,24 @@ class WatchFacePushCatalogFacesTest {
 
   private val json = Json { ignoreUnknownKeys = true }
 
-  private fun designs() =
+  /**
+   * `/designs` once the background worker has caught up: a listing never builds, so the test runs
+   * the reconcile pass the server runs on a timer, and waits for its builds.
+   */
+  private fun designs(): List<Design> {
+    built()
+    return listing()
+  }
+
+  /** `/designs` exactly as it is now, without letting the background worker run first. */
+  private fun listing() =
     json.decodeFromString<DesignList>(get("${WatchFacePush.BASE_PATH}/designs").body).designs
+
+  private fun built() {
+    val push = push!!
+    push.reconcileNow()
+    assertTrue(push.builds.awaitIdle(), "the background builds finish")
+  }
 
   @Test
   fun `listed catalogs' redistributable faces are public entries with attribution and their own package`() {
@@ -287,7 +309,7 @@ class WatchFacePushCatalogFacesTest {
         Triple("bad", "MIT", "<WatchFace REFUSE=\"1\"/>"),
       )
     start(mapOf("wear" to host))
-    // The listing builds both; only the good one is listed.
+    // The background worker builds both; only the good one is listed.
     assertEquals(listOf("catalog:wear/good"), designs().map { it.id })
     val status = Json.parseToJsonElement(get("${WatchFacePush.BASE_PATH}/status").body).jsonObject
     val catalogFaces = status.getValue("catalogFaces").jsonObject
@@ -625,5 +647,107 @@ class WatchFacePushCatalogFacesTest {
     assertTrue("$catalogId.wff.zip" in previews, previews.toString())
     assertTrue("$catalogId.wff.json" in previews, previews.toString())
     assertFalse(previews.any { it.startsWith("Unaliased") }, "only aliased previews are kept")
+  }
+
+  @Test
+  fun `a listing never packages, and a face is pending on status until the background worker builds it`() {
+    start(mapOf("wear" to catalog("wear", Triple("face", "MIT", "<WatchFace/>"))))
+    // However often the watch asks, nothing is packaged on the request path.
+    repeat(3) { assertEquals(emptyList(), listing()) }
+    val status = Json.parseToJsonElement(get("${WatchFacePush.BASE_PATH}/status").body).jsonObject
+    val catalogFaces = status.getValue("catalogFaces").jsonObject
+    assertEquals(0, catalogFaces.getValue("listed").jsonPrimitive.content.toInt())
+    assertEquals(
+      listOf("catalog:wear/face"),
+      catalogFaces.getValue("pending").jsonArray.map { it.jsonPrimitive.content },
+    )
+    assertEquals(emptyList(), packagerRuns, "neither /designs nor /status packaged anything")
+
+    built()
+    assertEquals(listOf("catalog:wear/face"), listing().map { it.id })
+    assertEquals(1, packagerRuns.size)
+    // Once built, a reconcile pass and further listings leave it alone.
+    built()
+    listing()
+    assertEquals(1, packagerRuns.size)
+  }
+
+  @Test
+  fun `a refused face is remembered across a restart and never packaged again`() {
+    val faces =
+      mapOf(
+        "wear" to
+          catalog(
+            "wear",
+            Triple("good", "MIT", "<WatchFace/>"),
+            Triple("bad", "MIT", "<WatchFace REFUSE=\"1\"/>"),
+          ),
+      )
+    start(faces)
+    assertEquals(listOf("catalog:wear/good"), designs().map { it.id })
+    val badName = WatchFacePushCatalogFaces.faceName("wear", "bad")
+    assertEquals(1, packagerRuns.count { it == badName })
+
+    // A restart over the same push state: a new push lane, a new server.
+    server?.stop()
+    start(faces)
+    assertEquals(listOf("catalog:wear/good"), designs().map { it.id })
+    assertEquals(1, packagerRuns.count { it == badName }, "the refusal was read back from disk")
+    val status = Json.parseToJsonElement(get("${WatchFacePush.BASE_PATH}/status").body).jsonObject
+    val skipped =
+      status.getValue("catalogFaces").jsonObject.getValue("skipped").jsonArray.map {
+        it.jsonObject.getValue("id").jsonPrimitive.content
+      }
+    assertEquals(listOf("catalog:wear/bad"), skipped)
+  }
+
+  @Test
+  fun `a transient packaging failure backs off instead of re-running on every request`() {
+    var now = 1_000L
+    val runs = java.util.concurrent.atomic.AtomicInteger()
+    var fail = true
+    val packager = WatchFacePushPackager { _, faceName, versionCode, out ->
+      runs.incrementAndGet()
+      if (fail) throw java.io.IOException("timed out")
+      out.writeBytes("apk:$faceName:$versionCode".toByteArray())
+      "token"
+    }
+    val store = WatchFacePushStore(dir.resolve("backoff"))
+    val builds =
+      WatchFacePushBuilds(
+        store,
+        { WatchFacePushPackaging.Ready(packager, "c0ffee") },
+        clock = { now },
+        transientBackoffMillis = 1_000L,
+        maxTransientBackoffMillis = 4_000L,
+        log = {},
+      )
+    val publication =
+      store.candidate(
+        "face",
+        "github:alice",
+        1,
+        "Face",
+        DwfSource("<WatchFace/>", 2, emptyMap()),
+        0L,
+      )
+
+    assertIs<WatchFacePushBuilds.Result.Failed>(builds.build(publication))
+    assertIs<WatchFacePushBuilds.Result.Failed>(builds.build(publication))
+    assertFalse(builds.enqueue(publication, cause = "test"), "nothing is queued during a backoff")
+    assertEquals(1, runs.get(), "a retry inside the backoff does not run the packager")
+    assertNull(builds.refusal(publication), "a timeout is not a refusal")
+
+    now += 1_000L
+    assertIs<WatchFacePushBuilds.Result.Failed>(builds.build(publication))
+    assertEquals(2, runs.get())
+    now += 1_000L
+    assertIs<WatchFacePushBuilds.Result.Failed>(builds.build(publication))
+    assertEquals(2, runs.get(), "the backoff doubled")
+
+    // A deliberate caller (an owner's publish) may retry at once.
+    fail = false
+    assertIs<WatchFacePushBuilds.Result.Built>(builds.build(publication, retryTransient = true))
+    assertEquals(3, runs.get())
   }
 }
