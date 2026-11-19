@@ -3746,8 +3746,11 @@ public class ServeRunner(
         // Wrapped so every accepted edit also queues a redraw of that design's listing card.
         uiBuilderService =
           uiBuilderLane?.let { lane ->
+            // Timed once, under both the routes and the thumbnail worker, so a call that holds the
+            // service's lock is logged whichever of them made it.
+            val timed = ServeUiBuilderServiceTiming(lane.service)
             ServeUiBuilderVisibility.withDefault(
-              lane.thumbnails?.warming(lane.service) ?: lane.service,
+              lane.thumbnails?.warming(timed) ?: timed,
               uiBuilderDefaultVisibility,
             )
           },

@@ -187,6 +187,41 @@ class ServeUiBuilderDesignReadHostTest {
     assertContains(resumed, "cause: ServeUiBuilderDesignReadHostTest")
   }
 
+  @Test
+  fun `a slow design-service call is logged with its request type and design`() {
+    val service =
+      PersistentUiBuilderService(
+        storage = FileUiBuilderStateStorage(dir.resolve("timed")),
+        limits = UiBuilderServiceLimits(),
+        catalogs = benchmarkCatalogExecutor(catalogSystemIds = setOf(CATALOG)),
+        exporter = UiBuilderExportExecutor { error("no export") },
+      )
+    var now = 0L
+    val log = CopyOnWriteArrayList<String>()
+    // Each read of the clock is 1.5 s later, so a call (two reads) takes 1.5 s: just under the
+    // threshold of 2 s until the threshold is lowered.
+    val timed =
+      ServeUiBuilderServiceTiming(
+        service,
+        thresholdMillis = 1_500,
+        clock = { now.also { now += 1_500 } - 0 },
+        log = { log += it },
+      )
+    runBlocking {
+      timed.execute(UiBuilderServiceCall(owner, UiBuilderServiceRequest.CreateDesign(document())))
+      timed.execute(
+        UiBuilderServiceCall(owner, UiBuilderServiceRequest.GetSnapshot(DESIGN_ID, null)),
+      )
+    }
+    assertEquals(
+      listOf(
+        "serve: ui-builder CreateDesign $DESIGN_ID took 1500 ms",
+        "serve: ui-builder GetSnapshot $DESIGN_ID took 1500 ms",
+      ),
+      log,
+    )
+  }
+
   private fun document(): DesignDocumentV1 =
     DesignDocumentV1(
       schema = "compose-ui-builder-document/v1-candidate",
