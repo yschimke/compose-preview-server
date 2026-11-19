@@ -332,6 +332,41 @@ class WatchFacePushCatalogFacesTest {
   }
 
   @Test
+  fun `includePending lists a refused catalog face with its attribution`() {
+    val host =
+      catalog(
+        "wear",
+        Triple("good", "MIT", "<WatchFace/>"),
+        Triple("bad", "MIT", "<WatchFace REFUSE=\"1\"/>"),
+      )
+    start(mapOf("wear" to host))
+    built()
+    val entries =
+      Json.parseToJsonElement(get("${WatchFacePush.BASE_PATH}/designs?includePending=1").body)
+        .jsonObject
+        .getValue("designs")
+        .jsonArray
+        .associateBy { it.jsonObject.getValue("id").jsonPrimitive.content }
+    val bad = entries.getValue("catalog:wear/bad").jsonObject
+    assertEquals(
+      "refused",
+      bad.getValue("build").jsonObject.getValue("state").jsonPrimitive.content,
+    )
+    assertNull(bad["apkUrl"], "nothing to install")
+    // Where it is from and its licence travel with it, built or not.
+    val attribution =
+      json.decodeFromJsonElement(Attribution.serializer(), bad.getValue("attribution"))
+    assertEquals("MIT", attribution.license)
+    assertEquals(
+      json.decodeFromJsonElement(
+        Attribution.serializer(),
+        entries.getValue("catalog:wear/good").jsonObject.getValue("attribution"),
+      ),
+      attribution,
+    )
+  }
+
+  @Test
   fun `a catalog face's version moves when its source does`() {
     val host = catalog("wear", Triple("face", "MIT", "<WatchFace a=\"1\"/>"))
     start(mapOf("wear" to host))

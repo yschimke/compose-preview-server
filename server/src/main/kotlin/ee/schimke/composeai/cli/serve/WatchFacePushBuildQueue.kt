@@ -116,6 +116,10 @@ internal class WatchFacePushBuildQueue(private val clock: () -> Long) {
     }
   }
 
+  /** Every design with a build state now, as [status] reports each. */
+  fun snapshot(): Map<String, WatchFacePushBuildStatusV1> =
+    states.keys.toTypedArray().mapNotNull { id -> status(id)?.let { id to it } }.toMap()
+
   fun summary(): WatchFacePushBuildSummaryV1 {
     val values = states.values
     return WatchFacePushBuildSummaryV1(
