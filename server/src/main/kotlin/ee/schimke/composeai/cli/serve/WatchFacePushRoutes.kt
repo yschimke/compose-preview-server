@@ -704,6 +704,8 @@ internal fun Route.installWatchFacePushRoutes(
    * resident catalogs only (it never wakes one).
    */
   catalogFaceSources: () -> List<CatalogFaceSource> = { emptyList() },
+  /** What the host a request addressed offers a watch ([WatchFacePushSite]). */
+  site: (ApplicationCall) -> WatchFacePushSite = { WatchFacePushSite.BOTH },
 ) {
   // Push APKs are built off the request path: publish builds inline, and this pass queues the rest
   // (new catalog faces, lost APKs) onto the one background worker. Listings never build.
@@ -769,6 +771,11 @@ internal fun Route.installWatchFacePushRoutes(
 
   get("${WatchFacePush.BASE_PATH}/status") {
     call.noStore()
+    // A site that lists no catalog faces does not count them either.
+    if (!site(call).catalogFaces) {
+      call.respondJson(WatchFacePushStatusV1.serializer(), push.packagingStatus())
+      return@get
+    }
     val catalog = withContext(Dispatchers.IO) { push.catalogFaces.resolve(catalogFaceSources()) }
     // Only a face with a built APK is on `/designs`, so only those count as listed. One the
     // packager refused is skipped, with its first diagnostic as the reason; one not built yet is
@@ -806,16 +813,20 @@ internal fun Route.installWatchFacePushRoutes(
       val caller = call.watchCaller(push, clientAddress) ?: return@limited
       if (!call.admit(caller.limiter, caller.key)) return@limited
       val packaging = push.packagingStatus()
+      val offered = site(call)
       val designs = mutableListOf<WatchFacePushDesignV1>()
-      for (publication in push.store.published()) {
+      for (publication in if (offered.designs) push.store.published() else emptyList()) {
         val visibility = push.reach(service, publication, caller.account) ?: continue
         // Only what is already built: a listing never packages (the reconcile pass does).
         val built = withContext(Dispatchers.IO) { push.builds.cached(publication) } ?: continue
         designs += push.listing(origin(call), publication, built.apk, visibility)
       }
       // Then the public catalog faces, to every caller alike.
-      val catalog = withContext(Dispatchers.IO) { push.catalogFaces.resolve(catalogFaceSources()) }
-      for (face in catalog.faces) {
+      val catalog =
+        if (offered.catalogFaces) {
+          withContext(Dispatchers.IO) { push.catalogFaces.resolve(catalogFaceSources()) }.faces
+        } else emptyList()
+      for (face in catalog) {
         val built = withContext(Dispatchers.IO) { push.builds.cached(face.publication) } ?: continue
         designs += push.catalogListing(origin(call), face, built.apk)
       }
@@ -829,6 +840,7 @@ internal fun Route.installWatchFacePushRoutes(
   // A catalog face, named by query rather than path: a preview id may hold a `/`.
   get("${WatchFacePush.BASE_PATH}/catalog-faces/apk") {
     call.limited {
+      if (!call.offersCatalogFaces(site)) return@limited
       val caller = call.watchCaller(push, clientAddress) ?: return@limited
       if (!call.admit(caller.limiter, caller.key)) return@limited
       if (caller.account == null && !call.admit(push.anonymousApkLimiter, caller.key))
@@ -852,6 +864,7 @@ internal fun Route.installWatchFacePushRoutes(
 
   get("${WatchFacePush.BASE_PATH}/catalog-faces/preview.png") {
     call.limited {
+      if (!call.offersCatalogFaces(site)) return@limited
       if (!call.admit(push.anonymousLimiter, "ip:" + clientAddress(call))) return@limited
       val face = call.catalogFace(push, catalogFaceSources) ?: return@limited
       val png = withContext(Dispatchers.IO) { face.source.png() }
@@ -867,6 +880,7 @@ internal fun Route.installWatchFacePushRoutes(
 
   get("${WatchFacePush.BASE_PATH}/designs/{designId}/apk") {
     call.limited {
+      if (!call.offersDesigns(site)) return@limited
       val caller = call.watchCaller(push, clientAddress) ?: return@limited
       if (!call.admit(caller.limiter, caller.key)) return@limited
       if (caller.account == null && !call.admit(push.anonymousApkLimiter, caller.key))
@@ -939,6 +953,7 @@ internal fun Route.installWatchFacePushRoutes(
 
   get("${WatchFacePush.BASE_PATH}/designs/{designId}/preview.png") {
     call.limited {
+      if (!call.offersDesigns(site)) return@limited
       if (!call.admit(push.anonymousLimiter, "ip:" + clientAddress(call))) return@limited
       val designId = call.parameters["designId"].orEmpty()
       val publication = push.store.publication(designId)
@@ -1181,6 +1196,39 @@ internal const val SOURCE_CATALOG = "catalog"
  * a face that is listed (its catalog served and listed, its source present, its licence on the
  * allowlist) is found.
  */
+/**
+ * What one host offers a watch. A box serving both the UI builder's own host and a catalog site
+ * keeps each list on its own site: the builder's host lists the designs made in it, the catalog
+ * site lists its catalog faces. A box with no builder host offers both on every host.
+ */
+internal data class WatchFacePushSite(val designs: Boolean, val catalogFaces: Boolean) {
+  companion object {
+    val BOTH = WatchFacePushSite(designs = true, catalogFaces = true)
+    val DESIGNS_ONLY = WatchFacePushSite(designs = true, catalogFaces = false)
+    val CATALOG_FACES_ONLY = WatchFacePushSite(designs = false, catalogFaces = true)
+  }
+}
+
+/** False, having answered 404, when this host lists no catalog faces. */
+private suspend fun ApplicationCall.offersCatalogFaces(
+  site: (ApplicationCall) -> WatchFacePushSite,
+): Boolean {
+  if (site(this).catalogFaces) return true
+  noStore()
+  respondError(HttpStatusCode.NotFound, "not_found", "this site lists no catalog faces")
+  return false
+}
+
+/** False, having answered 404, when this host lists no UI-builder designs. */
+private suspend fun ApplicationCall.offersDesigns(
+  site: (ApplicationCall) -> WatchFacePushSite,
+): Boolean {
+  if (site(this).designs) return true
+  noStore()
+  respondError(HttpStatusCode.NotFound, "not_found", "no such published design")
+  return false
+}
+
 private suspend fun ApplicationCall.catalogFace(
   push: WatchFacePush,
   sources: () -> List<CatalogFaceSource>,

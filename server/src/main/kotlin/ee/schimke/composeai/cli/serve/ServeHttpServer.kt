@@ -1402,6 +1402,15 @@ class ServeHttpServer(
                 )
               },
               catalogFaceSources = ::watchFaceCatalogSources,
+              // Each list on its own site: the builder's host lists its designs, any other host
+              // its catalog faces. With no builder host configured, every host offers both.
+              site = { call ->
+                when {
+                  uiBuilderHost == null -> WatchFacePushSite.BOTH
+                  isUiBuilderHost(call) -> WatchFacePushSite.DESIGNS_ONLY
+                  else -> WatchFacePushSite.CATALOG_FACES_ONLY
+                }
+              },
             )
           }
           installUiBuilderRoutes(
