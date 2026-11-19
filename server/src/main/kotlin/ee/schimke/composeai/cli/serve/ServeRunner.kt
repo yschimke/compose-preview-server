@@ -2695,11 +2695,17 @@ public class ServeRunner(
       else null
     // An A2UI catalog's JSON (its A2UI messages) is written whatever the Remote Compose flag says;
     // every other design passes through to the Remote Compose / picture chain below it.
+    // A watch face's `bundle` (its WFF source layout, with the PNG export as the preview) is
+    // written here; every other design and format passes through.
     val exporter =
-      LovelaceJsonExportExecutor(
-        A2uiJsonExportExecutor(
-          documentExporter?.let { RemotePngExportExecutor(it, renderer, fonts) } ?: pictureExporter,
+      WatchFaceBundleExportExecutor(
+        LovelaceJsonExportExecutor(
+          A2uiJsonExportExecutor(
+            documentExporter?.let { RemotePngExportExecutor(it, renderer, fonts) }
+              ?: pictureExporter,
+          ),
         ),
+        assets = assetStore,
       )
     val pictureExports =
       ((pictureExporter as? ProductionUiBuilderExportExecutor)?.capabilities
@@ -2825,7 +2831,7 @@ public class ServeRunner(
             health.withhold(systemId, "published ui-builder.json declares no platform")
             return false
           }
-          publishedCatalogs[systemId] = composed.catalog
+          publishedCatalogs[systemId] = withWatchFaceBundle(composed.catalog)
           // The runtime is the executable half of the document pin; never substitute a host
           // default. A republish that drops its runtime returns to the built-in renderer.
           published.runtimeId?.let { publishedRuntimeIds[systemId] = it }
