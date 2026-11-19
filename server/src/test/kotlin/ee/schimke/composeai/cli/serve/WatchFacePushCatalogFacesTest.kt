@@ -101,6 +101,15 @@ class WatchFacePushCatalogFacesTest {
     (listed + unlisted).forEach { (system, host) ->
       registry.register(system, host = host, pinned = true)
     }
+    start(registry, listed.keys.toList(), unlisted.keys.toList())
+  }
+
+  private fun start(
+    registry: ServeSessionRegistry,
+    listed: List<String>,
+    unlisted: List<String> = emptyList(),
+    catalogBakedBundle: (String) -> ServeCatalogStore.BakedBundle? = { null },
+  ) {
     val packager = WatchFacePushPackager { files, faceName, versionCode, out ->
       if ("REFUSE" in files.getValue("res/raw/watchface.xml").decodeToString()) {
         throw DwfPackagingFailed(listOf("error[validator]: refused for the test"))
@@ -123,8 +132,9 @@ class WatchFacePushCatalogFacesTest {
           token = "local-fixture",
           sessions = registry,
           defaultSessionId = "unused",
-          catalogSessions = listed.keys.toList(),
-          appCatalogSessions = unlisted.keys.toList(),
+          catalogSessions = listed,
+          appCatalogSessions = unlisted,
+          catalogBakedBundle = catalogBakedBundle,
           machineAuthorization = ServeMachineAuthorization("local-fixture", null, null),
           uiBuilderService =
             PersistentUiBuilderService(
@@ -351,6 +361,185 @@ class WatchFacePushCatalogFacesTest {
     // A design literally named like it is hashed again, so it cannot take the catalog face's
     // package.
     assertNotEquals(name, WatchFacePushNaming.faceName(name))
+  }
+
+  /** A trusted `wear-faces`-shaped catalog whose live bundle carries one face's WFF source. */
+  private fun liveBundleCatalogFetch(
+    system: String,
+    xml: String = "<WatchFace/>",
+  ): (String) -> ByteArray? {
+    val catalogJson =
+      """
+      {"schema":"design-parity-catalog/v1","system":"$system",
+       "liveBundle":{"path":"bundle/","file":"$system-bundle.png"},
+       "components":[{"componentId":"Faces/Digital","images":[
+         {"path":"images/digital/ideal__default__dark.png","theme":"dark","previewId":"DigitalFace"}]}]}
+      """
+        .trimIndent()
+    val bundleZip = ByteArrayOutputStream()
+    ZipOutputStream(bundleZip).use { zip ->
+      for ((name, bytes) in
+        mapOf(
+          "previews/DigitalFace.wff.json" to manifest("DigitalFace", "Apache-2.0").toByteArray(),
+          "previews/DigitalFace.wff.zip" to wffZip(xml),
+          "previews/Unaliased.wff.zip" to wffZip(xml),
+        )) {
+        zip.putNextEntry(ZipEntry(name))
+        zip.write(bytes)
+        zip.closeEntry()
+      }
+    }
+    return { url ->
+      when {
+        url.endsWith("/${ServeCatalogStore.CATALOG_FILE}") -> catalogJson.toByteArray()
+        url.endsWith("bundle/$system-bundle.png") -> bundleZip.toByteArray()
+        url.endsWith(".png") -> byteArrayOf(1)
+        else -> null
+      }
+    }
+  }
+
+  private val trust =
+    TrustStore(branches = listOf(TrustedBranch("yschimke/compose-ai-tools", "design-artifacts/*")))
+
+  /**
+   * A catalog store over [fetch] (read per call, so a test can republish) that registers via
+   * [register].
+   */
+  private fun store(
+    fetch: () -> (String) -> ByteArray?,
+    register: (String, ServeBundleHost) -> Unit = { _, _ -> },
+    buildTrustedBundle: () -> Boolean = { false },
+  ) =
+    ServeCatalogStore(
+      root = dir.resolve("catalog-store").toFile(),
+      register = register,
+      trust = { trust },
+      fetch = { url -> fetch()(url) },
+      buildTrustedBundle = { _, _, _, _, _, _ -> buildTrustedBundle() },
+    )
+
+  private val storeFaceId = "catalog:wear-faces/digital__ideal__default__dark"
+
+  private fun catalogFacesStatus(): Pair<Int, Set<String>> {
+    val status = Json.parseToJsonElement(get("${WatchFacePush.BASE_PATH}/status").body).jsonObject
+    val catalogFaces = status.getValue("catalogFaces").jsonObject
+    return catalogFaces.getValue("listed").jsonPrimitive.content.toInt() to
+      catalogFaces
+        .getValue("skipped")
+        .jsonArray
+        .map { it.jsonObject.getValue("id").jsonPrimitive.content }
+        .toSet()
+  }
+
+  @Test
+  fun `a listed catalog's faces are read from its bundle on disk, not its session`() {
+    var fetch = liveBundleCatalogFetch("wear-faces", "<WatchFace a=\"1\"/>")
+    val store = store({ fetch })
+    assertIs<ServeCatalogStore.Result.Ok>(store.load("wear-faces"))
+    // Never registered: no session is resident, so a residency-bound read finds nothing.
+    val registry = ServeSessionRegistry(open = { null }).also(registries::add)
+    start(registry, listed = listOf("wear-faces"), catalogBakedBundle = store::bakedBundle)
+
+    val face = designs().single()
+    assertEquals(storeFaceId, face.id)
+    assertEquals(1, face.version)
+    assertEquals(1 to emptySet(), catalogFacesStatus(), "/status counts what /designs lists")
+    assertEquals(200, get(pathOf(face.apkUrl)).code)
+    assertEquals(200, get(pathOf(face.previewUrl)).code)
+    assertNull(registry.peekHost("wear-faces"), "listing faces never stands a session up")
+
+    // A refresh publishes a new generation; the list follows it.
+    fetch = liveBundleCatalogFetch("wear-faces", "<WatchFace a=\"2\"/>")
+    assertIs<ServeCatalogStore.Result.Ok>(store.load("wear-faces"))
+    assertEquals(2, designs().single().version)
+  }
+
+  @Test
+  fun `a suspended catalog keeps its faces`() {
+    var now = 0L
+    val registry =
+      ServeSessionRegistry(
+          open = { null },
+          idleTimeoutMillis = 10,
+          reaperIntervalMillis = 0,
+          clock = { now },
+        )
+        .also(registries::add)
+    // Registered unpinned, the way a live catalog's session can be suspended.
+    val fetch = liveBundleCatalogFetch("wear-faces")
+    val store = store({ fetch }, register = { id, host -> registry.register(id, host = host) })
+    assertIs<ServeCatalogStore.Result.Ok>(store.load("wear-faces"))
+    start(registry, listed = listOf("wear-faces"), catalogBakedBundle = store::bakedBundle)
+    assertNotNull(registry.peekHost("wear-faces"))
+    assertEquals(listOf(storeFaceId), designs().map { it.id })
+
+    now = 100
+    assertEquals(1, registry.suspendIdle(), "the catalog session suspends")
+    assertNull(registry.peekHost("wear-faces"))
+
+    assertEquals(listOf(storeFaceId), designs().map { it.id })
+    assertEquals(1 to emptySet(), catalogFacesStatus())
+    assertNull(registry.peekHost("wear-faces"), "listing faces must not resume the session")
+  }
+
+  @Test
+  fun `a catalog still loading at startup lists its faces once its bundle is on disk`() {
+    val reachedLiveLane = java.util.concurrent.CountDownLatch(1)
+    val release = java.util.concurrent.CountDownLatch(1)
+    val fetch = liveBundleCatalogFetch("wear-faces")
+    val store =
+      store(
+        { fetch },
+        // The daemon stand-up is the slow part of a startup load; hold it there.
+        buildTrustedBundle = {
+          reachedLiveLane.countDown()
+          release.await(30, TimeUnit.SECONDS)
+          false
+        },
+      )
+    val registry = ServeSessionRegistry(open = { null }).also(registries::add)
+    start(registry, listed = listOf("wear-faces"), catalogBakedBundle = store::bakedBundle)
+    assertEquals(emptyList(), designs(), "nothing is on disk before the load starts")
+
+    var result: ServeCatalogStore.Result? = null
+    val loader = Thread { result = store.load("wear-faces") }.also { it.start() }
+    try {
+      assertTrue(reachedLiveLane.await(30, TimeUnit.SECONDS), "the load reached its live lane")
+      assertNull(store.liveDir("wear-faces"), "nothing is published yet")
+      assertEquals(listOf(storeFaceId), designs().map { it.id })
+      assertEquals(1 to emptySet(), catalogFacesStatus())
+    } finally {
+      release.countDown()
+      loader.join(30_000)
+    }
+    assertIs<ServeCatalogStore.Result.Ok>(result)
+    assertEquals(listOf(storeFaceId), designs().map { it.id })
+  }
+
+  @Test
+  fun `an unlisted catalog's faces are never listed, even from its bundle on disk`() {
+    val fetch = liveBundleCatalogFetch("wear-faces")
+    val store = store({ fetch })
+    assertIs<ServeCatalogStore.Result.Ok>(store.load("wear-faces"))
+    assertNotNull(store.bakedBundle("wear-faces"))
+    val registry = ServeSessionRegistry(open = { null }).also(registries::add)
+    start(
+      registry,
+      listed = emptyList(),
+      unlisted = listOf("wear-faces"),
+      catalogBakedBundle = store::bakedBundle,
+    )
+    assertEquals(emptyList(), designs())
+    assertEquals(0 to emptySet(), catalogFacesStatus())
+    assertEquals(
+      404,
+      get(
+          "${WatchFacePush.BASE_PATH}/catalog-faces/apk?system=wear-faces" +
+            "&preview=digital__ideal__default__dark",
+        )
+        .code,
+    )
   }
 
   @Test
