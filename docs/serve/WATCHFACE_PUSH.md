@@ -102,6 +102,8 @@ published revision.
 
 `PUT /api/ui-builder/v1/designs/{id}/watch-push` (empty body) publishes the design's **current
 revision**; MCP agents use `ui_builder_publish_watch_face` with `{"designId", "published": true}`.
+An agent first runs `ui_builder_validate_watch_face` with `{"designId"}`, which returns the
+validation report described in [the preview design](../design/UI_BUILDER_WATCH_FACE_ANDROID_PREVIEW.md#validation-report).
 Only the design's owner may (or an agent acting for them), and only for a design whose catalog
 draws watch faces (native backend `android-dwf`, i.e. `wff-watchface`). The server exports the
 design's Watch Face Format with the same exporter as the real-runtime preview tab, keeps that WFF
