@@ -885,6 +885,24 @@ internal class WatchFacePushStore(
     return apk
   }
 
+  @Serializable private data class Refusal(val diagnostics: List<String>)
+
+  /**
+   * The packager's diagnostics for a revision it refused, kept beside that revision's APK record so
+   * a restart does not package a known-bad face again. A refusal is about exact bytes (the key
+   * holds the digest), so it never needs invalidating: a fixed face is a new digest.
+   */
+  fun refusal(publication: Publication): List<String>? =
+    readJson(apkDir.resolve(apkBase(publication) + ".refused.json"), Refusal.serializer())
+      ?.diagnostics
+
+  fun recordRefusal(publication: Publication, diagnostics: List<String>) {
+    writeAtomically(
+      apkDir.resolve(apkBase(publication) + ".refused.json"),
+      json.encodeToString(Refusal.serializer(), Refusal(diagnostics)).toByteArray(),
+    )
+  }
+
   private fun apkBase(publication: Publication): String =
     "${publication.faceName}-v${publication.version}-${publication.digest.take(16)}"
 
@@ -1148,10 +1166,25 @@ internal class WatchFacePushDeviceCodes(
  * which are memory-hungry, and a listing that finds several faces unbuilt should not start them all
  * at once. A build is keyed by `(faceName, version, digest)`, so an unchanged revision is never
  * rebuilt — across requests and across restarts.
+ *
+ * Builds are deliberate. An owner's publish builds inline (so a refusal reaches the person who can
+ * fix it), and everything else is queued onto one background worker ([enqueue]) by the reconcile
+ * pass — a catalog face whose digest has no APK yet, a publication whose APK was lost. Listings
+ * read [cached] and [refusal] only and never build. The APK download routes still call [build] on a
+ * miss, as a fallback.
+ *
+ * A refusal is remembered on disk ([WatchFacePushStore.recordRefusal]), so a restart does not
+ * repackage a known-bad face. Any other failure (a timeout, a full disk) may well succeed later, so
+ * it is retried, but only after a backoff that doubles from [transientBackoffMillis] up to
+ * [maxTransientBackoffMillis], not once per request.
  */
 internal class WatchFacePushBuilds(
   private val store: WatchFacePushStore,
   private val packaging: () -> WatchFacePushPackaging,
+  private val clock: () -> Long = System::currentTimeMillis,
+  private val transientBackoffMillis: Long = DEFAULT_TRANSIENT_BACKOFF_MILLIS,
+  private val maxTransientBackoffMillis: Long = MAX_TRANSIENT_BACKOFF_MILLIS,
+  private val log: (String) -> Unit = System.err::println,
 ) {
   sealed interface Result {
     data class Built(val apk: WatchFacePushStore.Apk, val file: File) : Result
@@ -1163,30 +1196,135 @@ internal class WatchFacePushBuilds(
 
   private val lock = Any()
 
-  /** Failures by build key, so a face the packager refuses is not re-run on every listing. */
+  /** Refusals by build key, mirrored from disk on first read so a listing stays cheap. */
   private val failures = ConcurrentHashMap<String, List<String>>()
+
+  /**
+   * Keys whose disk refusal was looked up and found absent. Cleared by a refusal being recorded.
+   */
+  private val noRefusal = ConcurrentHashMap.newKeySet<String>()
+
+  private class Backoff(
+    val attempts: Int,
+    val retryAtEpochMillis: Long,
+    val diagnostics: List<String>,
+  )
+
+  /** Transient failures by build key: the last diagnostics and when a retry is allowed again. */
+  private val transient = ConcurrentHashMap<String, Backoff>()
+
+  /** Keys queued on, or being built by, [worker]. */
+  private val queued = ConcurrentHashMap.newKeySet<String>()
+
+  /** One thread; a [java.util.concurrent.ThreadPoolExecutor] so [close] can drop its queue. */
+  private val worker =
+    java.util.concurrent.ThreadPoolExecutor(
+      1,
+      1,
+      0L,
+      java.util.concurrent.TimeUnit.MILLISECONDS,
+      java.util.concurrent.LinkedBlockingQueue(),
+    ) { runnable ->
+      Thread(runnable, "watchface-push-builds").apply {
+        isDaemon = true
+        priority = Thread.MIN_PRIORITY
+      }
+    }
 
   fun cached(publication: WatchFacePushStore.Publication): Result.Built? =
     store.apk(publication)?.let { Result.Built(it, store.apkFile(publication)) }
 
   /**
-   * The packager's diagnostics for [publication] if an earlier build of this exact revision was
-   * refused, without building it: `/status` reports such a face as skipped rather than listed.
+   * The packager's diagnostics for [publication] if a build of this exact revision was refused, in
+   * this process or an earlier one, without building it: `/status` reports such a face as skipped
+   * rather than listed.
    */
-  fun refusal(publication: WatchFacePushStore.Publication): List<String>? =
-    failures["${publication.faceName}|${publication.version}|${publication.digest}"]
+  fun refusal(publication: WatchFacePushStore.Publication): List<String>? {
+    val key = key(publication)
+    failures[key]?.let {
+      return it
+    }
+    if (key in noRefusal) return null
+    val stored = store.refusal(publication)
+    if (stored != null) failures[key] = stored else noRefusal += key
+    return stored
+  }
 
-  /** [source] defaults to the publication's own WFF; a catalog face passes its full source. */
+  /** Wait until the background worker has nothing queued; false on timeout. For tests. */
+  fun awaitIdle(timeoutMillis: Long = 60_000L): Boolean {
+    val deadline = System.currentTimeMillis() + timeoutMillis
+    while (queued.isNotEmpty()) {
+      if (System.currentTimeMillis() > deadline) return false
+      Thread.sleep(20)
+    }
+    return true
+  }
+
+  /** True while [publication] is queued for, or being built by, the background worker. */
+  fun isPending(publication: WatchFacePushStore.Publication): Boolean = key(publication) in queued
+
+  /**
+   * Queue a background build of [publication] unless it is built, refused, already queued, or
+   * waiting out a transient failure's backoff. Never blocks on the packager. True when queued.
+   */
+  fun enqueue(
+    publication: WatchFacePushStore.Publication,
+    source: () -> DwfSource = { store.source(publication) },
+    cause: String,
+  ): Boolean {
+    if (cached(publication) != null || refusal(publication) != null) return false
+    val key = key(publication)
+    if (transient[key]?.let { clock() < it.retryAtEpochMillis } == true) return false
+    if (packaging() is WatchFacePushPackaging.Unavailable) return false
+    if (!queued.add(key)) return false
+    try {
+      worker.execute(
+        Queued(key) {
+          try {
+            when (val result = build(publication, source(), cause = cause)) {
+              is Result.Failed ->
+                log(
+                  "serve: watchface-push: ${publication.designId} v${publication.version} is not " +
+                    "listed: ${result.diagnostics.firstOrNull()}",
+                )
+              else -> Unit
+            }
+          } catch (e: Exception) {
+            log("serve: watchface-push: background build of ${publication.designId} failed: $e")
+          } finally {
+            queued.remove(key)
+          }
+        },
+      )
+    } catch (e: java.util.concurrent.RejectedExecutionException) {
+      queued.remove(key)
+      return false
+    }
+    return true
+  }
+
+  /**
+   * Build [publication] now, on the caller's thread. [source] defaults to the publication's own
+   * WFF; a catalog face passes its full source. [retryTransient] lets a deliberate caller (an
+   * owner's publish) skip a transient failure's backoff; a refusal is never retried.
+   */
   fun build(
     publication: WatchFacePushStore.Publication,
     source: DwfSource = store.source(publication),
+    retryTransient: Boolean = false,
+    cause: String = "download",
   ): Result {
     cached(publication)?.let {
       return it
     }
-    val key = "${publication.faceName}|${publication.version}|${publication.digest}"
-    failures[key]?.let {
+    val key = key(publication)
+    refusal(publication)?.let {
       return Result.Failed(it)
+    }
+    if (!retryTransient) {
+      transient[key]?.let { backoff ->
+        if (clock() < backoff.retryAtEpochMillis) return Result.Failed(backoff.diagnostics)
+      }
     }
     val ready =
       when (val available = packaging()) {
@@ -1194,12 +1332,28 @@ internal class WatchFacePushBuilds(
           return Result.Unavailable(available.code, available.reason)
         is WatchFacePushPackaging.Ready -> available
       }
+    val waitStarted = System.nanoTime()
     synchronized(lock) {
       cached(publication)?.let {
         return it
       }
+      // Again under the lock: a build that held it may have just been refused or failed, and a
+      // caller that waited for it must not run the packager straight back into the same outcome.
+      refusal(publication)?.let {
+        return Result.Failed(it)
+      }
+      if (!retryTransient) {
+        transient[key]?.let { backoff ->
+          if (clock() < backoff.retryAtEpochMillis) return Result.Failed(backoff.diagnostics)
+        }
+      }
+      val started = System.nanoTime()
+      val waitedMillis = (started - waitStarted) / 1_000_000
       val out = store.apkFile(publication)
       val tmp = File(out.parentFile, out.name + ".tmp")
+      fun elapsed() =
+        "${(System.nanoTime() - started) / 1_000_000} ms" +
+          if (waitedMillis >= 1000) " after waiting $waitedMillis ms for the packager" else ""
       return try {
         source.problem()?.let { throw DwfPackagingFailed(listOf("error[bundle]: $it")) }
         val files =
@@ -1216,16 +1370,100 @@ internal class WatchFacePushBuilds(
           )
         check(tmp.isFile && tmp.length() > 0L) { "the packager wrote no APK" }
         Files.move(tmp.toPath(), out.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        transient.remove(key)
+        log(
+          "serve: watchface-push: packaged ${publication.designId} v${publication.version} " +
+            "($cause) in ${elapsed()}",
+        )
         Result.Built(store.recordApk(publication, token), out)
       } catch (e: DwfPackagingFailed) {
+        if (!isSourceRefusal(e.diagnostics)) {
+          // A nonzero exit without the packager's own diagnostics (a JVM killed under memory
+          // pressure, a full disk): about the host, not these bytes, so never remembered as a
+          // refusal.
+          return transientFailure(publication, key, e.diagnostics, cause, elapsed())
+        }
         failures[key] = e.diagnostics
+        noRefusal -= key
+        transient.remove(key)
+        runCatching { store.recordRefusal(publication, e.diagnostics) }
+          .onFailure { log("serve: watchface-push: could not record a refusal: ${it.message}") }
+        log(
+          "serve: watchface-push: the packager refused ${publication.designId} " +
+            "v${publication.version} ($cause) in ${elapsed()}",
+        )
         Result.Failed(e.diagnostics)
       } catch (e: Exception) {
-        // Not remembered: a timeout or a full disk may well succeed next time.
-        Result.Failed(listOf("error[push]: ${e.message ?: e.javaClass.simpleName}"))
+        // Not a refusal: a timeout or a full disk may well succeed later, so back off and retry.
+        transientFailure(
+          publication,
+          key,
+          listOf("error[push]: ${e.message ?: e.javaClass.simpleName}"),
+          cause,
+          elapsed(),
+        )
       } finally {
         tmp.delete()
       }
     }
+  }
+
+  private fun transientFailure(
+    publication: WatchFacePushStore.Publication,
+    key: String,
+    diagnostics: List<String>,
+    cause: String,
+    elapsed: String,
+  ): Result.Failed {
+    val attempts = (transient[key]?.attempts ?: 0) + 1
+    val delay =
+      (transientBackoffMillis shl (attempts - 1).coerceAtMost(20)).coerceAtMost(
+        maxTransientBackoffMillis,
+      )
+    transient[key] = Backoff(attempts, clock() + delay, diagnostics)
+    log(
+      "serve: watchface-push: packaging ${publication.designId} v${publication.version} " +
+        "($cause) failed after $elapsed; retrying no sooner than ${delay / 1000} s: " +
+        diagnostics.firstOrNull(),
+    )
+    return Result.Failed(diagnostics)
+  }
+
+  /**
+   * Stop the background worker: nothing queued starts, and a build already running finishes. Not
+   * interrupted: the packager kills its subprocess tree only on its own timeout, so interrupting
+   * its wait would leave the packager JVM and its Android tools running unsupervised.
+   */
+  fun close() {
+    // Drop what has not started, then shut down without interrupting the build that has.
+    val dropped = mutableListOf<Runnable>()
+    worker.queue.drainTo(dropped)
+    dropped.forEach { (it as? Queued)?.let { task -> queued.remove(task.key) } }
+    worker.shutdown()
+  }
+
+  /** A queued build, carrying its key so [close] can forget the ones it drops. */
+  private class Queued(val key: String, private val run: () -> Unit) : Runnable {
+    override fun run() = run.invoke()
+  }
+
+  private fun key(publication: WatchFacePushStore.Publication): String =
+    "${publication.faceName}|${publication.version}|${publication.digest}"
+
+  companion object {
+    /**
+     * Whether [diagnostics] are the packager refusing the source: every line one of its own
+     * `error[…]`/`warning[…]`/`info[…]` diagnostics, with at least one error. Anything else (the
+     * last line of a crashed JVM, say) is about the host.
+     */
+    internal fun isSourceRefusal(diagnostics: List<String>): Boolean =
+      diagnostics.isNotEmpty() &&
+        diagnostics.all { REFUSAL_LINE.matches(it) } &&
+        diagnostics.any { it.startsWith("error[") }
+
+    private val REFUSAL_LINE = Regex("^(error|warning|info)\\[[^\\]]+\\]: .*")
+
+    const val DEFAULT_TRANSIENT_BACKOFF_MILLIS = 60_000L
+    const val MAX_TRANSIENT_BACKOFF_MILLIS = 60 * 60_000L
   }
 }
