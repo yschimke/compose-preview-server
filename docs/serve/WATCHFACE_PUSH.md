@@ -99,7 +99,7 @@ none of the install fields (`version`, `apkUrl`, `sha256`, `sizeBytes`, `validat
 - an owner's first publish still queued or building, **only to that owner's linked watches** (it
   is not published yet, so whether it will be public is not known);
 - a listed catalog face whose APK the background worker has not built (`queued`, `pending`, or
-  `refused` with its diagnostics).
+  `refused` with its diagnostics), with the same `catalog` and `attribution` as when built.
 
 `id`, `title`, `packageName`, `visibility` and `source` are always there; `previewUrl` and
 `wffVersion` may be absent on an entry that has not been exported yet. Without the parameter the list

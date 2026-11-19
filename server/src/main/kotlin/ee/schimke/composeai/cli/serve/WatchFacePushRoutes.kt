@@ -1608,14 +1608,20 @@ internal fun WatchFacePush.catalogListing(
     visibility = WatchFacePush.VISIBILITY_PUBLIC,
     source = SOURCE_CATALOG,
     catalog = WatchFacePushCatalogV1(face.source.system, face.source.catalogTitle),
-    attribution =
-      WatchFacePushAttributionV1(
-        repoUrl = face.manifest.repoUrl,
-        sourceUrl = face.manifest.sourceUrl,
-        license = face.manifest.license!!,
-      ),
+    attribution = catalogAttribution(face),
   )
 }
+
+/**
+ * Where a listed catalog face comes from and under what licence, on every listing of it, built or
+ * not: a face is only listed with its licence known ([WatchFacePushLicenses]).
+ */
+private fun catalogAttribution(face: WatchFacePushCatalogFaces.Face) =
+  WatchFacePushAttributionV1(
+    repoUrl = face.manifest.repoUrl,
+    sourceUrl = face.manifest.sourceUrl,
+    license = face.manifest.license!!,
+  )
 
 internal const val SOURCE_DESIGN = "design"
 internal const val SOURCE_CATALOG = "catalog"
@@ -1837,6 +1843,7 @@ internal fun WatchFacePush.pendingCatalogListing(
     visibility = WatchFacePush.VISIBILITY_PUBLIC,
     source = SOURCE_CATALOG,
     catalog = WatchFacePushCatalogV1(face.source.system, face.source.catalogTitle),
+    attribution = catalogAttribution(face),
     build =
       when {
         refusal != null ->
