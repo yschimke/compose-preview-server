@@ -6,6 +6,7 @@ import java.nio.file.Files
 import java.util.Base64
 import kotlin.test.AfterTest
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -154,6 +155,35 @@ class ServeAgentGrantRoutingTest {
   fun tearDown() {
     server.stop()
     registry.close()
+  }
+
+  @Test
+  fun `a capability this server does not know is reported back, not silently dropped`() {
+    val (code, opened) =
+      post(
+        "/agent-access/request",
+        """{"scope":"preview","capabilities":["ui-builder-read","ui-builder-publish",""" +
+          """" telepathy ","ui-builder-publish"]}""",
+      )
+    assertEquals(200, code, opened)
+    val body = json(opened)
+    assertEquals(
+      listOf("ui-builder-publish", "telepathy"),
+      body["unsupportedCapabilities"]!!.jsonArray.map { it.jsonPrimitive.content },
+    )
+    assertContains(str(opened, "message"), "ui-builder-publish")
+    // The rest of the request goes ahead.
+    assertEquals(
+      listOf("ui-builder-read"),
+      body["requestedCapabilities"]!!.jsonArray.map { it.jsonPrimitive.content },
+    )
+    // A request with nothing unknown says nothing about it.
+    val (_, plain) = post("/agent-access/request", """{"capabilities":["ui-builder-read"]}""")
+    // Absent or null: this server's JSON writes explicit nulls.
+    for (key in listOf("unsupportedCapabilities", "message")) {
+      val value = json(plain)[key]
+      assertTrue(value == null || value is kotlinx.serialization.json.JsonNull, "$key: $value")
+    }
   }
 
   @Test

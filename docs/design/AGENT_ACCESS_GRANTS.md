@@ -174,6 +174,12 @@ Three edges are worth stating, since none of them is obvious:
    happened. An operator who needs the picture gone needs the image lane's own controls, not the
    revoke button.
 
+**A capability this server does not know is reported, not dropped in silence.** A request naming
+one (a newer client's, or one this release does not have yet) still opens, without it; the
+request's answer lists such names in `unsupportedCapabilities` with a `message` saying so, so an
+agent can tell "this server cannot give that" from "the approver did not tick it". `request_access`
+over MCP returns the same answer. Names are echoed trimmed, at most sixteen of up to 64 characters.
+
 **The other ingest lanes are outside the scope system entirely.** `POST /bundles/{name}` and `POST /docs`
 run through the same `rejectBadToken` as everything else, so a `preview` grant would have satisfied
 them — letting an agent granted "browse this server's catalogs" publish a document or replace a
