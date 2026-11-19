@@ -127,6 +127,11 @@ class ServeUiBuilderMcp(
    * absent).
    */
   private val links: ServeUiBuilderLinksStore? = null,
+  /**
+   * The Watch Face Push publish flag ([PUBLISH_WATCH_FACE]); null on a host without it (tool
+   * absent).
+   */
+  private val watchFacePush: WatchFacePush? = null,
   private val onLog: (String) -> Unit = { System.err.println(it) },
   /**
    * Bytes behind a design's `assets` map, so an agent can put a photograph in a design. Null
@@ -210,6 +215,12 @@ class ServeUiBuilderMcp(
   val supportsLinks: Boolean
     get() = links != null
 
+  /**
+   * Whether this host publishes watch faces to watches, and so whether [PUBLISH_WATCH_FACE] exists.
+   */
+  val supportsWatchFacePush: Boolean
+    get() = watchFacePush != null
+
   /** Whether this host keeps reference overlays, and so whether the reference tools exist. */
   val supportsReferences: Boolean
     get() = references != null
@@ -286,6 +297,8 @@ class ServeUiBuilderMcp(
       // as the design does.
       GET_LINKS -> if (links == null) null else UiBuilderRouteCapability.READ
       SET_LINKS -> if (links == null) null else UiBuilderRouteCapability.WRITE
+      // A write gated at the door; the push lane then admits only the design's owner.
+      PUBLISH_WATCH_FACE -> if (watchFacePush == null) null else UiBuilderRouteCapability.WRITE
       // The reference overlay is gated as the browser's reference routes are: attaching one is
       // the design's own write, measuring against it the design's read.
       SET_REFERENCE -> if (references == null) null else UiBuilderRouteCapability.WRITE
@@ -478,6 +491,7 @@ class ServeUiBuilderMcp(
         REACT_TO_COMMENT -> return commentTool(tool, args, actor)
         GET_LINKS,
         SET_LINKS -> return linksTool(tool, args, actor)
+        PUBLISH_WATCH_FACE -> return publishWatchFace(args, actor)
         VALIDATE -> return validate(args, actor)
         CHECK_DESIGN -> return checkDesign(args, actor)
         SIMULATE_ACTION -> return simulateAction(args, actor)
@@ -1768,6 +1782,30 @@ class ServeUiBuilderMcp(
     val record = UI_BUILDER_JSON.encodeToJsonElement(StoredLinks.serializer(), stored).jsonObject
     // The chat platform the thread lives on, read off its permalink; see [ServeChatThreadLinks].
     return JsonObject(record + ServeChatThreadLinks.describe(stored.thread)).toString()
+  }
+
+  /**
+   * Publish a `wff-watchface` design to watches, or take it off them ([WatchFacePush]). Only the
+   * design's owner may; the reply is the publication with its version and APK status.
+   */
+  private suspend fun publishWatchFace(
+    args: JsonObject,
+    actor: AuthenticatedUiBuilderActor,
+  ): String {
+    val push = watchFacePush ?: throw McpRequestException("this host does not publish watch faces")
+    val designId = args.requiredText("designId")
+    val published =
+      (args["published"] as? JsonPrimitive)?.booleanOrNull
+        ?: throw McpRequestException("`published` must be true or false")
+    val outcome =
+      if (published) push.publish(service, actor, designId)
+      else push.unpublish(service, actor, designId)
+    return when (outcome) {
+      is WatchFacePush.Outcome.Ok ->
+        WATCHFACE_PUSH_JSON.encodeToString(WatchFacePushPublicationV1.serializer(), outcome.status)
+      is WatchFacePush.Outcome.Refused ->
+        throw McpRequestException("${outcome.code}: ${outcome.reason}")
+    }
   }
 
   /**
@@ -4105,6 +4143,7 @@ class ServeUiBuilderMcp(
     const val DESIGN_ACCESS = "ui_builder_design_access"
     const val GET_LINKS = "ui_builder_get_links"
     const val SET_LINKS = "ui_builder_set_links"
+    const val PUBLISH_WATCH_FACE = "ui_builder_publish_watch_face"
     const val SHARE_DESIGN = "ui_builder_share_design"
     const val RENAME_DESIGN = "ui_builder_rename_design"
     const val DELETE_DESIGN = "ui_builder_delete_design"
@@ -4388,8 +4427,28 @@ class ServeUiBuilderMcp(
       branches: Boolean = false,
       references: Boolean = false,
       guidelineRecords: Boolean = false,
+      watchFacePush: Boolean = false,
     ): List<JsonObject> =
       listOfNotNull(
+        if (!watchFacePush) null
+        else
+          tool(
+            PUBLISH_WATCH_FACE,
+            "Publish a watch-face design (a `wff-watchface` catalog design) to Wear OS watches, " +
+              "or take it off them. `published: true` publishes the design's current revision: " +
+              "the server exports its Watch Face Format, builds a signed Watch Face Push APK, " +
+              "and lists it to every watch linked to the owner's account (and, for a public " +
+              "design, to any watch). Publish again after editing to ship the edit; the " +
+              "`version` moves only when the face itself changed. `published: false` stops " +
+              "listing it. Only the design's owner may. A face the packager refuses is refused " +
+              "here with its diagnostics.",
+            """
+            {"type":"object","properties":{
+              "designId":{"type":"string"},
+              "published":{"type":"boolean","description":"true to publish the current revision, false to unpublish."}
+            },"required":["designId","published"],"additionalProperties":false}
+            """,
+          ),
         tool(
           LIST_CATALOGS,
           "List the component catalogs a UI-builder design can pin to. Start here: a design's " +

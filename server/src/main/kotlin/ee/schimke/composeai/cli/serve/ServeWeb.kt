@@ -7662,6 +7662,23 @@ ${captureControlsHtml().prependIndent("          ")}
    * A grant link opened in a browser already acting as a different live grant. Nothing changes
    * unless `Switch` (a same-origin POST) is pressed.
    */
+  /** A plain server-styled page around [body] (already escaped markup), e.g. `/link`. */
+  fun plainPage(
+    title: String,
+    body: String,
+    version: String? = null,
+    siteName: String = "",
+    themeCss: String = "",
+  ): String =
+    document(
+      title = "$title — compose-preview",
+      unfurlDescription = title,
+      version = version,
+      siteName = siteName,
+      themeCss = themeCss,
+      body = body,
+    )
+
   fun agentGrantSwitchPage(
     currentLabel: String,
     currentFingerprint: String,

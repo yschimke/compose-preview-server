@@ -252,6 +252,15 @@ subscriber. `SERVE_VAPID_SUBJECT` (a `mailto:` or `https:` URL) defaults to the 
 The box needs outbound HTTPS to the browsers' push services. See
 [`docs/serve/NOTIFICATIONS.md`](../../docs/serve/NOTIFICATIONS.md).
 
+**Watch Face Push** lets the Wear OS push app (yschimke/watchface-tools `:push-app`) list and install
+the `wff-watchface` designs published here. It needs one secret: the marketplace signing key, set as
+`WFF_SIGNING_KEYSTORE_B64`, `WFF_SIGNING_KEYSTORE_PASSWORD` and (recommended) the pin
+`WFF_SIGNING_CERT_SHA256` in `.env`. Every face is signed with that one key, and a face installed from
+this box only accepts updates signed by the same certificate, so generate it once, back it up, and
+never rotate it. Without it the API stays up, lists nothing, and `GET /api/watchface-push/v1/status`
+says why; no throwaway key is generated in its place. See
+[`docs/serve/WATCHFACE_PUSH.md`](../../docs/serve/WATCHFACE_PUSH.md).
+
 The compose deployment offers those three agent capabilities by default because the image always
 packages the builder lane. `images` joins them when `SERVE_IMAGE_UPLOAD_REPO` names a repository —
 that is, when this box runs the upload lane — so an approved agent can host a rendered preview

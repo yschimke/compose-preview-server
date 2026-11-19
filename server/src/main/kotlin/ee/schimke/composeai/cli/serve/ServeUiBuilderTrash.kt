@@ -25,10 +25,14 @@ internal class ServeUiBuilderSidecars(
   private val guidelineRecords: ServeUiBuilderGuidelineStore? = null,
   /** Which shared folder the design was filed in. */
   private val folders: ServeUiBuilderFolderStore? = null,
+  /** The design's watch publication, retired with it so a recreated id never inherits it. */
+  private val retireWatchPublication: (designId: String) -> Unit = {},
   private val onLog: (String) -> Unit = { System.err.println(it) },
 ) {
   fun sweep(designId: String) {
     thumbnails?.evict(designId)
+    runCatching { retireWatchPublication(designId) }
+      .onFailure { onLog("serve: watch publication for $designId not retired (${it.message})") }
     runCatching {
       if (folders?.move(designId, null) is FolderWriteResult.Failed) {
         onLog("serve: folder record for $designId not removed")

@@ -2368,6 +2368,47 @@ public class ServeRunner(
    * [ServeHttpServer] is the transport. An unwritable explicit directory is a startup error, not an
    * in-memory downgrade, since clients rely on persistence.
    */
+  /**
+   * The Watch Face Push site API over [lane]'s designs, keeping its state beside the builder's
+   * (`watchface-push/`). Null without a state directory. The marketplace signing key is read from
+   * the environment once, here; without one the API answers that it cannot build
+   * ([WatchFacePushSigning]).
+   */
+  private fun buildWatchFacePush(
+    lane: UiBuilderLane,
+    githubAuth: ServeGithubAuth?,
+  ): WatchFacePush? {
+    val directory = lane.stateDirectory?.resolve("watchface-push") ?: return null
+    val store = lane.watchFacePush ?: return null
+    val signing = WatchFacePushSigning.fromEnvironment()
+    when (signing) {
+      is WatchFacePushSigning.Configured ->
+        System.err.println(
+          "serve: watch-face push signs with the certificate SHA-256 ${signing.certificateSha256}",
+        )
+      is WatchFacePushSigning.Unavailable ->
+        System.err.println("serve: watch-face push cannot build APKs: ${signing.reason}")
+    }
+    val thumbnails = lane.thumbnails
+    return WatchFacePush(
+      store = store,
+      packaging = WatchFacePushPackaging.production(signing, directory.resolve("packager-home")),
+      sourceFor = ::deriveDwfSource,
+      isWatchFaceCatalog = { catalog -> lane.nativeBackends[catalog] == DwfPreviewSurface.BACKEND },
+      preview = { actor, designId, revision ->
+        thumbnails?.watchFacePreview(actor, designId, revision)
+      },
+      signInPath =
+        githubAuth?.let {
+          { returnTo ->
+            ServeGithubAuth.START_PATH +
+              "?return=" +
+              java.net.URLEncoder.encode(returnTo, Charsets.UTF_8)
+          }
+        },
+    )
+  }
+
   private data class UiBuilderLane(
     val service: PersistentUiBuilderService,
     /** Live catalog generation, swapped when a delivery branch refreshes. */
@@ -2432,6 +2473,8 @@ public class ServeRunner(
     val validator: UiBuilderDraftValidator,
     /** The state directory itself, for the stores that live beside the builder's (Web Push). */
     val stateDirectory: File? = null,
+    /** Watch publications and linked watches ([WatchFacePush]); shared with the trash sweep. */
+    val watchFacePush: WatchFacePushStore? = null,
   ) : AutoCloseable {
     override fun close() {
       thumbnails?.close()
@@ -3072,6 +3115,15 @@ public class ServeRunner(
       nativePlatforms = catalogPlatforms,
       validator = ScratchUiBuilderDraftValidator(catalogs, annotatedExporter),
       stateDirectory = directory,
+      watchFacePush =
+        runCatching { WatchFacePushStore(directory.resolve("watchface-push").toPath()) }
+          .onFailure {
+            System.err.println(
+              "serve: watch-face push unavailable (${it.message}); the builder works, and no " +
+                "design can be installed on a watch from here",
+            )
+          }
+          .getOrNull(),
     )
   }
 
@@ -3352,6 +3404,7 @@ public class ServeRunner(
               thumbnails = lane.thumbnails,
               guidelineRecords = lane.guidelineRecords,
               folders = lane.folders,
+              retireWatchPublication = { lane.watchFacePush?.retire(it) },
             ),
         )
         .start()
@@ -3410,6 +3463,7 @@ public class ServeRunner(
           thumbnails = uiBuilderLane.thumbnails,
           designs = uiBuilderLane.service,
           guidelineRecords = uiBuilderLane.guidelineRecords,
+          retireWatchPublication = { uiBuilderLane.watchFacePush?.retire(it) },
         )
       } else {
         null
@@ -3782,6 +3836,8 @@ public class ServeRunner(
               sourceFor = ::deriveDwfSource,
             )
           },
+        // The Wear OS push app's site API: device linking, the published watch faces, their APKs.
+        watchFacePush = uiBuilderLane?.let { lane -> buildWatchFacePush(lane, githubAuth) },
         // Needs the generator and the playground, but no catalog mapping: an inline body compiles
         // against whichever catalog offers `remote-compose`.
         uiBuilderInlineCapture =
