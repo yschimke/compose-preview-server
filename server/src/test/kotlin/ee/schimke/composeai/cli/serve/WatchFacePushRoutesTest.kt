@@ -1646,6 +1646,38 @@ class WatchFacePushRoutesTest {
     assertFalse("broken" in skipped(), "a deleted design is on /status")
   }
 
+  @Test
+  fun `a startup sweep build that failed for a passing reason is tried again`() {
+    automaticListing = true
+    val ready = readyPackaging()() as WatchFacePushPackaging.Ready
+    var failures = 1
+    val flaky = WatchFacePushPackager { files, faceName, versionCode, out ->
+      if (failures-- > 0) throw java.io.IOException("No space left on device")
+      ready.packager.pack(files, faceName, versionCode, out)
+    }
+    start(packaging = { WatchFacePushPackaging.Ready(flaky, "c0ffee") })
+    runBlocking {
+      service.execute(
+        UiBuilderServiceCall(
+          AuthenticatedUiBuilderActor(alice),
+          UiBuilderServiceRequest.CreateDesign(document("aurora", "Aurora")),
+        ),
+      )
+      service.setDesignVisibility(
+        AuthenticatedUiBuilderActor(alice),
+        "aurora",
+        UiBuilderDefaultVisibility.PUBLIC,
+      )
+      push.automatic.sweep(service)
+    }
+    assertEquals(emptyList(), designs())
+    assertTrue(push.automatic.isPending("aurora"))
+    val failed = publication("aurora").build!!
+    assertEquals("failed", failed.state)
+    assertNotNull(failed.nextRetryAtEpochMillis)
+    assertEquals(listOf("aurora"), settledDesigns().map { it.id })
+  }
+
   private fun document(id: String, title: String) =
     DesignDocumentV1(
       schema = "compose-ui-builder-document/v1-candidate",

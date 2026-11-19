@@ -163,9 +163,12 @@ internal class WatchFacePushAutomatic(
     if (!enabled) return
     for (head in storedDesigns()) {
       if (head.catalogSystemId != null && !push.isWatchFaceCatalog(head.catalogSystemId)) continue
-      val worked =
-        queue.exclusive.withLock { runCatching { consider(service, head.designId) }.isSuccess }
-      if (worked && sweepPauseMillis > 0) delay(sweepPauseMillis)
+      queue.exclusive.withLock {
+        val retry = attempt(service, head.designId)
+        // A build that failed around the packager is tried again, as the scheduler's own are.
+        if (retry != null) scheduleRetry(head.designId, failures = 1, reason = retry)
+      }
+      if (sweepPauseMillis > 0) delay(sweepPauseMillis)
     }
   }
 
@@ -177,31 +180,39 @@ internal class WatchFacePushAutomatic(
         if (entry.atMillis > now) continue
         // Taken off first: an edit that lands while this one builds schedules it again.
         if (!due.remove(designId, entry)) continue
-        val retry = runCatching {
-          consider(service, designId)
-        }
-          .getOrElse {
-            System.err.println("serve: watchface-push: automatic listing of $designId: $it")
-            it.message ?: it.javaClass.simpleName
-          }
-        queue.done(designId)
-        if (retry != null) {
-          val failures = entry.failures + 1
-          val backoff = (retryMillis shl minOf(failures - 1, 6)).coerceAtMost(MAX_RETRY_MILLIS)
-          val next = push.clock() + backoff
-          due.putIfAbsent(designId, Due(next, failures))
-          queue.record(
-            designId,
-            WatchFacePushBuildStatusV1(
-              WatchFacePushBuildQueue.FAILED,
-              reason = retry,
-              nextRetryAtEpochMillis = next,
-              automatic = true,
-            ),
-          )
-        }
+        val retry = attempt(service, designId)
+        if (retry != null) scheduleRetry(designId, entry.failures + 1, retry)
       }
     }
+  }
+
+  /** [consider] [designId]; the reason to try again, or null. The caller holds the queue's lock. */
+  private suspend fun attempt(service: UiBuilderServicePort, designId: String): String? {
+    val retry = runCatching {
+      consider(service, designId)
+    }
+      .getOrElse {
+        System.err.println("serve: watchface-push: automatic listing of $designId: $it")
+        it.message ?: it.javaClass.simpleName
+      }
+    queue.done(designId)
+    return retry
+  }
+
+  /** Try [designId] again after a backoff that doubles with each of its [failures], to an hour. */
+  private fun scheduleRetry(designId: String, failures: Int, reason: String) {
+    val backoff = (retryMillis shl minOf(failures - 1, 6)).coerceAtMost(MAX_RETRY_MILLIS)
+    val next = push.clock() + backoff
+    due.putIfAbsent(designId, Due(next, failures))
+    queue.record(
+      designId,
+      WatchFacePushBuildStatusV1(
+        WatchFacePushBuildQueue.FAILED,
+        reason = reason,
+        nextRetryAtEpochMillis = next,
+        automatic = true,
+      ),
+    )
   }
 
   /** A pending state for [designId] that nothing will now build is dropped. */
