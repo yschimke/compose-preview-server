@@ -30,6 +30,7 @@ import ee.schimke.composeai.uibuilder.service.PackagedUiBuilderRenderBundle
 import ee.schimke.composeai.uibuilder.service.PersistentUiBuilderService
 import ee.schimke.composeai.uibuilder.service.ProductionUiBuilderExportExecutor
 import ee.schimke.composeai.uibuilder.service.PublishedUiBuilderCatalog
+import ee.schimke.composeai.uibuilder.service.UiBuilderAssetStore
 import ee.schimke.composeai.uibuilder.service.UiBuilderBranchPort
 import ee.schimke.composeai.uibuilder.service.UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.UiBuilderDesignStateStore
@@ -2394,6 +2395,7 @@ public class ServeRunner(
       store = store,
       packaging = WatchFacePushPackaging.production(signing, directory.resolve("packager-home")),
       sourceFor = ::deriveDwfSource,
+      assets = lane.assets,
       isWatchFaceCatalog = { catalog -> lane.nativeBackends[catalog] == DwfPreviewSurface.BACKEND },
       preview = { actor, designId, revision ->
         thumbnails?.watchFacePreview(actor, designId, revision)
@@ -2475,6 +2477,8 @@ public class ServeRunner(
     val stateDirectory: File? = null,
     /** Watch publications and linked watches ([WatchFacePush]); shared with the trash sweep. */
     val watchFacePush: WatchFacePushStore? = null,
+    /** Uploaded asset bytes, so the watch-face lanes package a design's pinned drawables. */
+    val assets: UiBuilderAssetStore? = null,
   ) : AutoCloseable {
     override fun close() {
       thumbnails?.close()
@@ -2695,11 +2699,17 @@ public class ServeRunner(
       else null
     // An A2UI catalog's JSON (its A2UI messages) is written whatever the Remote Compose flag says;
     // every other design passes through to the Remote Compose / picture chain below it.
+    // A watch face's `bundle` (its WFF source layout, with the PNG export as the preview) is
+    // written here; every other design and format passes through.
     val exporter =
-      LovelaceJsonExportExecutor(
-        A2uiJsonExportExecutor(
-          documentExporter?.let { RemotePngExportExecutor(it, renderer, fonts) } ?: pictureExporter,
+      WatchFaceBundleExportExecutor(
+        LovelaceJsonExportExecutor(
+          A2uiJsonExportExecutor(
+            documentExporter?.let { RemotePngExportExecutor(it, renderer, fonts) }
+              ?: pictureExporter,
+          ),
         ),
+        assets = assetStore,
       )
     val pictureExports =
       ((pictureExporter as? ProductionUiBuilderExportExecutor)?.capabilities
@@ -2825,7 +2835,7 @@ public class ServeRunner(
             health.withhold(systemId, "published ui-builder.json declares no platform")
             return false
           }
-          publishedCatalogs[systemId] = composed.catalog
+          publishedCatalogs[systemId] = withWatchFaceBundle(composed.catalog)
           // The runtime is the executable half of the document pin; never substitute a host
           // default. A republish that drops its runtime returns to the built-in renderer.
           published.runtimeId?.let { publishedRuntimeIds[systemId] = it }
@@ -3013,6 +3023,7 @@ public class ServeRunner(
     }
     return UiBuilderLane(
       service = service,
+      assets = assetStore,
       catalogs = catalogs,
       renderer = renderer,
       refreshPublished = refreshPublished,
@@ -3632,6 +3643,7 @@ public class ServeRunner(
         uiBuilderProfile = uiBuilderProfile,
         uiBuilderHostRoot = uiBuilderHostRoot,
         catalogLoads = catalogLoads,
+        catalogBakedBundle = { system -> catalogStore?.bakedBundle(system) },
         heroCacheDir = catalogCacheDirFlag?.takeIf { it != "none" }?.let { File(it, "heroes") },
         catalogRefresh = catalogRefresh,
         localRebuild = localRebuild,
@@ -3834,6 +3846,8 @@ public class ServeRunner(
               },
               // The tab starts with an empty body, so the server writes the WFF itself.
               sourceFor = ::deriveDwfSource,
+              // The editor sends only the XML; the design's pinned assets are its drawables.
+              assets = lane.assets,
             )
           },
         // The Wear OS push app's site API: device linking, the published watch faces, their APKs.

@@ -981,6 +981,17 @@ class ServeCatalogStore(
     // wait on ~150 small PNGs.
     scheduleRcCompareFetch(system, generation, rcCompareAlias, bakedLaneLabel, base, dir)
 
+    // This generation's bytes are on disk from here on. On a catalog's first load in this process
+    // there is nothing published to stay consistent with, so readers that must not wait for a
+    // daemon ([bakedBundle]) see it now rather than after the live lane stands up. Re-staged after
+    // each sidecar extraction below, so a cached reader notices the watch-face sources arriving.
+    // Baked previews only until a live lane publishes: live-only ids are served only where one
+    // runs.
+    val stageForReaders = {
+      stageBakedBundle(safe, generation) { bakedFallback(emptyList(), emptyList()) }
+    }
+    stageForReaders()
+
     // Trusted re-render from a carried executable bundle (opt-in), tried before the Gradle `source`
     // build. Only a Trusted catalog that declares `liveBundle` reaches the builder, and only once
     // the whole bundle fetched cleanly. The builder fronts [bakedFallback] with the daemon.
@@ -1034,6 +1045,7 @@ class ServeCatalogStore(
           val localAlias = moduleAlias.mapValues { (_, id) -> localPreviewIds.getValue(id) }
           extractCatalogRcDocs(bundleFile, localAlias, dir)
           extractCatalogWatchFaceSidecars(bundleFile, localAlias, dir)
+          stageForReaders()
           extractComponentRecord(bundleFile, dir)
           extractGuidelineResults(bundleFile, dir)
           val resources =
@@ -1090,7 +1102,9 @@ class ServeCatalogStore(
               { bakedFallback(emptyList(), deferredIds.toList()) },
             )
         ) {
-          publishGeneration(safe, dir, wasmDir)
+          publishGeneration(safe, dir, wasmDir, generation) {
+            bakedFallback(emptyList(), deferredIds.toList())
+          }
           return Result.Ok(
             safe,
             count + deferredIds.size + failedIds.size,
@@ -1126,6 +1140,7 @@ class ServeCatalogStore(
         // Done regardless of daemon outcome, since that lane needs no daemon.
         extractCatalogRcDocs(bundleFile, alias, dir)
         extractCatalogWatchFaceSidecars(bundleFile, alias, dir)
+        stageForReaders()
         extractComponentRecord(bundleFile, dir)
         extractGuidelineResults(bundleFile, dir)
         // IR-backed previews have no class in app.jar; the daemon replays them from `ir/`, so they
@@ -1165,7 +1180,9 @@ class ServeCatalogStore(
                   perPreviewBundle,
                 )
             ) {
-              publishGeneration(safe, dir, wasmDir)
+              publishGeneration(safe, dir, wasmDir, generation) {
+                bakedFallback(emptyList(), deferredIds.toList())
+              }
               return Result.Ok(
                 safe,
                 count + deferredIds.size + failedIds.size,
@@ -1208,7 +1225,9 @@ class ServeCatalogStore(
           { bakedFallback(emptyList(), deferredIds.toList()) },
         )
     ) {
-      publishGeneration(safe, dir, wasmDir)
+      publishGeneration(safe, dir, wasmDir, generation) {
+        bakedFallback(emptyList(), deferredIds.toList())
+      }
       return Result.Ok(
         safe,
         count + deferredIds.size + failedIds.size,
@@ -1246,7 +1265,7 @@ class ServeCatalogStore(
         )
     // Same reasoning as the degradation: a session with no live lane lists no live-only previews.
     val host = bakedFallback(degradations, emptyList())
-    publishGeneration(safe, dir, wasmDir)
+    publishGeneration(safe, dir, wasmDir, generation) { host }
     register(safe, host)
     return Result.Ok(
       safe,
@@ -3758,6 +3777,56 @@ class ServeCatalogStore(
     }
   }
 
+  /**
+   * The baked bundle of each system's newest generation on disk: the published one, or, before a
+   * catalog's first publish in this process, the one being loaded ([stageBakedBundle]).
+   */
+  private val bakedBundles = ConcurrentHashMap<String, BakedBundle>()
+
+  /**
+   * One generation's baked bundle as this store laid it out on disk, independent of whether the
+   * catalog's session is resident, suspended, or still waiting for its live lane. [key] changes
+   * whenever what it reads may have (a new generation, a publish, sidecars landing), so a reader
+   * may cache what it derives from [host] by it.
+   */
+  class BakedBundle
+  internal constructor(
+    val generation: Int,
+    private val revision: Long,
+    factory: () -> ServeBundleHost,
+  ) {
+    /** Built on first read and then kept; a [ServeBundleHost] never starts a daemon. */
+    val host: ServeBundleHost by lazy(factory)
+
+    val key: String
+      get() = "g$generation.$revision"
+  }
+
+  /** Bumped per [putBakedBundle], so every replacement carries a fresh [BakedBundle.key]. */
+  private val bakedBundleRevisions = java.util.concurrent.atomic.AtomicLong()
+
+  private fun putBakedBundle(safe: String, generation: Int, baked: () -> ServeBundleHost) {
+    bakedBundles[safe] = BakedBundle(generation, bakedBundleRevisions.incrementAndGet(), baked)
+  }
+
+  /**
+   * [system]'s baked catalog bundle on disk, or null before any generation of it has been laid out.
+   * Never resumes a session or wakes a daemon: for metadata readers (the Watch Face Push catalog
+   * faces) that must not come and go with session residency.
+   */
+  fun bakedBundle(system: String): BakedBundle? =
+    ServeBundleStore.sanitizeName(system)?.let { bakedBundles[it] }
+
+  /**
+   * Offer [generation], laid out on disk, to [bakedBundle] readers before it is published, but only
+   * while nothing of [safe] is published yet: a refresh keeps readers on the generation the catalog
+   * serves until [publishGeneration] swaps both.
+   */
+  private fun stageBakedBundle(safe: String, generation: Int, baked: () -> ServeBundleHost) {
+    if (liveDirs.containsKey(safe)) return
+    putBakedBundle(safe, generation, baked)
+  }
+
   /** Where [system]'s registered host reads its bytes from, or null if it has never published. */
   fun liveDir(system: String): File? = ServeBundleStore.sanitizeName(system)?.let { liveDirs[it] }
 
@@ -3766,8 +3835,15 @@ class ServeCatalogStore(
    * point, so a generation is never marked live without a host (or swept while one still serves
    * it).
    */
-  private fun publishGeneration(safe: String, dir: File, wasmDir: File?) {
+  private fun publishGeneration(
+    safe: String,
+    dir: File,
+    wasmDir: File?,
+    generation: Int,
+    baked: () -> ServeBundleHost,
+  ) {
     liveDirs[safe] = dir
+    putBakedBundle(safe, generation, baked)
     File(dir, UI_BUILDER_RUNTIME_DIR).takeIf(File::isDirectory)?.let(runtimeRoots::add)
     // Always, including null, so an earlier generation's in-browser app is withdrawn. See
     // [registerWasm].

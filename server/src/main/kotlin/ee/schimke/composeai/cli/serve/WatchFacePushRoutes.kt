@@ -4,6 +4,7 @@ import ee.schimke.composeai.uibuilder.protocol.DesignAccessActionV1
 import ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1
 import ee.schimke.composeai.uibuilder.protocol.GetSnapshotRequestV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
+import ee.schimke.composeai.uibuilder.service.UiBuilderAssetStore
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import ee.schimke.composeai.web.WebEscaping
@@ -52,6 +53,11 @@ internal constructor(
   /** Where a signed-out person signs in and comes back to the given path; null: no sign-in. */
   internal val signInPath: ((returnTo: String) -> String)? = null,
   internal val clock: () -> Long = System::currentTimeMillis,
+  /**
+   * Where a design's uploaded asset bytes are, so a published face carries the drawables its WFF
+   * names ([WatchFaceDrawables]).
+   */
+  internal val assets: UiBuilderAssetStore? = null,
 ) {
   internal val codes = WatchFacePushDeviceCodes(store, clock)
   internal val builds = WatchFacePushBuilds(store, packaging)
@@ -101,13 +107,22 @@ internal constructor(
         is Owned.Refused -> return owned.outcome
         is Owned.Document -> owned.document to owned.ownerActorId
       }
-    val source =
+    val exported =
       sourceFor(document)
         ?: return Outcome.Refused(
           HttpStatusCode.UnprocessableEntity,
           "not_exportable",
           "this design does not export to Watch Face Format; the editor's code pane lists why",
         )
+    val packaged = packagedWithPinnedDrawables(document, exported, emptyMap(), assets)
+    if (packaged.missing.isNotEmpty()) {
+      return Outcome.Refused(
+        HttpStatusCode.UnprocessableEntity,
+        WatchFaceDrawables.MISSING_RESOURCE,
+        packaged.missing.joinToString("\n"),
+      )
+    }
+    val source = packaged.source
     source.problem()?.let {
       return Outcome.Refused(HttpStatusCode.UnprocessableEntity, "not_exportable", it)
     }
