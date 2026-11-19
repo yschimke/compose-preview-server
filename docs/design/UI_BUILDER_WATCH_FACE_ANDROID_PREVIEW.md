@@ -150,6 +150,38 @@ as exporting it). Body, all optional:
   unchanged revision is free.
 - Refusals: `DWF_SOURCE_INVALID` / `DWF_SOURCE_UNAVAILABLE` (422), `DWF_RUNTIME_MISSING` /
   `DWF_PACKAGING_UNAVAILABLE` (503), `DWF_TOO_MANY_SESSIONS` (429).
+- `"async": true` answers `202` at once with `{sessionId, socketPath, pagePath, statusPath, stage}`
+  and does the export (for `{}`), the packaging and the first frame in the background, reporting
+  each stage (below). Without it the request packages before it answers `201`, as before, so a
+  packager refusal stays that request's `422`; with it, the refusal is the session's `failed` stage,
+  carrying the packager's text verbatim. When all four runtime slots are taken an async start waits
+  in a queue of at most 8 instead of answering `429`.
+
+### Stages
+
+`GET …/dwf-preview/{sessionId}` (owner only) and the socket's `stage` messages say where a session
+is on its way to its first frame — a cold one on a large face is minutes, and a bare "waiting" read
+as broken:
+
+```json
+{"type":"stage","sessionId":"…","stage":"packaging","step":2,"steps":5,
+ "label":"Packaging the watch face","elapsedMillis":12000,"stageElapsedMillis":9000,
+ "cachedPackage":false,"queueAhead":null,"code":null,"reason":null,"frameIntervalMillis":1000}
+```
+
+| `stage` | `step` | `label` |
+| --- | --- | --- |
+| `queued` | 0 | "Waiting for a free runtime (2 ahead)" / "(next in line)"; `queueAhead` set |
+| `exporting` | 1 | only when the server derives the WFF from the revision |
+| `packaging` | 2 | "Packaging the watch face", or "Using the cached package" (`cachedPackage: true`) |
+| `starting-runtime` | 3 | only when no simulator is running |
+| `installing` | 4 | the APK pushed into the runtime |
+| `loading-face` | 5 | until the runtime reports the face's first frame |
+| `live` | 5 | frames follow |
+| `failed` | the step it failed at | `code` and `reason`: the diagnostic, e.g. the packager's text |
+
+The socket sends one when the stage changes and about once a second while it does not, so a client
+can show elapsed seconds and a determinate "step n of 5" without polling.
 
 The existing `…/native-preview` route answers a `android-dwf` design with `422 NATIVE_BACKEND_DWF`
 naming this route, instead of compiling it on Skiko. `UiBuilderNativeTargets.resolve` returns
@@ -165,8 +197,20 @@ packaged APK; it belongs to the actor that started it (another actor gets 404/cl
 the daemon last served another session — or another revision — the next frame pushes this session's
 APK and replays its whole state; when it last served this session, only the diff is sent. A failing
 command drops the daemon (its state is unknown) and the next frame starts a fresh one and replays.
-Sessions are bounded (4) and expire after 15 idle minutes, checked on use — no thread. The last
-session out stops the daemon. `DELETE …/dwf-preview/{sessionId}` closes explicitly.
+Four sessions hold a runtime slot (a `failed` or `queued` one holds none) and expire after 15 idle
+minutes. A session is also released when no socket has been attached to it for a minute (a closed
+pane or tab; a reload reattaches well inside that), and at once when its owner starts another
+session on the same design while it has no socket — a pane's Reload replaces its predecessor rather
+than leaving it to hold a slot. A session still showing in another tab keeps its socket and is left
+alone. All of this is checked on use and on every start — no timer thread. The last session out
+stops the daemon. `DELETE …/dwf-preview/{sessionId}` closes explicitly.
+
+**The first frame is the app's face.** A push answers before the runtime has drawn anything, so the
+session polls `watchface status` until the face reports a frame (at most 90 s, as
+`DwfApkDaemonBridge` does) and, after any override, until it is no longer `rendering` (a short
+bound), before the screenshot. Without that, a warm daemon's first screenshot was the simulator's
+built-in face ("the watch face has not rendered a frame") and every override showed one frame
+late.
 
 ### The tab and its socket
 
@@ -187,14 +231,25 @@ making a design revision look like one would mean faking `ServeHost`, and the vi
 | --- | --- |
 | `{"type":"controls","controls":{…}}` | partial update, then a frame |
 | `{"type":"requestFrame"}` | redraw |
-| `{"type":"visibility","visible":false}` | a hidden tab stops ticking |
+| `{"type":"visibility","visible":false}` | a hidden tab gets no frames until it is visible again |
+
+Server → client adds `stage` (above) to `lane`/`frame`/`error`; `lane` carries `ticking` and
+`frameIntervalMillis`.
+
+**A session runs on the wall clock.** It starts with `ticking: true` from the time it started, so
+the face shows the time and moves without anyone touching a control; before this a session drew one
+frame and stopped, in the editor's pane and in the tab alike. While live and visible it redraws
+every second, or every 250 ms for a face that moves between seconds (`SECOND_MILLISECOND`,
+`MILLISECOND`, `<Animation>`, `<Sequence>`, a `<Sweep>` second hand: `DwfSource.animates`). Each
+frame is a sandbox screenshot, so that is a ceiling: the next frame is never asked for before the
+last one has been sent. `{"ticking": false}` freezes it.
 
 `controls` keys (absent = unchanged, `null` = clear; the whole patch is refused if any key is bad):
 
 | Control | Key | Daemon command |
 | --- | --- | --- |
 | Time | `timeMillis` | `clock {timeMillis}` |
-| Live ticking | `ticking` | none — the server redraws each second and sends the advanced `clock`; counts from the last set time |
+| Live ticking | `ticking` (default `true`) | none — the server redraws each tick and sends the advanced `clock`; counts from the last set time, or the session's start |
 | Ambient | `ambient`, `burnInProtection`, `lowBitAmbient` | `ambient {state: AMBIENT\|INTERACTIVE, burnIn, lowBit}` |
 | Heart rate, steps | `heartRate` (0–300), `steps` | `health {heartRate, steps}` |
 | Battery | `batteryPercent` (0–100) | `battery {level}` |

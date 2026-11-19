@@ -86,6 +86,13 @@ internal class RenderHostDwfApkRuntime(
     return DwfApkRuntime.Availability.Ready
   }
 
+  override fun isPackaged(source: DwfSource): Boolean {
+    val digest = source.digest()
+    if (packaged[digest]?.isFile == true) return true
+    val out = File(cacheDir, "wff-$digest.apk")
+    return out.isFile && out.length() > 0L
+  }
+
   override fun packageApk(source: DwfSource): File {
     val digest = source.digest()
     packaged[digest]

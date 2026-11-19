@@ -44,6 +44,7 @@ class ServeUiBuilderDwfRoutesTest {
     availability: DwfApkRuntime.Availability = DwfApkRuntime.Availability.Ready,
     dwfCatalog: String = "m3-catalog",
     tickMillis: Long = 1000,
+    animatedTickMillis: Long = 250,
     sourceFor: (ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1) -> DwfSource? = { null },
   ): ServeHttpServer {
     runtime.availability = availability
@@ -74,6 +75,7 @@ class ServeUiBuilderDwfRoutesTest {
             sessions = DwfPreviewSessions(runtime),
             isDwfCatalog = { it == dwfCatalog },
             tickMillis = tickMillis,
+            animatedTickMillis = animatedTickMillis,
             sourceFor = sourceFor,
           ),
         uiBuilderAuthorization =
@@ -189,7 +191,8 @@ class ServeUiBuilderDwfRoutesTest {
 
   @Test
   fun `a started session streams frames and maps controls onto daemon commands`() {
-    start()
+    // A session ticks on the wall clock by default; a long tick keeps its frames out of the way.
+    start(tickMillis = 600_000)
     val (code, body) = post("$base?revision=0", """{"wffXml":"<WatchFace/>","wffVersion":3}""")
     assertEquals(201, code, body)
     val started = obj(body)
@@ -247,7 +250,8 @@ class ServeUiBuilderDwfRoutesTest {
       val sent = runtime.commands.drop(seen)
       assertEquals(
         listOf("ambient", "health", "battery"),
-        sent.map { it.cmd }.filter { it != "screenshot" && it != "watchface" },
+        // `clock` too: a ticking session's every frame carries the advanced wall clock.
+        sent.map { it.cmd }.filter { it != "screenshot" && it != "watchface" && it != "clock" },
       )
       assertTrue(sent.any { it.cmd == "battery" && it.payload.toString() == """{"level":64}""" })
       assertTrue(
@@ -305,11 +309,15 @@ class ServeUiBuilderDwfRoutesTest {
       )
     try {
       assertEquals(1, frames.poll(10, TimeUnit.SECONDS))
+      // Nothing asked for it: a new session runs on the wall clock, so the face moves on its own.
+      assertEquals(2, frames.poll(10, TimeUnit.SECONDS))
+      val mark = runtime.commands.size
       socket.send("""{"type":"controls","controls":{"timeMillis":1000,"ticking":true}}""")
       var last = 0
       repeat(4) { last = frames.poll(10, TimeUnit.SECONDS) ?: fail("ticking stopped") }
       assertTrue(last >= 4)
-      val clocks = runtime.commands.filter { it.cmd == "clock" }
+      // From the set time on, the clock only moves forward.
+      val clocks = runtime.commands.drop(mark).filter { it.cmd == "clock" }
       assertTrue(clocks.size >= 3, "each tick sends the advanced clock: $clocks")
       assertTrue(
         clocks.zipWithNext().all { (a, b) ->
@@ -317,6 +325,133 @@ class ServeUiBuilderDwfRoutesTest {
             a.payload["timeMillis"]!!.jsonPrimitive.long
         },
       )
+    } finally {
+      socket.close(1000, null)
+    }
+  }
+
+  private fun openSocket(id: String, inbox: LinkedBlockingQueue<JsonObject>): WebSocket =
+    client.newWebSocket(
+      Request.Builder()
+        .url("ws://127.0.0.1:${server!!.port}$base/$id/ws")
+        .header(ServeHttpServer.TOKEN_HEADER, "local-fixture")
+        .build(),
+      object : WebSocketListener() {
+        override fun onMessage(webSocket: WebSocket, text: String) {
+          inbox.add(obj(text))
+        }
+      },
+    )
+
+  @Test
+  fun `an async start answers at once and the socket reports each stage, then the frame`() {
+    start(tickMillis = 600_000)
+    val (code, body) = post(base, """{"wffXml":"<WatchFace/>","async":true}""")
+    assertEquals(202, code, body)
+    val started = obj(body)
+    val id = started["sessionId"]!!.jsonPrimitive.content
+    assertEquals("$base/$id", started["statusPath"]!!.jsonPrimitive.content)
+    assertNotNull(started["stage"])
+
+    val inbox = LinkedBlockingQueue<JsonObject>()
+    val socket = openSocket(id, inbox)
+    try {
+      val stages = mutableListOf<JsonObject>()
+      var frame: JsonObject? = null
+      while (frame == null) {
+        val m = inbox.poll(10, TimeUnit.SECONDS) ?: fail("no frame; stages: $stages")
+        when (m["type"]!!.jsonPrimitive.content) {
+          "stage" -> stages += m
+          "frame" -> frame = m
+        }
+      }
+      assertEquals(1, frame["seq"]!!.jsonPrimitive.int)
+      // The live stage follows the frame, and every stage carries the step and elapsed time.
+      val live = generateSequence {
+        inbox.poll(10, TimeUnit.SECONDS)
+      }
+        .first { it["type"]!!.jsonPrimitive.content == "stage" }
+      assertEquals("live", live["stage"]!!.jsonPrimitive.content)
+      assertEquals(5, live["step"]!!.jsonPrimitive.int)
+      assertEquals(5, live["steps"]!!.jsonPrimitive.int)
+      assertTrue(live["elapsedMillis"]!!.jsonPrimitive.long >= 0)
+      (stages + live).forEach { assertNotNull(it["label"], it.toString()) }
+
+      val (statusCode, statusBody) = get("$base/$id")
+      assertEquals(200, statusCode, statusBody)
+      val status = obj(statusBody)
+      assertEquals("live", status["stage"]!!.jsonPrimitive.content)
+      assertEquals("Live", status["label"]!!.jsonPrimitive.content)
+      assertEquals(600_000, status["frameIntervalMillis"]!!.jsonPrimitive.long)
+    } finally {
+      socket.close(1000, null)
+    }
+  }
+
+  @Test
+  fun `an async start the packager refuses fails on the socket with the packager's text`() {
+    start()
+    runtime.packagingRefusal = listOf("error[wff]: line 3: unknown element <Bogus>")
+    val (code, body) = post(base, """{"wffXml":"<WatchFace/>","async":true}""")
+    assertEquals(202, code, body)
+    val id = obj(body)["sessionId"]!!.jsonPrimitive.content
+    val inbox = LinkedBlockingQueue<JsonObject>()
+    val socket = openSocket(id, inbox)
+    try {
+      val failed = generateSequence {
+        inbox.poll(10, TimeUnit.SECONDS)
+      }
+        .first {
+          it["type"]!!.jsonPrimitive.content == "stage" &&
+            it["stage"]!!.jsonPrimitive.content == "failed"
+        }
+      assertEquals(DwfPreviewSurface.PACKAGING_FAILED, failed["code"]!!.jsonPrimitive.content)
+      assertTrue(failed["reason"]!!.jsonPrimitive.content.contains("<Bogus>"))
+      assertEquals(2, failed["step"]!!.jsonPrimitive.int)
+      val error = generateSequence {
+        inbox.poll(10, TimeUnit.SECONDS)
+      }
+        .first { it["type"]!!.jsonPrimitive.content == "error" }
+      assertTrue(error["message"]!!.jsonPrimitive.content.contains("<Bogus>"))
+      assertTrue(runtime.connections.isEmpty(), "a refused face never reaches the daemon")
+    } finally {
+      socket.close(1000, null)
+    }
+    val status = obj(get("$base/status").second)
+    assertEquals(0, status["sessions"]!!.jsonPrimitive.int, "a failed session holds no slot")
+  }
+
+  @Test
+  fun `a face that moves between seconds is redrawn faster than once a second`() {
+    start(tickMillis = 600_000, animatedTickMillis = 20)
+    val xml = """<WatchFace><Transform target="alpha" value="[SECOND_MILLISECOND]"/></WatchFace>"""
+    val id =
+      obj(post(base, Json.encodeToString(buildJsonObject { put("wffXml", xml) })).second)[
+          "sessionId"]!!
+        .jsonPrimitive
+        .content
+    val inbox = LinkedBlockingQueue<JsonObject>()
+    val socket = openSocket(id, inbox)
+    try {
+      val lane = generateSequence {
+        inbox.poll(10, TimeUnit.SECONDS)
+      }
+        .first { it["type"]!!.jsonPrimitive.content == "lane" }
+      assertEquals(20, lane["frameIntervalMillis"]!!.jsonPrimitive.long)
+      val seqs = generateSequence {
+        inbox.poll(10, TimeUnit.SECONDS)
+      }
+        .filter { it["type"]!!.jsonPrimitive.content == "frame" }
+        .take(4)
+        .map { it["seq"]!!.jsonPrimitive.int }
+        .toList()
+      assertEquals(listOf(1, 2, 3, 4), seqs)
+      // A hidden tab gets nothing until it is visible again.
+      socket.send("""{"type":"visibility","visible":false}""")
+      Thread.sleep(200)
+      inbox.clear()
+      Thread.sleep(200)
+      assertTrue(inbox.none { it["type"]!!.jsonPrimitive.content == "frame" })
     } finally {
       socket.close(1000, null)
     }

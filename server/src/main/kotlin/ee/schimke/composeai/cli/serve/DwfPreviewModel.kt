@@ -119,6 +119,14 @@ internal class DwfSource(
   }
 
   /**
+   * Whether the face moves between whole seconds: a sub-second time source (`SECOND_MILLISECOND`,
+   * the one brazen-nugget's pulsing segments read), an `<Animation>`/`<Sequence>`, or a sweeping
+   * second hand. A ticking session redraws such a face faster than once a second; a face without
+   * any of them changes only when its clock does, so a frame a second shows everything it does.
+   */
+  val animates: Boolean by lazy { ANIMATION_MARKERS.containsMatchIn(wffXml) }
+
+  /**
    * The identity of this exact package: a re-push of an unchanged revision is a cache hit on the
    * packaged APK, and two sessions on the same revision share one.
    */
@@ -155,6 +163,8 @@ internal class DwfSource(
     const val MAX_ASSETS = 256
     const val MAX_ASSET_BYTES = 16L * 1024 * 1024
     private val DOCTYPE = Regex("<!\\s*(DOCTYPE|ENTITY)", RegexOption.IGNORE_CASE)
+    private val ANIMATION_MARKERS =
+      Regex("""\[(SECOND_MILLISECOND|MILLISECOND)]|<(Animation|Sequence|Sweep)\b""")
     private val SAFE_ASSET_PATH = Regex("[A-Za-z0-9._][A-Za-z0-9._/-]*")
   }
 }
@@ -563,3 +573,31 @@ internal fun deriveDwfSource(
       DwfSource(wffXml = result.xml, wffVersion = result.wffVersion, label = document.id)
     is ee.schimke.composeai.uibuilder.export.WatchFaceXmlExporter.Result.Refused -> null
   }
+
+/**
+ * Where a session is on its way to the first live frame, as the tab and the editor's pane show it.
+ * The order is the order a cold start passes through; a stage that does not apply is skipped (a
+ * source the editor sent is never `exporting`; a cached package is never `packaging`, and says
+ * "Using the cached package" instead; a running simulator is never `starting-runtime`).
+ *
+ * [step] is the stage's place among the [STEPS] working stages, so a client can draw a determinate
+ * indicator ("2 of 5"); [QUEUED] is step 0 and [LIVE] is step [STEPS], complete. [FAILED] keeps the
+ * step it failed at.
+ */
+internal enum class DwfStage(val wire: String, val step: Int) {
+  QUEUED("queued", 0),
+  EXPORTING("exporting", 1),
+  PACKAGING("packaging", 2),
+  STARTING_RUNTIME("starting-runtime", 3),
+  INSTALLING("installing", 4),
+  LOADING_FACE("loading-face", 5),
+  LIVE("live", 5),
+  FAILED("failed", -1);
+
+  val terminal: Boolean
+    get() = this == LIVE || this == FAILED
+
+  companion object {
+    const val STEPS = 5
+  }
+}
