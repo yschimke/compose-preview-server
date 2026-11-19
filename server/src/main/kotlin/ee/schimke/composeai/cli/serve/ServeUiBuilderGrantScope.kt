@@ -114,6 +114,19 @@ internal object ServeUiBuilderGrantScope {
     return if (parent != null && parent in designs) actor else scoped
   }
 
+  /**
+   * Whether [AuthenticatedUiBuilderActor.onBehalfOfActorId] still stands for a design: true unless
+   * the actor's grant names designs and this is neither one of them nor a branch of one. A check
+   * made outside the port — which asks the service as the approver, not as the holder — asks this
+   * first, so it lends the approver's standing exactly where [limit] would.
+   */
+  fun delegationReaches(
+    lookup: Lookup,
+    parents: Parents?,
+  ): suspend (AuthenticatedUiBuilderActor, String) -> Boolean = { actor, designId ->
+    scopedActor(actor, designId, lookup, parents) === actor
+  }
+
   fun limit(
     delegate: UiBuilderServicePort,
     lookup: Lookup,

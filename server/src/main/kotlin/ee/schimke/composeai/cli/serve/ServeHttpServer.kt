@@ -8687,6 +8687,15 @@ class ServeHttpServer(
   )
 
   init {
+    // Publishing to watches asks who owns a design as the grant's approver, past the design
+    // scope [designService] applies; this holds it to the designs the grant names.
+    agentGrants?.let { store ->
+      watchFacePush?.delegationReaches =
+        ServeUiBuilderGrantScope.delegationReaches(
+          ServeUiBuilderGrantScope.lookupOf(store),
+          branchParents,
+        )
+    }
     // Widget thumbnails are drawn in their host container wherever this server can render one.
     uiBuilderThumbnails?.nativePreview = admittedNativePreview
     // Snapshot a catalog's facts as its daemon goes idle — the last moment they're readable.

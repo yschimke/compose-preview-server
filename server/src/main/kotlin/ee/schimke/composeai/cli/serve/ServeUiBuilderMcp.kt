@@ -390,6 +390,11 @@ class ServeUiBuilderMcp(
      * no `renderer`, to choose the native frame when a selection has to be outlined.
      */
     mayExport: () -> Boolean = { false },
+    /**
+     * Whether the caller may publish watch faces ([mayPublishWatchFaces]): a person's own session,
+     * or a grant carrying `ui-builder-publish`. Asked only by [PUBLISH_WATCH_FACE].
+     */
+    mayPublish: () -> Boolean = { false },
   ): String {
     // Only a design this actor may read can acquire presence. A failed or spoofed design id
     // must never reveal another actor's access or add a participant to someone else's room.
@@ -417,7 +422,7 @@ class ServeUiBuilderMcp(
               tool,
               args,
               actor,
-              run(tool, args, actor, callId, clientInteraction, mayExport),
+              run(tool, args, actor, callId, clientInteraction, mayExport, mayPublish),
             ),
           ),
         ),
@@ -434,6 +439,7 @@ class ServeUiBuilderMcp(
     callId: String,
     clientInteraction: ServeCatalogMcp.ClientInteraction,
     mayExport: () -> Boolean,
+    mayPublish: () -> Boolean,
   ): String {
     val request =
       when (tool) {
@@ -512,7 +518,7 @@ class ServeUiBuilderMcp(
         REACT_TO_COMMENT -> return commentTool(tool, args, actor)
         GET_LINKS,
         SET_LINKS -> return linksTool(tool, args, actor)
-        PUBLISH_WATCH_FACE -> return publishWatchFace(args, actor)
+        PUBLISH_WATCH_FACE -> return publishWatchFace(args, actor, mayPublish)
         VALIDATE_WATCH_FACE -> return validateWatchFace(args, actor)
         VALIDATE -> return validate(args, actor)
         CHECK_DESIGN -> return checkDesign(args, actor)
@@ -1834,8 +1840,16 @@ class ServeUiBuilderMcp(
   private suspend fun publishWatchFace(
     args: JsonObject,
     actor: AuthenticatedUiBuilderActor,
+    mayPublish: () -> Boolean,
   ): String {
     val push = watchFacePush ?: throw McpRequestException("this host does not publish watch faces")
+    // Publishing reaches watches, every watch for a public design: a grant needs its approver's
+    // explicit `ui-builder-publish`, which write and destructive never imply.
+    if (!mayPublish()) {
+      throw McpRequestException(
+        "${WatchFacePush.OWNER_SESSION_REQUIRED}: ${WatchFacePush.OWNER_SESSION_REQUIRED_MESSAGE}",
+      )
+    }
     val designId = args.requiredText("designId")
     val published =
       (args["published"] as? JsonPrimitive)?.booleanOrNull
@@ -4617,7 +4631,9 @@ class ServeUiBuilderMcp(
               "and lists it to every watch linked to the owner's account (and, for a public " +
               "design, to any watch). Publish again after editing to ship the edit; the " +
               "`version` moves only when the face itself changed. `published: false` stops " +
-              "listing it. Only the design's owner may. A face the packager refuses is refused " +
+              "listing it. Only the design's owner may, or a grant the owner approved with " +
+              "`ui-builder-publish` (request_access with that capability; write alone never " +
+              "implies it). A face the packager refuses is refused " +
               "here with its diagnostics. A public design is listed to every watch on its own, " +
               "from a settled revision; publishing pins the revision, and `visibility: " +
               "private` keeps a public design to the owner's linked watches only" +

@@ -20,6 +20,8 @@ sealed interface UiBuilderAuthorizationDecision {
     val onBehalfOfActorId: String? = null,
     /** See [ServeMachineAuthorization.Decision.Authorized.mayDeleteForPrincipal]. */
     val mayDeleteForPrincipal: Boolean = false,
+    /** See [ServeMachineAuthorization.Decision.Authorized.mayPublishForPrincipal]. */
+    val mayPublishForPrincipal: Boolean = false,
   ) : UiBuilderAuthorizationDecision {
     init {
       require(actorId.isNotBlank()) { "UI-builder actor id must not be blank" }
@@ -80,6 +82,7 @@ fun interface ServeUiBuilderAuthorization {
             decision.actorId,
             decision.onBehalfOfActorId,
             decision.mayDeleteForPrincipal,
+            decision.mayPublishForPrincipal,
           )
         ServeMachineAuthorization.Decision.Missing -> UiBuilderAuthorizationDecision.Missing
         is ServeMachineAuthorization.Decision.Forbidden -> UiBuilderAuthorizationDecision.Forbidden
