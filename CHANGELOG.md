@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.185.0](https://github.com/yschimke/compose-preview-server/compare/v3.184.0...v3.185.0) (2026-11-20)
+
+
+### Bug Fixes
+
+* **deps:** update compose-ai-tools to 2.101.1 ([#2041](https://github.com/yschimke/compose-preview-server/issues/2041)) ([ed01fed](https://github.com/yschimke/compose-preview-server/commit/ed01fed040a195758c341cc07127c1afd18fa882))
+* **deps:** update watchface-tools to 0.11.0 ([#2043](https://github.com/yschimke/compose-preview-server/issues/2043)) ([2ea06d6](https://github.com/yschimke/compose-preview-server/commit/2ea06d6e760f95f51687b7beaf86c0361e839b1c))
+
 ## [3.184.0](https://github.com/yschimke/compose-preview-server/compare/v3.183.0...v3.184.0) (2026-11-19)
 
 
