@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.187.0](https://github.com/yschimke/compose-preview-server/compare/v3.186.0...v3.187.0) (2026-11-20)
+
+
+### Features
+
+* declare MCP ToolAnnotations and catalog outputSchemas ([#2044](https://github.com/yschimke/compose-preview-server/issues/2044)) ([8317a39](https://github.com/yschimke/compose-preview-server/commit/8317a390fc185269f67d4bf276e9bda2ab185537))
+
 ## [3.186.0](https://github.com/yschimke/compose-preview-server/compare/v3.185.0...v3.186.0) (2026-11-20)
 
 
