@@ -868,7 +868,7 @@ class PlaygroundCompileService(
     /**
      * Reduce a client-supplied name to a safe `.kt` filename (last segment, printable, non-empty).
      */
-    internal fun safeKtName(raw: String): String {
+    fun safeKtName(raw: String): String {
       val base =
         raw
           .substringAfterLast('/')
@@ -895,7 +895,7 @@ class PlaygroundCompileService(
       }
     }
 
-    internal fun toDataUri(png: ByteArray): String =
+    fun toDataUri(png: ByteArray): String =
       "data:image/png;base64," + Base64.getEncoder().encodeToString(png)
 
     /**

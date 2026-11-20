@@ -19,7 +19,7 @@ import java.io.File
  * missing sidecar means for the surface asking are the caller's; this answers only "can this host
  * open that daemon, and with what on its classpath".
  */
-internal object PlaygroundDaemonOpeners {
+object PlaygroundDaemonOpeners {
 
   /**
    * The Android/Robolectric opener — the `lib-daemon-android` sidecar plus `android.jar` on the

@@ -80,14 +80,15 @@ seed-template plan is now paying.
 
 **The order that works:**
 
-1. **Extract the render engine** — the `Playground*` compile and daemon services — as its own module
-   inside this repository first, consumed by `:server` through an interface. That is the whole
-   substance of the split and it is worth doing on its own merits: ten consumers reaching into a
-   6,000-line engine by same-package visibility is the coupling that made this measurement necessary.
+1. **Extract the render engine** — **done** (`:playground-engine`). The `Playground*` compile,
+   sandbox and daemon-render services now live in `:playground-engine`, consumed by `:server` across
+   a Gradle module boundary enforced by `checkPlaygroundEngineBoundary` (no Ktor, no UI builder, no
+   Watch Face, no Livery, no `:server`, no renderer/daemon implementations).
 2. Only then does `compose-preview-design` become a move rather than a rewrite: the command, the
    engine module, and a tarball that names its sidecars.
 
-Step 2 is the one to want. It is testable, reversible, and it makes the question in step 3 small.
+Step 2 is now mechanical, testable, and reversible when we choose to split `design`, Playground, or
+the hosted UI-builder server into separate deliverables.
 
 ## What happens to the workflow meanwhile
 

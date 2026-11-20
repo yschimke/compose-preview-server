@@ -683,6 +683,10 @@ dependencies {
     "${libs.composeai.ui.builder.web.get()}@zip",
   )
 
+  // The compile, sandbox and render engine shared by the playground, UI-builder native preview
+  // and `design --local`. `api` because its types appear throughout `:server` and its tests.
+  api(project(":playground-engine"))
+
   // The render host, bundle daemon and git-backed history, published from compose-ai-tools so the
   // CLI's offline `bundle render` / `history manifest` reach them without a web server. `api`
   // because their types (`ServeHost`, `RenderOutcome`) are throughout this module's signatures. The
@@ -1008,11 +1012,13 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
     },
   )
 
-  // The UI-builder runtime, export, render bundle and export fonts. Named as projects for
+  // `:playground-engine` is the transport-free compile/render engine extracted from `:server`.
+  // The UI-builder runtime, export, render bundle and export fonts are named as projects for
   // `-PcomposeUiBuilderDir` (included-build substitution); the default build matches them in
   // `allowedComposeAiModules`. The last two are resources only: a PNG and two font files.
   allowedProjects.set(
     listOf(
+      ":playground-engine",
       ":ui-builder-runtime",
       ":ui-builder-export",
       ":ui-builder-render-bundle",
