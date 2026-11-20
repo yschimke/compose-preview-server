@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.186.0](https://github.com/yschimke/compose-preview-server/compare/v3.185.0...v3.186.0) (2026-11-20)
+
+
+### Features
+
+* **ui-builder:** draw a watch face over time in ui_builder_view ([#2045](https://github.com/yschimke/compose-preview-server/issues/2045)) ([36f01de](https://github.com/yschimke/compose-preview-server/commit/36f01de46650ce86303682b52bab1f5ca2c2e826))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.101.1 ([#2048](https://github.com/yschimke/compose-preview-server/issues/2048)) ([12cb3b3](https://github.com/yschimke/compose-preview-server/commit/12cb3b32b2b31ec80fe1378109f770f30d0aa712))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.28.1 ([#2049](https://github.com/yschimke/compose-preview-server/issues/2049)) ([d9777bf](https://github.com/yschimke/compose-preview-server/commit/d9777bfce7a876aa4a3fbd9e6811013f1cea848b))
+* **deps:** update the UI Builder to 3.141.0 ([#2047](https://github.com/yschimke/compose-preview-server/issues/2047)) ([45555bf](https://github.com/yschimke/compose-preview-server/commit/45555bf0517b2a0f2a949975081eb0a27dcb3400))
+
 ## [3.185.0](https://github.com/yschimke/compose-preview-server/compare/v3.184.0...v3.185.0) (2026-11-20)
 
 
