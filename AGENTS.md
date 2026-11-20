@@ -177,7 +177,10 @@ how those artefacts are regenerated, just run through `build-brief`.
   web surfaces; `:playground-engine` holds the transport-free compile, sandbox and render engine
   shared by the playground, UI-builder native preview and `design --local`
   (`checkPlaygroundEngineBoundary` keeps it free of Ktor server, UI builder, Watch Face, Livery,
-  `:server` and renderer implementations); `:watchface-engine` holds Watch Face Format (WFF/DWF)
+  `:server` and renderer implementations); `:serve-auth` holds GitHub OAuth sessions, agent-grant
+  verification/storage, MCP OAuth, browse cookies and same-origin checks (`checkServeAuthBoundary`
+  keeps it free of `:server`, `:playground-engine`, `:watchface-engine`, UI builder, Watch Face,
+  Livery, render-host and daemons); `:watchface-engine` holds Watch Face Format (WFF/DWF)
   packaging, validation, preview sessions and the APK daemon runtime bridge
   (`checkWatchFaceEngineBoundary` keeps it free of Ktor server, UI builder, Livery, `:server`,
   `:playground-engine`, renderer/daemon implementations and `wff-packager`/`xerces`);

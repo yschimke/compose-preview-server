@@ -13,7 +13,7 @@ import java.io.File
  *
  * Nothing here ever prints a value — only the variable names and the file's path.
  */
-internal object ServeSecretEnv {
+object ServeSecretEnv {
   const val FILE_SUFFIX: String = "_FILE"
 
   /**

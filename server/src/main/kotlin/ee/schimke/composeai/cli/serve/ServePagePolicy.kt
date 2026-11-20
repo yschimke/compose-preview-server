@@ -10,7 +10,6 @@ import io.ktor.server.request.path
 import io.ktor.server.response.ApplicationSendPipeline
 import io.ktor.util.AttributeKey
 import io.ktor.util.pipeline.PipelinePhase
-import java.net.URI
 
 /**
  * The `Content-Security-Policy` every HTML response from this server carries, written once. The
@@ -215,22 +214,7 @@ internal object ServePagePolicy {
    * The `form-action` source admitting a form that redirects to [uri]: its origin, or its bare
    * scheme for a private-use scheme (`vscode:`, `cursor:`); null otherwise.
    */
-  fun formActionSource(uri: String): String? {
-    val parsed = runCatching { URI(uri) }.getOrNull() ?: return null
-    val scheme = parsed.scheme?.lowercase()?.takeIf { SCHEME.matches(it) } ?: return null
-    val host = parsed.host?.takeIf { it.isNotBlank() }
-    if (scheme != "http" && scheme != "https") {
-      // A private-use scheme is opened by the app that registered it; the scheme is the whole
-      // destination as far as the browser is concerned.
-      return if (scheme == "javascript" || scheme == "data" || scheme == "blob") null
-      else "$scheme:"
-    }
-    host ?: return null
-    val port = parsed.port.takeIf { it > 0 }?.let { ":$it" }.orEmpty()
-    return "$scheme://${host.lowercase()}$port"
-  }
-
-  private val SCHEME = Regex("[a-z][a-z0-9+.-]*")
+  fun formActionSource(uri: String): String? = ServeUrls.formActionSource(uri)
 
   /**
    * Let this page submit a form ending at [uri] (an OAuth client's redirect URI); no-op without a

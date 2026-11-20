@@ -165,7 +165,7 @@ data class ServeSites(private val byHost: Map<String, String>) {
      * omissions against the routing block; `ServeTopLevelSiteTest` drives real routes on a site
      * host.
      */
-    internal val RESERVED_SYSTEMS =
+    val RESERVED_SYSTEMS =
       setOf(
         "healthz",
         "readyz",

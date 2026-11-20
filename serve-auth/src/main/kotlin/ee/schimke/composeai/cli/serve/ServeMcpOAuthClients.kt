@@ -12,7 +12,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 /** Public registrations only: no grants, tokens, PKCE verifiers or authorization codes. */
-internal class ServeMcpOAuthClients(file: Path?, private val clock: () -> Long) {
+class ServeMcpOAuthClients(file: Path?, private val clock: () -> Long) {
   private val file = file?.toAbsolutePath()?.normalize()
   private val memory = mutableMapOf<String, ServeMcpOAuth.RegisteredClient>()
 
