@@ -526,7 +526,11 @@ composeai-contracts = "3.44.0"
 # and gives the Native pane its Refresh (compose-ui-builder#1314), the client of this server's
 # `dwf-preview/status?session=` staleness (#2039). Built on compose-ai-tools 2.101.0, contracts
 # 3.43.0, Kotlin 2.4.21 and watchface-tools 0.9.0, all met here.
-composeai-ui-builder = "3.140.0"
+# 3.141.0 plays WFF <Animation> in the canvas preview and adds a scrubbable preview clock
+# (compose-ui-builder#1319), which this server's ui_builder_view motion frames (#2045) pick up.
+# Built on compose-ai-tools 2.101.0, contracts 3.43.0, Kotlin 2.4.21, watchface-tools 0.9.0 and
+# rc-players 3.9.0.
+composeai-ui-builder = "3.141.0"
 # First published version of the optional publication server library (Maven Central).
 livery = "0.15.0"
 # Packages a design revision's WFF source into the signed APK the real watch-face runtime loads
