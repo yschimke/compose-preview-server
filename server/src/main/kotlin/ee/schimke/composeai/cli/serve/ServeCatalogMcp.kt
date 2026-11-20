@@ -3480,7 +3480,32 @@ class ServeCatalogMcp(
         ),
       )
       put("outputSchema", outputSchema(name))
+      toolAnnotations(name)?.let { put("annotations", it) }
       if (name in VIEWER_TOOL_NAMES) put("_meta", viewerToolMeta())
+    }
+
+  private fun toolAnnotations(name: String): JsonObject? =
+    when (name) {
+      in READ_ONLY_TOOL_NAMES -> buildJsonObject { put("readOnlyHint", true) }
+      in DESTRUCTIVE_TOOL_NAMES ->
+        buildJsonObject {
+          put("readOnlyHint", false)
+          put("destructiveHint", true)
+          put("idempotentHint", false)
+        }
+      in IDEMPOTENT_WRITE_TOOL_NAMES ->
+        buildJsonObject {
+          put("readOnlyHint", false)
+          put("destructiveHint", false)
+          put("idempotentHint", true)
+        }
+      in NON_IDEMPOTENT_WRITE_TOOL_NAMES ->
+        buildJsonObject {
+          put("readOnlyHint", false)
+          put("destructiveHint", false)
+          put("idempotentHint", false)
+        }
+      else -> null
     }
 
   private fun viewerHtml(): String =
@@ -3507,6 +3532,13 @@ class ServeCatalogMcp(
    */
   private fun outputSchema(name: String): JsonObject =
     when (name) {
+      "status" -> STATUS_OUTPUT_SCHEMA
+      "list_projects" -> LIST_PROJECTS_OUTPUT_SCHEMA
+      "list_previews" -> LIST_PREVIEWS_OUTPUT_SCHEMA
+      "list_devices" -> LIST_DEVICES_OUTPUT_SCHEMA
+      "history_list" -> HISTORY_LIST_OUTPUT_SCHEMA
+      "history_diff" -> HISTORY_DIFF_OUTPUT_SCHEMA
+      "diff_semantics" -> DIFF_SEMANTICS_OUTPUT_SCHEMA
       "list_data_products" -> arrayWrapperSchema("dataProducts")
       "preview-stories" -> arrayWrapperSchema("observations")
       ServeUiBuilderMcp.VIEW -> UiBuilderJsonSchemas.viewOutput
@@ -3991,6 +4023,253 @@ class ServeCatalogMcp(
       name.removePrefix(CATALOG_PREFIX).takeIf { it in CATALOG_TOOL_NAMES } ?: name
 
     private const val PROPERTIES = "properties"
+
+    private val READ_ONLY_TOOL_NAMES =
+      setOf(
+        "poll_access",
+        "status",
+        "list_projects",
+        ServeLibraryMcp.LIBRARY,
+        ServeLibraryMcp.UI_BUILDER_OPEN,
+        "list_previews",
+        "render_preview",
+        "render_matrix",
+        "list_devices",
+        "diff_semantics",
+        "history_list",
+        "history_diff",
+        "history_read",
+        "list_data_products",
+        "get_preview_data",
+        "list-all-documentation",
+        "get-documentation-for-story",
+        "preview-stories",
+        ServeUiBuilderMcp.LIST_CATALOGS,
+        ServeUiBuilderMcp.SEARCH_COMPONENTS,
+        ServeUiBuilderMcp.LIST_DESIGNS,
+        ServeUiBuilderMcp.GET_DESIGN,
+        ServeUiBuilderMcp.PREVIEW_CATALOG_RECOVERY,
+        ServeUiBuilderMcp.EXPORT,
+        ServeUiBuilderMcp.EXPORT_DOCUMENT,
+        ServeUiBuilderMcp.RENDER_NATIVE,
+        ServeUiBuilderMcp.VIEW,
+        ServeUiBuilderMcp.LIST_COMMENTS,
+        ServeUiBuilderMcp.AWAIT_COMMENTS,
+        ServeUiBuilderMcp.AWAIT_DESIGN,
+        ServeUiBuilderMcp.GET_LINKS,
+        ServeUiBuilderMcp.VALIDATE_WATCH_FACE,
+        ServeUiBuilderMcp.LIST_TRASH,
+        ServeUiBuilderMcp.VALIDATE,
+        ServeUiBuilderMcp.CHECK_DESIGN,
+        ServeUiBuilderMcp.SIMULATE_ACTION,
+        ServeUiBuilderMcp.RENDER_DESIGN_MATRIX,
+        ServeUiBuilderMcp.AWAIT_DECISION,
+        ServeUiBuilderMcp.IMPLEMENTATION_STATUS,
+        ServeUiBuilderMcp.FIND_DESIGN_FOR_PR,
+        ServeUiBuilderMcp.COMPARE_REFERENCE,
+        ServeUiBuilderMcp.GUIDELINES_PROMPT,
+        ServeUiBuilderMcp.GET_GUIDELINES,
+        ServeUiBuilderHistoryTools.LIST_REVISIONS,
+        ServeUiBuilderHistoryTools.DIFF_DESIGNS,
+        ServeUiBuilderBranchTools.LIST_BRANCHES,
+        ServeUiBuilderAlternativeTools.COMPARE_BRANCHES,
+      )
+
+    private val DESTRUCTIVE_TOOL_NAMES =
+      setOf(
+        ServeUiBuilderMcp.DELETE_DESIGN,
+        ServeUiBuilderMcp.REPLACE_DESIGN_DOCUMENT,
+        ServeUiBuilderMcp.MOVE_DESIGN_HOME,
+        ServeUiBuilderMcp.PUBLISH_WATCH_FACE,
+        ServeUiBuilderHistoryTools.RESTORE_REVISION,
+        ServeUiBuilderBranchTools.MERGE_BRANCH,
+        ServeUiBuilderBranchTools.ARCHIVE_BRANCH,
+        ServeUiBuilderAlternativeTools.PICK_BRANCH,
+      )
+
+    private val IDEMPOTENT_WRITE_TOOL_NAMES =
+      setOf(
+        ServeUiBuilderMcp.PUT_ASSET,
+        ServeUiBuilderMcp.RESOLVE_COMMENT_THREAD,
+        ServeUiBuilderMcp.ACKNOWLEDGE_COMMENT,
+        ServeUiBuilderMcp.REACT_TO_COMMENT,
+        ServeUiBuilderMcp.DESIGN_ACCESS,
+        ServeUiBuilderMcp.SET_LINKS,
+        ServeUiBuilderMcp.SHARE_DESIGN,
+        ServeUiBuilderMcp.RENAME_DESIGN,
+        ServeUiBuilderMcp.RESTORE_DESIGN,
+        ServeUiBuilderMcp.SET_IMPLEMENTATION,
+        ServeUiBuilderMcp.SET_REFERENCE,
+        ServeUiBuilderMcp.RECORD_GUIDELINES,
+      )
+
+    private val NON_IDEMPOTENT_WRITE_TOOL_NAMES =
+      setOf(
+        "request_access",
+        ServeUiBuilderMcp.CREATE_DESIGN,
+        ServeUiBuilderMcp.APPLY,
+        ServeUiBuilderMcp.POST_COMMENT,
+        ServeUiBuilderMcp.RECORD_DECISION,
+        ServeUiBuilderHistoryTools.FORK_DESIGN,
+        ServeUiBuilderBranchTools.BRANCH_DESIGN,
+      )
+
+    private val STATUS_OUTPUT_SCHEMA: JsonObject = buildJsonObject {
+      put("type", "object")
+      putJsonObject(PROPERTIES) {
+        putJsonObject("schema") { put("type", "string") }
+        putJsonObject("ready") { put("type", "boolean") }
+        putJsonObject("remote") { put("type", "boolean") }
+        putJsonObject("aggregate") { put("type", "boolean") }
+        putJsonObject("origin") { put("type", "string") }
+        putJsonObject("originAliases") {
+          put("type", "array")
+          putJsonObject("items") { put("type", "string") }
+        }
+        putJsonObject("toolCatalog") { put("type", "object") }
+        putJsonObject("projects") {
+          put("type", "array")
+          putJsonObject("items") { put("type", "object") }
+        }
+        putJsonObject("loading") {
+          put("type", "array")
+          putJsonObject("items") { put("type", "string") }
+        }
+      }
+    }
+
+    private val LIST_PROJECTS_OUTPUT_SCHEMA: JsonObject = buildJsonObject {
+      put("type", "object")
+      putJsonObject(PROPERTIES) {
+        putJsonObject("projects") {
+          put("type", "array")
+          putJsonObject("items") {
+            put("type", "object")
+            putJsonObject(PROPERTIES) {
+              putJsonObject("workspaceId") { put("type", "string") }
+              putJsonObject("rootProjectName") { put("type", "string") }
+              putJsonObject("catalog") { put("type", "string") }
+              putJsonObject("label") { put("type", "string") }
+              putJsonObject("previewCount") { put("type", "integer") }
+              putJsonObject("remote") { put("type", "boolean") }
+            }
+          }
+        }
+        putJsonObject("loading") {
+          put("type", "array")
+          putJsonObject("items") { put("type", "string") }
+        }
+      }
+    }
+
+    private val LIST_PREVIEWS_OUTPUT_SCHEMA: JsonObject = buildJsonObject {
+      put("type", "object")
+      putJsonObject(PROPERTIES) {
+        putJsonObject("catalogs") {
+          put("type", "array")
+          putJsonObject("items") {
+            put("type", "object")
+            putJsonObject(PROPERTIES) {
+              putJsonObject("catalog") { put("type", "string") }
+              putJsonObject("label") { put("type", "string") }
+              putJsonObject("query") { put("type", "string") }
+              putJsonObject("total") { put("type", "integer") }
+              putJsonObject("offset") { put("type", "integer") }
+              putJsonObject("previews") {
+                put("type", "array")
+                putJsonObject("items") { put("type", "object") }
+              }
+              putJsonObject("nextOffset") { put("type", "integer") }
+              putJsonObject("note") { put("type", "string") }
+            }
+          }
+        }
+      }
+    }
+
+    private val LIST_DEVICES_OUTPUT_SCHEMA: JsonObject = buildJsonObject {
+      put("type", "object")
+      putJsonObject(PROPERTIES) {
+        putJsonObject("schema") { put("type", "string") }
+        putJsonObject("devices") {
+          put("type", "array")
+          putJsonObject("items") {
+            put("type", "object")
+            putJsonObject(PROPERTIES) {
+              putJsonObject("id") { put("type", "string") }
+              putJsonObject("widthDp") { put("type", "integer") }
+              putJsonObject("heightDp") { put("type", "integer") }
+              putJsonObject("density") { put("type", "number") }
+            }
+          }
+        }
+      }
+    }
+
+    private val HISTORY_LIST_OUTPUT_SCHEMA: JsonObject = buildJsonObject {
+      put("type", "object")
+      putJsonObject(PROPERTIES) {
+        putJsonObject("schema") { put("type", "string") }
+        putJsonObject("catalog") { put("type", "string") }
+        putJsonObject("previewId") { put("type", "string") }
+        putJsonObject("uri") { put("type", "string") }
+        putJsonObject("mode") { put("type", "string") }
+        putJsonObject("repo") { put("type", "string") }
+        putJsonObject("branch") { put("type", "string") }
+        putJsonObject("commit") { put("type", "string") }
+        putJsonObject("pinnedCommit") { put("type", "string") }
+        putJsonObject("manifestUrl") { put("type", "string") }
+        putJsonObject("renderUrlTemplate") { put("type", "string") }
+        putJsonObject("path") { put("type", "string") }
+        putJsonObject("observations") { put("type", "integer") }
+        putJsonObject("unstable") { put("type", "boolean") }
+        putJsonObject("flapCount") { put("type", "integer") }
+        putJsonObject("versions") {
+          put("type", "array")
+          putJsonObject("items") { put("type", "object") }
+        }
+        putJsonObject("reason") { put("type", "string") }
+      }
+    }
+
+    private val HISTORY_DIFF_OUTPUT_SCHEMA: JsonObject = buildJsonObject {
+      put("type", "object")
+      putJsonObject(PROPERTIES) {
+        putJsonObject("schema") { put("type", "string") }
+        putJsonObject("mode") { put("type", "string") }
+        putJsonObject("catalog") { put("type", "string") }
+        putJsonObject("previewId") { put("type", "string") }
+        putJsonObject("from") { put("type", "object") }
+        putJsonObject("to") { put("type", "object") }
+        putJsonObject("changed") { put("type", "boolean") }
+        putJsonObject("versionsBetween") { put("type", "integer") }
+        putJsonObject("unstable") { put("type", "boolean") }
+        putJsonObject("note") { put("type", "string") }
+      }
+    }
+
+    private val DIFF_SEMANTICS_OUTPUT_SCHEMA: JsonObject = buildJsonObject {
+      put("type", "object")
+      putJsonObject(PROPERTIES) {
+        putJsonObject("schema") { put("type", "string") }
+        putJsonObject("identity") { put("type", "string") }
+        putJsonObject("left") { put("type", "object") }
+        putJsonObject("right") { put("type", "object") }
+        putJsonObject("onlyInLeft") {
+          put("type", "array")
+          putJsonObject("items") { put("type", "string") }
+        }
+        putJsonObject("onlyInRight") {
+          put("type", "array")
+          putJsonObject("items") { put("type", "string") }
+        }
+        putJsonObject("changed") {
+          put("type", "array")
+          putJsonObject("items") { put("type", "object") }
+        }
+        putJsonObject("unchangedCount") { put("type", "integer") }
+      }
+    }
 
     /**
      * The argument a gated tool call carries its grant token in.
