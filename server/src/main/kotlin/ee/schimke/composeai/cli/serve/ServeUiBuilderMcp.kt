@@ -193,6 +193,19 @@ class ServeUiBuilderMcp(
    * design on the bundled rules.
    */
   private val catalogGuidelines: ServeCatalogGuidelines? = null,
+  /**
+   * The per-account budget of [VIEW]'s motion frames (`frames`, `durationMs`, `times`, `ambient`):
+   * each call draws up to [UiBuilderMotionView.MAX_FRAMES] exports, so it is charged by the
+   * account, one in flight at a time. Null leaves it unmetered.
+   */
+  private val motionLimiter: ServeRateLimiter? =
+    ServeRateLimiter(
+      permitsPerWindow = MOTION_VIEWS_PER_MINUTE,
+      windowSeconds = 60,
+      maxConcurrent = 1,
+    ),
+  /** The instant a motion view with no `times` starts at. */
+  private val motionClock: () -> Long = System::currentTimeMillis,
 ) {
 
   /** Revisions, restore, fork and diff; see [ServeUiBuilderHistoryTools]. */
@@ -1237,6 +1250,7 @@ class ServeUiBuilderMcp(
     actor: AuthenticatedUiBuilderActor,
     mayExport: () -> Boolean = { false },
   ): String {
+    if (args.asksForMotion()) return motionView(args, actor)
     val designId = args.requiredText("designId")
     val include = args.viewIncludes()
     val selection = args.stringList(SELECTION_ARGUMENT)
@@ -1310,6 +1324,239 @@ class ServeUiBuilderMcp(
         throw McpRequestException(refused.message ?: "the view could not be drawn")
       }
     return UI_BUILDER_JSON.encodeToString(UiBuilderViewV1.serializer(), view)
+  }
+
+  private fun JsonObject.asksForMotion(): Boolean =
+    listOf(FRAMES_ARGUMENT, DURATION_MS_ARGUMENT, TIMES_ARGUMENT, AMBIENT_ARGUMENT, FORMAT_ARGUMENT)
+      .any { this[it] != null && this[it] !is JsonNull }
+
+  /**
+   * [VIEW] over time ([UiBuilderMotionView]): a `wff-watchface` design's frames at several
+   * instants, or in ambient, drawn by the editor's PNG export on scratch copies.
+   *
+   * The frames go through [UiBuilderDraftValidator.exportPngs], a throwaway service over the host's
+   * own exporter, so no revision moves and the host service's lock is held only for the snapshot
+   * read. The builder renderer only: the native runtime would compile once per frame.
+   */
+  private suspend fun motionView(args: JsonObject, actor: AuthenticatedUiBuilderActor): String {
+    val designId = args.requiredText("designId")
+    args.text(RENDERER_ARGUMENT)?.let {
+      if (it != ServeUiBuilderView.RENDERER_EXPORT) {
+        throw McpRequestException(
+          "motion frames are drawn by the `${ServeUiBuilderView.RENDERER_EXPORT}` renderer only; " +
+            "drop `$RENDERER_ARGUMENT` or pass `${ServeUiBuilderView.RENDERER_EXPORT}`",
+        )
+      }
+    }
+    val format = args.text(FORMAT_ARGUMENT) ?: UiBuilderMotionView.FORMAT_FILMSTRIP
+    if (format !in UiBuilderMotionView.FORMATS) {
+      throw McpRequestException(
+        "`$FORMAT_ARGUMENT` must be ${UiBuilderMotionView.FORMATS.joinToString(" or ") { "`$it`" }}",
+      )
+    }
+    val ambient =
+      when (val value = args[AMBIENT_ARGUMENT]) {
+        null,
+        is JsonNull -> false
+        else ->
+          (value as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
+            ?: throw McpRequestException("`$AMBIENT_ARGUMENT` must be a boolean")
+      }
+    val times =
+      when (val value = args[TIMES_ARGUMENT]) {
+        null,
+        is JsonNull -> null
+        is JsonArray ->
+          value.map {
+            (it as? JsonPrimitive)?.takeIf { p -> !p.isString }?.longOrNull
+              ?: throw McpRequestException(
+                "`$TIMES_ARGUMENT` must be an array of epoch milliseconds",
+              )
+          }
+        else ->
+          throw McpRequestException("`$TIMES_ARGUMENT` must be an array of epoch milliseconds")
+      }
+    fun integer(name: String): Long? =
+      when (val value = args[name]) {
+        null,
+        is JsonNull -> null
+        else ->
+          (value as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull
+            ?: throw McpRequestException("`$name` must be an integer")
+      }
+    val shots =
+      try {
+        UiBuilderMotionView.plan(
+          frames = integer(FRAMES_ARGUMENT),
+          durationMs = integer(DURATION_MS_ARGUMENT),
+          times = times,
+          ambient = ambient,
+          // Whole seconds, so `[SECOND_MILLISECOND]` starts the window at 0.
+          startMillis = motionClock() / 1000 * 1000,
+        )
+      } catch (refused: UiBuilderMotionView.Refused) {
+        throw McpRequestException(refused.message.orEmpty())
+      }
+    val viewport = args.viewport()
+    val snapshot =
+      when (
+        val response =
+          execute(
+            GetSnapshotRequestV1(designId = designId, revision = args.number("revision")),
+            actor,
+          )
+      ) {
+        is UiBuilderServiceResponse.Snapshot -> response.snapshot
+        is UiBuilderServiceResponse.Error -> throw McpRequestException(response.error.message)
+        else -> throw McpRequestException("no design `$designId` this actor can read")
+      }
+    if (!WatchFaceBundleExportExecutor.isWatchFace(snapshot.catalog)) {
+      throw McpRequestException(
+        "`$FRAMES_ARGUMENT`, `$DURATION_MS_ARGUMENT`, `$TIMES_ARGUMENT` and `$AMBIENT_ARGUMENT` " +
+          "draw a `wff-watchface` design over time; `$designId` is not one, so view it without them",
+      )
+    }
+    val lane =
+      validator
+        ?: throw McpRequestException(
+          "this host cannot render a design at another time without saving it; view it without " +
+            "`$FRAMES_ARGUMENT`",
+        )
+    val document = snapshot.state.document
+    val admitted =
+      when (val decision = motionLimiter?.tryAcquire(actor.actorId)) {
+        null -> null
+        is ServeRateLimiter.Decision.Admitted -> decision
+        is ServeRateLimiter.Decision.Throttled ->
+          throw McpRequestException(
+            "$MOTION_RATE_LIMITED: ${decision.reason}; motion views are $MOTION_VIEWS_PER_MINUTE " +
+              "a minute per account, so retry after ${decision.retryAfterSeconds}s. " +
+              "`watchFaceCost` on each edit is the cheap per-edit signal",
+          )
+      }
+    val startedAt = System.nanoTime()
+    try {
+      val pictures =
+        lane.exportPngs(actor, shots.map { UiBuilderMotionView.documentFor(document, it) })
+          ?: throw McpRequestException(
+            "this host cannot render a design at another time without saving it",
+          )
+      val frames = shots.mapIndexed { index, shot ->
+        val picture = pictures.getOrNull(index)
+        val png =
+          picture?.png
+            ?: run {
+              val problem = picture?.problem ?: "the export produced no image"
+              // The renderer's own admission refusals are an overload to retry, not a failure.
+              if (MOTION_OVERLOAD_PROBLEMS.any { it in problem }) {
+                throw ExportOverloadedException(problem)
+              }
+              throw McpRequestException(
+                "frame ${index + 1} of `$designId` could not be rendered: $problem",
+              )
+            }
+        UiBuilderMotionView.Frame(shot, png)
+      }
+      val composed =
+        try {
+          withContext(Dispatchers.Default) { UiBuilderMotionView.compose(frames, format, viewport) }
+        } catch (refused: UiBuilderMotionView.Refused) {
+          throw McpRequestException(refused.message.orEmpty())
+        }
+      val hashes = frames.map { UiBuilderDesignMatrix.sha256(it.png) }
+      val start = shots.first().epochMillis
+      val pinned = document.environment.fixedTime
+      val variants = UiBuilderMotionView.ambientVariantCount(document)
+      val notes = buildList {
+        add(
+          "overlays (selection, reference, comments, bounds) are not drawn on motion frames; " +
+            "view without `$FRAMES_ARGUMENT` for them",
+        )
+        if (pinned != null) {
+          add(
+            "the design pins `environment.fixedTime` to $pinned, so every frame shows that " +
+              "instant; reset it to see the face move",
+          )
+        }
+        if (shots.any { it.ambient }) {
+          add(
+            if (variants == 0)
+              "ambient frames apply the design's `wff/variant mode=AMBIENT` overrides, and it " +
+                "declares none, so they draw the interactive mode"
+            else
+              "ambient frames apply the design's $variants `wff/variant mode=AMBIENT` " +
+                "override(s) to their parents, as the watch does",
+          )
+        }
+        if (hashes.distinct().size == 1 && shots.map { it.epochMillis }.distinct().size > 1) {
+          add("every frame is the same picture: nothing in this design moves over these instants")
+        }
+      }
+      val environment = document.environment
+      val view =
+        UiBuilderViewV1(
+          designId = designId,
+          revision = document.revision,
+          renderer = ServeUiBuilderView.RENDERER_EXPORT,
+          include = emptyList(),
+          selection = emptyList(),
+          image =
+            UiBuilderViewImageV1(
+              widthPx = composed.width,
+              heightPx = composed.height,
+              scale = composed.cellWidth.toDouble() / composed.renderWidth,
+              sha256 = UiBuilderDesignMatrix.sha256(composed.png),
+            ),
+          frame =
+            UiBuilderViewFrameV1(
+              widthDp = environment.widthDp,
+              heightDp = environment.heightDp,
+              density = environment.density,
+              renderWidthPx = composed.renderWidth,
+              renderHeightPx = composed.renderHeight,
+            ),
+          boundsUnavailable =
+            "the ${ServeUiBuilderView.RENDERER_EXPORT} renderer reports no layout bounds",
+          notes = notes,
+          motion =
+            UiBuilderViewMotionV1(
+              format = format,
+              frames =
+                shots.mapIndexed { index, shot ->
+                  val placed = composed.placed[index]
+                  UiBuilderViewMotionFrameV1(
+                    index = index,
+                    epochMillis = shot.epochMillis,
+                    offsetMs = shot.epochMillis - start,
+                    label = UiBuilderMotionView.label(shot, start),
+                    ambient = shot.ambient,
+                    x = placed.x,
+                    y = placed.y,
+                    width = placed.width,
+                    height = placed.height,
+                    sha256 = hashes[index],
+                    changed = index == 0 || hashes[index] != hashes[index - 1],
+                  )
+                },
+              distinctFrames = hashes.distinct().size,
+              pinnedFixedTime = pinned,
+              ambientVariants = if (shots.any { it.ambient }) variants else 0,
+              cellWidthPx = composed.cellWidth,
+              cellHeightPx = composed.cellHeight,
+            ),
+          imageBase64 = UiBuilderDesignMatrix.base64(composed.png),
+        )
+      return UI_BUILDER_JSON.encodeToString(UiBuilderViewV1.serializer(), view)
+    } finally {
+      admitted?.release()
+      val elapsedMillis = (System.nanoTime() - startedAt) / 1_000_000
+      if (elapsedMillis >= SLOW_MOTION_VIEW_MILLIS) {
+        onLog(
+          "serve: slow $VIEW motion: ${shots.size} frames of `$designId` took ${elapsedMillis}ms " +
+            "(outside the UI Builder service lock)",
+        )
+      }
+    }
   }
 
   /**
@@ -4432,6 +4679,28 @@ class ServeUiBuilderMcp(
     private const val SELECTION_ARGUMENT = "selection"
     private const val VIEWPORT_ARGUMENT = "viewport"
     private const val RENDERER_ARGUMENT = "renderer"
+    private const val FRAMES_ARGUMENT = "frames"
+    private const val DURATION_MS_ARGUMENT = "durationMs"
+    private const val TIMES_ARGUMENT = "times"
+    private const val AMBIENT_ARGUMENT = "ambient"
+    private const val FORMAT_ARGUMENT = "format"
+
+    /** [VIEW] motion calls one account may make a minute; see `motionLimiter`. */
+    const val MOTION_VIEWS_PER_MINUTE = 6
+
+    /** A motion view this slow is logged, as the service's own slow calls are. */
+    private const val SLOW_MOTION_VIEW_MILLIS = 5_000L
+
+    /** The export lane's admission refusals ([exportOverloadReason]), as a frame's problem. */
+    private val MOTION_OVERLOAD_PROBLEMS =
+      listOf(
+        "concurrent export limit reached",
+        "concurrent export worker limit reached",
+        "UI-builder renderer is busy",
+      )
+
+    /** The code a motion view over the account's budget answers with. */
+    const val MOTION_RATE_LIMITED = "motion_rate_limited"
 
     /** The argument that asks [VIEW] for the picture's bytes in the reply instead of a link. */
     const val INLINE_ARGUMENT = "inline"
@@ -5217,7 +5486,21 @@ class ServeUiBuilderMcp(
             "`$RENDERER_ARGUMENT`, a non-empty `selection` is drawn on the native frame when the " +
             "host has a lane and the caller the capability, and otherwise on the export with a " +
             "note saying why it is not outlined. A node with no box is reported in `notes`, " +
-            "never drawn at a guessed position. Not an McpResponseEnvelopeV1.",
+            "never drawn at a guessed position. " +
+            "For a `wff-watchface` design, `$FRAMES_ARGUMENT` (${UiBuilderMotionView.MIN_FRAMES}-" +
+            "${UiBuilderMotionView.MAX_FRAMES}) over `$DURATION_MS_ARGUMENT`, or explicit " +
+            "`$TIMES_ARGUMENT`, draws the face at several instants instead — use it to check " +
+            "motion: a second hand's sweep, a seconds pulse, anything driven by " +
+            "`[SECOND_MILLISECOND]`, `[MILLISECOND]` or `[UTC_TIMESTAMP]` — and `$AMBIENT_ARGUMENT: " +
+            "true` draws ambient mode (alone: interactive and ambient side by side, to check the " +
+            "transition). The reply is one picture, by default a `filmstrip` grid with each frame " +
+            "labelled by its UTC time (`$FORMAT_ARGUMENT: \"animated\"` makes an animated PNG), " +
+            "and `motion` lists each frame's time, box and hash, with `distinctFrames` saying " +
+            "whether anything moved. Frames are drawn by the editor's renderer on unsaved copies, " +
+            "at most ${UiBuilderMotionView.MAX_FRAMES} a call and $MOTION_VIEWS_PER_MINUTE calls a " +
+            "minute per account; a design that pins `environment.fixedTime` shows that instant in " +
+            "every frame. It is an occasional look, not a per-edit check: `watchFaceCost` on each " +
+            "edit stays the per-edit cost signal. Not an McpResponseEnvelopeV1.",
           """
           {"type":"object","properties":{
             "designId":{"type":"string"},
@@ -5226,7 +5509,12 @@ class ServeUiBuilderMcp(
             "$INCLUDE_ARGUMENT":{"type":"array","items":{"type":"string","enum":[${ServeUiBuilderView.INCLUDES.joinToString(",") { "\"$it\"" }}]},"description":"Overlays to draw. Defaults to ${ServeUiBuilderView.DEFAULT_INCLUDES.sorted().joinToString(", ")}; [] draws the bare frame."},
             "$SELECTION_ARGUMENT":{"type":"array","items":{"type":"string"},"description":"Node ids to show as selected."},
             "$RENDERER_ARGUMENT":{"type":"string","enum":["${ServeUiBuilderView.RENDERER_EXPORT}","${ServeUiBuilderView.RENDERER_NATIVE}"],"description":"Defaults to ${ServeUiBuilderView.RENDERER_EXPORT}, or ${ServeUiBuilderView.RENDERER_NATIVE} when a selection is to be outlined and this host and grant can render it."},
-            "$INLINE_ARGUMENT":{"type":"boolean","description":"Also return the PNG as an image block. Defaults to false; a host with no public origin always does."}
+            "$INLINE_ARGUMENT":{"type":"boolean","description":"Also return the PNG as an image block. Defaults to false; a host with no public origin always does."},
+            "$FRAMES_ARGUMENT":{"type":"integer","minimum":${UiBuilderMotionView.MIN_FRAMES},"maximum":${UiBuilderMotionView.MAX_FRAMES},"description":"wff-watchface only: draw this many frames spread evenly over `$DURATION_MS_ARGUMENT`, starting at the current whole second. Defaults to ${UiBuilderMotionView.DEFAULT_FRAMES} when only `$DURATION_MS_ARGUMENT` is given."},
+            "$DURATION_MS_ARGUMENT":{"type":"integer","minimum":1,"maximum":${UiBuilderMotionView.MAX_DURATION_MS},"description":"wff-watchface only: the window the frames cover, in milliseconds. Defaults to ${UiBuilderMotionView.DEFAULT_DURATION_MS}."},
+            "$TIMES_ARGUMENT":{"type":"array","items":{"type":"integer","minimum":0},"minItems":${UiBuilderMotionView.MIN_FRAMES},"maxItems":${UiBuilderMotionView.MAX_FRAMES},"description":"wff-watchface only: the exact instants to draw, in epoch milliseconds, instead of `$FRAMES_ARGUMENT` and `$DURATION_MS_ARGUMENT`."},
+            "$AMBIENT_ARGUMENT":{"type":"boolean","description":"wff-watchface only: draw the frames in ambient mode, applying the design's `wff/variant mode=AMBIENT` overrides. Alone, draws the interactive and ambient modes side by side."},
+            "$FORMAT_ARGUMENT":{"type":"string","enum":[${UiBuilderMotionView.FORMATS.joinToString(",") { "\"$it\"" }}],"description":"With motion frames: `${UiBuilderMotionView.FORMAT_FILMSTRIP}` (default) is one labelled PNG grid, the easiest to read; `${UiBuilderMotionView.FORMAT_ANIMATED}` is an animated PNG."}
           },"required":["designId"],"additionalProperties":false}
           """,
         ),
