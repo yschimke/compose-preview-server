@@ -233,6 +233,30 @@ class ServeUiBuilderMotionViewTest {
   }
 
   @Test
+  fun `an ambient override keeps a fractional value on a whole-number property`() {
+    val base = face("frac", secondDriven = false)
+    val hand = base.nodes.getValue("hand")
+    val variant = base.nodes.getValue("hand-ambient")
+    val document =
+      base.copy(
+        nodes =
+          base.nodes +
+            ("hand" to hand.copy(properties = mapOf("pivotX" to IntegerValueV1(0)))) +
+            ("hand-ambient" to
+              variant.copy(
+                properties =
+                  variant.properties +
+                    ("target" to StringValueV1("pivotX")) +
+                    ("value" to StringValueV1("0.5")),
+              )),
+      )
+    assertEquals(
+      ee.schimke.composeai.uibuilder.protocol.DecimalValueV1(0.5),
+      UiBuilderMotionView.ambient(document).nodes.getValue("hand").properties["pivotX"],
+    )
+  }
+
+  @Test
   fun `animated is one animated PNG with a frame per instant`() {
     val reply = view("""{"designId":"sweep","frames":3,"format":"animated"}""")
     val png = Base64.getDecoder().decode(reply["imageBase64"]!!.jsonPrimitive.content)

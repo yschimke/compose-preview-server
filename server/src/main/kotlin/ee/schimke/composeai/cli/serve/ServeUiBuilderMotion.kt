@@ -203,9 +203,10 @@ internal object UiBuilderMotionView {
   private fun typedLike(existing: UiValueV1?, value: String): UiValueV1? =
     when (existing) {
       is StringValueV1 -> StringValueV1(value)
+      // The catalog declares these as numbers, so a fractional value stays fractional even where
+      // the property currently holds a whole one.
       is IntegerValueV1 ->
-        value.toLongOrNull()?.let(::IntegerValueV1)
-          ?: value.toDoubleOrNull()?.let { IntegerValueV1(it.roundToInt().toLong()) }
+        value.toLongOrNull()?.let(::IntegerValueV1) ?: value.toDoubleOrNull()?.let(::DecimalValueV1)
       is DecimalValueV1 -> value.toDoubleOrNull()?.let(::DecimalValueV1)
       else ->
         value.toLongOrNull()?.let(::IntegerValueV1)
