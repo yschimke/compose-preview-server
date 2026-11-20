@@ -351,6 +351,8 @@ private fun ExportFormatV1.fileExtension(): String =
     ExportFormatV1.WFF_XML -> "xml"
     ExportFormatV1.WFF_BUNDLE -> "zip"
     ExportFormatV1.WFF_APK -> "apk"
+    // Added by contracts 3.45.0: a Kobento screen as component JSON, for Kobento's `convert`.
+    ExportFormatV1.KOBENTO_JSON -> "json"
   }
 
 /** The live SVG of one design: the current committed revision, rendered on every request. */
