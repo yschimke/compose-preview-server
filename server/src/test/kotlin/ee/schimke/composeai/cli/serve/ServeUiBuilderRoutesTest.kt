@@ -793,6 +793,7 @@ class ServeUiBuilderRoutesTest {
           ExportFormatV1.WFF_XML,
           ExportFormatV1.WFF_BUNDLE,
           ExportFormatV1.WFF_APK -> error("the live routes never ask for a watch face")
+          ExportFormatV1.KOBENTO_JSON -> error("the live routes never ask for Kobento JSON")
         }
       }
     }

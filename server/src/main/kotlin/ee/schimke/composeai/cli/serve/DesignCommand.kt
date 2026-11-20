@@ -730,6 +730,8 @@ internal fun ExportFormatV1?.extension(): String =
     // JSON and RC exports (contracts 2.17.0); a null format already means `.json`.
     ExportFormatV1.JSON -> "json"
     ExportFormatV1.RC -> "rc"
+    // Kobento component JSON (contracts 3.45.0): JSON, for Kobento's `convert`.
+    ExportFormatV1.KOBENTO_JSON -> "json"
     null -> "json"
     else ->
       if (this in ee.schimke.composeai.uibuilder.export.RemoteDocumentExportSupport.formats)
