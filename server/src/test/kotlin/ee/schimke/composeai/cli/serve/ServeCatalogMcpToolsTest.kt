@@ -562,4 +562,60 @@ class ServeCatalogMcpToolsTest {
     assertTrue(body.firstText().contains("scroll-png"), body.firstText())
     assertTrue(body.firstText().contains("scroll-svg"), body.firstText())
   }
+
+  @Test
+  fun `tools list declares annotations and concrete outputSchemas for catalog tools`() {
+    val registry = ServeSessionRegistry(open = { null })
+    registry.register("m3", host = ToolHost(png = pixel))
+    val mcp = ServeCatalogMcp(registry, Semaphore(1))
+    val response =
+      requireNotNull(
+        runBlocking {
+          mcp.handle(
+            Json.parseToJsonElement("""{"jsonrpc":"2.0","id":1,"method":"tools/list"}""")
+              .jsonObject,
+          ) {
+            ServeMachineAuthorization.Decision.Authorized("agent:test")
+          }
+        }
+          .body,
+      )
+    val toolsByName =
+      response["result"]!!.jsonObject["tools"]!!.jsonArray.associateBy {
+        it.jsonObject["name"]!!.jsonPrimitive.content
+      }
+
+    for ((name, rawTool) in toolsByName) {
+      val annotations = rawTool.jsonObject["annotations"]?.jsonObject
+      assertTrue(annotations != null, "Expected MCP annotations on tool $name")
+      assertTrue("readOnlyHint" in annotations, "Expected readOnlyHint on tool $name")
+    }
+
+    assertEquals(
+      "true",
+      toolsByName["catalog_list_previews"]!!
+        .jsonObject["annotations"]!!
+        .jsonObject["readOnlyHint"]!!
+        .jsonPrimitive
+        .content,
+    )
+
+    val expectedProperties =
+      mapOf(
+        "status" to setOf("schema", "ready", "projects"),
+        "catalog_list_projects" to setOf("projects"),
+        "catalog_list_previews" to setOf("catalogs"),
+        "catalog_list_devices" to setOf("schema", "devices"),
+        "catalog_history_list" to setOf("schema", "mode", "versions"),
+        "catalog_history_diff" to setOf("schema", "changed", "unstable"),
+        "catalog_diff_semantics" to setOf("schema", "onlyInLeft", "onlyInRight", "changed"),
+      )
+    for ((name, keys) in expectedProperties) {
+      val props =
+        toolsByName[name]!!.jsonObject["outputSchema"]!!.jsonObject["properties"]!!.jsonObject
+      for (key in keys) {
+        assertTrue(key in props, "Expected outputSchema.properties.$key on tool $name")
+      }
+    }
+  }
 }
