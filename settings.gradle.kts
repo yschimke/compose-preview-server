@@ -243,6 +243,8 @@ providers.gradleProperty("composeUiBuilderDir").orNull?.let { path ->
   }
 }
 
+include(":playground-engine")
+
 include(":server")
 
 // The MCP server (`compose-preview mcp serve`) moved to yschimke/compose-preview-mcp, a layer-3

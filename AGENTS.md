@@ -174,8 +174,11 @@ how those artefacts are regenerated, just run through `build-brief`.
   ([#9](https://github.com/yschimke/compose-preview-server/issues/9),
   [#180](https://github.com/yschimke/compose-preview-server/issues/180)).
 - Shipping Kotlin modules. `:server` holds the HTTP layer, the runner, the catalog store and the
-  web surfaces; `:usage-source-psi`, `:wasm-ui` and `:native-catalog-m3` are the supporting build
-  modules. The UI builder's service — `:ui-builder-runtime`
+  web surfaces; `:playground-engine` holds the transport-free compile, sandbox and render engine
+  shared by the playground, UI-builder native preview and `design --local`
+  (`checkPlaygroundEngineBoundary` keeps it free of Ktor, UI builder, Watch Face, Livery, `:server`
+  and renderer implementations); `:usage-source-psi`, `:wasm-ui` and `:native-catalog-m3` are the
+  supporting build modules. The UI builder's service — `:ui-builder-runtime`
   — is not here: it is a released coordinate from `yschimke/compose-ui-builder` that `:server` links,
   and it holds persistent design state, catalog validation and renderer-neutral export orchestration
   there. This repository publishes no Maven coordinates; the modules ship inside the standalone

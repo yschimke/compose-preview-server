@@ -2190,6 +2190,7 @@ public class ServeRunner(
     return PlaygroundNodeBoundsService(
       openSession = opener,
       newWorkDir = { java.io.File(workRoot, "node-bounds-${boundsCounter.incrementAndGet()}") },
+      retagSemantics = NativeNodeTagSemantics::retag,
     )
   }
 

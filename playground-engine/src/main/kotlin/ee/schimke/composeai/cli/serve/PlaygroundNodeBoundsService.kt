@@ -53,6 +53,11 @@ class PlaygroundNodeBoundsService(
   private val newWorkDir: () -> File,
   private val renderBudget: Duration = DEFAULT_RENDER_BUDGET,
   private val ackTimeout: Duration = DEFAULT_ACK_TIMEOUT,
+  /**
+   * Optional semantics normalizer run before [ServeSemanticsTags.index] (for example, projecting
+   * UI-builder Remote Compose content-description tags onto `testTag`).
+   */
+  private val retagSemantics: (ComposeSemanticsPayload) -> ComposeSemanticsPayload = { it },
 ) {
 
   /** Snippet → `testTag`-keyed boxes in render pixels, or an empty map on any miss. */
@@ -125,9 +130,9 @@ class PlaygroundNodeBoundsService(
         }
           .getOrNull() ?: return@use emptyMap()
       val payload = runCatching { decode(fetched) }.getOrNull() ?: return@use emptyMap()
-      // A Remote Compose render (a Wear widget on the CMP player) carries its node ids as content
-      // descriptions rather than test tags; read them as tags so one index serves both.
-      ServeSemanticsTags.index(NativeNodeTagSemantics.retag(payload))
+      // Apply any caller-provided semantics retagging (for example, projecting Remote Compose
+      // content-description node ids onto testTag) before indexing bounds.
+      ServeSemanticsTags.index(retagSemantics(payload))
         .mapNotNull { (tag, entry) ->
           // `count > 1` is a tag two nodes carry, which no longer identifies one of them. Compose
           // does not enforce uniqueness and the projection tags by node id, so this should not

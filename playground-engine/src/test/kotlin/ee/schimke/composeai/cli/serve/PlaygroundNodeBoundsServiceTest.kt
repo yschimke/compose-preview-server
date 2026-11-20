@@ -5,7 +5,6 @@ import ee.schimke.composeai.data.layoutinspector.ComposeSemanticsNode
 import ee.schimke.composeai.data.layoutinspector.ComposeSemanticsPayload
 import ee.schimke.composeai.data.layoutinspector.ComposeSemanticsProduct
 import ee.schimke.composeai.previewdata.PreviewManifest
-import ee.schimke.composeai.uibuilder.export.NativeNodeTags
 import java.io.File
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -138,12 +137,11 @@ class PlaygroundNodeBoundsServiceTest {
   }
 
   /**
-   * A Wear widget played by the CMP player: Remote Compose has no `testTag`, so each node carries
-   * its id as a leading content description, reported as the node's `label`. Labels without the
-   * prefix (a node's own description) are not ids, and a real test tag still wins.
+   * Callers can supply [PlaygroundNodeBoundsService.retagSemantics] to project custom markers (such
+   * as Remote Compose content-description node ids) onto `testTag` before bounds indexing.
    */
   @Test
-  fun `a Remote Compose render reports a box per node tagged in its content description`() {
+  fun `retagSemantics transforms the tree before indexing bounds`() {
     val tree =
       node(
         "0",
@@ -153,12 +151,12 @@ class PlaygroundNodeBoundsServiceTest {
             node(
               "1",
               "32,16,200,128",
-              label = NativeNodeTags.tag("column"),
+              label = "node:column",
               children =
                 listOf(
-                  node("2", "32,16,200,48", label = NativeNodeTags.tag("title, with a comma")),
+                  node("2", "32,16,200,48", label = "node:title"),
                   node("3", "32,48,80,96", label = "Play"),
-                  node("4", "80,48,128,96", label = NativeNodeTags.tag("x"), testTag = "real"),
+                  node("4", "80,48,128,96", label = "node:x", testTag = "real"),
                 ),
             ),
           ),
@@ -170,13 +168,24 @@ class PlaygroundNodeBoundsServiceTest {
           if (kind == ComposeSemanticsProduct.KIND) semanticsResult(tree) else null
         },
       )
+    fun retagNode(n: ComposeSemanticsNode): ComposeSemanticsNode {
+      val children = n.children.map(::retagNode)
+      val id =
+        n.label?.takeIf { n.testTag == null }?.removePrefix("node:")?.takeIf { it != n.label }
+      return if (id != null) n.copy(testTag = id, children = children)
+      else n.copy(children = children)
+    }
     val svc =
-      PlaygroundNodeBoundsService(openSession = { _, _, _, _ -> fake }, newWorkDir = { tmp() })
+      PlaygroundNodeBoundsService(
+        openSession = { _, _, _, _ -> fake },
+        newWorkDir = { tmp() },
+        retagSemantics = { payload -> payload.copy(root = retagNode(payload.root)) },
+      )
 
     assertEquals(
       mapOf(
         "column" to AnnotationBounds(x = 32, y = 16, width = 168, height = 112),
-        "title, with a comma" to AnnotationBounds(x = 32, y = 16, width = 168, height = 32),
+        "title" to AnnotationBounds(x = 32, y = 16, width = 168, height = 32),
         "real" to AnnotationBounds(x = 80, y = 48, width = 48, height = 48),
       ),
       svc.capture(snippet()),
