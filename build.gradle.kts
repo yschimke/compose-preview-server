@@ -80,6 +80,7 @@ tasks.named("check") {
   // `:server:check`.
   dependsOn(
     ":playground-engine:check",
+    ":watchface-engine:check",
     ":server:check",
     ":native-catalog-m3:check",
     ":usage-source-psi:check",

@@ -21,7 +21,7 @@ import kotlinx.serialization.json.intOrNull
  * (compose-ai-tools' exported `DwfSimulatorLauncher`). [RenderHostDwfApkRuntime] is the production
  * binding and a fake stands in for it in tests.
  */
-internal interface DwfApkRuntime {
+interface DwfApkRuntime {
   /** Whether this host can draw a watch face with the real runtime, and if not, why not. */
   fun availability(): Availability
 
@@ -62,13 +62,13 @@ internal interface DwfApkRuntime {
  * The daemon's stdio JSON-lines channel as a function: one command, its `result` (or an exception
  * carrying the daemon's `error`). [DwfDaemonCommands] builds the commands.
  */
-internal interface DwfDaemonConnection : AutoCloseable {
+interface DwfDaemonConnection : AutoCloseable {
   val alive: Boolean
 
   fun command(command: DwfCommand): JsonElement?
 }
 
-internal open class DwfRuntimeException(message: String, cause: Throwable? = null) :
+open class DwfRuntimeException(message: String, cause: Throwable? = null) :
   RuntimeException(message, cause)
 
 /**
@@ -100,7 +100,7 @@ internal open class DwfRuntimeException(message: String, cause: Throwable? = nul
  * owner starts another session on the same design while it has no socket (a Reload). Release is
  * checked on use and on every start, so nothing here runs a timer.
  */
-internal class DwfPreviewSessions(
+class DwfPreviewSessions(
   private val runtime: DwfApkRuntime,
   private val maxSessions: Int = DEFAULT_MAX_SESSIONS,
   private val idleMillis: Long = DEFAULT_IDLE_MILLIS,
@@ -114,7 +114,7 @@ internal class DwfPreviewSessions(
   private val sleep: (Long) -> Unit = { Thread.sleep(it) },
 ) {
   class Session
-  internal constructor(
+  constructor(
     val id: String,
     val designId: String,
     val revision: Long,
@@ -126,44 +126,44 @@ internal class DwfPreviewSessions(
     /** Null until an async start has exported it; always set for a [start]ed session. */
     @Volatile
     var sourceOrNull: DwfSource? = null
-      internal set
+      set
 
     val source: DwfSource
       get() = checkNotNull(sourceOrNull) { "the session's watch face is not ready yet" }
 
     @Volatile
     var wffVersion: Int = wffVersion
-      internal set
+      set
 
     @Volatile var controls: DwfControls = initialControls
-    @Volatile internal var lastUsed: Long = startedAt
-    @Volatile internal var apk: File? = null
+    @Volatile var lastUsed: Long = startedAt
+    @Volatile var apk: File? = null
 
     /** What the daemon has been brought to for this session; null until it has served one. */
-    @Volatile internal var applied: DwfControls? = null
+    @Volatile var applied: DwfControls? = null
 
     /** `now` when the ticking clock last (re)started, and the wall time it counts from. */
-    @Volatile internal var tickAnchor: Long = startedAt
-    @Volatile internal var seq: Long = 0
+    @Volatile var tickAnchor: Long = startedAt
+    @Volatile var seq: Long = 0
 
-    @Volatile internal var stage: DwfStage = DwfStage.PACKAGING
-    @Volatile internal var stageSince: Long = startedAt
-    @Volatile internal var reachedStep: Int = 0
-    @Volatile internal var cachedPackage: Boolean = false
-    @Volatile internal var failure: Frame.Failed? = null
+    @Volatile var stage: DwfStage = DwfStage.PACKAGING
+    @Volatile var stageSince: Long = startedAt
+    @Volatile var reachedStep: Int = 0
+    @Volatile var cachedPackage: Boolean = false
+    @Volatile var failure: Frame.Failed? = null
 
     /** True while [startAsync]'s preparation is running for this session. */
-    @Volatile internal var preparing: Boolean = false
+    @Volatile var preparing: Boolean = false
 
     /** The frame an async start drew as its last step, handed to the first socket that asks. */
-    @Volatile internal var warmFrame: Frame.Ok? = null
+    @Volatile var warmFrame: Frame.Ok? = null
 
-    internal val sockets = AtomicInteger(0)
-    @Volatile internal var everAttached: Boolean = false
-    @Volatile internal var detachedSince: Long = startedAt
+    val sockets = AtomicInteger(0)
+    @Volatile var everAttached: Boolean = false
+    @Volatile var detachedSince: Long = startedAt
 
     /** [controls] with the ticking clock advanced to [now]; a still clock is returned as is. */
-    internal fun effective(now: Long): DwfControls {
+    fun effective(now: Long): DwfControls {
       val c = controls
       if (!c.ticking) return c
       return c.copy(timeMillis = (c.timeMillis ?: tickAnchor) + (now - tickAnchor))
@@ -719,7 +719,7 @@ internal class DwfPreviewSessions(
     }
 
     /** The app's face is loaded but has not drawn yet; an error or the built-in face is final. */
-    internal fun isWaitingForFrame(status: JsonElement?): Boolean {
+    fun isWaitingForFrame(status: JsonElement?): Boolean {
       val obj = status as? JsonObject ?: return false
       if ((obj["error"] as? JsonPrimitive)?.contentOrNull != null) return false
       val kind = (obj["kind"] as? JsonPrimitive)?.contentOrNull
@@ -727,7 +727,7 @@ internal class DwfPreviewSessions(
       return kind != null && kind != "built-in" && (frames == null || frames <= 0)
     }
 
-    internal fun isRendering(status: JsonElement?): Boolean =
+    fun isRendering(status: JsonElement?): Boolean =
       ((status as? JsonObject)?.get("rendering") as? JsonPrimitive)?.booleanOrNull == true
 
     /**
@@ -735,7 +735,7 @@ internal class DwfPreviewSessions(
      * rule as `DwfApkDaemonBridge.appWatchFaceProblem`, because the simulator draws its built-in
      * demo face when the app's face fails to load, and a screenshot alone cannot tell the two.
      */
-    internal fun faceProblem(status: JsonElement?): String? {
+    fun faceProblem(status: JsonElement?): String? {
       val obj = status as? JsonObject ?: return "the simulator returned no watch face status"
       val kind = (obj["kind"] as? JsonPrimitive)?.contentOrNull
       val error = (obj["error"] as? JsonPrimitive)?.contentOrNull
@@ -750,7 +750,7 @@ internal class DwfPreviewSessions(
     }
 
     /** Width and height from a PNG's IHDR, or nulls when the bytes are not a PNG. */
-    internal fun pngSize(bytes: ByteArray): Pair<Int?, Int?> {
+    fun pngSize(bytes: ByteArray): Pair<Int?, Int?> {
       if (bytes.size < 24 || bytes[1] != 'P'.code.toByte()) return null to null
       fun int(at: Int) =
         (bytes[at].toInt() and 0xff shl 24) or

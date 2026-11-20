@@ -779,8 +779,6 @@ private fun frameInterval(dwf: UiBuilderDwfPreview, session: DwfPreviewSessions.
   if (session.sourceOrNull?.animates == true) dwf.animatedTickMillis else dwf.tickMillis
 
 /** A new session runs on the wall clock, so a face shows the time and moves without a click. */
-internal val LIVE_CONTROLS = DwfControls(ticking = true)
-
 private fun dwfLaneMessage(dwf: UiBuilderDwfPreview, session: DwfPreviewSessions.Session): String =
   kotlinx.serialization.json
     .buildJsonObject {
@@ -1004,3 +1002,17 @@ private suspend fun ApplicationCall.respondDwfRefusal(
     status,
   )
 }
+
+/**
+ * Derive a [DwfSource] from a UI-builder design document using [WatchFaceXmlExporter]. Bitmap
+ * assets are not carried: a face that names `res/` drawables needs the editor to send them in the
+ * start request.
+ */
+internal fun deriveDwfSource(
+  document: ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1,
+): DwfSource? =
+  when (val result = ee.schimke.composeai.uibuilder.export.WatchFaceXmlExporter.export(document)) {
+    is ee.schimke.composeai.uibuilder.export.WatchFaceXmlExporter.Result.Emitted ->
+      DwfSource(wffXml = result.xml, wffVersion = result.wffVersion, label = document.id)
+    is ee.schimke.composeai.uibuilder.export.WatchFaceXmlExporter.Result.Refused -> null
+  }

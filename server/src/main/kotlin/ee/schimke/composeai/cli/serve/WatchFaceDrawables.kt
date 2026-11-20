@@ -125,12 +125,7 @@ internal object WatchFaceDrawables {
   }
 
   /** The resource name of a package path such as `drawable-hdpi/logo.png`, or null. */
-  fun drawableName(path: String): String? {
-    val normalized = DwfSource.normalizedAssetPath(path)
-    val directory = normalized.substringBefore('/', "")
-    if (directory != "drawable" && !directory.startsWith("drawable-")) return null
-    return normalized.substringAfter('/').substringBefore('.').takeIf { it.isNotEmpty() }
-  }
+  fun drawableName(path: String): String? = DwfSource.drawableName(path)
 
   /**
    * One [MISSING_RESOURCE] finding per bitmap [xml] names that [available] (resource names) does
