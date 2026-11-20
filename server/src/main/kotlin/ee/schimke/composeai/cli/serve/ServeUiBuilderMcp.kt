@@ -1326,9 +1326,30 @@ class ServeUiBuilderMcp(
     return UI_BUILDER_JSON.encodeToString(UiBuilderViewV1.serializer(), view)
   }
 
-  private fun JsonObject.asksForMotion(): Boolean =
-    listOf(FRAMES_ARGUMENT, DURATION_MS_ARGUMENT, TIMES_ARGUMENT, AMBIENT_ARGUMENT, FORMAT_ARGUMENT)
-      .any { this[it] != null && this[it] !is JsonNull }
+  /**
+   * Whether [VIEW] is asked for motion frames: any timing argument, or `ambient: true`. An explicit
+   * `ambient: false` is the default and keeps the ordinary view; `format` alone is refused, since
+   * it only shapes motion frames.
+   */
+  private fun JsonObject.asksForMotion(): Boolean {
+    val timed =
+      listOf(FRAMES_ARGUMENT, DURATION_MS_ARGUMENT, TIMES_ARGUMENT).any {
+        this[it] != null && this[it] !is JsonNull
+      }
+    val ambient = (this[AMBIENT_ARGUMENT] as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull
+    if (timed || ambient == true) return true
+    if (this[FORMAT_ARGUMENT] != null && this[FORMAT_ARGUMENT] !is JsonNull) {
+      throw McpRequestException(
+        "`$FORMAT_ARGUMENT` shapes motion frames; pass it with `$FRAMES_ARGUMENT`, " +
+          "`$DURATION_MS_ARGUMENT`, `$TIMES_ARGUMENT` or `$AMBIENT_ARGUMENT: true`",
+      )
+    }
+    val stray = this[AMBIENT_ARGUMENT]
+    if (stray != null && stray !is JsonNull && ambient == null) {
+      throw McpRequestException("`$AMBIENT_ARGUMENT` must be a boolean")
+    }
+    return false
+  }
 
   /**
    * [VIEW] over time ([UiBuilderMotionView]): a `wff-watchface` design's frames at several

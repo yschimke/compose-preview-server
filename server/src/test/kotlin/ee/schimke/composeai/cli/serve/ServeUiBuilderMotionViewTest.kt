@@ -222,6 +222,17 @@ class ServeUiBuilderMotionViewTest {
   }
 
   @Test
+  fun `ambient false is the ordinary view, not a motion view`() {
+    // The plain view asks the service for its PNG export, which this stand-in service refuses; a
+    // motion view would have gone to the draft validator instead.
+    for (designId in listOf("sweep", "phone")) {
+      val message = refused("""{"designId":"$designId","ambient":false}""")
+      assertTrue("PNG export" in message, message)
+    }
+    assertEquals(emptyList(), exported)
+  }
+
+  @Test
   fun `animated is one animated PNG with a frame per instant`() {
     val reply = view("""{"designId":"sweep","frames":3,"format":"animated"}""")
     val png = Base64.getDecoder().decode(reply["imageBase64"]!!.jsonPrimitive.content)
@@ -247,6 +258,8 @@ class ServeUiBuilderMotionViewTest {
     assertTrue("`format`" in refused("""{"designId":"sweep","frames":2,"format":"gif"}"""))
     assertTrue("renderer" in refused("""{"designId":"sweep","frames":2,"renderer":"native"}"""))
     assertTrue("wff-watchface" in refused("""{"designId":"phone","frames":2}"""))
+    assertTrue("`format`" in refused("""{"designId":"sweep","format":"animated"}"""))
+    assertTrue("boolean" in refused("""{"designId":"sweep","ambient":"yes"}"""))
     assertEquals(emptyList(), exported, "a refused call renders nothing")
 
     // A frame is never drawn larger than the cell cap, whatever the render's size.
