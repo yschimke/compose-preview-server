@@ -213,7 +213,7 @@ that protocol/SDK migration is deliberately not bundled into the compatibility t
 | `ui_builder_merge_branch`, `ui_builder_archive_branch` | `ui-builder-write` | Replay a branch onto its parent, all or nothing, with a per-command report (`dryRun`, `skipOperationIds`); or close it unmerged |
 | `ui_builder_compare_branches`, `ui_builder_pick_branch` | `ui-builder-read` | Put a design's open branches side by side in one signed picture with a diff summary each; ask the person which to keep (thumbnail picker, plain form, or a numbered list for chat). Present with the branch tools |
 | `ui_builder_export` | `ui-builder-export` | Export a design — `compose` returns the generator's Kotlin, or diagnostics naming each reason it refused |
-| `ui_builder_view` | `ui-builder-read` (plus `ui-builder-export` for `renderer: "native"`) | The editor canvas as a person sees it — a PNG with the selection, reference overlay, comment pins and layout bounds drawn on, and the node boxes and pin positions as JSON (#1114) |
+| `ui_builder_view` | `ui-builder-read` (plus `ui-builder-export` for `renderer: "native"`) | The editor canvas as a person sees it — a PNG with the selection, reference overlay, comment pins and layout bounds drawn on, and the node boxes and pin positions as JSON (#1114); for a watch face, `frames`/`durationMs`/`times`/`ambient` draw it over time (watchface-tools#39) |
 | `ui_builder_set_reference` | `ui-builder-write` | Attach the picture a design is built against — a Figma frame screenshot, a mock — as its reference overlay, or clear it; replies with what the picture is against the frame (size in dp, density, screen or region, whether pixels compare). Present only where the host keeps reference overlays |
 | `ui_builder_compare_reference` | `ui-builder-read` (plus `ui-builder-export` when matching layers) | Measure a design against its reference: the differing regions in dp with their layers, and per named layer the move, size and font size that would line it up, as `ui_builder_apply` operations. Writes nothing |
 | `ui_builder_put_asset` | `ui-builder-write` | Put a picture behind an `assetKey`, so an `asset/image` node draws it; present only where the host keeps design assets |
@@ -384,6 +384,32 @@ The CLI spelling is `compose-preview-server design view <designId>` with `--sele
 `--viewport <w>x<h>` and `--renderer`: the PNG goes to `--out` (default `<designId>.view.png`) and
 the JSON to stdout.
 
+
+#### A watch face over time
+
+A still frame cannot show a second hand's sweep, a seconds pulse or the ambient transition
+(yschimke/watchface-tools#39). For a `wff-watchface` design, `ui_builder_view` also takes
+`frames` (2–12) over `durationMs` (default 1000; frames are spread evenly from the current whole
+second, the window's end left out), or explicit `times` (2–12 epoch milliseconds), and `ambient`.
+`ambient: true` alone draws the interactive and ambient modes side by side at one instant. The
+reply is still one `compose-preview/ui-builder-view/v1` picture: by default a `filmstrip` grid with
+each frame labelled by its UTC time, or with `format: "animated"` an animated PNG (still
+`image/png`, so the signed link, the image block and the chat fallback carry it unchanged). Its
+`motion` object lists each frame's instant, box and render hash, `changed` against the frame before,
+and `distinctFrames` — `1` means nothing moved over those instants.
+
+Each frame is the design with `environment.fixedTime` set to the frame's instant, drawn by the
+editor's PNG export (UI Builder 3.140.0 evaluates `[SECOND_MILLISECOND]`, `[MILLISECOND]` and
+`[UTC_TIMESTAMP]` against it) on an unsaved scratch copy through the draft validator: no revision
+moves, and the UI Builder service's lock is held only for the snapshot read. A design that pins
+`environment.fixedTime` has frozen its clock, and every frame honours that pin. Ambient frames
+apply the design's `wff/variant mode=AMBIENT` overrides to their parents, as the watch does. The
+native runtime is never used, since it would compile once per frame.
+
+It is kept lean: at most 12 frames, each scaled to fit 320 px, the encoded picture under 4 MB, and
+six motion views a minute per account, one at a time (`motion_rate_limited` past that). It is an
+occasional look; `watchFaceCost` on each edit remains the per-edit cost signal. Animation and
+Sequence playback arrive through the same export with a later builder release.
 ### Building against a reference
 
 The editor's **Frame, density and reference** panel has two tools on this surface, so an agent can

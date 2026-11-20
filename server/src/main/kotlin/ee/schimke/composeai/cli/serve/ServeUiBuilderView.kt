@@ -419,6 +419,11 @@ internal data class UiBuilderViewV1(
   /** Null when the caller did not ask for the reference or the design has none attached. */
   val reference: UiBuilderViewReferenceV1? = null,
   val notes: List<String> = emptyList(),
+  /**
+   * A watch face over time, when the call asked for `frames`, `durationMs`, `times` or `ambient`:
+   * the picture is then the filmstrip or animation and this lists its frames. Null otherwise.
+   */
+  val motion: UiBuilderViewMotionV1? = null,
   val imageBase64: String? = null,
 )
 
