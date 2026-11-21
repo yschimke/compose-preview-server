@@ -102,8 +102,16 @@ case "${SERVE_ROLE:-}" in
     export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:-} -Dcomposeai.serve.themeOptimization=false -Dcomposeai.serve.warmInBackground=false"
     echo "entrypoint: playground role — no UI builder, engagement, grants, push, optimizer or warming" >&2
     ;;
+  ui-builder)
+    args+=(--role ui-builder)
+    : "${SERVE_ENGAGEMENT_FILE:=none}"
+    : "${SERVE_WEB_PUSH:=0}"
+    : "${SERVE_ACCEPT_IMAGES:=0}"
+    export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:-} -Dcomposeai.serve.themeOptimization=false -Dcomposeai.serve.warmInBackground=false"
+    echo "entrypoint: ui-builder role — UI builder host; no catalog engagement, push, optimizer or warming" >&2
+    ;;
   *)
-    echo "entrypoint: SERVE_ROLE='${SERVE_ROLE}' is not a role — the only one is playground" >&2
+    echo "entrypoint: SERVE_ROLE='${SERVE_ROLE}' is not a role — supported roles are playground, ui-builder" >&2
     exit 64
     ;;
 esac
@@ -187,7 +195,9 @@ apply_settings_file() {
   export SERVE_SETTINGS_SOURCES
   echo "entrypoint: ${file}: ${applied} setting(s) applied, ${overridden} overridden by the environment" >&2
 }
-apply_settings_file "${SERVE_SETTINGS_FILE}" "${SERVE_SETTINGS_SCHEMA}" "${SERVE_ROLE:-preview}"
+settings_role="${SERVE_ROLE:-preview}"
+[[ "${settings_role}" == "ui-builder" ]] && settings_role="preview"
+apply_settings_file "${SERVE_SETTINGS_FILE}" "${SERVE_SETTINGS_SCHEMA}" "${settings_role}"
 [[ "${SERVE_SETTINGS_FILE}" != "none" ]] && args+=(--settings-file "${SERVE_SETTINGS_FILE}")
 
 # The Remote Compose player the viewer opens on, where a preview enables it (e.g. `cmp-android`,
@@ -417,8 +427,9 @@ if [[ -f /opt/compose-preview-server/wasm-ui/index.html ]]; then
   args+=(--wasm-ui-dir /opt/compose-preview-server/wasm-ui)
 fi
 # The Compose UI builder is an independent application and route. Do not register it as a
-# `preview-ui` catalog or as the `/wasm/<system>/` fallback above.
-if [[ -f /opt/compose-preview-server/ui-builder/index.html && "${SERVE_ROLE:-}" != "playground" ]]; then
+# `preview-ui` catalog or as the `/wasm/<system>/` fallback above. When `SERVE_UI_BUILDER_EXTERNAL=1`,
+# a dedicated `ui-builder` container owns `/config/ui-builder-state` and this process leaves it untouched.
+if [[ -f /opt/compose-preview-server/ui-builder/index.html && "${SERVE_ROLE:-}" != "playground" && "${SERVE_UI_BUILDER_EXTERNAL:-0}" != "1" ]]; then
   args+=(--ui-builder-dir /opt/compose-preview-server/ui-builder)
   # Catalog publication does not imply authoring support. Enable only the explicitly reviewed
   # catalog adapters; this deployment carries M3, the Remote Compose M3 catalog, and Wear M3.

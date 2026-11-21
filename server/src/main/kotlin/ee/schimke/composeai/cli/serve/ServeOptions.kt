@@ -214,6 +214,14 @@ public interface ServeOptions {
   public val playgroundRole: Boolean
 
   /**
+   * `--role ui-builder`: this process is the UI Builder's own container (`ui.coo.ee`) behind the
+   * shared proxy; it serves the editor, design APIs, MCP, and Watch Face Push without owning
+   * catalog-only writers.
+   */
+  public val uiBuilderRole: Boolean
+    get() = false
+
+  /**
    * `--playground-external`: a sibling `--role playground` process serves the playground at this
    * origin, so this host only renders editor handoff links. Needs `--compile-engine` to decide
    * which catalogs get one.
