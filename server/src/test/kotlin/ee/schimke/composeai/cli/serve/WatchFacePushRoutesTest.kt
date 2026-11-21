@@ -1799,9 +1799,11 @@ class WatchFacePushRoutesTest {
 
   @Test
   fun `an unpublish cancels a publish still queued or building`() {
+    val started = java.util.concurrent.CountDownLatch(1)
     val release = java.util.concurrent.CountDownLatch(1)
     val ready = readyPackaging()() as WatchFacePushPackaging.Ready
     val slow = WatchFacePushPackager { files, face, version, out ->
+      started.countDown()
       release.await(20, TimeUnit.SECONDS)
       ready.packager.pack(files, face, version, out)
     }
@@ -1810,6 +1812,7 @@ class WatchFacePushRoutesTest {
     createDesign(alice, "pulse", "Pulse", public = true)
     assertEquals(202, put(alice, "aurora", "public").code)
     assertEquals(202, put(alice, "pulse", "public").code)
+    assertTrue(started.await(20, TimeUnit.SECONDS), "aurora's build never started")
     // aurora is building, pulse is queued behind it; both are unpublished now.
     val path = "/api/ui-builder/v1/designs/%s/watch-face-publication"
     assertEquals(200, send("DELETE", path.format("aurora"), actor = alice).code)
