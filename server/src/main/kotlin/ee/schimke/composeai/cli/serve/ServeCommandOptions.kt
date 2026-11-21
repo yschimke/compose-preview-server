@@ -157,14 +157,22 @@ public class ServeCommandOptions(
   /** `--compile-engine`: the compile engine without the public playground; see [ServeOptions]. */
   override val compileEngine: Boolean = "--compile-engine" in args
 
-  /** `--role playground`; see [ServeOptions]. Any other role is a startup error. */
-  override val playgroundRole: Boolean =
+  private val parsedRole: String? =
     when (val role = args.flagValue("--role")) {
-      null -> false
-      "playground" -> true
+      null,
+      "playground",
+      "ui-builder" -> role
       else ->
-        throw IllegalArgumentException("--role '$role' is not a role — the only one is playground")
+        throw IllegalArgumentException(
+          "--role '$role' is not a role — supported roles are playground, ui-builder",
+        )
     }
+
+  /** `--role playground`; see [ServeOptions]. */
+  override val playgroundRole: Boolean = parsedRole == "playground"
+
+  /** `--role ui-builder`; see [ServeOptions]. */
+  override val uiBuilderRole: Boolean = parsedRole == "ui-builder"
 
   /** `--playground-external`; see [ServeOptions]. */
   override val playgroundExternal: Boolean = "--playground-external" in args
