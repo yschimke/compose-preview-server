@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.188.0](https://github.com/yschimke/compose-preview-server/compare/v3.187.0...v3.188.0) (2026-11-21)
+
+
+### Bug Fixes
+
+* **deps:** update contracts to 3.45.0 and handle the Kobento export format ([#2055](https://github.com/yschimke/compose-preview-server/issues/2055)) ([60c46e9](https://github.com/yschimke/compose-preview-server/commit/60c46e9b273a4e1e40c5e3e5c7389b0ef1515116))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-ui-builder-bom to v3.143.0 ([#1957](https://github.com/yschimke/compose-preview-server/issues/1957)) ([658cb9a](https://github.com/yschimke/compose-preview-server/commit/658cb9ae72c06d9c695a3960fbe1c6f490bd6a44))
+* **deps:** update the UI Builder to 3.144.0 ([#2061](https://github.com/yschimke/compose-preview-server/issues/2061)) ([b8aa615](https://github.com/yschimke/compose-preview-server/commit/b8aa615eae96b127150e4102dece976836b7bd94))
+
 ## [3.187.0](https://github.com/yschimke/compose-preview-server/compare/v3.186.0...v3.187.0) (2026-11-20)
 
 
