@@ -1,7 +1,9 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.uibuilder.export.BuiltInCatalogDocumentFormats
+import ee.schimke.composeai.uibuilder.export.CatalogDocumentFormat
 import ee.schimke.composeai.uibuilder.export.CatalogDocumentFormats
+import ee.schimke.composeai.uibuilder.export.toUiBuilderDocument
 import ee.schimke.composeai.uibuilder.protocol.DiagnosticSeverityV1
 import ee.schimke.composeai.uibuilder.protocol.ExportArtifactV1
 import ee.schimke.composeai.uibuilder.protocol.ExportDiagnosticV1
@@ -23,9 +25,10 @@ internal fun interface DocumentCompiler {
 
 /**
  * The `.rc` of a design whose catalog declares a document format this host compiles: the format's
- * content from [delegate], then [compilers]' bytes for it. The builder advertises `remoteDocument`
- * for exactly these catalogs (`CurrentM3UiBuilderCatalogExecutor.Builder.documentCompilers`), so
- * every other request passes through untouched.
+ * own content (written here, by the format, so it needs neither the renderer nor anything else in
+ * [delegate]'s chain), then [compilers]' bytes for it. The builder advertises `remoteDocument` for
+ * exactly these catalogs (`CurrentM3UiBuilderCatalogExecutor.Builder.documentCompilers`), so every
+ * other request passes through to [delegate] untouched.
  */
 internal class DocumentCompileExportExecutor(
   private val delegate: UiBuilderExportExecutor,
@@ -38,12 +41,19 @@ internal class DocumentCompileExportExecutor(
       formats.supported(request.catalog.statusSemantics) ?: return delegate.export(request)
     val compiler = compilers[declared.format.id] ?: return delegate.export(request)
 
-    val source = delegate.export(request.copy(format = declared.format.wireFormat))
     val content =
-      when (source.encoding) {
-        ExportEncodingV1.UTF8 -> source.content
-        ExportEncodingV1.BASE64 ->
-          Base64.getDecoder().decode(source.content).toString(Charsets.UTF_8)
+      when (
+        val written =
+          declared.format.export(request.document.toUiBuilderDocument(), declared.policy)
+      ) {
+        is CatalogDocumentFormat.Result.Emitted ->
+          when (declared.format.encoding) {
+            ExportEncodingV1.UTF8 -> written.content
+            ExportEncodingV1.BASE64 ->
+              Base64.getDecoder().decode(written.content).toString(Charsets.UTF_8)
+          }
+        is CatalogDocumentFormat.Result.Refused ->
+          throw IllegalArgumentException(written.reasons.joinToString("; "))
       }
     val bytes = compiler.compile(content)
     return ExportArtifactV1(
@@ -54,13 +64,14 @@ internal class DocumentCompileExportExecutor(
       contentDigest =
         MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) },
       diagnostics =
-        source.diagnostics +
+        listOf(
           ExportDiagnosticV1(
             DiagnosticSeverityV1.INFO,
             "REVISION_PINNED_REMOTE_EXPORT",
             "Compiled design ${request.designId} revision ${request.revision} " +
               "(${request.documentHash}) from ${declared.format.label}.",
           ),
+        ),
     )
   }
 }

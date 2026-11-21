@@ -1,7 +1,11 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.uibuilder.export.CatalogDocumentFormat
+import ee.schimke.composeai.uibuilder.export.KobentoDocumentFormat
+import ee.schimke.composeai.uibuilder.export.UiBuilderNode
 import ee.schimke.composeai.uibuilder.export.blankUiBuilderDocument
 import ee.schimke.composeai.uibuilder.export.toDesignDocumentV1
+import ee.schimke.composeai.uibuilder.export.toUiBuilderDocument
 import ee.schimke.composeai.uibuilder.protocol.CatalogCapabilityV1
 import ee.schimke.composeai.uibuilder.protocol.ExportArtifactV1
 import ee.schimke.composeai.uibuilder.protocol.ExportEncodingV1
@@ -16,6 +20,7 @@ import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
 import kotlin.test.assertSame
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -136,6 +141,16 @@ class KobentoConvertExportTest {
             )
             .jsonObject,
       )
+      // One Kobento component as the root: the blank screen's Compose scaffold is no Kobento.
+      .let {
+        it.copy(
+          roots = listOf("thermostat"),
+          nodes =
+            mapOf(
+              "thermostat" to UiBuilderNode(id = "thermostat", componentId = "kobento/thermostat"),
+            ),
+        )
+      }
       .toDesignDocumentV1()
 
   private fun catalog(statusSemantics: JsonObject): CatalogCapabilityV1 =
@@ -157,22 +172,11 @@ class KobentoConvertExportTest {
       format = format,
     )
 
-  private val json =
-    ExportArtifactV1(
-      ExportFormatV1.KOBENTO_JSON,
-      "application/json",
-      ExportEncodingV1.UTF8,
-      """{"root":{"column":{}}}""",
-      "json-digest",
-    )
-
   @Test
-  fun `a kobento rc is compiled from the delegate's kobento json`() {
-    val asked = mutableListOf<ExportFormatV1>()
-    val delegate = UiBuilderExportExecutor {
-      asked += it.format
-      json
-    }
+  fun `a kobento rc is compiled from the format's own json, with no renderer behind it`() {
+    // The delegate chain stands for a server whose renderer did not open (Java 17): it can write
+    // nothing but Compose. The Kobento JSON is the format's own, so the `.rc` does not need it.
+    val delegate = UiBuilderExportExecutor { error("asked the delegate for ${it.format}") }
     var compiled: String? = null
     val executor =
       DocumentCompileExportExecutor(
@@ -189,8 +193,11 @@ class KobentoConvertExportTest {
 
     val artifact = executor.export(request(ExportFormatV1.RC, kobento))
 
-    assertEquals(listOf(ExportFormatV1.KOBENTO_JSON), asked)
-    assertEquals(json.content, compiled)
+    val written =
+      assertIs<CatalogDocumentFormat.Result.Emitted>(
+        KobentoDocumentFormat.export(document.toUiBuilderDocument(), JsonObject(emptyMap())),
+      )
+    assertEquals(written.content, compiled)
     assertEquals(ExportFormatV1.RC, artifact.format)
     assertEquals(ExportEncodingV1.BASE64, artifact.encoding)
     assertEquals(rc.toList(), Base64.getDecoder().decode(artifact.content).toList())
