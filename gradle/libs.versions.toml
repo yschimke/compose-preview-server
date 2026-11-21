@@ -532,7 +532,11 @@ composeai-contracts = "3.45.0"
 # (compose-ui-builder#1319), which this server's ui_builder_view motion frames (#2045) pick up.
 # Built on compose-ai-tools 2.101.0, contracts 3.43.0, Kotlin 2.4.21, watchface-tools 0.9.0 and
 # rc-players 3.9.0.
-composeai-ui-builder = "3.143.0"
+# 3.144.0 exports a Kobento catalog's designs as Kobento component JSON (compose-ui-builder#1334,
+# contracts 3.45.0's `kobento-json`, which this server's routes handle since #2055): the catalog
+# advertises `kobentoJson` and no Compose export, ProductionUiBuilderExportExecutor writes it, and
+# the editor's code pane and Issues follow the Kobento exporter.
+composeai-ui-builder = "3.144.0"
 # First published version of the optional publication server library (Maven Central).
 livery = "0.15.0"
 # Packages a design revision's WFF source into the signed APK the real watch-face runtime loads
