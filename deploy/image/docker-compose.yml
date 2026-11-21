@@ -543,7 +543,7 @@ services:
   playground:
     logging: *default-logging
     profiles: ["playground"]
-    image: "ghcr.io/yschimke/compose-preview-host:${IMAGE_TAG:-latest}"
+    image: "ghcr.io/yschimke/compose-preview-playground:${IMAGE_TAG:-latest}"
     restart: always
     init: true
     pull_policy: always
