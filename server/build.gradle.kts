@@ -710,8 +710,8 @@ dependencies {
   // The build-host protocol, `implementation`: only `ServeBuildHost` is programmed against
   // elsewhere.
   implementation(libs.composeai.build.host.protocol)
-  // Reusable publication reader and Ktor routes; host auth, CSP and settings stay here.
-  implementation(libs.livery.server)
+  // Reusable publication reader, Ktor routes and standalone host entrypoint.
+  implementation(project(":livery-host"))
   // Authoritative persistence, validation, collaboration and export orchestration. The server
   // supplies Ktor/auth and the narrow render-host adapter; the runtime has neither dependency.
   api(libs.composeai.ui.builder.runtime)
@@ -1020,14 +1020,15 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
     },
   )
 
-  // `:playground-engine` (compile/render engine), `:serve-auth` (auth/grants) and
-  // `:watchface-engine` (WFF/DWF packaging, validation and preview sessions) are extracted internal
-  // seams consumed by `:server`.
+  // `:livery-host` (standalone Livery publications host), `:playground-engine` (compile/render
+  // engine), `:serve-auth` (auth/grants) and `:watchface-engine` (WFF/DWF packaging, validation
+  // and preview sessions) are extracted internal seams consumed by `:server`.
   // The UI-builder runtime, export, render bundle and export fonts are named as projects for
   // `-PcomposeUiBuilderDir` (included-build substitution); the default build matches them in
   // `allowedComposeAiModules`. The last two are resources only: a PNG and two font files.
   allowedProjects.set(
     listOf(
+      ":livery-host",
       ":playground-engine",
       ":serve-auth",
       ":watchface-engine",

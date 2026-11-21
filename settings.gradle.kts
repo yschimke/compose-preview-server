@@ -243,6 +243,8 @@ providers.gradleProperty("composeUiBuilderDir").orNull?.let { path ->
   }
 }
 
+include(":livery-host")
+
 include(":playground-engine")
 
 include(":serve-auth")
