@@ -4,7 +4,7 @@
 # Runs `:livery-host` on a JRE with no Android SDK, Skiko, Robolectric, BTA, or `:server` runtime.
 ARG SERVER_VERSION
 
-FROM eclipse-temurin:21.0.13_9-jre AS fetch
+FROM eclipse-temurin:21.0.13.1_2-jre AS fetch
 ARG SERVER_VERSION
 WORKDIR /opt
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
     rm /tmp/livery.tgz && \
     ln -s "/opt/compose-preview-livery-host-${SERVER_VERSION}" /opt/compose-preview-livery-host
 
-FROM eclipse-temurin:21.0.13_9-jre
+FROM eclipse-temurin:21.0.13.1_2-jre
 ARG SERVER_VERSION
 COPY --from=fetch "/opt/compose-preview-livery-host-${SERVER_VERSION}" "/opt/compose-preview-livery-host-${SERVER_VERSION}"
 RUN ln -s "/opt/compose-preview-livery-host-${SERVER_VERSION}" /opt/compose-preview-livery-host && \
