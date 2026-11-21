@@ -99,6 +99,27 @@ internal fun UiBuilderRouteCapability.agentGrantCapability(): AgentGrantCapabili
     UiBuilderRouteCapability.EXPORT -> AgentGrantCapability.UI_BUILDER_EXPORT
   }
 
+/**
+ * [ServeUiBuilderAuthorization] that refuses a session-cookie request from a page on another origin
+ * when it changes state or opens a socket. Reads over plain `GET` are unchanged: a page elsewhere
+ * cannot read their answers.
+ */
+internal fun ServeUiBuilderAuthorization.acceptingSessionWritesFromSameOrigin(
+  siteHosts: () -> Set<String>,
+): ServeUiBuilderAuthorization {
+  val delegate = this
+  return ServeUiBuilderAuthorization { call, capability, presented ->
+    if (
+      ServeSameOriginRequests.isStateChangingOrUpgrade(call) &&
+        ServeSameOriginRequests.isForeignSessionRequest(call, siteHosts())
+    ) {
+      UiBuilderAuthorizationDecision.Forbidden
+    } else {
+      delegate.authorize(call, capability, presented)
+    }
+  }
+}
+
 /** The ordinary call-only form: routes that read the credential off the request present nothing. */
 fun ServeUiBuilderAuthorization.authorize(
   call: ApplicationCall,

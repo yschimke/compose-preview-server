@@ -33,7 +33,7 @@ import kotlinx.serialization.json.Json
  * are dropped on every write. A file that cannot be read or written fails the transition
  * ([Outcome.Unavailable]) — never silently read as empty, which would let a stale copy act.
  */
-internal class ServeAgentGrantRequestFile(
+class ServeAgentGrantRequestFile(
   file: Path,
   private val clock: () -> Long,
   /**
@@ -52,7 +52,7 @@ internal class ServeAgentGrantRequestFile(
    * another shape — the previous release's, or a future one — is refused rather than half-read.
    */
   @Serializable
-  internal data class Snapshot(val format: String, val version: Int, val requests: List<Record>)
+  data class Snapshot(val format: String, val version: Int, val requests: List<Record>)
 
   /** The previous release's file shape: `{"version":1,"requests":[…]}`. */
   @Serializable
@@ -60,7 +60,7 @@ internal class ServeAgentGrantRequestFile(
 
   /** One request, as persisted. Every field but [deviceSecretSha256] is what the page shows. */
   @Serializable
-  internal data class Record(
+  data class Record(
     val id: String,
     /** Base64url SHA-256 of the device secret; the secret itself is never written. */
     val deviceSecretSha256: String,
@@ -105,7 +105,7 @@ internal class ServeAgentGrantRequestFile(
 
   /** What an approver decided — enough to mint the grant later, with no credential in it. */
   @Serializable
-  internal data class Approval(
+  data class Approval(
     val approvedBy: String,
     val approvedByActorId: String = "",
     val scope: String,
@@ -254,7 +254,7 @@ internal class ServeAgentGrantRequestFile(
    * clamped it to.
    */
   @Serializable
-  internal data class Bearer(
+  data class Bearer(
     val grantId: String,
     /** Base64url SHA-256 of the bearer. */
     val tokenSha256: String,

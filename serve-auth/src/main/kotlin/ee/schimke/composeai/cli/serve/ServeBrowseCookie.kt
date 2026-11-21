@@ -28,7 +28,7 @@ import javax.crypto.spec.SecretKeySpec
  * Machine clients are unaffected. A header or a query token on anything that is not a top-level
  * browser page load is authorised exactly as before and never redirected.
  */
-internal object ServeBrowseCookie {
+object ServeBrowseCookie {
   const val NAME: String = "cp_browse"
 
   /**
@@ -98,7 +98,7 @@ internal object ServeBrowseCookie {
     return localRedirectPath(path) + queryWithoutToken(call.request.queryString())
   }
 
-  internal fun isDocumentNavigation(call: ApplicationCall): Boolean {
+  fun isDocumentNavigation(call: ApplicationCall): Boolean {
     val headers = call.request.headers
     val mode = headers["Sec-Fetch-Mode"]
     if (mode != null) {
@@ -109,7 +109,7 @@ internal object ServeBrowseCookie {
   }
 
   /** [rawQuery] minus every `token` parameter, other parameters kept byte for byte. */
-  internal fun queryWithoutToken(rawQuery: String): String {
+  fun queryWithoutToken(rawQuery: String): String {
     val kept =
       rawQuery
         .split('&')
@@ -122,8 +122,7 @@ internal object ServeBrowseCookie {
   }
 
   /** A root-relative redirect path that cannot be interpreted as a protocol-relative authority. */
-  internal fun localRedirectPath(path: String): String =
-    "/" + path.trimStart { it == '/' || it == '\\' }
+  fun localRedirectPath(path: String): String = "/" + path.trimStart { it == '/' || it == '\\' }
 
   private fun derive(serverToken: String, label: String): String {
     val mac = Mac.getInstance("HmacSHA256")

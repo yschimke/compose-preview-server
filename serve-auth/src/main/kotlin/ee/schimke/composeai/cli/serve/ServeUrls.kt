@@ -161,7 +161,7 @@ object ServeUrls {
     val b = branch?.trim()?.trim('/')?.takeIf { it.isNotEmpty() }
     if (r == null || b == null) return null
     val encodedBranch = b.split('/').joinToString("/") { WebEscaping.urlEncodeSegment(it) }
-    return "https://raw.githubusercontent.com/$r/$encodedBranch/${PreviewHistoryManifest.FILE_NAME}"
+    return "https://raw.githubusercontent.com/$r/$encodedBranch/history.json"
   }
 
   /**
@@ -205,4 +205,24 @@ object ServeUrls {
     } catch (_: Exception) {
       emptyList()
     }
+
+  /**
+   * Project a redirect/form target URI into its CSP `form-action` source (`scheme://host[:port]`
+   * for http/https, or `scheme:` for a private-use custom scheme, rejecting `javascript:`/`data:`/
+   * `blob:`).
+   */
+  fun formActionSource(uri: String): String? {
+    val parsed = runCatching { java.net.URI(uri) }.getOrNull() ?: return null
+    val scheme = parsed.scheme?.lowercase()?.takeIf { URI_SCHEME.matches(it) } ?: return null
+    val host = parsed.host?.takeIf { it.isNotBlank() }
+    if (scheme != "http" && scheme != "https") {
+      return if (scheme == "javascript" || scheme == "data" || scheme == "blob") null
+      else "$scheme:"
+    }
+    host ?: return null
+    val port = parsed.port.takeIf { it > 0 }?.let { ":$it" }.orEmpty()
+    return "$scheme://${host.lowercase()}$port"
+  }
+
+  private val URI_SCHEME = Regex("[a-z][a-z0-9+.-]*")
 }

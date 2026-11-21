@@ -600,7 +600,7 @@ object ServeMcpOAuth {
 
   private val random = SecureRandom()
 
-  internal fun randomId(): String {
+  fun randomId(): String {
     val bytes = ByteArray(16)
     random.nextBytes(bytes)
     return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)

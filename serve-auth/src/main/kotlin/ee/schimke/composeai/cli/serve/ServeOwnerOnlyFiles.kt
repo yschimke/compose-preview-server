@@ -24,7 +24,7 @@ import java.nio.file.attribute.PosixFilePermissions
  * not change the mode of is still usable if it was usable before. Neither is worth refusing to
  * start over, and the store's own `require(isDirectory)` still decides whether it can be used.
  */
-internal object ServeOwnerOnlyFiles {
+object ServeOwnerOnlyFiles {
   private val OWNER_ONLY_DIRECTORY = PosixFilePermissions.fromString("rwx------")
 
   /** [Files.createDirectories], then [restrictDirectory] on [directory] itself. */

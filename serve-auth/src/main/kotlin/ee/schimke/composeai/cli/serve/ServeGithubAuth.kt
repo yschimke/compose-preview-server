@@ -650,7 +650,7 @@ class ServeGithubAuth(
   }
 
   /** The login a raw session cookie value speaks for, member or guest; null when it is refused. */
-  internal fun sessionLogin(cookie: String): String? = verifySession(cookie)?.login
+  fun sessionLogin(cookie: String): String? = verifySession(cookie)?.login
 
   /** True when the session belongs to a guest rather than a member. */
   fun isGuest(call: ApplicationCall): Boolean {
@@ -673,7 +673,7 @@ class ServeGithubAuth(
   }
 
   /** [hasImageRepositoryAccess] on a raw cookie value, so the rule can be tested without a call. */
-  internal fun hasImageRepositoryAccess(cookie: String): Boolean {
+  fun hasImageRepositoryAccess(cookie: String): Boolean {
     // Every accepted cookie carries its own image bit; older cookies without the field no longer
     // verify ([verifySession]).
     return verifySession(cookie)?.imageRepositoryAccess == true
@@ -694,7 +694,7 @@ class ServeGithubAuth(
    * The pinned callback's origin, or null when it follows the request's host. Listed in pages'
    * `form-action` ([ServePagePolicy]).
    */
-  fun callbackOrigin(): String? = config.callbackBaseUrl?.let(ServePagePolicy::formActionSource)
+  fun callbackOrigin(): String? = config.callbackBaseUrl?.let(ServeUrls::formActionSource)
 
   fun accessRepository(): String = config.repository
 
@@ -738,7 +738,7 @@ class ServeGithubAuth(
    * is added with `--github-auth-orgs`. [ServeGithubAuthConfig.oauthScope] may replace the base
    * only with [ALLOWED_SCOPES].
    */
-  internal fun requestedScope(): String {
+  fun requestedScope(): String {
     val base = config.oauthScope?.trim()?.takeIf { it.isNotEmpty() } ?: USER_SCOPE
     val needsOrg = config.allowedOrgs.isNotEmpty() && ORG_SCOPE !in base.split(' ', ',')
     return if (needsOrg) "$base $ORG_SCOPE" else base
@@ -774,7 +774,7 @@ class ServeGithubAuth(
    * to (a pinned callback, and inside the cookie domain or [handsOff]); null for anything else,
    * including every relative path, which [safeReturnTo] handles as it always has.
    */
-  internal fun absoluteReturn(raw: String, hosts: Set<String>): Pair<String, String>? {
+  fun absoluteReturn(raw: String, hosts: Set<String>): Pair<String, String>? {
     if (hosts.isEmpty() || !hasPinnedCallback || !raw.startsWith("https://")) return null
     if (raw.any { it == '\\' || it.isISOControl() }) return null
     val uri = runCatching { java.net.URI(raw) }.getOrNull() ?: return null
@@ -1139,7 +1139,7 @@ class ServeGithubAuth(
     private const val HOST_ONLY_FLAG = "host-only"
 
     /** A handoff code is redeemed by the redirect that carries it, so it needs only seconds. */
-    internal const val HANDOFF_TTL_SECONDS = 60L
+    const val HANDOFF_TTL_SECONDS = 60L
 
     /** Unredeemed codes held at once; beyond it a handoff is refused with `503`. */
     internal const val MAX_HANDOFF_GRANTS = 10_000
@@ -1185,7 +1185,7 @@ class ServeGithubAuth(
     /** Both OAuth routes, so [refreshSession] can leave the cookie-minting ones alone. */
     private const val AUTH_PATH_PREFIX = "/auth/github/"
 
-    internal const val STATE_TTL_SECONDS = 10L * 60
+    const val STATE_TTL_SECONDS = 10L * 60
 
     /** Length of [configFingerprint] in hex characters: 64 bits of SHA-256. */
     private const val CONFIG_FINGERPRINT_CHARS = 16
@@ -1194,7 +1194,7 @@ class ServeGithubAuth(
      * Short digest of everything deciding what a session may carry: both repositories, allowed
      * logins and orgs, and guest admission.
      */
-    internal fun configFingerprint(config: ServeGithubAuthConfig): String {
+    fun configFingerprint(config: ServeGithubAuthConfig): String {
       val imageRepository = config.imageRepository?.takeIf { it.isNotBlank() } ?: config.repository
       val canonical =
         listOf(
@@ -1218,17 +1218,17 @@ class ServeGithubAuth(
      * Idle expiry: how long a session survives without a visit; [refreshSession] slides it up to
      * [SESSION_ABSOLUTE_TTL_SECONDS]. A week, so ordinary occasional visits never hit a sign-in.
      */
-    internal const val SESSION_TTL_SECONDS = 7L * 24 * 60 * 60
+    const val SESSION_TTL_SECONDS = 7L * 24 * 60 * 60
 
     /**
      * Absolute expiry from sign-in, never extended: the ceiling on how stale the cached
      * `repositoryAccess` (playground gate) can be. Re-authorising an approved OAuth app needs no
      * consent screen, so reaching it is cheap.
      */
-    internal const val SESSION_ABSOLUTE_TTL_SECONDS = 14L * 24 * 60 * 60
+    const val SESSION_ABSOLUTE_TTL_SECONDS = 14L * 24 * 60 * 60
 
     /** Sessions are re-minted past half their idle expiry, rather than on every response. */
-    internal const val SESSION_REFRESH_AFTER_SECONDS = SESSION_TTL_SECONDS / 2
+    const val SESSION_REFRESH_AFTER_SECONDS = SESSION_TTL_SECONDS / 2
     private val SECURE_RANDOM = SecureRandom()
 
     /**
@@ -1406,7 +1406,7 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
    * Whether [token] was issued to [app] (`POST /applications/{client_id}/token`): `200` yes,
    * `404`/`422` no, anything else [GitHubCheckUnavailableException].
    */
-  internal fun isIssuedToApp(token: String, app: GitHubOAuthApp): Boolean {
+  fun isIssuedToApp(token: String, app: GitHubOAuthApp): Boolean {
     val body =
       JSON.encodeToString(GitHubAccessTokenBody.serializer(), GitHubAccessTokenBody(token))
         .toRequestBody("application/json".toMediaType())
@@ -1477,7 +1477,7 @@ class GitHubOAuthVerifier(private val client: OkHttpClient = OkHttpClient()) {
    * sees public membership with no scope. Either yes suffices; anything else is no (the visitor
    * lands as a guest).
    */
-  internal fun isOrgMember(token: String, org: String, login: String): Boolean {
+  fun isOrgMember(token: String, org: String, login: String): Boolean {
     val membership =
       Request.Builder()
         .url("https://api.github.com/user/memberships/orgs/$org")
@@ -1736,7 +1736,7 @@ private fun io.ktor.server.request.ApplicationRequest.soleCookieValue(name: Stri
  * `callbackBaseUrl` is authoritative; otherwise the request's view (`X-Forwarded-Proto` behind a
  * trusted proxy).
  */
-internal fun isSecure(
+fun isSecure(
   call: ApplicationCall,
   callbackBaseUrl: String? = null,
   trustForwardedHeaders: Boolean = false,
@@ -1748,7 +1748,7 @@ internal fun isSecure(
  * The externally visible hostname, normalised for site-host comparison: `X-Forwarded-Host` when
  * [trustForwardedHeaders], else `Host`. Null for a non-hostname, which matches no site.
  */
-internal fun requestHost(call: ApplicationCall, trustForwardedHeaders: Boolean = false): String? {
+fun requestHost(call: ApplicationCall, trustForwardedHeaders: Boolean = false): String? {
   val forwarded = forwardedHeader(call, "X-Forwarded-Host", trustForwardedHeaders)
   val raw = forwarded ?: call.request.headers[HttpHeaders.Host]
   return raw?.let { ServeSites.normalizeHost(it) }
@@ -1758,7 +1758,7 @@ internal fun requestHost(call: ApplicationCall, trustForwardedHeaders: Boolean =
  * First value of an `X-Forwarded-*` header, only when [trustForwardedHeaders]; a direct request
  * chooses these itself.
  */
-internal fun forwardedHeader(
+fun forwardedHeader(
   call: ApplicationCall,
   name: String,
   trustForwardedHeaders: Boolean,

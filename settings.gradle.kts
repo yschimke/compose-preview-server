@@ -245,6 +245,8 @@ providers.gradleProperty("composeUiBuilderDir").orNull?.let { path ->
 
 include(":playground-engine")
 
+include(":serve-auth")
+
 include(":watchface-engine")
 
 include(":server")

@@ -687,6 +687,10 @@ dependencies {
   // and `design --local`. `api` because its types appear throughout `:server` and its tests.
   api(project(":playground-engine"))
 
+  // Shared GitHub OAuth session cookies, agent-grant verification/store, MCP OAuth and same-origin
+  // request checks. `api` because its types appear throughout `:server` and its tests.
+  api(project(":serve-auth"))
+
   // Watch Face Format (WFF/DWF) packaging, validation, preview sessions and APK daemon runtime.
   api(project(":watchface-engine"))
 
@@ -1016,14 +1020,16 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
     },
   )
 
-  // `:playground-engine` (compile/render engine) and `:watchface-engine` (WFF/DWF packaging,
-  // validation and preview sessions) are extracted internal seams consumed by `:server`.
+  // `:playground-engine` (compile/render engine), `:serve-auth` (auth/grants) and
+  // `:watchface-engine` (WFF/DWF packaging, validation and preview sessions) are extracted internal
+  // seams consumed by `:server`.
   // The UI-builder runtime, export, render bundle and export fonts are named as projects for
   // `-PcomposeUiBuilderDir` (included-build substitution); the default build matches them in
   // `allowedComposeAiModules`. The last two are resources only: a PNG and two font files.
   allowedProjects.set(
     listOf(
       ":playground-engine",
+      ":serve-auth",
       ":watchface-engine",
       ":ui-builder-runtime",
       ":ui-builder-export",

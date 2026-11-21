@@ -18,7 +18,7 @@ import io.ktor.server.request.queryString
  * capabilities, design limits, revocation and expiry are exactly the bearer's rather than a copied
  * authorization policy.
  */
-internal object ServeAgentGrantCookie {
+object ServeAgentGrantCookie {
   const val NAME: String = "cp_agent_grant"
 
   data class Exchange(

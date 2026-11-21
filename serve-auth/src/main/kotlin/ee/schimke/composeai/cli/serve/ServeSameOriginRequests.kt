@@ -22,7 +22,7 @@ import io.ktor.server.request.httpMethod
  * header itself, which a page on another origin cannot do without a CORS approval this server never
  * gives. Neither is affected.
  */
-internal object ServeSameOriginRequests {
+object ServeSameOriginRequests {
 
   /** The browser's GitHub session cookie, as [ServeGithubAuth] writes it. */
   const val SESSION_COOKIE: String = "cp_gh_auth"
@@ -91,10 +91,13 @@ internal object ServeSameOriginRequests {
       return false
     }
     val headers = request.headers
-    return headers[ServeHttpServer.TOKEN_HEADER] == null &&
-      headers[ServeHttpServer.ADMIN_TOKEN_HEADER] == null &&
+    return headers[TOKEN_HEADER] == null &&
+      headers[ADMIN_TOKEN_HEADER] == null &&
       headers[HttpHeaders.Authorization] == null
   }
+
+  private const val TOKEN_HEADER: String = "X-Compose-Preview-Token"
+  private const val ADMIN_TOKEN_HEADER: String = "X-Compose-Preview-Admin-Token"
 
   private fun originMatches(
     origin: String,
@@ -116,26 +119,5 @@ internal object ServeSameOriginRequests {
     if (addressed.any { it.equals(authority, ignoreCase = true) }) return true
     val originHost = ServeSites.normalizeHost(authority) ?: return false
     return originHost in siteHosts
-  }
-}
-
-/**
- * [ServeUiBuilderAuthorization] that refuses a session-cookie request from a page on another origin
- * when it changes state or opens a socket. Reads over plain `GET` are unchanged: a page elsewhere
- * cannot read their answers.
- */
-internal fun ServeUiBuilderAuthorization.acceptingSessionWritesFromSameOrigin(
-  siteHosts: () -> Set<String>,
-): ServeUiBuilderAuthorization {
-  val delegate = this
-  return ServeUiBuilderAuthorization { call, capability, presented ->
-    if (
-      ServeSameOriginRequests.isStateChangingOrUpgrade(call) &&
-        ServeSameOriginRequests.isForeignSessionRequest(call, siteHosts())
-    ) {
-      UiBuilderAuthorizationDecision.Forbidden
-    } else {
-      delegate.authorize(call, capability, presented)
-    }
   }
 }
