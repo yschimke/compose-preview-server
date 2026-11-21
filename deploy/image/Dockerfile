@@ -516,7 +516,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends bubblewrap && \
 ENV SERVE_ROLE=playground
 
 # ---------------------------------------------------------------------------
-# Stage 3b: host (default final target) — main preview server without
+# Stage 3b: ui-builder — dedicated UI Builder host (`ui.coo.ee`) with
+# `ENV SERVE_ROLE=ui-builder`. Shares all `runtime` layers with `host` and
+# `playground`. Published as `ghcr.io/<owner>/compose-preview-ui-builder`.
+# ---------------------------------------------------------------------------
+FROM runtime AS ui-builder
+ENV SERVE_ROLE=ui-builder
+
+# ---------------------------------------------------------------------------
+# Stage 3c: host (default final target) — main preview server without
 # `bubblewrap`. Published as `ghcr.io/<owner>/compose-preview-host`.
 # ---------------------------------------------------------------------------
 FROM runtime AS host
