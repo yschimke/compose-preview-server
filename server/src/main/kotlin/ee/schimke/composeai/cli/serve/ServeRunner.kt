@@ -2715,19 +2715,35 @@ public class ServeRunner(
     val documentExporter =
       if (UiBuilderBuildFeatures.remoteCompose) RemoteDocumentExportExecutor(pictureExporter)
       else null
+    // Document formats this server compiles to `.rc` through the format's own service, each with
+    // one service-account credential. Kobento's `convert` needs its token; without one the Kobento
+    // catalog offers its component JSON alone.
+    val documentCompilers: Map<String, DocumentCompiler> = buildMap {
+      ServeSecretEnv.read(KobentoConvertCompiler.TOKEN_ENV, System.getenv())?.let { token ->
+        put(KobentoConvertCompiler.FORMAT_ID, KobentoConvertCompiler(token))
+      }
+    }
+    if (documentCompilers.isNotEmpty())
+      System.err.println(
+        "serve: compiling ${documentCompilers.keys.sorted().joinToString()} designs to .rc",
+      )
     // An A2UI catalog's JSON (its A2UI messages) is written whatever the Remote Compose flag says;
     // every other design passes through to the Remote Compose / picture chain below it.
     // A watch face's `bundle` (its WFF source layout, with the PNG export as the preview) is
-    // written here; every other design and format passes through.
+    // written here; every other design and format passes through. Outermost, a `.rc` of a design in
+    // a document format this server compiles is compiled from that format's content.
     val exporter =
-      WatchFaceBundleExportExecutor(
-        LovelaceJsonExportExecutor(
-          A2uiJsonExportExecutor(
-            documentExporter?.let { RemotePngExportExecutor(it, renderer, fonts) }
-              ?: pictureExporter,
+      DocumentCompileExportExecutor(
+        WatchFaceBundleExportExecutor(
+          LovelaceJsonExportExecutor(
+            A2uiJsonExportExecutor(
+              documentExporter?.let { RemotePngExportExecutor(it, renderer, fonts) }
+                ?: pictureExporter,
+            ),
           ),
+          assets = assetStore,
         ),
-        assets = assetStore,
+        documentCompilers,
       )
     val pictureExports =
       ((pictureExporter as? ProductionUiBuilderExportExecutor)?.capabilities
@@ -2926,6 +2942,7 @@ public class ServeRunner(
           it.published = publishedCatalogs
           it.nativeRuntimeIds = publishedRuntimeIds
           it.unlistedCatalogIds = options.uiBuilderUnlistedCatalogs
+          it.documentCompilers = documentCompilers.keys
           // `composeCode` answers a configuration question (is a record configured for this
           // catalog?), not a filesystem one: the value is baked in once, so a disk read would block
           // hot reload of a repaired record. Asked per catalog so a record-less catalog doesn't
