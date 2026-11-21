@@ -166,6 +166,9 @@ services:
       SERVE_UI_BUILDER_GUIDELINES_PICTURE_BUDGET: "${SERVE_UI_BUILDER_GUIDELINES_PICTURE_BUDGET:-}"
       SERVE_UI_BUILDER_GUIDELINES_TRIAGE: "${SERVE_UI_BUILDER_GUIDELINES_TRIAGE:-}"
       SERVE_UI_BUILDER_GUIDELINES_GITHUB_TOKEN: "${SERVE_UI_BUILDER_GUIDELINES_GITHUB_TOKEN:-}"
+      # Kobento's `convert`, on this box's one service-account token: a Kobento catalog's designs
+      # download as a `.rc` Kobento compiles. Unset, they offer their Kobento component JSON alone.
+      SERVE_UI_BUILDER_KOBENTO_TOKEN: "${SERVE_UI_BUILDER_KOBENTO_TOKEN:-}"
       # The Watch Face Push marketplace signing key (docs/serve/WATCHFACE_PUSH.md): every watch-face
       # APK the push API serves is signed with it, so it must never change. Secrets, so .env only.
       # Unset, the push API lists nothing and says why; no key is ever generated in its place.

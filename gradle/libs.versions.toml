@@ -536,7 +536,15 @@ composeai-contracts = "3.45.0"
 # contracts 3.45.0's `kobento-json`, which this server's routes handle since #2055): the catalog
 # advertises `kobentoJson` and no Compose export, ProductionUiBuilderExportExecutor writes it, and
 # the editor's code pane and Issues follow the Kobento exporter.
-composeai-ui-builder = "3.144.0"
+# 3.145.0 dispatches document-format exports through `CatalogDocumentFormats` (compose-ui-builder#1343)
+# and lets a host advertise a compiled `.rc` for a format it compiles
+# (`CurrentM3UiBuilderCatalogExecutor.Builder.documentCompilers`, compose-ui-builder#1347), which
+# this server's Kobento `convert` (`DocumentCompileExportExecutor`) sets. It also moves the UI
+# builder to rc-players 3.10.0.
+# 3.146.0 previews a Kobento design from that compiled `.rc` (compose-ui-builder#1354: the catalog
+# gets `browserPreview` where this server compiles its format) and offers a Kobento palette only
+# the components Kobento JSON writes (compose-ui-builder#1353). 3.145.0 never reached Maven Central.
+composeai-ui-builder = "3.146.0"
 # First published version of the optional publication server library (Maven Central).
 livery = "0.15.0"
 # Packages a design revision's WFF source into the signed APK the real watch-face runtime loads
