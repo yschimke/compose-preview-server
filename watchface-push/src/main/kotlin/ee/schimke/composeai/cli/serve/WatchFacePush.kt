@@ -27,7 +27,7 @@ import kotlinx.serialization.json.Json
  *
  * The API is documented in `docs/serve/WATCHFACE_PUSH.md`.
  */
-internal object WatchFacePushNaming {
+object WatchFacePushNaming {
   /** The push app's applicationId; the Watch Face Push API rejects any other prefix. */
   const val MARKETPLACE_PACKAGE = "ee.schimke.watchface.push"
 
@@ -147,7 +147,7 @@ internal object WatchFacePushNaming {
       FACE_NAME.matches(packageName.removePrefix(PACKAGE_PREFIX))
 }
 
-internal fun sha256Hex(bytes: ByteArray): String =
+fun sha256Hex(bytes: ByteArray): String =
   MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
 private fun sha256Hex(file: File): String {
@@ -188,7 +188,7 @@ private fun sha256Hex(file: File): String {
  * rather than on every build; the packager is handed exactly these variables and nothing else
  * signing-related ([WffPackagerProcess]).
  */
-internal sealed interface WatchFacePushSigning {
+sealed interface WatchFacePushSigning {
   /** [environment] is what the packager's `--keystore-from-env` reads; never logged. */
   class Configured(
     val environment: Map<String, String>,
@@ -300,7 +300,7 @@ internal sealed interface WatchFacePushSigning {
 }
 
 /** A push build: a bundle in, a signed APK at `out`, the validation token out. */
-internal fun interface WatchFacePushPackager {
+fun interface WatchFacePushPackager {
   /**
    * Build [files] as `<marketplace>.watchfacepush.<faceName>` with [versionCode] into [out].
    *
@@ -316,7 +316,7 @@ internal fun interface WatchFacePushPackager {
  * `PackageTarget.WatchFacePush(marketplacePackage, faceName)`, `--keystore-from-env` signs with
  * [signing], and `--token-out` hands back the validator's token.
  */
-internal class WatchFacePushSubprocessPackager(
+class WatchFacePushSubprocessPackager(
   private val libDir: File,
   private val sdk: DwfAndroidSdk,
   private val home: File,
@@ -362,7 +362,7 @@ internal class WatchFacePushSubprocessPackager(
 }
 
 /** Whether push APKs can be built here, and with what. */
-internal sealed interface WatchFacePushPackaging {
+sealed interface WatchFacePushPackaging {
   class Ready(val packager: WatchFacePushPackager, val signerCertificateSha256: String?) :
     WatchFacePushPackaging
 
@@ -431,7 +431,7 @@ internal sealed interface WatchFacePushPackaging {
  * `version` must keep increasing: a face re-published after an unpublish must still be a higher
  * `versionCode` than the one already on somebody's watch.
  */
-internal class WatchFacePushStore(
+class WatchFacePushStore(
   private val root: Path,
   private val clock: () -> Long = System::currentTimeMillis,
 ) {
@@ -1103,7 +1103,7 @@ internal class WatchFacePushStore(
  * purpose — a code lives ten minutes, and a restart costs the person one retry — while the device
  * token an approval mints is durable ([WatchFacePushStore.link]).
  */
-internal class WatchFacePushDeviceCodes(
+class WatchFacePushDeviceCodes(
   private val store: WatchFacePushStore,
   private val clock: () -> Long = System::currentTimeMillis,
   val lifetimeSeconds: Int = DEFAULT_LIFETIME_SECONDS,
@@ -1300,7 +1300,7 @@ internal class WatchFacePushDeviceCodes(
  * it is retried, but only after a backoff that doubles from [transientBackoffMillis] up to
  * [maxTransientBackoffMillis], not once per request.
  */
-internal class WatchFacePushBuilds(
+class WatchFacePushBuilds(
   private val store: WatchFacePushStore,
   private val packaging: () -> WatchFacePushPackaging,
   private val clock: () -> Long = System::currentTimeMillis,
@@ -1590,7 +1590,7 @@ internal class WatchFacePushBuilds(
      * `error[…]`/`warning[…]`/`info[…]` diagnostics, with at least one error. Anything else (the
      * last line of a crashed JVM, say) is about the host.
      */
-    internal fun isSourceRefusal(diagnostics: List<String>): Boolean =
+    fun isSourceRefusal(diagnostics: List<String>): Boolean =
       diagnostics.isNotEmpty() &&
         diagnostics.all { REFUSAL_LINE.matches(it) } &&
         diagnostics.any { it.startsWith("error[") }

@@ -694,6 +694,9 @@ dependencies {
   // Watch Face Format (WFF/DWF) packaging, validation, preview sessions and APK daemon runtime.
   api(project(":watchface-engine"))
 
+  // Watch Face Push marketplace store, device linking, signed APK build queue and settings.
+  api(project(":watchface-push"))
+
   // The render host, bundle daemon and git-backed history, published from compose-ai-tools so the
   // CLI's offline `bundle render` / `history manifest` reach them without a web server. `api`
   // because their types (`ServeHost`, `RenderOutcome`) are throughout this module's signatures. The
@@ -1021,8 +1024,9 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
   )
 
   // `:livery-host` (standalone Livery publications host), `:playground-engine` (compile/render
-  // engine), `:serve-auth` (auth/grants) and `:watchface-engine` (WFF/DWF packaging, validation
-  // and preview sessions) are extracted internal seams consumed by `:server`.
+  // engine), `:serve-auth` (auth/grants), `:watchface-engine` (WFF/DWF packaging, validation and
+  // preview sessions) and `:watchface-push` (Watch Face Push marketplace store and build queue)
+  // are extracted internal seams consumed by `:server`.
   // The UI-builder runtime, export, render bundle and export fonts are named as projects for
   // `-PcomposeUiBuilderDir` (included-build substitution); the default build matches them in
   // `allowedComposeAiModules`. The last two are resources only: a PNG and two font files.
@@ -1032,6 +1036,7 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
       ":playground-engine",
       ":serve-auth",
       ":watchface-engine",
+      ":watchface-push",
       ":ui-builder-runtime",
       ":ui-builder-export",
       ":ui-builder-render-bundle",

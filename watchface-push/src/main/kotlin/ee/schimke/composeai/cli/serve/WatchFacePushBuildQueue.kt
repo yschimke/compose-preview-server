@@ -52,7 +52,7 @@ data class WatchFacePushBuildSummaryV1(val pending: Int, val queued: Int, val bu
  * [exclusive]) alike. No request waits on the packager; each design's last state is kept for its
  * owner's status ([status]).
  */
-internal class WatchFacePushBuildQueue(private val clock: () -> Long) {
+class WatchFacePushBuildQueue(private val clock: () -> Long) {
   private val executor = lazy {
     Executors.newSingleThreadExecutor { task ->
       Thread(task, "watchface-push-builds").apply {
@@ -179,7 +179,7 @@ internal class WatchFacePushBuildQueue(private val clock: () -> Long) {
   }
 
   /** Wait for every submitted build. For tests. */
-  internal suspend fun awaitIdle() {
+  suspend fun awaitIdle() {
     // A snapshot by array: `toList()` on a one-element concurrent set can lose that element.
     while (jobs.isNotEmpty()) jobs.toTypedArray().toList().joinAll()
   }

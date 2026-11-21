@@ -162,7 +162,8 @@ internal class WatchFacePushAutomatic(
   internal suspend fun sweep(service: UiBuilderServicePort) {
     if (!enabled) return
     for (head in storedDesigns()) {
-      if (head.catalogSystemId != null && !push.isWatchFaceCatalog(head.catalogSystemId)) continue
+      val catalogSystemId = head.catalogSystemId
+      if (catalogSystemId != null && !push.isWatchFaceCatalog(catalogSystemId)) continue
       queue.exclusive.withLock {
         val retry = attempt(service, head.designId)
         // A build that failed around the packager is tried again, as the scheduler's own are.
