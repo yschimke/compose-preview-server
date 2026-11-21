@@ -15,7 +15,7 @@ class ServeComponentPublications(
   private val publications =
     ComponentPublications(PublicationStore(root), viewerRoot, publicOrigin, viewerConfig)
 
-  internal fun install(route: Route) = publications.install(route)
+  fun install(route: Route) = publications.install(route)
 
   companion object {
     fun fromEnvironment(env: Map<String, String> = System.getenv()): ServeComponentPublications? {

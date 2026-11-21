@@ -56,7 +56,7 @@ class ServeSettingsTest {
     val publications =
       File(
           repoRoot,
-          "server/src/main/kotlin/ee/schimke/composeai/cli/serve/ServeComponentPublications.kt",
+          "livery-host/src/main/kotlin/ee/schimke/composeai/cli/serve/ServeComponentPublications.kt",
         )
         .readText()
     val watchFacePush =
