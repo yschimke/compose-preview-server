@@ -141,6 +141,6 @@ echo "PASS: compose leaves every managed setting for settings.json to fill"
 # The image carries what the merge needs.
 grep -q '^COPY settings.schema.json /etc/compose-preview/settings.schema.json$' "${here}/Dockerfile" ||
   fail "the Dockerfile does not bake the schema the entrypoint reads"
-grep -qE '^\s+curl ca-certificates git bubblewrap jq$' "${here}/Dockerfile" ||
+grep -qE '^\s+curl ca-certificates git jq$' "${here}/Dockerfile" ||
   fail "the Dockerfile does not install jq, which the merge needs"
 echo "PASS: the image bakes the schema and jq"

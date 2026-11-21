@@ -27,13 +27,9 @@ ARG DAEMON_VERSION
 # Stage 0: base — JDK + Skiko's native deps (same rationale as the cloudrun image:
 # libGL via libgl1, Mesa software GLX/DRI, fonts; force software GL).
 #
-# `bubblewrap` is here for the playground jail, and only for that. Without it
-# `--playground-sandbox bwrap` cannot launch, so the lane either runs a snippet
-# unconfined (issue #3211) or an operator reaches for a `custom:` argv — which
-# cannot work, because a custom argv is a STATIC prefix (PlaygroundSandbox.command,
-# `Profile.CUSTOM -> customCommand`) and so cannot bind the per-session work dir
-# that only exists at compile time. `Profile.BWRAP` builds its argv from `Paths`
-# and binds it correctly. See deploy/image/README.md § "Containment".
+# `bubblewrap` is installed only in the `playground` target stage below, keeping the main
+# `compose-preview-host` image free of user-namespace sandbox tooling while sharing all
+# runtime layers between `host` and `playground`.
 #
 # `jq` is for the entrypoint's settings.json merge (see the settings.schema.json COPY below).
 # ---------------------------------------------------------------------------
@@ -41,7 +37,7 @@ FROM eclipse-temurin:21.0.13.1_2-jdk AS base
 COPY scripts/install-linux-font-fallbacks.sh /usr/local/bin/install-linux-font-fallbacks
 RUN COMPOSEAI_CLEAN_APT=1 /usr/local/bin/install-linux-font-fallbacks \
       libfreetype6 libfontconfig1 libgl1 libglx-mesa0 libgl1-mesa-dri \
-      curl ca-certificates git bubblewrap jq
+      curl ca-certificates git jq
 ENV LIBGL_ALWAYS_SOFTWARE=1 \
     GRADLE_USER_HOME=/root/.gradle
 
@@ -508,3 +504,19 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+
+# ---------------------------------------------------------------------------
+# Stage 3a: playground — adds `bubblewrap` for `--playground-sandbox bwrap`
+# and defaults `SERVE_ROLE=playground`. Shares all `runtime` layers with `host`.
+# Published as `ghcr.io/<owner>/compose-preview-playground`.
+# ---------------------------------------------------------------------------
+FROM runtime AS playground
+RUN apt-get update && apt-get install -y --no-install-recommends bubblewrap && \
+    rm -rf /var/lib/apt/lists/*
+ENV SERVE_ROLE=playground
+
+# ---------------------------------------------------------------------------
+# Stage 3b: host (default final target) — main preview server without
+# `bubblewrap`. Published as `ghcr.io/<owner>/compose-preview-host`.
+# ---------------------------------------------------------------------------
+FROM runtime AS host

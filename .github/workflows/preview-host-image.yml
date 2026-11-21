@@ -90,6 +90,7 @@ jobs:
         with:
           context: deploy/image
           file: deploy/image/Dockerfile
+          target: host
           build-args: |
             SERVER_VERSION=${{ steps.versions.outputs.server }}
             TOOLS_VERSION=${{ steps.versions.outputs.tools }}
@@ -97,6 +98,26 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        id: playground-meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/compose-preview-playground
+          tags: |
+            type=raw,value=${{ steps.versions.outputs.server }}
+            type=raw,value=latest
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        id: push-playground
+        with:
+          context: deploy/image
+          file: deploy/image/Dockerfile
+          target: playground
+          build-args: |
+            SERVER_VERSION=${{ steps.versions.outputs.server }}
+            TOOLS_VERSION=${{ steps.versions.outputs.tools }}
+            DAEMON_VERSION=${{ steps.versions.outputs.daemon }}
+          push: true
+          tags: ${{ steps.playground-meta.outputs.tags }}
+          labels: ${{ steps.playground-meta.outputs.labels }}
       - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         id: livery-meta
         with:
