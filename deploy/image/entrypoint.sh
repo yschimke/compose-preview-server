@@ -427,8 +427,9 @@ if [[ -f /opt/compose-preview-server/wasm-ui/index.html ]]; then
   args+=(--wasm-ui-dir /opt/compose-preview-server/wasm-ui)
 fi
 # The Compose UI builder is an independent application and route. Do not register it as a
-# `preview-ui` catalog or as the `/wasm/<system>/` fallback above.
-if [[ -f /opt/compose-preview-server/ui-builder/index.html && "${SERVE_ROLE:-}" != "playground" ]]; then
+# `preview-ui` catalog or as the `/wasm/<system>/` fallback above. When `SERVE_UI_BUILDER_EXTERNAL=1`,
+# a dedicated `ui-builder` container owns `/config/ui-builder-state` and this process leaves it untouched.
+if [[ -f /opt/compose-preview-server/ui-builder/index.html && "${SERVE_ROLE:-}" != "playground" && "${SERVE_UI_BUILDER_EXTERNAL:-0}" != "1" ]]; then
   args+=(--ui-builder-dir /opt/compose-preview-server/ui-builder)
   # Catalog publication does not imply authoring support. Enable only the explicitly reviewed
   # catalog adapters; this deployment carries M3, the Remote Compose M3 catalog, and Wear M3.

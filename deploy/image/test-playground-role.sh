@@ -84,6 +84,19 @@ for flag in --compile-engine --playground-external --agent-grants --engagement-f
 done
 has --role && note "the main server took a role it was never given"
 
+# --- ui-builder role + main server with SERVE_UI_BUILDER_EXTERNAL=1 -----------------------------
+run SERVE_ROLE=ui-builder || note "the ui-builder role did not start: $(tail -1 "${work}/log")"
+has --role || note "the ui-builder role does not pass --role ui-builder"
+grep -qx -- "ui-builder" "${work}/out" || note "--role value is not ui-builder"
+for forbidden in --engagement-file --web-push --accept-images; do
+  has "${forbidden}" && note "the ui-builder role kept ${forbidden}"
+done
+
+run SERVE_UI_BUILDER_EXTERNAL=1 || note "preview with SERVE_UI_BUILDER_EXTERNAL=1 did not start: $(tail -1 "${work}/log")"
+for forbidden in --ui-builder-dir --ui-builder-state-dir --ui-builder-catalogs; do
+  has "${forbidden}" && note "preview with SERVE_UI_BUILDER_EXTERNAL=1 kept ${forbidden}"
+done
+
 # --- a typo fails loudly rather than starting the wrong server -----------------------------------
 if run SERVE_ROLE=playgorund; then
   note "an unknown SERVE_ROLE started a server"
