@@ -270,9 +270,26 @@ jobs:
       # `:ui-builder-runtime:test`, `:ui-builder:compileKotlinWasmJs`) runs in
       # yschimke/compose-ui-builder's CI under the same flag. A release pairs the two: the flag is
       # one compile-time choice made in two builds now, and they have to agree.
-      - run: >-
-          ./gradlew -PcomposeUiBuilderDir=.compose-ui-builder -PuiBuilderRemoteCompose=true
-          -Pcomposeai.testForks=4 :server:test
+      # `gradle-server-test` already runs the full 4,300+ test `:server:test` suite against the
+      # shipping default. Scope this opt-in lane to every test referencing `UiBuilderBuildFeatures`
+      # (discovered dynamically so new flag-gated tests are picked up automatically) plus the
+      # remote-export proof suites.
+      - name: Run remote-compose server tests
+        run: |
+          set -euo pipefail
+          tests=()
+          while IFS= read -r name; do
+            tests+=(--tests "*${name}")
+          done < <(
+            {
+              echo "RemoteNativeRenderProofTest"
+              echo "RemotePngExportProofTest"
+              grep -rl 'UiBuilderBuildFeatures' server/src/test/ | xargs -r -n1 basename -s .kt
+            } | sort -u
+          )
+          echo "Running ${#tests[@]} test filters: ${tests[*]}"
+          ./gradlew -PcomposeUiBuilderDir=.compose-ui-builder -PuiBuilderRemoteCompose=true \
+            -Pcomposeai.testForks=4 :server:test "${tests[@]}"
 
   selector-fixtures:
     runs-on: ubuntu-latest
