@@ -14,7 +14,7 @@ import kotlinx.serialization.json.jsonPrimitive
  * listing never starts, and an owner's explicit publish still works, through the one packager
  * queue.
  */
-internal object WatchFacePushBuildsSetting {
+object WatchFacePushBuildsSetting {
   const val ENV = "SERVE_WATCH_FACE_PUSH_BUILDS"
 
   fun enabled(env: Map<String, String> = System.getenv()): Boolean =
@@ -27,7 +27,7 @@ internal object WatchFacePushBuildsSetting {
  * automatic listing never takes the service's lock to find them. A header that does not parse is
  * skipped; the service is the authority on every design the sweep then looks at.
  */
-internal object WatchFacePushStoredDesigns {
+object WatchFacePushStoredDesigns {
   data class Head(val designId: String, val catalogSystemId: String?)
 
   private val json = Json { ignoreUnknownKeys = true }

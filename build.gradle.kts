@@ -83,6 +83,7 @@ tasks.named("check") {
     ":playground-engine:check",
     ":serve-auth:check",
     ":watchface-engine:check",
+    ":watchface-push:check",
     ":server:check",
     ":native-catalog-m3:check",
     ":usage-source-psi:check",

@@ -62,7 +62,7 @@ class ServeSettingsTest {
     val watchFacePush =
       File(
           repoRoot,
-          "server/src/main/kotlin/ee/schimke/composeai/cli/serve/WatchFacePushSettings.kt",
+          "watchface-push/src/main/kotlin/ee/schimke/composeai/cli/serve/WatchFacePushSettings.kt",
         )
         .readText()
     for (setting in ServeSettings.ALL) {

@@ -251,6 +251,8 @@ include(":serve-auth")
 
 include(":watchface-engine")
 
+include(":watchface-push")
+
 include(":server")
 
 // The MCP server (`compose-preview mcp serve`) moved to yschimke/compose-preview-mcp, a layer-3

@@ -186,6 +186,9 @@ how those artefacts are regenerated, just run through `build-brief`.
   Format (WFF/DWF) packaging, validation, preview sessions and the APK daemon runtime bridge
   (`checkWatchFaceEngineBoundary` keeps it free of Ktor server, UI builder, Livery, `:server`,
   `:playground-engine`, renderer/daemon implementations and `wff-packager`/`xerces`);
+  `:watchface-push` holds the Watch Face Push marketplace store, device linking, signed APK build
+  queue and catalog face discovery (`checkWatchFacePushBoundary` keeps it free of `:server`,
+  `:playground-engine`, `:livery-host`, UI builder, Livery and `wff-packager`/`xerces`);
   `:usage-source-psi`, `:wasm-ui` and `:native-catalog-m3` are the supporting build modules. The UI
   builder's service — `:ui-builder-runtime`
   — is not here: it is a released coordinate from `yschimke/compose-ui-builder` that `:server` links,

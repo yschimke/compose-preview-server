@@ -18,7 +18,7 @@ import kotlinx.serialization.json.Json
  * pinned here. Read with unknown keys ignored, so an additive change upstream does not break it.
  */
 @Serializable
-internal data class WffSourceManifestV1(
+data class WffSourceManifestV1(
   val schemaVersion: Int = SCHEMA_VERSION,
   val previewId: String,
   val bundle: String,
@@ -44,7 +44,7 @@ internal data class WffSourceManifestV1(
  * with attribution, which the listing carries. An unknown licence (`null`) is not on it: no licence
  * means no permission.
  */
-internal object WatchFacePushLicenses {
+object WatchFacePushLicenses {
   val REDISTRIBUTABLE: Set<String> =
     setOf("Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "CC0-1.0", "Unlicense", "CC-BY-4.0")
 
@@ -66,7 +66,7 @@ internal object WatchFacePushLicenses {
 }
 
 /** One catalog watch-face preview that carries its WFF source, as the host found it. */
-internal class CatalogFaceSource(
+class CatalogFaceSource(
   val system: String,
   val catalogTitle: String,
   val previewId: String,
@@ -90,7 +90,7 @@ internal class CatalogFaceSource(
  * `version` moves when its source does, and is kept in `catalog-faces.json` beside the rest of the
  * push state so it only ever grows.
  */
-internal class WatchFacePushCatalogFaces(private val stateFile: Path) {
+class WatchFacePushCatalogFaces(private val stateFile: Path) {
   /** A face that can be listed: its source, its version, and the attribution to show. */
   class Face(
     val source: CatalogFaceSource,
