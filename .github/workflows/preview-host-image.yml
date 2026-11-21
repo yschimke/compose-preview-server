@@ -97,6 +97,23 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        id: livery-meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/compose-preview-livery-host
+          tags: |
+            type=raw,value=${{ steps.versions.outputs.server }}
+            type=raw,value=latest
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        id: push-livery
+        with:
+          context: deploy/livery
+          file: deploy/livery/Dockerfile
+          build-args: |
+            SERVER_VERSION=${{ steps.versions.outputs.server }}
+          push: true
+          tags: ${{ steps.livery-meta.outputs.tags }}
+          labels: ${{ steps.livery-meta.outputs.labels }}
       # OPT-IN: notify an operator's deploy hook (deploy/image/deploy-hook.sh, routed by the edge at
       # /__hooks/rollout) and wait for that host to serve the image just pushed. Inert unless the
       # repository sets the `DEPLOY_HOOK_URL` variable and the `DEPLOY_HOOK_TOKEN` secret, so a fork

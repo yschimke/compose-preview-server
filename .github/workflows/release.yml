@@ -171,11 +171,12 @@ jobs:
           cache-provider: basic
           cache-read-only: true
       - name: Build the standalone distributions
-        run: ./gradlew :server:distTar
+        run: ./gradlew :server:distTar :livery-host:distTar
       - name: Upload standalone server distribution
         run: >-
           gh release upload "${{ needs.release-please.outputs.publish_tag }}"
           "server/build/distributions/compose-preview-server-${PLUGIN_VERSION}.tar.gz"
+          "livery-host/build/distributions/compose-preview-livery-host-${PLUGIN_VERSION}.tar.gz"
           --clobber
       # A bridge for CLIs released before compose-ai-tools#5929, which still fetch
       # `compose-preview-mcp-<this version>.tar.gz` from the newest release HERE: re-attach
