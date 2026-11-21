@@ -1,5 +1,7 @@
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.gradle.api.tasks.bundling.Compression
+import org.gradle.api.tasks.bundling.Tar
 
 // `:livery-host` — standalone host and Ktor route adapter for Livery public component publications
 // (`/p/<slug>/r/<rev>/…`).
@@ -16,6 +18,15 @@ plugins {
 
 group = "ee.schimke.composeai"
 
+version =
+  providers.environmentVariable("PLUGIN_VERSION").orNull
+    ?: run {
+      val manifest = rootDir.resolve(".release-please-manifest.json").readText()
+      val current = Regex(""""\.":\s*"([^"]+)"""").find(manifest)!!.groupValues[1]
+      val (major, minor, patch) = current.split(".").map { it.toInt() }
+      "$major.$minor.${patch + 1}-SNAPSHOT"
+    }
+
 kotlin { jvmToolchain(libs.versions.java.server.get().toInt()) }
 
 ktfmt { googleStyle() }
@@ -23,6 +34,11 @@ ktfmt { googleStyle() }
 application {
   applicationName = "compose-preview-livery-host"
   mainClass.set("ee.schimke.composeai.cli.serve.LiveryHostMainKt")
+}
+
+tasks.named<Tar>("distTar") {
+  compression = Compression.GZIP
+  archiveExtension.set("tar.gz")
 }
 
 dependencies {
