@@ -15,7 +15,7 @@ import kotlinx.serialization.json.Json
  * caller unless it is named here.
  */
 @Serializable
-internal data class WatchFacePackagerReportV1(
+data class WatchFacePackagerReportV1(
   val schemaVersion: Int = 1,
   /** Null when the packager could not read one from the bundle; the source's is used then. */
   val wffVersion: Int? = null,
@@ -27,7 +27,7 @@ internal data class WatchFacePackagerReportV1(
 )
 
 @Serializable
-internal data class WatchFaceValidationCheckV1(
+data class WatchFaceValidationCheckV1(
   val id: String,
   val title: String,
   /** `passed`, `failed`, or the packager's word for a check it did not run. */
@@ -46,7 +46,7 @@ internal data class WatchFaceValidationCheckV1(
 )
 
 @Serializable
-internal data class WatchFaceValidationFindingV1(
+data class WatchFaceValidationFindingV1(
   /** `error`, `warning` or `info`. */
   val severity: String,
   val message: String,
@@ -58,7 +58,7 @@ internal data class WatchFaceValidationFindingV1(
 )
 
 @Serializable
-internal data class WatchFaceValidationContributorV1(
+data class WatchFaceValidationContributorV1(
   /** `drawable/case_steel`. */
   val resource: String,
   /** `image`, `font` or `other`. */
@@ -79,7 +79,7 @@ internal data class WatchFaceValidationContributorV1(
 )
 
 @Serializable
-internal data class WatchFaceValidationMemoryV1(
+data class WatchFaceValidationMemoryV1(
   val totalBytes: Long,
   val maxActiveBytes: Long,
   val maxAmbientBytes: Long,
@@ -93,7 +93,7 @@ internal data class WatchFaceValidationMemoryV1(
  * error.
  */
 @Serializable
-internal data class WatchFaceValidationReportV1(
+data class WatchFaceValidationReportV1(
   val schemaVersion: Int,
   val wffVersion: Int,
   val minimumWffVersion: Int? = null,
@@ -109,7 +109,7 @@ internal data class WatchFaceValidationReportV1(
 )
 
 /** The validator as a function: a WFF source bundle in, the packager's JSON report out. */
-internal fun interface WatchFaceValidator {
+fun interface WatchFaceValidator {
   /**
    * @throws DwfPackagingFailed when the packager could not produce a report on the bundle, with its
    *   diagnostics.
@@ -119,7 +119,7 @@ internal fun interface WatchFaceValidator {
 }
 
 /** Whether faces can be validated here, and with what. */
-internal sealed interface WatchFaceValidatorAvailability {
+sealed interface WatchFaceValidatorAvailability {
   class Ready(val validator: WatchFaceValidator) : WatchFaceValidatorAvailability
 
   data class Unavailable(val code: String, val reason: String) : WatchFaceValidatorAvailability
@@ -173,7 +173,7 @@ internal sealed interface WatchFaceValidatorAvailability {
  * report is a failing face, which is a report like any other. The child runs at a lowered OS
  * priority ([NICENESS]) and is killed, with its whole process tree, after [timeoutSeconds].
  */
-internal class WatchFaceSubprocessValidator(
+class WatchFaceSubprocessValidator(
   private val libDir: File,
   private val sdk: DwfAndroidSdk,
   private val home: File,
@@ -191,7 +191,7 @@ internal class WatchFaceSubprocessValidator(
           "--report-out",
           File(work, REPORT_FILE).path,
           "--push-marketplace",
-          WatchFacePushNaming.MARKETPLACE_PACKAGE,
+          DEFAULT_MARKETPLACE_PACKAGE,
         )
       },
       environment = emptyMap(),
@@ -201,8 +201,11 @@ internal class WatchFaceSubprocessValidator(
         ?: throw DwfPackagingFailed(listOf("error[validate]: the packager wrote no report"))
     }
 
-  internal companion object {
+  companion object {
     const val REPORT_FILE = "validation-report.json"
+
+    /** The push app's applicationId; the Watch Face Push API rejects any other prefix. */
+    const val DEFAULT_MARKETPLACE_PACKAGE = "ee.schimke.watchface.push"
 
     /** `nice -n` for the validator's JVM: below requests, above nothing in particular. */
     const val NICENESS = 10
@@ -225,7 +228,7 @@ internal class WatchFaceSubprocessValidator(
  * - at most [perActorRuns] runs per actor per [perActorWindowMillis]; a cached report does not
  *   count, since it runs nothing. Past that, [Result.RateLimited].
  */
-internal class WatchFaceValidation(
+class WatchFaceValidation(
   private val validator: () -> WatchFaceValidatorAvailability,
   private val clock: () -> Long = System::currentTimeMillis,
   private val maxConcurrent: Int = 1,
@@ -270,7 +273,7 @@ internal class WatchFaceValidation(
   /** Runs admitted and not yet finished: running plus waiting for a permit. */
   private var admitted = 0
   /** Validations running or waiting for the packager now. */
-  internal val pending: Int
+  val pending: Int
     get() = synchronized(lock) { admitted }
 
   /** Each actor's recent run start times, oldest first. */
@@ -432,7 +435,7 @@ internal class WatchFaceValidation(
                   missing.map {
                     WatchFaceValidationFindingV1(
                       severity = "error",
-                      message = "${WatchFaceDrawables.MISSING_RESOURCE}: $it",
+                      message = "WFF_BUNDLE_MISSING_RESOURCE: $it",
                     )
                   },
               ),
@@ -511,7 +514,7 @@ internal class WatchFaceValidation(
     private val REPORT_JSON = Json { ignoreUnknownKeys = true }
 
     /** `error[source]: message` as a finding; any other line is an error with that message. */
-    internal fun finding(line: String): WatchFaceValidationFindingV1 {
+    fun finding(line: String): WatchFaceValidationFindingV1 {
       val match = DIAGNOSTIC.matchEntire(line.trim())
       return if (match == null) WatchFaceValidationFindingV1("error", line.trim())
       else

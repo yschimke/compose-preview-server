@@ -14,7 +14,7 @@ import kotlinx.serialization.json.put
  * answers `screenshot` by writing a 1×1 PNG to the requested path and `watchface status` with a
  * healthy app face — the daemon's contract as `DwfApkDaemonBridge` relies on it.
  */
-internal class FakeDwfRuntime(
+class FakeDwfRuntime(
   private val dir: File = Files.createTempDirectory("fake-dwf").toFile(),
   var availability: DwfApkRuntime.Availability = DwfApkRuntime.Availability.Ready,
 ) : DwfApkRuntime {
@@ -102,5 +102,5 @@ internal class FakeDwfRuntime(
   }
 }
 
-internal fun source(xml: String = "<WatchFace/>", version: Int = 2) =
+fun source(xml: String = "<WatchFace/>", version: Int = 2) =
   DwfSource(wffXml = xml, wffVersion = version, label = "test face")

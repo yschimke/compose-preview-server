@@ -23,7 +23,7 @@ import kotlinx.serialization.json.put
  * Everything in this file is pure (no ktor, no process, no IO), so the part that must not drift —
  * which control becomes which daemon command — is unit-tested against a recording fake.
  */
-internal object DwfPreviewSurface {
+object DwfPreviewSurface {
   /**
    * The value of a builder catalog's `statusSemantics.previewSurfaces.native.backend` that selects
    * this surface. A string here rather than a `UiBuilderPreviewSurfaces` constant because the
@@ -85,7 +85,7 @@ internal object DwfPreviewSurface {
  * Both are caller-influenced text and bytes fed to `aapt2` and a Robolectric sandbox, so [problem]
  * is the gate and is checked before anything is packaged.
  */
-internal class DwfSource(
+class DwfSource(
   val wffXml: String,
   val wffVersion: Int = DwfPreviewSurface.DEFAULT_WFF_VERSION,
   val assets: Map<String, ByteArray> = emptyMap(),
@@ -156,8 +156,19 @@ internal class DwfSource(
     private val RESERVED_PATHS =
       setOf("raw/watchface.xml", "xml/watch_face_info.xml", "androidmanifest.xml")
 
-    internal fun normalizedAssetPath(path: String): String =
+    fun normalizedAssetPath(path: String): String =
       path.lowercase().split('/').filter { it.isNotEmpty() && it != "." }.joinToString("/")
+
+    /**
+     * Android drawable resource name (file stem under `drawable/` or qualified drawable dir), or
+     * null.
+     */
+    fun drawableName(path: String): String? {
+      val normalized = normalizedAssetPath(path)
+      val directory = normalized.substringBefore('/', "")
+      if (directory != "drawable" && !directory.startsWith("drawable-")) return null
+      return normalized.substringAfter('/').substringBefore('.').takeIf { it.isNotEmpty() }
+    }
 
     const val MAX_XML_CHARS = 2_000_000
     const val MAX_ASSETS = 256
@@ -170,7 +181,7 @@ internal class DwfSource(
 }
 
 /** One complication slot's data, in the daemon's vocabulary. */
-internal data class DwfComplication(
+data class DwfComplication(
   val type: String,
   val text: String? = null,
   val title: String? = null,
@@ -189,7 +200,10 @@ internal data class DwfComplication(
  * and [DwfDaemonCommands.diff] turns a change of it into daemon commands — which is also how a
  * session that lost the shared daemon to another one is brought back ([DwfDaemonCommands.full]).
  */
-internal data class DwfControls(
+/** Default controls for a live ticking watch-face preview session. */
+val LIVE_CONTROLS = DwfControls(ticking = true)
+
+data class DwfControls(
   /** The watch's wall clock in epoch millis; null leaves the simulator's own clock. */
   val timeMillis: Long? = null,
   /**
@@ -405,7 +419,7 @@ internal data class DwfControls(
 }
 
 /** One daemon command: the `cmd` name and its payload, before the transport adds an `id`. */
-internal data class DwfCommand(val cmd: String, val payload: JsonObject = JsonObject(emptyMap()))
+data class DwfCommand(val cmd: String, val payload: JsonObject = JsonObject(emptyMap()))
 
 /**
  * The control → daemon command mapping. The vocabulary is the one `DwfApkDaemonBridge` speaks over
@@ -415,7 +429,7 @@ internal data class DwfCommand(val cmd: String, val payload: JsonObject = JsonOb
  * compose-ai-tools exports that builder this object shrinks to a call (see the design doc, "What
  * compose-ai-tools needs to export").
  */
-internal object DwfDaemonCommands {
+object DwfDaemonCommands {
 
   /** Every command that brings a freshly (re)pushed face to [controls]. Order is significant. */
   fun full(controls: DwfControls): List<DwfCommand> = diff(DwfControls(), controls, force = true)
@@ -560,21 +574,6 @@ internal object DwfDaemonCommands {
 }
 
 /**
- * The WFF a design revision exports, as a [DwfSource], so the watch-face tab can start a session
- * with an empty body. Null when the design does not export to Watch Face Format (the exporter's
- * reasons are the code pane's). Bitmap assets are not carried: a face that names `res/` drawables
- * needs the editor to send them in the start request.
- */
-internal fun deriveDwfSource(
-  document: ee.schimke.composeai.uibuilder.protocol.DesignDocumentV1,
-): DwfSource? =
-  when (val result = ee.schimke.composeai.uibuilder.export.WatchFaceXmlExporter.export(document)) {
-    is ee.schimke.composeai.uibuilder.export.WatchFaceXmlExporter.Result.Emitted ->
-      DwfSource(wffXml = result.xml, wffVersion = result.wffVersion, label = document.id)
-    is ee.schimke.composeai.uibuilder.export.WatchFaceXmlExporter.Result.Refused -> null
-  }
-
-/**
  * Where a session is on its way to the first live frame, as the tab and the editor's pane show it.
  * The order is the order a cold start passes through; a stage that does not apply is skipped (a
  * source the editor sent is never `exporting`; a cached package is never `packaging`, and says
@@ -584,7 +583,7 @@ internal fun deriveDwfSource(
  * indicator ("2 of 5"); [QUEUED] is step 0 and [LIVE] is step [STEPS], complete. [FAILED] keeps the
  * step it failed at.
  */
-internal enum class DwfStage(val wire: String, val step: Int) {
+enum class DwfStage(val wire: String, val step: Int) {
   QUEUED("queued", 0),
   EXPORTING("exporting", 1),
   PACKAGING("packaging", 2),

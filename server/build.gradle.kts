@@ -687,6 +687,9 @@ dependencies {
   // and `design --local`. `api` because its types appear throughout `:server` and its tests.
   api(project(":playground-engine"))
 
+  // Watch Face Format (WFF/DWF) packaging, validation, preview sessions and APK daemon runtime.
+  api(project(":watchface-engine"))
+
   // The render host, bundle daemon and git-backed history, published from compose-ai-tools so the
   // CLI's offline `bundle render` / `history manifest` reach them without a web server. `api`
   // because their types (`ServeHost`, `RenderOutcome`) are throughout this module's signatures. The
@@ -786,6 +789,7 @@ dependencies {
   implementation("org.jetbrains.kotlin:kotlin-build-tools-api:${libs.versions.kotlin.get()}")
 
   testImplementation(kotlin("test"))
+  testImplementation(testFixtures(project(":watchface-engine")))
 
   // `FakeRenderSession` lives in `:render-host`'s fixtures with `ServeRenderHost`, which it fakes.
   testImplementation(testFixtures(libs.composeai.render.host))
@@ -1012,13 +1016,15 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
     },
   )
 
-  // `:playground-engine` is the transport-free compile/render engine extracted from `:server`.
+  // `:playground-engine` (compile/render engine) and `:watchface-engine` (WFF/DWF packaging,
+  // validation and preview sessions) are extracted internal seams consumed by `:server`.
   // The UI-builder runtime, export, render bundle and export fonts are named as projects for
   // `-PcomposeUiBuilderDir` (included-build substitution); the default build matches them in
   // `allowedComposeAiModules`. The last two are resources only: a PNG and two font files.
   allowedProjects.set(
     listOf(
       ":playground-engine",
+      ":watchface-engine",
       ":ui-builder-runtime",
       ":ui-builder-export",
       ":ui-builder-render-bundle",

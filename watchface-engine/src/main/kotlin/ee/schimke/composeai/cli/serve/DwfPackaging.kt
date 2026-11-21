@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
 import javax.imageio.ImageIO
 
 /** Packaging failed in a way the design can fix; [diagnostics] are the packager's own words. */
-internal class DwfPackagingFailed(val diagnostics: List<String>) :
+class DwfPackagingFailed(val diagnostics: List<String>) :
   DwfRuntimeException(diagnostics.joinToString("\n"))
 
 /**
@@ -26,9 +26,10 @@ internal class DwfPackagingFailed(val diagnostics: List<String>) :
  * WFF version in the manifest's `com.google.wear.watchface.format.version`, which is where the
  * packager reads it back from to check the face against it.
  */
-internal object DwfPackaging {
+object DwfPackaging {
   /** A drawable a face's `watch_face_info.xml` points at when the design supplies none. */
   private const val PREVIEW_PATH = "drawable/preview.png"
+  private const val PREVIEW_DRAWABLE = "preview"
 
   /**
    * The bundle's files keyed by bundle-relative path. `res/xml/watch_face_info.xml` is always the
@@ -63,11 +64,7 @@ internal object DwfPackaging {
       WffWatchFaceInfo().toDocument().toXml().encodeToByteArray()
     // Any `drawable*/preview.*` is the preview resource whatever its format (a pinned GIF too):
     // Android names a drawable without its extension, so a second one would be a duplicate.
-    if (
-      files.keys.none {
-        WatchFaceDrawables.drawableName(it.removePrefix("res/")) == WatchFaceDrawables.PREVIEW
-      }
-    ) {
+    if (files.keys.none { DwfSource.drawableName(it.removePrefix("res/")) == PREVIEW_DRAWABLE }) {
       files["res/$PREVIEW_PATH"] = placeholderPreview()
     }
     return files
@@ -104,13 +101,13 @@ internal object DwfPackaging {
 }
 
 /** The packager as a function: a bundle in, a signed APK at `out`. */
-internal fun interface DwfWffPackager {
+fun interface DwfWffPackager {
   /** @throws DwfPackagingFailed when the packager refuses the face. */
   fun pack(files: Map<String, ByteArray>, packageName: String, out: File)
 }
 
 /** The Android SDK pieces packaging needs; found the way the packager itself finds them. */
-internal class DwfAndroidSdk(val root: File) {
+class DwfAndroidSdk(val root: File) {
   companion object {
     const val INSTALL_HINT =
       "sdkmanager \"build-tools;36.0.0\" \"platforms;android-36\" " +
@@ -149,7 +146,7 @@ internal class DwfAndroidSdk(val root: File) {
  * signed with the marketplace key, is [WatchFacePushSubprocessPackager]; both run through
  * [WffPackagerProcess].
  */
-internal class DwfSubprocessPackager(
+class DwfSubprocessPackager(
   private val libDir: File,
   private val sdk: DwfAndroidSdk,
   /** Holds the generated per-installation debug key (`WFF_PACKAGER_HOME`). */
@@ -168,7 +165,7 @@ internal class DwfSubprocessPackager(
 
   companion object {
     /** The packager's error lines, else whatever it said (a usage error has no diagnostic form). */
-    internal fun diagnostics(output: String): List<String> = WffPackagerProcess.diagnostics(output)
+    fun diagnostics(output: String): List<String> = WffPackagerProcess.diagnostics(output)
   }
 }
 
@@ -181,7 +178,7 @@ internal class DwfSubprocessPackager(
  * `environment` the caller passes: a debug build passes none, so a marketplace secret in the
  * server's environment can never sign one, and a push build passes the configured key.
  */
-internal class WffPackagerProcess(
+class WffPackagerProcess(
   private val libDir: File,
   private val sdk: DwfAndroidSdk,
   /** `WFF_PACKAGER_HOME`: where the packager keeps a generated debug key. */
@@ -292,7 +289,7 @@ internal class WffPackagerProcess(
     private val DIAGNOSTIC = Regex("^(error|warning|info)\\[[^\\]]+\\]: .*")
 
     /** The packager's error lines, else whatever it said (a usage error has no diagnostic form). */
-    internal fun diagnostics(output: String): List<String> {
+    fun diagnostics(output: String): List<String> {
       val lines = output.lines().map(String::trim).filter(String::isNotEmpty)
       val errors = lines.filter { it.startsWith("error[") && DIAGNOSTIC.matches(it) }
       return errors.ifEmpty { listOf(lines.lastOrNull() ?: "wff-packager failed with no output") }

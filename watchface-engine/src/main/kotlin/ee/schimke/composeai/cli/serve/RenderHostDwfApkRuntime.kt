@@ -11,7 +11,7 @@ import kotlinx.serialization.json.JsonElement
  * test can stand in for a Robolectric daemon. [connect] returns a connection over the daemon's
  * stdio channel.
  */
-internal class DwfSimulatorLaunch(
+class DwfSimulatorLaunch(
   /** Why a daemon cannot start here, or null. */
   val unavailableReason: () -> String?,
   val connect: (File) -> ee.schimke.composeai.cli.serve.DwfSimulatorConnection,
@@ -38,7 +38,7 @@ internal class DwfSimulatorLaunch(
  * Packaged APKs are cached by [DwfSource.digest] under [cacheDir], so a re-push of an unchanged
  * revision, a second session on it, and a server restart all reuse the same file.
  */
-internal class RenderHostDwfApkRuntime(
+class RenderHostDwfApkRuntime(
   private val runtimeInstalled: () -> Boolean,
   private val sdk: () -> DwfAndroidSdk? = { DwfAndroidSdk.locate() },
   /** The `lib-wff-packager/` directory, or null when this install does not carry it. */
@@ -157,5 +157,5 @@ private const val PACKAGER_DIR_PROPERTY = "composeai.cli.lib.wff.packagerDir"
  * `-D$PACKAGER_DIR_PROPERTY`, `$APP_HOME/lib-wff-packager`, or next to the server's own jars); null
  * unless it holds jars.
  */
-internal fun locateWffPackagerDir(): File? =
+fun locateWffPackagerDir(): File? =
   locateBundleSidecarJars("lib-wff-packager").firstOrNull()?.parentFile
