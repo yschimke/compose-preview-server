@@ -49,6 +49,7 @@ class RenderHostDwfApkRuntime(
     { lib, located, signing ->
       DwfSubprocessPackager(lib, located, signing)
     },
+  private val remotePackagerUrl: () -> String? = { WatchFacePushServerClient.configuredUrl() },
 ) : DwfApkRuntime {
   private val packLock = Any()
   private val packaged = ConcurrentHashMap<String, File>()
@@ -63,22 +64,24 @@ class RenderHostDwfApkRuntime(
           "The fast Remote Compose preview in the editor is unaffected.",
       )
     }
-    if (sdk() == null) {
-      return DwfApkRuntime.Availability.Unavailable(
-        DwfPreviewSurface.ANDROID_SDK_MISSING,
-        "Drawing a watch face with the real runtime needs an Android SDK on this server: " +
-          "build-tools (aapt2 and zipalign) and a platform android.jar, found through " +
-          "ANDROID_HOME or ANDROID_SDK_ROOT. Install with: ${DwfAndroidSdk.INSTALL_HINT}. " +
-          "The fast Remote Compose preview in the editor is unaffected.",
-      )
-    }
-    if (packagerLibDir() == null) {
-      return DwfApkRuntime.Availability.Unavailable(
-        DwfPreviewSurface.PACKAGING_UNAVAILABLE,
-        "This install has no lib-wff-packager/ (the watch-face packager and its validator). It " +
-          "ships in the server distribution; set -D$PACKAGER_DIR_PROPERTY to its directory if " +
-          "the server was started some other way.",
-      )
+    if (remotePackagerUrl() == null) {
+      if (sdk() == null) {
+        return DwfApkRuntime.Availability.Unavailable(
+          DwfPreviewSurface.ANDROID_SDK_MISSING,
+          "Drawing a watch face with the real runtime needs an Android SDK on this server: " +
+            "build-tools (aapt2 and zipalign) and a platform android.jar, found through " +
+            "ANDROID_HOME or ANDROID_SDK_ROOT. Install with: ${DwfAndroidSdk.INSTALL_HINT}. " +
+            "The fast Remote Compose preview in the editor is unaffected.",
+        )
+      }
+      if (packagerLibDir() == null) {
+        return DwfApkRuntime.Availability.Unavailable(
+          DwfPreviewSurface.PACKAGING_UNAVAILABLE,
+          "This install has no lib-wff-packager/ (the watch-face packager and its validator). It " +
+            "ships in the server distribution; set -D$PACKAGER_DIR_PROPERTY to its directory if " +
+            "the server was started some other way.",
+        )
+      }
     }
     launcher.unavailableReason()?.let {
       return DwfApkRuntime.Availability.Unavailable(DwfPreviewSurface.SIMULATOR_UNAVAILABLE, it)
@@ -108,11 +111,17 @@ class RenderHostDwfApkRuntime(
         }
       val out = File(cacheDir, "wff-$digest.apk")
       if (!out.isFile || out.length() == 0L) {
-        val located =
-          sdk() ?: throw DwfRuntimeException("no Android SDK: ${DwfAndroidSdk.INSTALL_HINT}")
-        val lib = packagerLibDir() ?: throw DwfRuntimeException("no lib-wff-packager/ installed")
+        val packager =
+          remotePackagerUrl()?.let { WatchFacePushServerClient(it).asDwfPackager() }
+            ?: run {
+              val located =
+                sdk() ?: throw DwfRuntimeException("no Android SDK: ${DwfAndroidSdk.INSTALL_HINT}")
+              val lib =
+                packagerLibDir() ?: throw DwfRuntimeException("no lib-wff-packager/ installed")
+              packagerFor(lib, located, File(cacheDir, "signing"))
+            }
         try {
-          DwfPackaging.pack(source, out, packagerFor(lib, located, File(cacheDir, "signing")))
+          DwfPackaging.pack(source, out, packager)
         } catch (e: DwfRuntimeException) {
           throw e
         } catch (e: Exception) {

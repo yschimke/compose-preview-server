@@ -138,6 +138,7 @@ sealed interface WatchFaceValidatorAvailability {
       enabled: () -> Boolean,
       sdk: () -> DwfAndroidSdk? = { DwfAndroidSdk.locate() },
       libDir: () -> File? = { locateWffPackagerDir() },
+      remoteUrl: () -> String? = { WatchFacePushServerClient.configuredUrl() },
     ): () -> WatchFaceValidatorAvailability = available@{
       if (!enabled()) {
         return@available Unavailable(
@@ -145,6 +146,9 @@ sealed interface WatchFaceValidatorAvailability {
           "this server does not run Google's watch-face validators (its " +
             "`watchFaceValidation` flag is off); the editor's in-browser checks still apply",
         )
+      }
+      remoteUrl()?.let { url ->
+        return@available Ready(WatchFacePushServerClient(url).asValidator())
       }
       val located = sdk()
       val lib = libDir()

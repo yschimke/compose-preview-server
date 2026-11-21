@@ -382,32 +382,71 @@ sealed interface WatchFacePushPackaging {
       home: File,
       sdk: () -> DwfAndroidSdk? = { DwfAndroidSdk.locate() },
       libDir: () -> File? = { locateWffPackagerDir() },
+      remoteUrl: () -> String? = { WatchFacePushServerClient.configuredUrl() },
     ): () -> WatchFacePushPackaging = {
-      when {
-        signing is WatchFacePushSigning.Unavailable ->
-          Unavailable(SIGNING_KEY_MISSING, signing.reason)
-        else -> {
-          val located = sdk()
-          val lib = libDir()
-          when {
-            located == null ->
-              Unavailable(
-                ANDROID_SDK_MISSING,
-                "building a watch face needs an Android SDK on this server: " +
-                  DwfAndroidSdk.INSTALL_HINT,
-              )
-            lib == null ->
-              Unavailable(
-                PACKAGER_MISSING,
-                "this install has no lib-wff-packager/ (the watch-face packager); it ships in " +
-                  "the server distribution",
-              )
-            else -> {
-              val configured = signing as WatchFacePushSigning.Configured
-              Ready(
-                WatchFacePushSubprocessPackager(lib, located, home, configured),
-                configured.certificateSha256,
-              )
+      val remote = remoteUrl()
+      if (remote != null) {
+        val client = WatchFacePushServerClient(remote)
+        val status = client.readyz()
+        when {
+          status == null ->
+            Unavailable(
+              PACKAGER_MISSING,
+              "watchface push-server at $remote is unreachable",
+            )
+          !status.sdkAvailable ->
+            Unavailable(
+              ANDROID_SDK_MISSING,
+              "watchface push-server at $remote has no Android SDK available",
+            )
+          !status.signingConfigured ->
+            Unavailable(
+              SIGNING_KEY_MISSING,
+              status.signingError
+                ?: "watchface push-server at $remote has no signing key configured",
+            )
+          else ->
+            Ready(
+              packager =
+                WatchFacePushPackager { files, faceName, versionCode, out ->
+                  client.packPush(
+                    files = files,
+                    marketplacePackage = WatchFacePushNaming.MARKETPLACE_PACKAGE,
+                    faceName = faceName,
+                    versionCode = versionCode,
+                    out = out,
+                  )
+                },
+              signerCertificateSha256 = status.signerCertificateSha256,
+            )
+        }
+      } else {
+        when {
+          signing is WatchFacePushSigning.Unavailable ->
+            Unavailable(SIGNING_KEY_MISSING, signing.reason)
+          else -> {
+            val located = sdk()
+            val lib = libDir()
+            when {
+              located == null ->
+                Unavailable(
+                  ANDROID_SDK_MISSING,
+                  "building a watch face needs an Android SDK on this server: " +
+                    DwfAndroidSdk.INSTALL_HINT,
+                )
+              lib == null ->
+                Unavailable(
+                  PACKAGER_MISSING,
+                  "this install has no lib-wff-packager/ (the watch-face packager); it ships in " +
+                    "the server distribution",
+                )
+              else -> {
+                val configured = signing as WatchFacePushSigning.Configured
+                Ready(
+                  WatchFacePushSubprocessPackager(lib, located, home, configured),
+                  configured.certificateSha256,
+                )
+              }
             }
           }
         }
