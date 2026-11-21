@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.190.0](https://github.com/yschimke/compose-preview-server/compare/v3.189.0...v3.190.0) (2026-11-21)
+
+
+### Features
+
+* **deploy:** add ui-builder serve role and compose-preview-ui-builder image ([#2072](https://github.com/yschimke/compose-preview-server/issues/2072)) ([1ac08b5](https://github.com/yschimke/compose-preview-server/commit/1ac08b57fc4b559781e3381c22da450950b12d5b))
+* **deploy:** support SERVE_UI_BUILDER_EXTERNAL=1 to disable UI Builder on preview ([#2074](https://github.com/yschimke/compose-preview-server/issues/2074)) ([d1195c2](https://github.com/yschimke/compose-preview-server/commit/d1195c262384917b1457ab82cfc0f842ec826388))
+
+
+### Bug Fixes
+
+* **deps:** update watchface-tools to v0.12.0 ([#2024](https://github.com/yschimke/compose-preview-server/issues/2024)) ([0951f5f](https://github.com/yschimke/compose-preview-server/commit/0951f5fe304c8d9113ce8c2448067d4a29e00a83))
+
 ## [3.189.0](https://github.com/yschimke/compose-preview-server/compare/v3.188.0...v3.189.0) (2026-11-21)
 
 
