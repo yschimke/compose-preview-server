@@ -1009,6 +1009,22 @@ public design is not listed on anybody else's designs page. Owners switch any on
 public and private from its share page. Unset (or `private`) keeps the old behaviour: a design is
 private to its owner and whoever it is shared with.
 
+### Kobento `.rc` export
+
+A catalog of [Kobento](https://mcp.kobento.dev/)'s components (`kobento`, from
+`yschimke/kobento-catalog-out`) exports its designs as Kobento component JSON. Only Kobento's
+hosted `convert` can expand those component calls, so a plain `.rc` of the same design is compiled
+there, on **this box's** one service-account token:
+
+```
+SERVE_UI_BUILDER_KOBENTO_TOKEN=...   # a Kobento account's token; read by the server, never put on argv
+```
+
+With it set, the Kobento catalog advertises `remoteDocument` and the editor's Export menu offers
+**Download .rc**; the server sends the design's Kobento JSON to `https://mcp.kobento.dev/mcp`
+(`tools/call` `convert`) and serves the bytes Kobento returns. Unset, Kobento designs export as JSON
+only. `SERVE_UI_BUILDER_KOBENTO_TOKEN_FILE` (a Docker secret) works in place of the variable.
+
 ### UI-builder guidelines check
 
 `ui_builder_check_design` can also run a `guidelines` check: a model, reached through
