@@ -49,24 +49,70 @@ class WatchFacePushServerClient(
     val error: String? = null,
   )
 
+  private val readyzCache = java.util.concurrent.atomic.AtomicReference<CachedReadyz?>(null)
+  private val readyzRefreshing = java.util.concurrent.atomic.AtomicBoolean(false)
+
+  private data class CachedReadyz(val status: ReadyStatus?, val expiresAtMillis: Long)
+
   /**
    * Queries `GET /readyz`; returns null if the push-server is unreachable or returned invalid JSON.
    */
-  fun readyz(): ReadyStatus? {
-    val request =
-      HttpRequest.newBuilder(URI("$baseUrl/readyz")).timeout(Duration.ofSeconds(10)).GET().build()
+  fun readyz(timeout: Duration = Duration.ofSeconds(3)): ReadyStatus? {
+    val request = HttpRequest.newBuilder(URI("$baseUrl/readyz")).timeout(timeout).GET().build()
     val response =
       try {
         client.send(request, HttpResponse.BodyHandlers.ofString())
       } catch (_: Exception) {
         return null
       }
-    return try {
-      json.decodeFromString(ReadyStatus.serializer(), response.body())
+    return parseReadyz(response.body())
+  }
+
+  /**
+   * Non-blocking readiness lookup for request threads: returns the cached status immediately and
+   * triggers a single-flight asynchronous refresh via [HttpClient.sendAsync] whenever the entry is
+   * absent or expired. Never blocks a caller on a slow or unreachable push-server.
+   */
+  fun cachedReadyz(
+    nowMillis: Long = System.currentTimeMillis(),
+    successTtlMillis: Long = DEFAULT_READYZ_SUCCESS_TTL_MILLIS,
+    failureTtlMillis: Long = DEFAULT_READYZ_FAILURE_TTL_MILLIS,
+    probeTimeout: Duration = DEFAULT_READYZ_PROBE_TIMEOUT,
+  ): ReadyStatus? {
+    val cached = readyzCache.get()
+    if (cached == null || nowMillis >= cached.expiresAtMillis) {
+      refreshReadyzAsync(successTtlMillis, failureTtlMillis, probeTimeout)
+    }
+    return cached?.status
+  }
+
+  /** Starts a background `/readyz` refresh if one is not already in flight. */
+  fun refreshReadyzAsync(
+    successTtlMillis: Long = DEFAULT_READYZ_SUCCESS_TTL_MILLIS,
+    failureTtlMillis: Long = DEFAULT_READYZ_FAILURE_TTL_MILLIS,
+    probeTimeout: Duration = DEFAULT_READYZ_PROBE_TIMEOUT,
+  ) {
+    if (!readyzRefreshing.compareAndSet(false, true)) return
+    val request = HttpRequest.newBuilder(URI("$baseUrl/readyz")).timeout(probeTimeout).GET().build()
+    try {
+      client.sendAsync(request, HttpResponse.BodyHandlers.ofString()).handle { response, error ->
+        val status = if (error == null && response != null) parseReadyz(response.body()) else null
+        val ttl = if (status != null && status.ready) successTtlMillis else failureTtlMillis
+        readyzCache.set(CachedReadyz(status, System.currentTimeMillis() + ttl))
+        readyzRefreshing.set(false)
+      }
+    } catch (_: Exception) {
+      readyzCache.set(CachedReadyz(null, System.currentTimeMillis() + failureTtlMillis))
+      readyzRefreshing.set(false)
+    }
+  }
+
+  private fun parseReadyz(body: String): ReadyStatus? =
+    try {
+      json.decodeFromString(ReadyStatus.serializer(), body)
     } catch (_: Exception) {
       null
     }
-  }
 
   /** Calls `POST /v1/validate?pushMarketplace=<marketplacePackage>` and returns the JSON report. */
   fun validate(
@@ -199,6 +245,9 @@ class WatchFacePushServerClient(
 
   companion object {
     const val ENV_URL: String = "WATCHFACE_PUSH_SERVER_URL"
+    const val DEFAULT_READYZ_SUCCESS_TTL_MILLIS: Long = 15_000L
+    const val DEFAULT_READYZ_FAILURE_TTL_MILLIS: Long = 3_000L
+    val DEFAULT_READYZ_PROBE_TIMEOUT: Duration = Duration.ofSeconds(2)
 
     private val json = Json { ignoreUnknownKeys = true }
 

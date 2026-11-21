@@ -114,4 +114,44 @@ class WatchFacePushServerClientTest {
       server.stop(0)
     }
   }
+
+  @Test
+  fun cachedReadyzDoesNotBlockAndRefreshesInBackground() {
+    val release = java.util.concurrent.CountDownLatch(1)
+    val server =
+      HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
+        createContext("/readyz") { ex ->
+          release.await(5, java.util.concurrent.TimeUnit.SECONDS)
+          val body =
+            """{"ready":true,"sdkAvailable":true,"signingConfigured":true,"signerCertificateSha256":"${"b".repeat(64)}"}"""
+              .toByteArray(StandardCharsets.UTF_8)
+          ex.responseHeaders.set("Content-Type", "application/json")
+          ex.sendResponseHeaders(200, body.size.toLong())
+          ex.responseBody.use { it.write(body) }
+        }
+      }
+    server.start()
+    try {
+      val client = WatchFacePushServerClient("http://127.0.0.1:${server.address.port}")
+      val startNanos = System.nanoTime()
+      val initial = client.cachedReadyz()
+      val elapsedMs = (System.nanoTime() - startNanos) / 1_000_000L
+      assertEquals(null, initial)
+      assertTrue(elapsedMs < 500, "cachedReadyz blocked for ${elapsedMs}ms")
+
+      release.countDown()
+      val deadline = System.currentTimeMillis() + 5_000L
+      var warm: WatchFacePushServerClient.ReadyStatus? = null
+      while (System.currentTimeMillis() < deadline && warm == null) {
+        warm = client.cachedReadyz()
+        if (warm == null) Thread.sleep(25)
+      }
+      assertNotNull(warm)
+      assertTrue(warm.ready)
+      assertEquals("b".repeat(64), warm.signerCertificateSha256)
+    } finally {
+      release.countDown()
+      server.stop(0)
+    }
+  }
 }
