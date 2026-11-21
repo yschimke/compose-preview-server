@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.189.0](https://github.com/yschimke/compose-preview-server/compare/v3.188.0...v3.189.0) (2026-11-21)
+
+
+### Features
+
+* **deploy:** split compose-preview-playground image target with bubblewrap ([#2068](https://github.com/yschimke/compose-preview-server/issues/2068)) ([bb238cd](https://github.com/yschimke/compose-preview-server/commit/bb238cdd4f8df1cd77f564e69001a691983049d3))
+* extract standalone :livery-host module from :server ([#2060](https://github.com/yschimke/compose-preview-server/issues/2060)) ([7aac34c](https://github.com/yschimke/compose-preview-server/commit/7aac34c67e8794c31ca319d89fb640c200a57804))
+* publish standalone compose-preview-livery-host tarball and image ([#2064](https://github.com/yschimke/compose-preview-server/issues/2064)) ([1f8048c](https://github.com/yschimke/compose-preview-server/commit/1f8048c4726a1c03979cde60176d61cbae78f147))
+* **watchface:** delegate validation and push packaging to WATCHFACE_PUSH_SERVER_URL ([#2067](https://github.com/yschimke/compose-preview-server/issues/2067)) ([83b2036](https://github.com/yschimke/compose-preview-server/commit/83b2036603448d8a7002cad07308b16935ebda17))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.28.2 ([#2065](https://github.com/yschimke/compose-preview-server/issues/2065)) ([3a0b8ba](https://github.com/yschimke/compose-preview-server/commit/3a0b8bae3452e9a2d75e41fedb7807a6aa913653))
+* **watchface:** keep push-server /readyz probes non-blocking and cached ([#2070](https://github.com/yschimke/compose-preview-server/issues/2070)) ([42a9d24](https://github.com/yschimke/compose-preview-server/commit/42a9d24bf8ae669f9fedbfe237d53cfb85f96268))
+
 ## [3.188.0](https://github.com/yschimke/compose-preview-server/compare/v3.187.0...v3.188.0) (2026-11-21)
 
 
