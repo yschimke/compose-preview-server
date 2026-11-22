@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.193.0](https://github.com/yschimke/compose-preview-server/compare/v3.192.0...v3.193.0) (2026-11-22)
+
+
+### Features
+
+* answer credential-less gated MCP tool calls with HTTP 401 ([#2083](https://github.com/yschimke/compose-preview-server/issues/2083)) ([97803cb](https://github.com/yschimke/compose-preview-server/commit/97803cb35795f4da9e76a6e860f4503876672e36))
+* make the UI-builder device presets public and CORS-open ([#2087](https://github.com/yschimke/compose-preview-server/issues/2087)) ([caa1619](https://github.com/yschimke/compose-preview-server/commit/caa161904e431a766786afb82590cdbbe734321f))
+* serve the UI Builder editor as an MCP App for server designs ([#2086](https://github.com/yschimke/compose-preview-server/issues/2086)) ([b0cd54b](https://github.com/yschimke/compose-preview-server/commit/b0cd54b1b33ac9cd6322ca4b6a791e8261477d47))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-preview-ui-builder-bom to v3.148.0 ([#2089](https://github.com/yschimke/compose-preview-server/issues/2089)) ([02ec6fc](https://github.com/yschimke/compose-preview-server/commit/02ec6fc7cec58c5fce8cc4efb605d21688a53c2c))
+
 ## [3.192.0](https://github.com/yschimke/compose-preview-server/compare/v3.191.0...v3.192.0) (2026-11-22)
 
 
