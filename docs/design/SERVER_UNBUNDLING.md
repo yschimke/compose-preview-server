@@ -139,6 +139,93 @@ dependency on this one:
 - The `compose-preview-mcp-<v>.tar.gz` bridge on this repository's releases is retired once the
   CLIs from before compose-ai-tools#5929 fall out of support.
 
+#### The catalog reads it needs are served
+
+compose-preview-contracts' `docs/design/CATALOG_READ_API.md` maps every in-process read the MCP
+makes onto a route, and named four that had none. They now exist (`ServeCatalogRead.kt`), each
+built from the same `ServeHost` calls `ServeCatalogMcp` makes for that answer, so the MCP can switch
+to them when it moves and get the same data. `ServeCatalogMcp` itself does not call them yet.
+
+| method and path | gap | in process today |
+| --- | --- | --- |
+| `GET /{system}/api/capabilities` | 1, per-preview capabilities | `previewJson` (`list_previews`) and `dataProductsJson` (`list_data_products`) |
+| `GET /{system}/api/history` | 2, the served delivery commit | `historyJson`'s `repo`, `branch`, `commit` |
+| `GET /{system}/api/history/{previewId}` | 2, the indexed timeline | `historyJson` (`history_list`), `historyView` (`history_diff`, `history_read`) |
+| `GET /{system}/api/guidelines/{previewId}` | 3, the guidelines result | `guidelinesResultJson` (`get_preview_data kind=guidelines/result`) |
+| `ETag` and `revision` on `GET /{system}/api/previews` | 4, a revision to cache against | — |
+
+They sit in the per-catalog `/{system}/api/…` family beside `previews`, `render-runs` and `uses`,
+and like those each also answers as `/api/…?session={system}`. Named for what the MCP reads, not
+for the tool that reads it: one capabilities body serves both `list_previews` and
+`list_data_products`, and one timeline serves all three history tools.
+
+- **Gate.** The same `rejectBadToken` as `/api/previews`: operator token (header, `?token=` or
+  browse cookie), an agent grant with `preview` scope, or nothing on a `--public` host. Every
+  refusal is `404 not found`, and so is a catalog the server does not have; a catalog still
+  loading is `503`, `Retry-After: 3` (`withLeasedSession`). An unknown preview is `404 no such
+  preview`.
+- **Caching.** Each body carries a weak `ETag`, `W/"<revision prefix>-<digest>"`: the first 12
+  characters of the served commit when there is one, then a SHA-256 prefix of the body. A matching
+  `If-None-Match` answers `304` with no body. The digest is what makes it correct, since a body can
+  change at the same commit (a renderer comes up, a degradation clears). The four new bodies send
+  `Cache-Control: private, no-cache`: keep a copy, revalidate every time, never in a shared cache.
+  `/api/previews` keeps the no `Cache-Control` it has always sent; its digest skips the `views`
+  engagement counters, which move on every page open, and that is why the tag is weak.
+- **Shapes.** Server-private `@Serializable` DTOs, written with the server's `Json`
+  (`encodeDefaults = true`), so an absent optional is `null`, not missing. The wire types follow in
+  compose-preview-contracts; until then these shapes are held stable. Decode with
+  `ignoreUnknownKeys`.
+
+`GET /{system}/api/capabilities`, previews in catalog order. `dataProductKinds` is the preview's
+declared list (`list_previews`), `productKinds` the derived set `list_data_products` reports:
+
+```json
+{"schema":"compose-preview-serve/capabilities/v1","revision":"4444…","previews":[
+  {"id":"card","dataProductKinds":["a11y/atf","compose/theme"],
+   "productKinds":["a11y/atf","a11y/hierarchy","compose/theme","guidelines/result"],
+   "svgAvailable":true,"scrollAvailable":false,"state":"pressed","theme":"dark",
+   "a11yOverlay":true,"designAnnotations":false,"publishedTypography":false,
+   "guidelinesResult":true}]}
+```
+
+`GET /{system}/api/history`. `mode` is `published` (delivery branch), `local` (this server's
+checkout, project mode) or `none`, with `historyJson`'s precedence; `publishesManifest` says the
+served tree carried a `history.json`, so per-preview timelines can answer:
+
+```json
+{"schema":"compose-preview-serve/history/v1","mode":"published","repo":"yschimke/design",
+ "branch":"design/m3","commit":"4444…",
+ "manifestUrl":"https://raw.githubusercontent.com/yschimke/design/design/m3/history.json",
+ "renderUrlTemplate":"https://raw.githubusercontent.com/yschimke/design/{commit}/{path}",
+ "publishesManifest":true,"reason":null}
+```
+
+`GET /{system}/api/history/{previewId}`, versions newest first. `commit` is the served commit
+(the MCP's `commit`, and its `pinnedCommit` when there is a timeline); `blob` equality is
+`history_diff`'s `changed`. With no timeline, `versions` is `null` and `reason` says why (in
+`local` mode with fewer than two renders it is `[]`, as `history_list` answers):
+
+```json
+{"schema":"compose-preview-serve/preview-history/v1","previewId":"ProfilePreview",
+ "mode":"published","repo":"yschimke/design","branch":"design/m3","commit":"4444…",
+ "manifestUrl":"…/history.json","renderUrlTemplate":"…/{commit}/{path}","reason":null,
+ "path":"images/profile/ideal__default__dark.png","observations":2,"unstable":true,"flapCount":3,
+ "versions":[{"commit":"1111…","date":"2026-08-27T10:58:22Z","blob":"aaaa…","commits":1,
+   "sourceSha":"2ef7b877","sinceCommit":null,"occurrences":null,
+   "renderUrl":"https://raw.githubusercontent.com/yschimke/design/1111…/images/profile/ideal__default__dark.png"}]}
+```
+
+`GET /{system}/api/guidelines/{previewId}`. `record` is the `GuidelineRecordV1`
+(`design-guidelines-protocol`) as its own serializer writes it, or `null` with `found: false`:
+
+```json
+{"schema":"compose-preview-serve/guidelines/v1","revision":"4444…","kind":"guidelines/result",
+ "previewId":"card","found":true,"record":{"revision":0,"model":"deepseek/deepseek-v4.1-flash", …}}
+```
+
+`GET /{system}/api/previews` gains `"revision": "4444…"` (null without a delivery commit) as its
+last field; nothing else in its body changes.
+
 ### ha.coo.ee
 
 ha.coo.ee is the Home Assistant card designer. Its own server, `ha-designs`, is already outside
