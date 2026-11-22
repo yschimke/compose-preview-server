@@ -112,6 +112,12 @@ The product spec and its RFC come first; everything after them is one surface or
 - [design/MULTIPLAYER_WORKFLOW.md](design/MULTIPLAYER_WORKFLOW.md) — **proposal**: what a
   multiplayer design/engineering/product workflow would look like over what exists today.
 
+## Repository boundary
+
+- [design/SERVER_UNBUNDLING.md](design/SERVER_UNBUNDLING.md) — **accepted, in progress**: the UI
+  builder and the hosted MCP ship their own containers on their own release trains. Covers the
+  target image ownership, the contracts that replace in-process seams, and the order of the moves.
+
 ## History
 
 - [design/PREVIEW_SERVER_SPLIT.md](design/PREVIEW_SERVER_SPLIT.md) — the extraction that produced
