@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.195.0](https://github.com/yschimke/compose-preview-server/compare/v3.194.0...v3.195.0) (2026-11-22)
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-preview-contracts-bom to v3.46.0 ([#2028](https://github.com/yschimke/compose-preview-server/issues/2028)) ([73d897d](https://github.com/yschimke/compose-preview-server/commit/73d897d6efac90cd9217d829ed18df76b1e64c4c))
+* give the ui-builder role the image repository its session fingerprint needs ([#2095](https://github.com/yschimke/compose-preview-server/issues/2095)) ([a3d224e](https://github.com/yschimke/compose-preview-server/commit/a3d224e4e01a42ba311ac882750bdae2b9d99d76))
+
 ## [3.194.0](https://github.com/yschimke/compose-preview-server/compare/v3.193.0...v3.194.0) (2026-11-22)
 
 
