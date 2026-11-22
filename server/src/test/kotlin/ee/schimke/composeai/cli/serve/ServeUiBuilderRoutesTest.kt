@@ -1061,14 +1061,19 @@ class ServeUiBuilderRoutesTest {
   }
 
   @Test
-  fun `device presets are read-gated and derived from the render catalog`() {
-    assertEquals(401, devicePresets(null).use { it.code })
-    assertEquals(403, devicePresets("forbidden").use { it.code })
+  fun `device presets are public, CORS-open and derived from the render catalog`() {
+    // Compile-time data naming no design: a sandboxed MCP App frame with no credential reads it.
+    for (actor in listOf(null, "forbidden")) {
+      devicePresets(actor).use {
+        assertEquals(200, it.code)
+        assertEquals("*", it.header("Access-Control-Allow-Origin"))
+      }
+    }
 
     val body =
       devicePresets("actor").use {
         assertEquals(200, it.code)
-        assertEquals(UiBuilderRouteCapability.READ, capabilities.last())
+        assertEquals("public, max-age=300", it.header("Cache-Control"))
         it.body.string()
       }
     val payload = json.decodeFromString(UiBuilderDevicePresetsV1.serializer(), body)
