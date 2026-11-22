@@ -916,6 +916,24 @@ class ServeHttpServer(
     }
   }
 
+  /**
+   * The UI Builder editor as an MCP App over this server's designs, or null unless the served
+   * archive's manifest says `mcpApp >= 2`. Its assets are this server's own archive under the
+   * immutable `/ui-builder/v/<bundle>/` prefix, which every host routes (the rooted builder host
+   * never redirects it).
+   */
+  private val uiBuilderEditorApp: ServeUiBuilderEditorApp? = uiBuilderDir?.let { dir ->
+    ServeUiBuilderEditorApp.forArchive(
+      dir,
+      assetPath = {
+        // A catalog with id `v` shadows the versioned prefix; the unversioned path serves the same
+        // files, revalidated.
+        if (UI_BUILDER_VERSION_SEGMENT in uiBuilderCatalogs) "/ui-builder/"
+        else "/ui-builder/$UI_BUILDER_VERSION_SEGMENT/$uiBuilderBundleVersion/"
+      },
+    )
+  }
+
   private val catalogMcp =
     if (catalogMcpEnabled && machineAuthorization != null)
       ServeCatalogMcp(
@@ -923,6 +941,7 @@ class ServeHttpServer(
         renderSemaphore,
         projectHistory = projectHistory,
         uiBuilder = uiBuilderMcp,
+        uiBuilderEditor = uiBuilderEditorApp,
         uiBuilderNative = admittedNativePreview != null,
         catalogNativeRender = featureFlags.catalogNativeRender,
         publicOrigin = ::canonicalServerOrigin,
@@ -10268,6 +10287,7 @@ class ServeHttpServer(
           uiBuilderAuthorization?.authorize(call, capability, presented)
             ?: UiBuilderAuthorizationDecision.Missing
         },
+        requestOrigin = externalOrigin(),
         liveAuthorization = { presented ->
           authorization.authorizeScope(
             call,
@@ -14967,6 +14987,9 @@ class ServeHttpServer(
       HttpHeaders.CacheControl,
       if (version == null) "no-cache" else UI_BUILDER_IMMUTABLE_CACHE_CONTROL,
     )
+    // The editor MCP App ([ServeUiBuilderEditorApp]) loads these files from a host's sandbox
+    // origin, so its module scripts and Wasm fetch are cross-origin. The archive is public.
+    call.response.headers.append(HttpHeaders.AccessControlAllowOrigin, "*")
     call.response.headers.append(HttpHeaders.ETag, etag)
     if (uiBuilderPrecompressed.compressible(file)) {
       call.response.headers.append(HttpHeaders.Vary, HttpHeaders.AcceptEncoding)
