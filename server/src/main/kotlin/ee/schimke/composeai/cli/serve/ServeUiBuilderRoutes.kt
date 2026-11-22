@@ -766,25 +766,16 @@ internal fun Route.installUiBuilderRoutes(
   }
 
   /**
-   * The device frames the Screen inspector offers. A plain GET (compile-time data, same for every
-   * actor, no protocol change), read-gated like everything else the editor fetches.
+   * The device frames the Screen inspector offers. A plain GET of compile-time data, the same for
+   * every actor and naming no design, so it is public and CORS-open, like the catalog capabilities:
+   * the editor as an MCP App ([ServeUiBuilderEditorApp]) fetches it from a host's sandbox origin,
+   * which holds no credential of this server's.
    */
   get(UI_BUILDER_DEVICE_PRESETS_PATH) {
-    when (authorization.authorize(call, UiBuilderRouteCapability.READ)) {
-      is UiBuilderAuthorizationDecision.Authorized -> Unit
-      UiBuilderAuthorizationDecision.Missing -> {
-        call.response.headers.append(HttpHeaders.WWWAuthenticate, "Bearer")
-        call.respondText("authentication is required", status = HttpStatusCode.Unauthorized)
-        return@get
-      }
-      UiBuilderAuthorizationDecision.Forbidden -> {
-        call.respondText("UI-builder read access required", status = HttpStatusCode.Forbidden)
-        return@get
-      }
-    }
+    call.response.headers.append(HttpHeaders.AccessControlAllowOrigin, "*")
     // The catalog cannot change without a redeploy, so the response is immutable for the life of
-    // the process; the editor fetches it once per page load and an ETag saves the second one.
-    call.response.headers.append(HttpHeaders.CacheControl, "private, max-age=300")
+    // the process; the editor fetches it once per page load.
+    call.response.headers.append(HttpHeaders.CacheControl, "public, max-age=300")
     call.respondText(
       UI_BUILDER_JSON.encodeToString(UiBuilderDevicePresets.payload),
       ContentType.Application.Json,

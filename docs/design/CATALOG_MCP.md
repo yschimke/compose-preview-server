@@ -788,10 +788,10 @@ file resources. The contract is compose-ui-builder's
   base set to `<origin>/ui-builder/v/<bundle>/`, `<origin>` being the origin the MCP request
   arrived on (else the configured public origin), and the layout `focused`. Its content carries
   `_meta.ui.csp.resourceDomains` and `connectDomains` = `[<origin>]` and prefers fullscreen. It is
-  readable without a grant, like the viewer. The device-presets placeholder is left unfilled: that
-  route is read-gated and not CORS-open, so the shell falls back to no device menus and derives its
-  catalog base (`/api/ui-builder/v1/catalog-capabilities/`, public and CORS-open) from the asset
-  base.
+  readable without a grant, like the viewer. The device-presets placeholder is filled with
+  `<origin>/api/ui-builder/v1/device-presets`, which is public and CORS-open (compile-time data
+  naming no design), so the editor offers device menus; the shell derives its catalog base
+  (`/api/ui-builder/v1/catalog-capabilities/`, also public and CORS-open) from the same origin.
 - A save is one `POST /mcp`, so a design whose JSON passes the endpoint's 1 MiB request bound is
   refused with HTTP 413 before `ui_builder_editor_write` sees it; the editor shows that as a failed
   save, not `too-large`.

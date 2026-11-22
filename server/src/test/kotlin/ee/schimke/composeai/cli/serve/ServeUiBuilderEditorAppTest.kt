@@ -122,7 +122,7 @@ class ServeUiBuilderEditorAppTest {
   // ---- resource --------------------------------------------------------------------------------
 
   @Test
-  fun `the resource is the shell with its asset base and layout filled and the origin in the csp`() {
+  fun `the resource is the shell with its asset base, layout and device presets filled and the origin in the csp`() {
     val mcp = catalogMcp()
     val read =
       request(mcp, "resources/read", """{"uri":"$EDITOR_URI"}""", origin = ORIGIN)["result"]!!
@@ -137,6 +137,12 @@ class ServeUiBuilderEditorAppTest {
     assertTrue("""<base href="$ORIGIN$ASSET_PATH" />""" in html, html)
     assertTrue("""const assetBase = "$ORIGIN$ASSET_PATH";""" in html, html)
     assertTrue("""layout: "focused"""" in html, html)
+    // The device presets are the server's own public, CORS-open route, so the frame can read them.
+    assertFalse(ServeUiBuilderEditorApp.DEVICE_PRESETS_PLACEHOLDER in html, html)
+    assertTrue(
+      """const devicePresets = "$ORIGIN$UI_BUILDER_DEVICE_PRESETS_PATH";""" in html,
+      html,
+    )
     val meta = read["_meta"]!!.jsonObject
     val ui = meta["ui"]!!.jsonObject
     val csp = ui["csp"]!!.jsonObject
