@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.agentgrants.AgentGrantScope
 import ee.schimke.composeai.bundle.WatchFaceComplicationsPayload
 import ee.schimke.composeai.bundle.WatchFaceComplicationsProduct
 import ee.schimke.composeai.daemon.devices.DeviceDimensions
