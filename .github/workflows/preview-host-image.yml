@@ -34,6 +34,10 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      # The base every image here builds FROM (deploy/image/Dockerfile `RENDER_RUNTIME_IMAGE`), one
+      # reference for the wait below and all three builds.
+      RENDER_RUNTIME_IMAGE: ${{ vars.RENDER_RUNTIME_IMAGE || 'ghcr.io/yschimke/compose-preview-render-runtime' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -81,10 +85,12 @@ jobs:
       # Every image here builds FROM compose-preview-daemon's render runtime at the daemon version
       # the server links (deploy/image/Dockerfile `base`). That repository publishes it from its own
       # release workflow, so a daemon bump can reach this one before the image exists: wait for the
-      # tag rather than fail the build on it.
+      # tag rather than fail the build on it. The same reference is passed to every build below, so a
+      # fork waits for the image it actually builds FROM (the upstream one unless the
+      # `RENDER_RUNTIME_IMAGE` repository variable names its own).
       - name: Wait for the render-runtime base image
         env:
-          IMAGE: ghcr.io/${{ github.repository_owner }}/compose-preview-render-runtime:${{ steps.versions.outputs.daemon }}
+          IMAGE: ${{ env.RENDER_RUNTIME_IMAGE }}:${{ steps.versions.outputs.daemon }}
         run: |
           for i in $(seq 1 30); do
             if docker buildx imagetools inspect "${IMAGE}" >/dev/null 2>&1; then exit 0; fi
@@ -110,6 +116,7 @@ jobs:
             SERVER_VERSION=${{ steps.versions.outputs.server }}
             TOOLS_VERSION=${{ steps.versions.outputs.tools }}
             DAEMON_VERSION=${{ steps.versions.outputs.daemon }}
+            RENDER_RUNTIME_IMAGE=${{ env.RENDER_RUNTIME_IMAGE }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -130,6 +137,7 @@ jobs:
             SERVER_VERSION=${{ steps.versions.outputs.server }}
             TOOLS_VERSION=${{ steps.versions.outputs.tools }}
             DAEMON_VERSION=${{ steps.versions.outputs.daemon }}
+            RENDER_RUNTIME_IMAGE=${{ env.RENDER_RUNTIME_IMAGE }}
           push: true
           tags: ${{ steps.playground-meta.outputs.tags }}
           labels: ${{ steps.playground-meta.outputs.labels }}
@@ -150,6 +158,7 @@ jobs:
             SERVER_VERSION=${{ steps.versions.outputs.server }}
             TOOLS_VERSION=${{ steps.versions.outputs.tools }}
             DAEMON_VERSION=${{ steps.versions.outputs.daemon }}
+            RENDER_RUNTIME_IMAGE=${{ env.RENDER_RUNTIME_IMAGE }}
           push: true
           tags: ${{ steps.ui-builder-meta.outputs.tags }}
           labels: ${{ steps.ui-builder-meta.outputs.labels }}
