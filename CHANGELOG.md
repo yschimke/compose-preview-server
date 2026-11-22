@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.191.0](https://github.com/yschimke/compose-preview-server/compare/v3.190.0...v3.191.0) (2026-11-22)
+
+
+### Features
+
+* compile a Kobento design's .rc through Kobento's convert ([#2071](https://github.com/yschimke/compose-preview-server/issues/2071)) ([2e2b3fd](https://github.com/yschimke/compose-preview-server/commit/2e2b3fd897682b79e7649a0c0e7bb0ab86bd58bb))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.103.0 ([#2078](https://github.com/yschimke/compose-preview-server/issues/2078)) ([7f411d7](https://github.com/yschimke/compose-preview-server/commit/7f411d78a15aadff9d8ad65e64a73b72e34b22c4))
+* **deps:** update dependency ee.schimke.composeai:livery-server to v0.22.0 ([#2079](https://github.com/yschimke/compose-preview-server/issues/2079)) ([6772b92](https://github.com/yschimke/compose-preview-server/commit/6772b925f3b3ca11ade8597ecff08171d617c29a))
+* **deps:** update watchface-tools to v0.12.1 ([#2077](https://github.com/yschimke/compose-preview-server/issues/2077)) ([1edc2a5](https://github.com/yschimke/compose-preview-server/commit/1edc2a554c9ee41692f61ac25bec96d772361731))
+
 ## [3.190.0](https://github.com/yschimke/compose-preview-server/compare/v3.189.0...v3.190.0) (2026-11-21)
 
 
