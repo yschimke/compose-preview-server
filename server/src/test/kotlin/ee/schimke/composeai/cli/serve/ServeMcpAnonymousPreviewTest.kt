@@ -159,6 +159,35 @@ class ServeMcpAnonymousPreviewTest {
   }
 
   @Test
+  fun `a revoked token is challenged like no token at all`() {
+    // An OAuth client whose token lapsed must be told to sign in again; a 200 would strand it.
+    val server = start(isPublic = true)
+    val request =
+      requireNotNull(
+        lastGrants.openRequest(
+          label = "lapsed",
+          client = "test",
+          requestedScope = AgentGrantScope.LIVE,
+          requestedTtlSeconds = 600,
+        ),
+      )
+    val grant =
+      requireNotNull(
+        lastGrants.approve(
+          request.id,
+          approvedBy = "operator",
+          scope = AgentGrantScope.LIVE,
+          ttlSeconds = 600,
+        ),
+      )
+    assertTrue(lastGrants.revoke(grant.id, "test"))
+    val call = liveCall.replace(""""overrides":""", """"token":"${grant.token}","overrides":""")
+    val (code, body, challenge) = mcpWithChallenge(server, call)
+    assertEquals(401, code, body)
+    assertTrue(challenge.orEmpty().startsWith("Bearer "), challenge)
+  }
+
+  @Test
   fun `a presented token without live scope is declined as a tool error, not challenged`() {
     // A credential that was presented and found wanting would be declined again after a sign-in,
     // so it stays a 200 tool error rather than restarting the client's authorization.
