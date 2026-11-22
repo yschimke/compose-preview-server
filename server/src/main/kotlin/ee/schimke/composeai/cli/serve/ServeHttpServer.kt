@@ -10315,9 +10315,7 @@ class ServeHttpServer(
       // Only when nothing this server recognises was presented. A recognised credential that the
       // call still could not use (a box without the UI builder's authorization, a grant without the
       // capability) would be refused the same way after a sign-in, so it stays a tool error.
-      if (
-        challenge != null && !authorization.presentsRecognisedCredential(call, presentedToken)
-      ) {
+      if (challenge != null && !authorization.presentsRecognisedCredential(call, presentedToken)) {
         // Refused only for want of any credential: answer at the transport, before the body
         // becomes a 200 tool result. A `401` with `WWW-Authenticate` is the one signal an
         // OAuth-capable client (Claude's "sign in when needed", the MCP authorization spec) acts

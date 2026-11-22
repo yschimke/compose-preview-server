@@ -225,9 +225,9 @@ class ServeMachineAuthorization(
   /**
    * Whether [call] presents a credential this server recognises: the operator token, a live agent
    * grant (header, bearer, query or the in-band [presentedToken]) or a GitHub session. An expired,
-   * revoked or unknown token is not one. The MCP transport answers `401` only when this is false, so
-   * a client whose OAuth token lapsed is told to sign in again, and a refusal of a credential that
-   * was recognised but is not enough stays a tool error.
+   * revoked or unknown token is not one. The MCP transport answers `401` only when this is false,
+   * so a client whose OAuth token lapsed is told to sign in again, and a refusal of a credential
+   * that was recognised but is not enough stays a tool error.
    */
   fun presentsRecognisedCredential(call: ApplicationCall, presentedToken: String? = null): Boolean =
     hasOperatorToken(call) ||
