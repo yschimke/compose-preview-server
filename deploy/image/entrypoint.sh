@@ -937,10 +937,13 @@ if [[ -z "${SERVE_ACCEPT_IMAGES:-}" ]]; then
   fi
 fi
 
-# The playground role keeps the lane off but still names its repository: the session cookie
-# `preview` signs carries a fingerprint that includes it, and the playground rejects any cookie
-# whose fingerprint differs from its own. Naming it without --accept-images opens nothing.
-[[ "${SERVE_ROLE:-}" == "playground" && -n "${SERVE_IMAGE_UPLOAD_REPO:-}" ]] &&
+# The playground and ui-builder roles keep the lane off but still name its repository: the session
+# cookie `preview` signs carries a fingerprint that includes it, and each role rejects any cookie
+# whose fingerprint differs from its own. Without it, sign-in on the builder's own host (ui.coo.ee)
+# loops: `preview` hands the session over, `ui-builder` refuses it, and the editor signs in again.
+# Naming it without --accept-images opens nothing.
+[[ ("${SERVE_ROLE:-}" == "playground" || "${SERVE_ROLE:-}" == "ui-builder") &&
+  -n "${SERVE_IMAGE_UPLOAD_REPO:-}" && "${SERVE_ACCEPT_IMAGES:-}" != "1" && "${SERVE_ACCEPT_IMAGES:-}" != "true" ]] &&
   args+=(--image-upload-repo "${SERVE_IMAGE_UPLOAD_REPO}")
 
 image_lane_on=0

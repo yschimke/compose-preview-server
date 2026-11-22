@@ -91,6 +91,11 @@ grep -qx -- "ui-builder" "${work}/out" || note "--role value is not ui-builder"
 for forbidden in --engagement-file --web-push --accept-images; do
   has "${forbidden}" && note "the ui-builder role kept ${forbidden}"
 done
+# Same fingerprint rule as the playground: ui.coo.ee's sessions are minted by `preview` (the pinned
+# callback host) and read here, so without the image repository every one of them is refused and
+# sign-in on the builder host loops through the silent handoff.
+has --image-upload-repo ||
+  note "the ui-builder role drops --image-upload-repo, so every cookie preview signs is rejected"
 
 run SERVE_UI_BUILDER_EXTERNAL=1 || note "preview with SERVE_UI_BUILDER_EXTERNAL=1 did not start: $(tail -1 "${work}/log")"
 for forbidden in --ui-builder-dir --ui-builder-state-dir --ui-builder-catalogs; do
