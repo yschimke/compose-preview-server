@@ -16,9 +16,12 @@
 # carries only `bin/`, `lib/`, `wasm-ui/` and `ui-builder/`; both sidecars ride in compose-ai-tools' `:cli`
 # distribution, so `$APP_HOME/lib-daemon-desktop` resolves to nothing and the fallback is silent.
 #
-# So: for each backend, assert the directory is produced by a build stage, copied into the runtime
-# stage, and named by the sysprop that locates it. A stage that fetches a sidecar nobody points at,
-# or a sysprop naming a path nothing populates, both fail here.
+# So: for each backend, assert the directory reaches the runtime stage and is named by the sysprop
+# that locates it. A directory reaches it either by a `COPY --from` into the runtime stage, or, for
+# the render runtime's contract directories (compose-preview-daemon's
+# docs/daemon/RENDER_RUNTIME_IMAGE.md), by the runtime stage being built FROM that image. A stage
+# that fetches a sidecar nobody points at, or a sysprop naming a path nothing populates, both fail
+# here.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -62,10 +65,22 @@ sidecars=(
   "dwf-apk|lib-dex2jar|composeai.cli.libDex2jarDir|DwfApkDaemonBridge cannot translate APK DEX classes and watch-face catalogs fail to boot dwf-apk"
 )
 
+# What compose-preview-daemon's render runtime carries at these paths (its layout contract).
+base_dirs=" lib-daemon-android lib-daemon-desktop lib-renderer lib-skiko "
+
+# Whether the runtime stage is built FROM the render runtime: the `base` stage is that image and the
+# runtime stage is `FROM base`. Both lines, so a `base` renamed or rebased onto something else, with
+# the contract directories no longer under it, is not mistaken for one.
+from_render_runtime() {
+  grep -qE '^FROM \$\{RENDER_RUNTIME_IMAGE\}:\$\{DAEMON_VERSION\} AS base$' "${1}" &&
+    grep -qE '^FROM base AS runtime$' "${1}"
+}
+
 # The line that puts the directory into the RUNTIME stage. Anchored to `COPY --from=`, so a stage
 # that unpacks a sidecar into a builder and never carries it forward does not count as carried.
 runtime_copies() {
-  grep -qE "^COPY --from=[a-z0-9-]+ /opt/${1}( |$)" "${dockerfile}"
+  grep -qE "^COPY --from=[a-z0-9-]+ /opt/${1}( |$)" "${2:-${dockerfile}}" && return 0
+  [[ "${base_dirs}" == *" ${1} "* ]] && from_render_runtime "${2:-${dockerfile}}"
 }
 
 # The sysprop must name the SAME path the COPY lands on. A `-D…Dir=/opt/lib-daemon-desktop` beside a
@@ -78,7 +93,8 @@ sysprop_points_at() {
 for entry in "${sidecars[@]}"; do
   IFS='|' read -r backend dir sysprop consequence <<<"${entry}"
   runtime_copies "${dir}" || {
-    echo "FAIL: backend=${backend} needs /opt/${dir} in the runtime stage, but no COPY --from carries it." >&2
+    echo "FAIL: backend=${backend} needs /opt/${dir} in the runtime stage, but no COPY --from carries it" >&2
+    echo "      and it is not a render-runtime directory under a runtime stage built FROM that image." >&2
     echo "      Then ${consequence}." >&2
     exit 1
   }
@@ -105,5 +121,31 @@ if DOCKERFILE="${tmp}" grep -qE -- "-Dcomposeai.cli.libDaemonDesktopDir=/opt/lib
   exit 1
 fi
 echo "PASS: self-test — a sidecar copied but pointed elsewhere is caught"
+
+# Self-test: a contract directory is only "from the base" when the runtime stage really is built on
+# the render runtime. A plain temurin base that claims nothing must be caught.
+cat >"${tmp}" <<'BAD'
+FROM eclipse-temurin:21-jdk AS base
+FROM base AS runtime
+ENV JAVA_TOOL_OPTIONS="-Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android"
+BAD
+if runtime_copies lib-daemon-android "${tmp}"; then
+  echo "FAIL: self-test — a contract directory was assumed present without the render-runtime base." >&2
+  exit 1
+fi
+# …and a compose-ai-tools sidecar is never assumed to come from the base.
+cat >"${tmp}" <<'BAD'
+FROM ${RENDER_RUNTIME_IMAGE}:${DAEMON_VERSION} AS base
+FROM base AS runtime
+BAD
+if runtime_copies lib-rcjvm "${tmp}"; then
+  echo "FAIL: self-test — lib-rcjvm was assumed to come from the render runtime, which never carries it." >&2
+  exit 1
+fi
+runtime_copies lib-daemon-android "${tmp}" || {
+  echo "FAIL: self-test — a contract directory under the render-runtime base was not accepted." >&2
+  exit 1
+}
+echo "PASS: self-test — base-provided directories are accepted only under the render-runtime base"
 
 echo "PASS: all live-render sidecar checks"

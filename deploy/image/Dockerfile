@@ -17,30 +17,36 @@ ARG SERVER_VERSION=3.192.0
 # Required build input. The release workflow reads it from gradle/libs.versions.toml so the
 # server's runtime dependencies and its separately packaged daemon sidecars cannot drift.
 ARG TOOLS_VERSION
-# The compose-preview-daemon release supplying the daemon sidecars — the Android daemon zip and the
-# desktop daemon + renderer tarball. Those left compose-ai-tools in compose-ai-tools#5336, so
-# TOOLS_VERSION names only what still ships from there (`lib-rcjvm/`, `lib-bta/`). No default:
-# automatic releases read `composeai-preview-daemon` from gradle/libs.versions.toml.
+# The compose-preview-daemon release whose render-runtime image this builds FROM. That image carries
+# the daemon sidecars (the Android daemon, the desktop daemon + renderer and their Skiko native),
+# the Android SDK, the prefetched Robolectric runtime and the baked fonts; compose-preview-daemon
+# builds and publishes it on each release (its docs/daemon/RENDER_RUNTIME_IMAGE.md is the layout
+# contract this file relies on). TOOLS_VERSION names only what still ships from compose-ai-tools
+# (`lib-rcjvm/`, `lib-bta/`, `lib-simulator/`, `lib-dex2jar/`). No default: automatic releases read
+# `composeai-preview-daemon` from gradle/libs.versions.toml, so the sidecars always match the
+# daemon client the server links.
 ARG DAEMON_VERSION
+# Overridable for a fork that publishes its own base, or for a local build against a tag you built.
+ARG RENDER_RUNTIME_IMAGE=ghcr.io/yschimke/compose-preview-render-runtime
 
 # ---------------------------------------------------------------------------
-# Stage 0: base — JDK + Skiko's native deps (same rationale as the cloudrun image:
-# libGL via libgl1, Mesa software GLX/DRI, fonts; force software GL).
+# Stage 0: base — compose-preview-daemon's render runtime.
+#
+# Temurin 21 with Skiko's native deps and software GL (`LIBGL_ALWAYS_SOFTWARE=1`), the Noto font
+# fallbacks, `curl`/`git`/`jq`, a minimal Android SDK at /opt/android-sdk, the Android daemon at
+# /opt/lib-daemon-android, the desktop daemon + renderer at /opt/lib-daemon-desktop and
+# /opt/lib-renderer, the paired Skiko native at /opt/lib-skiko, Robolectric's instrumented
+# android-all under /root/.m2, and the baked downloadable-font cache at /opt/font-cache/fonts. These
+# used to be this file's `android-daemon`, `desktop-daemon` and `fonts` stages; they moved to the
+# repository that releases the daemons, so the UI-builder image can share them without this server.
+# `/opt/compose-preview-render-runtime.json` records the versions it was built with.
 #
 # `bubblewrap` is installed only in the `playground` target stage below, keeping the main
 # `compose-preview-host` image free of user-namespace sandbox tooling while sharing all
 # runtime layers between `host` and `playground`.
-#
-# `jq` is for the entrypoint's settings.json merge (see the settings.schema.json COPY below).
 # ---------------------------------------------------------------------------
-FROM eclipse-temurin:21.0.13.1_2-jdk AS base
-COPY scripts/install-linux-font-fallbacks.sh /usr/local/bin/install-linux-font-fallbacks
-RUN COMPOSEAI_CLEAN_APT=1 /usr/local/bin/install-linux-font-fallbacks \
-      libfreetype6 libfontconfig1 libgl1 libglx-mesa0 libgl1-mesa-dri \
-      curl ca-certificates git jq
-ENV LIBGL_ALWAYS_SOFTWARE=1 \
-    GRADLE_USER_HOME=/root/.gradle
-
+FROM ${RENDER_RUNTIME_IMAGE}:${DAEMON_VERSION} AS base
+ENV GRADLE_USER_HOME=/root/.gradle
 # ---------------------------------------------------------------------------
 # Stage 1: install the released standalone server.
 # ---------------------------------------------------------------------------
@@ -66,180 +72,30 @@ RUN set -eu; \
 ENV PATH="/opt/compose-preview-server/bin:${PATH}"
 
 # ---------------------------------------------------------------------------
-# Stage 1b (optional): Android/Wear live daemon — "do the slow work upfront".
+# Stage 1b: compose-ai-tools' sidecars, which the render runtime deliberately does not carry
+# (compose-preview-daemon may not reach compose-ai-tools).
 #
-# An Android/Wear catalog (wear-m3) renders live through a Robolectric daemon, NOT
-# the desktop Skiko one. That runtime ships from compose-preview-daemon (it's ~150-200 MB)
-# as `compose-preview-android-daemon-<ver>.zip`, and needs
-# `android.jar` from an Android SDK plus, on its FIRST render, Robolectric's
-# `android-all-instrumented` jar (~150 MB). All three are baked here so the runtime
-# never pays a download on the request path — combined with serve's startup
-# `prewarm()` (warmInBackground), the first live Wear browse is already warm.
+# Only `lib-rcjvm/` (the `cmp-jvm` Remote Compose player `RcJvmServerRenderer` spawns, classpath
+# `lib-rcjvm/*` + `lib-daemon-desktop/*`), `lib-bta/` (the Kotlin Build Tools jars
+# `PlaygroundBtaCompiler.fromInstall` compiles playground snippets with), and `lib-simulator/` +
+# `lib-dex2jar/` (the `dwf-apk` watch-face renderer, `DwfApkDaemonBridge`) are lifted from the CLI
+# tarball; the rest of it (the `compose-preview` launcher, its own `lib/`, the Wasm players) is not
+# this image's job, since the server is the entrypoint. Each is located the way the daemon sidecars
+# are, `-Dcomposeai.cli.<name>Dir`, else `$APP_HOME/<name>`. A missing one disables a lane silently
+# (a 503 on `?rcPlayer=cmp-jvm`, a playground admitted and then unavailable), hence the assertions.
 #
-# The runtime stage always carries these (this image fronts the Wear catalog); they
-# stay inert unless a served catalog actually resolves an android `liveBundle`, in
-# which case ServeBundleDaemon.materialize picks up the sidecar + android.jar here.
-FROM base AS android-daemon
-ARG DAEMON_VERSION
-ARG ANDROID_SDK_PLATFORM=android-36
-ARG ANDROID_BUILD_TOOLS=35.0.0
-COPY release-assets/ /tmp/release-assets/
-# Minimal Android SDK: cmdline-tools + one platform's android.jar + build-tools (aapt2 for
-# packaging dwf-apk watch-face bundle resources; no emulator).
-ENV ANDROID_HOME=/opt/android-sdk ANDROID_SDK_ROOT=/opt/android-sdk
-RUN set -eu; \
-    apt-get update && apt-get install -y --no-install-recommends unzip; \
-    rm -rf /var/lib/apt/lists/*; \
-    mkdir -p "${ANDROID_HOME}/cmdline-tools"; \
-    curl -fsSL -o /tmp/cmdtools.zip \
-      "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"; \
-    unzip -q /tmp/cmdtools.zip -d "${ANDROID_HOME}/cmdline-tools"; \
-    mv "${ANDROID_HOME}/cmdline-tools/cmdline-tools" "${ANDROID_HOME}/cmdline-tools/latest"; \
-    rm /tmp/cmdtools.zip; \
-    yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null; \
-    "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" \
-      "platforms;${ANDROID_SDK_PLATFORM}" \
-      "build-tools;${ANDROID_BUILD_TOOLS}" >/dev/null
-# Unpack the released Android daemon sidecar → /opt/lib-daemon-android. Automatic
-# releases use the locally staged archive; manual builds retain the public fallback.
-RUN set -eu; \
-    local="/tmp/release-assets/compose-preview-android-daemon-${DAEMON_VERSION}.zip"; \
-    if [ -f "$local" ]; then \
-      cp "$local" /tmp/android-daemon.zip; \
-    else \
-      curl -fsSL --retry 20 --retry-delay 30 --retry-all-errors -o /tmp/android-daemon.zip \
-        "https://github.com/yschimke/compose-preview-daemon/releases/download/v${DAEMON_VERSION}/compose-preview-android-daemon-${DAEMON_VERSION}.zip"; \
-    fi; \
-    unzip -q /tmp/android-daemon.zip -d /opt; \
-    rm /tmp/android-daemon.zip; \
-    test -d /opt/lib-daemon-android
-# Pre-fetch Robolectric's instrumented `android-all` runtime (~200 MB) into the local
-# Maven cache so the daemon's FIRST render doesn't download it (the runtime stage
-# carries this m2 subtree). This removes the download from the cold start — though the
-# dominant cold cost is the per-process Robolectric/Compose warm-up + first render,
-# which only serve's prewarm can move off the request path (a cached android-all still
-# leaves that). The coordinate is Robolectric-version + SDK specific (4.16.1 → SDK 35),
-# so it's an ARG: bump it when the bundled robolectric or ANDROID_SDK_PLATFORM changes
-# (it's the `android-all-instrumented-<ver>` dir that appears under ~/.m2 after a first
-# render). Best-effort — the daemon still fetches at runtime if this is stale/missing.
-# Verified against Robolectric 4.17-beta-2 (the version the 0.17.12+ daemon sidecar bundles):
-# `DefaultSdkProvider` still maps SDK 35 → android-all 15 / build 13954326 with
-# PREINSTRUMENTED_VERSION = 7, so this coordinate is a cache HIT and no runtime re-download
-# happens on a cold boot. Re-verify (jar constant `PREINSTRUMENTED_VERSION` + the SDK 35 row in
-# `DefaultSdkProvider`) whenever `robolectric` bumps in gradle/libs.versions.toml.
-ARG ANDROID_ALL_VERSION=15-robolectric-13954326-i7
-# Download to a temp path and move on success. A partial jar left at the real
-# `jarPath()` would be worse than no prefetch: Robolectric 4.16.1's MavenArtifactFetcher
-# skips its runtime download when the target exists, so a truncated file would boot the
-# daemon with a corrupt android-all instead of falling back. On any failure, delete the
-# temp file and let the daemon fetch at runtime.
-RUN set -eu; \
-    d="/root/.m2/repository/org/robolectric/android-all-instrumented/${ANDROID_ALL_VERSION}"; \
-    f="$d/android-all-instrumented-${ANDROID_ALL_VERSION}.jar"; \
-    mkdir -p "$d"; \
-    if curl -fsSL --retry 10 --retry-delay 15 --retry-all-errors -o "$f.tmp" \
-        "https://repo1.maven.org/maven2/org/robolectric/android-all-instrumented/${ANDROID_ALL_VERSION}/android-all-instrumented-${ANDROID_ALL_VERSION}.jar"; then \
-      mv "$f.tmp" "$f"; \
-    else \
-      rm -f "$f.tmp"; \
-      echo "warn: android-all prefetch failed (coordinate stale?); daemon will fetch at runtime"; \
-    fi
-
+# The `lib-bta/` assertions are two, not one, because `PlaygroundBtaCompiler.fromInstall` splits
+# that directory BY FILENAME: the Compose plugin jar rides the per-compile plugin classpath and
+# everything else loads into BTA's isolated classloader. A tarball carrying only one of those halves
+# satisfies a plain `ls *.jar` and still makes `fromInstall` return null.
+#
+# Local-first / public-fallback, like the server stage: an automatic release stages the tag's
+# tarball into the build context and can build before the draft GitHub Release is public.
 # ---------------------------------------------------------------------------
-# Stage 1c: the DESKTOP (Compose Multiplatform / Skiko) live daemon sidecar.
-#
-# The counterpart of stage 1b for `backend: "desktop"` bundles, and the reason
-# a production host served every desktop catalog as baked PNGs. `ServeBundleDaemon`'s
-# desktop launch (`desktopBundleDaemonLaunch`) needs two directories the Android path
-# has an explicit ARG for and this one had nothing at all: `lib-daemon-desktop/` (the
-# CMP daemon) and `lib-renderer/` (the Skiko render backend it links against). They are
-# located through `locateBundleSidecarJars`, i.e. `-Dcomposeai.cli.libDaemonDesktopDir` /
-# `-Dcomposeai.cli.libRendererDir`, else `$APP_HOME/<name>`.
-#
-# `$APP_HOME` here is `/opt/compose-preview-server`, and the released SERVER tarball
-# carries only `bin/`, `lib/`, `wasm-ui/`, `ui-builder/`, `ui-builder-components/` and
-# `rc-player-wasm/` (the CMP/Wasm player the entrypoint serves at `/rc-player-wasm/`, whose `fonts/`
-# the cmp-jvm lane also resolves through `ServeRcJvmFonts`) — those
-# sidecars used to be staged into compose-ai-tools' `:cli` distribution, which this image never
-# installed, and since compose-ai-tools#5336 they are compose-preview-daemon's
-# `compose-preview-desktop-daemon-<ver>.tar.gz`. So the lookup came back
-# empty, `desktopBundleDaemonLaunch` returned null, and every desktop catalog fell back
-# with `livebundle-unavailable: the live bundle daemon could not be started` — the Android
-# catalogs stayed live because stage 1b baked THEIR sidecar and pointed a sysprop at it.
-# Before the repo split (#3824) the server ran out of the CLI install dir and inherited
-# both for free; nothing replaced that when it moved.
-#
-# Two archives feed this stage: the desktop daemon tarball from compose-preview-daemon
-# (`lib-daemon-desktop/` + `lib-renderer/`, packed flat) and the compose-ai-tools CLI tarball,
-# from which only `lib-rcjvm/` and `lib-bta/` are lifted. The rest of the CLI tarball (the
-# `compose-preview` launcher, its own `lib/`, `lib-usage-psi/`, the Wasm players) is not
-# this image's job — the server is the entrypoint, not the CLI — and the downloads stay in
-# this stage, so the runtime grows by the sidecars rather than by whole archives.
-#
-# `lib-bta/` IS one of them, and was the exception that disabled a whole lane. It carries
-# `kotlin-build-tools-impl` + `kotlin-compiler-embeddable` + the Compose compiler plugin,
-# which is what `PlaygroundBtaCompiler.fromInstall` loads to compile a playground snippet:
-# the serve host has no Gradle plugin to supply them the way the editor daemon does. Absent
-# it, `openPlaygroundService` logged "playground compiler unavailable — no lib-bta/ in the
-# CLI install" and returned null, so a production host admitted the lane on every other count
-# (public host, repo-access-gated, sandbox preflighted) and then served no playground at
-# all. Same lookup as its neighbours: `-Dcomposeai.cli.libBtaDir`, else `$APP_HOME/lib-bta`.
-# It is the largest of the sidecars, and it buys the lane that compiles a stranger's Kotlin;
-# a box that does not run `--playground` pays for it in image size and nothing else.
-#
-# NONE of these sidecars carries a Skiko NATIVE. `skiko-awt` is bindings only; the
-# `libskiko-<os>-<arch>.so` lives in `skiko-awt-runtime-<os>-<arch>`, and compose-ai-tools'
-# `:cli` staging excludes all six of those on purpose ("excluded from CLI staging:
-# SkikoNativeProvision downloads only the current host's jar", `cli/build.gradle.kts`). That
-# provisioner is a CLI class this image never installs — the entrypoint here is the SERVER — so
-# nothing downloads it and `-Dcomposeai.cli.skikoProvisionerClass` is unset. Every lane that
-# boots Skiko then dies in `Library`'s static initialiser with
-#
-#     LibraryLoadException: Cannot find libskiko-linux-x64.so.sha256, proper native dependency
-#     missing
-#
-# which reaches the caller as a bare `ExceptionInInitializerError: null` — no cause, no stack —
-# so `?rcPlayer=cmp-jvm` answered `500 cmp-jvm render failed: ExceptionInInitializerError: null`
-# for every document in every catalog, and the compare wall's cmp-jvm column was a broken image.
-# Stage the host arch's native into `lib-skiko/`, which
-# `locateBundleSidecarJars("lib-daemon-desktop")` prepends to the desktop classpath when
-# `-Dcomposeai.cli.skikoDir` names it (`configuredSkikoJars`) — the same directory the cmp-jvm
-# subprocess joins — and a second native, for `lib-rcjvm/`'s own `skiko-awt`, into `lib-rcjvm/`
-# itself (see the RUN below for why one native cannot serve both).
-#
-# Each version is READ OFF the staged `skiko-awt-<version>.jar` rather than pinned here: a
-# mismatched pair is the split-Skiko `UnsatisfiedLinkError` `SkikoNativePairing` exists to warn
-# about, and a pin would drift the next time compose-ai-tools bumps Compose. A bundle built
-# against a NEWER Skiko still resolves its own pair through `CoordinateResolver` (the repair
-# coordinate), which needs the box's Maven Central egress — unchanged by this.
-#
-# Fetching it is a hard failure, unlike the `android-all` prefetch above: that one has a runtime
-# fetch to fall back on, this one has none, and an image built without it is exactly the silently
-# broken box this stanza documents.
-FROM base AS desktop-daemon
+FROM base AS tools-sidecars
 ARG TOOLS_VERSION
-ARG DAEMON_VERSION
 COPY release-assets/ /tmp/release-assets/
-# Same local-first / public-fallback shape as the server and Android stages: an automatic
-# release stages the tag's tarball into the build context and can build before the draft
-# GitHub Release is public; a manual build falls back to the published asset.
-#
-# The `lib-bta/` assertions are two, not one, because `PlaygroundBtaCompiler.fromInstall`
-# splits that directory BY FILENAME: the Compose plugin jar rides the per-compile plugin
-# classpath and everything else loads into BTA's isolated classloader. A tarball carrying
-# only one of those halves satisfies a plain `ls *.jar` and still makes `fromInstall`
-# return null — the exact silent-disable this stage now exists to prevent — so each half is
-# asserted on its own.
 RUN set -eu; \
-    local="/tmp/release-assets/compose-preview-desktop-daemon-${DAEMON_VERSION}.tar.gz"; \
-    if [ -f "$local" ]; then \
-      cp "$local" /tmp/desktop-daemon.tgz; \
-    else \
-      curl -fsSL --retry 20 --retry-delay 30 --retry-all-errors -o /tmp/desktop-daemon.tgz \
-        "https://github.com/yschimke/compose-preview-daemon/releases/download/v${DAEMON_VERSION}/compose-preview-desktop-daemon-${DAEMON_VERSION}.tar.gz"; \
-    fi; \
-    tar -xzf /tmp/desktop-daemon.tgz -C /opt; \
-    rm /tmp/desktop-daemon.tgz; \
     local="/tmp/release-assets/compose-preview-${TOOLS_VERSION}.tar.gz"; \
     if [ -f "$local" ]; then \
       cp "$local" /tmp/cli.tgz; \
@@ -250,14 +106,10 @@ RUN set -eu; \
     tar -xzf /tmp/cli.tgz -C /opt --strip-components=1 --wildcards \
       "*/lib-rcjvm" "*/lib-bta" "*/lib-simulator" "*/lib-dex2jar"; \
     rm /tmp/cli.tgz; \
-    test -d /opt/lib-daemon-desktop; \
-    test -d /opt/lib-renderer; \
     test -d /opt/lib-rcjvm; \
     test -d /opt/lib-bta; \
     test -d /opt/lib-simulator; \
     test -d /opt/lib-dex2jar; \
-    ls /opt/lib-daemon-desktop/*.jar >/dev/null; \
-    ls /opt/lib-renderer/*.jar >/dev/null; \
     ls /opt/lib-rcjvm/*.jar >/dev/null; \
     ls /opt/lib-bta/*.jar >/dev/null; \
     ls /opt/lib-simulator/*.jar >/dev/null; \
@@ -265,20 +117,17 @@ RUN set -eu; \
     ls /opt/lib-bta/kotlin-compose-compiler-plugin-embeddable*.jar >/dev/null; \
     test "$(ls /opt/lib-bta/*.jar | grep -cv kotlin-compose-compiler-plugin-embeddable)" -gt 0
 
-# The host's Skiko native, paired by version with the `skiko-awt` each JVM actually loads. See the
-# stage header for why nothing else in this image supplies it.
+# `lib-rcjvm/`'s own Skiko native, paired by version with the `skiko-awt` it carries.
 #
-# TWO natives, because there are two Skiko versions. `lib-daemon-desktop/` (compose-preview-daemon)
-# and `lib-rcjvm/` (compose-ai-tools) are built by different releases and need not agree — on
-# 3.125.0 they were 0.144.6 and 0.150.1. The cmp-jvm classpath is `lib-rcjvm/*` FIRST, then
-# `lib-skiko/`, then `lib-daemon-desktop/*`, so it binds lib-rcjvm's `skiko-awt` and, with only the
-# lib-skiko native staged, loaded the older `libskiko`: every call into a JNI symbol newer than that
-# (`ParagraphKt._nGetUnresolvedCodepointsCount`, i.e. any text) threw `UnsatisfiedLinkError`. So
-# lib-skiko/ keeps the desktop daemon's native and lib-rcjvm/ gets its own, which precedes it on
-# the cmp-jvm classpath. Each process loads the native for its own bindings, whatever the two
-# releases pin, and `check-skiko-pairing.sh` fails the build if a classpath ever pairs otherwise.
-# A directory with no `skiko-awt` gets no native here; the check is what decides whether that is
-# fine (lib-rcjvm then binds lib-daemon-desktop's pair) or fatal (the desktop daemon binds nothing).
+# TWO Skiko versions meet on the cmp-jvm classpath: `lib-daemon-desktop/` (compose-preview-daemon,
+# whose native the base already stages in /opt/lib-skiko) and `lib-rcjvm/` (compose-ai-tools), built
+# by different releases — on 3.125.0 they were 0.144.6 and 0.150.1. The cmp-jvm classpath is
+# `lib-rcjvm/*` FIRST, so it binds lib-rcjvm's `skiko-awt`; with only the older native, every call
+# into a newer JNI symbol (`ParagraphKt._nGetUnresolvedCodepointsCount`, i.e. any text) threw
+# `UnsatisfiedLinkError`. So lib-rcjvm/ gets its own native, read off its jar rather than pinned,
+# and `check-skiko-pairing.sh` fails the build if any classpath under /opt pairs otherwise. A
+# lib-rcjvm with no `skiko-awt` gets no native; the check decides whether that is fine. Fetching it
+# is a hard failure: there is no runtime fallback, and an image without it is silently broken.
 COPY check-skiko-pairing.sh /usr/local/bin/check-skiko-pairing.sh
 RUN set -eu; \
     case "$(dpkg --print-architecture)" in \
@@ -296,41 +145,9 @@ RUN set -eu; \
         "https://repo1.maven.org/maven2/org/jetbrains/skiko/skiko-awt-runtime-${platform}/${version}/${nativeJar}"; \
       jar tf "$2/${nativeJar}" | grep -qx "libskiko-${platform}.so"; \
     }; \
-    stage_native /opt/lib-daemon-desktop /opt/lib-skiko; \
     stage_native /opt/lib-rcjvm /opt/lib-rcjvm; \
     chmod +x /usr/local/bin/check-skiko-pairing.sh; \
     check-skiko-pairing.sh /opt "$platform"
-
-# ---------------------------------------------------------------------------
-# Stage 1b: prewarm the downloadable-font cache.
-#
-# The Android renderer resolves `Font(DeviceFontFamilyName("roboto-flex"))` — Wear Material3's type
-# scale — by downloading the Google Fonts TTF and seeding it into Robolectric's system font map
-# (`PixelSystemFontAliases`). Unresolved slugs fall back to plain Roboto SILENTLY, which is what
-# made the live daemon's text differ from the baked catalog PNG on the preview host. Baking the
-# faces removes the runtime download entirely: no first-render latency, no dependency on egress to
-# fonts.googleapis.com, and the same bytes CI rendered the PNGs with.
-#
-# LICENSING — this stage REDISTRIBUTES font binaries in a published image, which is a different act
-# from the runtime fetch it replaces. All but one family below are in the google/fonts open corpus
-# under OFL-1.1 or Apache-2.0, which permit redistribution. `Google Sans Flex` is the exception: the
-# CSS2 endpoint serves it, but it is in no license directory of that repo, so its terms can't be
-# read off the corpus. It is baked here because the project owner confirmed redistribution is
-# cleared for this deployment — if you fork this image, that clearance is NOT inherited, so re-check
-# it or drop the family from FONT_PREWARM_FAMILIES. Dropping it only forgoes the baked copy; the
-# renderer still fetches it at runtime, exactly as every family did before this stage existed.
-#
-# The list mirrors `PixelSystemFontAliases.ALIASES`; extend both together.
-# ---------------------------------------------------------------------------
-FROM base AS fonts
-COPY prewarm-fonts.sh /usr/local/bin/prewarm-fonts.sh
-ARG FONT_PREWARM_FAMILIES="Roboto|Roboto Flex|Google Sans Flex|Noto Sans|Noto Serif|Noto Sans Mono|Cutive Mono|Coming Soon|Dancing Script|Carrois Gothic SC"
-# `IFS='|'` + an unquoted expansion is how the pipe-separated list becomes one argument per family;
-# family names contain spaces, so splitting on whitespace would be wrong.
-RUN set -eu; \
-    chmod +x /usr/local/bin/prewarm-fonts.sh; \
-    IFS='|'; \
-    /usr/local/bin/prewarm-fonts.sh /opt/font-cache/fonts ${FONT_PREWARM_FAMILIES}
 
 # ---------------------------------------------------------------------------
 # Stage 2: runtime.
@@ -339,16 +156,9 @@ FROM base AS runtime
 ARG SERVER_VERSION
 COPY --from=server "/opt/compose-preview-server-${SERVER_VERSION}" "/opt/compose-preview-server-${SERVER_VERSION}"
 RUN ln -s "/opt/compose-preview-server-${SERVER_VERSION}" /opt/compose-preview-server
-# Android/Wear live-render bits (see the android-daemon stage): the Robolectric
-# daemon sidecar + a minimal Android SDK (android.jar). Carried so a served Wear
-# catalog with an android liveBundle renders live per-variant.
-COPY --from=android-daemon /opt/lib-daemon-android /opt/lib-daemon-android
-COPY --from=android-daemon /opt/android-sdk /opt/android-sdk
-# Desktop (CMP/Skiko) live-render bits (see the desktop-daemon stage): the daemon +
-# renderer sidecars a `backend: "desktop"` liveBundle launches through. Inert until a
-# served catalog resolves one, exactly like the Android pair above.
-COPY --from=desktop-daemon /opt/lib-daemon-desktop /opt/lib-daemon-desktop
-COPY --from=desktop-daemon /opt/lib-renderer /opt/lib-renderer
+# The Android daemon + Android SDK and the desktop daemon + renderer come from the base (the render
+# runtime): /opt/lib-daemon-android, /opt/android-sdk, /opt/lib-daemon-desktop, /opt/lib-renderer
+# and /opt/lib-skiko. Inert until a served catalog resolves a liveBundle for that backend.
 # …plus the one jar the daemon's renderer tarball does not carry and the server's own `lib-renderer/`
 # does: `window-core-desktop`. `-Dcomposeai.cli.libRendererDir` points the lookup at THIS directory,
 # so the copy `server/build.gradle.kts` adds to the server distribution for #812 never reached the
@@ -366,11 +176,9 @@ COPY --from=server "/opt/compose-preview-server-${SERVER_VERSION}/lib-renderer/w
 # Only half of that pair was here, so every `?rcPlayer=cmp-jvm` on the deployed site answered 503
 # with "needs lib-rcjvm and lib-daemon-desktop on the CLI install" — measured against
 # a production host's /remote-m3 — and the compare wall could never show that player.
-COPY --from=desktop-daemon /opt/lib-rcjvm /opt/lib-rcjvm
-# …and the Skiko native both of those link against. Neither sidecar ships one — see the
-# desktop-daemon stage — so without this directory every Skiko-backed lane on this box dies in a
-# static initialiser and `?rcPlayer=cmp-jvm` answers 500 for every document.
-COPY --from=desktop-daemon /opt/lib-skiko /opt/lib-skiko
+COPY --from=tools-sidecars /opt/lib-rcjvm /opt/lib-rcjvm
+# (The Skiko native `lib-daemon-desktop/` links against is the base's /opt/lib-skiko; lib-rcjvm's
+# own is inside the directory just copied — see the tools-sidecars stage.)
 # …and the native for the desktop player daemon's own bindings. The server tarball ships
 # `lib-rc-player-desktop/`: the CMP Remote Compose player and the Compose Multiplatform line it needs,
 # laid ahead of `lib-daemon-desktop/` + `lib-renderer/` so `ServeRcPlayerDaemon.desktopSubprocess` can
@@ -400,12 +208,12 @@ RUN set -eu; \
 # …and the Kotlin Build Tools API jars the PLAYGROUND compiles snippets with. Unlike the
 # sidecars above it backs no render lane: without it `--playground` is admitted and then
 # disabled at the last step, which is how a production host ran with a playground nobody could
-# open. See the desktop-daemon stage for why it is lifted here.
-COPY --from=desktop-daemon /opt/lib-bta /opt/lib-bta
+# open. See the tools-sidecars stage for why it is lifted here.
+COPY --from=tools-sidecars /opt/lib-bta /opt/lib-bta
 # …and the simulator host + dex2jar sidecars (`LaunchMain`) that back the `dwf-apk` watch-face
 # renderer daemon (`DwfApkDaemonBridge`).
-COPY --from=desktop-daemon /opt/lib-simulator /opt/lib-simulator
-COPY --from=desktop-daemon /opt/lib-dex2jar /opt/lib-dex2jar
+COPY --from=tools-sidecars /opt/lib-simulator /opt/lib-simulator
+COPY --from=tools-sidecars /opt/lib-dex2jar /opt/lib-dex2jar
 # JAVA_TOOL_OPTIONS (inherited by the spawned daemon JVM too) points the CLI at the
 # unpacked Android AND desktop daemon sidecars, warms catalog daemons in the background so the
 # HTTP listener can come up before every live catalog finishes, and lifts BOTH cold-start budgets so a cold
@@ -461,11 +269,11 @@ ENV PATH="/opt/compose-preview-server/bin:${PATH}" \
 
 WORKDIR /project
 # `/project` intentionally stays empty: entrypoint.sh starts module-less serve and hosts
-# published catalogs/bundles. Seed only the pre-fetched Robolectric `android-all` runtime into
-# Maven's cache, so the Android daemon's first render skips the ~200 MB download. Released
-# compose-preview dependencies continue to resolve from their configured remote repositories;
-# this image must not force the auto-injected Gradle build to trust arbitrary Maven Local state.
-COPY --from=android-daemon /root/.m2/repository/org/robolectric /root/.m2/repository/org/robolectric
+# published catalogs/bundles. The only thing in Maven's local cache is the base's pre-fetched
+# Robolectric `android-all` runtime, so the Android daemon's first render skips the ~200 MB
+# download. Released compose-preview dependencies continue to resolve from their configured remote
+# repositories; this image must not force the auto-injected Gradle build to trust arbitrary Maven
+# Local state.
 
 # Bake the branch-trust store so a public deploy badges the published
 # design-artifacts catalogs as Trusted(Branch) out of the box (SERVE_TRUST_STORE
@@ -487,12 +295,11 @@ COPY settings.schema.json /etc/compose-preview/settings.schema.json
 # host without jq can run it from here.
 COPY env-to-settings.sh /usr/local/bin/env-to-settings.sh
 
-# Baked downloadable-font cache (see the `fonts` stage). Deliberately NOT written straight to
+# The baked downloadable-font cache is the base's /opt/font-cache/fonts. Deliberately NOT straight in
 # `~/.cache/composeai/fonts`: that path is a named volume (docker-compose.yml `preview_cache`), and
 # a volume only inherits image content when it is FIRST created — an existing box that has been
 # running since before this change would never see the baked faces. entrypoint.sh copies the
 # missing ones across on every boot instead, which covers both fresh and long-lived volumes.
-COPY --from=fonts /opt/font-cache/fonts /opt/font-cache/fonts
 
 # The same site-hostname scanner the caddy image carries. Here it answers one question at boot:
 # does this deployment serve any top-level site? — which decides whether the GitHub auth cookies

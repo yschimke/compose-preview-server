@@ -11,7 +11,9 @@
 # breaker then disables the lane for every design on the box.
 #
 # So: assert the runtime stage copies both jars from the server stage into /opt/lib-renderer, AFTER
-# the directory itself is copied (a later `COPY … /opt/lib-renderer` would replace it).
+# the directory itself is copied (a later `COPY … /opt/lib-renderer` would replace it). When the
+# runtime stage is built FROM compose-preview-daemon's render runtime, the directory is already in
+# the base, so the jars only have to be copied and no later COPY may replace the directory.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -21,7 +23,11 @@ check() {
   local file="$1"
   local dir_line jar_line variant
   dir_line="$(grep -nE '^COPY --from=[a-z0-9-]+ /opt/lib-renderer /opt/lib-renderer$' "${file}" | tail -n 1 | cut -d: -f1)"
-  [[ -n "${dir_line}" ]] || return 1
+  if [[ -z "${dir_line}" ]]; then
+    grep -qE '^FROM \$\{RENDER_RUNTIME_IMAGE\}:\$\{DAEMON_VERSION\} AS base$' "${file}" &&
+      grep -qE '^FROM base AS runtime$' "${file}" || return 1
+    dir_line=0
+  fi
   for variant in desktop jvm; do
     jar_line="$(grep -nE "^COPY --from=server \"?/opt/compose-preview-server-\\\$\\{SERVER_VERSION\\}/lib-renderer/window-core-${variant}-\\*\\.jar\"? /opt/lib-renderer/\$" "${file}" | tail -n 1 | cut -d: -f1)"
     [[ -n "${jar_line}" && "${jar_line}" -gt "${dir_line}" ]] || return 1
@@ -62,3 +68,16 @@ if check "${tmp}"; then
   exit 1
 fi
 echo "PASS: self-test — a missing window-core-jvm copy is caught"
+
+# Self-test: with no directory COPY, the jars alone pass only under the render-runtime base.
+cat >"${tmp}" <<'BAD'
+FROM eclipse-temurin:21-jdk AS base
+FROM base AS runtime
+COPY --from=server "/opt/compose-preview-server-${SERVER_VERSION}/lib-renderer/window-core-desktop-*.jar" /opt/lib-renderer/
+COPY --from=server "/opt/compose-preview-server-${SERVER_VERSION}/lib-renderer/window-core-jvm-*.jar" /opt/lib-renderer/
+BAD
+if check "${tmp}"; then
+  echo "FAIL: self-test — jars with no /opt/lib-renderer under them were not caught." >&2
+  exit 1
+fi
+echo "PASS: self-test — jars need a directory, copied or from the render-runtime base"

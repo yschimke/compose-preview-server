@@ -1467,7 +1467,8 @@ Compose. Catalogs whose modes this container can't render — Android ones witho
 `lib-daemon-android` sidecar — are simply not listed.
 
 **This image already carries the Android bits**, so that exclusion does not apply here: the
-Dockerfile's `android-daemon` stage bakes the Robolectric sidecar at `/opt/lib-daemon-android`
+render-runtime base it is built `FROM` (compose-preview-daemon's
+`ghcr.io/yschimke/compose-preview-render-runtime`) bakes the Robolectric sidecar at `/opt/lib-daemon-android`
 (pointed at by `-Dcomposeai.cli.libDaemonAndroidDir` in `JAVA_TOOL_OPTIONS`) and a minimal Android
 SDK at `/opt/android-sdk` (`ANDROID_HOME`), because the Wear catalog's *live* tier needs exactly the
 same two things. Turning the selector on is therefore all it takes for an Android-backed catalog
@@ -1800,7 +1801,8 @@ first-render download, works with no egress to `fonts.googleapis.com`, and pins 
 the same bytes CI rendered the catalog PNGs with — the live lane and the baked PNG of one preview
 should never show two different typefaces.
 
-- The `fonts` build stage runs `prewarm-fonts.sh` into `/opt/font-cache/fonts`, mirroring
+- The render-runtime base image (built by compose-preview-daemon, which now owns the family list
+  and `prewarm-fonts.sh`) runs `prewarm-fonts.sh` into `/opt/font-cache/fonts`, mirroring
   `GoogleFontInterceptor`'s cache filenames and CSS2 query exactly. A family that won't resolve
   **fails the build** — a silently font-less image would just reintroduce the drift.
 - `entrypoint.sh` installs the baked faces into `~/.cache/composeai/fonts` on every boot. It has to
@@ -1817,7 +1819,9 @@ should never show two different typefaces.
   because the project owner confirmed redistribution is cleared for this deployment. **A fork does
   not inherit that clearance** — re-check it, or drop the family from `FONT_PREWARM_FAMILIES`.
   Dropping it only forgoes the baked copy; the renderer still fetches it at runtime, as every family
-  did before this stage existed. Override `FONT_PREWARM_FAMILIES` at build time to change the set.
+  did before the faces were baked. `FONT_PREWARM_FAMILIES` is now a build argument of the base
+  image in compose-preview-daemon; a fork changes the set there, or builds its own base and points
+  this image at it with `--build-arg RENDER_RUNTIME_IMAGE=…`.
 
 ## Notes / caveats
 

@@ -141,6 +141,9 @@ echo "PASS: compose leaves every managed setting for settings.json to fill"
 # The image carries what the merge needs.
 grep -q '^COPY settings.schema.json /etc/compose-preview/settings.schema.json$' "${here}/Dockerfile" ||
   fail "the Dockerfile does not bake the schema the entrypoint reads"
+# jq comes from the render-runtime base, whose contract installs it (compose-preview-daemon
+# docs/daemon/RENDER_RUNTIME_IMAGE.md); a Dockerfile not built on that base must install it itself.
 grep -qE '^\s+curl ca-certificates git jq$' "${here}/Dockerfile" ||
-  fail "the Dockerfile does not install jq, which the merge needs"
+  grep -qE '^FROM \$\{RENDER_RUNTIME_IMAGE\}:\$\{DAEMON_VERSION\} AS base$' "${here}/Dockerfile" ||
+  fail "the Dockerfile neither installs jq nor builds on the render runtime, and the merge needs jq"
 echo "PASS: the image bakes the schema and jq"
