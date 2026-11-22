@@ -792,6 +792,9 @@ file resources. The contract is compose-ui-builder's
   route is read-gated and not CORS-open, so the shell falls back to no device menus and derives its
   catalog base (`/api/ui-builder/v1/catalog-capabilities/`, public and CORS-open) from the asset
   base.
+- A save is one `POST /mcp`, so a design whose JSON passes the endpoint's 1 MiB request bound is
+  refused with HTTP 413 before `ui_builder_editor_write` sees it; the editor shows that as a failed
+  save, not `too-large`.
 - Every static file of the archive is served with `Access-Control-Allow-Origin: *` (the sandbox
   frame's origin is the host's, e.g. `*.claudemcpcontent.com`), `application/wasm` for `.wasm`, and
   the versioned prefix's immutable caching.
