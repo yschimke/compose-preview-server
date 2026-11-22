@@ -324,7 +324,7 @@ composeai-preview-daemon = "3.29.0"
 # design can declare the host inputs its host logic sets.
 # 3.45.0 adds the Kobento component JSON export format (`kobento-json`) and its
 # `ExportCapabilitiesV1.kobentoJson` gate (contracts #232).
-composeai-contracts = "3.45.0"
+composeai-contracts = "3.46.0"
 
 # The extracted UI builder (yschimke/compose-ui-builder), resolved from its RELEASES. Three jars
 # and a BOM on Maven Central, and the editor archive as a GitHub release asset reached through the
