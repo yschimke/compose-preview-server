@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.composeai.agentgrants.AgentGrantScope
 import ee.schimke.composeai.bundle.WatchFaceComplicationsPayload
 import ee.schimke.composeai.bundle.WatchFaceComplicationsProduct
 import ee.schimke.composeai.daemon.devices.DeviceDimensions
@@ -62,6 +63,11 @@ class ServeCatalogMcp(
    * failing.
    */
   private val uiBuilder: ServeUiBuilderMcp? = null,
+  /**
+   * The UI Builder editor as an MCP App ([ServeUiBuilderEditorApp]), or null: absent unless the
+   * served archive's shell edits server designs (`mcpApp >= 2`). Needs [uiBuilder] as well.
+   */
+  private val uiBuilderEditor: ServeUiBuilderEditorApp? = null,
   /** Whether this box can also compile a design natively; see [ServeUiBuilderMcp.RENDER_NATIVE]. */
   private val uiBuilderNative: Boolean = false,
   /**
@@ -107,7 +113,21 @@ class ServeCatalogMcp(
       ) = size > MAX_VIEW_IMAGES
     }
 
-  data class Reply(val body: JsonObject?, val accepted: Boolean = false)
+  /**
+   * [challenge] is set when the call was refused only because no credential was presented at all.
+   * The body still carries the refusal as a tool (or JSON-RPC) error, so an in-process caller reads
+   * the same answer; the HTTP transport turns it into a `401` with a `WWW-Authenticate` challenge,
+   * which is the only signal that makes an OAuth-capable client (Claude's "sign in when needed")
+   * run its authorization flow and retry the call.
+   */
+  data class Reply(
+    val body: JsonObject?,
+    val accepted: Boolean = false,
+    val challenge: AuthorizationChallenge? = null,
+  )
+
+  /** Why a call needs a credential: the scope or capability it lacked, and the refusal's text. */
+  data class AuthorizationChallenge(val requiredScope: String, val message: String)
 
   /**
    * Request-scoped client interaction, only on a negotiated Streamable HTTP session. Stateless
@@ -250,6 +270,11 @@ class ServeCatalogMcp(
       { _, _ ->
         UiBuilderAuthorizationDecision.Missing
       },
+    /**
+     * This server's origin as the caller reached it (scheme and authority), for the editor app's
+     * asset base; null falls back to [publicOrigin].
+     */
+    requestOrigin: String? = null,
     liveAuthorization: (String?) -> ServeMachineAuthorization.Decision,
   ): Reply {
     val id = request["id"]
@@ -262,6 +287,7 @@ class ServeCatalogMcp(
     if (id == null) return Reply(body = null, accepted = true)
     val params = request["params"] as? JsonObject ?: JsonObject(emptyMap())
 
+    var challenge: AuthorizationChallenge? = null
     val result =
       try {
         when (method) {
@@ -289,13 +315,22 @@ class ServeCatalogMcp(
                       put("retryAfterSeconds", EXPORT_RETRY_AFTER_SECONDS)
                     }),
               )
+            } catch (e: CredentialRequiredException) {
+              challenge = AuthorizationChallenge(e.requiredScope, e.message)
+              toolError(e.message)
             } catch (e: McpRequestException) {
               toolError(e.message ?: "Tool call failed")
             }
           "resources/list" -> listResources()
-          "resources/read" -> readResource(params, presentedToken(request), liveAuthorization)
+          "resources/read" ->
+            readResource(params, presentedToken(request), requestOrigin, liveAuthorization)
           else -> return Reply(error(id, METHOD_NOT_FOUND, "Unknown method '$method'"))
         }
+      } catch (e: CredentialRequiredException) {
+        return Reply(
+          error(id, INVALID_PARAMS, e.message),
+          challenge = AuthorizationChallenge(e.requiredScope, e.message),
+        )
       } catch (e: McpRequestException) {
         return Reply(error(id, INVALID_PARAMS, e.message ?: "Invalid parameters"))
       } catch (e: UrlElicitationRequired) {
@@ -303,7 +338,7 @@ class ServeCatalogMcp(
       } catch (e: Exception) {
         return Reply(error(id, INTERNAL_ERROR, e.message ?: "Catalog MCP request failed"))
       }
-    return Reply(success(id, result))
+    return Reply(success(id, result), challenge = challenge)
   }
 
   private fun initialize(params: JsonObject): JsonObject {
@@ -343,7 +378,9 @@ class ServeCatalogMcp(
           "X-Compose-Preview-Token header if you control your own headers; if you cannot set " +
           "them — an MCP client fixes its headers when it connects — pass the token as the " +
           "'token' argument of each gated tool instead, and access approved during this session " +
-          "works in it." +
+          "works in it. A gated call made with no credential at all is answered HTTP 401 with a " +
+          "WWW-Authenticate challenge, so a client that supports MCP OAuth signs in and retries " +
+          "it instead." +
           originInstruction() +
           accessElicitationInstruction(params) +
           " Export and native-render lanes each admit at most four concurrent requests per server, " +
@@ -798,6 +835,8 @@ class ServeCatalogMcp(
           it.supportsWatchFaceValidation,
         ),
       )
+      // The editor MCP App, only where the archive's shell edits server designs (mcpApp 2+).
+      if (uiBuilderEditor != null) addAll(ServeUiBuilderEditorApp.declarations(::tool))
     }
     add(
       tool(
@@ -1044,6 +1083,9 @@ class ServeCatalogMcp(
     }.let { withStructuredContent(name, it) }
   }
 
+  /** The editor app, where both it and the builder exist. */
+  private fun editorApp(): ServeUiBuilderEditorApp? = uiBuilderEditor?.takeIf { uiBuilder != null }
+
   private suspend fun listResources(): JsonObject {
     val resources = buildJsonArray {
       add(
@@ -1059,6 +1101,7 @@ class ServeCatalogMcp(
         },
       )
       add(ServeLibraryMcp.resourceDescriptor())
+      editorApp()?.let { add(it.resourceDescriptor()) }
       // UI-builder schemas, static and public, so an agent has them before its first call rather
       // than after a refusal.
       if (uiBuilder != null) {
@@ -1093,9 +1136,19 @@ class ServeCatalogMcp(
   private suspend fun readResource(
     params: JsonObject,
     presentedToken: String?,
+    requestOrigin: String?,
     liveAuthorization: (String?) -> ServeMachineAuthorization.Decision,
   ): JsonObject {
     val uri = params.requiredString("uri")
+    if (uri == ServeUiBuilderEditorApp.RESOURCE_URI) {
+      val editor =
+        editorApp() ?: throw McpRequestException("this server does not serve the editor app")
+      val origin =
+        requestOrigin
+          ?: publicOrigin()
+          ?: throw McpRequestException("this server does not know the origin it is reached at")
+      return editor.readResource(origin)
+    }
     UiBuilderJsonSchemas.byUri(uri)
       ?.takeIf { uiBuilder != null }
       ?.let { schema ->
@@ -3173,7 +3226,8 @@ class ServeCatalogMcp(
     when (val decision = check()) {
       is ServeMachineAuthorization.Decision.Authorized -> Unit
       ServeMachineAuthorization.Decision.Missing ->
-        throw McpRequestException(
+        throw CredentialRequiredException(
+          AgentGrantScope.LIVE.wire,
           "live grant scope is required for a made-to-order render. To look at a published " +
             "render, read its resource instead (resources/read on the uri from " +
             "catalog_list_previews), which needs only preview scope. For a live render, call " +
@@ -3186,7 +3240,8 @@ class ServeCatalogMcp(
   /**
    * One UI-builder tool, or null for a catalog-surface name. Authorized here because the credential
    * belongs to the transport's call, like the HTTP routes ([TOKEN_ARGUMENT] is resolved the same
-   * way). A missing grant is a tool error, not a transport status.
+   * way). A grant that is presented but lacks the capability is a tool error; one that is absent
+   * altogether is a [CredentialRequiredException], which the HTTP transport answers with `401`.
    */
   private suspend fun uiBuilderTool(
     name: String,
@@ -3196,12 +3251,15 @@ class ServeCatalogMcp(
     clientInteraction: ClientInteraction,
   ): JsonObject? {
     val builder = uiBuilder ?: return null
+    // The editor app's tools exist only with the app; otherwise they are unknown names.
+    if (name in ServeUiBuilderEditorTools.TOOL_NAMES && uiBuilderEditor == null) return null
     val capability = builder.capabilityFor(name) ?: return null
     val actor =
       when (val decision = authorize(capability, presentedToken)) {
         is UiBuilderAuthorizationDecision.Authorized -> decision.actor
         UiBuilderAuthorizationDecision.Missing ->
-          return toolError(
+          throw CredentialRequiredException(
+            capability.agentGrantCapability().wire,
             "this tool needs a UI-builder ${capability.name.lowercase()} grant; none was " +
               "presented. Call request_access with capability " +
               "'${capability.agentGrantCapability().wire}', have a human approve it, then pass the " +
@@ -3217,13 +3275,17 @@ class ServeCatalogMcp(
           )
       }
     builder.additionalCapabilityFor(name, args)?.let { additional ->
-      if (authorize(additional, presentedToken) !is UiBuilderAuthorizationDecision.Authorized) {
-        return toolError(
+      val decision = authorize(additional, presentedToken)
+      if (decision !is UiBuilderAuthorizationDecision.Authorized) {
+        val message =
           "this call also needs a UI-builder ${additional.name.lowercase()} grant. Call " +
             "request_access with capability '${additional.agentGrantCapability().wire}', have a " +
             "human approve it, then pass the token poll_access returns as this tool's " +
-            "'$TOKEN_ARGUMENT' argument.",
-        )
+            "'$TOKEN_ARGUMENT' argument."
+        if (decision == UiBuilderAuthorizationDecision.Missing) {
+          throw CredentialRequiredException(additional.agentGrantCapability().wire, message)
+        }
+        return toolError(message)
       }
     }
     // A person may take a while to answer a form, and the answer is what licenses a write. So an
@@ -3251,7 +3313,17 @@ class ServeCatalogMcp(
               as? UiBuilderAuthorizationDecision.Authorized)
             ?.mayPublishWatchFaces() == true
         },
+        // The editor's load says whether it may save, and the same credential must still name the
+        // same actor for the save to be its.
+        mayWrite = {
+          val write = authorize(UiBuilderRouteCapability.WRITE, presentedToken)
+          write is UiBuilderAuthorizationDecision.Authorized && write.actor == actor
+        },
       )
+    if (
+      name == ServeUiBuilderEditorTools.EDIT_DESIGN || name == ServeUiBuilderEditorTools.EDITOR_READ
+    )
+      return uiBuilderEditorResult(name, text)
     if (name == ServeUiBuilderMcp.GUIDELINES_PROMPT) return uiBuilderGuidelinesPromptResult(text)
     if (
       name == ServeUiBuilderMcp.VIEW ||
@@ -3264,6 +3336,26 @@ class ServeCatalogMcp(
       )
     }
     return uiBuilderToolResult(name, text)
+  }
+
+  /**
+   * The editor app's open and load: a one-line text and the reply as `structuredContent`. The load
+   * carries the whole document, so it is not repeated in the text, which would double a result a
+   * host may cap.
+   */
+  private fun uiBuilderEditorResult(name: String, text: String): JsonObject {
+    val reply = JSON.parseToJsonElement(text).jsonObject
+    val title = reply["title"]?.jsonPrimitive?.contentOrNull.orEmpty()
+    val revision = reply["revision"]?.jsonPrimitive?.contentOrNull.orEmpty()
+    val line =
+      if (name == ServeUiBuilderEditorTools.EDIT_DESIGN) "Opened $title in the UI Builder editor."
+      else
+        "$title at revision $revision" +
+          (if (reply["writable"]?.jsonPrimitive?.booleanOrNull == true) "." else ", read-only.")
+    return buildJsonObject {
+      putJsonArray("content") { add(textContent(line)) }
+      put("structuredContent", reply)
+    }
   }
 
   /**
@@ -4056,6 +4148,9 @@ class ServeCatalogMcp(
         ServeUiBuilderMcp.LIST_COMMENTS,
         ServeUiBuilderMcp.AWAIT_COMMENTS,
         ServeUiBuilderMcp.AWAIT_DESIGN,
+        ServeUiBuilderEditorTools.EDIT_DESIGN,
+        ServeUiBuilderEditorTools.EDITOR_READ,
+        ServeUiBuilderEditorTools.EDITOR_AWAIT,
         ServeUiBuilderMcp.GET_LINKS,
         ServeUiBuilderMcp.VALIDATE_WATCH_FACE,
         ServeUiBuilderMcp.LIST_TRASH,
@@ -4108,6 +4203,7 @@ class ServeCatalogMcp(
         "request_access",
         ServeUiBuilderMcp.CREATE_DESIGN,
         ServeUiBuilderMcp.APPLY,
+        ServeUiBuilderEditorTools.EDITOR_WRITE,
         ServeUiBuilderMcp.POST_COMMENT,
         ServeUiBuilderMcp.RECORD_DECISION,
         ServeUiBuilderHistoryTools.FORK_DESIGN,
@@ -4339,6 +4435,7 @@ class ServeCatalogMcp(
         // (or demands live scope) before it touches a catalog. See [signResourceUri].
         return uri != MCP_APP_VIEWER_URI &&
           uri != ServeLibraryMcp.RESOURCE_URI &&
+          uri != ServeUiBuilderEditorApp.RESOURCE_URI &&
           UiBuilderJsonSchemas.byUri(uri.orEmpty()) == null &&
           (uri == null || !isSignedOverrideUri(uri))
       }
@@ -4353,7 +4450,18 @@ class ServeCatalogMcp(
 /**
  * A tool call this surface understood and refused. Carried as a tool error, not a transport one.
  */
-internal class McpRequestException(message: String) : RuntimeException(message)
+internal open class McpRequestException(message: String) : RuntimeException(message)
+
+/**
+ * A refusal caused only by the absence of any credential, as opposed to one that was presented and
+ * found wanting. [ServeCatalogMcp.handle] still answers it as a tool error, and records it on the
+ * [ServeCatalogMcp.Reply] so the HTTP transport can answer `401` instead. [requiredScope] is the
+ * wire name of the grant scope or UI-builder capability that was asked for.
+ */
+internal class CredentialRequiredException(
+  val requiredScope: String,
+  override val message: String,
+) : McpRequestException(message)
 
 /** The data product a hosted catalog serves each preview's design-guidelines result as. */
 internal const val GUIDELINES_RESULT_KIND = "guidelines/result"

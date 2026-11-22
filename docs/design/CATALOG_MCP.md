@@ -764,6 +764,46 @@ daemon-backed session that can export `compose/figma-svg`. A catalog with neithe
 name rather than reported as a missing preview. The lane shares the render semaphore with the PNG
 lane, so it is metered identically and cannot become a second unmetered renderer.
 
+### The editor as an MCP App: `ui://compose-ui-builder/editor`
+
+Beside the viewer (`ui://compose-preview/viewer`) and the library (`ui://compose-preview/library`),
+this endpoint can serve the UI Builder editor itself as an MCP App, for Claude and any host without
+file resources. The contract is compose-ui-builder's
+[`UI_BUILDER_MCP_APP_HOST.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_MCP_APP_HOST.md),
+"Server designs"; `ServeUiBuilderEditorApp` is this side of it.
+
+- `ui_builder_edit_design` `{designId}` (model and app, read) opens the editor on a design:
+  `structuredContent` `{designId, title, revision}`, `_meta.ui.resourceUri` the editor resource.
+- Three **app-only** tools (`_meta.ui.visibility: ["app"]`), which the editor calls through the
+  host with the connector's credential and the model never sees: `ui_builder_editor_read`
+  `{designId}` → `{designId, title, revision, writable, document}` (read);
+  `ui_builder_editor_write` `{designId, baseRevision, document}` → `{outcome: saved | conflict |
+  read-only | too-large, revision?, maxBytes?, message?}` (write; an ordinary
+  `ReplaceDesignDocument` revision attributed to the actor, never the dry-run decision of
+  `ui_builder_replace_design_document`); `ui_builder_editor_await` `{designId, afterRevision,
+  waitSeconds ≤ 25}` → `{revision, changed}` (read). `writable` and a save both need the design's
+  own WRITE action *and* a credential that carries `write`; a design the actor cannot read is a
+  tool error, never `read-only`. The editor's calls never announce agent presence.
+- The resource is the web archive's own shell, `mcp-app/ui-builder-mcp-app.html`, with its asset
+  base set to `<origin>/ui-builder/v/<bundle>/`, `<origin>` being the origin the MCP request
+  arrived on (else the configured public origin), and the layout `focused`. Its content carries
+  `_meta.ui.csp.resourceDomains` and `connectDomains` = `[<origin>]` and prefers fullscreen. It is
+  readable without a grant, like the viewer. The device-presets placeholder is left unfilled: that
+  route is read-gated and not CORS-open, so the shell falls back to no device menus and derives its
+  catalog base (`/api/ui-builder/v1/catalog-capabilities/`, public and CORS-open) from the asset
+  base.
+- A save is one `POST /mcp`, so a design whose JSON passes the endpoint's 1 MiB request bound is
+  refused with HTTP 413 before `ui_builder_editor_write` sees it; the editor shows that as a failed
+  save, not `too-large`.
+- Every static file of the archive is served with `Access-Control-Allow-Origin: *` (the sandbox
+  frame's origin is the host's, e.g. `*.claudemcpcontent.com`), `application/wasm` for `.wasm`, and
+  the versioned prefix's immutable caching.
+
+**Gate.** All four tools and the resource exist only when the served archive's
+`ui-builder-web.json` carries `"mcpApp"` of 2 or more (the shell that understands a `{designId}`
+input) and the box serves the UI Builder. Archives at `mcpApp: 1` or without the key register
+nothing, and the names answer `unknown tool`.
+
 ### History
 
 `catalog_history_list` answers in one of three `mode`s, and the field is load-bearing: the three are not

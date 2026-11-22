@@ -916,6 +916,24 @@ class ServeHttpServer(
     }
   }
 
+  /**
+   * The UI Builder editor as an MCP App over this server's designs, or null unless the served
+   * archive's manifest says `mcpApp >= 2`. Its assets are this server's own archive under the
+   * immutable `/ui-builder/v/<bundle>/` prefix, which every host routes (the rooted builder host
+   * never redirects it).
+   */
+  private val uiBuilderEditorApp: ServeUiBuilderEditorApp? = uiBuilderDir?.let { dir ->
+    ServeUiBuilderEditorApp.forArchive(
+      dir,
+      assetPath = {
+        // A catalog with id `v` shadows the versioned prefix; the unversioned path serves the same
+        // files, revalidated.
+        if (UI_BUILDER_VERSION_SEGMENT in uiBuilderCatalogs) "/ui-builder/"
+        else "/ui-builder/$UI_BUILDER_VERSION_SEGMENT/$uiBuilderBundleVersion/"
+      },
+    )
+  }
+
   private val catalogMcp =
     if (catalogMcpEnabled && machineAuthorization != null)
       ServeCatalogMcp(
@@ -923,6 +941,7 @@ class ServeHttpServer(
         renderSemaphore,
         projectHistory = projectHistory,
         uiBuilder = uiBuilderMcp,
+        uiBuilderEditor = uiBuilderEditorApp,
         uiBuilderNative = admittedNativePreview != null,
         catalogNativeRender = featureFlags.catalogNativeRender,
         publicOrigin = ::canonicalServerOrigin,
@@ -10268,6 +10287,7 @@ class ServeHttpServer(
           uiBuilderAuthorization?.authorize(call, capability, presented)
             ?: UiBuilderAuthorizationDecision.Missing
         },
+        requestOrigin = externalOrigin(),
         liveAuthorization = { presented ->
           authorization.authorizeScope(
             call,
@@ -10311,6 +10331,23 @@ class ServeHttpServer(
     }
 
     suspend fun respondReply(reply: ServeCatalogMcp.Reply) {
+      val challenge = reply.challenge
+      // Only when nothing this server recognises was presented. A recognised credential that the
+      // call still could not use (a box without the UI builder's authorization, a grant without the
+      // capability) would be refused the same way after a sign-in, so it stays a tool error.
+      if (challenge != null && !authorization.presentsRecognisedCredential(call, presentedToken)) {
+        // Refused only for want of any credential: answer at the transport, before the body
+        // becomes a 200 tool result. A `401` with `WWW-Authenticate` is the one signal an
+        // OAuth-capable client (Claude's "sign in when needed", the MCP authorization spec) acts
+        // on: it runs the flow and retries this same call with the token. A client that
+        // cannot do OAuth reads the same refusal text, and the grant request URL, in the body.
+        respondCatalogMcpAuthorization(
+          HttpStatusCode.Unauthorized,
+          challenge.message,
+          requiredScope = challenge.requiredScope,
+        )
+        return
+      }
       if (reply.accepted) {
         call.respond(HttpStatusCode.Accepted)
       } else {
@@ -10475,6 +10512,7 @@ class ServeHttpServer(
   private suspend fun RoutingContext.respondCatalogMcpAuthorization(
     status: HttpStatusCode,
     message: String,
+    requiredScope: String = AgentGrantScope.PREVIEW.wire,
   ) {
     // `resource_metadata` tells an MCP client where discovery starts; without it clients guess with
     // an unprompted registration POST and report a spurious 404.
@@ -10494,7 +10532,7 @@ class ServeHttpServer(
             if (status == HttpStatusCode.Unauthorized) "authorization_required" else "forbidden",
           message = message,
           agentAccessRequestUrl = externalOrigin() + ServeAgentGrants.REQUEST_PATH,
-          requiredScope = AgentGrantScope.PREVIEW.wire,
+          requiredScope = requiredScope,
         ),
       ),
       ContentType.Application.Json,
@@ -14949,6 +14987,9 @@ class ServeHttpServer(
       HttpHeaders.CacheControl,
       if (version == null) "no-cache" else UI_BUILDER_IMMUTABLE_CACHE_CONTROL,
     )
+    // The editor MCP App ([ServeUiBuilderEditorApp]) loads these files from a host's sandbox
+    // origin, so its module scripts and Wasm fetch are cross-origin. The archive is public.
+    call.response.headers.append(HttpHeaders.AccessControlAllowOrigin, "*")
     call.response.headers.append(HttpHeaders.ETag, etag)
     if (uiBuilderPrecompressed.compressible(file)) {
       call.response.headers.append(HttpHeaders.Vary, HttpHeaders.AcceptEncoding)
