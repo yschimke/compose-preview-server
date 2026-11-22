@@ -107,7 +107,21 @@ class ServeCatalogMcp(
       ) = size > MAX_VIEW_IMAGES
     }
 
-  data class Reply(val body: JsonObject?, val accepted: Boolean = false)
+  /**
+   * [challenge] is set when the call was refused only because no credential was presented at all.
+   * The body still carries the refusal as a tool (or JSON-RPC) error, so an in-process caller reads
+   * the same answer; the HTTP transport turns it into a `401` with a `WWW-Authenticate` challenge,
+   * which is the only signal that makes an OAuth-capable client (Claude's "sign in when needed")
+   * run its authorization flow and retry the call.
+   */
+  data class Reply(
+    val body: JsonObject?,
+    val accepted: Boolean = false,
+    val challenge: AuthorizationChallenge? = null,
+  )
+
+  /** Why a call needs a credential: the scope or capability it lacked, and the refusal's text. */
+  data class AuthorizationChallenge(val requiredScope: String, val message: String)
 
   /**
    * Request-scoped client interaction, only on a negotiated Streamable HTTP session. Stateless
@@ -262,6 +276,7 @@ class ServeCatalogMcp(
     if (id == null) return Reply(body = null, accepted = true)
     val params = request["params"] as? JsonObject ?: JsonObject(emptyMap())
 
+    var challenge: AuthorizationChallenge? = null
     val result =
       try {
         when (method) {
@@ -289,6 +304,9 @@ class ServeCatalogMcp(
                       put("retryAfterSeconds", EXPORT_RETRY_AFTER_SECONDS)
                     }),
               )
+            } catch (e: CredentialRequiredException) {
+              challenge = AuthorizationChallenge(e.requiredScope, e.message)
+              toolError(e.message)
             } catch (e: McpRequestException) {
               toolError(e.message ?: "Tool call failed")
             }
@@ -296,6 +314,11 @@ class ServeCatalogMcp(
           "resources/read" -> readResource(params, presentedToken(request), liveAuthorization)
           else -> return Reply(error(id, METHOD_NOT_FOUND, "Unknown method '$method'"))
         }
+      } catch (e: CredentialRequiredException) {
+        return Reply(
+          error(id, INVALID_PARAMS, e.message),
+          challenge = AuthorizationChallenge(e.requiredScope, e.message),
+        )
       } catch (e: McpRequestException) {
         return Reply(error(id, INVALID_PARAMS, e.message ?: "Invalid parameters"))
       } catch (e: UrlElicitationRequired) {
@@ -303,7 +326,7 @@ class ServeCatalogMcp(
       } catch (e: Exception) {
         return Reply(error(id, INTERNAL_ERROR, e.message ?: "Catalog MCP request failed"))
       }
-    return Reply(success(id, result))
+    return Reply(success(id, result), challenge = challenge)
   }
 
   private fun initialize(params: JsonObject): JsonObject {
@@ -343,7 +366,9 @@ class ServeCatalogMcp(
           "X-Compose-Preview-Token header if you control your own headers; if you cannot set " +
           "them — an MCP client fixes its headers when it connects — pass the token as the " +
           "'token' argument of each gated tool instead, and access approved during this session " +
-          "works in it." +
+          "works in it. A gated call made with no credential at all is answered HTTP 401 with a " +
+          "WWW-Authenticate challenge, so a client that supports MCP OAuth signs in and retries " +
+          "it instead." +
           originInstruction() +
           accessElicitationInstruction(params) +
           " Export and native-render lanes each admit at most four concurrent requests per server, " +
@@ -3173,7 +3198,8 @@ class ServeCatalogMcp(
     when (val decision = check()) {
       is ServeMachineAuthorization.Decision.Authorized -> Unit
       ServeMachineAuthorization.Decision.Missing ->
-        throw McpRequestException(
+        throw CredentialRequiredException(
+          AgentGrantScope.LIVE.wire,
           "live grant scope is required for a made-to-order render. To look at a published " +
             "render, read its resource instead (resources/read on the uri from " +
             "catalog_list_previews), which needs only preview scope. For a live render, call " +
@@ -3186,7 +3212,8 @@ class ServeCatalogMcp(
   /**
    * One UI-builder tool, or null for a catalog-surface name. Authorized here because the credential
    * belongs to the transport's call, like the HTTP routes ([TOKEN_ARGUMENT] is resolved the same
-   * way). A missing grant is a tool error, not a transport status.
+   * way). A grant that is presented but lacks the capability is a tool error; one that is absent
+   * altogether is a [CredentialRequiredException], which the HTTP transport answers with `401`.
    */
   private suspend fun uiBuilderTool(
     name: String,
@@ -3201,7 +3228,8 @@ class ServeCatalogMcp(
       when (val decision = authorize(capability, presentedToken)) {
         is UiBuilderAuthorizationDecision.Authorized -> decision.actor
         UiBuilderAuthorizationDecision.Missing ->
-          return toolError(
+          throw CredentialRequiredException(
+            capability.agentGrantCapability().wire,
             "this tool needs a UI-builder ${capability.name.lowercase()} grant; none was " +
               "presented. Call request_access with capability " +
               "'${capability.agentGrantCapability().wire}', have a human approve it, then pass the " +
@@ -3217,13 +3245,17 @@ class ServeCatalogMcp(
           )
       }
     builder.additionalCapabilityFor(name, args)?.let { additional ->
-      if (authorize(additional, presentedToken) !is UiBuilderAuthorizationDecision.Authorized) {
-        return toolError(
+      val decision = authorize(additional, presentedToken)
+      if (decision !is UiBuilderAuthorizationDecision.Authorized) {
+        val message =
           "this call also needs a UI-builder ${additional.name.lowercase()} grant. Call " +
             "request_access with capability '${additional.agentGrantCapability().wire}', have a " +
             "human approve it, then pass the token poll_access returns as this tool's " +
-            "'$TOKEN_ARGUMENT' argument.",
-        )
+            "'$TOKEN_ARGUMENT' argument."
+        if (decision == UiBuilderAuthorizationDecision.Missing) {
+          throw CredentialRequiredException(additional.agentGrantCapability().wire, message)
+        }
+        return toolError(message)
       }
     }
     // A person may take a while to answer a form, and the answer is what licenses a write. So an
@@ -4353,7 +4385,18 @@ class ServeCatalogMcp(
 /**
  * A tool call this surface understood and refused. Carried as a tool error, not a transport one.
  */
-internal class McpRequestException(message: String) : RuntimeException(message)
+internal open class McpRequestException(message: String) : RuntimeException(message)
+
+/**
+ * A refusal caused only by the absence of any credential, as opposed to one that was presented and
+ * found wanting. [ServeCatalogMcp.handle] still answers it as a tool error, and records it on the
+ * [ServeCatalogMcp.Reply] so the HTTP transport can answer `401` instead. [requiredScope] is the
+ * wire name of the grant scope or UI-builder capability that was asked for.
+ */
+internal class CredentialRequiredException(
+  val requiredScope: String,
+  override val message: String,
+) : McpRequestException(message)
 
 /** The data product a hosted catalog serves each preview's design-guidelines result as. */
 internal const val GUIDELINES_RESULT_KIND = "guidelines/result"
