@@ -211,6 +211,9 @@ class ServeUiBuilderMcp(
   /** Revisions, restore, fork and diff; see [ServeUiBuilderHistoryTools]. */
   private val history = ServeUiBuilderHistoryTools(service, serverOrigin, links)
 
+  /** The editor MCP App's load, save and follow; see [ServeUiBuilderEditorApp]. */
+  private val editorTools = ServeUiBuilderEditorTools(service)
+
   /** Branch, list, merge and archive; see [ServeUiBuilderBranchTools]. */
   private val branchTools = branches?.let(::ServeUiBuilderBranchTools)
 
@@ -273,6 +276,9 @@ class ServeUiBuilderMcp(
       // service on top of that: only the owner is told who else holds a grant.
       DESIGN_ACCESS -> UiBuilderRouteCapability.READ
       AWAIT_DESIGN -> UiBuilderRouteCapability.READ
+      // The editor app's open, load and follow read; its save writes. Whether they exist at all is
+      // the transport's decision (the archive's `mcpApp`); see [ServeUiBuilderEditorApp].
+      in ServeUiBuilderEditorTools.TOOL_NAMES -> ServeUiBuilderEditorTools.capabilityFor(tool)
       // History: listing and diffing are reads; restore writes, and fork creates a design.
       ServeUiBuilderHistoryTools.LIST_REVISIONS,
       ServeUiBuilderHistoryTools.DIFF_DESIGNS -> UiBuilderRouteCapability.READ
@@ -408,10 +414,16 @@ class ServeUiBuilderMcp(
      * or a grant carrying `ui-builder-publish`. Asked only by [PUBLISH_WATCH_FACE].
      */
     mayPublish: () -> Boolean = { false },
+    /**
+     * Whether the caller's credential also carries the write capability. Asked only by the editor
+     * app's load ([ServeUiBuilderEditorTools.EDITOR_READ], its `writable`) and save.
+     */
+    mayWrite: () -> Boolean = { false },
   ): String {
     // Only a design this actor may read can acquire presence. A failed or spoofed design id
     // must never reveal another actor's access or add a participant to someone else's room.
-    val designId = args.text("designId")
+    // The editor app is a person editing, not an agent, so its calls never announce one.
+    val designId = args.text("designId")?.takeIf { tool !in ServeUiBuilderEditorTools.TOOL_NAMES }
     val leave =
       if (designId != null && service.canRead(actor, designId)) {
         agentPresence?.enter(
@@ -435,7 +447,16 @@ class ServeUiBuilderMcp(
               tool,
               args,
               actor,
-              run(tool, args, actor, callId, clientInteraction, mayExport, mayPublish),
+              run(
+                tool,
+                args,
+                actor,
+                callId,
+                clientInteraction,
+                mayExport,
+                mayPublish,
+                mayWrite,
+              ),
             ),
           ),
         ),
@@ -453,6 +474,7 @@ class ServeUiBuilderMcp(
     clientInteraction: ServeCatalogMcp.ClientInteraction,
     mayExport: () -> Boolean,
     mayPublish: () -> Boolean,
+    mayWrite: () -> Boolean,
   ): String {
     val request =
       when (tool) {
@@ -548,6 +570,8 @@ class ServeUiBuilderMcp(
         SET_REFERENCE -> return setReference(args, actor)
         COMPARE_REFERENCE -> return compareReference(args, actor)
         in ServeUiBuilderHistoryTools.TOOL_NAMES -> return history.call(tool, args, actor)
+        in ServeUiBuilderEditorTools.TOOL_NAMES ->
+          return editorTools.call(tool, args, actor, mayWrite)
         in ServeUiBuilderBranchTools.TOOL_NAMES ->
           return (branchTools
               ?: throw McpRequestException("this host does not keep design branches"))

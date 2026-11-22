@@ -63,6 +63,11 @@ class ServeCatalogMcp(
    * failing.
    */
   private val uiBuilder: ServeUiBuilderMcp? = null,
+  /**
+   * The UI Builder editor as an MCP App ([ServeUiBuilderEditorApp]), or null: absent unless the
+   * served archive's shell edits server designs (`mcpApp >= 2`). Needs [uiBuilder] as well.
+   */
+  private val uiBuilderEditor: ServeUiBuilderEditorApp? = null,
   /** Whether this box can also compile a design natively; see [ServeUiBuilderMcp.RENDER_NATIVE]. */
   private val uiBuilderNative: Boolean = false,
   /**
@@ -265,6 +270,11 @@ class ServeCatalogMcp(
       { _, _ ->
         UiBuilderAuthorizationDecision.Missing
       },
+    /**
+     * This server's origin as the caller reached it (scheme and authority), for the editor app's
+     * asset base; null falls back to [publicOrigin].
+     */
+    requestOrigin: String? = null,
     liveAuthorization: (String?) -> ServeMachineAuthorization.Decision,
   ): Reply {
     val id = request["id"]
@@ -312,7 +322,8 @@ class ServeCatalogMcp(
               toolError(e.message ?: "Tool call failed")
             }
           "resources/list" -> listResources()
-          "resources/read" -> readResource(params, presentedToken(request), liveAuthorization)
+          "resources/read" ->
+            readResource(params, presentedToken(request), requestOrigin, liveAuthorization)
           else -> return Reply(error(id, METHOD_NOT_FOUND, "Unknown method '$method'"))
         }
       } catch (e: CredentialRequiredException) {
@@ -824,6 +835,8 @@ class ServeCatalogMcp(
           it.supportsWatchFaceValidation,
         ),
       )
+      // The editor MCP App, only where the archive's shell edits server designs (mcpApp 2+).
+      if (uiBuilderEditor != null) addAll(ServeUiBuilderEditorApp.declarations(::tool))
     }
     add(
       tool(
@@ -1070,6 +1083,9 @@ class ServeCatalogMcp(
     }.let { withStructuredContent(name, it) }
   }
 
+  /** The editor app, where both it and the builder exist. */
+  private fun editorApp(): ServeUiBuilderEditorApp? = uiBuilderEditor?.takeIf { uiBuilder != null }
+
   private suspend fun listResources(): JsonObject {
     val resources = buildJsonArray {
       add(
@@ -1085,6 +1101,7 @@ class ServeCatalogMcp(
         },
       )
       add(ServeLibraryMcp.resourceDescriptor())
+      editorApp()?.let { add(it.resourceDescriptor()) }
       // UI-builder schemas, static and public, so an agent has them before its first call rather
       // than after a refusal.
       if (uiBuilder != null) {
@@ -1119,9 +1136,19 @@ class ServeCatalogMcp(
   private suspend fun readResource(
     params: JsonObject,
     presentedToken: String?,
+    requestOrigin: String?,
     liveAuthorization: (String?) -> ServeMachineAuthorization.Decision,
   ): JsonObject {
     val uri = params.requiredString("uri")
+    if (uri == ServeUiBuilderEditorApp.RESOURCE_URI) {
+      val editor =
+        editorApp() ?: throw McpRequestException("this server does not serve the editor app")
+      val origin =
+        requestOrigin
+          ?: publicOrigin()
+          ?: throw McpRequestException("this server does not know the origin it is reached at")
+      return editor.readResource(origin)
+    }
     UiBuilderJsonSchemas.byUri(uri)
       ?.takeIf { uiBuilder != null }
       ?.let { schema ->
@@ -3224,6 +3251,8 @@ class ServeCatalogMcp(
     clientInteraction: ClientInteraction,
   ): JsonObject? {
     val builder = uiBuilder ?: return null
+    // The editor app's tools exist only with the app; otherwise they are unknown names.
+    if (name in ServeUiBuilderEditorTools.TOOL_NAMES && uiBuilderEditor == null) return null
     val capability = builder.capabilityFor(name) ?: return null
     val actor =
       when (val decision = authorize(capability, presentedToken)) {
@@ -3284,7 +3313,17 @@ class ServeCatalogMcp(
               as? UiBuilderAuthorizationDecision.Authorized)
             ?.mayPublishWatchFaces() == true
         },
+        // The editor's load says whether it may save, and the same credential must still name the
+        // same actor for the save to be its.
+        mayWrite = {
+          val write = authorize(UiBuilderRouteCapability.WRITE, presentedToken)
+          write is UiBuilderAuthorizationDecision.Authorized && write.actor == actor
+        },
       )
+    if (
+      name == ServeUiBuilderEditorTools.EDIT_DESIGN || name == ServeUiBuilderEditorTools.EDITOR_READ
+    )
+      return uiBuilderEditorResult(name, text)
     if (name == ServeUiBuilderMcp.GUIDELINES_PROMPT) return uiBuilderGuidelinesPromptResult(text)
     if (
       name == ServeUiBuilderMcp.VIEW ||
@@ -3297,6 +3336,26 @@ class ServeCatalogMcp(
       )
     }
     return uiBuilderToolResult(name, text)
+  }
+
+  /**
+   * The editor app's open and load: a one-line text and the reply as `structuredContent`. The load
+   * carries the whole document, so it is not repeated in the text, which would double a result a
+   * host may cap.
+   */
+  private fun uiBuilderEditorResult(name: String, text: String): JsonObject {
+    val reply = JSON.parseToJsonElement(text).jsonObject
+    val title = reply["title"]?.jsonPrimitive?.contentOrNull.orEmpty()
+    val revision = reply["revision"]?.jsonPrimitive?.contentOrNull.orEmpty()
+    val line =
+      if (name == ServeUiBuilderEditorTools.EDIT_DESIGN) "Opened $title in the UI Builder editor."
+      else
+        "$title at revision $revision" +
+          (if (reply["writable"]?.jsonPrimitive?.booleanOrNull == true) "." else ", read-only.")
+    return buildJsonObject {
+      putJsonArray("content") { add(textContent(line)) }
+      put("structuredContent", reply)
+    }
   }
 
   /**
@@ -4089,6 +4148,9 @@ class ServeCatalogMcp(
         ServeUiBuilderMcp.LIST_COMMENTS,
         ServeUiBuilderMcp.AWAIT_COMMENTS,
         ServeUiBuilderMcp.AWAIT_DESIGN,
+        ServeUiBuilderEditorTools.EDIT_DESIGN,
+        ServeUiBuilderEditorTools.EDITOR_READ,
+        ServeUiBuilderEditorTools.EDITOR_AWAIT,
         ServeUiBuilderMcp.GET_LINKS,
         ServeUiBuilderMcp.VALIDATE_WATCH_FACE,
         ServeUiBuilderMcp.LIST_TRASH,
@@ -4141,6 +4203,7 @@ class ServeCatalogMcp(
         "request_access",
         ServeUiBuilderMcp.CREATE_DESIGN,
         ServeUiBuilderMcp.APPLY,
+        ServeUiBuilderEditorTools.EDITOR_WRITE,
         ServeUiBuilderMcp.POST_COMMENT,
         ServeUiBuilderMcp.RECORD_DECISION,
         ServeUiBuilderHistoryTools.FORK_DESIGN,
@@ -4372,6 +4435,7 @@ class ServeCatalogMcp(
         // (or demands live scope) before it touches a catalog. See [signResourceUri].
         return uri != MCP_APP_VIEWER_URI &&
           uri != ServeLibraryMcp.RESOURCE_URI &&
+          uri != ServeUiBuilderEditorApp.RESOURCE_URI &&
           UiBuilderJsonSchemas.byUri(uri.orEmpty()) == null &&
           (uri == null || !isSignedOverrideUri(uri))
       }

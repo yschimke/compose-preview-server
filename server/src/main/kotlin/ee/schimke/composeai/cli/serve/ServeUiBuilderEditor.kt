@@ -60,6 +60,11 @@ object ServeUiBuilderEditor {
     val serverApi: Int,
     /** Root-aware offline handlers can share the host's notification registration. */
     val rootOffline: Int = 0,
+    /**
+     * The MCP App shell contract (`mcp-app/ui-builder-mcp-app.html`): 0 when absent, 1 for the
+     * file-resource editor, 2 when it can also edit a server design. See [ServeUiBuilderEditorApp].
+     */
+    val mcpApp: Int = 0,
   )
 
   private val JSON = Json {
