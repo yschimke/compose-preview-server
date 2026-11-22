@@ -94,13 +94,14 @@ class ServeUiBuilderEditorApp(
 
   private fun shellHtml(origin: String): String {
     val chosen = layout().takeIf { it == LAYOUT_FOCUSED || it == LAYOUT_FULL } ?: LAYOUT_FOCUSED
-    // The device presets placeholder is left as it is: this server's device-presets route is
-    // read-gated and not CORS-open, so a sandboxed frame could not fetch it. Unfilled, the shell
-    // derives its catalog base from the asset base, which is this same origin.
+    // The device presets are this server's public, CORS-open route, so the sandboxed frame can
+    // fetch them and the editor offers device menus. The shell derives its catalog base from this
+    // URL's origin, which is the same origin as the assets.
     return shellFile
       .readText()
       .replace(ASSET_BASE_PLACEHOLDER, assetBase(origin))
       .replace(LAYOUT_PLACEHOLDER, chosen)
+      .replace(DEVICE_PRESETS_PLACEHOLDER, origin.trimEnd('/') + UI_BUILDER_DEVICE_PRESETS_PATH)
   }
 
   private fun resourceMeta(origin: String?): JsonObject = buildJsonObject {
