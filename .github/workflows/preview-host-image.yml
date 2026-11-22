@@ -78,6 +78,21 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # Every image here builds FROM compose-preview-daemon's render runtime at the daemon version
+      # the server links (deploy/image/Dockerfile `base`). That repository publishes it from its own
+      # release workflow, so a daemon bump can reach this one before the image exists: wait for the
+      # tag rather than fail the build on it.
+      - name: Wait for the render-runtime base image
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/compose-preview-render-runtime:${{ steps.versions.outputs.daemon }}
+        run: |
+          for i in $(seq 1 30); do
+            if docker buildx imagetools inspect "${IMAGE}" >/dev/null 2>&1; then exit 0; fi
+            echo "waiting for ${IMAGE} (attempt ${i}/30)"
+            sleep 30
+          done
+          echo "::error::${IMAGE} is not published; compose-preview-daemon's render-runtime-image.yml builds it"
+          exit 1
       - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         id: meta
         with:
