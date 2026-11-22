@@ -180,7 +180,9 @@ private val UI_BUILDER_ASSET_EXTENSIONS =
  * - `GET /{system}/feed.xml` demand-activated catalog change feed,
  * - `GET /render/{id}.png` PNG bytes (`POST` with the parameters in the body for oversized knob
  *   values), `GET /{system}/a2ui` the A2UI document playground,
- * - `GET /api/previews` JSON, `GET /healthz` liveness,
+ * - `GET /api/previews` JSON (with a weak `ETag` and `304`), `GET /healthz` liveness,
+ * - `GET /{system}/api/capabilities`, `/api/history`, `/api/history/{id}` and
+ *   `/api/guidelines/{id}`: the catalog reads the hosted MCP makes ([ServeCatalogRead]),
  * - `GET /hero/{system}/{hash}.png` a prebaked, immutable front-door thumbnail ([ServeHeroImages]),
  * - `GET /social/{hash}.png` the link-unfurl card ([ServeSocialCard]), and `GET /favicon.svg` /
  *   `/favicon.ico` / `/apple-touch-icon.png` ([ServeSiteIcon]) — ungated, since unfurlers and icon
@@ -2558,6 +2560,16 @@ class ServeHttpServer(
 
         get("/api/previews") { handleApiPreviews(sessionInPath = false) }
         get("/{system}/api/previews") { handleApiPreviews(sessionInPath = true) }
+        // The catalog reads the hosted MCP makes in process ([ServeCatalogRead]), so it can make
+        // them over HTTP once it moves out (docs/design/SERVER_UNBUNDLING.md step 4).
+        get("/api/capabilities") { handleCatalogCapabilities(sessionInPath = false) }
+        get("/{system}/api/capabilities") { handleCatalogCapabilities(sessionInPath = true) }
+        get("/api/history") { handleCatalogHistory(sessionInPath = false) }
+        get("/{system}/api/history") { handleCatalogHistory(sessionInPath = true) }
+        get("/api/history/{name}") { handlePreviewHistory(sessionInPath = false) }
+        get("/{system}/api/history/{name}") { handlePreviewHistory(sessionInPath = true) }
+        get("/api/guidelines/{name}") { handlePreviewGuidelines(sessionInPath = false) }
+        get("/{system}/api/guidelines/{name}") { handlePreviewGuidelines(sessionInPath = true) }
         get("/api/uses") { handleUsesSearch(sessionInPath = false) }
         get("/{system}/api/uses") { handleUsesSearch(sessionInPath = true) }
         // Which of a preview's published revisions actually differ. Fetched lazily by
@@ -10130,6 +10142,7 @@ class ServeHttpServer(
       val dto =
         PreviewsResponse(
           module = renderHost.label,
+          revision = ServeCatalogRead.revision(renderHost),
           // The compose-ai-tools version that produced the snapshots. Native clients must match it
           // before substituting compiled composables; missing provenance fails closed to the
           // snapshots.
@@ -10165,10 +10178,91 @@ class ServeHttpServer(
               )
             },
         )
-      call.respondText(
-        JSON.encodeToString(PreviewsResponse.serializer(), dto),
-        ContentType.Application.Json,
+      // The validator excludes the engagement counters ([PreviewsResponse.views],
+      // [PreviewDto.views]): they move on every page open and are not catalog identity, so the tag
+      // is weak and covers everything else.
+      val identity =
+        JSON.encodeToString(
+          PreviewsResponse.serializer(),
+          dto.copy(views = 0, previews = dto.previews.map { it.copy(views = 0) }),
+        )
+      respondCatalogRead(
+        body = { JSON.encodeToString(PreviewsResponse.serializer(), dto) },
+        identity = identity,
+        revision = dto.revision,
+        cacheControl = null,
       )
+    }
+  }
+
+  /**
+   * Answers a catalog-read body with a weak `ETag` ([ServeCatalogRead.entityTag] over [identity])
+   * and `304` when `If-None-Match` names it. [cacheControl] null leaves the header unset, which is
+   * what `/api/previews` has always sent.
+   */
+  private suspend fun RoutingContext.respondCatalogRead(
+    body: () -> String,
+    identity: String,
+    revision: String?,
+    cacheControl: String? = ServeCatalogRead.CACHE_CONTROL,
+  ) {
+    val etag = ServeCatalogRead.entityTag(revision, identity)
+    cacheControl?.let { call.response.headers.append(HttpHeaders.CacheControl, it) }
+    call.response.headers.append(HttpHeaders.ETag, "W/$etag")
+    if (ifNoneMatchHits(call.request.headers[HttpHeaders.IfNoneMatch], etag)) {
+      call.respond(HttpStatusCode.NotModified)
+      return
+    }
+    call.respondText(body(), ContentType.Application.Json)
+  }
+
+  /** `GET /{system}/api/capabilities`: every preview's capabilities ([ServeCatalogRead]). */
+  private suspend fun RoutingContext.handleCatalogCapabilities(sessionInPath: Boolean) {
+    if (rejectBadToken()) return
+    withLeasedSession(selectedSessionId(sessionInPath)) { renderHost ->
+      val dto = withContext(Dispatchers.IO) { ServeCatalogRead.capabilities(renderHost) }
+      val json = JSON.encodeToString(CatalogCapabilitiesResponse.serializer(), dto)
+      respondCatalogRead(body = { json }, identity = json, revision = dto.revision)
+    }
+  }
+
+  /** `GET /{system}/api/history`: the catalog's history provenance and served commit. */
+  private suspend fun RoutingContext.handleCatalogHistory(sessionInPath: Boolean) {
+    if (rejectBadToken()) return
+    withLeasedSession(selectedSessionId(sessionInPath)) { renderHost ->
+      val dto = ServeCatalogRead.history(renderHost, projectHistory)
+      val json = JSON.encodeToString(CatalogHistoryResponse.serializer(), dto)
+      respondCatalogRead(body = { json }, identity = json, revision = dto.commit)
+    }
+  }
+
+  /** `GET /{system}/api/history/{previewId}`: one preview's indexed timeline. */
+  private suspend fun RoutingContext.handlePreviewHistory(sessionInPath: Boolean) {
+    if (rejectBadToken()) return
+    val previewId = call.parameters["name"].orEmpty()
+    withLeasedSession(selectedSessionId(sessionInPath)) { renderHost ->
+      if (renderHost.previews.none { it.id == previewId }) {
+        call.respondText("no such preview", status = HttpStatusCode.NotFound)
+        return@withLeasedSession
+      }
+      val dto = ServeCatalogRead.previewHistory(renderHost, projectHistory, previewId)
+      val json = JSON.encodeToString(PreviewHistoryResponse.serializer(), dto)
+      respondCatalogRead(body = { json }, identity = json, revision = dto.commit)
+    }
+  }
+
+  /** `GET /{system}/api/guidelines/{previewId}`: the preview's published guidelines result. */
+  private suspend fun RoutingContext.handlePreviewGuidelines(sessionInPath: Boolean) {
+    if (rejectBadToken()) return
+    val previewId = call.parameters["name"].orEmpty()
+    withLeasedSession(selectedSessionId(sessionInPath)) { renderHost ->
+      if (renderHost.previews.none { it.id == previewId }) {
+        call.respondText("no such preview", status = HttpStatusCode.NotFound)
+        return@withLeasedSession
+      }
+      val dto = ServeCatalogRead.guidelines(renderHost, previewId)
+      val json = JSON.encodeToString(PreviewGuidelinesResponse.serializer(), dto)
+      respondCatalogRead(body = { json }, identity = json, revision = dto.revision)
     }
   }
 
@@ -19437,6 +19531,12 @@ private data class PreviewsResponse(
   /** Aggregate landing-page visits for this catalog/app. */
   val views: Long = 0,
   val previews: List<PreviewDto>,
+  /**
+   * The delivery-branch commit this catalog was loaded from ([ServeCatalogRead.revision]); null
+   * when it has none. The response's `ETag` is the validator to cache against; this names the
+   * revision it describes. Additive in `compose-preview-serve/v3`.
+   */
+  val revision: String? = null,
 )
 
 @Serializable private data class DegradationDto(val code: String, val detail: String)
