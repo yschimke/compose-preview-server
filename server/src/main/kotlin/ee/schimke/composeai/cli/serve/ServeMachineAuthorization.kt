@@ -222,6 +222,18 @@ class ServeMachineAuthorization(
    * into a place it was never meant to travel — a tool argument, in a transcript, chosen by a
    * model. An operator who can set a header has no need of it.
    */
+  /**
+   * Whether [call] presents a credential this server recognises: the operator token, a live agent
+   * grant (header, bearer, query or the in-band [presentedToken]) or a GitHub session. An expired,
+   * revoked or unknown token is not one. The MCP transport answers `401` only when this is false,
+   * so a client whose OAuth token lapsed is told to sign in again, and a refusal of a credential
+   * that was recognised but is not enough stays a tool error.
+   */
+  fun presentsRecognisedCredential(call: ApplicationCall, presentedToken: String? = null): Boolean =
+    hasOperatorToken(call) ||
+      presentedGrant(call, presentedToken, allowBrowserGrantCookie = false) != null ||
+      githubAuth?.currentLogin(call) != null
+
   private fun hasOperatorToken(call: ApplicationCall): Boolean {
     if (serverToken.isBlank()) return false
     // A browser that exchanged its `?token=` link for the browse cookie holds the same credential.

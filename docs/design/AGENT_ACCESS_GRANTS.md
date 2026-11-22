@@ -629,6 +629,25 @@ unknown IDs and unregistered redirects locally rather than redirecting an error 
 session never edits an `mcp.json`, never holds a pasted secret, and never needs to be talked into
 using the flow. A token that rotates mid-session is the ordinary `401` path, not a reconfiguration.
 
+**A call that needs a rung anonymity does not reach is a `401` too.** A `--public` box answers
+`initialize`, `tools/list` and published reads with no credential at all, so a client can connect
+before anyone signs in. A tool call that then needs more, such as a live render or a UI-builder
+tool, and presents **no credential at all**, is answered at the transport with `401` and the same
+`WWW-Authenticate` challenge, not as a `200` tool error. That is the "sign in when needed" shape:
+Claude's custom connectors, and the MCP authorization spec, start OAuth only on a transport-level
+`401` and then retry the same call with the token, and a `200` with `isError` is never a reason to
+sign in. The challenge carries no `scope`, so the client asks for every scope in
+`scopes_supported` and the approver narrows it on the page. The body still carries the refusal's
+text, `requiredScope` and `agentAccessRequestUrl`, for a client that cannot do OAuth and uses the
+device flow and the `token` argument instead.
+
+A credential that **is** presented and found wanting, a grant without `live` or a UI-builder
+capability its approver left unticked, stays a `200` tool error. Signing in again would be declined
+the same way, so a `401` there would only loop the client through authorization.
+`CredentialRequiredException` (in `ServeCatalogMcp.kt`) marks the first kind, and
+`ServeCatalogMcpCredentialChallengeTest`
+pins which refusals carry it.
+
 **The approval page leads with the redirect host.** A client registers its own `client_name` and
 redirect URIs, so the name says nothing about where the code will go. For a request that came
 through `/oauth/authorize` the page therefore shows the registered redirect's host under *Access

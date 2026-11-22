@@ -32,6 +32,7 @@ class ServeMcpAnonymousPreviewTest {
 
   private val servers = mutableListOf<ServeHttpServer>()
   private val registries = mutableListOf<ServeSessionRegistry>()
+  private lateinit var lastGrants: ServeAgentGrantStore
 
   private fun start(isPublic: Boolean): ServeHttpServer {
     val registry = ServeSessionRegistry(open = { null }).also { registries += it }
@@ -47,7 +48,8 @@ class ServeMcpAnonymousPreviewTest {
           ),
       )
     registry.register("demo", host = ServeBundleHost(dir, label = "demo"), pinned = true)
-    val grants = ServeAgentGrantStore(maxScope = AgentGrantScope.PLAYGROUND)
+    val grants =
+      ServeAgentGrantStore(maxScope = AgentGrantScope.PLAYGROUND).also { lastGrants = it }
     return ServeHttpServer(
         host = "127.0.0.1",
         requestedPort = 0,
@@ -77,6 +79,21 @@ class ServeMcpAnonymousPreviewTest {
         .build()
     client.newCall(request).execute().use {
       return it.code to it.body.string()
+    }
+  }
+
+  private fun mcpWithChallenge(
+    server: ServeHttpServer,
+    body: String,
+  ): Triple<Int, String, String?> {
+    val request =
+      Request.Builder()
+        .url("http://127.0.0.1:${server.port}/mcp")
+        .post(body.toRequestBody("application/json".toMediaType()))
+        .header("Accept", "application/json")
+        .build()
+    client.newCall(request).execute().use {
+      return Triple(it.code, it.body.string(), it.header("WWW-Authenticate"))
     }
   }
 
@@ -123,16 +140,81 @@ class ServeMcpAnonymousPreviewTest {
     // Reading what is already published is one thing; spending the machine is another. A live
     // render is above the rung anonymity satisfies, so it is refused even here.
     //
-    // The refusal arrives as a JSON-RPC *tool* error rather than a transport 401, and that is the
-    // shape it should have: the request was understood, authenticated as far as it goes, and
-    // declined on scope. A 401 here would restart the client's whole authorization dance for a
-    // call that will keep being declined until a human grants a higher rung.
-    val (code, body) = mcp(start(isPublic = true), liveCall)
-    assertEquals(200, code, body)
-    assertTrue(body.contains("\"isError\":true"), body)
+    // With no credential at all the refusal is a transport 401 carrying a WWW-Authenticate
+    // challenge, because that, and not a 200 tool error, is what makes an OAuth-capable MCP client
+    // (Claude's "sign in when needed") run its authorization flow and retry this call. The body
+    // still says what was missing and how to look without it, for a client that cannot.
+    val (code, body, challenge) = mcpWithChallenge(start(isPublic = true), liveCall)
+    assertEquals(401, code, body)
+    assertTrue(challenge.orEmpty().startsWith("Bearer "), challenge)
+    assertTrue(
+      challenge.orEmpty().contains("resource_metadata=\"") &&
+        challenge.orEmpty().contains(ServeMcpOAuth.PROTECTED_RESOURCE_METADATA_MCP_PATH),
+      challenge,
+    )
+    assertTrue(body.contains("\"requiredScope\":\"live\""), body)
     assertTrue(body.contains("live grant scope is required"), body)
     // …and says how to look without one: the published render needs only preview scope.
     assertTrue(body.contains("resources/read"), body)
+  }
+
+  @Test
+  fun `a revoked token is challenged like no token at all`() {
+    // An OAuth client whose token lapsed must be told to sign in again; a 200 would strand it.
+    val server = start(isPublic = true)
+    val request =
+      requireNotNull(
+        lastGrants.openRequest(
+          label = "lapsed",
+          client = "test",
+          requestedScope = AgentGrantScope.LIVE,
+          requestedTtlSeconds = 600,
+        ),
+      )
+    val grant =
+      requireNotNull(
+        lastGrants.approve(
+          request.id,
+          approvedBy = "operator",
+          scope = AgentGrantScope.LIVE,
+          ttlSeconds = 600,
+        ),
+      )
+    assertTrue(lastGrants.revoke(grant.id, "test"))
+    val call = liveCall.replace(""""overrides":""", """"token":"${grant.token}","overrides":""")
+    val (code, body, challenge) = mcpWithChallenge(server, call)
+    assertEquals(401, code, body)
+    assertTrue(challenge.orEmpty().startsWith("Bearer "), challenge)
+  }
+
+  @Test
+  fun `a presented token without live scope is declined as a tool error, not challenged`() {
+    // A credential that was presented and found wanting would be declined again after a sign-in,
+    // so it stays a 200 tool error rather than restarting the client's authorization.
+    val server = start(isPublic = true)
+    val request =
+      requireNotNull(
+        lastGrants.openRequest(
+          label = "preview only",
+          client = "test",
+          requestedScope = AgentGrantScope.PREVIEW,
+          requestedTtlSeconds = 600,
+        ),
+      )
+    val token =
+      requireNotNull(
+          lastGrants.approve(
+            request.id,
+            approvedBy = "operator",
+            scope = AgentGrantScope.PREVIEW,
+            ttlSeconds = 600,
+          ),
+        )
+        .token
+    val call = liveCall.replace(""""overrides":""", """"token":"$token","overrides":""")
+    val (code, body) = mcp(server, call)
+    assertEquals(200, code, body)
+    assertTrue(body.contains("\"isError\":true"), body)
   }
 
   @Test
