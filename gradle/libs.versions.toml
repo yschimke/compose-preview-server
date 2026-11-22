@@ -546,7 +546,7 @@ composeai-contracts = "3.45.0"
 # the components Kobento JSON writes (compose-ui-builder#1353). 3.145.0 never reached Maven Central.
 composeai-ui-builder = "3.146.0"
 # First published version of the optional publication server library (Maven Central).
-livery = "0.15.0"
+livery = "0.22.0"
 # Packages a design revision's WFF source into the signed APK the real watch-face runtime loads
 # (`DwfPackaging`), from yschimke/watchface-tools; published to Maven Central since 0.3.0. 0.3.2 is
 # the first that targets Java 17 (watchface-tools#28), which this build's floor needs. `wff-core`
