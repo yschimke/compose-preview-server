@@ -31,7 +31,7 @@ Watchtower rolls it on its own, and `preview` reaches it at `WATCHFACE_PUSH_SERV
 | --- | --- | --- |
 | `compose-preview-render-runtime` | compose-preview-daemon | JDK 21, both daemon sidecars, Android SDK, Robolectric `android-all`, Skiko native, baked fonts. No entrypoint |
 | `compose-preview-host`, `compose-preview-playground` | this repository | `FROM` the render runtime, plus compose-ai-tools' `lib-rcjvm`/`lib-bta`/`lib-simulator`/`lib-dex2jar`, plus the server |
-| `compose-ui-builder-host` (name to confirm in that repository) | compose-ui-builder | `FROM` the render runtime, plus the UI builder's own Ktor host: `/ui-builder`, `/api/ui-builder/*`, `/mcp/ui-builder` |
+| `compose-ui-builder-server` | compose-ui-builder (`:ui-builder-server`) | The UI builder's own Ktor host: `/ui-builder`, `/api/ui-builder/*`, `/mcp/ui-builder`. A JRE image while it only fronts the legacy container; `FROM` the render runtime once export moves |
 | `compose-preview-catalog-mcp` | compose-preview-mcp | The hosted catalog MCP at `/mcp`, rendering through the server's HTTP API |
 | `compose-preview-livery-host` | this repository, later yschimke/livery | Unchanged until `:server` stops linking `:livery-host` |
 | `compose-preview-caddy` | this repository | The generic edge stays here; deployments mount their own fragments |
@@ -49,11 +49,11 @@ sends, so today's server conforms without a change.
 
 | Contract | Replaces | State |
 | --- | --- | --- |
-| Deployable endpoints: `/healthz`, `/readyz`, `/version` (with `component` and `apis`) | The convergence loop in `preview-host-image.yml` and `checks.txt` assuming every container is this server | contracts PR (first wave) |
-| Release manifest: component, version, `provides`/`requires` API levels, asset digests | The editor archive's one-off `ui-builder-web.json` `serverApi` | contracts PR (first wave) |
-| Session check: forward the browser's cookie to the auth host's `/auth/github/whoami` | Sharing `SERVE_GITHUB_AUTH_COOKIE_SECRET` and the session fingerprint across containers | contracts PR (first wave) |
+| Deployable endpoints: `/healthz`, `/readyz`, `/version` (with `component` and `apis`) | The convergence loop in `preview-host-image.yml` and `checks.txt` assuming every container is this server | compose-preview-contracts#236 |
+| Release manifest: component, version, `provides`/`requires` API levels, asset digests | The editor archive's one-off `ui-builder-web.json` `serverApi` | compose-preview-contracts#236 |
+| Session check: forward the browser's cookie to the auth host's `/auth/github/whoami` | Sharing `SERVE_GITHUB_AUTH_COOKIE_SECRET` and the session fingerprint across containers | compose-preview-contracts#236. ha-designs already does exactly this |
 | Catalog read API: catalog list, revisions, component records, pinned revision | Each container loading every catalog from `SERVE_CATALOGS` into a shared cache volume | named, not yet typed |
-| Editor↔host routes (`/api/ui-builder/*`, OpenAPI) | The single integer `SUPPORTED_SERVER_API` | named, not yet typed |
+| UI-builder HTTP routes (`/api/ui-builder/*`, OpenAPI): the editor's and the REST routes ha-designs calls | The single integer `SUPPORTED_SERVER_API` | named, not yet typed; next, because it has two clients |
 | Render/export request | `ServeUiBuilderRenderPort` adapting onto this process's render host | named, not yet typed |
 
 ## Steps
@@ -74,7 +74,7 @@ server until step 3.
 
 ### 2. A base image below both hosts
 
-compose-preview-daemon publishes `compose-preview-render-runtime` on each release, and its layout
+compose-preview-daemon publishes (yschimke/compose-preview-daemon#511) `compose-preview-render-runtime` on each release, and its layout
 is a documented contract. Then `deploy/image/Dockerfile` builds `runtime` `FROM` it (an
 `ARG RENDER_RUNTIME_IMAGE` pinned to the `composeai-preview-daemon` version, so the image and
 `gradle/libs.versions.toml` cannot drift). It drops its own `android-daemon`, `desktop-daemon`
@@ -105,12 +105,25 @@ The seams the moved code must stop calling, and what each becomes:
 | `WatchFacePush*` | `WATCHFACE_PUSH_SERVER_URL`, already HTTP |
 | `ServeRateLimiter`, `ServeOpenAiForms`, `ServeChatThreadLinks` | Copied; they are small and have no state worth sharing |
 
-Move order, smallest coupling first: the editor and static assets (`ServeUiBuilderEditor`,
-`HostRoot`, `RuntimeAssets`, `Precompressed`); then the read-only stores and routes (folders,
-links, references, comments, reviews, templates, trash); then projects and the design service; then
-export, native preview and DWF; the MCP doors last. After each group `preview` keeps answering
-those paths by proxying to the builder host, so there is no flag day. `SERVE_UI_BUILDER_EXTERNAL=1`
-becomes the only mode, and the jars leave `:server` in the last pull request.
+**The builder host goes in front, and the server stays behind it until it is empty.**
+`compose-ui-builder-server` (yschimke/compose-ui-builder#1372) answers the deployable endpoints
+itself and forwards every other request, WebSockets included, unchanged (`Host`, cookies,
+`X-Forwarded-*`) to today's `SERVE_ROLE=ui-builder` container. Caddy points the UI-builder paths
+at it once. After that, moving a route group is one compose-ui-builder pull request: the group is
+handled there ahead of the proxy. No release here and no Caddy change is needed, and there is no
+flag day.
+
+Move order, smallest coupling first:
+1. the read-only stores and routes (folders, links, references, comments, reviews, templates,
+   trash);
+2. projects and the design service;
+3. export, native preview and DWF;
+4. the editor pages. They are rendered inside `ServeHttpServer.kt` with per-host configuration
+   injected, not served as static files, so they come after the routes they call;
+5. the MCP doors.
+
+When nothing is forwarded any more, the legacy container is removed, `SERVE_UI_BUILDER_EXTERNAL=1`
+becomes the only mode, and the jars leave `:server`.
 
 ### 4. The hosted MCP moves to compose-preview-mcp
 
@@ -125,6 +138,25 @@ dependency on this one:
   longer needs a release here.
 - The `compose-preview-mcp-<v>.tar.gz` bridge on this repository's releases is retired once the
   CLIs from before compose-ai-tools#5929 fall out of support.
+
+### ha.coo.ee
+
+ha.coo.ee is the Home Assistant card designer. Its own server, `ha-designs`, is already outside
+this repository (yschimke/homeassistant-remotecompose `design-server`, image
+`ha-card-design-server`, rolled by Watchtower). It is not a candidate for moving. It is the first
+client of these contracts other than this server, and that changes their priority:
+
+| ha-designs uses | Today | After |
+| --- | --- | --- |
+| Sign-in (`HOST_SIGN_IN_URL`) | Forwards the browser's cookie to `preview`'s `/auth/github/whoami`, `/auth/github/start` and `/logout` | The same calls, typed by `SessionWhoamiV1` (compose-preview-contracts#236). It is already the pattern the contract describes |
+| The UI builder (`UI_BUILDER_URL`, `UI_BUILDER_TOKEN`, `UI_BUILDER_ADMIN_READ_TOKEN`) | About ten `/api/ui-builder/v1/*` routes (designs PUT/GET, `export.rc`, `documents/export.rc`, `requests`, `identity`) plus `/admin/ui-builder/designs`, against `preview` | Pointed at the UI-builder host (`http://ui-builder-server:8080`) once that fronts the routes. The editor↔host route contract has to cover these REST routes and not only the editor's, because this is a second client written in another repository |
+| Browser links | `https://ha.coo.ee/ui-builder/<id>`, routed by `ui-builder.caddy` (`/run/caddy-ha-routes`) | Unchanged paths. Caddy sends them to the UI-builder host |
+| Everything else on ha.coo.ee | `ha.caddy`'s final `handle` sends every path ha-designs does not own to `preview` | Narrowed to `/auth/github/*` and the shared static assets once the builder routes move, so ha.coo.ee no longer depends on the catalog server's surface |
+
+ha-designs can also launch a UI builder of its own (`UI_BUILDER_BINARY`, `--ui-builder-state-dir`),
+which today means spawning compose-preview-server's distribution. The UI-builder host's
+distribution replaces that, so a standalone HA deployment has no compose-preview-server in it at
+all.
 
 ### 5. Smaller removals
 
