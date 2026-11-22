@@ -135,6 +135,13 @@ class ServeUiBuilderRoutesTest {
                 publicationRuntime,
               ) to published
             },
+            files = {
+              mapOf(
+                  "kobento/theme.json" to """{"numbers": {}}""".toByteArray(),
+                  "kobento/json2rc.mjs" to "export function convert(text) {}".toByteArray(),
+                )
+                .takeIf { _ -> it == "custom-kit" }
+            },
           ) {
             published.takeIf { _ -> it == "custom-kit" }
           },
@@ -219,6 +226,38 @@ class ServeUiBuilderRoutesTest {
           .url("http://127.0.0.1:${server.port}/api/ui-builder/v1/catalogs/missing/templates")
       if (actor != null) request.header(ACTOR_HEADER, actor)
       client.newCall(request.build()).execute().use { assertEquals(expected, it.code) }
+    }
+  }
+
+  @Test
+  fun `a catalog's published files are served by path, typed, to readers only`() {
+    fun get(path: String, actor: String? = "reader") =
+      client
+        .newCall(
+          Request.Builder()
+            .url("http://127.0.0.1:${server.port}/api/ui-builder/v1/catalogs/$path")
+            .apply { if (actor != null) header(ACTOR_HEADER, actor) }
+            .build(),
+        )
+        .execute()
+    get("custom-kit/files/kobento/json2rc.mjs").use { response ->
+      assertEquals(200, response.code)
+      assertEquals("text/javascript", response.header("Content-Type")?.substringBefore(';'))
+      assertEquals("no-cache", response.header("Cache-Control"))
+      assertEquals("export function convert(text) {}", response.body.string())
+    }
+    assertEquals(UiBuilderRouteCapability.READ, capabilities.last())
+    get("custom-kit/files/kobento/theme.json").use { response ->
+      assertEquals(200, response.code)
+      assertEquals("application/json", response.header("Content-Type")?.substringBefore(';'))
+    }
+    // A path the publication does not name, another catalog, or no credentials: nothing served.
+    get("custom-kit/files/kobento/missing.json").use { assertEquals(404, it.code) }
+    get("custom-kit/files/kobento/../secret").use { assertEquals(404, it.code) }
+    get("missing/files/kobento/theme.json").use { assertEquals(404, it.code) }
+    get("custom-kit/files/kobento/theme.json", actor = null).use { assertEquals(401, it.code) }
+    get("custom-kit/files/kobento/theme.json", actor = "forbidden").use {
+      assertEquals(403, it.code)
     }
   }
 

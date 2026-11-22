@@ -2774,6 +2774,8 @@ public class ServeRunner(
     // and export declaration. Operators no longer choose an ownership subset.
     val ownership = ee.schimke.composeai.uibuilder.export.CatalogOwnership.ALL
     val publishedTemplates = ConcurrentHashMap<String, CatalogSeedTemplates>()
+    // The files each catalog's publication names for its editor (`statusSemantics.files`).
+    val publishedFiles = ConcurrentHashMap<String, Map<String, ByteArray>>()
     val templatePublications =
       ConcurrentHashMap<String, Pair<CatalogReferenceV1, CatalogSeedTemplates?>>()
     // Null allows every enabled catalog, empty turns the path off, a named set opts in one at a
@@ -2894,6 +2896,7 @@ public class ServeRunner(
               health.degrade(systemId, read.reason)
             }
           }
+          publishedFiles[systemId] = published.files
           templatePublications[systemId] =
             CatalogReferenceV1(
               systemId,
@@ -2916,6 +2919,7 @@ public class ServeRunner(
           // The seeds belonged to the publication that just stopped composing.
           publishedTemplates.remove(systemId)
           templatePublications.remove(systemId)
+          publishedFiles.remove(systemId)
           return false
         }
       }
@@ -3075,7 +3079,10 @@ public class ServeRunner(
       renderer = renderer,
       refreshPublished = refreshPublished,
       seeds =
-        UiBuilderCatalogSeeds(publication = { templatePublications[it] }) {
+        UiBuilderCatalogSeeds(
+          publication = { templatePublications[it] },
+          files = { publishedFiles[it] },
+        ) {
           publishedTemplates[it]
         },
       references =

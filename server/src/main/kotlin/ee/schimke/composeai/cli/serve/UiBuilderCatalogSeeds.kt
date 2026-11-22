@@ -15,8 +15,14 @@ import ee.schimke.composeai.uibuilder.protocol.CatalogReferenceV1
  */
 class UiBuilderCatalogSeeds(
   private val publication: ((String) -> Pair<CatalogReferenceV1, CatalogSeedTemplates?>?)? = null,
+  /** The files a catalog's publication names for its editor, by path. */
+  private val files: (catalogSystemId: String) -> Map<String, ByteArray>? = { null },
   private val templates: (catalogSystemId: String) -> CatalogSeedTemplates? = { null },
 ) {
+
+  /** [path] as [catalogSystemId]'s publication names it under `statusSemantics.files`, or null. */
+  internal fun file(catalogSystemId: String, path: String): ByteArray? =
+    files(catalogSystemId)?.get(path)
 
   /** Published starting documents, without synthesizing a catalog-specific fallback. */
   internal fun publishedDocuments(pin: CatalogReferenceV1): Map<String, UiBuilderDocument>? {

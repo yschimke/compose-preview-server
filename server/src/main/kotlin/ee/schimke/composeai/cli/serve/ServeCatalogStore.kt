@@ -1698,6 +1698,12 @@ class ServeCatalogStore(
      */
     val templates: Map<String, String?> = emptyMap(),
     /**
+     * Files named by the policy's `statusSemantics.files`, from the same commit, for the editor to
+     * load (what a document format compiles with in the browser, say); a path that escapes or will
+     * not fetch is left out. Fetched only with [templates].
+     */
+    val files: Map<String, ByteArray> = emptyMap(),
+    /**
      * The catalog's `ui-builder.guidelines.json` from the same commit, or null.
      * [ServeCatalogGuidelines.accept] decides whether it is valid.
      */
@@ -1759,10 +1765,41 @@ class ServeCatalogStore(
       file = target,
       runtimeId = catalog.uiBuilderRuntime?.takeIf { it.validateContract().isEmpty() }?.runtimeId,
       templates = if (templates) fetchUiBuilderTemplates(system, base, bytes) else emptyMap(),
+      files = if (templates) fetchUiBuilderFiles(system, base, bytes) else emptyMap(),
       guidelines = guidelines,
       guidelinesUrl = guidelinesUrl.takeIf { guidelines != null },
       deliveryCommit = deliveryCommit,
     )
+  }
+
+  /**
+   * The files [policy] names under `statusSemantics.files`, fetched from one commit. A path that
+   * escapes or won't fetch is left out (logged once); the editor then does without it, as it does
+   * on a host that serves none.
+   */
+  private fun fetchUiBuilderFiles(
+    system: String,
+    base: String,
+    policy: ByteArray,
+  ): Map<String, ByteArray> {
+    val declared = runCatching {
+      ((json.parseToJsonElement(policy.decodeToString()) as? JsonObject)?.get("statusSemantics")
+          as? JsonObject)
+        ?.get("files") as? JsonArray
+    }
+      .getOrNull()
+      ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim('/') }
+      .orEmpty()
+    return declared
+      .filter { path -> path.isNotEmpty() && ".." !in path.split("/") }
+      .mapNotNull { path ->
+        runCatching { fetchCatalogAsset("$base$path") }.getOrNull()?.let { path to it }
+          ?: run {
+            System.err.println("serve: $system declares file $path and it could not be fetched")
+            null
+          }
+      }
+      .toMap()
   }
 
   /**

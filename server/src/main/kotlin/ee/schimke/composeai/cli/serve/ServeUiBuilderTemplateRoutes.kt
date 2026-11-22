@@ -11,6 +11,7 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
+import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
@@ -89,4 +90,39 @@ internal fun Route.installUiBuilderTemplateRoutes(
       ContentType.Application.Json,
     )
   }
+  // A file the catalog's publication names for its editor (`statusSemantics.files`): what a
+  // document format compiles with in the browser. Public catalog data, gated like the templates.
+  get("/api/ui-builder/v1/catalogs/{system}/files/{path...}") {
+    when (authorization.authorize(call, UiBuilderRouteCapability.READ)) {
+      is UiBuilderAuthorizationDecision.Authorized -> Unit
+      UiBuilderAuthorizationDecision.Missing -> {
+        call.respondText("authentication is required", status = HttpStatusCode.Unauthorized)
+        return@get
+      }
+      UiBuilderAuthorizationDecision.Forbidden -> {
+        call.respondText("catalog access is forbidden", status = HttpStatusCode.Forbidden)
+        return@get
+      }
+    }
+    val system = call.parameters["system"].orEmpty()
+    val scope = catalogScope(call)
+    val path = call.parameters.getAll("path").orEmpty().joinToString("/")
+    val bytes = seeds.file(system, path).takeIf { scope == null || system in scope }
+    if (bytes == null) {
+      call.respondText("file not found", status = HttpStatusCode.NotFound)
+      return@get
+    }
+    // A republish replaces the file at the same path, so the browser revalidates each load.
+    call.response.headers.append(HttpHeaders.CacheControl, "no-cache")
+    call.respondBytes(bytes, catalogFileContentType(path))
+  }
 }
+
+/** A catalog file's media type, from its extension: the editor imports `.mjs` as a module. */
+internal fun catalogFileContentType(path: String): ContentType =
+  when (path.substringAfterLast('.', "").lowercase()) {
+    "json" -> ContentType.Application.Json
+    "mjs",
+    "js" -> ContentType("text", "javascript")
+    else -> ContentType.Application.OctetStream
+  }
