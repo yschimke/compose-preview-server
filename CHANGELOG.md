@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.197.0](https://github.com/yschimke/compose-preview-server/compare/v3.196.0...v3.197.0) (2026-11-23)
+
+
+### Performance Improvements
+
+* **ui-builder:** compile a document format's content once, not once per request ([#2102](https://github.com/yschimke/compose-preview-server/issues/2102)) ([3698089](https://github.com/yschimke/compose-preview-server/commit/3698089781de4e9c3739602d731df631a74f13f7))
+
 ## [3.196.0](https://github.com/yschimke/compose-preview-server/compare/v3.195.0...v3.196.0) (2026-11-23)
 
 
