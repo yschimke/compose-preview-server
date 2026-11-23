@@ -97,4 +97,30 @@ class CachingDocumentCompilerTest {
     }
     assertEquals(1, calls.get())
   }
+
+  @Test
+  fun `a request that misses just before another caches the result does not compile again`() {
+    val calls = AtomicInteger()
+    lateinit var compiler: CachingDocumentCompiler
+    var raced = false
+    compiler =
+      CachingDocumentCompiler(
+        {
+          calls.incrementAndGet()
+          byteArrayOf(9)
+        },
+        afterMiss = {
+          // The first request has missed and not yet taken the slot: another one runs to the end.
+          if (!raced) {
+            raced = true
+            val other = Thread { compiler.compile("same") }
+            other.start()
+            other.join()
+          }
+        },
+      )
+
+    assertContentEquals(byteArrayOf(9), compiler.compile("same"))
+    assertEquals(1, calls.get())
+  }
 }

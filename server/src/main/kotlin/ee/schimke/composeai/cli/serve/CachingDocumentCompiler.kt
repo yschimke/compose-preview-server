@@ -24,6 +24,10 @@ internal class CachingDocumentCompiler(
   private val maxEntries: Int = DEFAULT_MAX_ENTRIES,
   private val ttlMillis: Long = DEFAULT_TTL_MILLIS,
   private val clock: () -> Long = System::currentTimeMillis,
+  /**
+   * Runs between a miss and claiming the in-flight slot: where a test lands a competing request.
+   */
+  private val afterMiss: () -> Unit = {},
 ) : DocumentCompiler {
   private class Entry(val bytes: ByteArray, val at: Long)
 
@@ -36,19 +40,21 @@ internal class CachingDocumentCompiler(
 
   override fun compile(content: String): ByteArray {
     val key = sha256(content)
-    val now = clock()
-    synchronized(entries) {
-      entries[key]?.let { entry ->
-        if (now - entry.at < ttlMillis) return entry.bytes.copyOf()
-        entries.remove(key)
-      }
+    cached(key)?.let {
+      return it
     }
+    afterMiss()
     val mine = CompletableFuture<ByteArray>()
     val running = inFlight.putIfAbsent(key, mine)
     if (running != null) return join(running).copyOf()
     try {
-      val bytes = delegate.compile(content)
-      synchronized(entries) { entries[key] = Entry(bytes, clock()) }
+      // Again, now the slot is ours: another request may have compiled and cached this key between
+      // the miss above and taking the slot, and must not be followed by a second call.
+      val bytes =
+        cached(key)
+          ?: delegate.compile(content).also { compiled ->
+            synchronized(entries) { entries[key] = Entry(compiled, clock()) }
+          }
       mine.complete(bytes)
       return bytes.copyOf()
     } catch (failure: Throwable) {
@@ -56,6 +62,17 @@ internal class CachingDocumentCompiler(
       throw failure
     } finally {
       inFlight.remove(key, mine)
+    }
+  }
+
+  /** A copy of [key]'s compiled bytes while they are fresh; null on a miss or an expired entry. */
+  private fun cached(key: String): ByteArray? {
+    val now = clock()
+    synchronized(entries) {
+      val entry = entries[key] ?: return null
+      if (now - entry.at < ttlMillis) return entry.bytes.copyOf()
+      entries.remove(key)
+      return null
     }
   }
 
