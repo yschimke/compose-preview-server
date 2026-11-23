@@ -551,7 +551,7 @@ composeai-contracts = "3.46.0"
 # 3.149.0 ships the editor's MCP App shell at `"mcpApp": 2` (compose-ui-builder#1378): it opens a
 # design on this server from a `{ designId }` tool input, through the editor tools #2086 added, so
 # `ui_builder_edit_design` and `ui://compose-ui-builder/editor` switch on for Claude.
-composeai-ui-builder = "3.150.0"
+composeai-ui-builder = "3.151.0"
 # First published version of the optional publication server library (Maven Central).
 livery = "0.22.0"
 # Packages a design revision's WFF source into the signed APK the real watch-face runtime loads
