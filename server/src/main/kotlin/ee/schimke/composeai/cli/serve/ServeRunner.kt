@@ -2720,7 +2720,11 @@ public class ServeRunner(
     // catalog offers its component JSON alone.
     val documentCompilers: Map<String, DocumentCompiler> = buildMap {
       ServeSecretEnv.read(KobentoConvertCompiler.TOKEN_ENV, System.getenv())?.let { token ->
-        put(KobentoConvertCompiler.FORMAT_ID, KobentoConvertCompiler(token))
+        // Cached by content: the palette's thumbnails are the same documents for every visitor.
+        put(
+          KobentoConvertCompiler.FORMAT_ID,
+          CachingDocumentCompiler(KobentoConvertCompiler(token)),
+        )
       }
     }
     if (documentCompilers.isNotEmpty())
