@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.196.0](https://github.com/yschimke/compose-preview-server/compare/v3.195.0...v3.196.0) (2026-11-23)
+
+
+### Features
+
+* **ui-builder:** serve Remote Compose document export, with compose-ui-builder 3.155.0 ([#2100](https://github.com/yschimke/compose-preview-server/issues/2100)) ([3bd3f59](https://github.com/yschimke/compose-preview-server/commit/3bd3f59f8e13c3fafb8597fdeda2eb9bf04ab2d7))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-preview-ui-builder-bom to v3.150.0 ([#2096](https://github.com/yschimke/compose-preview-server/issues/2096)) ([757f2d9](https://github.com/yschimke/compose-preview-server/commit/757f2d9ab04832059a136b0d4c5adb154f245c53))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-ui-builder-bom to v3.151.0 ([#2098](https://github.com/yschimke/compose-preview-server/issues/2098)) ([da9a2c2](https://github.com/yschimke/compose-preview-server/commit/da9a2c2a4c3e00d758c4c65f878f6e6d53af8fe3))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-ui-builder-bom to v3.154.0 ([#2101](https://github.com/yschimke/compose-preview-server/issues/2101)) ([5649d68](https://github.com/yschimke/compose-preview-server/commit/5649d68713372fe315637ae19fa69a05d0c20766))
+* **deps:** update dependency ee.schimke.composeai:livery-server to v0.23.0 ([#2099](https://github.com/yschimke/compose-preview-server/issues/2099)) ([8a8259b](https://github.com/yschimke/compose-preview-server/commit/8a8259bf5cf34fe5cfebf4a7a6d53418bcfdf86e))
+
 ## [3.195.0](https://github.com/yschimke/compose-preview-server/compare/v3.194.0...v3.195.0) (2026-11-22)
 
 
