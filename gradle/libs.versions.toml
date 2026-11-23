@@ -553,7 +553,7 @@ composeai-contracts = "3.46.0"
 # `ui_builder_edit_design` and `ui://compose-ui-builder/editor` switch on for Claude.
 composeai-ui-builder = "3.150.0"
 # First published version of the optional publication server library (Maven Central).
-livery = "0.22.0"
+livery = "0.23.0"
 # Packages a design revision's WFF source into the signed APK the real watch-face runtime loads
 # (`DwfPackaging`), from yschimke/watchface-tools; published to Maven Central since 0.3.0. 0.3.2 is
 # the first that targets Java 17 (watchface-tools#28), which this build's floor needs. `wff-core`
