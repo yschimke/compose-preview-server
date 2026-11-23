@@ -170,8 +170,13 @@ jobs:
         with:
           cache-provider: basic
           cache-read-only: true
+      # With `uiBuilderRemoteCompose`, paired with compose-ui-builder's Maven artifacts (built
+      # with it since 3.155.0): this build's own `UiBuilderBuildFeatures` gates the Remote Compose
+      # document export executor, and the `ui-builder-export` jar's gates its routes. Either one
+      # off and `/api/ui-builder/v1/documents/export.rc` is a 404, which leaves an editor's service
+      # fallback (a Kobento component only Kobento's `convert` compiles) without a picture.
       - name: Build the standalone distributions
-        run: ./gradlew :server:distTar :livery-host:distTar
+        run: ./gradlew -PuiBuilderRemoteCompose=true :server:distTar :livery-host:distTar
       - name: Upload standalone server distribution
         run: >-
           gh release upload "${{ needs.release-please.outputs.publish_tag }}"
