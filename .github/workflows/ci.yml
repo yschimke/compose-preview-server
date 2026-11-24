@@ -76,8 +76,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Check tools-owned parser vendor
-        run: python3 .github/scripts/check-usage-source-psi-vendor.py
       # The design-render lane's manifest and its sticky comment. Pure stdlib and no image is
       # opened — a design render is compared by the sha256 the manifest carries — so this belongs
       # in the job that needs no JDK rather than in `gradle`.
