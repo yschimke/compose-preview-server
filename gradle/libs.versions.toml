@@ -274,7 +274,7 @@ composeai-tools = "2.103.0"
 # not usable here (ui-builder-gate2's `data-material-icon` check is what catches it). 3.29.0 is the
 # first release publishing `ghcr.io/yschimke/compose-preview-render-runtime`, which
 # `deploy/image/Dockerfile` builds FROM at exactly this version, so the image cannot go below it.
-composeai-preview-daemon = "3.29.0"
+composeai-preview-daemon = "3.29.1"
 # 2.9.0 is the first release carrying `DesignEnvironmentV1.exportDevices` and its Set/Reset
 # changes, which is the field a design names its export devices in. 2.14.0 adds the components a
 # design defines — `DesignDocumentV1.components`, `DesignNodeV1.component` and the `binding` value
