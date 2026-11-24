@@ -530,7 +530,7 @@ widget artwork resolves in the browser is the builder's asset-registry question,
 scaffold's: `asset/image` draws the bytes the design's `assets` map pins under its key (put there
 with `PUT /api/ui-builder/v1/designs/{designId}/assets/{assetKey}` or `ui_builder_put_asset`), the
 project-owned artwork keys, and a placeholder carrying the key otherwise — see
-[`design/UI_BUILDER_ASSETS.md`](design/UI_BUILDER_ASSETS.md).
+[`design/UI_BUILDER_ASSETS.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_ASSETS.md).
 
 A blank widget declares none of this, so both empty templates open on the default frame:
 
@@ -1039,7 +1039,7 @@ another application's classes, for the reason it cannot link Wear Compose — an
 by **Preview**, which compiles the design against the pack's own served bundle. A design drawing on
 two packs has no bundle that carries both and the native preview says so. Export and the code pane
 write the real call site from the pack's record.
-[`design/UI_BUILDER_COMPONENT_PACKS.md`](design/UI_BUILDER_COMPONENT_PACKS.md) has the model and
+[`design/UI_BUILDER_COMPONENT_PACKS.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_COMPONENT_PACKS.md) has the model and
 the projection rules.
 
 ### The export's one classpath requirement
@@ -1139,7 +1139,7 @@ that is the case to hand to an agent.
 
 None of this is part of the design. No node holds it, the Compose and SVG exports cannot see it, and
 nothing here reaches another collaborator's canvas — it is scaffolding for the person doing the
-work. [`design/UI_BUILDER_REFERENCE_OVERLAY.md`](design/UI_BUILDER_REFERENCE_OVERLAY.md) says why
+work. [`design/UI_BUILDER_REFERENCE_OVERLAY.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_REFERENCE_OVERLAY.md) says why
 that line is drawn where it is, and where the one-way door between the two halves sits.
 
 ## Property coverage
@@ -1173,7 +1173,7 @@ theme roles in the catalog's `statusSemantics.colorTokens`; `assetKey` names one
 chooses the value, with the node and the field named — and a design that already holds such a
 value renders it as a visible placeholder rather than failing the frame. The decision, and why
 the line is "the canvas cannot draw it" rather than "the export cannot write it", is
-[`design/UI_BUILDER_VALUE_SEMANTICS.md`](design/UI_BUILDER_VALUE_SEMANTICS.md).
+[`design/UI_BUILDER_VALUE_SEMANTICS.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_VALUE_SEMANTICS.md).
 
 An optional property can be **unset** again, so the component's own default applies: the editor's
 `removeNodeProperty` operation names the node and the field, and on the wire
@@ -1202,7 +1202,7 @@ If the design belongs to an app rather than to this repository, the same file ha
 with `--ui-builder-designs ./ui-builder/designs` and every design in there is listed under **From
 the projects** on `/admin/ui-builder`, ready to open and carry on with. That is the loop an app uses
 while a screen is still being designed — export when it is worth keeping, open when somebody picks
-it up — and [`design/UI_BUILDER_PROJECT_DESIGNS.md`](design/UI_BUILDER_PROJECT_DESIGNS.md) has the
+it up — and [`design/UI_BUILDER_PROJECT_DESIGNS.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_PROJECT_DESIGNS.md) has the
 convention and the two sources in full.
 
 From there the build owns it. `DesignFixturesTest` replays the file, checks its hash, validates

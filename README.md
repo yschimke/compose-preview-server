@@ -324,7 +324,7 @@ edits as a pull request while displaying each design's canonical home; see
 A served catalog's own composables can also be offered *inside* the builder's catalogs as a
 component pack (`--ui-builder-packs confetti-mobile=mobile,confetti-wear=wear`), switched on by an
 author from the editor's settings; see
-[`docs/design/UI_BUILDER_COMPONENT_PACKS.md`](docs/design/UI_BUILDER_COMPONENT_PACKS.md).
+[`docs/design/UI_BUILDER_COMPONENT_PACKS.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_COMPONENT_PACKS.md).
 
 Releases attach that distribution to the GitHub release, then publish the reusable
 `ghcr.io/yschimke/compose-preview-host` image. Start your own instance with

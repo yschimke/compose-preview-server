@@ -36,5 +36,5 @@ so a wrong guess costs one keystroke, where an empty container cost the same sub
 every insert.
 
 The rules, the table and what is deliberately left unseeded are in
-[`docs/design/UI_BUILDER_EDITOR_OPERATIONS.md`](../../docs/design/UI_BUILDER_EDITOR_OPERATIONS.md#starter-content)
+[`docs/design/UI_BUILDER_EDITOR_OPERATIONS.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_EDITOR_OPERATIONS.md#starter-content)
 and in `StarterContent.kt`'s own documentation.

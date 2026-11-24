@@ -71,7 +71,7 @@ lines or reduce `--local` to the HTTP client it exists to not be.
 `compose-ui-builder` was extracted first and has since published, so its seams are coordinates:
 three jars and a BOM on Maven Central and the editor archive as a GitHub release asset, with a
 composite build opt-in through `-PcomposeUiBuilderDir`
-([`UI_BUILDER_EXTRACTION_AND_DESKTOP.md`](UI_BUILDER_EXTRACTION_AND_DESKTOP.md)'s status note has
+([`UI_BUILDER_EXTRACTION_AND_DESKTOP.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_EXTRACTION_AND_DESKTOP.md)'s status note has
 the details). What remains ahead of a second extraction is the cost below, not resolvability.
 Starting it out of the same repository is how three repositories end up half-finished at once, and
 the cost is paid in the place that is hardest to see: a change spanning the seam becomes two pull

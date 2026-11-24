@@ -17,7 +17,7 @@ import { pathToFileURL } from "node:url";
  * What is inside a `ui-builder-service-v1.json`, by design and by section. The store rewrites one
  * file per accepted edit, so the operator only saw a total; this attributes it, and is the
  * measurement behind the per-design store in
- * [`docs/design/UI_BUILDER_STATE_STORAGE.md`](../../docs/design/UI_BUILDER_STATE_STORAGE.md) (run
+ * [`docs/design/UI_BUILDER_STATE_STORAGE.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_STATE_STORAGE.md) (run
  * it before and after the migration). Sizes are each subtree's serialized UTF-8 length; envelope,
  * key names and punctuation belong to no section and are reported as `overheadBytes`.
  */

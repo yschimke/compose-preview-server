@@ -1,7 +1,7 @@
 # UI builder — the board, the frame, and the variant strip
 
 Committed evidence for the three axes
-[`UI_BUILDER_CANVAS_FRAMES_VARIANTS.md`](../../docs/design/UI_BUILDER_CANVAS_FRAMES_VARIANTS.md)
+[`UI_BUILDER_CANVAS_FRAMES_VARIANTS.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_CANVAS_FRAMES_VARIANTS.md)
 unpins: what is *in* a design, what it is *measured in*, and how many pictures of it you look at.
 
 | file | what it is |
@@ -67,7 +67,7 @@ capability exporter's generated Kotlin call the real scaffold, and each frame co
 size class so a row of frames can disagree. The record-driven projection still refuses the component. `layoutMode` became a `PaneScaffoldDirective` rather than a width
 comparison. The canvas keeps a stand-in on purpose — it draws every declared pane at every width so
 no subtree becomes uneditable — which is
-[`UI_BUILDER_PREVIEW_FIDELITY.md`](../../docs/design/UI_BUILDER_PREVIEW_FIDELITY.md)'s rung-1 licence,
+[`UI_BUILDER_PREVIEW_FIDELITY.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_PREVIEW_FIDELITY.md)'s rung-1 licence,
 not a leftover. Read the pane geometry in these two PNGs as historical; everything else in them still
 holds.
 

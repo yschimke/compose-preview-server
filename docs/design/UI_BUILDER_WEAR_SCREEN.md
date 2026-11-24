@@ -206,7 +206,7 @@ upstream nobody in this repository compiles.
 So the canvas is not the fidelity surface for `wear-m3`, and it is not going to become one.
 
 `remote-m3` is the same rule with a stricter conclusion, and it is written up in
-[`UI_BUILDER_REMOTE_COMPOSE.md`](UI_BUILDER_REMOTE_COMPOSE.md#no-borrow-crosses-into-remotecomposable):
+[`UI_BUILDER_REMOTE_COMPOSE.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_REMOTE_COMPOSE.md#no-borrow-crosses-into-remotecomposable):
 a widget body is `@RemoteComposable`, which cannot call `@UiComposable` content at all, so even the
 foundation carve-out above is unavailable there — that catalog's borrows are stand-ins all the way
 down.
@@ -296,7 +296,7 @@ Not `CapturingWearWidgetPreview`: that compose-ai-tools wrapper additionally off
 document to the render harness's `.rc` sidecar, and this lane wants a frame, not bytes. Requiring
 `ee.schimke.composeai:wear-preview-runtime` on a bundle to publish something nobody reads would be a
 deployment cost for nothing; producing a document is what the
-[inline-capture lane](UI_BUILDER_REMOTE_COMPOSE.md) exists for.
+[inline-capture lane](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_REMOTE_COMPOSE.md) exists for.
 
 Two consequences worth stating out loud:
 

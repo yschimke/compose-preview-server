@@ -4,7 +4,7 @@ Committed evidence for the strip of revision thumbnails under the canvas, and th
 opens — the pictures half of the history the
 [History dock](../ui-builder-history/README.md) lists in words. The design, the two timelines it sits
 between, and where the pictures come from are in
-[`docs/design/UI_BUILDER_REVISION_HISTORY.md`](../../docs/design/UI_BUILDER_REVISION_HISTORY.md).
+[`docs/design/UI_BUILDER_REVISION_HISTORY.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_REVISION_HISTORY.md).
 
 | file | what it is |
 | --- | --- |

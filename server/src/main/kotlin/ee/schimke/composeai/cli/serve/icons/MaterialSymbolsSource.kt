@@ -27,7 +27,7 @@ internal data class MaterialSymbolsStyle(
  * that: pointed at a moving branch, the day upstream advances is the day every cold host downloads
  * bytes that cannot match, discards them, and answers 503 for good — a pin nobody can fetch is not
  * determinism, it is an outage. Determinism is the property
- * [`UI_BUILDER_MATERIAL_SYMBOLS.md`](../../../../../../../../../docs/design/UI_BUILDER_MATERIAL_SYMBOLS.md)
+ * [`UI_BUILDER_MATERIAL_SYMBOLS.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_MATERIAL_SYMBOLS.md)
  * calls determinism, and the reason the live Google endpoints are not the runtime source.
  *
  * [fetch] is injected so that tests never reach the network and so an offline host can be handed a

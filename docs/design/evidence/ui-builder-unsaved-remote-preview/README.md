@@ -87,4 +87,4 @@ preservation, corrupt digests, mismatched revisions/formats and rejected authent
 The temporary endpoint accepts Remote JSON/RC only. Fully disconnected compilation and native PNG
 compilation remain separate work.
 The broader operation-coverage goal is retained in the
-[implementation tracker](../../UI_BUILDER_REMOTE_COMPOSE_IMPLEMENTATION.md).
+[implementation tracker](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_REMOTE_COMPOSE_IMPLEMENTATION.md).

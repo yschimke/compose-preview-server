@@ -59,4 +59,4 @@ The standalone Android proof passes all nine tests, including both ordinary-root
 This closes ordinary-root source export in the editor and MCP. The separate server native PNG
 compilation route still needs this root support. String/nullable state, broader recipes and
 operation coverage, unsaved-document playback and reusable-component fidelity remain tracked in
-[the implementation plan](../../UI_BUILDER_REMOTE_COMPOSE_IMPLEMENTATION.md).
+[the implementation plan](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_REMOTE_COMPOSE_IMPLEMENTATION.md).
