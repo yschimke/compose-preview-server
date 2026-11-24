@@ -176,9 +176,7 @@ how those artefacts are regenerated, just run through `build-brief`.
   ([#9](https://github.com/yschimke/compose-preview-server/issues/9),
   [#180](https://github.com/yschimke/compose-preview-server/issues/180)).
 - Shipping Kotlin modules. `:server` holds the HTTP layer, the runner, the catalog store and the
-  web surfaces; `:livery-host` holds the Livery public component-publication adapter and its
-  standalone Ktor CIO host (`checkLiveryHostBoundary` keeps it free of `:server`, engines, UI
-  builder, Watch Face, render-host and daemons); `:playground-engine` holds the transport-free
+  web surfaces; `:playground-engine` holds the transport-free
   compile, sandbox and render engine shared by the playground, UI-builder native preview and
   `design --local` (`checkPlaygroundEngineBoundary` keeps it free of Ktor server, UI builder, Watch
   Face, Livery, `:server` and renderer implementations); `:serve-auth` holds GitHub OAuth sessions,
@@ -190,9 +188,12 @@ how those artefacts are regenerated, just run through `build-brief`.
   `:playground-engine`, renderer/daemon implementations and `wff-packager`/`xerces`);
   `:watchface-push` holds the Watch Face Push marketplace store, device linking, signed APK build
   queue and catalog face discovery (`checkWatchFacePushBoundary` keeps it free of `:server`,
-  `:playground-engine`, `:livery-host`, UI builder, Livery and `wff-packager`/`xerces`);
-  `:usage-source-psi`, `:wasm-ui` and `:native-catalog-m3` are the supporting build modules. The UI
-  builder's service — `:ui-builder-runtime`
+  `:playground-engine`, UI builder, Livery — including `ee.schimke.composeai:livery-host` — and
+  `wff-packager`/`xerces`);
+  `:usage-source-psi`, `:wasm-ui` and `:native-catalog-m3` are the supporting build modules.
+  `:livery-host` moved to [`yschimke/livery`](https://github.com/yschimke/livery) and is consumed as
+  the released Maven coordinate `ee.schimke.composeai:livery-host` (via `livery-bom`) and GitHub
+  release tarball (`livery-host-<version>.tar.gz`). The UI builder's service — `:ui-builder-runtime`
   — is not here: it is a released coordinate from `yschimke/compose-ui-builder` that `:server` links,
   and it holds persistent design state, catalog validation and renderer-neutral export orchestration
   there. This repository publishes no Maven coordinates; the modules ship inside the standalone

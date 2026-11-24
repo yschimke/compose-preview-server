@@ -1,29 +1,30 @@
 # syntax=docker/dockerfile:1.29
 
 # Minimal standalone container for Livery public component publications (`/p/<slug>/r/<rev>/…`).
-# Runs `:livery-host` on a JRE with no Android SDK, Skiko, Robolectric, BTA, or `:server` runtime.
-ARG SERVER_VERSION
+# Runs `livery-host` from yschimke/livery on a JRE with no Android SDK, Skiko, Robolectric, BTA,
+# or `:server` runtime.
+ARG LIVERY_VERSION=0.26.0
 
 FROM eclipse-temurin:21.0.13.1_2-jre AS fetch
-ARG SERVER_VERSION
+ARG LIVERY_VERSION
 WORKDIR /opt
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
     rm -rf /var/lib/apt/lists/* && \
     curl -fsSL --retry 20 --retry-delay 15 --retry-all-errors -o /tmp/livery.tgz \
-      "https://github.com/yschimke/compose-preview-server/releases/download/v${SERVER_VERSION}/compose-preview-livery-host-${SERVER_VERSION}.tar.gz" && \
+      "https://github.com/yschimke/livery/releases/download/v${LIVERY_VERSION}/livery-host-${LIVERY_VERSION}.tar.gz" && \
     tar -xzf /tmp/livery.tgz -C /opt && \
     rm /tmp/livery.tgz && \
-    ln -s "/opt/compose-preview-livery-host-${SERVER_VERSION}" /opt/compose-preview-livery-host
+    ln -s "/opt/livery-host-${LIVERY_VERSION}" /opt/livery-host
 
 FROM eclipse-temurin:21.0.13.1_2-jre
-ARG SERVER_VERSION
-COPY --from=fetch "/opt/compose-preview-livery-host-${SERVER_VERSION}" "/opt/compose-preview-livery-host-${SERVER_VERSION}"
-RUN ln -s "/opt/compose-preview-livery-host-${SERVER_VERSION}" /opt/compose-preview-livery-host && \
+ARG LIVERY_VERSION
+COPY --from=fetch "/opt/livery-host-${LIVERY_VERSION}" "/opt/livery-host-${LIVERY_VERSION}"
+RUN ln -s "/opt/livery-host-${LIVERY_VERSION}" /opt/livery-host && \
     apt-get update && apt-get install -y --no-install-recommends curl && \
     rm -rf /var/lib/apt/lists/*
 
-ENV PATH="/opt/compose-preview-livery-host/bin:${PATH}" \
+ENV PATH="/opt/livery-host/bin:${PATH}" \
     JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=70"
 
 EXPOSE 8080
-ENTRYPOINT ["compose-preview-livery-host"]
+ENTRYPOINT ["livery-host"]

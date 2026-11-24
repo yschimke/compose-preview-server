@@ -79,7 +79,6 @@ tasks.named("check") {
   // UI-builder modules live in yschimke/compose-ui-builder and are verified by its CI, not
   // `:server:check`.
   dependsOn(
-    ":livery-host:check",
     ":playground-engine:check",
     ":serve-auth:check",
     ":watchface-engine:check",

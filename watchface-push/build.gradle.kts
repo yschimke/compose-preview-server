@@ -37,8 +37,9 @@ tasks.withType<Test>().configureEach {
 }
 
 /**
- * Enforces that `:watchface-push` stays free of `:server`, `:playground-engine`, `:livery-host`, UI
- * builder, Livery, renderer/daemon implementations, and `wff-packager` / `xerces`.
+ * Enforces that `:watchface-push` stays free of `:server`, `:playground-engine`, UI builder, Livery
+ * (including `ee.schimke.composeai:livery-host`), renderer/daemon implementations, and
+ * `wff-packager` / `xerces`.
  */
 abstract class CheckWatchFacePushBoundary : DefaultTask() {
   @get:Input abstract val resolvedComponents: SetProperty<String>
@@ -54,9 +55,9 @@ abstract class CheckWatchFacePushBoundary : DefaultTask() {
         .filter { component -> prefixes.any { prefix -> component.startsWith(prefix) } }
         .sorted()
     check(hits.isEmpty()) {
-      ":watchface-push must stay free of :server, :playground-engine, :livery-host, UI builder, " +
-        "Livery, renderer/daemon implementations and wff-packager/xerces. " +
-        "Found on runtimeClasspath: ${hits.joinToString(", ")}"
+      ":watchface-push must stay free of :server, :playground-engine, UI builder, Livery " +
+        "(including ee.schimke.composeai:livery-host), renderer/daemon implementations and " +
+        "wff-packager/xerces. Found on runtimeClasspath: ${hits.joinToString(", ")}"
     }
   }
 }
@@ -85,12 +86,12 @@ tasks.register<CheckWatchFacePushBoundary>("checkWatchFacePushBoundary") {
     listOf(
       "project :server",
       "project :playground-engine",
-      "project :livery-host",
       "project :cli",
       "project :ui-builder",
       "project :wasm-ui",
       "module ee.schimke.composeai:compose-preview-ui-builder-",
       "module ee.schimke.composeai:ui-builder-",
+      "module ee.schimke.composeai:livery-host",
       "module ee.schimke.composeai:livery-",
       "module ee.schimke.composeai:renderer-",
       "module ee.schimke.composeai:daemon-android",

@@ -50,6 +50,7 @@ import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceRequest
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
 import ee.schimke.composeai.web.WebEscaping
+import ee.schimke.livery.host.ServeComponentPublications
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod

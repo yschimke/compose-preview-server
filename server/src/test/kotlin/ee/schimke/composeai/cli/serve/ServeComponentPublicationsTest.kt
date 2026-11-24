@@ -1,5 +1,6 @@
 package ee.schimke.composeai.cli.serve
 
+import ee.schimke.livery.host.ServeComponentPublications
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest

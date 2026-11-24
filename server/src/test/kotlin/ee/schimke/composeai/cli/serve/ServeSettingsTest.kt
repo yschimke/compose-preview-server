@@ -1,6 +1,7 @@
 package ee.schimke.composeai.cli.serve
 
 import ee.schimke.composeai.cli.serve.ServeSettings.Source
+import ee.schimke.livery.host.ServeComponentPublications
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -53,12 +54,21 @@ class ServeSettingsTest {
     val analytics =
       File(repoRoot, "server/src/main/kotlin/ee/schimke/composeai/cli/serve/ServeAnalytics.kt")
         .readText()
-    val publications =
-      File(
-          repoRoot,
-          "livery-host/src/main/kotlin/ee/schimke/composeai/cli/serve/ServeComponentPublications.kt",
-        )
-        .readText()
+    val publicationsEnvKeys = mutableSetOf<String>()
+    ServeComponentPublications.fromEnvironment(
+      object : AbstractMap<String, String>() {
+        override val entries: Set<Map.Entry<String, String>> = emptySet()
+
+        override fun get(key: String): String {
+          publicationsEnvKeys.add(key)
+          return when (key) {
+            "SERVE_COMPONENT_PUBLICATIONS_ORIGIN" -> "https://example.invalid"
+            "SERVE_COMPONENT_VIEWER_CONFIG" -> "{}"
+            else -> "/tmp/nonexistent"
+          }
+        }
+      },
+    )
     val watchFacePush =
       File(
           repoRoot,
@@ -75,7 +85,7 @@ class ServeSettingsTest {
       assertTrue(
         "\${${setting.env}" in entrypoint ||
           "\"${setting.env}\"" in analytics ||
-          "\"${setting.env}\"" in publications ||
+          setting.env in publicationsEnvKeys ||
           "\"${setting.env}\"" in watchFacePush ||
           "\"${setting.env}\"" in exportRoutes,
         "${setting.env} (${setting.key}) is read by neither the entrypoint nor the server",

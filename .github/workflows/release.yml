@@ -175,13 +175,12 @@ jobs:
       # document export executor, and the `ui-builder-export` jar's gates its routes. Either one
       # off and `/api/ui-builder/v1/documents/export.rc` is a 404, which leaves an editor's service
       # fallback (a Kobento component only Kobento's `convert` compiles) without a picture.
-      - name: Build the standalone distributions
-        run: ./gradlew -PuiBuilderRemoteCompose=true :server:distTar :livery-host:distTar
+      - name: Build the standalone distribution
+        run: ./gradlew -PuiBuilderRemoteCompose=true :server:distTar
       - name: Upload standalone server distribution
         run: >-
           gh release upload "${{ needs.release-please.outputs.publish_tag }}"
           "server/build/distributions/compose-preview-server-${PLUGIN_VERSION}.tar.gz"
-          "livery-host/build/distributions/compose-preview-livery-host-${PLUGIN_VERSION}.tar.gz"
           --clobber
       # A bridge for CLIs released before compose-ai-tools#5929, which still fetch
       # `compose-preview-mcp-<this version>.tar.gz` from the newest release HERE: re-attach
@@ -233,12 +232,13 @@ jobs:
     outputs:
       version: ${{ steps.tools.outputs.version }}
       daemon_version: ${{ steps.tools.outputs.daemon_version }}
+      livery_version: ${{ steps.tools.outputs.livery_version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.release-please.outputs.publish_tag }}
           persist-credentials: false
-      - name: Read the compose-ai-tools and compose-preview-daemon versions used by the server
+      - name: Read the compose-ai-tools, compose-preview-daemon and livery versions used by the server
         id: tools
         run: |
           set -euo pipefail
@@ -256,6 +256,14 @@ jobs:
             exit 1
           }
           echo "daemon_version=${daemon}" >> "$GITHUB_OUTPUT"
+          # `livery-host` moved to yschimke/livery; deploy/livery/Dockerfile fetches its tarball
+          # at this pin.
+          livery="$(sed -n 's/^livery = "\([^"]*\)"$/\1/p' gradle/libs.versions.toml)"
+          test -n "${livery}" || {
+            echo "::error::livery is missing from gradle/libs.versions.toml"
+            exit 1
+          }
+          echo "livery_version=${livery}" >> "$GITHUB_OUTPUT"
 
   preview-host-image:
     needs: [release-please, finish-release, resolve-preview-host-tools]
@@ -274,6 +282,7 @@ jobs:
       # (`lib-rcjvm/`, `lib-bta/`), `daemon_version` for the Android and desktop daemons.
       tools_version: ${{ needs.resolve-preview-host-tools.outputs.version }}
       daemon_version: ${{ needs.resolve-preview-host-tools.outputs.daemon_version }}
+      livery_version: ${{ needs.resolve-preview-host-tools.outputs.livery_version }}
     secrets:
       DEPLOY_HOOK_TOKEN: ${{ secrets.DEPLOY_HOOK_TOKEN }}
 
