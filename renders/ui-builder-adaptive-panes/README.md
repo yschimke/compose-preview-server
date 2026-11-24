@@ -40,4 +40,4 @@ pane there is a subtree that cannot be selected, dropped into or edited — and 
 structure rather than about pixels, so it is pinned in
 [`AdaptiveSupportingPaneTest`](../../ui-builder/src/jvmTest/kotlin/ee/schimke/composeai/uibuilder/AdaptiveSupportingPaneTest.kt)
 rather than rendered. The rung it sits on is
-[`UI_BUILDER_PREVIEW_FIDELITY.md`](../../docs/design/UI_BUILDER_PREVIEW_FIDELITY.md).
+[`UI_BUILDER_PREVIEW_FIDELITY.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_PREVIEW_FIDELITY.md).

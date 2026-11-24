@@ -8,7 +8,7 @@ of a UI — authored against `m3-catalog` and drawn by `composePreviewRender` th
 
 They exist to answer one question: **does authoring a real tablet UI against the real composables,
 and letting the AndroidX adaptive libraries do the responding, actually work?** What it turned up is
-[`UI_BUILDER_GOOGLE_APP_SAMPLES.md`](../../docs/design/UI_BUILDER_GOOGLE_APP_SAMPLES.md).
+[`UI_BUILDER_GOOGLE_APP_SAMPLES.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_GOOGLE_APP_SAMPLES.md).
 
 | design | the screen it draws | what it exercises |
 | --- | --- | --- |

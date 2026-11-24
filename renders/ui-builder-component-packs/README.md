@@ -12,4 +12,4 @@ and a pack node on the canvas used to be the red **Unsupported component** diagn
   `wear-m3`'s native-only components take. The canvas cannot link Confetti's classes; the picture of
   the real component comes from the native lane, compiled against the `confetti-mobile` bundle.
 
-See [`docs/design/UI_BUILDER_COMPONENT_PACKS.md`](../../docs/design/UI_BUILDER_COMPONENT_PACKS.md).
+See [`docs/design/UI_BUILDER_COMPONENT_PACKS.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_COMPONENT_PACKS.md).

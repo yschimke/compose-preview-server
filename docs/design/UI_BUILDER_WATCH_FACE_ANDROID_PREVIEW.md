@@ -10,7 +10,7 @@ shown in **its own tab**, beside the editor and not inside it.
 
 The editor's fast preview (the WFF → Remote Compose translation, several devices side by side)
 stays in the editor tab and does not depend on anything here. This is the slow, authoritative
-second rung of the fidelity ladder in [UI_BUILDER_PREVIEW_FIDELITY.md](UI_BUILDER_PREVIEW_FIDELITY.md),
+second rung of the fidelity ladder in [UI_BUILDER_PREVIEW_FIDELITY.md](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_PREVIEW_FIDELITY.md),
 and like the Wear screen's native lane it is allowed to be absent: a host without the runtime says
 so, and the fast preview keeps working.
 

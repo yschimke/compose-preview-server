@@ -269,7 +269,7 @@ the reply is the released `McpResponseEnvelopeV1` and the request shapes are the
    design, so put the picture **first**: this stores PNG, JPEG, GIF or WebP bytes (base64, at most
    1 MiB) content-addressed and pins the key into the design's `assets` map, moving the revision
    like an apply does. Then insert the node naming the key. See
-   [`UI_BUILDER_ASSETS.md`](UI_BUILDER_ASSETS.md).
+   [`UI_BUILDER_ASSETS.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_ASSETS.md).
 6. `ui_builder_export` — the Kotlin, or the refusals. An `asset/image` exports as the real
    `Image(...)` with a `ColorPainter` in place of the picture and an `ASSET_PLACEHOLDER` warning
    naming the key and digest to bundle.
@@ -718,14 +718,14 @@ whenever somebody has said something you have not acknowledged. Clear it with
 `ui_builder_acknowledge_comment`, which claims only that you have read the thread, or with
 `ui_builder_react_to_comment`, which is the lightest way to say the same thing; neither claims the
 question is settled, which is what `ui_builder_resolve_comment_thread` is for.
-[`UI_BUILDER_COMMENTS.md`](UI_BUILDER_COMMENTS.md) has the three acts and why they are separate.
+[`UI_BUILDER_COMMENTS.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_COMMENTS.md) has the three acts and why they are separate.
 
 **And what the design is for, on the same reply.** `ui_builder_get_design` also grows a `links`
 object — the issue, the design-tool frame, the pull request, the chat thread and the design this one
 continues — whenever anybody has recorded one, so an agent opening somebody else's design sees the
 brief behind it without a second call. Read it on its own with `ui_builder_get_links` and write it
 with `ui_builder_set_links`, which replaces the whole record.
-[`UI_BUILDER_LINKS.md`](UI_BUILDER_LINKS.md) has the record and its routes.
+[`UI_BUILDER_LINKS.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_LINKS.md) has the record and its routes.
 
 **And where the design is canonical, at the top.** The design's recorded `home` (`{kind: server,
 url, designId}` or `{kind: repo, path}`) is in the document, four levels down

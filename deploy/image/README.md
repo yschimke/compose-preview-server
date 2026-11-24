@@ -228,7 +228,7 @@ The `shadow` flag, a startup report on what owning a catalog would change, is re
 every builder catalog of that platform — their own composables
 on a shelf an author switches on from the editor's settings. A pack's component record is read from
 the served catalog's delivery branch, so nothing else needs configuring. See
-[`docs/design/UI_BUILDER_COMPONENT_PACKS.md`](../../docs/design/UI_BUILDER_COMPONENT_PACKS.md).
+[`docs/design/UI_BUILDER_COMPONENT_PACKS.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_COMPONENT_PACKS.md).
 
 `SERVE_UI_BUILDER_COMMENT_WEBHOOK` points a design's **Talk** activity outward: a new thread, a
 reply and a resolution are POSTed to one incoming-webhook URL with the thread's permalink, so a
@@ -240,7 +240,7 @@ acknowledgements deliberately do not fire. `SERVE_UI_BUILDER_COMMENT_WEBHOOK_FOR
 the deployment's env file, never in a compose file or a log; the server accepts only `https`
 (loopback aside) and names the hook by a digest wherever it has to mention one. Delivery is
 fire-and-forget from a bounded queue, so a wedged chat platform never slows an accepted comment.
-See [`docs/design/UI_BUILDER_COMMENTS.md`](../../docs/design/UI_BUILDER_COMMENTS.md).
+See [`docs/design/UI_BUILDER_COMMENTS.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_COMMENTS.md).
 
 **Web Push** reaches a person rather than a room: a reply on a thread they are in, an `@mention`,
 or a verdict on a design they own, pushed to each browser they turned notifications on in
@@ -270,7 +270,7 @@ the one shape the compose file cannot see, `SERVE_ACCEPT_IMAGES=0` with the repo
 A human still ticks it per grant, and only if they themselves have access to the repository uploads
 are gated on. To narrow or widen either, set `SERVE_AGENT_GRANT_CAPABILITIES` explicitly in
 `.env`. The grant token belongs in `COMPOSE_PREVIEW_UI_BUILDER_TOKEN` for the remote MCP process,
-never in its argv; see [the live-session guide](../../docs/design/UI_BUILDER_LIVE_SESSION.md) and
+never in its argv; see [the live-session guide](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_LIVE_SESSION.md) and
 the [remote MCP reference](https://github.com/yschimke/compose-ai-tools/blob/main/docs/daemon/MCP.md#remote-ui-builder-tools).
 
 Catalog MCP is a separate opt-in surface. Set `SERVE_CATALOG_MCP=1` to expose every catalog through

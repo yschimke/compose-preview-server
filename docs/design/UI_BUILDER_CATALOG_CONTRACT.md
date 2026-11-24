@@ -1,7 +1,7 @@
 # The UI builder on a catalog contract
 
 Status: **plan** (2026-09; sequence revised 2026-09-08). The successor to
-[`UI_BUILDER_ON_THE_COMPONENT_RECORD.md`](UI_BUILDER_ON_THE_COMPONENT_RECORD.md), which generates the
+[`UI_BUILDER_ON_THE_COMPONENT_RECORD.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_ON_THE_COMPONENT_RECORD.md), which generates the
 *components* of a catalog from its record. This document is about everything else a catalog tells
 the builder — its platform, its shelves, its templates, its screen frame, how its screens are written
 and where they are rendered — and about moving that out of this repository's Kotlin and into the
@@ -40,7 +40,7 @@ Then a release of this repository, because none of it is data the server reads a
 
 That is the shape the component-packs work already refused for *components*: "nobody transcribes a
 capability table for Confetti; the record already says what its composables take"
-([`UI_BUILDER_COMPONENT_PACKS.md`](UI_BUILDER_COMPONENT_PACKS.md)). This plan applies the same
+([`UI_BUILDER_COMPONENT_PACKS.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_COMPONENT_PACKS.md)). This plan applies the same
 refusal to the catalog.
 
 ## What is where today
@@ -156,7 +156,7 @@ What is *not* decided here: the record's own shape (owned upstream by
 [`COMPONENT_RECORD.md`](https://github.com/yschimke/compose-ai-tools/blob/main/docs/design/COMPONENT_RECORD.md)),
 the design document format, the pin, or the Remote Compose lane's decision that
 `remote-compose/document` is a typed embed rather than a component
-([`UI_BUILDER_REMOTE_COMPOSE.md`](UI_BUILDER_REMOTE_COMPOSE.md)).
+([`UI_BUILDER_REMOTE_COMPOSE.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_REMOTE_COMPOSE.md)).
 
 ## The contract
 
@@ -398,7 +398,7 @@ than being left implicit:
    and stamp `uiBuilderFile` on the manifest. One generator, two lanes, and the local lane is not a
    reimplementation that can disagree.
 4. **The revision, not the version, is the compatibility unit.** A design pins a catalog revision
-   ([`UI_BUILDER_PROJECT_DESIGNS.md`](UI_BUILDER_PROJECT_DESIGNS.md)); two builders resolving that
+   ([`UI_BUILDER_PROJECT_DESIGNS.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_PROJECT_DESIGNS.md)); two builders resolving that
    revision must read the same bytes, which is true for the delivery branch and is *not* true for a
    local build output. A locally generated builder catalog is therefore unpinned by construction and
    says so — the same status a locally discovered component record already carries.
@@ -469,7 +469,7 @@ catalog with `platform: "remote-compose"`, a `frame/widget-host` adapter whose t
 publishes, structural templates for the creation DSL instead of Compose, and the same typed-embed
 admission rule §4 of the record plan already grants it. The one thing it keeps that no other catalog
 has is the vocabulary switch and `remote-compose/document`, which stay builtin components of the
-builder ([`UI_BUILDER_REMOTE_COMPOSE.md`](UI_BUILDER_REMOTE_COMPOSE.md)) rather than anything a
+builder ([`UI_BUILDER_REMOTE_COMPOSE.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_REMOTE_COMPOSE.md)) rather than anything a
 catalog declares. wear-m3-catalog's `:remote-catalog` already publishes the `remote-m3` system; it
 grows a policy file and nothing else.
 
@@ -724,7 +724,7 @@ its own step because it was previously miscounted as part of phase 0, which made
 finished while this was not done.
 
 **The plan for this phase, and the readiness measurement it rests on, is
-[`UI_BUILDER_SEED_TEMPLATES.md`](UI_BUILDER_SEED_TEMPLATES.md).** Two results from it belong here:
+[`UI_BUILDER_SEED_TEMPLATES.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_SEED_TEMPLATES.md).** Two results from it belong here:
 `jetcaster` does not export and is not a template a catalog should carry, so seven documents move
 rather than eight; and `templates` as a list of paths cannot carry the label, supporting text and
 default the chooser holds today, so each entry has to be an object.

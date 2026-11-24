@@ -20,7 +20,7 @@ internal data class VariationAxis(
  * This exists so that nothing large has to be generated, shipped or regenerated: the variable font
  * *is* the compressed form of every axis point, and resolving one is a glyph lookup plus a delta
  * interpolation rather than a table someone had to enumerate in advance.
- * [`UI_BUILDER_MATERIAL_SYMBOLS.md`](../../../../../../../../../docs/design/UI_BUILDER_MATERIAL_SYMBOLS.md)
+ * [`UI_BUILDER_MATERIAL_SYMBOLS.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_MATERIAL_SYMBOLS.md)
  * carries the measurements behind that choice.
  *
  * It is deliberately not a general font library. It reads exactly what this one family needs —

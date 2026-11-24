@@ -70,12 +70,12 @@ An inventory of what exists, ordered by how much of the workflow each already ca
 
 | Primitive | Where it is | What it gives a multiplayer flow |
 | --- | --- | --- |
-| A design with a canonical URL, revisions, presence and an owner/viewer/editor list | `/ui-builder/<design>`; [`UI_BUILDER_LIVE_SESSION.md`](UI_BUILDER_LIVE_SESSION.md), `ui_builder_share_design` | The shared object. A browser and an MCP client land in one `PersistentUiBuilderService.apply`, and every accepted write reaches every subscriber |
-| Comments pinned to a node, a mark or a point, with react / acknowledge / resolve kept distinct | [`UI_BUILDER_COMMENTS.md`](UI_BUILDER_COMMENTS.md) | The in-context discussion. Stored *beside* the design, so talking never moves the revision |
+| A design with a canonical URL, revisions, presence and an owner/viewer/editor list | `/ui-builder/<design>`; [`UI_BUILDER_LIVE_SESSION.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_LIVE_SESSION.md), `ui_builder_share_design` | The shared object. A browser and an MCP client land in one `PersistentUiBuilderService.apply`, and every accepted write reaches every subscriber |
+| Comments pinned to a node, a mark or a point, with react / acknowledge / resolve kept distinct | [`UI_BUILDER_COMMENTS.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_COMMENTS.md) | The in-context discussion. Stored *beside* the design, so talking never moves the revision |
 | The agent is woken, and told what it has not read, on every reply | `ui_builder_await_comments`; the `comments` block on `ui_builder_get_design` / `_apply` / `_export` | An agent mid-edit learns a designer spoke without polling |
-| A reference overlay: paste a frame from any tool, a screenshot of a shipped screen, or a photo of a sketch; mark it up, erase, capture a component, promote it into the tree | [`UI_BUILDER_REFERENCE_OVERLAY.md`](UI_BUILDER_REFERENCE_OVERLAY.md) | The cheapest possible join to a design tool *and* to the existing app: the clipboard |
-| An app's own composables on the palette, from its discovered component record | [`UI_BUILDER_COMPONENT_PACKS.md`](UI_BUILDER_COMPONENT_PACKS.md), `ui --module app` | A change to an existing screen is built from the screen's own parts |
-| Designs in the app's repository, `ui-builder/designs/index.json`, and a library to open one from | [`UI_BUILDER_PROJECT_DESIGNS.md`](UI_BUILDER_PROJECT_DESIGNS.md) | The design survives the session, can be argued about in a pull request, and is there for the next feature |
+| A reference overlay: paste a frame from any tool, a screenshot of a shipped screen, or a photo of a sketch; mark it up, erase, capture a component, promote it into the tree | [`UI_BUILDER_REFERENCE_OVERLAY.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_REFERENCE_OVERLAY.md) | The cheapest possible join to a design tool *and* to the existing app: the clipboard |
+| An app's own composables on the palette, from its discovered component record | [`UI_BUILDER_COMPONENT_PACKS.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_COMPONENT_PACKS.md), `ui --module app` | A change to an existing screen is built from the screen's own parts |
+| Designs in the app's repository, `ui-builder/designs/index.json`, and a library to open one from | [`UI_BUILDER_PROJECT_DESIGNS.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_PROJECT_DESIGNS.md) | The design survives the session, can be argued about in a pull request, and is there for the next feature |
 | Deterministic export: Compose source, layered SVG, PNG, all pinned to a revision | `ui_builder_export`, `compose-preview-server design …` | The handoff to engineering is a file, not a screenshot; the handoff to the design tool is a vector it can import |
 | Preview permalinks that unfurl, with the render as the card | `/<system>/p/<id>`, Open Graph cards, `ServeSocialCard` ([public-preview-server.md](https://github.com/yschimke/compose-ai-tools/blob/main/docs/public-preview-server.md#pasting-a-link-into-slack-or-google-chat)) | A link pasted into the chat *is* the review artefact |
 | A prefilled issue carrying a `compose-parity-locator/v1` block, and an issue index the compare page reads back | `ServeIssueReport`, [`COMPONENT_PARITY_WORKFLOW.md`](COMPONENT_PARITY_WORKFLOW.md) | "We know about this one" survives the page reload, and the tracker is where the human already is |
@@ -498,7 +498,7 @@ document. Item 11 is the adoption guide.
   shared with, never on one from a `via` it cannot verify.
 - **Noise.** An agent that reacts to every comment and posts to every thread trains people to
   ignore it. React on receipt, reply when there is something to say, resolve when it is done — the
-  three-act model in [`UI_BUILDER_COMMENTS.md`](UI_BUILDER_COMMENTS.md) — and the webhook posts
+  three-act model in [`UI_BUILDER_COMMENTS.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_COMMENTS.md) — and the webhook posts
   threads, not reactions.
 - **Two conversations diverging.** A question answered in the chat and left open in Talk, or the
   reverse. The rule that only the board closes a thread, and the webhook that shows the board's

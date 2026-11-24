@@ -1,6 +1,6 @@
 # Remote Compose feasibility proof
 
-Disposable experiment for the [completeness review](../../docs/design/UI_BUILDER_REMOTE_COMPOSE_COMPLETENESS_REVIEW.md).
+Disposable experiment for the [completeness review](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_REMOTE_COMPOSE_COMPLETENESS_REVIEW.md).
 This does not add features to the production UI builder. Review the evidence before committing to
 production implementation. No upstream commits or releases are needed to run it.
 

@@ -30,9 +30,9 @@ import ee.schimke.composeai.uibuilder.service.UiBuilderServiceResponse
  * The comment board deliberately stays on [canRead], and that is not an oversight. Its whole
  * motivating case is a designer who may see a screen saying "The play icon looks like a cross" on
  * it while an agent edits — see
- * [`UI_BUILDER_COMMENTS.md`](../../../../../../../../docs/design/UI_BUILDER_COMMENTS.md). Requiring
- * WRITE to comment would lock reviewers out of the review surface, which is the opposite of what
- * the board is for. Reading a design remains the right bar for discussing it.
+ * [`UI_BUILDER_COMMENTS.md`](https://github.com/yschimke/compose-ui-builder/blob/main/docs/design/UI_BUILDER_COMMENTS.md).
+ * Requiring WRITE to comment would lock reviewers out of the review surface, which is the opposite
+ * of what the board is for. Reading a design remains the right bar for discussing it.
  *
  * ## One implementation, including for the board
  *
