@@ -6354,6 +6354,63 @@ test("contract · a result without an image is re-rendered with one, and lists i
   await expect(refused.locator(".notice > p")).not.toContainText("{");
 });
 
+test("contract · a file or observation result draws _meta['composePreview/png'] without re-rendering", async ({ page }) => {
+  const pngs = livePngs();
+  const base = "compose-preview://fixture/_app/com.example.Card";
+  // Simulates a host that drops resource_link and refuses app-initiated tools/call (e.g. Claude
+  // Code receiving the default inline=false file result).
+  const fileViewer = await openLiveViewer(page, pngs, {
+    refuseCalls: true,
+    firstResult: {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            uri: base,
+            pngPath: "/tmp/card.png",
+            widthPx: 320,
+            heightPx: 480,
+            sha256: "abc123",
+          }),
+        },
+      ],
+      _meta: { "composePreview/png": pngs.base },
+    },
+  });
+  await expect(fileViewer.locator("#canvas .preview-stage > img")).toHaveAttribute(
+    "src",
+    `data:image/png;base64,${pngs.base}`,
+  );
+  await expect(fileViewer.locator(".notice")).toHaveCount(0);
+  expect(await page.evaluate(() => window.__live.calls)).toEqual([]);
+
+  // Same for observe="semantics" / "hash" where the model gets metadata only.
+  const semanticsViewer = await openLiveViewer(page, pngs, {
+    refuseCalls: true,
+    firstResult: {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            observe: "semantics",
+            uri: base,
+            widthPx: 320,
+            heightPx: 480,
+            sha256: "def456",
+          }),
+        },
+      ],
+      _meta: { "composePreview/png": pngs.round },
+    },
+  });
+  await expect(semanticsViewer.locator("#canvas .preview-stage > img")).toHaveAttribute(
+    "src",
+    `data:image/png;base64,${pngs.round}`,
+  );
+  await expect(semanticsViewer.locator(".notice")).toHaveCount(0);
+  expect(await page.evaluate(() => window.__live.calls)).toEqual([]);
+});
+
 test("contract · a variant grid shows every variant and enlarges the one clicked", async ({ page }) => {
   const pngs = livePngs();
   const base = "compose-preview://fixture/_app/com.example.Card_Devices%20-%20Large";
