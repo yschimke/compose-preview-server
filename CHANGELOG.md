@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.200.0](https://github.com/yschimke/compose-preview-server/compare/v3.199.0...v3.200.0) (2026-11-24)
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.103.1 ([#2118](https://github.com/yschimke/compose-preview-server/issues/2118)) ([cade7f7](https://github.com/yschimke/compose-preview-server/commit/cade7f775303db1781eca2f5e8e9e926f7ca6313))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-contracts-bom to v3.47.0 ([#2120](https://github.com/yschimke/compose-preview-server/issues/2120)) ([ed32b83](https://github.com/yschimke/compose-preview-server/commit/ed32b834f88022be65b44864c7d0e3a08f0b85fd))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-daemon-bom to v3.29.1 ([#2119](https://github.com/yschimke/compose-preview-server/issues/2119)) ([0d0eb59](https://github.com/yschimke/compose-preview-server/commit/0d0eb594258efcc389179a516c9b1127d39e98bb))
+* **deps:** update dependency ee.schimke.composeai:livery-bom to v0.26.0 ([#2121](https://github.com/yschimke/compose-preview-server/issues/2121)) ([537cdfd](https://github.com/yschimke/compose-preview-server/commit/537cdfd0bbf354e50e404efa65218236a192ea9b))
+
+
+### Performance Improvements
+
+* **ui-builder:** keep a hosted compiler's refusal of a document like its answer ([#2115](https://github.com/yschimke/compose-preview-server/issues/2115)) ([dbb96b3](https://github.com/yschimke/compose-preview-server/commit/dbb96b3f2c680383ce6e6bd03e6c431d044c8549))
+
 ## [3.199.0](https://github.com/yschimke/compose-preview-server/compare/v3.198.0...v3.199.0) (2026-11-24)
 
 
