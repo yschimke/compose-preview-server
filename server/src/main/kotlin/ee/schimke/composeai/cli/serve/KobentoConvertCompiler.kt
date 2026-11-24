@@ -104,7 +104,10 @@ internal class KobentoConvertCompiler(
             .getOrNull()
             ?.let { (it["rc_base64"] as? JsonPrimitive)?.contentOrNull }
         } ?: throw IllegalStateException("Kobento convert's answer carried no rc_base64")
-      return Base64.getDecoder().decode(encoded)
+      // The service's answer, not the design, is at fault here: a state failure, so a caller that
+      // keeps refusals of the design (CachingDocumentCompiler) asks again rather than keeping it.
+      return runCatching { Base64.getDecoder().decode(encoded) }
+        .getOrElse { throw IllegalStateException("Kobento convert's rc_base64 was not base64") }
     }
 
     private val client: HttpClient by lazy {

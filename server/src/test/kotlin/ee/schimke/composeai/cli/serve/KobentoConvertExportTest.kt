@@ -123,6 +123,17 @@ class KobentoConvertExportTest {
       assertFailsWith<IllegalArgumentException> { rpcError.compile("{}") }.message!!,
       "bad json",
     )
+
+    // A malformed answer is the service's fault, not the design's: not a refusal to keep.
+    val garbled =
+      KobentoConvertCompiler("t") { _, _, _ ->
+        200 to
+          """{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"{\"rc_base64\":\"%%%\"}"}]}}"""
+      }
+    assertContains(
+      assertFailsWith<IllegalStateException> { garbled.compile("{}") }.message!!,
+      "was not base64",
+    )
   }
 
   private val document =
