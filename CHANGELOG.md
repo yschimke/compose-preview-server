@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.198.0](https://github.com/yschimke/compose-preview-server/compare/v3.197.0...v3.198.0) (2026-11-24)
+
+
+### Features
+
+* **ui-builder:** let readers compile a supplied document to rc, behind uiBuilder.anonymousDocumentExport ([#2106](https://github.com/yschimke/compose-preview-server/issues/2106)) ([078a862](https://github.com/yschimke/compose-preview-server/commit/078a862bff92b435b1c671d43c1d73a388a9644c))
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-preview-ui-builder-bom to v3.156.0 ([#2104](https://github.com/yschimke/compose-preview-server/issues/2104)) ([d1cca77](https://github.com/yschimke/compose-preview-server/commit/d1cca77999c79e242949a7b78f9e123369268992))
+
 ## [3.197.0](https://github.com/yschimke/compose-preview-server/compare/v3.196.0...v3.197.0) (2026-11-23)
 
 
