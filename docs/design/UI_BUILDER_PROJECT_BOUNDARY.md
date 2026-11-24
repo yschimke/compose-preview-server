@@ -1,17 +1,19 @@
 # The UI builder is a second project in this repository
 
-> **Superseded: it is a second REPOSITORY now.** The nine modules are
+> **Superseded: it is a second REPOSITORY now.** The UI-builder modules live in
 > [`yschimke/compose-ui-builder`](https://github.com/yschimke/compose-ui-builder), which carries the
-> authoritative copy of this document along with the code. Read that one; this copy is kept because
-> `:server` source comments cite it by path, and because the seam table below is still exactly what
-> this build consumes.
+> authoritative copy of this document along with the UI-builder design documents under
+> [`docs/design/`](https://github.com/yschimke/compose-ui-builder/tree/main/docs/design). Read that
+> repository for UI-builder design specs; this copy is kept because `:server` source comments cite
+> it by path, and because the seam table below is still what this build consumes.
 >
 > What changed here: rule 3 and `.github/scripts/ui-builder-project-boundary.sh` are gone, because a
-> module cannot join the wrong project when the projects are different repositories. The four seams
+> module cannot join the wrong project when the projects are different repositories. The five seams
 > in rule 2's table are Maven coordinates, and since 3.26.0 they resolve as RELEASES: the runtime,
 > the export projection and the render bundle from Maven Central through
-> `compose-preview-ui-builder-bom`, the editor archive from that repository's GitHub release through
-> a group-fenced ivy repository. `settings.gradle.kts` holds both, and `-PcomposeUiBuilderDir` opts
+> `compose-preview-ui-builder-bom`, and the editor archive plus variable-font export asset
+> (`compose-preview-ui-builder-export-fonts`) from that repository's GitHub release through a
+> group-fenced ivy repository. `settings.gradle.kts` holds both, and `-PcomposeUiBuilderDir` opts
 > into a checkout as a composite build for working on the two repositories together.
 >
 > The cost this document predicted for a split is now being paid rather than predicted: a change
@@ -61,9 +63,9 @@ both were decisions nothing was checking.
 
 **The UI builder** — the design surface and everything that serves one design:
 
-`:ui-builder` · `:ui-builder-artwork` · `:ui-builder-export` · `:ui-builder-generated-jetcaster` ·
-`:ui-builder-reference-jetcaster` · `:ui-builder-render-bundle` · `:ui-builder-renderer` ·
-`:ui-builder-runtime` · `:ui-builder-web`
+`:ui-builder` · `:ui-builder-artwork` · `:ui-builder-export` · `:ui-builder-export-fonts` ·
+`:ui-builder-generated-jetcaster` · `:ui-builder-reference-jetcaster` ·
+`:ui-builder-render-bundle` · `:ui-builder-renderer` · `:ui-builder-runtime` · `:ui-builder-web`
 
 **The server** — the host, its transports and the surfaces that are not the builder:
 
@@ -84,7 +86,7 @@ server-side", would have put the boundary in the middle of the builder's own sta
    reaches back into its host is not a second project.
 
 2. **The server names only the seams.** `:server` and its siblings may depend on the UI-builder
-   project through exactly four modules:
+   project through exactly five modules:
 
    | Seam | What crosses |
    | --- | --- |
@@ -92,6 +94,7 @@ server-side", would have put the boundary in the middle of the builder's own sta
    | `:ui-builder-export` | the design → screen-model projection |
    | `:ui-builder-web` | the editor, as a Wasm distribution archive |
    | `:ui-builder-render-bundle` | the packaged preview a design renders through |
+   | `:ui-builder-export-fonts` | the variable fonts used by export (`compose-preview-ui-builder-export-fonts`), as a GitHub release asset |
 
    The test for a seam is not "is it convenient": it is a deliberately named contract or packaged
    distribution edge that the boundary check can keep narrow. This repository stopped publishing
