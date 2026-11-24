@@ -42,6 +42,7 @@ tasks.named<Tar>("distTar") {
 }
 
 dependencies {
+  implementation(platform(libs.livery.bom))
   implementation(libs.livery.server)
   implementation(libs.ktor.server.core)
   implementation(libs.ktor.server.cio)

@@ -558,7 +558,7 @@ composeai-contracts = "3.46.0"
 # sends a palette thumbnail to this export with a scale it accepts (#1408).
 composeai-ui-builder = "3.157.0"
 # First published version of the optional publication server library (Maven Central).
-livery = "0.23.0"
+livery = "0.25.0"
 # Packages a design revision's WFF source into the signed APK the real watch-face runtime loads
 # (`DwfPackaging`), from yschimke/watchface-tools; published to Maven Central since 0.3.0. 0.3.2 is
 # the first that targets Java 17 (watchface-tools#28), which this build's floor needs. `wff-core`
@@ -589,7 +589,7 @@ wff-core = "0.12.1"
 # daemon (`stageRcPlayerDesktopLibs`); compose-preview-daemon's desktop binding is compiled against
 # this release's `rc-player-compose`. The CMP/Wasm player's browser bundle (`rc-player-wasm` below)
 # comes from the same release, so it moves with this ref too.
-rc-players-android = "2.33.0"
+rc-players-android = "3.12.1"
 compose-remote = "1.0.0-alpha24"
 # The TypeScript player's browser bundle (`remote-compose-player-js-dist`, a zip with the `dist`
 # classifier). Its own ref because rc-players publishes only the modules a release changed: the
@@ -636,12 +636,14 @@ composeai-remotecompose-json = { module = "ee.schimke.composeai:remotecompose-js
 # what lets `checkServeModuleBoundary` keep holding while the server gains the capability
 # yschimke/compose-preview-server#9 asked for.
 composeai-build-host-protocol = { module = "ee.schimke.composeai:build-host-protocol" }
-# Livery owns the experimental publication reader and reusable Ktor routes. Pin this one
-# module directly; it is the only Livery module allowed on the server's resolved classpath.
-livery-server = { module = "ee.schimke.composeai:livery-server", version.ref = "livery" }
-# The upstream BOMs pin the Compose Preview modules below. Livery above and the three
-# UI-builder release assets (`-web`, `-render-bundle`, `-export-fonts`) carry explicit versions;
-# no BOM names those release assets because they are not on Central.
+# Livery owns the experimental publication reader and reusable Ktor routes. Resolve it through
+# `livery-bom` because livery publishes only changed modules per release; `livery-server` remains
+# the only Livery runtime module allowed on the server's resolved classpath.
+livery-bom = { module = "ee.schimke.composeai:livery-bom", version.ref = "livery" }
+livery-server = { module = "ee.schimke.composeai:livery-server" }
+# The upstream BOMs pin the Compose Preview modules below. The three UI-builder release assets
+# (`-web`, `-render-bundle`, `-export-fonts`) carry explicit versions; no BOM names those release
+# assets because they are not on Central.
 #
 # The rule the daemon line arrived at now holds for every line. Each of those repositories publishes
 # only the modules a release changes -- compose-preview-daemon#123, and since then
