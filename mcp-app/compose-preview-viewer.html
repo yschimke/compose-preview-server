@@ -561,8 +561,17 @@
     result?.structuredContent ||
     result?.content?.filter(block => block.type === 'text' && !detailOf(block)).map(block => parse(block.text)).find(Boolean) ||
     {};
-  const png = result =>
-    result?.content?.find(block => block.type === 'image' && block.mimeType === 'image/png' && !detailOf(block));
+  const png = result => {
+    const block = result?.content?.find(
+      block => block.type === 'image' && block.mimeType === 'image/png' && !detailOf(block),
+    );
+    if (block) return block;
+    // File-path and observation results keep pixels out of model context by putting them in `_meta`.
+    const metaPng = result?._meta?.['composePreview/png'];
+    return typeof metaPng === 'string' && metaPng.length > 0
+      ? { type: 'image', mimeType: 'image/png', data: metaPng, fromMeta: true }
+      : undefined;
+  };
   const link = result => result?.content?.find(block => block.type === 'resource_link');
   const resourcePng = result =>
     result?.contents?.find(content => content?.mimeType === 'image/png' && typeof content.blob === 'string');
@@ -1307,8 +1316,10 @@
       resultUri.startsWith('compose-preview://') &&
       !value?.crop &&
       !Array.isArray(value?.cells);
-    // Only a downscaled inline copy says so (inlineWidthPx); any other image is drawn as it is.
-    baseRenderSize = value?.inlineWidthPx ? sizeOf(value.widthPx, value.heightPx) : undefined;
+    // Downscaled inline copies and `_meta['composePreview/png']` images still carry the full
+    // render dimensions in `widthPx`/`heightPx`; any other image is drawn as it is.
+    baseRenderSize =
+      value?.inlineWidthPx || image.fromMeta ? sizeOf(value.widthPx, value.heightPx) : undefined;
     showImage(baseImageData, undefined, baseRenderSize);
     const label = value.previewId || toolArguments.previewId || 'Preview render';
     choose({
