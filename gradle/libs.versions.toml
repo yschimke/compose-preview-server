@@ -636,10 +636,12 @@ composeai-remotecompose-json = { module = "ee.schimke.composeai:remotecompose-js
 # what lets `checkServeModuleBoundary` keep holding while the server gains the capability
 # yschimke/compose-preview-server#9 asked for.
 composeai-build-host-protocol = { module = "ee.schimke.composeai:build-host-protocol" }
-# Livery owns the experimental publication reader and reusable Ktor routes. Resolve it through
-# `livery-bom` because livery publishes only changed modules per release; `livery-server` remains
-# the only Livery runtime module allowed on the server's resolved classpath.
+# Livery owns the experimental publication reader, reusable Ktor routes and standalone host.
+# Resolve them through `livery-bom` because livery publishes only changed modules per release;
+# `livery-host` and `livery-server` remain the only Livery runtime modules allowed on the server's
+# resolved classpath.
 livery-bom = { module = "ee.schimke.composeai:livery-bom", version.ref = "livery" }
+livery-host = { module = "ee.schimke.composeai:livery-host" }
 livery-server = { module = "ee.schimke.composeai:livery-server" }
 # The upstream BOMs pin the Compose Preview modules below. The three UI-builder release assets
 # (`-web`, `-render-bundle`, `-export-fonts`) carry explicit versions; no BOM names those release

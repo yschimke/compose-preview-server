@@ -33,7 +33,7 @@ Watchtower rolls it on its own, and `preview` reaches it at `WATCHFACE_PUSH_SERV
 | `compose-preview-host`, `compose-preview-playground` | this repository | `FROM` the render runtime, plus compose-ai-tools' `lib-rcjvm`/`lib-bta`/`lib-simulator`/`lib-dex2jar`, plus the server |
 | `compose-ui-builder-server` | compose-ui-builder (`:ui-builder-server`) | The UI builder's own Ktor host: `/ui-builder`, `/api/ui-builder/*`, `/mcp/ui-builder`. A JRE image while it only fronts the legacy container; `FROM` the render runtime once export moves |
 | `compose-preview-catalog-mcp` | compose-preview-mcp | The hosted catalog MCP at `/mcp`, rendering through the server's HTTP API |
-| `compose-preview-livery-host` | this repository, later yschimke/livery | Unchanged until `:server` stops linking `:livery-host` |
+| `compose-preview-livery-host` | this repository, from yschimke/livery's `livery-host` release tarball (later image in yschimke/livery) | `:livery-host` moved to yschimke/livery (`ee.schimke.composeai:livery-host`); `:server` links the released coordinate until it reaches it over HTTP |
 | `compose-preview-caddy` | this repository | The generic edge stays here; deployments mount their own fragments |
 | `watchface-push-server` | watchface-tools | Already external |
 
@@ -250,7 +250,9 @@ all.
 - The in-process `:watchface-push` / `:watchface-engine` fallback (about 6,400 lines), once every
   documented deployment runs `watchface-push-server`. That includes `deploy/example`, which has to
   gain the service first.
-- `:livery-host` to yschimke/livery, once `:server` reaches it over HTTP instead of linking it.
+- `:livery-host` moved to yschimke/livery (`ee.schimke.composeai:livery-host` and its
+  `livery-host-<version>.tar.gz` release tarball); the remaining step is for `:server` to reach it
+  over HTTP instead of linking it, and moving the container build to yschimke/livery.
 - `serve-web` and `wasm-ui` are browser applications. They can ship as digest-pinned assets the
   way the editor does, if their release cadence starts to differ from the server's.
 

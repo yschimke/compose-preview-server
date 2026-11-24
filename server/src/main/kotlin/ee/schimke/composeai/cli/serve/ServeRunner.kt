@@ -35,6 +35,7 @@ import ee.schimke.composeai.uibuilder.service.UiBuilderAssetStore
 import ee.schimke.composeai.uibuilder.service.UiBuilderBranchPort
 import ee.schimke.composeai.uibuilder.service.UiBuilderCatalogExecutor
 import ee.schimke.composeai.uibuilder.service.UiBuilderDesignStateStore
+import ee.schimke.livery.host.ServeComponentPublications
 import java.awt.Desktop
 import java.io.File
 import java.net.URI

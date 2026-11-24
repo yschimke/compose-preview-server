@@ -12,6 +12,9 @@ on:
       daemon_version:
         description: Released compose-preview-daemon version supplying the Android and desktop daemons
         required: true
+      livery_version:
+        description: Released yschimke/livery version supplying livery-host (defaults to gradle/libs.versions.toml)
+        required: false
   workflow_call:
     inputs:
       server_version:
@@ -22,6 +25,9 @@ on:
         type: string
       daemon_version:
         required: true
+        type: string
+      livery_version:
+        required: false
         type: string
     secrets:
       DEPLOY_HOOK_TOKEN: {required: false}
@@ -48,16 +54,23 @@ jobs:
           RAW_SERVER: ${{ inputs.server_version }}
           RAW_TOOLS: ${{ inputs.tools_version }}
           RAW_DAEMON: ${{ inputs.daemon_version }}
+          RAW_LIVERY: ${{ inputs.livery_version }}
         run: |
           server="${RAW_SERVER#v}"
           tools="${RAW_TOOLS#v}"
           daemon="${RAW_DAEMON#v}"
+          livery="${RAW_LIVERY#v}"
+          if [ -z "${livery}" ]; then
+            livery="$(sed -n 's/^livery = "\([^"]*\)"$/\1/p' gradle/libs.versions.toml)"
+          fi
           test -n "${server}" || { echo "::error::server_version is empty"; exit 1; }
           test -n "${tools}" || { echo "::error::tools_version is empty"; exit 1; }
           test -n "${daemon}" || { echo "::error::daemon_version is empty"; exit 1; }
+          test -n "${livery}" || { echo "::error::livery_version is empty"; exit 1; }
           echo "server=${server}" >> "$GITHUB_OUTPUT"
           echo "tools=${tools}" >> "$GITHUB_OUTPUT"
           echo "daemon=${daemon}" >> "$GITHUB_OUTPUT"
+          echo "livery=${livery}" >> "$GITHUB_OUTPUT"
       - name: Prepare image context
         run: |
           mkdir -p deploy/image/release-assets deploy/image/scripts
@@ -175,7 +188,7 @@ jobs:
           context: deploy/livery
           file: deploy/livery/Dockerfile
           build-args: |
-            SERVER_VERSION=${{ steps.versions.outputs.server }}
+            LIVERY_VERSION=${{ steps.versions.outputs.livery }}
           push: true
           tags: ${{ steps.livery-meta.outputs.tags }}
           labels: ${{ steps.livery-meta.outputs.labels }}
