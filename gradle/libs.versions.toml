@@ -556,7 +556,7 @@ composeai-contracts = "3.46.0"
 # and this server registers `/api/ui-builder/v1/documents/export.rc`, paired with this build's own
 # flag in release.yml. 3.153.0 writes a Kobento series as `resources.floatArrays` (#1406); 3.154.0
 # sends a palette thumbnail to this export with a scale it accepts (#1408).
-composeai-ui-builder = "3.157.0"
+composeai-ui-builder = "3.158.0"
 # First published version of the optional publication server library (Maven Central).
 livery = "0.23.0"
 # Packages a design revision's WFF source into the signed APK the real watch-face runtime loads
