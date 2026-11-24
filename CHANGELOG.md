@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.199.0](https://github.com/yschimke/compose-preview-server/compare/v3.198.0...v3.199.0) (2026-11-24)
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-preview-ui-builder-bom to v3.157.0 ([#2108](https://github.com/yschimke/compose-preview-server/issues/2108)) ([edc566f](https://github.com/yschimke/compose-preview-server/commit/edc566fcb1f03b87cc9bc41697cffbe0af5664ea))
+* **deps:** update dependency ee.schimke.composeai:compose-preview-ui-builder-bom to v3.158.0 ([#2112](https://github.com/yschimke/compose-preview-server/issues/2112)) ([dae7fe2](https://github.com/yschimke/compose-preview-server/commit/dae7fe2302b22fbae456ad5312a42c9600781b2a))
+* **mcp-app:** draw _meta['composePreview/png'] when tool results omit inline images ([#2107](https://github.com/yschimke/compose-preview-server/issues/2107)) ([d3a49e9](https://github.com/yschimke/compose-preview-server/commit/d3a49e991e2450058320fc64d8652ee45e21ca1b))
+
 ## [3.198.0](https://github.com/yschimke/compose-preview-server/compare/v3.197.0...v3.198.0) (2026-11-24)
 
 
