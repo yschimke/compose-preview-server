@@ -351,6 +351,17 @@ object ServeSettings {
           "SERVE_UI_BUILDER_HOST.",
       ),
       Setting(
+        "uiBuilder.anonymousDocumentExport",
+        AnonymousDocumentExport.ENV,
+        Type.Flag,
+        Apply.RESTART,
+        "Let a caller who may only read the UI builder, a signed-out visitor on a `--public` box " +
+          "included, compile a document it supplies to `.rc` (`POST " +
+          "/api/ui-builder/v1/documents/export.rc`), so components only a hosted compiler can " +
+          "draw are pictured for them too. Nothing is saved; it spends the server's compiler " +
+          "budget, a hosted compiler's token included, once per distinct document.",
+      ),
+      Setting(
         "uiBuilder.guidelines.model",
         "SERVE_UI_BUILDER_GUIDELINES_MODEL",
         Type.Text(),

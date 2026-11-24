@@ -70,6 +70,7 @@ import kotlinx.serialization.SerializationException
 internal fun Route.installUiBuilderLiveExportRoutes(
   service: UiBuilderServicePort,
   authorization: ServeUiBuilderAuthorization,
+  anonymousDocumentExport: Boolean = AnonymousDocumentExport.enabled(System.getenv()),
 ) {
   get(UI_BUILDER_EXPORT_SVG_PATH) {
     call.serveLiveExport(service, authorization, ExportFormatV1.SVG)
@@ -83,7 +84,12 @@ internal fun Route.installUiBuilderLiveExportRoutes(
   // admits the formats appropriate to the design's catalog.
   (RemoteDocumentExportSupport.formats + ExportFormatV1.JSON).distinct().forEach { format ->
     post("/api/ui-builder/v1/documents/export.${format.name.lowercase()}") {
-      call.serveSuppliedDocument(service, authorization, format)
+      call.serveSuppliedDocument(
+        service,
+        authorization,
+        format,
+        readersMayCompile = anonymousDocumentExport && format == ExportFormatV1.RC,
+      )
     }
     get("/api/ui-builder/v1/designs/{designId}/export.${format.name.lowercase()}") {
       call.serveLiveExport(service, authorization, format)
@@ -233,14 +239,21 @@ private suspend fun ApplicationCall.serveExportArtifact(
   respondBytes(bytes, ContentType.parse(artifact.mediaType), HttpStatusCode.OK)
 }
 
-/** Supplied content is compiled without allocating a saved design or revision. */
+/**
+ * Supplied content is compiled without allocating a saved design or revision.
+ *
+ * [readersMayCompile] lets a caller with only read access, a signed-out visitor on a `--public` box
+ * included, compile a document it supplies: see [AnonymousDocumentExport].
+ */
 private suspend fun ApplicationCall.serveSuppliedDocument(
   service: UiBuilderServicePort,
   authorization: ServeUiBuilderAuthorization,
   format: ExportFormatV1,
+  readersMayCompile: Boolean = false,
 ) {
   response.headers.append(HttpHeaders.CacheControl, "no-store")
-  val actor = authorizeExport(authorization) ?: return
+  val reader = if (readersMayCompile) authorization.readerWithoutExportCredential(this) else null
+  val actor = reader ?: authorizeExport(authorization) ?: return
   val bytes =
     withContext(Dispatchers.IO) {
       receiveStream().use { it.readNBytes(MAX_UI_BUILDER_REQUEST_BYTES + 1) }
@@ -269,6 +282,44 @@ private suspend fun ApplicationCall.serveSuppliedDocument(
     "document",
     includeArtifact = request.queryParameters["artifact"] == "true",
   )
+}
+
+/**
+ * The read-only actor behind a call that presents no export credential at all, or null.
+ *
+ * Only a [UiBuilderAuthorizationDecision.Missing] export answer falls back to read: a credential
+ * that was presented and refused (an agent grant without export, a session request from another
+ * origin) keeps its refusal.
+ */
+private fun ServeUiBuilderAuthorization.readerWithoutExportCredential(
+  call: ApplicationCall,
+): AuthenticatedUiBuilderActor? =
+  when (val export = authorize(call, UiBuilderRouteCapability.EXPORT)) {
+    is UiBuilderAuthorizationDecision.Authorized -> export.actor
+    UiBuilderAuthorizationDecision.Forbidden -> null
+    UiBuilderAuthorizationDecision.Missing ->
+      (authorize(call, UiBuilderRouteCapability.READ) as? UiBuilderAuthorizationDecision.Authorized)
+        ?.actor
+  }
+
+/**
+ * `SERVE_UI_BUILDER_ANONYMOUS_DOCUMENT_EXPORT` (`uiBuilder.anonymousDocumentExport`): whether a
+ * caller who may only read the UI builder, a signed-out visitor on a `--public` box included, may
+ * compile a document it supplies to `.rc`.
+ *
+ * It exists for the editor's palette and canvas: a component only a hosted service can compile
+ * (Kobento's generated and map components) is pictured by `POST documents/export.rc`, and without
+ * this a visitor who has not signed in sees an empty tile. Nothing is saved, no design is opened,
+ * and only `.rc` is admitted: PNG renders natively and stays behind the export capability. What it
+ * spends is the server's own compiler budget, a hosted compiler's token included, which
+ * [CachingDocumentCompiler] keeps to one call per distinct document. Off unless the operator turns
+ * it on.
+ */
+internal object AnonymousDocumentExport {
+  const val ENV: String = "SERVE_UI_BUILDER_ANONYMOUS_DOCUMENT_EXPORT"
+
+  fun enabled(environment: Map<String, String>): Boolean =
+    environment[ENV]?.trim()?.lowercase() in setOf("1", "true")
 }
 
 private suspend fun ApplicationCall.authorizeExport(

@@ -65,12 +65,19 @@ class ServeSettingsTest {
           "watchface-push/src/main/kotlin/ee/schimke/composeai/cli/serve/WatchFacePushSettings.kt",
         )
         .readText()
+    val exportRoutes =
+      File(
+          repoRoot,
+          "server/src/main/kotlin/ee/schimke/composeai/cli/serve/ServeUiBuilderExportRoutes.kt",
+        )
+        .readText()
     for (setting in ServeSettings.ALL) {
       assertTrue(
         "\${${setting.env}" in entrypoint ||
           "\"${setting.env}\"" in analytics ||
           "\"${setting.env}\"" in publications ||
-          "\"${setting.env}\"" in watchFacePush,
+          "\"${setting.env}\"" in watchFacePush ||
+          "\"${setting.env}\"" in exportRoutes,
         "${setting.env} (${setting.key}) is read by neither the entrypoint nor the server",
       )
     }
