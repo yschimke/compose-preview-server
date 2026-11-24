@@ -26,75 +26,22 @@ boundary that is compiled twice. An index is the cheap way to stop that recurrin
 
 ## The UI builder
 
-The product spec and its RFC come first; everything after them is one surface or one seam.
+The UI builder and its design documents live in
+[yschimke/compose-ui-builder `docs/design/`](https://github.com/yschimke/compose-ui-builder/tree/main/docs/design).
+This repository keeps only the boundary, contract, and server-side integration docs referenced here:
 
-- [design/UI_BUILDER_PRODUCT_SPEC.md](design/UI_BUILDER_PRODUCT_SPEC.md) — **spec**: the product
-  surface, its benchmarks and its release gate.
-- [design/UI_BUILDER_WAVE0.md](design/UI_BUILDER_WAVE0.md) — **RFC**: benchmark decomposition and
-  the v1 contract. Remaining release gates are listed in its §10.
 - [design/UI_BUILDER_PROJECT_BOUNDARY.md](design/UI_BUILDER_PROJECT_BOUNDARY.md) — **normative**:
   which module owns the service port, persistent state, catalog validation and export
   orchestration, and what it deliberately does not own. Read this before changing a module boundary.
 - [design/UI_BUILDER_CATALOG_CONTRACT.md](design/UI_BUILDER_CATALOG_CONTRACT.md) — what a catalog
   repository authors so the builder can serve it without being written into the server.
-- [design/UI_BUILDER_COMPONENT_PACKS.md](design/UI_BUILDER_COMPONENT_PACKS.md) — other catalogs'
-  components in one design.
-- [design/UI_BUILDER_CATALOG_AUDIT.md](design/UI_BUILDER_CATALOG_AUDIT.md) — **audit**: what an
-  application screen needs that the three authoring catalogs do not offer — drawing, layout, the
-  Material 3 remainder, modifiers — and which repository owns each gap.
-- [design/UI_BUILDER_ON_THE_COMPONENT_RECORD.md](design/UI_BUILDER_ON_THE_COMPONENT_RECORD.md) —
-  the builder over a derived component record.
-- [design/UI_BUILDER_PREVIEW_FIDELITY.md](design/UI_BUILDER_PREVIEW_FIDELITY.md) — the fidelity
-  ladder the workspace's three panes are: mock → real → platform, and which rung may lie about what.
-- [design/UI_BUILDER_CANVAS_FRAMES_VARIANTS.md](design/UI_BUILDER_CANVAS_FRAMES_VARIANTS.md) — the
-  canvas, the frame and the variants.
 - [design/UI_BUILDER_WEAR_SCREEN.md](design/UI_BUILDER_WEAR_SCREEN.md) — the Wear screen: one
   frame spec shared by the canvas and the native lane, and why a borrowed component may not be faked.
 - [design/UI_BUILDER_WATCH_FACE_ANDROID_PREVIEW.md](design/UI_BUILDER_WATCH_FACE_ANDROID_PREVIEW.md) —
   the `android-dwf` native surface: a Watch Face Format design drawn by Google's runtime in its own
   tab, the session lifecycle, the control → daemon mapping, and what compose-ai-tools must export.
-- [design/UI_BUILDER_REMOTE_COMPOSE.md](design/UI_BUILDER_REMOTE_COMPOSE.md) — Remote Compose
-  composition inside a design.
-- [design/UI_BUILDER_EDITOR_OPERATIONS.md](design/UI_BUILDER_EDITOR_OPERATIONS.md) — editor
-  operation parity.
-- [design/UI_BUILDER_VALUE_SEMANTICS.md](design/UI_BUILDER_VALUE_SEMANTICS.md) — a committed
-  document is one the canvas can draw.
-- [design/UI_BUILDER_STATE_STORAGE.md](design/UI_BUILDER_STATE_STORAGE.md) — a store that does not
-  rewrite every design on every keystroke.
-- [design/UI_BUILDER_LOCAL_STORAGE.md](design/UI_BUILDER_LOCAL_STORAGE.md) — designs kept in the
-  browser.
-- [design/UI_BUILDER_PROJECT_DESIGNS.md](design/UI_BUILDER_PROJECT_DESIGNS.md) — a project's
-  designs.
-- [design/UI_BUILDER_DESIGN_PORTABILITY.md](design/UI_BUILDER_DESIGN_PORTABILITY.md) — where a
-  design lives, and how it comes back.
-- [design/UI_BUILDER_EXPORT_BUNDLE.md](design/UI_BUILDER_EXPORT_BUNDLE.md) — exporting a design as
-  a bundle.
-- [design/UI_BUILDER_ASSETS.md](design/UI_BUILDER_ASSETS.md) — images in a design.
-- [design/UI_BUILDER_MATERIAL_SYMBOLS.md](design/UI_BUILDER_MATERIAL_SYMBOLS.md) — **RFC**: one row
-  per icon with the Material Symbols axes as properties, and why the icons leave the Wasm bundle
-  for the variable fonts.
-- [design/UI_BUILDER_LINKS.md](design/UI_BUILDER_LINKS.md) — links between designs.
-- [design/UI_BUILDER_COMMENTS.md](design/UI_BUILDER_COMMENTS.md) — comments on a design.
-- [design/UI_BUILDER_REVISION_HISTORY.md](design/UI_BUILDER_REVISION_HISTORY.md) — the history
-  bar of revision thumbnails, diffing two of them, and how that sits beside the viewer's
-  published-render versions.
-- [design/UI_BUILDER_LIVE_SESSION.md](design/UI_BUILDER_LIVE_SESSION.md) — the live browser session.
-- [design/UI_BUILDER_REFERENCE_OVERLAY.md](design/UI_BUILDER_REFERENCE_OVERLAY.md) — the reference
-  overlay.
-- [design/UI_BUILDER_SIDECAR_ACCESS.md](design/UI_BUILDER_SIDECAR_ACCESS.md) — sidecar access
-  control.
-- [design/UI_BUILDER_PROTOCOL_CLIENT.md](design/UI_BUILDER_PROTOCOL_CLIENT.md) — the common Kotlin
-  v1 protocol client, compiled for JVM and Wasm without depending on `:server` or Ktor, with
-  networking injected through transport interfaces.
-- [design/UI_BUILDER_COLLABORATION_SOAK.md](design/UI_BUILDER_COLLABORATION_SOAK.md) — what
-  `PersistentCollaborationSoakTest` drives, and why its schedule is seeded rather than timed.
-
-### Benchmarks and fidelity
-
-- [design/UI_BUILDER_JETCASTER_BENCHMARK.md](design/UI_BUILDER_JETCASTER_BENCHMARK.md) — the
-  primary fidelity target.
-- [design/UI_BUILDER_JETCASTER_FIDELITY.md](design/UI_BUILDER_JETCASTER_FIDELITY.md) — the evidence
-  for the content-color, floating-toolbar and compact-layout alignment against it.
+- [design/UI_BUILDER_HOSTED_PROJECTS.md](design/UI_BUILDER_HOSTED_PROJECTS.md) — hosted projects on
+  the preview server.
 
 ## The server's own surfaces
 

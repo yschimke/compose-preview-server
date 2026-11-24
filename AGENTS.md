@@ -154,10 +154,12 @@ how those artefacts are regenerated, just run through `build-brief`.
   checkout to follow, use the staged-publication workflow in
   [`docs/development/LOCAL_DEPENDENCIES.md`](docs/development/LOCAL_DEPENDENCIES.md).
 - The UI builder is a separate repository, [`yschimke/compose-ui-builder`](https://github.com/yschimke/compose-ui-builder),
-  consumed as RELEASES. Its three jars and a BOM come from Maven Central at `composeai-ui-builder` in
-  `gradle/libs.versions.toml`, and the editor archive from that repository's GitHub release through
-  the group-fenced ivy repository in `settings.gradle.kts`. Which modules are seams, and the rule
-  that the builder never depends on the server, are written once in
+  consumed as RELEASES. Its three jars (`:ui-builder-runtime`, `:ui-builder-export`,
+  `:ui-builder-render-bundle`) and BOM come from Maven Central at `composeai-ui-builder` in
+  `gradle/libs.versions.toml`, and the editor archive (`:ui-builder-web`) plus variable-font export
+  asset (`compose-preview-ui-builder-export-fonts` / `:ui-builder-export-fonts`) come from that
+  repository's GitHub release through the group-fenced ivy repository in `settings.gradle.kts`. Which
+  modules are seams, and the rule that the builder never depends on the server, are written once in
   [`docs/design/UI_BUILDER_PROJECT_BOUNDARY.md`](docs/design/UI_BUILDER_PROJECT_BOUNDARY.md) (the
   authoritative copy is in that repository). A change to this repository's consumption of the
   builder moves the catalog ref; changing the builder itself is a pull request there, and a change
