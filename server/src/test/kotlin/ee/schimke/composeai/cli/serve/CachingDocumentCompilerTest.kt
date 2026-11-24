@@ -48,6 +48,30 @@ class CachingDocumentCompilerTest {
   }
 
   @Test
+  fun `a refusal of the content is kept like an answer, until it expires`() {
+    var now = 0L
+    val calls = AtomicInteger()
+    val compiler =
+      CachingDocumentCompiler(
+        {
+          calls.incrementAndGet()
+          throw IllegalArgumentException("Kobento convert refused the design: give a chord")
+        },
+        ttlMillis = 100,
+        clock = { now },
+      )
+
+    repeat(3) {
+      val refused = assertFailsWith<IllegalArgumentException> { compiler.compile("piano") }
+      assertEquals("Kobento convert refused the design: give a chord", refused.message)
+    }
+    assertEquals(1, calls.get())
+    now = 100
+    assertFailsWith<IllegalArgumentException> { compiler.compile("piano") }
+    assertEquals(2, calls.get())
+  }
+
+  @Test
   fun `an entry expires and the least recently used leaves first`() {
     var now = 0L
     val calls = mutableListOf<String>()

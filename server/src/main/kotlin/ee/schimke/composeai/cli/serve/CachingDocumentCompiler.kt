@@ -15,7 +15,11 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * - Keyed by the content's SHA-256: a design that changed is a different key, never a stale hit.
  * - Concurrent requests for one key share the one call in flight.
- * - A failure is not kept, so a refused or missing credential is asked again next time.
+ * - A refusal of the content itself (an [IllegalArgumentException]: the service read it and said
+ *   no) is kept like an answer, since the same content is refused the same way, and a palette would
+ *   otherwise spend a call on every open re-asking about the components it can never picture. Any
+ *   other failure (a refused or missing credential, the service unreachable) is not kept, and is
+ *   asked again next time.
  * - At most [maxEntries], the least recently used leaving first, each for at most [ttlMillis], so a
  *   change on the service's side (a component library update) is picked up within that time.
  */
@@ -29,7 +33,8 @@ internal class CachingDocumentCompiler(
    */
   private val afterMiss: () -> Unit = {},
 ) : DocumentCompiler {
-  private class Entry(val bytes: ByteArray, val at: Long)
+  /** What the service said about one content: its bytes, or the reason it refused them. */
+  private class Entry(val bytes: ByteArray?, val refusal: String?, val at: Long)
 
   private val entries =
     object : LinkedHashMap<String, Entry>(16, 0.75f, true) {
@@ -52,8 +57,15 @@ internal class CachingDocumentCompiler(
       // the miss above and taking the slot, and must not be followed by a second call.
       val bytes =
         cached(key)
-          ?: delegate.compile(content).also { compiled ->
-            synchronized(entries) { entries[key] = Entry(compiled, clock()) }
+          ?: try {
+            delegate.compile(content).also { compiled ->
+              synchronized(entries) { entries[key] = Entry(compiled, null, clock()) }
+            }
+          } catch (refused: IllegalArgumentException) {
+            synchronized(entries) {
+              entries[key] = Entry(null, refused.message ?: "refused", clock())
+            }
+            throw refused
           }
       mine.complete(bytes)
       return bytes.copyOf()
@@ -65,15 +77,23 @@ internal class CachingDocumentCompiler(
     }
   }
 
-  /** A copy of [key]'s compiled bytes while they are fresh; null on a miss or an expired entry. */
+  /**
+   * A copy of [key]'s compiled bytes while they are fresh; null on a miss or an expired entry. A
+   * kept refusal is thrown again, as the [IllegalArgumentException] the service's answer was.
+   */
   private fun cached(key: String): ByteArray? {
     val now = clock()
-    synchronized(entries) {
-      val entry = entries[key] ?: return null
-      if (now - entry.at < ttlMillis) return entry.bytes.copyOf()
-      entries.remove(key)
-      return null
-    }
+    val entry =
+      synchronized(entries) {
+        val entry = entries[key] ?: return null
+        if (now - entry.at >= ttlMillis) {
+          entries.remove(key)
+          return null
+        }
+        entry
+      }
+    entry.refusal?.let { throw IllegalArgumentException(it) }
+    return entry.bytes?.copyOf()
   }
 
   private fun join(future: CompletableFuture<ByteArray>): ByteArray =
