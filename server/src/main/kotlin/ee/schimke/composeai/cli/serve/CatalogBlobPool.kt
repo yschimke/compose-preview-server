@@ -68,6 +68,12 @@ data class CatalogBlobPoolSnapshot(
  *
  * A rolling update runs two replicas on this volume: writes are staged per writer and moved
  * atomically, reads verify, and [sweep] spares anything younger than [graceMillis].
+ *
+ * Pointers outnumber blobs by far (every key of every catalog revision, against blobs deduplicated
+ * across all of them: 5.4 million to 95 thousand on preview.coo.ee), so [sweep] and [clear] stream
+ * the pointer directory one entry at a time and never hold its listing, and a pointer nothing has
+ * resolved for [pointerIdleMillis] is dropped. Listing it whole kept about 1.7 GB of `File`s and
+ * paths live on a 2.8 GB heap, and every few minutes, in every process sharing the volume.
  */
 class CatalogBlobPool(
   private val root: File,
@@ -86,6 +92,11 @@ class CatalogBlobPool(
   private val persistenceConfigured: Boolean = false,
   /** How long a remembered pinned "not found" is trusted ([knownMissing]); zero disables it. */
   private val missingTtlMillis: Long = DEFAULT_MISSING_TTL_MILLIS,
+  /**
+   * How long a pointer may go unresolved before [sweep] drops it; zero keeps pointers until their
+   * blob goes. Dropping one costs at most a re-fetch, which finds its blob already held.
+   */
+  private val pointerIdleMillis: Long = DEFAULT_POINTER_IDLE_MILLIS,
   private val clock: () -> Long = System::currentTimeMillis,
 ) {
   private val hits = AtomicLong()
@@ -185,6 +196,7 @@ class CatalogBlobPool(
           // Written last, and only once the blob it names is in place — a pointer is only ever
           // read back through [resolve], which re-verifies, so a stale one degrades to a miss.
           writeAtomically(pointer, sha.toByteArray())
+          stamp(pointer)
           blob
         }
     }
@@ -219,7 +231,9 @@ class CatalogBlobPool(
     } else if (store(bytes, sha) == null) {
       return
     }
-    writeAtomically(File(keysDir, sha256Hex(key.toByteArray())), sha.toByteArray())
+    val pointer = File(keysDir, sha256Hex(key.toByteArray()))
+    writeAtomically(pointer, sha.toByteArray())
+    stamp(pointer)
   }
 
   /**
@@ -288,20 +302,16 @@ class CatalogBlobPool(
    */
   fun clear(): CatalogBlobPoolSnapshot {
     // Only blobs count as evictions; pointers may share a blob and would inflate the count.
-    for (blob in contentDir.listFiles()?.filter { it.isFile }.orEmpty()) {
-      if (runCatching { blob.delete() }.getOrDefault(false)) evicted.increment()
+    forEachRegularFile(contentDir) { blob, _ ->
+      if (runCatching { java.nio.file.Files.deleteIfExists(blob) }.getOrDefault(false)) {
+        evicted.increment()
+      }
     }
-    for (pointer in keysDir.listFiles()?.filter { it.isFile }.orEmpty()) {
-      runCatching { pointer.delete() }
-    }
-    for (marker in missingDir.listFiles()?.filter { it.isFile }.orEmpty()) {
-      runCatching { marker.delete() }
-    }
+    forEachRegularFile(keysDir) { pointer, _ -> deleteQuietly(pointer) }
+    forEachRegularFile(missingDir) { marker, _ -> deleteQuietly(marker) }
     // Scratch too: a killed producer leaves bundle-sized files in `tmp/` that no census counts. A
     // live writer losing its scratch just misses once.
-    for (scratch in File(root, TEMP_DIR).listFiles()?.filter { it.isFile }.orEmpty()) {
-      runCatching { scratch.delete() }
-    }
+    forEachRegularFile(File(root, TEMP_DIR)) { scratch, _ -> deleteQuietly(scratch) }
     return census()
   }
 
@@ -313,25 +323,11 @@ class CatalogBlobPool(
   fun sweep(): CatalogBlobPoolSnapshot {
     val now = clock()
     data class BlobEntry(val file: File, val size: Long, val lastModified: Long)
+    // Held whole, unlike the pointers below: eviction is oldest-first, and blobs number in the
+    // thousands, not millions.
     val blobs = ArrayList<BlobEntry>()
-    if (contentDir.isDirectory) {
-      runCatching {
-        java.nio.file.Files.newDirectoryStream(contentDir.toPath()).use { stream ->
-          for (entry in stream) {
-            val attrs =
-              runCatching {
-                java.nio.file.Files.readAttributes(
-                  entry,
-                  java.nio.file.attribute.BasicFileAttributes::class.java,
-                )
-              }
-                .getOrNull() ?: continue
-            if (attrs.isRegularFile) {
-              blobs += BlobEntry(entry.toFile(), attrs.size(), attrs.lastModifiedTime().toMillis())
-            }
-          }
-        }
-      }
+    forEachRegularFile(contentDir) { entry, attrs ->
+      blobs += BlobEntry(entry.toFile(), attrs.size(), attrs.lastModifiedTime().toMillis())
     }
     blobs.sortBy { it.lastModified }
     var total = blobs.sumOf { it.size }
@@ -350,20 +346,32 @@ class CatalogBlobPool(
       val name = blob.file.name
       if (name !in evictedNames) survivingNames += name
     }
-    for (pointer in keysDir.listFiles()?.filter { it.isFile }.orEmpty()) {
-      val sha = runCatching { pointer.readText().trim() }.getOrNull()?.takeIf(::isSha)
+    // Streamed: one entry at a time, never the listing. Idle pointers go on their mtime alone,
+    // which
+    // [resolve] keeps current, so they are not even read; the rest go when their blob did.
+    forEachRegularFile(keysDir) { pointer, attrs ->
+      val idle = now - attrs.lastModifiedTime().toMillis()
+      if (pointerIdleMillis > 0 && idle >= pointerIdleMillis) {
+        deleteQuietly(pointer)
+        return@forEachRegularFile
+      }
+      val sha = runCatching {
+        java.nio.file.Files.readString(pointer).trim()
+      }
+        .getOrNull()
+        ?.takeIf(::isSha)
       if (sha == null || (sha !in survivingNames && !File(contentDir, sha).isFile)) {
-        runCatching { pointer.delete() }
+        deleteQuietly(pointer)
       }
     }
     // Expired misses. Empty files, so they cost no bytes against [maxBytes], only directory
     // entries — and an expired one is never trusted again anyway.
-    for (marker in missingDir.listFiles()?.filter { it.isFile }.orEmpty()) {
-      if (now - marker.lastModified() >= missingTtlMillis) runCatching { marker.delete() }
+    forEachRegularFile(missingDir) { marker, attrs ->
+      if (now - attrs.lastModifiedTime().toMillis() >= missingTtlMillis) deleteQuietly(marker)
     }
     // Abandoned scratch, but only past the grace window, since writers may be live.
-    for (scratch in File(root, TEMP_DIR).listFiles()?.filter { it.isFile }.orEmpty()) {
-      if (now - scratch.lastModified() >= graceMillis) runCatching { scratch.delete() }
+    forEachRegularFile(File(root, TEMP_DIR)) { scratch, attrs ->
+      if (now - attrs.lastModifiedTime().toMillis() >= graceMillis) deleteQuietly(scratch)
     }
     return census()
   }
@@ -375,25 +383,9 @@ class CatalogBlobPool(
   private fun census(): CatalogBlobPoolSnapshot {
     var count = 0
     var bytes = 0L
-    if (contentDir.isDirectory) {
-      runCatching {
-        java.nio.file.Files.newDirectoryStream(contentDir.toPath()).use { stream ->
-          for (entry in stream) {
-            val attrs =
-              runCatching {
-                java.nio.file.Files.readAttributes(
-                  entry,
-                  java.nio.file.attribute.BasicFileAttributes::class.java,
-                )
-              }
-                .getOrNull() ?: continue
-            if (attrs.isRegularFile) {
-              count++
-              bytes += attrs.size()
-            }
-          }
-        }
-      }
+    forEachRegularFile(contentDir) { _, attrs ->
+      count++
+      bytes += attrs.size()
     }
     knownBlobs.set(count)
     knownBytes.set(bytes)
@@ -445,8 +437,41 @@ class CatalogBlobPool(
   private fun resolve(pointer: File, verify: Boolean = true): File? {
     val sha = runCatching { pointer.readText().trim() }.getOrNull()?.takeIf(::isSha) ?: return null
     val blob = File(contentDir, sha)
-    if (!verify) return blob.takeIf { it.isFile }
-    return readVerified(blob, sha)
+    val resolved = if (!verify) blob.takeIf { it.isFile } else readVerified(blob, sha)
+    // In use, so not idle: [sweep] drops pointers on their mtime ([pointerIdleMillis]).
+    if (resolved != null) touch(pointer)
+    return resolved
+  }
+
+  /**
+   * Calls [action] for each regular file directly in [dir], streamed so a directory of millions of
+   * entries is never materialised. Best-effort, like the rest of the pool: an unreadable directory
+   * or entry is skipped. [action] may delete the entry it is given.
+   */
+  private inline fun forEachRegularFile(
+    dir: File,
+    action: (java.nio.file.Path, java.nio.file.attribute.BasicFileAttributes) -> Unit,
+  ) {
+    if (!dir.isDirectory) return
+    runCatching {
+      java.nio.file.Files.newDirectoryStream(dir.toPath()).use { stream ->
+        for (entry in stream) {
+          val attrs =
+            runCatching {
+              java.nio.file.Files.readAttributes(
+                entry,
+                java.nio.file.attribute.BasicFileAttributes::class.java,
+              )
+            }
+              .getOrNull() ?: continue
+          if (attrs.isRegularFile) action(entry, attrs)
+        }
+      }
+    }
+  }
+
+  private fun deleteQuietly(path: java.nio.file.Path) {
+    runCatching { java.nio.file.Files.deleteIfExists(path) }
   }
 
   private fun dropCorrupt(blob: File, why: String) {
@@ -468,14 +493,14 @@ class CatalogBlobPool(
   }
 
   /**
-   * Keep a blob being read away from the sweeper, re-stamping at most once per
+   * Keep a blob, or a pointer, being read away from the sweeper, re-stamping at most once per
    * [TOUCH_INTERVAL_MILLIS] so request-path hits don't each write metadata.
    */
-  private fun touch(blob: File) {
+  private fun touch(file: File) {
     val now = clock()
-    val recorded = runCatching { blob.lastModified() }.getOrDefault(0L)
+    val recorded = runCatching { file.lastModified() }.getOrDefault(0L)
     if (now - recorded in 0 until TOUCH_INTERVAL_MILLIS) return
-    runCatching { blob.setLastModified(now) }
+    runCatching { file.setLastModified(now) }
   }
 
   private fun store(bytes: ByteArray, sha: String): File? {
@@ -584,6 +609,12 @@ class CatalogBlobPool(
      * A day: restarts and refreshes on the same revision stop re-asking; a wrong 404 self-heals.
      */
     const val DEFAULT_MISSING_TTL_MILLIS: Long = 24L * 60 * 60 * 1000
+
+    /**
+     * A week: a catalog read at least that often keeps its pointers; one not, or an old revision's,
+     * stops costing a directory entry and a read on every sweep. Far above [TOUCH_INTERVAL_MILLIS].
+     */
+    const val DEFAULT_POINTER_IDLE_MILLIS: Long = 7L * 24 * 60 * 60 * 1000
 
     /**
      * Ceiling for the whole pool, sized for a couple of dozen catalogs whose ~100 MB bundles (plus

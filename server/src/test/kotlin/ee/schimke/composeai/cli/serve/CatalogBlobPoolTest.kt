@@ -503,6 +503,79 @@ class CatalogBlobPoolTest {
   }
 
   @Test
+  fun `sweep drops a pointer nothing has resolved for the idle window and keeps its blob`() {
+    // Pointers outnumber blobs by orders of magnitude (every key of every revision, deduplicated
+    // blobs), and only went when their blob did, so the pointer directory grew without bound.
+    val now = AtomicLong(1_000_000L)
+    val idle = 24L * 60 * 60 * 1000
+    val root = root()
+    val pool = CatalogBlobPool(root, pointerIdleMillis = idle, clock = { now.get() })
+    val url = "https://raw.githubusercontent.com/o/r/$COMMIT/old-revision.png"
+    val bytes = "an asset of a revision nobody reads".toByteArray()
+    pool.write(url, bytes)
+
+    now.addAndGet(idle)
+    pool.sweep()
+
+    assertFalse(pool.holds(url), "an idle pointer is dropped")
+    assertTrue(pool.contentFile(sha(bytes)).isFile, "its blob is the size cap's to reclaim")
+  }
+
+  @Test
+  fun `a pointer that keeps being resolved outlives the idle window`() {
+    val now = AtomicLong(1_000_000L)
+    val idle = 24L * 60 * 60 * 1000
+    val pool = CatalogBlobPool(root(), pointerIdleMillis = idle, clock = { now.get() })
+    val url = "https://raw.githubusercontent.com/o/r/$COMMIT/current.png"
+    val bytes = "an asset still in use".toByteArray()
+    pool.write(url, bytes)
+
+    now.addAndGet(idle * 3 / 4)
+    assertNotNull(pool.read(url), "a read re-stamps the pointer")
+    now.addAndGet(idle * 3 / 4)
+    pool.sweep()
+
+    assertContentEquals(bytes, pool.read(url), "read within the window, so kept")
+  }
+
+  @Test
+  fun `a zero idle window keeps pointers until their blob goes`() {
+    val now = AtomicLong(1_000_000L)
+    val pool = CatalogBlobPool(root(), pointerIdleMillis = 0, clock = { now.get() })
+    val url = "https://raw.githubusercontent.com/o/r/$COMMIT/kept.png"
+    pool.write(url, "kept".toByteArray())
+
+    now.addAndGet(CatalogBlobPool.DEFAULT_POINTER_IDLE_MILLIS * 10)
+    pool.sweep()
+
+    assertTrue(pool.holds(url))
+  }
+
+  @Test
+  fun `sweep and clear walk a large pointer directory entry by entry`() {
+    // The pass streams the directory rather than listing it, so what it decides per entry has to
+    // hold across many entries, deleting as it goes, in one walk.
+    val root = root()
+    val pool = CatalogBlobPool(root, graceMillis = 0)
+    val keys = File(root, CatalogBlobPool.KEYS_DIR).apply { mkdirs() }
+    val live = "live".toByteArray()
+    val liveUrl = "https://raw.githubusercontent.com/o/r/$COMMIT/live.png"
+    pool.write(liveUrl, live)
+    repeat(2_000) { i -> File(keys, sha("dangling-$i".toByteArray())).writeText("f".repeat(64)) }
+    repeat(500) { i -> File(keys, sha("garbage-$i".toByteArray())).writeText("not a sha") }
+
+    pool.sweep()
+
+    val left = keys.listFiles().orEmpty()
+    assertEquals(1, left.size, "only the pointer to a held blob survives")
+    assertContentEquals(live, pool.read(liveUrl))
+
+    pool.clear()
+    assertTrue(keys.listFiles().orEmpty().isEmpty())
+    assertFalse(pool.holds(liveUrl))
+  }
+
+  @Test
   fun `an unwritable root degrades to no caching rather than failing the load`() {
     // Persistence is an optimisation: an unwritable disk must yield null or refetches, never
     // throws.
