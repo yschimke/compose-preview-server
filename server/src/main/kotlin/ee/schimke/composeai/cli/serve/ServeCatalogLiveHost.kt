@@ -145,6 +145,12 @@ class ServeCatalogLiveHost(
    * bundle manifest to read (a source build) keeps offering it.
    */
   private val embeddedPlayerFor: (daemonId: String) -> Boolean = { true },
+  /**
+   * Where the page-facing capability flags are answered from while this catalog's daemon is down
+   * ([ServeLiveCapabilityMemo]), keyed by [residencySeatWeight]'s backend. Null asks the daemon,
+   * waking it, as before.
+   */
+  private val capabilityMemo: ServeLiveCapabilityMemo? = null,
   private val clock: () -> Long = System::currentTimeMillis,
 ) : ServeHost {
   /**
@@ -1050,24 +1056,63 @@ class ServeCatalogLiveHost(
         perPreviewStreamCount() > 0 ||
         perPreviewPoolStats().any { it.open > 0 }
 
-  override val gesturesRenderable: Boolean by lazy { live.gesturesRenderable }
+  /**
+   * The live lane's flags without waking it: its own once its daemon is up, which are then
+   * remembered for its backend, or what another daemon of that backend reported while this one is
+   * down. Null when nothing has reported yet, and the caller asks the daemon (waking it) as before.
+   */
+  private fun liveCapabilitiesWithoutWaking(): ServeLiveCapabilities? {
+    val memo = capabilityMemo ?: return null
+    val backend = ServeLiveCapabilityMemo.backendFor(residencySeatWeight())
+    if (live.daemonStarted) return observedLiveCapabilities.value.also { memo.record(backend, it) }
+    return memo.get(backend)
+  }
+
+  /** Read once the daemon is up, so recording costs one handshake that the page needed anyway. */
+  private val observedLiveCapabilities = lazy {
+    ServeLiveCapabilities(
+      svgExport = live.hasSvgExport,
+      scrollExport = live.hasScrollExport,
+      a11yOverlay = live.hasA11yOverlay,
+      gestures = live.gesturesRenderable,
+      remoteComposePlayerSelectable = live.remoteComposePlayerSelectable,
+    )
+  }
+
+  private val liveGesturesRenderable: Boolean by lazy { live.gesturesRenderable }
+
+  override val gesturesRenderable: Boolean
+    get() = liveCapabilitiesWithoutWaking()?.gestures ?: liveGesturesRenderable
+
+  private val liveSvgExport: Boolean by lazy { live.hasSvgExport }
 
   /**
    * SVG is exportable when either lane can produce it (baked `figma/<slug>.svg` or the daemon's
    * `compose/figma-svg`).
    */
-  override val hasSvgExport: Boolean by lazy { baked.hasSvgExport || live.hasSvgExport }
+  override val hasSvgExport: Boolean
+    get() = baked.hasSvgExport || (liveCapabilitiesWithoutWaking()?.svgExport ?: liveSvgExport)
 
-  override val hasScrollExport: Boolean by lazy { live.hasScrollExport }
+  private val liveScrollExport: Boolean by lazy { live.hasScrollExport }
+
+  override val hasScrollExport: Boolean
+    get() = liveCapabilitiesWithoutWaking()?.scrollExport ?: liveScrollExport
+
+  private val liveA11yOverlay: Boolean by lazy { live.hasA11yOverlay }
 
   /**
    * Accessibility inspection is an explicit live render; forwarded so the control appears on
    * catalog pages.
    */
-  override val hasA11yOverlay: Boolean by lazy { live.hasA11yOverlay }
+  override val hasA11yOverlay: Boolean
+    get() = liveCapabilitiesWithoutWaking()?.a11yOverlay ?: liveA11yOverlay
 
-  override fun hasA11yOverlayFor(previewId: String): Boolean =
-    previewId in alias && live.hasA11yOverlayFor(alias.getValue(previewId))
+  override fun hasA11yOverlayFor(previewId: String): Boolean {
+    if (previewId !in alias) return false
+    val remembered = liveCapabilitiesWithoutWaking()
+    if (remembered != null && !live.daemonStarted) return remembered.a11yOverlay
+    return live.hasA11yOverlayFor(alias.getValue(previewId))
+  }
 
   /**
    * From the live lane, not [canApplyOverrides] (which the default reads and which is false here
@@ -1082,15 +1127,26 @@ class ServeCatalogLiveHost(
   override fun hasPublishedTypographyFor(previewId: String): Boolean =
     baked.hasPublishedTypographyFor(previewId)
 
-  override fun hasScrollExportFor(previewId: String): Boolean =
-    previewId in alias && live.hasScrollExportFor(alias.getValue(previewId))
+  override fun hasScrollExportFor(previewId: String): Boolean {
+    val daemonId = alias[previewId] ?: return false
+    val remembered = liveCapabilitiesWithoutWaking()
+    if (remembered != null && !live.daemonStarted) {
+      // The per-preview half is the manifest's, which the daemon only echoes back.
+      return remembered.scrollExport &&
+        live.previews
+          .firstOrNull { it.id == daemonId }
+          ?.let { ServeRenderHost.SCROLL_LONG_KIND in it.dataProductKinds } == true
+    }
+    return live.hasScrollExportFor(daemonId)
+  }
 
   /**
    * Per-preview SVG availability: a daemon-twinned id when the daemon can export SVG, otherwise
    * only if the baked catalog has its slug's vector. Mirrors [renderSvg]'s routing.
    */
   override fun hasSvgExportFor(previewId: String): Boolean =
-    (previewId in alias && live.hasSvgExport) || baked.hasSvgExportFor(previewId)
+    (previewId in alias && (liveCapabilitiesWithoutWaking()?.svgExport ?: liveSvgExport)) ||
+      baked.hasSvgExportFor(previewId)
 
   /**
    * [hasSvgExportFor] for the landing page, which must never start a daemon: [live.hasSvgExport]
@@ -1349,7 +1405,14 @@ class ServeCatalogLiveHost(
     baked.remoteComposeRenderSpec(previewId)
 
   /** The daemon lane honours the RC player override when the carried daemon is Android-backed. */
-  override val remoteComposePlayerSelectable: Boolean by lazy { live.remoteComposePlayerSelectable }
+  private val liveRemoteComposePlayerSelectable: Boolean by lazy {
+    live.remoteComposePlayerSelectable
+  }
+
+  override val remoteComposePlayerSelectable: Boolean
+    get() =
+      liveCapabilitiesWithoutWaking()?.remoteComposePlayerSelectable
+        ?: liveRemoteComposePlayerSelectable
 
   /**
    * The Android players this catalog's own daemon can draw [previewId] with: AndroidX view when the

@@ -1362,6 +1362,12 @@ public class ServeRunner(
    * is fronted by [ServeCatalogLiveHost]; other sessions get the bare daemon. Rebuilt on every
    * resume.
    */
+  /**
+   * One per server: every catalog's host answers its page-facing daemon capabilities from it while
+   * its own daemon is down ([ServeLiveCapabilityMemo]).
+   */
+  private val liveCapabilityMemo = ServeLiveCapabilityMemo()
+
   private fun openHost(state: ServeSessionState): ServeHost? = runCatching {
     fun openDaemon(systemPropertyOverrides: Map<String, String> = emptyMap()): ServeRenderHost =
       ServeRenderHost.open(
@@ -1415,6 +1421,8 @@ public class ServeRunner(
             cmpAndroidPlayerByDescriptor[state.descriptor.absolutePath]?.let { players ->
               { daemonId: String -> RcPlayerBackend.ANDROIDX_EMBEDDED in players(daemonId) }
             } ?: { true },
+          // A page reads which controls to draw from here instead of booting this catalog's daemon.
+          capabilityMemo = liveCapabilityMemo,
         )
         // Prewarm off the request path so a slow-starting Android daemon is ready for the first
         // browse.
