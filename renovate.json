@@ -133,6 +133,11 @@
       "matchDatasources": ["docker"],
       "matchPackageNames": ["eclipse-temurin"],
       "allowedVersions": "/^21([._+-]|$)/"
+    },
+    {
+      "description": "Skip compose-preview-ui-builder-bom 3.159.0: ProductionUiBuilderRuntime.placeholderComponents fails PNG/SVG export on m3-catalog-capabilities-v1.json planned/unsupported Jetcaster entries asserted by jetcaster-capabilities.test.mjs and exercised by ui-builder-gate2.spec.mjs (PR #2126).",
+      "matchPackageNames": ["ee.schimke.composeai:compose-preview-ui-builder-bom"],
+      "allowedVersions": "!/^(3\\.159\\.0|.*-SNAPSHOT|.*-compat)$/"
     }
   ]
 }
