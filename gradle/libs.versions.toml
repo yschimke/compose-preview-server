@@ -165,7 +165,7 @@ graphics-shapes = "1.1.0"
 # (compose-ai-tools#6643), the daemon launcher `RenderHostDwfApkRuntime` connects through.
 # 2.101.1 adds the render host's DWF APK daemon diagnostics and caps its heap
 # (compose-ai-tools#6656); it is on compose-preview-daemon 3.28.0 and contracts 3.44.0, as here.
-composeai-tools = "2.103.1"
+composeai-tools = "2.104.0"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
 # in that repository's `docs/design/REPOSITORY_LAYERS.md`: between the contracts and
