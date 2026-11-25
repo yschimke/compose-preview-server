@@ -881,7 +881,8 @@ internal suspend fun UiBuilderServicePort.executeMapped(
   allowPlaceholders: Boolean = false,
 ): UiBuilderServiceResponse =
   when (val mapping = UiBuilderProtocolMapper.toServiceCall(actor, request)) {
-    is ProtocolRequestMapping.Mapped -> execute(mapping.call.allowingPlaceholders(allowPlaceholders))
+    is ProtocolRequestMapping.Mapped ->
+      execute(mapping.call.allowingPlaceholders(allowPlaceholders))
     is ProtocolRequestMapping.Rejected -> UiBuilderServiceResponse.Error(mapping.error)
   }
 
