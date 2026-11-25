@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.202.0](https://github.com/yschimke/compose-preview-server/compare/v3.201.0...v3.202.0) (2026-11-25)
+
+
+### Performance Improvements
+
+* stop page views booting catalog daemons, cap the server heap, report memory on /status ([#2135](https://github.com/yschimke/compose-preview-server/issues/2135)) ([df8f2bc](https://github.com/yschimke/compose-preview-server/commit/df8f2bc4dee54a4c656a31d06c65a444691e8fa6))
+
 ## [3.201.0](https://github.com/yschimke/compose-preview-server/compare/v3.200.0...v3.201.0) (2026-11-25)
 
 
