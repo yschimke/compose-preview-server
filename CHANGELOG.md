@@ -1,5 +1,15 @@
 # Changelog
 
+## [3.201.0](https://github.com/yschimke/compose-preview-server/compare/v3.200.0...v3.201.0) (2026-11-25)
+
+
+### Bug Fixes
+
+* **deps:** update dependency ee.schimke.composeai:compose-ai-tools-bom to v2.104.0 ([#2125](https://github.com/yschimke/compose-preview-server/issues/2125)) ([ee25fb0](https://github.com/yschimke/compose-preview-server/commit/ee25fb093184b3130d8a8f5542a094ed0ca9a81a))
+* **deps:** update dependency org.robolectric:robolectric to v4.18.1 ([#2131](https://github.com/yschimke/compose-preview-server/issues/2131)) ([f1ac3d4](https://github.com/yschimke/compose-preview-server/commit/f1ac3d4d7664fe81adeea8b3d8aac07ca658175a))
+* **image:** exit the server JVM on OutOfMemoryError ([#2129](https://github.com/yschimke/compose-preview-server/issues/2129)) ([29cf493](https://github.com/yschimke/compose-preview-server/commit/29cf493ffb2e67ca442c664752120f3f6ab09c61))
+* opt thumbnails and ?placeholders=allow into UI-builder placeholders ([#2130](https://github.com/yschimke/compose-preview-server/issues/2130)) ([c824038](https://github.com/yschimke/compose-preview-server/commit/c82403859979949da4c497619a76737961d381ee))
+
 ## [3.200.0](https://github.com/yschimke/compose-preview-server/compare/v3.199.0...v3.200.0) (2026-11-24)
 
 
