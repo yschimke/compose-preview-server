@@ -815,7 +815,11 @@ The live address behind the links is a plain `GET`, one per format:
 
 It answers with the artifact's media type, its digest as the `ETag`, and the revision it drew in
 `X-UI-Builder-Revision`. `?revision=N` pins an earlier retained revision; `?download=1` asks for an
-attachment. The route is gated on `ui-builder-export`, exactly like the protocol export, and the
+attachment. A design using a component the renderer can't draw (a native-only Remote Compose
+wrapper such as `ha-cards/status-chip`, or a Lovelace card with no host preview) is refused by
+default, naming the component, rather than served as a picture of dashed boxes;
+`?placeholders=allow` draws those as their placeholders instead. Listing thumbnails always allow
+them. The route is gated on `ui-builder-export`, exactly like the protocol export, and the
 copied link carries **no credential**: whoever opens it presents their own token, session or grant.
 A design's catalog decides which rows appear — a catalog whose renderer cannot draw SVG has no SVG
 rows, and one that cannot render at all has no Export button. On a server running below Java 21

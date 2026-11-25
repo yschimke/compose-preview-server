@@ -376,6 +376,9 @@ internal constructor(
             format = ExportFormatV1.PNG,
           ),
           actor,
+          // A listing card: the design's outline is the right picture where the renderer can't
+          // draw a component, rather than none.
+          allowPlaceholders = true,
         )
       } catch (failure: Exception) {
         if (failure is kotlinx.coroutines.CancellationException) throw failure

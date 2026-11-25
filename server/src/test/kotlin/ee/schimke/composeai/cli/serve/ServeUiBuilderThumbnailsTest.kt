@@ -39,6 +39,7 @@ import okhttp3.Request
 class ServeUiBuilderThumbnailsTest {
   private val revision = AtomicLong(3)
   private val exports = AtomicInteger()
+  private val placeholderExports = AtomicInteger()
   private val rendering = AtomicInteger()
   private val mostAtOnce = AtomicInteger()
   private val actor = AuthenticatedUiBuilderActor(OWNER)
@@ -65,6 +66,7 @@ class ServeUiBuilderThumbnailsTest {
             UiBuilderServiceResponse.DesignDeleted(request.designId)
           is UiBuilderServiceRequest.ExportDesign -> {
             exports.incrementAndGet()
+            if (request.allowPlaceholders) placeholderExports.incrementAndGet()
             mostAtOnce.accumulateAndGet(rendering.incrementAndGet(), ::maxOf)
             Thread.sleep(50)
             rendering.decrementAndGet()
@@ -156,6 +158,8 @@ class ServeUiBuilderThumbnailsTest {
     }
     fetch(DESIGN, 3).use { assertEquals(200, it.code) }
     assertEquals(1, exports.get(), "the second view is the cache, not a render")
+    // A listing card shows the design's outline where a component can't be drawn, not nothing.
+    assertEquals(1, placeholderExports.get(), "a thumbnail opts into placeholders")
   }
 
   @Test

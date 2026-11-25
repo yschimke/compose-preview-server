@@ -9,6 +9,7 @@ import ee.schimke.composeai.uibuilder.protocol.ExportDesignRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ExportEncodingV1
 import ee.schimke.composeai.uibuilder.protocol.ExportFormatV1
 import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
+import ee.schimke.composeai.uibuilder.service.PackagedUiBuilderRenderBundle
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceRequest
@@ -149,6 +150,14 @@ internal fun Route.installUiBuilderThumbnailRoute(
   }
 }
 
+/**
+ * `?placeholders=allow`: draw a component the renderer can't draw as its dashed placeholder.
+ * Without it a picture export that would show one fails, naming the component, so a link never
+ * serves a design's outline as the design.
+ */
+private fun ApplicationCall.allowsPlaceholders(): Boolean =
+  request.queryParameters["placeholders"] == PackagedUiBuilderRenderBundle.PLACEHOLDERS_ALLOW
+
 private suspend fun ApplicationCall.serveLiveExport(
   service: UiBuilderServicePort,
   authorization: ServeUiBuilderAuthorization,
@@ -171,6 +180,7 @@ private suspend fun ApplicationCall.serveLiveExport(
     service.executeMapped(
       ExportDesignRequestV1(designId = designId, revision = revision, format = format),
       actor,
+      allowPlaceholders = allowsPlaceholders(),
     )
   serveExportArtifact(outcome, format, designId)
 }
@@ -274,7 +284,14 @@ private suspend fun ApplicationCall.serveSuppliedDocument(
     }
   val outcome =
     service.execute(
-      UiBuilderServiceCall(actor, UiBuilderServiceRequest.ExportDocument(document, format)),
+      UiBuilderServiceCall(
+        actor,
+        UiBuilderServiceRequest.ExportDocument(
+          document,
+          format,
+          allowPlaceholders = allowsPlaceholders(),
+        ),
+      ),
     )
   serveExportArtifact(
     outcome,
