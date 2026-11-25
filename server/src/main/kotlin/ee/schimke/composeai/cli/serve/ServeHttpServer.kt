@@ -9026,6 +9026,9 @@ class ServeHttpServer(
      */
     val processCensus: ServeProcessCensusSnapshot? =
       if (onlySystem == null) processCensusSampler.sample() else null
+    /** This server JVM's heap ([ServeJvmMemorySnapshot]); box-wide like [processCensus]. */
+    val jvmMemory: ServeJvmMemorySnapshot? =
+      if (onlySystem == null) runCatching { ServeJvmMemorySnapshot.read() }.getOrNull() else null
     val overallOk: Boolean =
       failures.isEmpty() &&
         catalogLoadFailureCount == 0 &&
@@ -9033,6 +9036,47 @@ class ServeHttpServer(
         currentLiveRenderFailureCount == 0
 
     private fun backendOf(weight: Int): String = if (weight >= 2) "android" else "desktop"
+
+    /**
+     * The status page's memory line: the server's live heap against its ceiling, then the container
+     * against its limit, with a meter on the container when it has one.
+     */
+    private fun memoryStatText(
+      jvm: ServeJvmMemorySnapshot?,
+      census: ServeProcessCensusSnapshot?,
+    ): Pair<String, ServeWeb.Meter?>? {
+      if (jvm == null && census?.memoryCurrentBytes == null) return null
+      val text = buildList {
+        jvm?.let {
+          val live = it.heapLiveAfterGcBytes?.let { bytes -> "live ${gib(bytes)}" }
+          val max = it.heapMaxBytes?.let { bytes -> " of ${gib(bytes)}" } ?: ""
+          add("heap ${live ?: "used ${gib(it.heapUsedBytes)}"}$max")
+        }
+        census?.memoryCurrentBytes?.let { current ->
+          add(
+            "container ${gib(current)}" +
+              (census.memoryMaxBytes?.let { " of ${gib(it)}" } ?: "") +
+              (census.swapCurrentBytes?.takeIf { it > 0 }?.let { " + ${gib(it)} swap" } ?: ""),
+          )
+        }
+        census?.oomKills?.takeIf { it > 0 }?.let { add("$it OOM kill(s)") }
+      }
+        .joinToString(" · ")
+      val meter =
+        census?.memoryMaxBytes?.let { max ->
+          val used = (census.memoryCurrentBytes ?: 0).coerceIn(0, max)
+          ServeWeb.Meter(
+            max,
+            listOf(
+              ServeWeb.MeterSegment("used", used, "secondary"),
+              ServeWeb.MeterSegment("free", max - used, "primary"),
+            ),
+          )
+        }
+      return text to meter
+    }
+
+    private fun gib(bytes: Long): String = "%.1f GB".format(bytes / 1_073_741_824.0)
 
     /**
      * One line of live-lane cadence: delivered fps, median gap, per-frame wire cost, and heartbeats
@@ -9414,6 +9458,7 @@ class ServeHttpServer(
             )
           },
         processes = processCensus,
+        jvm = jvmMemory,
       )
     }
 
@@ -9539,6 +9584,11 @@ class ServeHttpServer(
           ),
         )
         add(ServeWeb.Stat("Known sessions", knownSessions.toString()))
+        // The server's heap (what ran out on ui.coo.ee) and the container's memory beside its
+        // limit.
+        memoryStatText(jvmMemory, processCensus)?.let { (text, meter) ->
+          add(ServeWeb.Stat("Memory", text, meter))
+        }
         // Subprocesses, which session counts miss. Zombies are shown separately from live JVMs
         // (they hold a PID, no memory). See [ServeProcessCensusSnapshot].
         processCensus?.let { census ->
@@ -19120,6 +19170,12 @@ private data class StatusResponse(
    * other count is session-level. Additive on `compose-preview-serve/status/v1`.
    */
   val processes: ServeProcessCensusSnapshot? = null,
+  /**
+   * This server JVM's heap and collector ([ServeJvmMemorySnapshot]), or null for a site. Alert on
+   * `heapLiveAfterGcFraction` near 1.0: an `OutOfMemoryError` follows, and the container restarts.
+   * Additive on `compose-preview-serve/status/v1`.
+   */
+  val jvm: ServeJvmMemorySnapshot? = null,
 )
 
 @Serializable
