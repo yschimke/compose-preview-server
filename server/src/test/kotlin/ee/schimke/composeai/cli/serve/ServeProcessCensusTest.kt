@@ -71,6 +71,55 @@ class ServeProcessCensusTest {
   }
 
   @Test
+  fun `sums live jvm resident memory and names the largest`(@TempDir tmp: File) {
+    proc(tmp, 1, "java", 'S')
+    proc(tmp, 2, "java", 'S')
+    proc(tmp, 3, "java", 'Z')
+    proc(tmp, 4, "sh", 'S')
+    // `status` reports VmRSS in kB on every page size, unlike `statm`'s page counts.
+    File(tmp, "1/status").writeText("Name:\tjava\nVmPeak:\t9 kB\nVmRSS:\t   4000 kB\nThreads:\t9\n")
+    File(tmp, "2/status").writeText("Name:\tjava\nVmRSS:\t1000 kB\n")
+    // Neither a zombie nor a non-JVM counts toward JVM memory.
+    File(tmp, "3/status").writeText("Name:\tjava\nVmRSS:\t999999 kB\n")
+    File(tmp, "4/status").writeText("Name:\tsh\nVmRSS:\t999999 kB\n")
+
+    val census = ServeProcessCensusSnapshot.read(tmp)!!
+
+    assertEquals(5000L * 1024, census.liveJavaRssBytes)
+    assertEquals(4000L * 1024, census.largestJavaRssBytes)
+  }
+
+  @Test
+  fun `reads container memory, swap and oom kills from a unified cgroup`(@TempDir tmp: File) {
+    proc(tmp, 1, "java", 'S')
+    val cgroup = File(tmp, "cgroup2").also { it.mkdirs() }
+    File(cgroup, "memory.current").writeText("3000\n")
+    File(cgroup, "memory.max").writeText("4000\n")
+    File(cgroup, "memory.swap.current").writeText("500\n")
+    File(cgroup, "memory.events").writeText("low 0\nhigh 0\nmax 12\noom 3\noom_kill 2\n")
+
+    val census = ServeProcessCensusSnapshot.read(tmp, cgroup)!!
+
+    assertEquals(3000L, census.memoryCurrentBytes)
+    assertEquals(4000L, census.memoryMaxBytes)
+    assertEquals(500L, census.swapCurrentBytes)
+    assertEquals(2L, census.oomKills, "oom_kill, not the oom events that killed nothing")
+  }
+
+  @Test
+  fun `an unlimited cgroup reports no memory limit`(@TempDir tmp: File) {
+    proc(tmp, 1, "java", 'S')
+    val v2 = File(tmp, "v2").also { it.mkdirs() }
+    File(v2, "memory.max").writeText("max\n")
+    val v1 = File(tmp, "v1")
+    File(v1, "memory").mkdirs()
+    File(v1, "memory/memory.limit_in_bytes").writeText("9223372036854771712\n")
+
+    assertNull(ServeProcessCensusSnapshot.read(tmp, v2)!!.memoryMaxBytes)
+    assertNull(ServeProcessCensusSnapshot.read(tmp, v1)!!.memoryMaxBytes)
+  }
+
+  @Test
   fun `survives a process that exits mid-census`(@TempDir tmp: File) {
     proc(tmp, 1, "java", 'S')
     // A pid directory with no readable `stat` is the ordinary race, not an error: the process
