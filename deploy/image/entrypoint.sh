@@ -776,6 +776,56 @@ derive_live_seats() {
   echo "${seats}"
 }
 
+# The server JVM's own heap ceiling, in MB, from the container's effective memory; 0 leaves the
+# JVM's default (unknown memory).
+#
+# Without one the server took the JVM default, JAVA_TOOL_OPTIONS' MaxRAMPercentage=70, which is
+# sized for a JVM that has the container to itself. This one shares it with its render daemons, and
+# the seat budget above assumes it keeps about SEATS_MEM_RESERVE_MB. On preview.coo.ee (32 GB) that
+# ceiling was 22 GB and G1 used it: 7-10 GB resident around a live heap of 1.7 GB, plus 10 GB pushed
+# to swap. A quarter of memory, held between SERVER_HEAP_FLOOR_MB and SERVER_HEAP_CEILING_MB, covers
+# that live set more than twice, and never more than SERVER_HEAP_MAX_PCT of a small box.
+# ExitOnOutOfMemoryError turns a cap that proves too small into a restart, not a dead listener.
+SERVER_HEAP_PCT=25
+SERVER_HEAP_FLOOR_MB=2048
+SERVER_HEAP_CEILING_MB=4096
+SERVER_HEAP_MAX_PCT=60
+derive_server_heap_mb() {
+  local eff_mb="$1" heap
+  (( eff_mb > 0 )) || { echo 0; return; }
+  heap=$(( eff_mb * SERVER_HEAP_PCT / 100 ))
+  (( heap < SERVER_HEAP_FLOOR_MB )) && heap=${SERVER_HEAP_FLOOR_MB}
+  (( heap > SERVER_HEAP_CEILING_MB )) && heap=${SERVER_HEAP_CEILING_MB}
+  local most=$(( eff_mb * SERVER_HEAP_MAX_PCT / 100 ))
+  (( heap > most )) && heap=${most}
+  echo "${heap}"
+}
+
+# The container's usable memory in MB: the tighter of the cgroup limit (v2, then v1) and physical
+# RAM, so an "unlimited" sentinel (a huge number or the literal "max") falls back to the real total.
+# 0 when neither is readable.
+effective_memory_mb() {
+  local mem_total_mb=0 limit_bytes="" mem_limit_mb=0
+  if [[ -r /proc/meminfo ]]; then
+    mem_total_mb=$(awk '/^MemTotal:/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 0)
+  fi
+  if [[ -r /sys/fs/cgroup/memory.max ]]; then
+    limit_bytes=$(cat /sys/fs/cgroup/memory.max 2>/dev/null)          # cgroup v2
+  elif [[ -r /sys/fs/cgroup/memory/memory.limit_in_bytes ]]; then
+    limit_bytes=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null)  # cgroup v1
+  fi
+  if [[ "${limit_bytes}" =~ ^[0-9]+$ ]]; then
+    mem_limit_mb=$(( limit_bytes / 1024 / 1024 ))
+  fi
+  if (( mem_limit_mb > 0 && mem_total_mb > 0 )); then
+    echo $(( mem_limit_mb < mem_total_mb ? mem_limit_mb : mem_total_mb ))
+  elif (( mem_limit_mb > 0 )); then
+    echo "${mem_limit_mb}"
+  else
+    echo "${mem_total_mb}"
+  fi
+}
+
 # The CPU budget this container may actually use.
 #
 # `nproc` does not answer that. It reports the processors *visible* to this process — the affinity
@@ -853,31 +903,8 @@ effective_cpus() {
 # without limit) but one a real box reaches rather than one every serious box exceeds.
 # Set SERVE_LIVE_SEATS explicitly to override, or 0 for unbounded.
 if [[ -z "${SERVE_LIVE_SEATS:-}" ]]; then
-  # Detect the cgroup memory limit (v2 then v1), capped by physical RAM so an "unlimited" sentinel
-  # (a huge number or the literal "max") falls back to the real total instead of overshooting.
-  mem_total_mb=0
-  if [[ -r /proc/meminfo ]]; then
-    mem_total_mb=$(awk '/^MemTotal:/ {printf "%d", $2/1024}' /proc/meminfo 2>/dev/null || echo 0)
-  fi
-  limit_bytes=""
-  if [[ -r /sys/fs/cgroup/memory.max ]]; then
-    limit_bytes=$(cat /sys/fs/cgroup/memory.max 2>/dev/null)          # cgroup v2
-  elif [[ -r /sys/fs/cgroup/memory/memory.limit_in_bytes ]]; then
-    limit_bytes=$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null)  # cgroup v1
-  fi
-  mem_limit_mb=0
-  if [[ "${limit_bytes}" =~ ^[0-9]+$ ]]; then
-    mem_limit_mb=$(( limit_bytes / 1024 / 1024 ))
-  fi
   # Effective memory = the tighter of the cgroup limit and physical RAM (0 = unknown → ignore).
-  eff_mb=0
-  if (( mem_limit_mb > 0 && mem_total_mb > 0 )); then
-    eff_mb=$(( mem_limit_mb < mem_total_mb ? mem_limit_mb : mem_total_mb ))
-  elif (( mem_limit_mb > 0 )); then
-    eff_mb=${mem_limit_mb}
-  else
-    eff_mb=${mem_total_mb}
-  fi
+  eff_mb="$(effective_memory_mb)"
   visible_cpus=$(nproc 2>/dev/null || echo 0)
   # The quota, not just the affinity mask — see [effective_cpus].
   cpus="$(effective_cpus "${visible_cpus}")"
@@ -892,6 +919,16 @@ if [[ -z "${SERVE_LIVE_SEATS:-}" ]]; then
     "(effective mem ${eff_mb} MB, ${cpus} cpus${quota_note}${util_note})" >&2
 fi
 [[ -n "${SERVE_LIVE_SEATS}" ]] && args+=(--live-seats "${SERVE_LIVE_SEATS}")
+# The server JVM's heap ceiling (derive_server_heap_mb), through the start script's
+# COMPOSE_PREVIEW_SERVER_OPTS so the render daemons, which inherit JAVA_TOOL_OPTIONS, keep their
+# own. SERVE_SERVER_HEAP_MB sets it explicitly; 0 leaves the JVM's default.
+if [[ -z "${SERVE_SERVER_HEAP_MB:-}" ]]; then
+  SERVE_SERVER_HEAP_MB="$(derive_server_heap_mb "$(effective_memory_mb)")"
+fi
+if [[ "${SERVE_SERVER_HEAP_MB}" =~ ^[1-9][0-9]*$ ]]; then
+  export COMPOSE_PREVIEW_SERVER_OPTS="${COMPOSE_PREVIEW_SERVER_OPTS:-} -Xmx${SERVE_SERVER_HEAP_MB}m"
+  echo "entrypoint: server heap capped at ${SERVE_SERVER_HEAP_MB} MB" >&2
+fi
 # Background (theme-optimizer) renders admitted at once, server-wide. Unset leaves the server's own
 # derivation from the seat budget, which clamps at 3 — a ceiling reached at 8 seats, so a box with
 # more than that stops widening this lane while everything else scales with it. The underlying knob
