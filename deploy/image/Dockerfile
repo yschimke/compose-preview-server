@@ -255,6 +255,16 @@ COPY --from=tools-sidecars /opt/lib-dex2jar /opt/lib-dex2jar
 # workers back warm for the next one. Two spares is one daemon's worth at sandboxCount=3 (its own
 # in-process sandbox fills the third slot), ~1 GB resident held in reserve.
 #
+# COMPOSE_PREVIEW_SERVER_OPTS (read by the start script for the server's own JVM only; the daemon
+# JVMs it spawns do not inherit it) — -XX:+ExitOnOutOfMemoryError. A heap OutOfMemoryError thrown
+# on a coroutine worker kills Ktor CIO's accept loop without killing the JVM: the process keeps
+# refreshing catalogs, the port stops answering, and `restart: always` never fires because nothing
+# exited. That is how ui.coo.ee answered 502 for five hours on 2026-11-25 (an m3-catalog refresh
+# filled the `ui-builder` container's 2.8 GB heap; `docker restart` brought it back in two
+# minutes). Exiting turns it into the restart the container policy already provides. Deliberately
+# not in JAVA_TOOL_OPTIONS: a daemon that runs out of heap is the host's to relaunch, not a reason to
+# take the server down.
+#
 # lazyInProcessSandbox — a daemon that adopted spares defers its own in-process sandbox until a path
 # only it can serve asks (a held interactive session, @PreviewParameter rows, or a render with no
 # worker left), instead of booting it in the background on every open: a boot and ~220 MB per
@@ -265,6 +275,7 @@ ENV PATH="/opt/compose-preview-server/bin:${PATH}" \
     SERVE_TIMEOUT=1800 \
     ANDROID_HOME=/opt/android-sdk \
     ANDROID_SDK_ROOT=/opt/android-sdk \
+    COMPOSE_PREVIEW_SERVER_OPTS="-XX:+ExitOnOutOfMemoryError" \
     JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=70 -Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android -Dcomposeai.cli.libDaemonDesktopDir=/opt/lib-daemon-desktop -Dcomposeai.cli.libRendererDir=/opt/lib-renderer -Dcomposeai.cli.libRcjvmDir=/opt/lib-rcjvm -Dcomposeai.cli.libSimulatorDir=/opt/lib-simulator -Dcomposeai.cli.libDex2jarDir=/opt/lib-dex2jar -Dcomposeai.cli.skikoDir=/opt/lib-skiko -Dcomposeai.cli.libBtaDir=/opt/lib-bta -Dcomposeai.serve.warmInBackground=true -Dcomposeai.serve.renderTimeoutSeconds=900 -Dcomposeai.serve.frameRenderTimeoutSeconds=120 -Dcomposeai.daemon.sandboxCount=3 -Dcomposeai.daemon.sandboxBootTimeoutMs=1800000 -Dcomposeai.daemon.backgroundSandboxBoot=true -Dcomposeai.daemon.lazyInProcessSandbox=true -Dcomposeai.serve.spareSandboxes=2"
 
 WORKDIR /project
