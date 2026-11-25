@@ -255,6 +255,14 @@ COPY --from=tools-sidecars /opt/lib-dex2jar /opt/lib-dex2jar
 # workers back warm for the next one. Two spares is one daemon's worth at sandboxCount=3 (its own
 # in-process sandbox fills the third slot), ~1 GB resident held in reserve.
 #
+# -XX:TrimNativeHeapInterval=60000 (JAVA_TOOL_OPTIONS, so every JVM here, daemons included) — once a
+# minute, hand glibc's freed but retained malloc memory back to the OS. A desktop render daemon's
+# native allocations (Skia surfaces and buffers, freed after each render) otherwise stay in its
+# malloc arenas for good: on preview.coo.ee (3.202.0, 2026-11-25) m3-catalog's daemon reached
+# 20.2 GB resident after 354 renders with a 160 MB Java heap, in 335 arena-sized regions, and one
+# `jcmd <pid> System.trim_native_heap` took it to 622 MB. Retention, not a leak, and invisible to
+# every heap setting.
+#
 # COMPOSE_PREVIEW_SERVER_OPTS (read by the start script for the server's own JVM only; the daemon
 # JVMs it spawns do not inherit it) — -XX:+ExitOnOutOfMemoryError. A heap OutOfMemoryError thrown
 # on a coroutine worker kills Ktor CIO's accept loop without killing the JVM: the process keeps
@@ -284,7 +292,7 @@ ENV PATH="/opt/compose-preview-server/bin:${PATH}" \
     ANDROID_HOME=/opt/android-sdk \
     ANDROID_SDK_ROOT=/opt/android-sdk \
     COMPOSE_PREVIEW_SERVER_OPTS="-XX:+ExitOnOutOfMemoryError -XX:G1PeriodicGCInterval=60000 -XX:MinHeapFreeRatio=10 -XX:MaxHeapFreeRatio=30" \
-    JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=70 -Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android -Dcomposeai.cli.libDaemonDesktopDir=/opt/lib-daemon-desktop -Dcomposeai.cli.libRendererDir=/opt/lib-renderer -Dcomposeai.cli.libRcjvmDir=/opt/lib-rcjvm -Dcomposeai.cli.libSimulatorDir=/opt/lib-simulator -Dcomposeai.cli.libDex2jarDir=/opt/lib-dex2jar -Dcomposeai.cli.skikoDir=/opt/lib-skiko -Dcomposeai.cli.libBtaDir=/opt/lib-bta -Dcomposeai.serve.warmInBackground=true -Dcomposeai.serve.renderTimeoutSeconds=900 -Dcomposeai.serve.frameRenderTimeoutSeconds=120 -Dcomposeai.daemon.sandboxCount=3 -Dcomposeai.daemon.sandboxBootTimeoutMs=1800000 -Dcomposeai.daemon.backgroundSandboxBoot=true -Dcomposeai.daemon.lazyInProcessSandbox=true -Dcomposeai.serve.spareSandboxes=2"
+    JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=70 -XX:TrimNativeHeapInterval=60000 -Dcomposeai.cli.libDaemonAndroidDir=/opt/lib-daemon-android -Dcomposeai.cli.libDaemonDesktopDir=/opt/lib-daemon-desktop -Dcomposeai.cli.libRendererDir=/opt/lib-renderer -Dcomposeai.cli.libRcjvmDir=/opt/lib-rcjvm -Dcomposeai.cli.libSimulatorDir=/opt/lib-simulator -Dcomposeai.cli.libDex2jarDir=/opt/lib-dex2jar -Dcomposeai.cli.skikoDir=/opt/lib-skiko -Dcomposeai.cli.libBtaDir=/opt/lib-bta -Dcomposeai.serve.warmInBackground=true -Dcomposeai.serve.renderTimeoutSeconds=900 -Dcomposeai.serve.frameRenderTimeoutSeconds=120 -Dcomposeai.daemon.sandboxCount=3 -Dcomposeai.daemon.sandboxBootTimeoutMs=1800000 -Dcomposeai.daemon.backgroundSandboxBoot=true -Dcomposeai.daemon.lazyInProcessSandbox=true -Dcomposeai.serve.spareSandboxes=2"
 
 WORKDIR /project
 # `/project` intentionally stays empty: entrypoint.sh starts module-less serve and hosts
