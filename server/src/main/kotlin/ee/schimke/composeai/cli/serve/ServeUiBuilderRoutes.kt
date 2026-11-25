@@ -871,16 +871,27 @@ internal fun ee.schimke.composeai.uibuilder.protocol.UiBuilderRequestV1.required
 
 /**
  * Run one protocol request through the mapper and the service as this actor, for resource routes
- * that have no envelope.
+ * that have no envelope. [allowPlaceholders] opts a picture export into drawing a component the
+ * renderer can't draw as its placeholder; the protocol has no field for it, so it is set on the
+ * mapped request.
  */
 internal suspend fun UiBuilderServicePort.executeMapped(
   request: ee.schimke.composeai.uibuilder.protocol.UiBuilderRequestV1,
   actor: AuthenticatedUiBuilderActor,
+  allowPlaceholders: Boolean = false,
 ): UiBuilderServiceResponse =
   when (val mapping = UiBuilderProtocolMapper.toServiceCall(actor, request)) {
-    is ProtocolRequestMapping.Mapped -> execute(mapping.call)
+    is ProtocolRequestMapping.Mapped ->
+      execute(mapping.call.allowingPlaceholders(allowPlaceholders))
     is ProtocolRequestMapping.Rejected -> UiBuilderServiceResponse.Error(mapping.error)
   }
+
+/** [this] call with an export's [UiBuilderServiceRequest.ExportDesign.allowPlaceholders] set. */
+internal fun UiBuilderServiceCall.allowingPlaceholders(allow: Boolean): UiBuilderServiceCall {
+  val export = request as? UiBuilderServiceRequest.ExportDesign
+  return if (!allow || export == null) this
+  else copy(request = export.copy(allowPlaceholders = true))
+}
 
 /** The refusal status as a bare code, for callers that answer outside Ktor's status type. */
 internal fun UiBuilderServiceResponse.httpStatusValue(): Int = httpStatus().value

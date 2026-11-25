@@ -26,6 +26,7 @@ import ee.schimke.composeai.uibuilder.protocol.PresenceV1
 import ee.schimke.composeai.uibuilder.protocol.PreviewCatalogUpgradeRequestV1
 import ee.schimke.composeai.uibuilder.protocol.ServiceErrorCodeV1
 import ee.schimke.composeai.uibuilder.protocol.UpdatePresenceRequestV1
+import ee.schimke.composeai.uibuilder.service.AuthenticatedUiBuilderActor
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceCall
 import ee.schimke.composeai.uibuilder.service.UiBuilderServiceError
 import ee.schimke.composeai.uibuilder.service.UiBuilderServicePort
@@ -834,6 +835,44 @@ class ServeUiBuilderRoutesTest {
     val export = assertIs<UiBuilderServiceRequest.ExportDesign>(calls.last().request)
     assertEquals(ExportFormatV1.PNG, export.format)
     assertEquals(3L, export.revision)
+  }
+
+  @Test
+  fun `a live picture export refuses placeholders unless the link opts into them`() {
+    liveExport("actor", "export.png").use { assertEquals(200, it.code) }
+    assertEquals(
+      false,
+      assertIs<UiBuilderServiceRequest.ExportDesign>(calls.last().request).allowPlaceholders,
+    )
+    liveExport("actor", "export.svg?placeholders=allow").use { assertEquals(200, it.code) }
+    assertEquals(
+      true,
+      assertIs<UiBuilderServiceRequest.ExportDesign>(calls.last().request).allowPlaceholders,
+    )
+    // Only `allow` opts in.
+    liveExport("actor", "export.png?placeholders=yes").use { assertEquals(200, it.code) }
+    assertEquals(
+      false,
+      assertIs<UiBuilderServiceRequest.ExportDesign>(calls.last().request).allowPlaceholders,
+    )
+  }
+
+  @Test
+  fun `an opt into placeholders reaches only an export request`() {
+    val actor = AuthenticatedUiBuilderActor("actor")
+    val export =
+      UiBuilderServiceCall(
+        actor,
+        UiBuilderServiceRequest.ExportDesign("design-1", null, ExportFormatV1.PNG),
+      )
+    assertEquals(
+      true,
+      assertIs<UiBuilderServiceRequest.ExportDesign>(export.allowingPlaceholders(true).request)
+        .allowPlaceholders,
+    )
+    assertEquals(export, export.allowingPlaceholders(false))
+    val other = UiBuilderServiceCall(actor, UiBuilderServiceRequest.ListCatalogs)
+    assertEquals(other, other.allowingPlaceholders(true))
   }
 
   @Test

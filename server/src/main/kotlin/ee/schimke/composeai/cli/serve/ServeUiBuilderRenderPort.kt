@@ -69,6 +69,12 @@ private constructor(
               PreviewOverrideValue.StringValue(it),
             )
           }
+          // Without it the bundle refuses a node it can't draw instead of drawing its outline.
+          if (allowPlaceholders)
+            put(
+              PackagedUiBuilderRenderBundle.PLACEHOLDERS_OVERRIDE_KEY,
+              PreviewOverrideValue.StringValue(PackagedUiBuilderRenderBundle.PLACEHOLDERS_ALLOW),
+            )
         },
     )
 

@@ -114,6 +114,7 @@ internal class RemotePngExportExecutor(
         environment.locale,
         environment.fontScale.toFloat(),
         projectRendererDocument(projection),
+        allowPlaceholders = request.allowPlaceholders,
       )
     }
 
