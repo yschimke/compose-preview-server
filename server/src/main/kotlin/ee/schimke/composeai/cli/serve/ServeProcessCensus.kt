@@ -40,7 +40,7 @@ data class ServeProcessCensusSnapshot(
   val pidsMax: Long? = null,
   /**
    * Resident memory of every live JVM in [liveJava] together: the server and its daemons, which
-   * share the container's memory limit. Null when no `statm` was readable.
+   * share the container's memory limit. Null when no `status` was readable.
    */
   val liveJavaRssBytes: Long? = null,
   /** The single largest live JVM's resident memory, to tell one runaway from many daemons. */
@@ -61,9 +61,6 @@ data class ServeProcessCensusSnapshot(
   companion object {
     /** Keep [zombieCommands] a hint rather than a process table. */
     private const val MAX_ZOMBIE_COMMANDS = 5
-
-    /** Linux x86-64 and arm64 server kernels; `statm` counts in pages. */
-    private const val PAGE_BYTES = 4096L
 
     /** At or above this, a cgroup v1 limit means "none" (it reports ~2^63 rounded to a page). */
     private const val UNLIMITED_V1_BYTES = 1L shl 62
@@ -133,12 +130,22 @@ data class ServeProcessCensusSnapshot(
       )
     }
 
-    /** Resident set from `statm` (pages, second field), the cheapest of the per-pid files. */
+    /**
+     * Resident set from `status`'s `VmRSS`, which the kernel reports in kB whatever its page size.
+     * Not `statm`, which counts pages: 4 KiB on x86-64 but 16 or 64 KiB on some arm64 kernels.
+     */
     private fun residentBytes(pid: File): Long? = runCatching {
-      File(pid, "statm").readText().trim().split(' ').getOrNull(1)?.toLongOrNull()
+      File(pid, "status").useLines { lines ->
+        lines
+          .firstOrNull { it.startsWith("VmRSS:") }
+          ?.substringAfter(':')
+          ?.trim()
+          ?.substringBefore(' ')
+          ?.toLongOrNull()
+      }
     }
       .getOrNull()
-      ?.let { it * PAGE_BYTES }
+      ?.let { it * 1024 }
 
     /** One counter from a cgroup `key value` events file, or null when absent. */
     private fun readEventCount(file: File, key: String): Long? = runCatching {

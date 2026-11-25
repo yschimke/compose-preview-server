@@ -76,17 +76,17 @@ class ServeProcessCensusTest {
     proc(tmp, 2, "java", 'S')
     proc(tmp, 3, "java", 'Z')
     proc(tmp, 4, "sh", 'S')
-    // `statm` is in pages: size, resident, shared, ….
-    File(tmp, "1/statm").writeText("100 1000 10 1 0 50 0\n")
-    File(tmp, "2/statm").writeText("100 250 10 1 0 50 0\n")
+    // `status` reports VmRSS in kB on every page size, unlike `statm`'s page counts.
+    File(tmp, "1/status").writeText("Name:\tjava\nVmPeak:\t9 kB\nVmRSS:\t   4000 kB\nThreads:\t9\n")
+    File(tmp, "2/status").writeText("Name:\tjava\nVmRSS:\t1000 kB\n")
     // Neither a zombie nor a non-JVM counts toward JVM memory.
-    File(tmp, "3/statm").writeText("0 999999 0 0 0 0 0\n")
-    File(tmp, "4/statm").writeText("0 999999 0 0 0 0 0\n")
+    File(tmp, "3/status").writeText("Name:\tjava\nVmRSS:\t999999 kB\n")
+    File(tmp, "4/status").writeText("Name:\tsh\nVmRSS:\t999999 kB\n")
 
     val census = ServeProcessCensusSnapshot.read(tmp)!!
 
-    assertEquals(1250L * 4096, census.liveJavaRssBytes)
-    assertEquals(1000L * 4096, census.largestJavaRssBytes)
+    assertEquals(5000L * 1024, census.liveJavaRssBytes)
+    assertEquals(4000L * 1024, census.largestJavaRssBytes)
   }
 
   @Test
