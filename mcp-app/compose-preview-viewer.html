@@ -1795,6 +1795,11 @@
       observe: 'png',
       inline: true,
     };
+    const selectionArgs = safeSelectionArguments({
+      uri: target.uri,
+      previewId: previewName(target.uri),
+      ...(target.overrides ? { overrides: target.overrides } : {}),
+    });
     try {
       const result = await callTool(renderToolName, renderArgs);
       if (generation !== liveGeneration) return;
@@ -1802,7 +1807,13 @@
         toolArguments = safeSelectionArguments(renderArgs);
         lastToolName = renderToolName;
         hasToolInput = true;
+        ownDraw = true;
         draw(result);
+        if (pendingRetry) {
+          pendingRetry.preserveVariants = true;
+          pendingRetry.selectionArguments = selectionArgs;
+          pendingRetry.contextLine = contextLine;
+        }
         return;
       }
       if (result?.isError || (!png(result) && !link(result))) {
@@ -1810,11 +1821,7 @@
         meta.textContent = `Render failed${reason ? `: ${reason}` : ''}; the previous preview is still shown.`;
         return;
       }
-      toolArguments = safeSelectionArguments({
-        uri: target.uri,
-        previewId: previewName(target.uri),
-        ...(target.overrides ? { overrides: target.overrides } : {}),
-      });
+      toolArguments = selectionArgs;
       ownDraw = true;
       draw(result);
       if (contextLine) void updateModelContext(contextLine);
@@ -3794,12 +3801,25 @@
     }
     const retryArguments = { ...pendingRetry.arguments };
     const statusNode = pendingRetry.statusNode;
+    const preserveVariants = !!pendingRetry.preserveVariants;
+    const selectionArguments = pendingRetry.selectionArguments;
+    const contextLine = pendingRetry.contextLine;
     pendingRetry.inFlight = true;
     if (statusNode) statusNode.textContent = 'Checking for the finished render…';
     try {
       const result = await callTool(toolName, retryArguments);
       if (!pendingRetry || pendingRetry.generation !== generation) return;
+      const stillPending = !result?.isError && data(result)?.pending === true;
+      if (!stillPending && selectionArguments) toolArguments = selectionArguments;
+      ownDraw = preserveVariants;
       draw(result);
+      if (stillPending && pendingRetry) {
+        pendingRetry.preserveVariants = preserveVariants;
+        pendingRetry.selectionArguments = selectionArguments;
+        pendingRetry.contextLine = contextLine;
+      } else if (contextLine && !result?.isError && (png(result) || link(result))) {
+        void updateModelContext(contextLine);
+      }
     } catch (error) {
       if (!pendingRetry || pendingRetry.generation !== generation) return;
       clearPendingRetry();
