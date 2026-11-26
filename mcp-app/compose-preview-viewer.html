@@ -29,9 +29,12 @@
   #meta.error { color: var(--color-text-danger, #c5221f); font-weight: 650; }
   .notice { width: 100%; padding: 10px 12px; box-sizing: border-box; border-radius: 0 8px 8px 0; border-left: 4px solid var(--color-border-secondary, #8a8f98); }
   .notice.error { border-left-color: var(--color-border-danger, #c5221f); background: var(--color-background-danger, #fce8e6); }
+  .notice.pending { border-left-color: var(--color-border-info, #315da8); }
   .notice strong { display: block; }
   .notice.error strong { color: var(--color-text-danger, #c5221f); }
   .notice p { margin: 4px 0 0; overflow-wrap: anywhere; }
+  .notice .pending-status { margin-top: 6px; font-size: 12px; color: var(--color-text-secondary, #666); }
+  .notice .pending-status:empty { display: none; }
   .notice details { margin-top: 6px; font-size: 12px; }
   .notice pre { margin: 6px 0 0; padding: 8px; border-radius: 6px; background: var(--color-background-primary, #fff); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
   .variant-list { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 0; padding: 0; list-style: none; font-size: 12px; }
@@ -308,7 +311,7 @@
     auditSummary.textContent = '';
     auditFindings.replaceChildren();
     auditSection.hidden = true;
-    if (result?.isError || comparison || isTrayResult(value)) return;
+    if (result?.isError || comparison || isTrayResult(value) || value?.pending === true) return;
     const subject = typeof value?.designId === 'string' && value.designId
       ? { designId: value.designId, ...(value.revision != null ? { revision: value.revision } : {}) }
       : liveTarget;
@@ -417,6 +420,8 @@
   // change and stop after a bounded run of unchanged reads; Refresh or a new result re-arms it.
   const RESOURCE_POLL_MAX_INTERVAL_MS = 60000;
   const RESOURCE_POLL_MAX_UNCHANGED = 12;
+  const PENDING_RETRY_MIN_MS = 1000;
+  const PENDING_RETRY_MAX_MS = 60000;
   const MAX_COMMENT_BODY_LENGTH = 4000;
   // Static host contract, for hosts with no MCP Apps bridge (for example Antigravity's
   // <agent-embed>). One envelope, two ways to deliver it:
@@ -450,6 +455,11 @@
   let inputResolved = false;
   let selected;
   let toolArguments = {};
+  let hasToolInput = false;
+  let lastToolName;
+  let toolsDiscovered = false;
+  let pendingRetry;
+  let pendingRetryGeneration = 0;
   let resourceToken;
   let resourceResult;
   let resourceReadGeneration = 0;
@@ -1604,6 +1614,7 @@
   const MAX_LAYOUT_BOXES = 400;
   const MAX_RESOURCE_LIST_PAGES = 10;
   let renderToolName;
+  let matrixToolName;
   let dataToolName;
   let liveTarget;
   let variants = [];
@@ -1723,7 +1734,7 @@
     const uri =
       (typeof value?.uri === 'string' && splitPreviewUri(value.uri).uri) || fromArguments.uri || fromResource.uri;
     const overrides = toolArguments.overrides || fromArguments.overrides || fromResource.overrides;
-    liveTarget = comparison || !uri ? undefined : { uri, ...(overrides ? { overrides } : {}) };
+    liveTarget = comparison || value?.pending === true || !uri ? undefined : { uri, ...(overrides ? { overrides } : {}) };
     layoutEligible = !!liveTarget && !Array.isArray(value?.cells) && !value?.crop;
     if (!own) {
       const others = variantUrisOf(result, value).filter(other => typeof other === 'string' && other);
@@ -1773,18 +1784,27 @@
 
   async function renderLive(target, contextLine) {
     if (!liveReady() || !renderToolName || !target || liveBusy) return;
+    clearPendingRetry();
     const generation = ++liveGeneration;
     liveBusy = true;
     updateLiveActions();
     meta.textContent = `Rendering ${previewName(target.uri)}…`;
+    const renderArgs = {
+      uri: target.uri,
+      ...(target.overrides ? { overrides: target.overrides } : {}),
+      observe: 'png',
+      inline: true,
+    };
     try {
-      const result = await callTool(renderToolName, {
-        uri: target.uri,
-        ...(target.overrides ? { overrides: target.overrides } : {}),
-        observe: 'png',
-        inline: true,
-      });
+      const result = await callTool(renderToolName, renderArgs);
       if (generation !== liveGeneration) return;
+      if (!result?.isError && data(result)?.pending === true) {
+        toolArguments = safeSelectionArguments(renderArgs);
+        lastToolName = renderToolName;
+        hasToolInput = true;
+        draw(result);
+        return;
+      }
       if (result?.isError || (!png(result) && !link(result))) {
         const reason = fallbackText(result).split('\n')[0];
         meta.textContent = `Render failed${reason ? `: ${reason}` : ''}; the previous preview is still shown.`;
@@ -2049,17 +2069,19 @@
 
   // A result that arrived but has nothing to draw. The header says so plainly instead of staying
   // on "Waiting…", which reads as still pending; the complete text stays one click away.
-  function renderNotice(result, { error, heading, summary }) {
+  function renderNotice(result, { error, pending: isPending, heading, summary, statusNode }) {
     const text = fallbackText(result).trim();
     const firstLine = (text.split('\n').find(line => line.trim()) || '').trim();
     const box = document.createElement('div');
-    box.className = error ? 'notice error' : 'notice';
+    box.className = error ? 'notice error' : isPending ? 'notice pending' : 'notice';
     if (error) box.setAttribute('role', 'alert');
+    else if (isPending) box.setAttribute('role', 'status');
     const title = document.createElement('strong');
     title.textContent = heading;
     const line = document.createElement('p');
     line.textContent = summary || firstLine || 'The result carried no image.';
     box.append(title, line);
+    if (statusNode) box.append(statusNode);
     const list = variantList(result);
     if (list) box.append(list);
     if (text && text !== line.textContent) {
@@ -3568,6 +3590,8 @@
 
   function draw(result) {
     hasToolResult = true;
+    clearPendingRetry();
+    pendingImage = undefined;
     canvas.classList.remove('has-image');
     meta.classList.remove('error');
     if (staticMode) meta.textContent = 'Static preview result';
@@ -3599,6 +3623,11 @@
       void renderBeforeAfter(result, comparison, comparisonGeneration);
       return;
     }
+    gridBack.hidden = true;
+    if (!result?.isError && value?.pending === true) {
+      renderPending(result, value);
+      return;
+    }
     const cells = Array.isArray(value.cells) && value.cells;
     // Variant grids carry each cell's PNG in `_meta`, which the model never reads.
     const cellPngs = result?._meta?.['composePreview/cellPngs'];
@@ -3607,7 +3636,6 @@
         if (cell && typeof cellPngs[index] === 'string' && !cell.png) cell.png = cellPngs[index];
       });
     }
-    gridBack.hidden = true;
     if (resource) {
       resourceResult = { result, resource, value };
       refresh.hidden = staticMode;
@@ -3653,6 +3681,137 @@
         : 'Re-render with observe="png" to see it here.',
     });
     requestImageFor(liveTarget);
+  }
+
+  function pendingHeading(phase) {
+    const normalized = typeof phase === 'string' ? phase.trim() : '';
+    if (!normalized || normalized === 'rendering') return 'Still rendering…';
+    if (normalized === 'starting') return 'Still starting…';
+    return `Still ${normalized.replace(/\s+/g, ' ')}…`;
+  }
+
+  function pendingMessage(value) {
+    if (typeof value?.message === 'string' && value.message.trim()) return value.message.trim();
+    return value?.phase === 'starting'
+      ? 'The project is still starting in the background.'
+      : 'The preview is still rendering in the background.';
+  }
+
+  function pendingToolHint(value) {
+    if (typeof value?.tool === 'string' && value.tool.trim()) return value.tool.trim();
+    if (typeof value?.message === 'string') {
+      const match = value.message.match(/\bCall\s+([A-Za-z0-9_./:-]+)\s+again\b/i);
+      if (match) return match[1];
+    }
+    return undefined;
+  }
+
+  function resolvePendingToolName(explicitToolName, hint, args) {
+    if (explicitToolName) return explicitToolName;
+    if (hint && /(^|__|\/|catalog_)render_matrix$/i.test(hint)) return matrixToolName;
+    if (hint && /(^|__|\/|catalog_)render_preview$/i.test(hint)) return renderToolName;
+    if (args && typeof args === 'object' && ('axes' in args || 'matrix' in args || 'preset' in args)) {
+      return matrixToolName || renderToolName;
+    }
+    return renderToolName;
+  }
+
+  function pendingRetryDelayMs(value) {
+    const raw = Number(value?.retryAfterMs);
+    if (!Number.isFinite(raw) || raw < PENDING_RETRY_MIN_MS) return PENDING_RETRY_MIN_MS;
+    return Math.min(PENDING_RETRY_MAX_MS, Math.round(raw));
+  }
+
+  function clearPendingRetry() {
+    ++pendingRetryGeneration;
+    if (pendingRetry?.timer !== undefined) window.clearTimeout(pendingRetry.timer);
+    pendingRetry = undefined;
+  }
+
+  // A budgeted render call that has not finished yet (compose-preview-mcp#226): show the server's
+  // progress state instead of "No image in this result" and, with a live bridge, retry the same
+  // tool after `retryAfterMs`.
+  function renderPending(result, value) {
+    const heading = pendingHeading(value?.phase);
+    const summary = pendingMessage(value);
+    const statusNode = !staticMode ? document.createElement('p') : undefined;
+    if (statusNode) statusNode.className = 'pending-status';
+    renderNotice(result, { pending: true, heading, summary, statusNode });
+    scheduleFit();
+    if (staticMode) return;
+    const generation = ++pendingRetryGeneration;
+    const delayMs = pendingRetryDelayMs(value);
+    pendingRetry = {
+      generation,
+      explicitToolName: lastToolName,
+      toolHint: pendingToolHint(value),
+      arguments: hasToolInput ? { ...toolArguments } : undefined,
+      dueAt: Date.now() + delayMs,
+      delayMs,
+      statusNode,
+      timer: undefined,
+      inFlight: false,
+    };
+    armPendingRetry();
+  }
+
+  function armPendingRetry() {
+    if (!pendingRetry || pendingRetry.timer !== undefined || pendingRetry.inFlight) return;
+    if (!liveReady() || !toolsDiscovered || !pendingRetry.arguments) return;
+    const toolName = resolvePendingToolName(
+      pendingRetry.explicitToolName,
+      pendingRetry.toolHint,
+      pendingRetry.arguments,
+    );
+    if (!toolName || refusedTools.has(toolName)) {
+      if (pendingRetry.statusNode && toolName && refusedTools.has(toolName)) {
+        pendingRetry.statusNode.textContent = `Automatic retry unavailable: ${HOST_REFUSED}`;
+      }
+      return;
+    }
+    const generation = pendingRetry.generation;
+    const waitMs = Math.max(0, pendingRetry.dueAt - Date.now());
+    if (pendingRetry.statusNode) {
+      const seconds = Math.max(1, Math.round(pendingRetry.delayMs / 1000));
+      pendingRetry.statusNode.textContent = `Retrying automatically in ${seconds}s…`;
+    }
+    pendingRetry.timer = window.setTimeout(() => {
+      void runPendingRetry(generation);
+    }, waitMs);
+  }
+
+  async function runPendingRetry(generation) {
+    if (!pendingRetry || pendingRetry.generation !== generation || !liveReady()) return;
+    pendingRetry.timer = undefined;
+    const toolName = resolvePendingToolName(
+      pendingRetry.explicitToolName,
+      pendingRetry.toolHint,
+      pendingRetry.arguments,
+    );
+    if (!toolName || refusedTools.has(toolName) || !pendingRetry.arguments) {
+      clearPendingRetry();
+      return;
+    }
+    const retryArguments = { ...pendingRetry.arguments };
+    const statusNode = pendingRetry.statusNode;
+    pendingRetry.inFlight = true;
+    if (statusNode) statusNode.textContent = 'Checking for the finished render…';
+    try {
+      const result = await callTool(toolName, retryArguments);
+      if (!pendingRetry || pendingRetry.generation !== generation) return;
+      draw(result);
+    } catch (error) {
+      if (!pendingRetry || pendingRetry.generation !== generation) return;
+      clearPendingRetry();
+      if (refusedByHost(error)) {
+        refusedTools.add(toolName);
+        updateLiveActions();
+        if (statusNode) statusNode.textContent = `Automatic retry unavailable: ${HOST_REFUSED}`;
+      } else {
+        if (statusNode) statusNode.textContent = 'Automatic retry failed; call the tool again to check.';
+        console.warn('Failed to retry pending Compose Preview render:', error);
+      }
+    }
   }
 
   const imageRequests = new Set();
@@ -3713,6 +3872,20 @@
         ? incomingArguments.token
         : undefined;
       toolArguments = safeSelectionArguments(incomingArguments);
+      lastToolName =
+        (typeof message.params?.name === 'string' && message.params.name) ||
+        (typeof message.params?.toolName === 'string' && message.params.toolName) ||
+        undefined;
+      hasToolInput = true;
+      if (pendingRetry) {
+        if (pendingRetry.arguments) {
+          clearPendingRetry();
+        } else {
+          pendingRetry.arguments = { ...toolArguments };
+          pendingRetry.explicitToolName = lastToolName;
+          armPendingRetry();
+        }
+      }
       return;
     }
     if (message.method === 'ui/notifications/tool-result') {
@@ -3765,6 +3938,7 @@
     guidelinesToolName = undefined;
     overlayToolName = 'render_preview_overlay';
     renderToolName = 'render_preview';
+    matrixToolName = 'render_matrix';
     dataToolName = 'get_preview_data';
     trayToolName = 'previews_tray';
     listCommentsToolName = undefined;
@@ -3776,10 +3950,12 @@
     const generation = ++toolDiscoveryGeneration;
     if (!hostServerTools) {
       assumeOwnTools();
+      toolsDiscovered = true;
       updateLiveActions();
       updateAccessibilityAction();
       updateCommentAction();
       sendPendingImageRequest();
+      armPendingRetry();
       resumeTray();
       return;
     }
@@ -3795,6 +3971,7 @@
       postCommentToolName = names
         .find(name => typeof name === 'string' && /(^|__|\/)ui_builder_post_comment$/.test(name));
       renderToolName = names.find(name => typeof name === 'string' && /(^|__|\/|catalog_)render_preview$/.test(name));
+      matrixToolName = names.find(name => typeof name === 'string' && /(^|__|\/|catalog_)render_matrix$/.test(name));
       dataToolName = names.find(name => typeof name === 'string' && /(^|__|\/|catalog_)get_preview_data$/.test(name));
       listPreviewsToolName = names
         .find(name => typeof name === 'string' && /(^|__|\/)catalog_list_previews$/.test(name));
@@ -3804,6 +3981,7 @@
       assumeOwnTools();
       console.debug('The host did not list tools; using the viewer\'s own tool names:', error);
     }
+    toolsDiscovered = true;
     updateLiveActions();
     updateAccessibilityAction();
     updateCommentAction();
@@ -3811,6 +3989,7 @@
     updateAuditAction();
     if (commentDesignId && listCommentsToolName) void loadComments();
     sendPendingImageRequest();
+    armPendingRetry();
     resumeTray();
   }
 
