@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.203.0](https://github.com/yschimke/compose-preview-server/compare/v3.202.0...v3.203.0) (2026-11-26)
+
+
+### Bug Fixes
+
+* **deps:** update ktor to v3.6.2 ([#2139](https://github.com/yschimke/compose-preview-server/issues/2139)) ([0bd67fe](https://github.com/yschimke/compose-preview-server/commit/0bd67fefdc55f49d9f6a173d03838846f419c22a))
+* **image:** trim every JVM's native heap once a minute ([#2137](https://github.com/yschimke/compose-preview-server/issues/2137)) ([a2837e6](https://github.com/yschimke/compose-preview-server/commit/a2837e60503f662063f6757551f584b176447b4c))
+
 ## [3.202.0](https://github.com/yschimke/compose-preview-server/compare/v3.201.0...v3.202.0) (2026-11-25)
 
 
