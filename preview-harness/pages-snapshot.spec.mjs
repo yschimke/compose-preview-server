@@ -6470,6 +6470,104 @@ test("contract · a pending render shows progress and auto-retries over the brid
   expect(await page.evaluate(() => window.__live.calls)).toEqual([]);
 });
 
+test("contract · pending live variant switch and re-render preserve variant choices until a new host result", async ({ page }) => {
+  const pngs = livePngs();
+  const base = "compose-preview://fixture/_app/com.example.Card";
+  const round = "compose-preview://fixture/_app/com.example.Card_Round?config=round";
+  const other = "compose-preview://fixture/_app/com.example.OtherCard";
+  const pendingResult = (phase, message) => ({
+    structuredContent: { pending: true, phase, retryAfterMs: 1000, message },
+    content: [{ type: "text", text: JSON.stringify({ pending: true, phase, retryAfterMs: 1000, message }) }],
+  });
+  const imageResult = (uri, data) => ({
+    structuredContent: { uri },
+    content: [
+      { type: "image", mimeType: "image/png", data },
+      { type: "text", text: JSON.stringify({ uri }) },
+    ],
+  });
+
+  const starting = pendingResult("starting", "The project is still starting in the background.");
+  const rendering = pendingResult("rendering", "The preview is still rendering in the background.");
+  const roundFinal = imageResult(round, pngs.round);
+  const roundRefreshed = imageResult(round, pngs.refreshed);
+  const baseFinal = imageResult(base, pngs.base);
+  const otherFinal = imageResult(other, pngs.refreshed);
+
+  const viewer = await openLiveViewer(page, pngs, {
+    renderResponses: [starting, rendering, roundFinal, rendering, roundRefreshed, baseFinal],
+    echoAppCalls: 15,
+  });
+  const variant = viewer.locator("#variant");
+  const image = viewer.locator("#canvas .preview-stage > img");
+  await expect(image).toHaveAttribute("src", `data:image/png;base64,${pngs.base}`);
+  await expect(variant).toBeVisible();
+  await expect(variant.locator("option")).toHaveText(["Card", "Card_Round (round)"]);
+
+  // Switch variants when render_preview returns pending twice and finishes with a URI-specific result omitting otherMatches.
+  await variant.selectOption(round);
+  await expect(viewer.locator(".notice.pending strong")).toHaveText("Still starting…");
+  await expect(viewer.locator(".notice.pending strong")).toHaveText("Still rendering…");
+  await expect(image).toHaveAttribute("src", `data:image/png;base64,${pngs.round}`);
+  await expect(viewer.locator("#meta")).toHaveText("Card_Round (round)");
+  await expect(variant).toBeVisible();
+  await expect(variant.locator("option")).toHaveText(["Card", "Card_Round (round)"]);
+  await expect(variant).toHaveValue(round);
+  await expect
+    .poll(() => page.evaluate(() => window.__live.contexts.at(-1)?.content?.[0]?.text || ""))
+    .toContain(`switched to variant Card_Round (round) (${round})`);
+
+  // Re-render also preserves variants across pending -> completed retry.
+  await viewer.locator("#rerender").click();
+  await expect(viewer.locator(".notice.pending strong")).toHaveText("Still rendering…");
+  await expect(image).toHaveAttribute("src", `data:image/png;base64,${pngs.refreshed}`);
+  await expect(variant).toBeVisible();
+  await expect(variant.locator("option")).toHaveText(["Card", "Card_Round (round)"]);
+  await expect(variant).toHaveValue(round);
+
+  // Users can still switch back to the original variant.
+  await variant.selectOption(base);
+  await expect(image).toHaveAttribute("src", `data:image/png;base64,${pngs.base}`);
+  await expect(variant).toBeVisible();
+  await expect(variant).toHaveValue(base);
+
+  // A brand-new host tool-result for another preview resets variants normally.
+  await page.evaluate(
+    ({ result }) => {
+      window.__liveSend({ method: "ui/notifications/tool-input", params: { arguments: { preview: "OtherCard" } } });
+      window.__liveSend({ method: "ui/notifications/tool-result", params: result });
+    },
+    { result: otherFinal },
+  );
+  await expect(image).toHaveAttribute("src", `data:image/png;base64,${pngs.refreshed}`);
+  await expect(viewer.locator("#variant-label")).toBeHidden();
+
+  // A brand-new host tool-result arriving mid-pending cancels the pending retry and resets variants.
+  const interrupted = await openLiveViewer(page, pngs, {
+    renderResponses: [starting],
+    echoAppCalls: 15,
+  });
+  await expect(interrupted.locator("#variant")).toBeVisible();
+  await interrupted.locator("#variant").selectOption(round);
+  await expect(interrupted.locator(".notice.pending strong")).toHaveText("Still starting…");
+  await page.evaluate(
+    ({ result }) => {
+      window.__liveSend({ method: "ui/notifications/tool-input", params: { arguments: { preview: "OtherCard" } } });
+      window.__liveSend({ method: "ui/notifications/tool-result", params: result });
+    },
+    { result: otherFinal },
+  );
+  await expect(interrupted.locator("#canvas .preview-stage > img")).toHaveAttribute(
+    "src",
+    `data:image/png;base64,${pngs.refreshed}`,
+  );
+  await expect(interrupted.locator("#variant-label")).toBeHidden();
+  await page.waitForTimeout(1200);
+  expect(await page.evaluate(() => window.__live.calls)).toEqual([
+    { name: "render_preview", arguments: { uri: round, observe: "png", inline: true } },
+  ]);
+});
+
 test("contract · a file or observation result draws _meta['composePreview/png'] without re-rendering", async ({ page }) => {
   const pngs = livePngs();
   const base = "compose-preview://fixture/_app/com.example.Card";
