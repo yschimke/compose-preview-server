@@ -5646,7 +5646,9 @@ async function openLiveViewer(
     frameWidth = 620,
     listTools = true,
     refuseCalls = false,
+    firstInput,
     firstResult,
+    renderResponses,
     hostContext,
     // A host that sizes the iframe to every ui/notifications/size-changed it is sent.
     followSize = false,
@@ -5656,9 +5658,10 @@ async function openLiveViewer(
   } = {},
 ) {
   await page.goto("/preview-harness/index.html");
-  await page.evaluate(({ pngs, frameHeight, frameWidth, listTools, refuseCalls, firstResult, hostContext, followSize, echoAppCalls }) => {
+  await page.evaluate(({ pngs, frameHeight, frameWidth, listTools, refuseCalls, firstInput, firstResult, renderResponses, hostContext, followSize, echoAppCalls }) => {
     const base = "compose-preview://fixture/_app/com.example.Card";
     const round = "compose-preview://fixture/_app/com.example.Card_Round?config=round";
+    const queuedResponses = Array.isArray(renderResponses) ? [...renderResponses] : null;
     const log = (window.__live = {
       calls: [],
       reads: [],
@@ -5692,7 +5695,7 @@ async function openLiveViewer(
           hostCapabilities: { serverTools: {}, serverResources: { subscribe: true } },
           ...(hostContext ? { hostContext } : {}),
         });
-        send({ method: "ui/notifications/tool-input", params: { arguments: { preview: "Card" } } });
+        send({ method: "ui/notifications/tool-input", params: { arguments: firstInput || { preview: "Card" } } });
         send({
           method: "ui/notifications/tool-result",
           params: firstResult || {
@@ -5746,6 +5749,10 @@ async function openLiveViewer(
           }, echoAppCalls);
         };
         if (params.name === "render_preview") {
+          if (queuedResponses && queuedResponses.length) {
+            answer(queuedResponses.shift());
+            return;
+          }
           // render_preview's inline image is the model's copy; a downscaled one names the render's size.
           const sizes = pngs.roundSize
             ? [{ type: "text", text: JSON.stringify({ uri: params.arguments.uri, ...pngs.roundSize }) }]
@@ -5788,7 +5795,9 @@ async function openLiveViewer(
     frameWidth,
     listTools,
     refuseCalls,
+    firstInput: firstInput ?? null,
     firstResult: firstResult ?? null,
+    renderResponses: renderResponses ?? null,
     hostContext: hostContext ?? null,
     followSize,
     echoAppCalls: echoAppCalls ?? null,
@@ -6352,6 +6361,113 @@ test("contract · a result without an image is re-rendered with one, and lists i
   await expect(refused.locator(".notice strong")).toHaveText("No image in this result");
   await expect(refused.locator(".variant-list button")).toHaveText(["Card", "Card_Round (round)"]);
   await expect(refused.locator(".notice > p")).not.toContainText("{");
+});
+
+test("contract · a pending render shows progress and auto-retries over the bridge", async ({ page }) => {
+  const pngs = livePngs();
+  const base = "compose-preview://fixture/_app/com.example.Card";
+  const inputArgs = { preview: "Card", observe: "png", inline: true };
+  const starting = {
+    structuredContent: {
+      pending: true,
+      phase: "starting",
+      retryAfterMs: 1000,
+      message:
+        "The project is still starting (Gradle bootstrap and render daemon); the work continues in the background. Call render_preview again with the same arguments to get the result.",
+    },
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          pending: true,
+          phase: "starting",
+          retryAfterMs: 1000,
+          message:
+            "The project is still starting (Gradle bootstrap and render daemon); the work continues in the background. Call render_preview again with the same arguments to get the result.",
+        }),
+      },
+    ],
+  };
+  const rendering = {
+    structuredContent: {
+      pending: true,
+      phase: "rendering",
+      retryAfterMs: 1000,
+      message:
+        "The preview is still rendering; the work continues in the background. Call render_preview again with the same arguments to get the result.",
+    },
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          pending: true,
+          phase: "rendering",
+          retryAfterMs: 1000,
+          message:
+            "The preview is still rendering; the work continues in the background. Call render_preview again with the same arguments to get the result.",
+        }),
+      },
+    ],
+  };
+  const finalResult = {
+    structuredContent: { uri: base },
+    content: [
+      { type: "image", mimeType: "image/png", data: pngs.base },
+      { type: "text", text: JSON.stringify({ uri: base }) },
+    ],
+  };
+
+  // Live bridge: starting -> rendering -> final PNG, preserving exact tool-input arguments even with host call echoes.
+  const viewer = await openLiveViewer(page, pngs, {
+    firstInput: inputArgs,
+    firstResult: starting,
+    renderResponses: [rendering, finalResult],
+    echoAppCalls: 15,
+  });
+  await expect(viewer.locator("#meta")).toHaveText("Still starting…");
+  await expect(viewer.locator(".notice.pending strong")).toHaveText("Still starting…");
+  await expect(viewer.locator(".notice.pending > p").first()).toContainText("project is still starting");
+  await expect(viewer.locator("#canvas")).not.toContainText("No image in this result");
+
+  await expect(viewer.locator(".notice.pending strong")).toHaveText("Still rendering…");
+  await expect(viewer.locator("#meta")).toHaveText("Still rendering…");
+
+  await expect(viewer.locator("#canvas .preview-stage > img")).toBeVisible();
+  expect(await page.evaluate(() => window.__live.calls)).toEqual([
+    { name: "render_preview", arguments: inputArgs },
+    { name: "render_preview", arguments: inputArgs },
+  ]);
+
+  // Refused bridge calls: keep the server's progress message (never "No image in this result") and stop retrying after refusal.
+  const refused = await openLiveViewer(page, pngs, {
+    refuseCalls: true,
+    firstInput: inputArgs,
+    firstResult: starting,
+  });
+  await expect(refused.locator(".notice.pending strong")).toHaveText("Still starting…");
+  await expect(refused.locator("#canvas")).not.toContainText("No image in this result");
+  await expect.poll(() => page.evaluate(() => window.__live.calls.length)).toBe(1);
+  await expect(refused.locator(".pending-status")).toContainText("Automatic retry unavailable");
+  await expect(refused.locator(".notice.pending strong")).toHaveText("Still starting…");
+
+  // Cancellation guard: a newer result arriving before retryAfterMs cancels the pending retry timer.
+  const cancelled = await openLiveViewer(page, pngs, {
+    firstInput: inputArgs,
+    firstResult: {
+      structuredContent: {
+        pending: true,
+        phase: "starting",
+        retryAfterMs: 1000,
+        message: "Still starting in background.",
+      },
+      content: [],
+    },
+  });
+  await expect(cancelled.locator(".notice.pending strong")).toHaveText("Still starting…");
+  await page.evaluate((result) => window.__liveSend({ method: "ui/notifications/tool-result", params: result }), finalResult);
+  await expect(cancelled.locator("#canvas .preview-stage > img")).toBeVisible();
+  await page.waitForTimeout(1200);
+  expect(await page.evaluate(() => window.__live.calls)).toEqual([]);
 });
 
 test("contract · a file or observation result draws _meta['composePreview/png'] without re-rendering", async ({ page }) => {

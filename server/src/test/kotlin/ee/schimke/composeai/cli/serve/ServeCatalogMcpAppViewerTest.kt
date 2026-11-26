@@ -162,6 +162,17 @@ class ServeCatalogMcpAppViewerTest {
     )
     assertTrue(html.contains("Render failed"))
     assertTrue(html.contains("No image in this result"))
+    assertTrue(html.contains("if (!result?.isError && value?.pending === true)"))
+    assertTrue(html.contains("function renderPending(result, value)"))
+    assertTrue(html.contains("Still starting…"))
+    assertTrue(html.contains("Still rendering…"))
+    assertTrue(html.contains("const PENDING_RETRY_MIN_MS = 1000;"))
+    assertTrue(html.contains("clearPendingRetry();"))
+    assertTrue(
+      html.indexOf("if (!result?.isError && value?.pending === true)") <
+        html.indexOf("renderImage(image, value, resource);\n      renderDetails"),
+      "pending results must be handled before image and no-image checks",
+    )
     assertTrue(html.contains("Full message"))
     assertTrue(html.contains("function beforeAfterModel(result, value)"))
     assertTrue(html.contains("const inputBeforeUri = result?.isError ? undefined"))
