@@ -703,6 +703,10 @@ dependencies {
   // sources keep the `ee.schimke.composeai.cli.serve` package.
   api(libs.composeai.render.host)
 
+  // `AppSimulatorLauncher`, which the simulator sessions start their simulator JVMs through
+  // (`LauncherSimulatorRuntime`), from yschimke/android-simulator.
+  implementation(libs.android.simulator.launch)
+
   // The WFF bundle layout `DwfPackaging` lays a design revision out in. Only `wff-core`: the
   // packager itself runs from `lib-wff-packager/` in its own JVM (see `wffPackager` below).
   implementation(libs.wff.core)

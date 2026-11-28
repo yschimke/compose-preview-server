@@ -188,6 +188,7 @@ val localBuildRoots =
     "tools" to "../compose-ai-tools",
     "daemon" to "../compose-preview-daemon",
     "contracts" to "../compose-preview-contracts",
+    "simulator" to "../android-simulator",
   )
 
 providers

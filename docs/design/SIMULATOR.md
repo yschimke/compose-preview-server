@@ -17,24 +17,23 @@ tiers, embed tokens), `ServeSimulatorRoutes.kt` (HTTP + socket), `ServeSimulator
 
 ## How the server reaches the simulator
 
-The server drives compose-ai-tools' released CLI, one process per session:
+The server starts simulators itself, through `AppSimulatorLauncher` in
+[`yschimke/android-simulator`](https://github.com/yschimke/android-simulator)'s published
+`ee.schimke.composeai:simulator-launch` (`LauncherSimulatorRuntime`): one simulator JVM per device
+and no CLI JVM between them, which saved about 85 MB a session over running
+`compose-preview android-simulator --control stdio`. The launcher converts and caches each APK by
+content (the CLI's cache and stamp), runs the two JVMs of a pair over a Data Layer hub, and answers
+each device's commands by id. Its command vocabulary is the simulator's own (`docs/SIMULATOR.md`
+there); none of it is restated here.
 
-```
-compose-preview android-simulator phone.apk [--pair watch.apk] --control stdio --headless \
-  --hide-agent --network <app's> [--launcher] [--max-heap <h>] --java <jdk21>
-```
+It runs from an `android-simulator` distribution: `simulator.home`, else `ANDROID_SIMULATOR_HOME`,
+else the image's `/opt/android-simulator`. The image lays that out as links to its own
+`lib-simulator/`, `lib-dex2jar/` and `lib-daemon-android/`, so nothing is shipped twice and the
+simulator runs on the very jars the watch-face renderer does. Converted APKs are cached under the
+state directory, the one path a jailed converter can write.
 
-That command is the simulator's public, documented interface (`docs/SIMULATOR.md` in compose-ai-tools).
-It converts and caches each APK by content, picks the form factor from the manifest, provisions
-Robolectric's `android-all`, and with `--pair` runs two simulator JVMs over a Data Layer hub, routing
-each command by `"device"` and tagging every line it prints with one. None of that is restated here,
-unlike the DWF lane, which had to restate its command vocabulary because its launcher is internal.
-
-The image installs the CLI at `/opt/compose-preview-cli` from the same `TOOLS_VERSION` tarball the
-sidecars already come from, and links its `lib-simulator/`, `lib-dex2jar/` and `lib-daemon-android/`
-to the image's copies, so nothing is shipped twice and the CLI never fetches a daemon.
-
-The child gets a **clean environment** (`PATH`, `HOME`, `LANG`, `TZ`, `JAVA_HOME`, `ANDROID_HOME`):
+Every child JVM, the converter's and each simulator's, gets a **clean environment** (`PATH`, `HOME`,
+`LANG`, `TZ`, `JAVA_HOME`, `ANDROID_HOME`), through the launcher's `AppSimulatorHost.processBuilder`:
 the server's holds operator secrets, and the app can read its own environment.
 
 ## Security model
@@ -88,7 +87,7 @@ into `key`, and shows Back, Home (with a launcher), Rotate (phone) and crown and
 
 On the released CLI 2.104.0, a 4-core, 16 GB sandbox, Java 21, hand-built test apps (a phone app, a
 watch app, and a phone + watch pair using `play-services-wearable` `MessageClient`). Server path
-numbers come from `SimulatorCliE2ETest` (the pool's own `/proc` meter,
+numbers come from `SimulatorE2ETest`, then on the CLI (the pool's own `/proc` meter,
 [`evidence/simulator/e2e-results.json`](../evidence/simulator/e2e-results.json)); the breakdown and
 concurrency rows from a harness on the CLI directly.
 

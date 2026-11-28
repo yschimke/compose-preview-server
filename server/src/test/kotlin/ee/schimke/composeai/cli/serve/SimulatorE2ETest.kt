@@ -19,23 +19,25 @@ import kotlinx.serialization.json.jsonObject
 import org.junit.jupiter.api.Assumptions.assumeTrue
 
 /**
- * The server's simulator path against the REAL released CLI: phone, watch and a paired phone and
- * watch, each booted, driven and measured; the idle tiers (pause, hibernate, wake) on real JVMs.
+ * The server's simulator path against a REAL `android-simulator` distribution, through
+ * `AppSimulatorLauncher`: phone, watch and a paired phone and watch, each booted, driven and
+ * measured; the idle tiers (pause, hibernate, wake) on real JVMs.
  *
- * Off unless `SIMULATOR_E2E_DIR` names a directory holding `cli/bin/compose-preview` and the APKs
- * `phone.apk`, `watch.apk`, `pairphone.apk`, `pairwatch.apk` (the last two using the Wearable Data
- * Layer: the phone's button messages the watch, which shows "Watch got hi 1"). Needs Java 21 and an
- * Android SDK. `SIMULATOR_E2E_HOLD=1` keeps the server up afterwards, writing its URL and an
- * operator token to `<dir>/server.json`, until `<dir>/done` exists — so a browser can drive the
- * real viewer. Results are written to `<dir>/e2e-results.json`.
+ * Off unless `SIMULATOR_E2E_DIR` names a directory holding `android-simulator/` (a distribution, or
+ * a directory of `lib-simulator/`, `lib-dex2jar/` and `lib-robolectric/` or `lib-daemon-android/`
+ * links) and the APKs `phone.apk`, `watch.apk`, `pairphone.apk`, `pairwatch.apk` (the last two
+ * using the Wearable Data Layer: the phone's button messages the watch, which shows "Watch got hi
+ * 1"). Needs Java 21 and an Android SDK. `SIMULATOR_E2E_HOLD=1` keeps the server up afterwards,
+ * writing its URL and an operator token to `<dir>/server.json`, until `<dir>/done` exists — so a
+ * browser can drive the real viewer. Results are written to `<dir>/e2e-results.json`.
  */
-class SimulatorCliE2ETest {
+class SimulatorE2ETest {
   private val dir = System.getenv("SIMULATOR_E2E_DIR")?.let(::File)
 
   @Test
-  fun `phone, watch and paired sessions run on the real CLI`() {
+  fun `phone, watch and paired sessions run on the real simulator`() {
     assumeTrue(
-      dir != null && File(dir, "cli/bin/compose-preview").canExecute(),
+      dir != null && File(dir, "android-simulator/lib-simulator").isDirectory,
       "SIMULATOR_E2E_DIR not set",
     )
     val root = File(dir, "e2e-state").apply { mkdirs() }
@@ -65,8 +67,8 @@ class SimulatorCliE2ETest {
     )
     registry.putConfig("pair", SimulatorAppConfig(label = "Paired demo"))
     val runtime =
-      CliSimulatorRuntime(
-        cli = { File(dir, "cli/bin/compose-preview") },
+      LauncherSimulatorRuntime(
+        home = { File(dir, "android-simulator") },
         javaHome = File(System.getenv("SIMULATOR_E2E_JAVA") ?: System.getProperty("java.home")),
         stateDir = File(root, "state"),
         appsDir = appsDir,
@@ -200,7 +202,9 @@ class SimulatorCliE2ETest {
         pool.visibility(s, true)
         pool.frame(s, s.devices.first(), force = true)!!
         r["wakeToFrameMs"] = (System.nanoTime() - w0) / 1_000_000
-        // Hibernate: the process goes, and waking boots it again with the activity restored.
+        // Hibernate: the process goes, and waking boots it again with the activity restored. Only
+        // a session nobody can see is hibernated, so the viewer looks away first.
+        pool.visibility(s, false)
         pool.pause(s)
         pool.hibernate(s)
         assertEquals(SimulatorStage.HIBERNATED, s.stage)

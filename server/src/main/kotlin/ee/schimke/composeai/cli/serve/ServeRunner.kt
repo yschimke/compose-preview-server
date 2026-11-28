@@ -2399,8 +2399,8 @@ public class ServeRunner(
     val sandbox =
       PlaygroundSandbox.parseProfile(env("SERVE_SIMULATOR_SANDBOX"))
         .mapCatching { parsed ->
-          // A simulator is the CLI's JVM and one or two simulator JVMs of up to 2 GB each, with
-          // their converter: the playground's 1.5 GB snippet budget would starve it.
+          // A simulator is one or two simulator JVMs of up to 2 GB each, with their converter:
+          // the playground's 1.5 GB snippet budget would starve it.
           PlaygroundSandbox.validate(
               parsed.copy(memoryMb = 6_144, cpus = 4.0, pids = 4_096, ttlSeconds = 2 * 60 * 60L),
             )
@@ -2408,10 +2408,10 @@ public class ServeRunner(
         }
         .getOrElse { throw IllegalArgumentException("simulator.sandbox: ${it.message}", it) }
     val runtime =
-      CliSimulatorRuntime(
-        cli = {
-          env("SERVE_SIMULATOR_CLI")?.takeIf { it.isNotBlank() }?.let(::File)
-            ?: CliSimulatorRuntime.locateCli()
+      LauncherSimulatorRuntime(
+        home = {
+          env("SERVE_SIMULATOR_HOME")?.takeIf { it.isNotBlank() }?.let(::File)
+            ?: LauncherSimulatorRuntime.locateHome(env)
         },
         stateDir = root.resolve("state"),
         appsDir = apps,

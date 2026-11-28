@@ -105,12 +105,6 @@ RUN set -eu; \
     fi; \
     tar -xzf /tmp/cli.tgz -C /opt --strip-components=1 --wildcards \
       "*/lib-rcjvm" "*/lib-bta" "*/lib-simulator" "*/lib-dex2jar"; \
-    # The CLI's own launcher and classpath, for the simulator surface (`CliSimulatorRuntime`), which
-    # runs `compose-preview android-simulator` rather than restating it. Its sidecar directories are
-    # linked to the ones above in the runtime stage, so nothing is shipped twice.
-    mkdir -p /opt/compose-preview-cli; \
-    tar -xzf /tmp/cli.tgz -C /opt/compose-preview-cli --strip-components=1 --wildcards "*/bin" "*/lib"; \
-    test -x /opt/compose-preview-cli/bin/compose-preview; \
     rm /tmp/cli.tgz; \
     test -d /opt/lib-rcjvm; \
     test -d /opt/lib-bta; \
@@ -220,15 +214,16 @@ COPY --from=tools-sidecars /opt/lib-bta /opt/lib-bta
 # renderer daemon (`DwfApkDaemonBridge`).
 COPY --from=tools-sidecars /opt/lib-simulator /opt/lib-simulator
 COPY --from=tools-sidecars /opt/lib-dex2jar /opt/lib-dex2jar
-# …and the CLI the simulator surface drives (`features.simulator`, off unless set), with its
-# `APP_HOME` sidecars linked to the image's copies: `lib-daemon-android/` comes from the base, so the
-# CLI never fetches it, and the simulator runs on the very jars the watch-face renderer does.
-COPY --from=tools-sidecars /opt/compose-preview-cli /opt/compose-preview-cli
+# …and an `android-simulator` distribution for the simulator surface (`features.simulator`, off
+# unless set), which `LauncherSimulatorRuntime` starts through `simulator-launch`'s
+# `AppSimulatorLauncher`: its sidecars are links to the image's copies, so nothing ships twice and
+# the simulator runs on the very jars the watch-face renderer does (`lib-daemon-android/` from the
+# base is its Robolectric).
 RUN set -eu; \
+    mkdir -p /opt/android-simulator; \
     for d in lib-simulator lib-dex2jar lib-daemon-android; do \
-      test -d "/opt/$d"; ln -s "/opt/$d" "/opt/compose-preview-cli/$d"; \
-    done; \
-    test -x /opt/compose-preview-cli/bin/compose-preview
+      test -d "/opt/$d"; ln -s "/opt/$d" "/opt/android-simulator/$d"; \
+    done
 # JAVA_TOOL_OPTIONS (inherited by the spawned daemon JVM too) points the CLI at the
 # unpacked Android AND desktop daemon sidecars, warms catalog daemons in the background so the
 # HTTP listener can come up before every live catalog finishes, and lifts BOTH cold-start budgets so a cold
