@@ -1034,6 +1034,7 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
   // The UI-builder runtime, export, render bundle and export fonts are named as projects for
   // `-PcomposeUiBuilderDir` (included-build substitution); the default build matches them in
   // `allowedComposeAiModules`. The last two are resources only: a PNG and two font files.
+  // `:simulator-launch` is android-simulator's, named for `-PlocalBuilds=simulator`.
   allowedProjects.set(
     listOf(
       ":playground-engine",
@@ -1044,6 +1045,7 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
       ":ui-builder-export",
       ":ui-builder-render-bundle",
       ":ui-builder-export-fonts",
+      ":simulator-launch",
     ),
   )
 
@@ -1107,6 +1109,10 @@ tasks.register<CheckServeModuleBoundary>("checkServeModuleBoundary") {
       // binder dependencies.
       "ee.schimke.composeai:livery-host",
       "ee.schimke.composeai:livery-server",
+      // `AppSimulatorLauncher`, published from yschimke/android-simulator: it starts simulator JVMs
+      // as child processes (`LauncherSimulatorRuntime`); no simulator or Robolectric class reaches
+      // this classpath.
+      "ee.schimke.composeai:simulator-launch",
       // The render host, published from compose-ai-tools.
       "ee.schimke.composeai:build-host-protocol",
       "ee.schimke.composeai:render-host",
