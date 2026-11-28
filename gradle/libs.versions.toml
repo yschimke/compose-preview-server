@@ -169,8 +169,8 @@ composeai-tools = "2.104.0"
 # The Robolectric Android simulator, published from yschimke/android-simulator (split out of
 # compose-ai-tools). `simulator-launch` is its host library: `AppSimulatorLauncher`, which the
 # server's simulator sessions start through (`LauncherSimulatorRuntime`). Build against a checkout
-# with `-PlocalBuilds=simulator`.
-android-simulator = "0.2.0"
+# with `-PlocalBuilds=simulator`. 0.3.0 is the first release to publish it (android-simulator#23).
+android-simulator = "0.3.0"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
 # in that repository's `docs/design/REPOSITORY_LAYERS.md`: between the contracts and
