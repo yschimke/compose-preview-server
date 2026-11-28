@@ -89,6 +89,12 @@ services:
       SERVE_NATIVE_PREVIEW: "${SERVE_NATIVE_PREVIEW:-}"
       SERVE_WATCH_FACE_VALIDATION: "${SERVE_WATCH_FACE_VALIDATION:-}"
       SERVE_CATALOG_NATIVE_RENDER: "${SERVE_CATALOG_NATIVE_RENDER:-}"
+      SERVE_SIMULATOR: "${SERVE_SIMULATOR:-}"
+      SERVE_SIMULATOR_CLI: "${SERVE_SIMULATOR_CLI:-}"
+      SERVE_SIMULATOR_MAX_SESSIONS: "${SERVE_SIMULATOR_MAX_SESSIONS:-}"
+      SERVE_SIMULATOR_MAX_HEAP: "${SERVE_SIMULATOR_MAX_HEAP:-}"
+      SERVE_SIMULATOR_MEMORY_BUDGET_MB: "${SERVE_SIMULATOR_MEMORY_BUDGET_MB:-}"
+      SERVE_SIMULATOR_SANDBOX: "${SERVE_SIMULATOR_SANDBOX:-}"
       # Public preview server by default: open, serving the published design
       # systems in catalogs.json. The in-browser CMP Wasm tier rides --catalogs —
       # `serve` fetches each system's web/wasm/ from the trusted branch (the

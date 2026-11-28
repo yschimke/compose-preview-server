@@ -272,13 +272,13 @@ class ServeDwfRuntimeAdmin(
     }
       .getOrNull()
 
-    private fun isBinaryXml(bytes: ByteArray): Boolean =
+    internal fun isBinaryXml(bytes: ByteArray): Boolean =
       bytes.size >= 8 &&
         (ByteBuffer.wrap(bytes, 0, 2).order(ByteOrder.LITTLE_ENDIAN).short.toInt() and 0xFFFF) ==
           0x0003
 
     /** Extracts the `<manifest package="…">` attribute from an Android Binary XML (AXML) buffer. */
-    private fun readBinaryXmlPackageName(bytes: ByteArray): String? {
+    internal fun readBinaryXmlPackageName(bytes: ByteArray): String? {
       if (!isBinaryXml(bytes)) return null
       val buf = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
       val headerSize = buf.getShort(2).toInt() and 0xFFFF
@@ -391,7 +391,7 @@ class ServeDwfRuntimeAdmin(
       return result
     }
 
-    private fun binaryXmlContainsString(bytes: ByteArray, needle: String): Boolean {
+    internal fun binaryXmlContainsString(bytes: ByteArray, needle: String): Boolean {
       val utf8 = needle.toByteArray(Charsets.UTF_8)
       val utf16 = needle.toByteArray(Charsets.UTF_16LE)
       return indexOfBytes(bytes, utf8) >= 0 || indexOfBytes(bytes, utf16) >= 0

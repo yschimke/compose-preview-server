@@ -33,15 +33,24 @@ data class ServeFeatureFlags(
    * render daemon down (watchface-tools#72), so it is refused until that is fixed.
    */
   val catalogNativeRender: Boolean = false,
+  /**
+   * Running operator-registered APKs in the Robolectric simulator (`/simulator/…`,
+   * `/api/simulator/v1/…`): a phone, a watch, or both paired. Off: the status route says so and a
+   * start answers 503 [SIMULATOR_DISABLED]. Off in the image too until the operator opts in, since
+   * a registered app's code runs on this host.
+   */
+  val simulator: Boolean = false,
 ) {
   fun describe(): String =
     "serve: feature flags: nativePreview=$nativePreview, " +
-      "watchFaceValidation=$watchFaceValidation, catalogNativeRender=$catalogNativeRender"
+      "watchFaceValidation=$watchFaceValidation, catalogNativeRender=$catalogNativeRender, " +
+      "simulator=$simulator"
 
   companion object {
     const val NATIVE_PREVIEW_ENV = "SERVE_NATIVE_PREVIEW"
     const val WATCH_FACE_VALIDATION_ENV = "SERVE_WATCH_FACE_VALIDATION"
     const val CATALOG_NATIVE_RENDER_ENV = "SERVE_CATALOG_NATIVE_RENDER"
+    const val SIMULATOR_ENV = "SERVE_SIMULATOR"
 
     /** Every lane on: for a test, or a box that wants all of it. */
     val ALL_ON =
@@ -49,6 +58,7 @@ data class ServeFeatureFlags(
         nativePreview = true,
         watchFaceValidation = true,
         catalogNativeRender = true,
+        simulator = true,
       )
 
     /** The 503 code a disabled Native pane answers with. */
@@ -57,11 +67,15 @@ data class ServeFeatureFlags(
     /** The code a catalog `wfRenderer: "dwf-apk"` render answers with while it is switched off. */
     const val CATALOG_NATIVE_RENDER_DISABLED = "catalog_native_render_disabled"
 
+    /** The 503 code a simulator start answers with while `features.simulator` is off. */
+    const val SIMULATOR_DISABLED = "simulator_disabled"
+
     fun fromEnvironment(env: Map<String, String> = System.getenv()): ServeFeatureFlags =
       ServeFeatureFlags(
         nativePreview = flag(env, NATIVE_PREVIEW_ENV),
         watchFaceValidation = flag(env, WATCH_FACE_VALIDATION_ENV),
         catalogNativeRender = flag(env, CATALOG_NATIVE_RENDER_ENV),
+        simulator = flag(env, SIMULATOR_ENV),
       )
 
     private fun flag(env: Map<String, String>, name: String): Boolean {

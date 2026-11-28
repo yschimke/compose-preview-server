@@ -1093,6 +1093,14 @@ fi
 export SERVE_NATIVE_PREVIEW="${SERVE_NATIVE_PREVIEW:-1}"
 export SERVE_WATCH_FACE_VALIDATION="${SERVE_WATCH_FACE_VALIDATION:-1}"
 export SERVE_CATALOG_NATIVE_RENDER="${SERVE_CATALOG_NATIVE_RENDER:-}"
+# The simulator (ServeSimulatorRoutes.kt) is OFF unless the deployment turns it on: a registered
+# app's code runs on this host. Its knobs pass through empty, so the server's defaults apply.
+export SERVE_SIMULATOR="${SERVE_SIMULATOR:-}"
+export SERVE_SIMULATOR_CLI="${SERVE_SIMULATOR_CLI:-}"
+export SERVE_SIMULATOR_MAX_SESSIONS="${SERVE_SIMULATOR_MAX_SESSIONS:-}"
+export SERVE_SIMULATOR_MAX_HEAP="${SERVE_SIMULATOR_MAX_HEAP:-}"
+export SERVE_SIMULATOR_MEMORY_BUDGET_MB="${SERVE_SIMULATOR_MEMORY_BUDGET_MB:-}"
+export SERVE_SIMULATOR_SANDBOX="${SERVE_SIMULATOR_SANDBOX:-}"
 
 # Extra Maven repositories the live-daemon classpath resolver may fetch from, beyond Maven Central +
 # Google Maven. A served catalog whose module pulls deps from a non-default repo (e.g.

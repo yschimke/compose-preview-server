@@ -330,6 +330,72 @@
           "x-roles": [
             "preview"
           ]
+        },
+        "simulator": {
+          "description": "Run operator-registered APKs in the Robolectric simulator — a phone, a watch, or both paired — at /simulator/<app> and, for apps that allow it, embedded on listed sites. Off unless set: a registered app's code runs on this host. Register apps with PUT /admin/simulator/apps/<app>.",
+          "type": "boolean",
+          "x-env": "SERVE_SIMULATOR",
+          "x-apply": "restart",
+          "x-roles": [
+            "preview"
+          ]
+        }
+      }
+    },
+    "simulator": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cli": {
+          "description": "The compose-preview CLI's bin/compose-preview the simulator runs. Default /opt/compose-preview-cli/bin/compose-preview (the image's), then PATH.",
+          "type": "string",
+          "minLength": 1,
+          "x-env": "SERVE_SIMULATOR_CLI",
+          "x-apply": "restart",
+          "x-roles": [
+            "preview"
+          ]
+        },
+        "maxSessions": {
+          "description": "Simulator sessions this box runs at once, a ceiling under simulator.memoryBudgetMb. Paused sessions count; hibernated and queued ones do not. Default 8.",
+          "type": "integer",
+          "minimum": 1,
+          "x-env": "SERVE_SIMULATOR_MAX_SESSIONS",
+          "x-apply": "restart",
+          "x-roles": [
+            "preview"
+          ]
+        },
+        "memoryBudgetMb": {
+          "description": "Memory, in MB, the simulator's running sessions may hold together, each charged its measured RSS (about 0.6-1 GB a phone or watch, 1-1.8 GB a pair). Past it, idle paused sessions are hibernated to make room, then new ones queue. Default half the machine.",
+          "type": "integer",
+          "minimum": 512,
+          "x-env": "SERVE_SIMULATOR_MEMORY_BUDGET_MB",
+          "x-apply": "restart",
+          "x-roles": [
+            "preview"
+          ]
+        },
+        "maxHeap": {
+          "description": "Each simulator JVM's maximum heap. Default: an eighth of the machine, 768m to 2g.",
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?:[1-9][0-9]*[mMgG])$",
+          "x-env": "SERVE_SIMULATOR_MAX_HEAP",
+          "x-apply": "restart",
+          "x-roles": [
+            "preview"
+          ]
+        },
+        "sandbox": {
+          "description": "The jail simulator processes run in, as --playground-sandbox takes it (none, unshare, bwrap, systemd, strict, custom:<argv>). Default none: only operator-registered apps run, and they run as this server's user.",
+          "type": "string",
+          "minLength": 1,
+          "x-env": "SERVE_SIMULATOR_SANDBOX",
+          "x-apply": "restart",
+          "x-roles": [
+            "preview"
+          ]
         }
       }
     },

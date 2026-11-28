@@ -2386,6 +2386,68 @@ public class ServeRunner(
    * the environment once, here; without one the API answers that it cannot build
    * ([WatchFacePushSigning]).
    */
+  /**
+   * The simulator surface ([ServeSimulator]), when there is anyone to use it: `features.simulator`
+   * is on, or there is an admin token to register apps with before turning it on. Its state lives
+   * in `composeAiCacheDir("simulator")`: `apps/` (the registry), `state/` (the CLI's home and
+   * conversion cache under a jail) and `embed-key` (the embed tokens' HMAC key, 0600).
+   */
+  private fun buildSimulator(env: (String) -> String? = System::getenv): ServeSimulator? {
+    if (!featureFlags.simulator && adminToken == null) return null
+    val root = ee.schimke.composeai.io.composeAiCacheDir("simulator")
+    val apps = root.resolve("apps")
+    val sandbox =
+      PlaygroundSandbox.parseProfile(env("SERVE_SIMULATOR_SANDBOX"))
+        .mapCatching { parsed ->
+          // A simulator is the CLI's JVM and one or two simulator JVMs of up to 2 GB each, with
+          // their converter: the playground's 1.5 GB snippet budget would starve it.
+          PlaygroundSandbox.validate(
+              parsed.copy(memoryMb = 6_144, cpus = 4.0, pids = 4_096, ttlSeconds = 2 * 60 * 60L),
+            )
+            .getOrThrow()
+        }
+        .getOrElse { throw IllegalArgumentException("simulator.sandbox: ${it.message}", it) }
+    val runtime =
+      CliSimulatorRuntime(
+        cli = {
+          env("SERVE_SIMULATOR_CLI")?.takeIf { it.isNotBlank() }?.let(::File)
+            ?: CliSimulatorRuntime.locateCli()
+        },
+        stateDir = root.resolve("state"),
+        appsDir = apps,
+        sandbox = sandbox,
+        maxHeap = env("SERVE_SIMULATOR_MAX_HEAP")?.takeIf { it.isNotBlank() },
+      )
+    val registry = SimulatorAppRegistry(apps)
+    val sessions =
+      SimulatorSessions(
+        registry,
+        runtime,
+        capacity =
+          SimulatorSessions.Capacity(
+            maxSessions =
+              env("SERVE_SIMULATOR_MAX_SESSIONS")?.toIntOrNull()?.coerceIn(1, 99)
+                ?: SimulatorSessions.DEFAULT_MAX_SESSIONS,
+            memoryBudgetMb =
+              env("SERVE_SIMULATOR_MEMORY_BUDGET_MB")?.toLongOrNull()?.coerceAtLeast(512)
+                ?: SimulatorSessions.defaultMemoryBudgetMb(),
+          ),
+      )
+    System.err.println(
+      "serve: simulator ${if (featureFlags.simulator) "on" else "off (apps can be registered)"}: " +
+        "${sessions.capacity}, ${sandbox.describe()}; " +
+        when (val a = runtime.availability()) {
+          SimulatorRuntime.Availability.Ready -> "runtime ready"
+          is SimulatorRuntime.Availability.Unavailable -> "unavailable: ${a.reason}"
+        },
+    )
+    return ServeSimulator(
+      registry = registry,
+      sessions = sessions,
+      embedTokens = SimulatorEmbedTokens.fromFile(root.resolve("embed-key")),
+    )
+  }
+
   /** Read once, at startup, and logged: see [ServeFeatureFlags]. */
   private val featureFlags: ServeFeatureFlags by lazy {
     ServeFeatureFlags.fromEnvironment().also { System.err.println(it.describe()) }
@@ -3727,6 +3789,7 @@ public class ServeRunner(
         uiBuilderSettingsAdmin = uiBuilderSettingsAdmin,
         settingsAdmin = settingsAdmin.takeIf { adminToken != null },
         dwfRuntimeAdmin = dwfRuntimeAdmin,
+        simulator = buildSimulator(),
         uiBuilderAdmin = uiBuilderAdmin,
         uiBuilderDesignLibrary = uiBuilderDesignLibrary,
         uiBuilderDesignCatalogs = {

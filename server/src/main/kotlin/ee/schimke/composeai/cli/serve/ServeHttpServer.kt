@@ -595,6 +595,11 @@ class ServeHttpServer(
    */
   private val uiBuilderDwfPreview: UiBuilderDwfPreview? = null,
   /**
+   * Operator-registered APKs in the Robolectric simulator ([ServeSimulator]): `/simulator/…`,
+   * `/api/simulator/v1/…` and `/admin/simulator/…`. Null: none of those routes exist.
+   */
+  private val simulator: ServeSimulator? = null,
+  /**
    * The Watch Face Push site API (`/api/watchface-push/v1`, `/link`) and the publish flag on a
    * watch-face design ([WatchFacePush]). Null without durable UI-builder state.
    */
@@ -1406,6 +1411,29 @@ class ServeHttpServer(
       }
       routing {
         componentPublications?.install(this)
+        simulator?.let { sim ->
+          val sameOrigin = uiBuilderAuthorization?.acceptingSessionWritesFromSameOrigin {
+            browserHosts
+          }
+          installSimulatorRoutes(
+            sim,
+            isOperator = { call ->
+              !adminToken.isNullOrBlank() &&
+                ServeUrls.tokensMatch(
+                  adminToken,
+                  call.request.headers[ADMIN_TOKEN_HEADER].orEmpty(),
+                )
+            },
+            signedInActor = { call ->
+              (sameOrigin?.authorize(call, UiBuilderRouteCapability.READ, null)
+                  as? UiBuilderAuthorizationDecision.Authorized)
+                ?.actor
+                ?.actorId
+            },
+            clientAddress = { it.clientAddress() },
+            enabled = featureFlags.simulator,
+          )
+        }
         if (uiBuilderCapabilities != null) {
           // Public catalog definitions. An MCP App iframe has an opaque origin and reads these
           // without a design credential; the same capabilities are already in the editor archive.
@@ -2662,6 +2690,7 @@ class ServeHttpServer(
     stallWatchdog.stop()
     // Its background reconcile and build threads hold this server's catalog sources.
     watchFacePush?.close()
+    simulator?.close()
     thumbWarmer.stop()
     server.stop(gracePeriodMillis = 500, timeoutMillis = 2000)
     uiBuilderPrecompressed.close()
