@@ -1425,10 +1425,9 @@ class ServeHttpServer(
                 )
             },
             signedInActor = { call ->
-              (sameOrigin?.authorize(call, UiBuilderRouteCapability.READ, null)
-                  as? UiBuilderAuthorizationDecision.Authorized)
-                ?.actor
-                ?.actorId
+              simulatorSignedInActor(
+                sameOrigin?.authorize(call, UiBuilderRouteCapability.READ, null),
+              )
             },
             clientAddress = { it.clientAddress() },
             enabled = featureFlags.simulator,

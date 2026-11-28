@@ -367,11 +367,13 @@ class SimulatorSessions(
           queue.removeFirst()
           continue
         }
+        // A session admitted earlier in this pass is already STARTING, so it is counted here and
+        // only here: `admitted` is not added again.
         val running = sessions.values.filter { it.stage.holdsMemory && it !in reclaim }
-        if (running.count { it.stage.booting } + admitted.size >= capacity.maxConcurrentBoots) break
+        if (running.count { it.stage.booting } >= capacity.maxConcurrentBoots) break
         val need = estimateMb(next.appId, next.mode)
-        var used = running.sumOf(::chargeMb) + admitted.sumOf { estimateMb(it.appId, it.mode) }
-        var count = running.size + admitted.size
+        var used = running.sumOf(::chargeMb)
+        var count = running.size
         if (count >= capacity.maxSessions || used + need > capacity.memoryBudgetMb) {
           // Room can be made from paused sessions with no visible viewer, least recently used
           // first.

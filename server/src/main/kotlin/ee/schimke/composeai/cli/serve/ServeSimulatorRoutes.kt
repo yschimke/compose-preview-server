@@ -682,6 +682,19 @@ internal fun Route.installSimulatorRoutes(
   }
 }
 
+/**
+ * The signed-in account a UI-builder authorization names, or null. Authorized is not signed in: on
+ * a `--public` box a signed-out visitor is authorized to read as
+ * [ServeUiBuilderVisibility.ANONYMOUS_ACTOR_ID], and the reserved "everyone" actors stand for
+ * nobody in particular. Neither may start an app whose access is `signed-in`; a visitor runs apps
+ * only through an embed and its limits.
+ */
+internal fun simulatorSignedInActor(decision: UiBuilderAuthorizationDecision?): String? {
+  val authorized = decision as? UiBuilderAuthorizationDecision.Authorized ?: return null
+  if (ServeUiBuilderVisibility.isReservedActor(authorized.actorId)) return null
+  return authorized.actor.actorId.takeUnless { ServeUiBuilderVisibility.isReservedActor(it) }
+}
+
 /** The embed page's whole CSP: this origin's script and socket, framed only by [origins]. */
 internal fun embedPolicy(origins: List<String>): String =
   listOf(

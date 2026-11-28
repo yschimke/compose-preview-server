@@ -207,6 +207,25 @@ class SimulatorSessionsTest {
   }
 
   @Test
+  fun `one pass admits every queued session that fits, counting each once`() {
+    pool(SimulatorSessions.Capacity(memoryBudgetMb = 2_000, maxConcurrentBoots = 2))
+    // A watch, so its measured size does not become the phone estimate b and c are charged.
+    val big = start("big", SimulatorMode.WATCH)
+    boot(big)
+    rssMb = 1_900
+    pool.sweep()
+    pool.attach(big)
+    val b = start("b")
+    val c = start("c")
+    assertEquals(SimulatorStage.QUEUED, b.stage)
+    assertEquals(SimulatorStage.QUEUED, c.stage)
+    // Freeing 1.9 GB makes room for both (900 MB each) and both boot slots: one pass admits both.
+    pool.close(big.id)
+    assertTrue(b.stage.booting, "b is ${b.stage}")
+    assertTrue(c.stage.booting, "c is ${c.stage}")
+  }
+
+  @Test
   fun `a session that does not fit and cannot make room waits`() {
     pool(SimulatorSessions.Capacity(memoryBudgetMb = 2_000, maxConcurrentBoots = 4))
     val a = start("a")

@@ -302,6 +302,21 @@ class ServeSimulatorRoutesTest {
   }
 
   @Test
+  fun `an anonymous visitor on a public box is not signed in`() {
+    assertEquals(
+      null,
+      simulatorSignedInActor(
+        UiBuilderAuthorizationDecision.Authorized(ServeUiBuilderVisibility.ANONYMOUS_ACTOR_ID),
+      ),
+    )
+    assertEquals(null, simulatorSignedInActor(UiBuilderAuthorizationDecision.Missing))
+    assertEquals(
+      "github:someone",
+      simulatorSignedInActor(UiBuilderAuthorizationDecision.Authorized("github:someone")),
+    )
+  }
+
+  @Test
   fun `a full host queues new sessions, and a full queue refuses them`() {
     start(maxSessions = 1, maxQueued = 1)
     registerPair()
