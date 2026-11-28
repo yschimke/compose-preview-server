@@ -346,11 +346,11 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "cli": {
-          "description": "The compose-preview CLI's bin/compose-preview the simulator runs. Default /opt/compose-preview-cli/bin/compose-preview (the image's), then PATH.",
+        "home": {
+          "description": "The android-simulator distribution the simulator runs from (its lib-simulator, lib-dex2jar and Robolectric). Default ANDROID_SIMULATOR_HOME, then /opt/android-simulator (the image's).",
           "type": "string",
           "minLength": 1,
-          "x-env": "SERVE_SIMULATOR_CLI",
+          "x-env": "SERVE_SIMULATOR_HOME",
           "x-apply": "restart",
           "x-roles": [
             "preview"

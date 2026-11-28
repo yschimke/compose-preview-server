@@ -498,50 +498,93 @@ class ServeSimulatorRoutesTest {
   }
 
   @Test
-  fun `the CLI command line runs a pair with --pair and never a window`() {
-    val launch =
-      SimulatorLaunch(
-        "s",
-        SimulatorMode.PAIRED,
-        mapOf(
-          SimulatorDevice.PHONE to File("/a/phone.apk"),
-          SimulatorDevice.WATCH to File("/a/watch.apk"),
-        ),
-        network = "wifi",
-        launcher = true,
+  fun `every simulator JVM starts on a clean environment in the state dir`() {
+    val root = dir.toFile()
+    val sdk = File(root, "sdk/platforms/android-36").apply { mkdirs() }.parentFile.parentFile
+    val runtime =
+      LauncherSimulatorRuntime(
+        home = { File(root, "android-simulator") },
+        androidSdk = { sdk },
+        javaHome = File("/jdk"),
+        stateDir = File(root, "state"),
+        appsDir = File(root, "apps"),
       )
-    val argv =
-      CliSimulatorRuntime.command(File("/cli/bin/compose-preview"), launch, File("/jdk"), "1g")
+    val env = runtime.environment(sdk)
     assertEquals(
-      listOf(
-        "/cli/bin/compose-preview",
-        "android-simulator",
-        "/a/phone.apk",
-        "--pair",
-        "/a/watch.apk",
-        "--control",
-        "stdio",
-        "--headless",
-        "--hide-agent",
-        "--network",
-        "wifi",
-        "--launcher",
-        "--max-heap",
-        "1g",
-        "--java",
-        "/jdk",
-      ),
-      argv,
+      setOf("PATH", "HOME", "LANG", "TZ", "JAVA_HOME", "ANDROID_HOME", "ANDROID_SDK_ROOT"),
+      env.keys,
+      "nothing of the server's environment, which holds operator secrets",
     )
-    val watch =
-      CliSimulatorRuntime.command(
-        File("/c"),
-        launch.copy(mode = SimulatorMode.WATCH, launcher = false),
-        File("/jdk"),
-        null,
+    assertEquals("/jdk/bin:/usr/local/bin:/usr/bin:/bin", env["PATH"])
+    assertTrue("JAVA_TOOL_OPTIONS" !in env, "no jail, so nothing to point at the state dir")
+    val host = runtime.host(File(root, "android-simulator"))
+    assertEquals(File(root, "state/converted"), host.cacheDir)
+    assertEquals(File("/jdk"), host.java)
+    val builder = host.processBuilder(listOf("/jdk/bin/java", "-version"))
+    assertEquals(listOf("/jdk/bin/java", "-version"), builder.command(), "no jail prefix")
+    assertEquals(File(root, "state"), builder.directory())
+    assertEquals(env, builder.environment().toMap())
+  }
+
+  @Test
+  fun `the simulator home is the setting, the environment's, or the image's`() {
+    assertEquals(
+      File("/opt/sim"),
+      LauncherSimulatorRuntime.locateHome(
+        env = { if (it == "ANDROID_SIMULATOR_HOME") "/opt/sim" else null },
+        sysProp = { null },
+      ),
+    )
+    assertEquals(
+      File("/x/android-simulator"),
+      LauncherSimulatorRuntime.locateHome(
+        env = {
+          if (it == "COMPOSE_PREVIEW_SIMULATOR") "/x/android-simulator/bin/android-simulator"
+          else null
+        },
+        sysProp = { null },
+      ),
+    )
+    assertEquals(
+      File("/p"),
+      LauncherSimulatorRuntime.locateHome(
+        env = { "/ignored" },
+        sysProp = { if (it == "composeai.serve.simulatorHome") "/p" else null },
+      ),
+    )
+  }
+
+  @Test
+  fun `a server without the simulator says why`() {
+    val root = dir.toFile()
+    val missing =
+      LauncherSimulatorRuntime(
+        home = { null },
+        stateDir = File(root, "state"),
+        appsDir = File(root, "apps"),
       )
-    assertEquals(listOf("/c", "android-simulator", "/a/watch.apk"), watch.take(3))
-    assertTrue("--pair" !in watch)
+    val unavailable = missing.availability() as SimulatorRuntime.Availability.Unavailable
+    assertEquals(SimulatorRuntime.UNAVAILABLE_SIMULATOR, unavailable.code)
+    val empty = File(root, "empty-home").apply { mkdirs() }
+    val sdk = File(root, "sdk2/platforms").apply { mkdirs() }.parentFile
+    val jdk = File(root, "jdk21").apply { mkdirs() }
+    File(jdk, "release").writeText("JAVA_VERSION=\"21.0.2\"\n")
+    File(jdk, "bin").mkdirs()
+    File(jdk, "bin/java").apply {
+      writeText("#!/bin/sh\n")
+      setExecutable(true)
+    }
+    val incomplete =
+      LauncherSimulatorRuntime(
+        home = { empty },
+        androidSdk = { sdk },
+        javaHome = jdk,
+        stateDir = File(root, "state"),
+        appsDir = File(root, "apps"),
+      )
+    val reason = incomplete.availability() as SimulatorRuntime.Availability.Unavailable
+    assertEquals(SimulatorRuntime.UNAVAILABLE_SIMULATOR, reason.code)
+    assertTrue("lib-simulator" in reason.reason, reason.reason)
   }
 
   @Test

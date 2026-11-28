@@ -166,6 +166,11 @@ graphics-shapes = "1.1.0"
 # 2.101.1 adds the render host's DWF APK daemon diagnostics and caps its heap
 # (compose-ai-tools#6656); it is on compose-preview-daemon 3.28.0 and contracts 3.44.0, as here.
 composeai-tools = "2.104.0"
+# The Robolectric Android simulator, published from yschimke/android-simulator (split out of
+# compose-ai-tools). `simulator-launch` is its host library: `AppSimulatorLauncher`, which the
+# server's simulator sessions start through (`LauncherSimulatorRuntime`). Build against a checkout
+# with `-PlocalBuilds=simulator`. 0.3.0 is the first release to publish it (android-simulator#23).
+android-simulator = "0.3.0"
 # The render daemons, the renderers, the preview annotations and data API, and the data extractors,
 # published from yschimke/compose-preview-daemon since its 3.0.0 (compose-ai-tools#5336). Layer 1a
 # in that repository's `docs/design/REPOSITORY_LAYERS.md`: between the contracts and
@@ -626,6 +631,7 @@ wff-apk = { module = "ee.schimke.watchface:wff-apk", version.ref = "wff-apk" }
 # it lived here only because it was written inside the `serve` package and came along when the server
 # was extracted. Same version ref as the rest of compose-ai-tools, because it now ships on that line.
 composeai-render-host = { module = "ee.schimke.composeai:render-host" }
+android-simulator-launch = { module = "ee.schimke.composeai:simulator-launch", version.ref = "android-simulator" }
 # The Remote Compose JSON codec: authoring JSON -> `.rc` bytes, and `.rc` bytes -> the
 # operation-level document JSON the viewer's `GET /render/<id>.rc.json` lane serves. Layer 1 by
 # `REPOSITORY_LAYERS.md`'s test (behaviour, opens no socket), consumed here as a published

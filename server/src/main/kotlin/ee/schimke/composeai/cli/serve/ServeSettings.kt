@@ -455,12 +455,13 @@ object ServeSettings {
           "PUT /admin/simulator/apps/<app>.",
       ),
       Setting(
-        "simulator.cli",
-        "SERVE_SIMULATOR_CLI",
+        "simulator.home",
+        "SERVE_SIMULATOR_HOME",
         Type.Text(),
         Apply.RESTART,
-        "The compose-preview CLI's bin/compose-preview the simulator runs. Default " +
-          "/opt/compose-preview-cli/bin/compose-preview (the image's), then PATH.",
+        "The android-simulator distribution the simulator runs from (its lib-simulator, " +
+          "lib-dex2jar and Robolectric). Default ANDROID_SIMULATOR_HOME, then " +
+          "/opt/android-simulator (the image's).",
       ),
       Setting(
         "simulator.maxSessions",
