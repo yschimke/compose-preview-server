@@ -60,6 +60,7 @@ class ServeSitesReservedRoutesTest {
       "ServeSiteIcon.SCREENSHOT_NARROW_PATH" to ServeSiteIcon.SCREENSHOT_NARROW_PATH,
       "ServeSiteIcon.SCREENSHOT_WIDE_PATH" to ServeSiteIcon.SCREENSHOT_WIDE_PATH,
       "PUSH_SERVICE_WORKER_PATH" to PUSH_SERVICE_WORKER_PATH,
+      "SIMULATOR_API" to SIMULATOR_API,
       "ServeShareTarget.ACTION_PATH" to ServeShareTarget.ACTION_PATH,
       "ServeShareTarget.SHARED_PATH" to ServeShareTarget.SHARED_PATH,
       "ServeRcFonts.URL_BASE" to ServeRcFonts.URL_BASE,
@@ -102,6 +103,7 @@ class ServeSitesReservedRoutesTest {
       listOf(
           "server/src/main/kotlin/ee/schimke/composeai/cli/serve/ServeHttpServer.kt",
           "server/src/main/kotlin/ee/schimke/composeai/cli/serve/WatchFacePushRoutes.kt",
+          "server/src/main/kotlin/ee/schimke/composeai/cli/serve/ServeSimulatorRoutes.kt",
         )
         .joinToString("\n") { path ->
           File(repoRoot(), path)
@@ -125,6 +127,9 @@ class ServeSitesReservedRoutesTest {
   /** A path opening with a constant — `"${'$'}{ServeRcFonts.URL_BASE}/{name}"`. */
   private val templated = Regex("""^"\$\{([A-Za-z][A-Za-z0-9_.]*)}([^"]*)"$""")
 
+  /** The same with an unbraced template — `"${'$'}SIMULATOR_API/status"`. */
+  private val unbraced = Regex("""^"\$([A-Za-z][A-Za-z0-9_]*)([^"]*)"$""")
+
   /** A bare constant — `get(ServeBugReport.PATH)`. */
   private val bare = Regex("""^[A-Za-z][A-Za-z0-9_.]*$""")
 
@@ -137,6 +142,12 @@ class ServeSitesReservedRoutesTest {
       return it.groupValues[1]
     }
     templated.find(argument)?.let {
+      val base =
+        constantPaths[it.groupValues[1]]
+          ?: fail("unknown path constant '${it.groupValues[1]}' — add it to constantPaths")
+      return base + it.groupValues[2]
+    }
+    unbraced.find(argument)?.let {
       val base =
         constantPaths[it.groupValues[1]]
           ?: fail("unknown path constant '${it.groupValues[1]}' — add it to constantPaths")
