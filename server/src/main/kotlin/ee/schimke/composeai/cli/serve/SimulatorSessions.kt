@@ -243,6 +243,11 @@ class SimulatorSessions(
 
   fun get(id: String): Session? = sessions[id]
 
+  /**
+   * Whether the pool still holds [session]: once closed it is never booted, woken or hibernated.
+   */
+  private fun isOpen(session: Session): Boolean = sessions[session.id] === session
+
   fun authorized(id: String, secret: String?): Session? {
     val session = sessions[id] ?: return null
     if (secret == null) return null
@@ -363,7 +368,7 @@ class SimulatorSessions(
     synchronized(this) {
       while (queue.isNotEmpty()) {
         val next = queue.first()
-        if (next.stage.ended) {
+        if (next.stage.ended || !isOpen(next)) {
           queue.removeFirst()
           continue
         }
@@ -412,6 +417,11 @@ class SimulatorSessions(
         return
       }
     session.process = process
+    if (!isOpen(session)) {
+      runCatching { process.close() }
+      pump()
+      return
+    }
     try {
       val deadline = clock() + bootTimeoutMillis
       while (session.ready.size < session.devices.size) {
@@ -537,7 +547,8 @@ class SimulatorSessions(
         }
       SimulatorStage.HIBERNATED -> {
         synchronized(this) {
-          if (session.stage == SimulatorStage.HIBERNATED) {
+          // Only a session the pool still holds is woken: a removed one could never be swept again.
+          if (session.stage == SimulatorStage.HIBERNATED && isOpen(session)) {
             session.stage = SimulatorStage.QUEUED
             session.stageAtMillis = clock()
             session.resuming = true
@@ -600,6 +611,9 @@ class SimulatorSessions(
       runCatching { process.close() }
       session.process = null
       session.frames.clear()
+      // Closed while its state was being saved: it stays closed (close() does not wait on this
+      // lock).
+      if (session.stage.ended || !isOpen(session)) return
       session.stage = SimulatorStage.HIBERNATED
       session.stageAtMillis = clock()
       session.hibernations.incrementAndGet()

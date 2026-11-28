@@ -226,6 +226,40 @@ class SimulatorSessionsTest {
   }
 
   @Test
+  fun `a session closed while it hibernates stays closed and cannot be woken`() {
+    pool(SimulatorSessions.Capacity(memoryBudgetMb = 100_000))
+    val s = start()
+    boot(s)
+    val saving = java.util.concurrent.CountDownLatch(1)
+    val release = java.util.concurrent.CountDownLatch(1)
+    val real = processOf(s)
+    s.process =
+      object : SimulatorProcess by real {
+        override fun command(
+          device: SimulatorDevice,
+          command: kotlinx.serialization.json.JsonObject,
+          timeoutMillis: Long,
+        ): kotlinx.serialization.json.JsonElement? {
+          saving.countDown()
+          release.await()
+          return real.command(device, command, timeoutMillis)
+        }
+      }
+    pool.pause(s)
+    val hibernating = Thread { pool.hibernate(s) }.apply { start() }
+    assertTrue(saving.await(5, java.util.concurrent.TimeUnit.SECONDS))
+    pool.close(s.id)
+    release.countDown()
+    hibernating.join(5_000)
+    assertEquals(SimulatorStage.CLOSED, s.stage)
+    val launches = runtime.launches.size
+    pool.wake(s)
+    Thread.sleep(200)
+    assertEquals(SimulatorStage.CLOSED, s.stage)
+    assertEquals(launches, runtime.launches.size, "a closed session never boots again")
+  }
+
+  @Test
   fun `a session that does not fit and cannot make room waits`() {
     pool(SimulatorSessions.Capacity(memoryBudgetMb = 2_000, maxConcurrentBoots = 4))
     val a = start("a")
