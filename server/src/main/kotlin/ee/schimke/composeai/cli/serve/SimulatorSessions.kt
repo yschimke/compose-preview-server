@@ -230,6 +230,10 @@ class SimulatorSessions(
   private val estimates = ConcurrentHashMap<String, Double>()
 
   init {
+    // An APK a queued, live, paused or hibernated session will boot again is kept on re-upload.
+    registry.apksInUse = {
+      sessions.values.filter { !it.stage.ended }.flatMap { it.launch.apks.values }.toSet()
+    }
     sweeper.scheduleWithFixedDelay(
       { runCatching { sweep() }.onFailure { onLog("serve: simulator sweep: $it") } },
       sweepMillis,

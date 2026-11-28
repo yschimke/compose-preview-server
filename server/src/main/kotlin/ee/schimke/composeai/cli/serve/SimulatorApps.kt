@@ -179,6 +179,13 @@ class SimulatorAppRegistry(
 
   private val lock = Any()
 
+  /**
+   * The APK files open sessions still run, or will run when they boot or wake: never pruned while
+   * they are, whatever has been uploaded since. [SimulatorSessions] sets it; a later upload removes
+   * them once those sessions have ended.
+   */
+  @Volatile internal var apksInUse: () -> Set<File> = { emptySet() }
+
   fun list(): List<SimulatorAppV1> =
     synchronized(lock) {
       root
@@ -265,7 +272,11 @@ class SimulatorAppRegistry(
             JSON.encodeToString(SimulatorAppConfig.serializer(), SimulatorAppConfig()),
           )
         }
-        prune(appId, keep = setOfNotNull(sha, previous?.sha256) + otherDeviceShas(appId, device))
+        prune(
+          appId,
+          keep =
+            setOfNotNull(sha, previous?.sha256) + otherDeviceShas(appId, device) + inUseShas(appId),
+        )
         onLog(
           "serve: simulator app $appId: installed ${device.id} APK ${info.packageName} sha256=$sha",
         )
@@ -334,6 +345,15 @@ class SimulatorAppRegistry(
     return runCatching { JSON.decodeFromString(SimulatorApkV1.serializer(), file.readText()) }
       .getOrNull()
       ?.takeIf { blob(appId, it.sha256).isFile }
+  }
+
+  private fun inUseShas(appId: String): Set<String> {
+    val dir = File(appDir(appId), APK_DIR).absoluteFile
+    return apksInUse()
+      .map { it.absoluteFile }
+      .filter { it.parentFile == dir && it.name.endsWith(".apk") }
+      .map { it.name.removeSuffix(".apk") }
+      .toSet()
   }
 
   private fun otherDeviceShas(appId: String, device: SimulatorDevice): Set<String> =

@@ -21,11 +21,12 @@ class SimulatorSessionsTest {
   private val runtime = FakeSimulatorRuntime().apply { bootEvents = false }
   private var rssMb = 500L
   private lateinit var pool: SimulatorSessions
+  private lateinit var registry: SimulatorAppRegistry
 
   @AfterTest fun tearDown() = pool.close()
 
   private fun pool(capacity: SimulatorSessions.Capacity): SimulatorSessions {
-    val registry = SimulatorAppRegistry(File(dir.toFile(), "apps"), onLog = {})
+    registry = SimulatorAppRegistry(File(dir.toFile(), "apps"), onLog = {})
     registry.installApk("demo", SimulatorDevice.PHONE, SimulatorFixtures.phoneApk())
     registry.installApk("demo", SimulatorDevice.WATCH, SimulatorFixtures.watchApk())
     pool =
@@ -287,6 +288,24 @@ class SimulatorSessionsTest {
     now.addAndGet(61_000)
     pool.sweep()
     assertEquals(SimulatorStage.CLOSED, s.stage)
+  }
+
+  @Test
+  fun `an apk an open session will boot again survives later uploads`() {
+    pool(SimulatorSessions.Capacity(memoryBudgetMb = 100_000))
+    val s = start()
+    boot(s)
+    val original = s.launch.apks.getValue(SimulatorDevice.PHONE)
+    pool.pause(s)
+    pool.hibernate(s)
+    // The pool's own registry: its wiring is what keeps the file.
+    registry.installApk("demo", SimulatorDevice.PHONE, SimulatorFixtures.phoneApk("com.example.v2"))
+    registry.installApk("demo", SimulatorDevice.PHONE, SimulatorFixtures.phoneApk("com.example.v3"))
+    assertTrue(original.isFile, "the hibernated session's build is kept")
+    pool.close(s.id)
+    registry.installApk("demo", SimulatorDevice.PHONE, SimulatorFixtures.phoneApk("com.example.v4"))
+    registry.installApk("demo", SimulatorDevice.PHONE, SimulatorFixtures.phoneApk("com.example.v4"))
+    assertTrue(!original.isFile, "and pruned by the next upload once the session has ended")
   }
 
   @Test
