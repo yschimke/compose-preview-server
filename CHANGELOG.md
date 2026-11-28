@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.204.0](https://github.com/yschimke/compose-preview-server/compare/v3.203.0...v3.204.0) (2026-11-28)
+
+
+### Features
+
+* **simulator:** run registered APKs as phone, watch and paired sessions, embeddable ([#2148](https://github.com/yschimke/compose-preview-server/issues/2148)) ([f795c3d](https://github.com/yschimke/compose-preview-server/commit/f795c3d8a52861606c99c5ab6d40d09d279309f2))
+* **simulator:** start sessions through AppSimulatorLauncher, not the CLI ([#2149](https://github.com/yschimke/compose-preview-server/issues/2149)) ([471c34c](https://github.com/yschimke/compose-preview-server/commit/471c34cd1f46d469d9397f09704945ed8158ef52))
+
+
+### Bug Fixes
+
+* **deps:** update rc-players ([#2144](https://github.com/yschimke/compose-preview-server/issues/2144)) ([d186dc7](https://github.com/yschimke/compose-preview-server/commit/d186dc784781a05970dc1fb59138e5d67ee67b81))
+* **deps:** update rc-players to v3 ([#2141](https://github.com/yschimke/compose-preview-server/issues/2141)) ([4f1a661](https://github.com/yschimke/compose-preview-server/commit/4f1a66128c13df17059219afec97e799edf7b87c))
+* **mcp-app:** handle pending render results in compose-preview-viewer ([#2142](https://github.com/yschimke/compose-preview-server/issues/2142)) ([978abd6](https://github.com/yschimke/compose-preview-server/commit/978abd69c500065b1989e9fd1462f7abea0ed648))
+* **mcp-app:** preserve variant choices across pending live renders ([#2145](https://github.com/yschimke/compose-preview-server/issues/2145)) ([c8241b2](https://github.com/yschimke/compose-preview-server/commit/c8241b276e942457440ddae75f6e0f325bca6982))
+
 ## [3.203.0](https://github.com/yschimke/compose-preview-server/compare/v3.202.0...v3.203.0) (2026-11-26)
 
 
