@@ -1412,9 +1412,12 @@ class ServeHttpServer(
       routing {
         componentPublications?.install(this)
         simulator?.let { sim ->
-          val sameOrigin = uiBuilderAuthorization?.acceptingSessionWritesFromSameOrigin {
-            browserHosts
-          }
+          // The server's own identity, so a signed-in account is recognised whether or not the UI
+          // builder runs here; refused from another site's page, as the builder's writes are.
+          val sameOrigin =
+            (uiBuilderAuthorization
+                ?: machineAuthorization?.let(ServeUiBuilderAuthorization::fromMachineAuthorization))
+              ?.acceptingSessionWritesFromSameOrigin { browserHosts }
           installSimulatorRoutes(
             sim,
             isOperator = { call ->

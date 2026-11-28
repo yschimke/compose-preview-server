@@ -545,6 +545,33 @@ class ServeSimulatorRoutesTest {
   }
 
   @Test
+  fun `the embed rate limit forgets addresses that have gone quiet`() {
+    var now = 1_000_000L
+    val registry = SimulatorAppRegistry(File(dir.toFile(), "apps-rate"), onLog = {})
+    val sim =
+      ServeSimulator(
+        registry = registry,
+        sessions = SimulatorSessions(registry, runtime, onLog = {}),
+        embedTokens = SimulatorEmbedTokens(ByteArray(32)),
+        embedStartsPerWindow = 2,
+        embedWindowMillis = 600_000,
+        clock = { now },
+      )
+    try {
+      assertTrue(sim.admitEmbedStart("a"))
+      assertTrue(sim.admitEmbedStart("a"))
+      assertTrue(!sim.admitEmbedStart("a"), "two per window")
+      repeat(5_000) { sim.admitEmbedStart("visitor-$it") }
+      assertEquals(5_001, sim.trackedAddresses)
+      now += 600_001
+      assertTrue(sim.admitEmbedStart("a"), "a new window")
+      assertEquals(1, sim.trackedAddresses, "every quiet address is dropped")
+    } finally {
+      sim.close()
+    }
+  }
+
+  @Test
   fun `embed tokens are bound to their app and expire`() {
     var now = 1_000_000L
     val tokens = SimulatorEmbedTokens("x".repeat(32).toByteArray(), clock = { now })

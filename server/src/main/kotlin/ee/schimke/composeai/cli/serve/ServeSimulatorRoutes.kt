@@ -54,22 +54,48 @@ class ServeSimulator(
   private val clock: () -> Long = System::currentTimeMillis,
 ) : AutoCloseable {
   private val embedStarts = ConcurrentHashMap<String, ArrayDeque<Long>>()
+  @Volatile private var prunedAtMillis = 0L
 
-  /** Whether [address] may start another embedded session now; counts it when it may. */
+  /** Addresses tracked now: only those with a start inside the window, once pruned. */
+  internal val trackedAddresses: Int
+    get() = embedStarts.size
+
+  /**
+   * Whether [address] may start another embedded session now; counts it when it may. Each address's
+   * starts change atomically ([ConcurrentHashMap.compute]); at most once a minute every address
+   * with no start left inside the window is dropped, so memory and the pruning work are bounded by
+   * the addresses active within the window, however many have come and gone.
+   */
   internal fun admitEmbedStart(address: String): Boolean {
     val now = clock()
-    val starts = embedStarts.computeIfAbsent(address) { ArrayDeque() }
-    synchronized(starts) {
+    var admitted = false
+    embedStarts.compute(address) { _, old ->
+      val starts = old ?: ArrayDeque()
       while (starts.isNotEmpty() && now - starts.first() > embedWindowMillis) starts.removeFirst()
-      if (starts.size >= embedStartsPerWindow) return false
-      starts.addLast(now)
+      if (starts.size < embedStartsPerWindow) {
+        starts.addLast(now)
+        admitted = true
+      }
+      starts
     }
-    if (embedStarts.size > 10_000)
-      embedStarts.entries.removeIf { synchronized(it.value) { it.value.isEmpty() } }
-    return true
+    if (now - prunedAtMillis > PRUNE_INTERVAL_MILLIS) {
+      prunedAtMillis = now
+      for (key in embedStarts.keys) {
+        embedStarts.computeIfPresent(key) { _, starts ->
+          while (starts.isNotEmpty() && now - starts.first() > embedWindowMillis) starts
+            .removeFirst()
+          starts.takeIf { it.isNotEmpty() }
+        }
+      }
+    }
+    return admitted
   }
 
   override fun close() = sessions.close()
+
+  private companion object {
+    const val PRUNE_INTERVAL_MILLIS = 60_000L
+  }
 }
 
 internal const val SIMULATOR_API = "/api/simulator/v1"
