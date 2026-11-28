@@ -398,7 +398,10 @@ class SimulatorSessions(
             count--
           }
           if (count >= capacity.maxSessions || used + need > capacity.memoryBudgetMb) break
+          // Make the room first and admit on the next pass, from what was really freed: a
+          // candidate a viewer woke meanwhile is not hibernated, and its memory is not counted.
           reclaim += freed
+          break
         }
         queue.removeFirst()
         next.stage = SimulatorStage.STARTING
@@ -406,8 +409,8 @@ class SimulatorSessions(
         admitted += next
       }
     }
-    reclaim.forEach(::hibernate)
     admitted.forEach { s -> starter.execute { boot(s) } }
+    if (reclaim.isNotEmpty() && reclaim.count(::hibernate) > 0) pump()
   }
 
   private fun boot(session: Session) {
@@ -540,15 +543,18 @@ class SimulatorSessions(
    * is live, so the caller can run its command or tell the client it is coming back.
    */
   fun wake(session: Session): Boolean {
-    when (session.stage) {
-      SimulatorStage.PAUSED ->
-        synchronized(session) {
-          if (session.stage == SimulatorStage.PAUSED) {
-            runCatching { session.process?.resume() }
-            session.stage = SimulatorStage.LIVE
-            session.stageAtMillis = clock()
-          }
+    session.lastInputMillis = clock()
+    if (session.stage == SimulatorStage.PAUSED) {
+      // Waits out a hibernation in progress (which holds the lock), then sees where it left it.
+      synchronized(session) {
+        if (session.stage == SimulatorStage.PAUSED) {
+          runCatching { session.process?.resume() }
+          session.stage = SimulatorStage.LIVE
+          session.stageAtMillis = clock()
         }
+      }
+    }
+    when (session.stage) {
       SimulatorStage.HIBERNATED -> {
         synchronized(this) {
           // Only a session the pool still holds is woken: a removed one could never be swept again.
@@ -598,10 +604,18 @@ class SimulatorSessions(
    * state for [wake] to restore: what `rememberSaveable`, `onSaveInstanceState` and
    * `SavedStateHandle` hold comes back; in-memory state such as a `ViewModel`'s does not.
    */
-  fun hibernate(session: Session) {
-    val process = session.process ?: return
+  fun hibernate(session: Session): Boolean {
+    val process = session.process ?: return false
     synchronized(session) {
-      if (session.stage != SimulatorStage.PAUSED && session.stage != SimulatorStage.LIVE) return
+      // Re-checked under the lock wake() and enter() take: a session a viewer has since woken,
+      // shown or sent a command to is in use, and is left alone.
+      if (
+        session.stage != SimulatorStage.PAUSED ||
+          session.visibleSockets.get() > 0 ||
+          session.inFlight.get() > 0
+      ) {
+        return false
+      }
       runCatching { process.resume() }
       for (device in session.devices) {
         runCatching {
@@ -617,7 +631,7 @@ class SimulatorSessions(
       session.frames.clear()
       // Closed while its state was being saved: it stays closed (close() does not wait on this
       // lock).
-      if (session.stage.ended || !isOpen(session)) return
+      if (session.stage.ended || !isOpen(session)) return true
       session.stage = SimulatorStage.HIBERNATED
       session.stageAtMillis = clock()
       session.hibernations.incrementAndGet()
@@ -625,6 +639,7 @@ class SimulatorSessions(
     onLog(
       "serve: simulator session ${session.id} hibernated (saved ${session.restore.keys.map { it.id }})",
     )
+    return true
   }
 
   fun command(session: Session, decision: SimulatorControlPolicy.Decision.Allowed): JsonElement? {

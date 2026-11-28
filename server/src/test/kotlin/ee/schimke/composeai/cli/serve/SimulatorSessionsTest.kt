@@ -261,6 +261,47 @@ class SimulatorSessionsTest {
   }
 
   @Test
+  fun `only a paused session nobody is using is hibernated`() {
+    pool(SimulatorSessions.Capacity(memoryBudgetMb = 100_000))
+    val s = start()
+    boot(s)
+    assertEquals(false, pool.hibernate(s), "live")
+    pool.attach(s)
+    pool.pause(s)
+    assertEquals(SimulatorStage.PAUSED, s.stage)
+    assertEquals(false, pool.hibernate(s), "a page shows it")
+    pool.detach(s, wasVisible = true)
+    s.inFlight.incrementAndGet()
+    assertEquals(false, pool.hibernate(s), "a command is running")
+    s.inFlight.decrementAndGet()
+    assertEquals(true, pool.hibernate(s))
+    assertEquals(SimulatorStage.HIBERNATED, s.stage)
+  }
+
+  @Test
+  fun `a candidate a viewer wakes is not hibernated, and nothing is admitted on its memory`() {
+    pool(SimulatorSessions.Capacity(memoryBudgetMb = 2_000, maxConcurrentBoots = 4))
+    val a = start("a")
+    boot(a)
+    val b = start("b")
+    boot(b)
+    rssMb = 900
+    pool.sweep()
+    pool.pause(a)
+    pool.pause(b)
+    // A viewer opens b again just as c asks for room: only a is free to reclaim, which is enough.
+    pool.attach(b)
+    val c = start("c")
+    boot(c)
+    assertEquals(SimulatorStage.HIBERNATED, a.stage)
+    assertEquals(SimulatorStage.LIVE, b.stage)
+    // With a and b both in use, d cannot be given b's memory: it waits.
+    pool.wake(a)
+    val d = start("d")
+    assertEquals(SimulatorStage.QUEUED, d.stage)
+  }
+
+  @Test
   fun `a session that does not fit and cannot make room waits`() {
     pool(SimulatorSessions.Capacity(memoryBudgetMb = 2_000, maxConcurrentBoots = 4))
     val a = start("a")
