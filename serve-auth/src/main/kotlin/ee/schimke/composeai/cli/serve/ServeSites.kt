@@ -199,6 +199,9 @@ data class ServeSites(private val byHost: Map<String, String>) {
         // The root-mounted A2UI playground (`GET /a2ui`), which a viewer served at `/p/{name}` on
         // a site host links to. A catalog named `a2ui` would otherwise shadow it.
         "a2ui",
+        // The simulator's viewer and embed pages (`/simulator/{app}`, `/simulator/embed/{app}`,
+        // `ServeSimulatorRoutes.kt`); an embed is framed from another site, on whichever host.
+        "simulator",
         "wasm",
         // `/wasm-private/<access>/<system>/…`, the token-in-path twin of `/wasm/…`.
         "wasm-private",

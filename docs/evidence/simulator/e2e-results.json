@@ -1,0 +1,34 @@
+{
+    "phone": {
+        "readyMs": 5215,
+        "phoneDisplay": "540x960",
+        "liveRssMb": 533,
+        "liveIdleCpuPercent": 11.316872427983542,
+        "pausedCpuPercent": 0.0,
+        "wakeToFrameMs": 52,
+        "hibernatedWakeMs": 5611
+    },
+    "watch": {
+        "readyMs": 5423,
+        "watchDisplay": "454x454 round",
+        "liveRssMb": 566,
+        "liveIdleCpuPercent": 10.101010101009885,
+        "pausedCpuPercent": 0.0,
+        "wakeToFrameMs": 45,
+        "hibernatedWakeMs": 5809
+    },
+    "paired": {
+        "readyMs": 7421,
+        "pairConnectedAfterLiveMs": 37,
+        "phoneDisplay": "540x960",
+        "watchDisplay": "454x454 round",
+        "phoneText": "Phone: 1 sent to 1",
+        "watchText": "Watch got hi 1",
+        "dataLayerMessage": "arrived",
+        "liveRssMb": 1037,
+        "liveIdleCpuPercent": 46.038543897216236,
+        "pausedCpuPercent": 0.0,
+        "wakeToFrameMs": 46,
+        "hibernatedWakeMs": 8223
+    }
+}

@@ -445,6 +445,61 @@ object ServeSettings {
           "`dwf-rc` draws the face instead.",
       ),
       Setting(
+        "features.simulator",
+        ServeFeatureFlags.SIMULATOR_ENV,
+        Type.Flag,
+        Apply.RESTART,
+        "Run operator-registered APKs in the Robolectric simulator — a phone, a watch, or both " +
+          "paired — at /simulator/<app> and, for apps that allow it, embedded on listed sites. " +
+          "Off unless set: a registered app's code runs on this host. Register apps with " +
+          "PUT /admin/simulator/apps/<app>.",
+      ),
+      Setting(
+        "simulator.cli",
+        "SERVE_SIMULATOR_CLI",
+        Type.Text(),
+        Apply.RESTART,
+        "The compose-preview CLI's bin/compose-preview the simulator runs. Default " +
+          "/opt/compose-preview-cli/bin/compose-preview (the image's), then PATH.",
+      ),
+      Setting(
+        "simulator.maxSessions",
+        "SERVE_SIMULATOR_MAX_SESSIONS",
+        Type.Whole(min = 1),
+        Apply.RESTART,
+        "Simulator sessions this box runs at once, a ceiling under simulator.memoryBudgetMb. " +
+          "Paused sessions count; hibernated and queued ones do not. Default 8.",
+      ),
+      Setting(
+        "simulator.memoryBudgetMb",
+        "SERVE_SIMULATOR_MEMORY_BUDGET_MB",
+        Type.Whole(min = 512),
+        Apply.RESTART,
+        "Memory, in MB, the simulator's running sessions may hold together, each charged its " +
+          "measured RSS (about 0.6-1 GB a phone or watch, 1-1.8 GB a pair). Past it, idle " +
+          "paused sessions are hibernated to make room, then new ones queue. Default half the " +
+          "machine.",
+      ),
+      Setting(
+        "simulator.maxHeap",
+        "SERVE_SIMULATOR_MAX_HEAP",
+        Type.Text(
+          pattern = Regex("[1-9][0-9]*[mMgG]"),
+          patternHint = "a JVM heap size such as 1536m or 2g",
+        ),
+        Apply.RESTART,
+        "Each simulator JVM's maximum heap. Default: an eighth of the machine, 768m to 2g.",
+      ),
+      Setting(
+        "simulator.sandbox",
+        "SERVE_SIMULATOR_SANDBOX",
+        Type.Text(),
+        Apply.RESTART,
+        "The jail simulator processes run in, as --playground-sandbox takes it (none, unshare, " +
+          "bwrap, systemd, strict, custom:<argv>). Default none: only operator-registered " +
+          "apps run, and they run as this server's user.",
+      ),
+      Setting(
         "catalogs.mcp",
         "SERVE_CATALOG_MCP",
         Type.Flag,
